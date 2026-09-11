@@ -48,13 +48,13 @@ These are the components where a vulnerability report makes sense:
 
 | Component | Type | Why it's in scope |
 |---|---|---|
-| **`interviews/staffml/`** | Public Next.js web app | Serves StaffML to users; auth, data integrity, XSS, IDOR, etc. |
-| **`interviews/staffml/worker/`, `staffml-vault-worker/`** | Cloudflare Workers (public API) | Internet-exposed API endpoints |
-| **`interviews/vault-cli/`** | Installable Python CLI | Code-execution risk for vault authors |
+| **`staffml/app/`** | Public Next.js web app | Serves StaffML to users; auth, data integrity, XSS, IDOR, etc. |
+| **`staffml/app/worker/`, `staffml/vault-worker/`** | Cloudflare Workers (public API) | Internet-exposed API endpoints |
+| **`staffml/vault-cli/`** | Installable Python CLI | Code-execution risk for vault authors |
 | **`tinytorch/`** | Installable Python package | Distributed via pip; supply-chain and code-execution risk |
 | **`mlsysim/`** | Installable Python package | Same as above |
 | **`mlperf-edu/`** | Installable Python package | Same as above |
-| **`book/vscode-ext/`, `tinytorch/vscode-ext/`, `labs/vscode-ext/`, `kits/vscode-ext/`, `mlsysim/vscode-ext/`** | VSCode extensions | Run inside the user's editor; code-execution risk |
+| **`binder/vscode-ext/`, `tinytorch/vscode-ext/`, `labs/vscode-ext/`, `kits/vscode-ext/`, `mlsysim/vscode-ext/`** | VSCode extensions | Run inside the user's editor; code-execution risk |
 | **`labs/`** | WASM-based browser labs | Same-origin / sandbox-escape risk |
 | **GitHub Actions workflows in `.github/workflows/`** | CI configuration | Token leakage, supply-chain injection |
 | **`site/newsletter/`** | Newsletter pipeline | Subscriber data handling |

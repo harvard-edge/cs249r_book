@@ -102,5 +102,91 @@ class TestCrossEntropyLoss:
         )
 
 
+class TestCrossEntropyLossOutOfRangeTargets:
+    """Test CrossEntropyLoss raises a clear error for invalid target indices."""
+
+    def test_target_equal_to_num_classes_raises_value_error(self):
+        """
+        WHAT: Verify a target index equal to num_classes (the first invalid
+        value, since valid indices are 0..num_classes-1) raises a clear
+        ValueError naming the problem, not a raw numpy IndexError.
+        """
+        loss_fn = CrossEntropyLoss()
+        logits = Tensor([[2.0, 1.0, 0.1]])  # 3 classes, valid range [0, 2]
+        target = Tensor([3])
+
+        with pytest.raises(ValueError, match="out of range"):
+            loss_fn(logits, target)
+
+    def test_negative_target_raises_value_error(self):
+        """
+        WHAT: Verify a negative target index raises the same clear
+        ValueError, rather than numpy's negative-indexing silently
+        selecting the wrong class.
+        """
+        loss_fn = CrossEntropyLoss()
+        logits = Tensor([[2.0, 1.0, 0.1]])
+        target = Tensor([-1])
+
+        with pytest.raises(ValueError, match="out of range"):
+            loss_fn(logits, target)
+
+    def test_valid_targets_still_work(self):
+        """
+        WHAT: Verify targets within the valid range are unaffected by the
+        new bounds check.
+        """
+        loss_fn = CrossEntropyLoss()
+        logits = Tensor([[2.0, 1.0, 0.1], [0.5, 1.5, 0.8]])
+        target = Tensor([0, 1])
+
+        loss = loss_fn(logits, target)
+
+        assert float(loss.data) > 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.parametrize("loss_type", [MSELoss, BinaryCrossEntropyLoss])
+@pytest.mark.parametrize("pred,target", [([[0.2], [0.8]], [0, 1]), ([], [])])
+def test_elementwise_losses_reject_broadcast_or_empty_targets(loss_type, pred, target):
+    """A column of predictions and a vector of labels must not form an NxN loss."""
+    with pytest.raises(ValueError, match="matching, nonempty"):
+        loss_type()(Tensor(pred), Tensor(target))
+
+
+@pytest.mark.parametrize("target", [[0.9, 1], [-0.1, 1], [np.nan, 1], [np.inf, 1]])
+def test_cross_entropy_rejects_noninteger_labels(target):
+    with pytest.raises(ValueError, match="finite integer"):
+        CrossEntropyLoss()(Tensor([[2, 0], [0, 2]]), Tensor(target))
+
+
+@pytest.mark.parametrize("logits,target", [
+    ([[2, 0], [0, 2]], [[0], [1]]),
+    ([[2, 0], [0, 2]], [0]),
+    ([2, 0], [0]),
+    (np.zeros((2, 3, 4)), [0, 1]),
+    (np.zeros((0, 2)), []),
+    (np.zeros((2, 0)), [0, 1]),
+])
+def test_cross_entropy_requires_one_label_per_row(logits, target):
+    with pytest.raises(ValueError, match="logits.*targets"):
+        CrossEntropyLoss()(Tensor(logits), Tensor(target))
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, np.nan, np.inf])
+@pytest.mark.parametrize("invalid_side", ["prediction", "target"])
+def test_binary_cross_entropy_validates_probability_contract(value, invalid_side):
+    pred, target = ([value], [1]) if invalid_side == "prediction" else ([0.5], [value])
+    with pytest.raises(ValueError, match="finite values"):
+        BinaryCrossEntropyLoss()(Tensor(pred), Tensor(target))
+
+
+def test_loss_means_count_every_output_and_accept_soft_binary_targets():
+    pred = Tensor([[0.2, 0.6], [0.7, 0.9]])
+    target = Tensor([[0, 0.5], [1, 1]])
+    assert np.isclose(MSELoss()(pred, target).data, (0.04 + 0.01 + 0.09 + 0.01) / 4)
+    expected = -(np.log(0.8) + 0.5 * np.log(0.6 * 0.4) + np.log(0.7) + np.log(0.9)) / 4
+    assert np.isclose(BinaryCrossEntropyLoss()(pred, target).data, expected)

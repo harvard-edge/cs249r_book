@@ -241,7 +241,7 @@ class TestWheelConsistency:
 
     def test_mlsysbook_labs_wheel_contains_contract_modules(self):
         """The lab helper wheel must include the schema, UI, report, and version modules."""
-        wheel = REPO_ROOT / "wheels" / "mlsysbook_labs-0.1.0-py3-none-any.whl"
+        wheel = REPO_ROOT / "labs" / "wheels" / "mlsysbook_labs-0.1.0-py3-none-any.whl"
         assert wheel.exists(), f"Missing lab helper wheel: {wheel}"
         with zipfile.ZipFile(wheel) as zf:
             names = set(zf.namelist())
@@ -359,8 +359,8 @@ class TestLabCatalog:
         )
 
     def test_wheel_file_exists_on_disk(self):
-        """The wheel file referenced by labs must actually exist in wheels/.
-        If this fails, run: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/
+        """The wheel file referenced by labs must actually exist in labs/wheels/.
+        If this fails, run: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl labs/wheels/
         """
         try:
             import tomllib
@@ -371,11 +371,11 @@ class TestLabCatalog:
         with open(pyproject, "rb") as f:
             version = tomllib.load(f)["project"]["version"]
 
-        wheel_path = REPO_ROOT / "wheels" / f"mlsysim-{version}-py3-none-any.whl"
+        wheel_path = REPO_ROOT / "labs" / "wheels" / f"mlsysim-{version}-py3-none-any.whl"
         assert wheel_path.exists(), (
             f"Wheel file missing: {wheel_path}\n"
-            f"Labs reference version {version} but the wheel is not present in wheels/.\n"
-            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/\n"
+            f"Labs reference version {version} but the wheel is not present in labs/wheels/.\n"
+            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl labs/wheels/\n"
             f"This causes BadZipFile in production when micropip fetches the missing URL."
         )
 
@@ -390,7 +390,7 @@ class TestLabCatalog:
         with open(pyproject, "rb") as f:
             version = tomllib.load(f)["project"]["version"]
 
-        wheel_path = REPO_ROOT / "wheels" / f"mlsysim-{version}-py3-none-any.whl"
+        wheel_path = REPO_ROOT / "labs" / "wheels" / f"mlsysim-{version}-py3-none-any.whl"
         required = {
             "mlsysim/labs/__init__.py",
             "mlsysim/labs/state.py",
@@ -402,7 +402,7 @@ class TestLabCatalog:
         missing = sorted(required - names)
         assert not missing, (
             f"Wheel is missing browser lab toolkit files: {missing}\n"
-            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/"
+            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl labs/wheels/"
         )
 
 

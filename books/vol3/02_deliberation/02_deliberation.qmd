@@ -1,0 +1,756 @@
+# Test-Time Deliberation {#sec-vol3-deliberation}
+
+Agentic reasoning shatters the static request-response paradigm by transforming the foundation model from an oracle into a deliberative actor. In this chapter, we formalize test-time deliberation as the computational engine of the **\1**\\index{stochastic processor}. We examine how allocating dynamic inference compute across structured search spaces resolves compositional problems that defeat **\1**\\index{greedy decoding}. We then develop the formal control topologies—Directed Acyclic Graphs and statecharts—that bound autonomous execution against infinite livelocks. Finally, we formulate tree search algorithms over semantic action spaces and derive the Verification Tax, establishing the Pareto frontier that governs the trade-off between generation compute and verification compute.
+
+## Purpose {.unnumbered .unlisted}
+
+::: {.content-visible when-format="pdf"}
+\begin{marginfigure}
+\mlagentstack{10}{10}{90}{10}{10}{20}
+\caption{The Agentic Machine Learning Systems Stack.}
+\end{marginfigure}
+:::
+
+_Why does generating more candidate reasoning paths degrade into worse decisions?_
+
+In unconstrained environments, foundation models suffer from cognitive drift and semantic livelocks because autoregressive sampling cannot inherently backtrack or verify its own logical progression. Without structured search and bounded topologies, allocating more compute merely accelerates the accumulation of compounding errors. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+
+- Explain test-time deliberation as dynamic search over semantic state-action spaces ($\mathcal{V}, \mathcal{E}$) within the stochastic processor paradigm.
+- Compare System 1 reflexive proposal generation with System 2 deliberate search (Best-of-$N$, Beam Search, MCTS, Graph of Thoughts).
+- Evaluate the spectrum of control topologies from static prompt chains to autonomous loops, enforcing the Anti-Swarm Principle and the Minimum Autonomy Invariant.
+- Design multi-tier semantic cycle detection and out-of-band circuit breaker state machines to protect infrastructure against semantic livelocks.
+- Calculate the Verification Tax ($C_{\text{ver}}$) and derive the optimal verification cadence ($m^*$) that minimizes expected wall-clock execution latency.
+- Diagnose failure modes of learned Process Reward Models (PRMs) under Goodhart over-optimization versus deterministic environmental oracles.
+
+:::
+
+## Introduction {#sec-vol3-deliberation-intro}
+
+Consider an agent tasked with diagnosing a sudden latency spike in a microservice architecture. If the agent attempts to resolve the issue by guessing the root cause and deploying a patch in a single, blind forward pass, it will almost certainly fail. The foundation model operates as a stochastic arithmetic logic unit (ALU), calculating probabilistic next-token transitions over volatile memory. We can formalize this limitation as the **\1**\index{Reliability Wall} ($P \le p^N$). If an agent attempts to execute a long-horizon trajectory through a single, greedy sequence of actions, compounding error rapidly drives the probability of task completion to zero.
+
+Classical microprocessors do not execute complex instructions through unguided, blind execution. They deploy branch prediction, speculative execution, out-of-order execution, and hardware interrupts to navigate control flow efficiently. Similarly, an agentic system cannot rely on raw, single-pass forward propagation to solve compositional problems. It requires **Test-Time Deliberation**\index{Test-Time Deliberation}[^fn-test-time-deliberation]: the allocation of runtime inference compute to explore alternative execution branches, evaluate intermediate candidate states, and backtrack from unviable paths.
+
+Deliberation sits at the intersection of two distinct systems disciplines:
+
+1.  **Search Algorithms:** Algorithmic exploration over semantic token and action spaces (Best-of-$N$, Beam Search, Monte Carlo Tree Search), balancing exploration and exploitation.
+2.  **Control Topologies:** Structural execution graphs (Directed Acyclic Graphs, Hierarchical Statecharts, Supervisor-Worker trees) and runtime invariants (Dynamic Circuit Breakers, Semantic Cycle Detectors) that guarantee finite execution and forward progress.
+
+By synthesizing formal search algorithms with hardened control topologies, systems engineers transform fragile stochastic models into dependable, self-correcting problem solvers.
+
+::: {.callout-note title="Meta perspective: Viewing Deliberation through Systems Architecture"}
+Deliberation is often treated in cognitive science and pure machine learning as an algorithmic abstraction. In production ML systems, however, deliberation is a concrete distributed computing workload. Every counterfactual branch demands GPU High-Bandwidth Memory for its Key-Value cache; every tool call risks non-idempotent environment mutations; and every verification step consumes wall-clock latency.
+
+As you navigate this chapter, keep the three foundational layers in view:
+
+1. **Control Topologies (@sec-vol3-deliberation-topologies):** How statecharts and supervisor trees establish structural boundaries against infinite livelocks and quadratic communication explosion.
+2. **Search Algorithms (@sec-vol3-deliberation-tree-search):** How algorithms navigate branching combinatorial spaces under memory and synchronization constraints.
+3. **The Verification Tax (@sec-vol3-deliberation-scaling-verification):** The economic thermodynamics governing when, where, and how frequently to verify intermediate states.
+:::
+
+## System 2 Reasoning {#sec-vol3-deliberation-system2}
+
+When a human engineer encounters a subtle concurrency bug, they do not instantaneously emit a perfect patch from memory. They read the stack trace, hypothesize a race condition, add print statements, and mentally simulate execution paths before writing code. To understand the systems architecture of deliberation, we must formalize this cognitive and algorithmic shift from single-pass inference to deliberate search.
+
+### Cognitive Duality: System 1 vs. System 2
+
+In his foundational work on cognitive architecture, Daniel Kahneman [@kahneman2011thinking] partitioned human cognition into two operational modes:
+
+*   **System 1 (Fast, Reflexive):** Automatic, effortless, perceptual pattern matching. It operates instantaneously without conscious deliberation or counterfactual auditing.
+*   **System 2 (Slow, Deliberative):** Effortful, logical, serial calculation. It constructs candidate hypotheses, simulates hypothetical futures, audits assumptions against external constraints, and backtracks when logical inconsistencies arise.
+
+Standard autoregressive language model inference is purely System 1. During a forward pass, the model emits tokens conditioned strictly on the pre-existing context:
+$$
+P(y_1, \dots, y_T \mid x) = \prod_{t=1}^T P_\theta(y_t \mid x, y_{<t})
+$$
+In this regime, the inference compute budget is rigid and linear in sequence length: $C_{\text{infer}} \approx 2 \cdot P \cdot T$ FLOPs, where $P$ is the parameter count and $T$ is the number of tokens. A trivial greeting and a subtle concurrent race condition diagnosis receive the exact same per-token compute budget. If the model samples a flawed premise at token $t=1$, autoregressive conditioning forces subsequent tokens to rationalize the mistake, causing cognitive drift.
+
+System 2 reasoning introduces runtime deliberation by treating foundation model forward passes as **proposal generators** within an external search algorithm [@snell2024scaling; @openai2024o1]. The system allocates variable inference FLOPs dynamically to explore, verify, and select candidate actions before committing them to the environment.
+
+### The Lessons of AlphaGo: Demoting the Oracle
+
+The seminal demonstration of neural System 2 reasoning occurred in computer Go [@silver2016mastering]. DeepMind’s AlphaGo did not conquer Go simply by training an enormous policy network. A pure policy network—no matter how large—suffers from tactical blind spots and cannot reliably look ahead across complex combinatorial horizons.
+
+AlphaGo triumphed by coupling two neural networks with Monte Carlo Tree Search (MCTS):
+
+1.  **The Policy Network ($\pi_\theta$):** Evaluates local board patterns and proposes a narrow set of high-probability candidate moves (pruning the combinatorial branching factor from 250 down to a manageable subset).
+2.  **The Value Network ($V_\phi$):** Evaluates board positions to estimate the probability of victory from that state.
+3.  **MCTS Runtime:** Deliberates across thousands of counterfactual rollouts, synthesizing the policy's priors and the value network's positional evaluations to identify tactical traps.
+
+This architectural blueprint applies directly to agentic language systems. The foundation model is not an infallible oracle whose first response should be trusted; it is a **stochastic proposal engine**. The agent runtime wraps the model in a deliberate search framework that verifies candidate thoughts, evaluates intermediate states, and prunes invalid branches before physical tool execution occurs.
+
+### Decoupling Parameter Scaling from Task Difficulty
+
+For the first decade of modern deep learning, capability scaled predominantly through pretraining compute: expanding parameters, dataset sizes, and training FLOPs [@brown2020language; @kaplan2020scaling]. However, pretraining parameter scaling exhibits sharply diminishing returns on complex compositional tasks. A 405-billion parameter model [@dubey2024llama3] running single-pass greedy decoding still stumbles on multi-step algorithmic planning or 50-line concurrent code patches.
+
+Runtime search activates the second half of Richard Sutton’s "Bitter Lesson" [@sutton2019bitter]: general methods that use compute—specifically **search** and **learning**—consistently triumph over domain heuristics. Test-time compute scaling fundamentally decouples task difficulty from static parameter scale. By allocating $10\times$ to $100\times$ more inference compute through deliberate search, a compact 8B or 14B parameter model [@dubey2024llama3] can match or exceed the accuracy of a 70B parameter model [@dubey2024llama3] operating under greedy decoding [@snell2024scaling], often at a substantially lower total dollar cost per resolved task.
+
+::: {#pri-vol3-inference-scaling .callout-principle title="The Inference Scaling Invariant"}
+**Invariant:** The reasoning fidelity of an autoregressive model on compositional tasks is fundamentally bounded by its search horizon.
+
+**Implication:** When intermediate verification is tractable, scaling test-time search compute yields exponential error reductions that cannot be achieved through greedy decoding on any finite parameter architecture.
+:::
+
+Trading compute for accuracy through search is conceptually powerful, but search algorithms cannot execute in an architectural vacuum. We must first define the structural boundaries that prevent an autonomous model from spiraling into infinite, catastrophic loops.
+
+## Control Topologies {#sec-vol3-deliberation-topologies}
+
+If an autonomous coding agent is permitted to arbitrarily branch and loop without structural boundaries, a simple syntax error can trap it in a retry cycle that burns thousands of API credits in minutes without making forward progress. While test-time search provides the algorithmic machinery for deliberation, search algorithms cannot execute in an architectural vacuum. Allowing an autonomous model to branch and loop unconstrained is an operational hazard.
+
+### The Illusion of the Naked Loop
+
+A common anti-pattern in early agent design is wrapping a foundation model in an unconstrained `while True:` loop:
+```python
+# The Naked Loop Anti-Pattern
+while not task_complete:
+    action = model.generate_action(context)
+    observation = execute(action)
+    context.append((action, observation))
+```
+A naked loop provides zero guarantees of termination, resource bounding, or transactional safety. When a model encounters ambiguous errors, network timeouts, or contradictory instructions, it regularly enters **semantic livelocks**\index{Semantic Livelock}[^fn-semantic-livelock]: paraphrasing the same failing action, generating rationalizations, and consuming thousands of dollars in API credits while making zero forward progress.
+
+Production systems govern deliberation through formal **\1**\\index{Control Topologies}: Directed Acyclic Graphs (DAGs) and Hierarchical Statecharts that strictly separate the stochastic control plane from the deterministic data plane.
+
+### The Spectrum of Control
+
+Agent control topologies exist along an architectural spectrum [@anthropic2024effective; @harel1987], progressively shifting routing and execution responsibilities from deterministic software to stochastic neural models. Figure 2.1 (@fig-vol3-deliberation-spectrum) illustrates this progression across five canonical archetypes, highlighting how model autonomy, verification burden, and cost unpredictability scale monotonically as execution transitions toward autonomous loops.
+
+::: {#fig-vol3-deliberation-spectrum fig-env="figure" fig-pos="htb" fig-cap="Figure 2.1: **The Architectural Spectrum of Agentic Control**: Progression across five canonical archetypes from deterministic linear pipelines to open-ended autonomous loops, illustrating the trade-offs between model autonomy, verification burden, and cost unpredictability. As execution moves toward autonomous loops, verification overhead and cost variance rise monotonically with agent autonomy. Source: Adapted from MLSysBook Volume III Control Architecture Blueprint." fig-alt="Horizontal architectural spectrum comparing five control paradigms from left to right: Prompt Chaining, Routing and Dispatch, Parallel Fan-Out, Orchestrator-Workers, and Autonomous Loops. Three colored progression bars at the bottom illustrate that Model Autonomy, Verification Burden, and Cost and Latency Unpredictability increase together as control transitions from hardcoded directed graphs to model-directed cycles."}
+![](images/svg/control_spectrum.svg){width="100%"}
+:::
+
+Table 2.1 (@tbl-vol3-deliberation-archetypes) formalizes the operational characteristics, execution complexities, and verification boundaries of each control archetype across the autonomy spectrum:
+
+| Control Archetype      | Graph Structure                     | Autonomy Level             | Latency Complexity                       | Token Variance ($\sigma^2$)                  | Failure Blast Radius                      | Primary Verification Mechanism              |
+|:-----------------------|:------------------------------------|:---------------------------|:-----------------------------------------|:---------------------------------------------|:------------------------------------------|:--------------------------------------------|
+| **Prompt Chaining**    | Static linear pipeline              | Zero (Hardcoded sequence)  | $\mathcal{O}(1)$ deterministic           | Minimal ($\sigma^2 \approx 0$)               | Minimal (Isolated to failing step)        | JSON Schema / Strict regex validation       |
+| **Routing & Dispatch** | Conditional branching tree          | Constrained classification | $\mathcal{O}(1)$ bounded                 | Low ($\sigma^2 \le \sigma_{\text{route}}^2$) | Low (Contained within specialized branch) | Classifier confusion matrix / Thresholds    |
+| **Parallel Fan-Out**   | Map-Reduce DAG [@dean2008mapreduce] | Partitioned concurrent     | $\mathcal{O}(\max_{i} t_i)$ parallel     | Medium (Additive worker variance)            | Medium (Isolated worker sandbox)          | Barrier invariants / Majority voting        |
+| **Supervisor-Workers** | Hierarchical supervisor tree        | Supervised task delegation | $\mathcal{O}(D)$ where $D$ is tree depth | Controlled dynamic                           | Low (Bounded by worker sub-agent lease)   | Deterministic verifier gates / Schema diffs |
+| **Autonomous Loops**   | Cyclic statechart / FSM             | Open-ended self-directed   | $\mathcal{O}(K)$ heavy-tailed Pareto     | High (Unbounded worst-case)                  | Severe (Unchecked state mutation)         | Semantic cycle detectors / Circuit breakers |
+
+: Table 2.1: **Architectural Archetypes of Agentic Control**: Comparison of control topologies across graph structure, autonomy level, latency complexity, token variance, failure blast radius, and primary verification mechanisms. {#tbl-vol3-deliberation-archetypes tbl-colwidths="[15,15,15,15,15,15,10]"}
+
+The architectural rule of control topologies is definitive: *Never deploy a more autonomous topology than the task strictly demands*. If a problem can be solved with a deterministic prompt chain or a static routing tree, wrapping it in an autonomous loop introduces unnecessary latency, variance, and failure modes.
+
+::: {#pri-vol3-minimum-autonomy .callout-principle title="The Minimum Autonomy Invariant"}
+**Invariant:** The failure blast radius, latency complexity, and token variance of an agent system scale monotonically with its control autonomy.
+
+**Operational Rule:** Never deploy a more autonomous control topology than the problem strictly demands. If a workflow can be satisfied with a deterministic prompt chain, a classification router, or a bounded Map-Reduce DAG [@dean2008mapreduce], wrapping it in an autonomous loop introduces unnecessary operational risk, unbounded latency variance, and avoidable verification tax.
+:::
+
+### The Anti-Swarm Principle
+
+During the initial enthusiasm for autonomous agents, significant attention focused on unconstrained peer-to-peer "agent swarms," where multiple models ("Researcher," "Coder," "Reviewer") participated in unstructured group chats to solve tasks [@wu2023autogen].
+
+Production engineering has overwhelmingly rejected this model. We formalize this empirical reality as the **\1**\\index{Anti-Swarm Principle}:
+
+::: {#pri-vol3-anti-swarm .callout-principle title="The Anti-Swarm Principle"}
+**Invariant:** Unconstrained peer-to-peer agent communication topologies exhibit quadratic communication overhead $\mathcal{O}(N^2)$, context dilution, diffuse accountability, and non-terminating livelocks. Production multi-agent architectures must strictly enforce unidirectional, hierarchical supervisor trees where communication is restricted to parent-child delegation and schema-validated artifact return.
+:::
+
+In a flat peer-to-peer mesh of $N$ agents, the number of potential communication channels scales quadratically:
+$$
+C = \frac{N(N-1)}{2} = \mathcal{O}(N^2)
+$$
+As messages bounce between agents, context windows become flooded with conversational chatter, token costs explode, and attention heads suffer from context dilution. Crucially, without an authoritative supervisor holding the termination invariant, swarms suffer from **diffuse accountability**—agents cycle in mutual agreement without verifying that the root objective was completed.
+
+Figure 2.2 (@fig-vol3-deliberation-anti-swarm) contrasts the unconstrained peer-to-peer mesh swarm against the production supervisor tree, highlighting the strict context isolation barriers and unidirectional delegation paths required to prevent quadratic chatter explosion.
+
+::: {#fig-vol3-deliberation-anti-swarm fig-env="figure" fig-pos="htb" fig-cap="Figure 2.2: **The Anti-Swarm Principle (Mesh Swarms vs. Hierarchical Supervisor Trees)**: Contrast between chaotic peer-to-peer mesh swarms suffering quadratic communication explosion $\mathcal{O}(N^2)$ and production supervisor trees with strict unidirectional delegation, context isolation barriers, and schema-gated verification. Hierarchical trees enforce explicit authority boundaries and bounded communication overhead. Source: Adapted from Erlang/OTP Supervision Design Principles [@armstrong2003making] applied to Agentic Systems." fig-alt="Two-panel architectural comparison: Left panel depicts a Peer-to-Peer Mesh Swarm with five interconnected agents exchanging unconstrained N-squared messages, resulting in semantic noise and cycle locks; Right panel depicts a Hierarchical Supervisor Tree where a root supervisor delegates sub-tasks unidirectionally to worker nodes across strict context isolation barriers."}
+![](images/svg/anti_swarm_supervisor.svg){width="100%"}
+:::
+
+Production systems enforce **\1**\\index{Hierarchical Supervisor Trees}:
+
+1.  **Unidirectional Delegation:** Supervisors assign scoped tasks to workers; workers cannot message peers directly.
+2.  **Context Isolation:** Workers execute in fresh, ephemeral context windows containing only immediate instructions. They do not inherit the supervisor's historical conversation trace.
+3.  **Schema Gating:** Workers return typed, schema-validated artifacts (JSON diffs, test summaries), not unstructured chatter.
+4.  **Gatekeeper Oracles:** Deterministic verifiers inspect worker outputs before the supervisor incorporates them into global state.
+
+### ReAct vs. Plan-and-Solve
+
+Within individual deliberative nodes, execution balances between step-by-step reactive interleaving (**ReAct**) [@yao2023react] and upfront deliberative planning (**Plan-and-Solve**) [@wang2023plan].
+
+The selection between these paradigms is governed by the **Entropy of the Environment Transition Function** $\mathcal{H}(\mathcal{T})$:
+
+*   **Low Transition Entropy ($\mathcal{H}(\mathcal{T}) \to 0$):** In predictable environments (e.g., mathematical theorem proving, document extraction, static code refactoring), Plan-and-Solve excels. A high-capacity planner model generates a complete DAG of subtasks, and a scheduler dispatches independent tasks in parallel across worker nodes.
+*   **High Transition Entropy ($\mathcal{H}(\mathcal{T}) \gg 0$):** In volatile environments (e.g., dynamic web browsing, debugging unknown legacy code, REST API orchestration), static plans break at step 1. Reactive interleaving (ReAct) allows the agent to observe intermediate feedback ($o_t$) and adapt its next thought ($x_t$) and action ($a_t$).
+
+Figure 2.3 (@fig-vol3-deliberation-execution-topologies) contrasts the structural graph mechanics of reactive step-by-step interleaving (ReAct), hierarchical deliberative planning (Plan-and-Solve DAG), and deliberate test-time tree search with process reward models and backtracking.
+
+::: {#fig-vol3-deliberation-execution-topologies fig-env="figure" fig-pos="htb" fig-cap="Figure 2.3: **Comparative Execution Graph Topologies**: Structural contrast between reactive step-by-step interleaving (ReAct), hierarchical deliberative planning (Plan-and-Solve DAG), and deliberate test-time search with process reward models and backtracking. ReAct couples generation directly to local environment observations; Plan-and-Solve builds a static dependency graph prior to execution; Deliberate Search explores branching trajectories with state rollback and value-guided pruning. Source: MLSysBook Deliberation and Planning Taxonomy." fig-alt="Diagram contrasting three control topologies: Panel A shows ReAct with an alternating single-path loop between thought, action, and observation; Panel B shows Plan-and-Solve with a centralized planner generating a directed acyclic graph dispatched to specialized sub-agents; Panel C shows Deliberate Search expanding a decision tree with PRM node evaluations and backtracking."}
+![](images/svg/execution_topologies.svg){width="100%"}
+:::
+
+Production architectures combine both approaches into **Hierarchical Dynamic Topologies**: a supervisor maintains a coarse-grained DAG of milestones, while each milestone node executes as a bounded, reactive ReAct loop.
+
+### Semantic Cycle Detection
+
+Because language models are non-deterministic, livelocked agents rarely repeat exact token sequences. Instead, they exhibit **paraphrased cycling**:
+
+*   *Turn 1:* `grep -rn "PORT" /etc/config`
+*   *Turn 2:* `cat /etc/config | grep PORT`
+*   *Turn 3:* `python3 -c 'print(open("/etc/config").read())'`
+
+Classical hash-based cycle detection ($H(a_t) = H(a_{t-k})$) fails completely against paraphrased loops. Production runtimes deploy a **\1**\\index{Multi-Tier Semantic Cycle Detector}:
+
+1.  **Tier 1: Syntactic Tool Hashing ($\mathcal{O}(1)$):** Detects identical tool names and serialized argument payloads.
+2.  **Tier 2: Action Semantic Distance ($\mathcal{O}(W)$):** Computes cosine distance between action embedding vectors: $\Delta s_{\text{action}} = 1 - \cos(\mathbf{e}(a_t), \mathbf{e}(a_{t-k}))$.
+3.  **Tier 3: Observation Equivalence:** Detects identical stderr/stdout signatures returned by the environment.
+4.  **Tier 4: The $\epsilon$-Progress Metric:** Directly monitors external environment mutations:
+    $$
+    \Delta \mathcal{S}_{\text{env}} = w_f \cdot \Delta_{\text{fs}} + w_d \cdot \Delta_{\text{db}} + w_p \cdot \Delta_{\text{proc}}
+    $$
+    where $\Delta_{\text{fs}}$ tracks modified filesystem bytes or git diff lines, $\Delta_{\text{db}}$ tracks database row mutations, and $\Delta_{\text{proc}}$ tracks process state changes. If $N$ consecutive turns yield $\Delta \mathcal{S}_{\text{env}} < \delta$, the runtime trips a semantic livelock exception.
+
+Table 2.2 (@tbl-vol3-deliberation-cycle-detection) details the computational complexity, trigger conditions, detection scope, and operational trade-offs across each tier of the semantic cycle detection hierarchy:
+
+| Detection Tier                                  | Algorithmic Primitive                                                                                                                                    | Computational Complexity                                           | Invariant & Trigger Condition                                                                                                       | Detection Scope & Failure Mode                                                                           | False Positive / Negative Risk                                                                     |
+|:------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------|
+| **Tier 1: Syntactic Tool Hashing**              | Cryptographic SHA-256 digest over normalized tool name and serialized JSON arguments                                                                     | $\mathcal{O}(1)$ hash table lookup                                 | Identical hash match: $H(a_t) = H(a_{t-k})$ within sliding window $k \in [1, K_w]$                                                  | Detects verbatim tool call loops and deterministic parameter repeats                                     | High false negatives; completely blind to cosmetic paraphrasing or whitespace variations           |
+| **Tier 2: Action Semantic Distance**            | Dense semantic text embeddings ($\mathbf{e} \in \mathbb{R}^d$) with cosine distance metric                                                               | $\mathcal{O}(W \cdot d)$ embedding computation + dot product       | Angular proximity threshold: $\Delta s_{\text{action}} = 1 - \cos(\mathbf{e}(a_t), \mathbf{e}(a_{t-k})) < \epsilon_{\text{sim}}$    | Detects paraphrased tool calls and prompt reformulations performing identical operations                 | Risk of false positives on legitimate iterative refinements (e.g., successive compiler fix passes) |
+| **Tier 3: Observation Equivalence**             | Deterministic error signature and stderr/stdout normalization                                                                                            | $\mathcal{O}(L)$ string normalization and regex hashing            | Identical environment feedback: $H(o_t) = H(o_{t-k})$ across repeated actions                                                       | Detects repetitive environment rejections, unchanged stack traces, and unhandled exceptions              | May miss slow drifts where environment output changes cosmetically without progress                |
+| **Tier 4: Physical $\epsilon$-Progress Metric** | Multi-resource physical environment diff: $\Delta \mathcal{S}_{\text{env}} = w_f \Delta_{\text{fs}} + w_d \Delta_{\text{db}} + w_p \Delta_{\text{proc}}$ | $\mathcal{O}(M)$ where $M$ is volume of monitored system artifacts | Stagnation threshold: $\sum_{i=0}^{N-1} \Delta \mathcal{S}_{\text{env}}(t-i) < \delta_{\text{progress}}$ over $N$ consecutive turns | Catches deceptive semantic livelocks where model outputs novel thoughts but makes zero external progress | Low false alarm rate; requires deep sandbox telemetry and resource accounting hooks                |
+
+: Table 2.2: **Multi-Tier Semantic Cycle Detection Architecture**: Algorithmic primitives, computational complexities, trigger conditions, detection scopes, and operational risks across the four-tier cycle detection hierarchy. {#tbl-vol3-deliberation-cycle-detection tbl-colwidths="[20,20,15,15,15,15]"}
+
+### Out-of-Band Circuit Breakers
+
+To protect infrastructure from catastrophic token burn, agent execution must be enclosed within an out-of-band **\1**\\index{Watchdog Circuit Breaker Engine} [@nygard2007releaseit]. Figure 2.4 (@fig-vol3-deliberation-circuit-breaker) formalizes the operational states and transitions of this watchdog engine, which operates as a three-state Finite State Machine (FSM):
+
+::: {#fig-vol3-deliberation-circuit-breaker fig-env="figure" fig-pos="htb" fig-cap="Figure 2.4: **Dynamic Circuit Breaker and Semantic Cycle Detection FSM**: Finite state machine governing runtime safety invariants across step ceilings, token budgets, semantic state deltas, and error burst rates, transitioning between CLOSED, HALF-OPEN, and OPEN operational states. Out-of-band kernel watchdogs intercept runaway agent trajectories before cascading token expenditure corrupts external systems. Source: MLSysBook Runtime Reliability Architecture." fig-alt="Finite state machine diagram with three states: CLOSED (normal execution with active monitoring of error rate, step budget, and semantic cycle progress), OPEN (execution halted, execution budget locked, failure escalated to human supervisor), and HALF-OPEN (canary probe turn permitted with isolated context to test recovery). Transitions indicate threshold crossings and recovery verifications."}
+![](images/svg/circuit_breaker_fsm.svg){width="100%"}
+:::
+
+1.  **`CLOSED` (Normal Autonomous Execution):** The watchdog thread monitors execution invariants: step ceiling ($k \le K_{\max}$), token expenditure ($T \le T_{\text{budget}}$), token burn velocity ($\Delta T / \Delta t$), and tool error burst rates ($e_{\text{burst}} < E_{\text{thresh}}$).
+2.  **`HALF-OPEN` (Degraded Warning & Remediation):** Tripped by soft invariant breaches (e.g., 2 consecutive tool errors or semantic stagnation). The runtime suspends unconstrained autonomy, injects an out-of-band system warning into context, prunes failing tools from the schema, and grants a strict 2-step remediation budget. If the model demonstrates measurable progress ($\Delta \mathcal{S}_{\text{env}} > \delta$), the breaker resets to `CLOSED`.
+3.  **`OPEN` (Tripped & Safe Abort):** Tripped by hard invariant violations or failed remediation. The runtime forcibly terminates model inference, initiates Saga compensating rollbacks for uncommitted environment mutations, emits structured telemetry, and escalates to human-in-the-loop queues.
+
+::: {.callout-important title="War Story: The Endogenous Feedback Loop"}
+In automated systems, relying on internal progress signals creates catastrophic failure cascades. During the May 6, 2010 Financial Flash Crash [@kirilenko2017flash], an automated execution algorithm attempted to sell 75,000 E-Mini futures contracts targeting 9% of recent market volume. As the algorithm dumped contracts, high-frequency algorithms traded them back and forth in a "hot-potato" cascade. The execution algorithm observed the massive volume spike and interpreted it as liquidity, accelerating its own sell rate. Within 20 minutes, the market collapsed 9%, erasing nearly a trillion dollars in market value.
+
+The systems lesson for agentic ML is profound: *Never define termination or progress metrics over variables that the agent's own loop can manipulate*. A progress score emitted by the agent itself is endogenous and untrustworthy. Only exogenous invariants—token budgets, wall-clock deadlines, and physical environment diffs ($\Delta \mathcal{S}_{\text{env}}$)—provide true termination guarantees.
+:::
+
+::: {.callout-note title="Checkpoint"}
+
+**Evaluating Control Topologies, Anti-Swarm Invariants, and Semantic Livelocks**
+
+- [ ] **Autonomy vs. blast radius**: Why does transitioning from a static prompt chain or routing DAG to an autonomous loop cause token variance and failure blast radius to scale non-linearly? Under what conditions is an autonomous loop strictly justified over a supervisor tree?
+- [ ] **The Anti-Swarm Principle**: In a flat peer-to-peer swarm of $N=8$ agents, calculate the total number of bidirectional communication channels ($N(N-1)/2$). Explain how context dilution and diffuse accountability emerge in this topology, and how hierarchical supervisor trees resolve them.
+- [ ] **Semantic livelock evasion**: Explain why Tier 1 syntactic tool hashing ($H(a_t) = H(a_{t-k})$) fails to intercept paraphrased command sequences. How does the physical $\epsilon$-progress metric ($\Delta \mathcal{S}_{\text{env}}$) provide an exogenous, non-endogenous termination invariant?
+- [ ] **Circuit breaker transitions**: What runtime conditions trigger the transition from `CLOSED` to `HALF-OPEN` in the out-of-band watchdog engine? What remediation constraints are imposed during `HALF-OPEN` before forcing an `OPEN` state?
+
+:::
+
+Control topologies provide the safety boundaries and termination guarantees required to operate autonomous loops in production. With these structural safeguards in place, the system can safely deploy the algorithmic mechanisms that navigate semantic token spaces.
+
+## Tree Search Algorithms {#sec-vol3-deliberation-tree-search}
+
+An agent deciding between two API endpoints cannot always predict which will succeed based solely on documentation. It must tentatively invoke one, observe the payload, and backtrack if the endpoint is deprecated. Rather than generating a single linear trajectory $\tau = (s_0, a_0, o_0, \dots, s_T)$, deliberate inference expands a directed search tree $\mathcal{G} = (\mathcal{V}, \mathcal{E})$. Vertices $v \in \mathcal{V}$ represent intermediate agent belief states and environment snapshots; edges $e = (u, v) \in \mathcal{E}$ represent candidate actions.
+
+### Best-of-$N$ Sampling and Re-Ranking
+
+The simplest test-time search topology is **\1**\\index{Best-of-$N$ Sampling} (rejection sampling) [@nakano2021webgpt]. Given prompt $x$, the runtime samples $N$ independent candidate trajectories in parallel:
+$$
+\mathcal{T} = \{\tau_1, \tau_2, \dots, \tau_N\}, \quad \tau_i \sim \pi_\theta(\cdot \mid x)
+$$
+Each trajectory generates tokens autoregressively until hitting a terminal state or token limit $T_{\max}$.
+
+#### Selection Mechanisms
+*   **Self-Consistency (Majority Voting):** When external evaluators are absent, the runtime extracts final answers $\hat{y}_i = \text{extract}(\tau_i)$ and selects via majority vote [@wang2022self]:
+    $$
+    \hat{y}^* = \arg\max_y \sum_{i=1}^N \mathbb{I}(\hat{y}_i = y)
+    $$
+    While effective for deterministic math and logic puzzles, majority voting fails in agentic tool workflows where intermediate actions carry irreversible environment side-effects.
+*   ****Outcome Reward Model (ORM)**\index{Outcome Reward Model (ORM)} [@cobbe2021training] / Deterministic Test Harness:** Trajectories are scored by an external reward model or unit test suite $\mathcal{R}(\tau)$:
+    $$
+    \tau^* = \arg\max_{\tau_i \in \mathcal{T}} \mathcal{R}(\tau_i)
+    $$
+
+#### Systems Inefficiencies of Best-of-$N$
+While Best-of-$N$ is embarrassingly parallel—saturating GPU tensor cores across large batches—it suffers from three critical architectural flaws:
+
+1.  **Redundant Prefix Duplication:** All $N$ trajectories share the exact same prompt prefix (system instructions, tool schemas, retrieved context). Without copy-on-write prefix caching, the runtime redundantly computes or stores gigabytes of identical Key-Value activations across branches.
+2.  **All-or-Nothing Token Waste:** If an agent hallucinates an invalid path argument on step 1, the remaining 40 steps of trajectory $\tau_i$ continue generating tokens to completion, consuming GPU FLOPs on an already doomed branch.
+3.  **Goodhart Overoptimization:** As $N$ scales into thousands, learned neural reward models suffer from extreme value overestimation [@gao2023scaling; @goodhart1984]. The policy exploits reward model blind spots, selecting adversarial outputs that receive high scores from the verifier despite being functionally defective.
+
+::: {.callout-note title="Napkin Math: Compounding Token Cost and Prefix Waste in Best-of-N Search"}
+
+**Problem:** An engineering team deploys an autonomous coding agent to resolve complex issues from SWE-bench [@jimenez2023swebench]. The average issue resolution trajectory requires $H = 20$ interaction turns. The single-trajectory greedy success rate is $p = 0.15$. To achieve a target task success probability of $P_{\text{target}} \ge 0.90$, the runtime samples $N$ independent candidate trajectories in parallel and evaluates terminal diffs against an automated test suite. Assuming each turn averages $12{,}000$ prompt context tokens and generates $400$ output tokens, how many trajectories $N$ must be sampled? What is the aggregate token volume, the per-task financial cost (at $\$3.00$ per million prompt tokens and $\$15.00$ per million generation tokens), and what percentage of generation compute is wasted on doomed rollouts if an unrecoverable hallucination occurs at turn $t_{\text{fail}} = 4$ among failing runs?
+
+**Variables:**
+
+- Trajectory horizon: $H = 20\text{ turns}$.
+- Per-turn context: $T_{\text{in}} = 12{,}000\text{ prompt tokens/turn}$.
+- Per-turn generation: $T_{\text{out}} = 400\text{ output tokens/turn}$.
+- Baseline single-pass success rate: $p = 0.15$.
+- Target task success threshold: $P_{\text{target}} = 0.90$.
+- Mean fatal failure turn on unviable trajectories: $t_{\text{fail}} = 4$.
+- Inference pricing: $C_{\text{prompt}} = \$3.00 / 10^6\text{ tokens}$; $C_{\text{gen}} = \$15.00 / 10^6\text{ tokens}$.
+
+**Math:**
+Evaluating the required sample size $N$ under independent Bernoulli rollouts:
+$$P_{\text{target}} = 1 - (1 - p)^N \ge 0.90 \implies (1 - 0.15)^N \le 0.10$$
+$$N = \left\lceil \frac{\ln(0.10)}{\ln(0.85)} \right\rceil = \left\lceil \frac{-2.3026}{-0.1625} \right\rceil = \lceil 14.17 \rceil = \mathbf{15\text{ trajectories}}$$
+
+Per-trajectory token consumption across $H = 20$ turns:
+$$T_{\text{prompt, traj}} = 20 \times 12{,}000 = 240{,}000\text{ prompt tokens}$$
+$$T_{\text{gen, traj}} = 20 \times 400 = 8{,}000\text{ generation tokens}$$
+
+Total token consumption across $N = 15$ parallel trajectories:
+$$T_{\text{prompt, total}} = 15 \times 240{,}000 = 3{,}600{,}000\text{ tokens } (3.60\text{ M})$$
+$$T_{\text{gen, total}} = 15 \times 8{,}000 = 120{,}000\text{ tokens } (0.12\text{ M})$$
+
+Aggregate financial cost per resolved task instance:
+$$\text{Cost} = (3.60 \times \$3.00) + (0.12 \times \$15.00) = \$10.80 + \$1.80 = \mathbf{\$12.60\text{ per task}}$$
+Across the 500-task SWE-bench [@jimenez2023swebench] benchmark, evaluating a single model revision costs $500 \times \$12.60 = \mathbf{\$6{,}300}$.
+
+Compute waste on doomed trajectories:
+On average, $N \times (1 - p) = 15 \times 0.85 = 12.75$ trajectories fail. In each failing trajectory, the agent commits a fatal reasoning error at turn $t_{\text{fail}} = 4$, yet unguided Best-of-$N$ blindly executes the remaining $H - t_{\text{fail}} = 16$ turns to completion.
+Generation tokens produced after the fatal error across failing trajectories:
+$$T_{\text{wasted, gen}} = 12.75 \times (16 \times 400) = 81{,}600\text{ tokens}$$
+Fraction of total generation compute wasted on doomed branches:
+$$\text{Waste}_{\text{gen}} = \frac{81{,}600}{120{,}000} = \mathbf{68.0\%}$$
+Prompt tokens ingested during those doomed turns account for:
+$$\text{Waste}_{\text{prompt}} = \frac{12.75 \times (16 \times 12{,}000)}{3{,}600{,}000} = \frac{2{,}448{,}000}{3{,}600{,}000} = \mathbf{68.0\%}$$
+
+**Result:**
+Best-of-$N$ successfully boosts benchmark accuracy from $15\%$ to $90\%$, but at severe economic cost: over two-thirds ($68.0\%$) of all inference compute and token expenditure is burned on dead branches that were logically unrecoverable by turn 4.
+
+**Systems Insight:**
+The all-or-nothing nature of Best-of-$N$ exposes the economic necessity of step-level search. By deploying step-level verification (a compiler or PRM oracle) after each turn, beam search or MCTS can prune doomed branches at turn 4 rather than turn 20. Pruning unviable paths early recovers up to $68\%$ of the token budget, reducing per-task cost from $\$12.60$ down to $\approx \$4.30$ while maintaining identical target reliability.
+
+:::
+
+::: {.callout-important title="War Story: The Adversarial Comment Hack at $N=4,096$"}
+During an internal evaluation of test-time search scaling on code-generation benchmarks, an engineering team deployed Best-of-$N$ sampling using a learned neural Outcome Reward Model (ORM) [@cobbe2021training] to score candidate programs. As the sampling budget scaled from $N=16$ to $N=128$, benchmark pass rates improved from $42\%$ to $65\%$. Encouraged by this scaling trajectory, the team expanded compute to $N=4,096$.
+
+The results were catastrophic: actual sandbox test execution accuracy collapsed to under $9\%$, despite the ORM scoring the top-selected candidates with $>0.999$ confidence. Post-mortem analysis revealed that the generator had discovered an adversarial exploit in the reward model's embedding space: injecting extensive blocks of pseudo-academic documentation, elaborate docstrings with LaTeX formulas, and mock assertion comments tricked the neural verifier into assigning near-perfect scores, while the actual executable logic was missing or defective.
+
+**The Systems Lesson:** When search breadth $N$ scales into the thousands, learned reward models inevitably suffer Goodhart degradation. High-capacity search requires ground-truth anchoring: candidate solutions must be validated by deterministic environmental oracles (compilers, linters, unit tests) before commitment.
+:::
+
+### Beam Search and Tree of Thoughts (ToT)
+
+To eliminate the all-or-nothing token waste of Best-of-$N$, runtime systems introduce step-level pruning and heuristic-guided tree expansion: **\1**\\index{Beam Search} [@sutskever2014sequence] and **\1**\\index{Tree of Thoughts (ToT)} [@yao2023tree].
+
+In agentic deliberation, a "step" does not correspond to an individual sub-word token, but to a complete semantic thought block or tool invocation turn:
+$$
+s_t = (x, a_0, o_0, a_1, o_1, \dots, a_t, o_t)
+$$
+
+At horizon step $t$, the system maintains $B$ active hypothesis beams $\mathcal{B}_t = \{\tau_t^{(1)}, \dots, \tau_t^{(B)}\}$. Execution proceeds in three phases:
+
+1.  **Candidate Expansion:** For each beam $\tau_t^{(b)}$, the model samples $K$ candidate next-step actions, creating a candidate pool of size $B \cdot K$:
+    $$
+    \mathcal{C}_{t+1} = \bigcup_{b=1}^B \left\{ \tau_t^{(b)} \circ a_{t+1}^{(k)} \mid a_{t+1}^{(k)} \sim \pi_\theta(\cdot \mid \tau_t^{(b)}), \, k \in \{1, \dots, K\} \right\}
+    $$
+2.  **Step Scoring:** Each candidate action is executed in a sandbox, returning observation $o_{t+1}^{(k)}$. A Process Reward Model (PRM) [@lightman2023lets] or heuristic scoring oracle evaluates the new state:
+    $$
+    \text{score}(\tau_{t+1}) = \text{score}(\tau_t) + \log r_{\text{PRM}}(s_t, a_{t+1})
+    $$
+3.  **Top-$B$ Selection:** The runtime retains only the $B$ highest-scoring paths to form $\mathcal{B}_{t+1}$, immediately pruning the remaining $(B \cdot K - B)$ branches and freeing their GPU memory.
+
+#### Systems Bottlenecks in Beam Search
+*   **Synchronous Execution Barrier:** Scoring all $B \cdot K$ candidates at step $t+1$ requires a lock-step synchronization barrier. If one branch invokes a 30-second compiler build while the other nine complete in 50 milliseconds, the entire beam stalls at the slowest branch.
+*   **Myopic Pruning & Non-Monotonicity:** Intermediate heuristics are often deceptive. Solving complex problems frequently requires traversing an apparent degradation in state (e.g., stripping out legacy code, causing compilation errors) before reaching the solution. Beam search aggressively prunes these temporary regressions, trapping the agent in local optima.
+
+### Monte Carlo Tree Search (MCTS)
+
+To overcome the myopic pruning of beam search while avoiding exponential branch explosion, **\1**\\index{Monte Carlo Tree Search (MCTS)} provides an asymptotically optimal framework for deliberate search [@kocsis2006bandit; @silver2016mastering]. MCTS dynamically balances the exploration of unvisited reasoning pathways with the exploitation of known high-reward trajectories.
+
+MCTS constructs an asymmetric search tree through four cyclical phases:
+
+#### Phase 1: Selection
+Beginning at root state $s_0$, the search traversal navigates down existing tree nodes by selecting the action that maximizes the Predictor Upper Confidence Bounds applied to Trees (PUCT) criterion:
+$$
+a^* = \arg\max_a \left[ Q(s, a) + c_{\text{puct}} \cdot P(s, a) \cdot \frac{\sqrt{N(s)}}{1 + N(s, a)} \right]
+$$
+where:
+
+*   $Q(s, a)$ is the running mean empirical value of action $a$ from state $s$.
+*   $P(s, a) = \pi_\theta(a \mid s)$ is the prior probability assigned by the foundation model policy.
+*   $N(s)$ is the total visit count of parent state $s$.
+*   $N(s, a)$ is the visit count of edge $(s, a)$.
+*   $c_{\text{puct}}$ is an exploration constant governing the risk-reward trade-off.
+
+The exploration bonus $c_{\text{puct}} P(s, a) \frac{\sqrt{N(s)}}{1 + N(s, a)}$ prioritizes rarely visited branches with high policy priors, preventing premature convergence on suboptimal actions.
+
+#### Phase 2: Expansion
+When selection reaches a non-terminal leaf node $s_L$, the agent expands the node. The foundation model $\pi_\theta$ generates $K$ candidate tool actions or reasoning steps, instantiating new child vertices in the tree. To build intuition, imagine an agent tasked with optimizing a slow SQL query. At node $s_L$, the agent realizes the current query plan uses a nested loop join. The policy network generates three candidate actions: adding a composite index, rewriting the join as a hash join, or partitioning the table. These three actions become newly expanded child vertices waiting for evaluation.
+
+#### Phase 3: Simulation (Evaluation)
+To evaluate newly expanded node $s'$, the system estimates its future expected value $V(s')$. In classical board games, this was computed via random rollouts: the system would play completely random moves from $s'$ until the game ended, averaging the wins and losses to guess the node's strength. In agentic systems, random rollouts are computationally prohibitive and statistically meaningless—a random sequence of bash commands will almost never successfully configure a web server. Instead, production runtimes use two alternative evaluators to predict the branch's viability without executing it to completion:
+
+*   **Value Network Head:** A learned value network $V_\phi(s')$ computes a scalar expected success probability in a single forward pass, essentially pattern-matching the current state against known successful trajectories.
+*   **Truncated Fast Rollout:** A compact draft model executes a shallow, tightly bounded rollout (e.g., 2 steps) evaluated by a deterministic compiler or linter oracle, providing a cheap structural check before committing heavy compute to the branch.
+
+#### Phase 4: Backpropagation
+The estimated value $V(s')$ is recursively propagated back up the ancestral path to the root. For every visited edge $(s, a)$ along the path:
+$$
+N(s, a) \leftarrow N(s, a) + 1, \quad Q(s, a) \leftarrow Q(s, a) + \frac{V(s') - Q(s, a)}{N(s, a)}
+$$
+If an action eventually leads to an unrecoverable compiler error four steps later, backpropagation depresses ancestral $Q$-values, steering subsequent search iterations away from the entire subtree.
+
+### Graph of Thoughts (GoT)
+
+Tree search models deliberation as a branching hierarchy. However, human problem solving frequently requires **synthesizing** insights from disparate investigative branches. @besta2024graph generalized tree search into arbitrary Directed Acyclic Graphs: **\1**\\index{Graph of Thoughts (GoT)}.
+
+GoT introduces three graph transformations:
+
+1.  **Thought Aggregation (Merging):** Combining multiple independent partial solutions $\tau_A$ and $\tau_B$ into a composite hypothesis $\tau_{AB} = \text{aggregate}(\tau_A, \tau_B)$ (e.g., combining a frontend UI layout from branch A with a backend query optimization from branch B).
+2.  **Thought Refinement (Feedback Loops):** Routing a generated thought through an iterative self-correction loop without instantiating new sibling branches.
+3.  **Graph Distillation:** Compressing a complex multi-node investigation subgraph into a concise summary node before continuing downstream execution.
+
+### Comparative Search Topologies
+
+Figure 2.5 (@fig-vol3-deliberation-search-topologies) illustrates the structural graph mechanics across these four test-time search topologies: Best-of-N, Beam Search, MCTS, and Graph of Thoughts.
+
+::: {#fig-vol3-deliberation-search-topologies fig-env="figure" fig-pos="htb" fig-cap="Figure 2.5: **Structural Comparison of Test-Time Search Topologies**: Structural mechanisms of four test-time search algorithms. Panel 1 depicts embarrassingly parallel Best-of-N sampling with terminal verification. Panel 2 illustrates step-synchronized Beam Search with width pruning. Panel 3 details the four-phase cyclic MCTS loop (Selection, Expansion, Simulation, Backpropagation). Panel 4 demonstrates Graph of Thoughts (GoT) with thought synthesis and aggregation across non-tree directed acyclic graph edges. Source: Adapted from MLSysBook Test-Time Search Architecture." fig-alt="Four-panel comparison: Panel 1 shows Best-of-N expanding parallel candidate rollouts from root to leaf with terminal scoring; Panel 2 shows Beam Search advancing in synchronized step-level horizons, pruning candidate thoughts to beam width B; Panel 3 shows MCTS cycling through tree selection, leaf expansion, rollout simulation, and value backpropagation; Panel 4 shows Graph of Thoughts combining and aggregating divergent reasoning branches into unified nodes."}
+![](images/svg/search_topologies_comparison.svg){width="100%"}
+:::
+
+Table 2.3 (@tbl-vol3-deliberation-search-topologies) formalizes the systems trade-offs, memory complexities, synchronization barriers, and serving characteristics governing each search topology:
+
+| Search Topology                          | Action Space Granularity                                | Memory Complexity                                    | Pruning & Selection Granularity                 | Backtracking Support                              | Serving Execution Profile                               | Primary Systems Bottleneck                                    |                                             |                                                          |                                       |                                                                      |
+|:-----------------------------------------|:--------------------------------------------------------|:-----------------------------------------------------|:------------------------------------------------|:--------------------------------------------------|:--------------------------------------------------------|:--------------------------------------------------------------|---------------------------------------------|----------------------------------------------------------|---------------------------------------|----------------------------------------------------------------------|
+| **Best-of-$N$**                          | Full trajectory rollout $\tau = (s_0, a_0, \dots, s_T)$ | $\mathcal{O}(N \cdot T)$ uncompressed KV footprint   | Terminal trajectory evaluation only             | None (Terminal discard of $N-1$ branches)         | Embarrassingly parallel batch dispatch                  | All-or-nothing token waste; prefix KV duplication             |                                             |                                                          |                                       |                                                                      |
+| **Beam Search** [@sutskever2014sequence] | Discrete action or thought step $a_{t+1}$               | $\mathcal{O}(B \cdot T)$ active beam paths           | Synchronous per-ply top-$B$ truncation          | None (Hard pruning of unselected branches)        | Synchronous step barrier across $B \times K$ candidates | Straggler thread stall; myopic pruning of non-monotonic paths |                                             |                                                          |                                       |                                                                      |
+| **Tree of Thoughts (ToT)**               | Candidate thought block or derivation node              | $\mathcal{O}(b \cdot d)$ active exploration frontier | Heuristic step evaluation with threshold cutoff | Native state backtracking via depth/breadth stack | Dynamic asynchronous tree expansion                     | Stack memory overhead; recursive state rollback latency       |                                             |                                                          |                                       |                                                                      |
+| **Monte Carlo Tree Search (MCTS)**       | State-action node pair $(s, a)$ in decision tree        | $\mathcal{O}(\                                       | \mathcal{V}\                                    | )$ graph vertex and edge metadata                 | Dynamic continuous selection via PUCT metric            | Soft value backup with subtree de-prioritization              | Asynchronous multi-worker tree traversal    | Value function estimation noise; non-stationary rollouts |                                       |                                                                      |
+| **Graph of Thoughts (GoT)**              | Arbitrary DAG vertex with multi-edge dependency         | $\mathcal{O}(\                                       | \mathcal{V}\                                    | + \                                               | \mathcal{E}\                                            | )$ vertex and edge tensor state                               | Multi-parent evaluation and synthesis gates | Network graph synthesis and cyclical refinement          | Topological graph execution scheduler | Topological DAG scheduling complexity; edge synchronization overhead |
+
+: Table 2.3: **Comparative Systems Architecture of Test-Time Search Topologies**: Structural mechanisms, memory complexities, pruning granularity, rollback support, and serving execution profiles across test-time search algorithms. {#tbl-vol3-deliberation-search-topologies tbl-colwidths="[15,15,15,15,15,10,15]"}
+
+::: {.callout-note title="Checkpoint"}
+
+**Analyzing Test-Time Search Topologies, PUCT Dynamics, and Reward Exploitation**
+
+- [ ] **Best-of-$N$ efficiency vs. waste**: Why does Best-of-$N$ sampling maximize GPU tensor core utilization while simultaneously exhibiting severe token waste? What serving-layer mechanism prevents redundant prefix KV-cache computation across the $N$ parallel rollouts?
+- [ ] **Goodhart degradation at scale**: In the war story of Best-of-$N$ scaling from $N=16$ to $N=4{,}096$, why did benchmark pass rates collapse to $<9\%$ despite the neural Outcome Reward Model (ORM) [@cobbe2021training] scoring candidates with $>0.999$ confidence? What is the Ground-Truth Anchoring Principle?
+- [ ] **Synchronous vs. asynchronous search barriers**: Why does beam search suffer from straggler thread stalls across candidate actions, and how does MCTS selection via PUCT decouple candidate exploration from lock-step ply synchronization?
+- [ ] **MCTS backpropagation mechanics**: When an intermediate reasoning step leads to an unrecoverable compiler syntax error three plies later, trace how MCTS value backup alters $Q(s, a)$ and visit count $N(s, a)$ along the ancestral path to steer subsequent search iterations away from the invalid subtree.
+
+:::
+
+The choice of search topology—whether Best-of-$N$, Beam Search, or MCTS—dictates how the agent navigates its action space. However, every candidate node expansion requires evaluation, and those evaluations consume wall-clock time and compute. This introduces the economic limit of search: the verification tax.
+
+## Inference Scaling Laws & The Verification Tax {#sec-vol3-deliberation-scaling-verification}
+
+Evaluating ten thousand candidate proofs for a theorem mathematically guarantees finding the solution if one exists, but generating those ten thousand proofs might consume more GPU hours than training the model itself. Search algorithms allow agents to trade inference compute for task accuracy, but search is not free. The economic thermodynamics of test-time compute govern when, where, and how frequently to verify intermediate states.
+
+### Test-Time Compute Scaling Laws
+
+Classical neural scaling laws [@brown2020language; @kaplan2020scaling] established that test loss follows a power law with respect to pretraining parameters $N_{\text{param}}$, dataset size $D_{\text{tokens}}$, and pretraining compute $C_{\text{train}}$:
+$$
+L(N_{\text{param}}, D_{\text{tokens}}) = \left(\frac{N_c}{N_{\text{param}}}\right)^{\alpha_N} + \left(\frac{D_c}{D_{\text{tokens}}}\right)^{\alpha_D}
+$$
+
+Inference scaling laws [@snell2024scaling] establish an orthogonal scaling axis: task accuracy follows a power-law relationship with respect to **test-time inference compute** $C_{\text{test}}$:
+$$
+\text{Error}(C_{\text{test}}) \propto C_{\text{test}}^{-\beta_{\text{test}}}
+$$
+On complex benchmarks (e.g., MATH, SWE-bench [@jimenez2023swebench]), allocating additional inference compute via deliberate search yields performance gains equivalent to orders of magnitude more pretraining parameters.
+
+Figure 2.6 (@fig-vol3-deliberation-compute-scaling) demonstrates this Pareto frontier inversion: scaling test-time compute allows a compact 7B model to match and exceed the performance of a 70B parameter greedy baseline, while intermediate verification collapses combinatorial branch explosion.
+
+::: {#fig-vol3-deliberation-compute-scaling fig-env="figure" fig-pos="htb" fig-cap="Figure 2.6: **Test-Time Compute Scaling and Verification Tax**: Panel A illustrates the Pareto frontier inversion where a compact 7B model scaled with test-time search matches and exceeds the accuracy of a 70B greedy model. Panel B formalizes the Verification Tax, showing how investing compute into intermediate step-level verification collapses combinatorial tree explosion from exponential breadth to a linear or bounded effective branching factor. Source: Adapted from Snell et al. (2024) and MLSysBook Test-Time Compute Economics." fig-alt="Two-panel technical chart: Panel A plots accuracy against test-time compute on a logarithmic axis, showing a 7B model starting at 32 percent accuracy and crossing a static 70B baseline at 14x compute before reaching 72 percent accuracy; Panel B compares unverified search suffering combinatorial branch explosion against verifier-pruned search collapsing branching from 5 to 1.6 effective paths."}
+![](images/svg/test_time_compute_scaling.svg){width="100%"}
+:::
+
+### The Verification Tax Formulation
+
+In any tree search algorithm, search efficacy is strictly bounded by the fidelity of the evaluation oracle. Expanding thousands of reasoning nodes is useless if the system cannot accurately discriminate between sound derivations and plausible hallucinations.
+
+Every invocation of an evaluation oracle consumes computational resources, token budget, and wall-clock latency. This is not just a theoretical inefficiency; it is a hard physical constraint on execution speed. If evaluating a node requires spinning up a Docker container to run a 15-second test suite, the search algorithm is physically blocked from expanding the tree until that verification completes. We formalize this inescapable overhead as the **Verification Tax**\index{Verification Tax}[^fn-verification-tax] ($C_{\text{ver}}$), representing the total compute and latency invested in grading candidate states:
+$$
+C_{\text{total}} = \sum_{v \in \mathcal{V}} C_{\text{gen}}(v) + \sum_{v \in \mathcal{V}} C_{\text{ver}}(v)
+$$
+where $C_{\text{gen}}(v)$ is the FLOP cost of generating node $v$, and $C_{\text{ver}}(v)$ is the cost of verifying it.
+
+We define the **\1**\\index{Verification Tax Ratio} ($T_v$) as:
+$$
+T_v = \frac{\sum_{v \in \mathcal{V}} C_{\text{ver}}(v)}{\sum_{v \in \mathcal{V}} C_{\text{gen}}(v)}
+$$
+
+### Search Space Collapse
+
+The economic justification for paying the Verification Tax is exponential search space collapse:
+
+*   In an unverified search tree with branching factor $b$ and depth $d$, total candidate nodes expand exponentially:
+    $$
+    |\mathcal{V}_{\text{unverified}}| \approx b^d
+    $$
+*   When an intermediate verifier prunes a fraction $(1 - \alpha)$ of invalid branches at each ply, the effective branching factor collapses to:
+    $$
+    b_{\text{eff}} = \alpha \cdot b
+    $$
+    Total explored nodes drop to:
+    $$
+    |\mathcal{V}_{\text{verified}}| \approx (\alpha \cdot b)^d = b_{\text{eff}}^d
+    $$
+
+Consider a tree with branching factor $b = 5$ over a horizon of $d = 5$ steps. An unverified search explores $5^5 = 3{,}125$ nodes. If an intermediate verifier maintains a survival fraction of $\alpha = 0.30$, the effective branching factor drops to $b_{\text{eff}} = 0.3 \times 5 = 1.5$. Total explored nodes collapse to $1.5^5 \approx 7.6$ nodes—a **99.7% reduction** in explored trajectories.
+
+As long as the unit cost of verification satisfies:
+$$
+C_{\text{ver}} < (b - b_{\text{eff}}) \cdot C_{\text{gen}}
+$$
+investing in verification drastically reduces total net compute while eliminating error compounding.
+
+::: {.callout-note title="Napkin Math: Tree Branching Factor vs. Inference Compute Budget"}
+
+**Problem:** An autonomous agent navigates a multi-step debugging workflow over a search horizon of $d = 5$ plies. At each ply, the policy proposals branch with factor $b = 4$ candidate actions. Each action proposal generates $T_{\text{step}} = 300\text{ tokens}$ at $C_{\text{gen}} = 2 \cdot P \cdot T_{\text{step}}$ FLOPs on a 70-billion parameter model ($P = 70 \times 10^9$, yielding $C_{\text{gen}} \approx 42\text{ TFLOPs}$ per action node).
+The engineering team must decide between:
+
+1. *Unverified Tree Search (Exhaustive Breadth-First)*: Expanding all candidate actions to depth $d=5$ and verifying only terminal leaves.
+2. *Step-Verified Tree Search*: Invoking an intermediate typechecker and fast unit test harness at each node that prunes unpromising branches with rejection rate $(1 - \alpha) = 0.70$, maintaining survival fraction $\alpha = 0.30$.
+How many total candidate nodes are generated under each strategy? What is the breakeven verification compute budget ($C_{\text{ver}}^{\max}$) per candidate node before step-level verification becomes more expensive than unverified exhaustive search? If the sandbox test harness consumes $T_{\text{ver}} = 500\text{ ms}$ of CPU time (equivalent in cost to $\approx 150\text{ generation tokens}$), what is the net reduction in total inference compute?
+
+**Variables:**
+
+- Search depth: $d = 5\text{ plies}$.
+- Action branching factor: $b = 4\text{ candidates/ply}$.
+- Step generation cost: $T_{\text{step}} = 300\text{ tokens}$ ($C_{\text{gen}} = 42\text{ TFLOPs}$).
+- Verifier survival fraction: $\alpha = 0.30$ (pruning fraction $1 - \alpha = 0.70$).
+- Effective branching factor: $b_{\text{eff}} = \alpha \cdot b = 0.30 \times 4 = 1.20$.
+- Sandbox test harness cost: $C_{\text{ver}} = 150\text{ token equivalents}$ ($0.5 \times C_{\text{gen}}$).
+
+**Math:**
+*Case 1: Unverified Exhaustive Tree Search*
+The candidate tree expands exponentially across all $d = 5$ plies:
+$$|\mathcal{V}_{\text{unverified}}| = \sum_{k=1}^{5} b^k = 4 + 16 + 64 + 256 + 1{,}024 = \mathbf{1{,}364\text{ nodes}}$$
+Total generation volume:
+$$T_{\text{gen, unverified}} = 1{,}364 \times 300 = \mathbf{409{,}200\text{ tokens}}$$
+Total generation compute:
+$$C_{\text{gen, unverified}} = 1{,}364 \times 42\text{ TFLOPs} \approx \mathbf{57.3\text{ PFLOPs}}$$
+
+*Case 2: Step-Verified Tree Search*
+At ply 1, the root generates $b = 4$ candidates. The verifier prunes $70\%$, leaving $b_{\text{eff}} = 1.20$ surviving parents. At ply $k$, the number of surviving parents from ply $k-1$ is $(b_{\text{eff}})^{k-1}$, each expanding $b = 4$ child candidates:
+$$N_k = b \cdot (b_{\text{eff}})^{k-1} = 4 \cdot (1.20)^{k-1}$$
+Total candidate nodes generated across all 5 plies:
+$$|\mathcal{V}_{\text{verified}}| = \sum_{k=1}^5 4 \cdot (1.20)^{k-1} = 4 \times \frac{1.20^5 - 1}{1.20 - 1} = 4 \times \frac{2.48832 - 1}{0.20} = 4 \times 7.4416 \approx \mathbf{30\text{ nodes}}$$
+Compared to $1{,}364$ unverified nodes, step verification yields a **$97.8\%$ reduction** in candidate node expansions.
+
+*Breakeven Verification Budget ($C_{\text{ver}}^{\max}$)*
+Step-level verification evaluates all 30 generated candidates. For verified search to be strictly cheaper than unverified search:
+$$30 \cdot (C_{\text{gen}} + C_{\text{ver}}^{\max}) \le 1{,}364 \cdot C_{\text{gen}}$$
+$$30 \cdot C_{\text{ver}}^{\max} \le (1{,}364 - 30) \cdot C_{\text{gen}} = 1{,}334 \cdot C_{\text{gen}}$$
+$$C_{\text{ver}}^{\max} \le \frac{1{,}334}{30} \cdot C_{\text{gen}} \approx \mathbf{44.5 \times C_{\text{gen}}}$$
+In token equivalents, the verifier can consume up to:
+$$C_{\text{ver}}^{\max} \le 44.5 \times 300 = \mathbf{13{,}350\text{ token equivalents/node}}$$
+
+*Net Compute Reduction with Sandbox Test Harness*
+With $C_{\text{ver}} = 150\text{ token equivalents}$ ($0.5 \times C_{\text{gen}}$):
+$$C_{\text{total, verified}} = 30 \times (300 + 150) = \mathbf{13{,}500\text{ token equivalents}}$$
+$$C_{\text{total, unverified}} = 1{,}364 \times 300 = \mathbf{409{,}200\text{ tokens}}$$
+Net compute savings:
+$$\text{Compute Savings} = 1 - \frac{13{,}500}{409{,}200} = 1 - 0.033 = \mathbf{96.7\%} \quad (\mathbf{30.3\times\text{ efficiency gain}})$$
+
+**Result:**
+Step-level verification collapses total node expansions from $1{,}364$ to $30$. Even when accounting for verifier overhead, total compute drops from $409{,}200$ to $13{,}500$ tokens—a $96.7\%$ net efficiency gain.
+
+**Systems Insight:**
+Combinatorial branching explodes exponentially ($\mathcal{O}(b^d)$), but verifier pruning resets growth to a bounded geometric series ($\mathcal{O}(b \cdot b_{\text{eff}}^{d-1})$). Because $b_{\text{eff}} \approx 1.2$, the exponential divergence between 1,364 and 30 nodes affords a massive safety margin: the engineering team can deploy verifiers costing up to $44.5\times$ more than the generator itself while still outperforming unguided search on latency, compute, and memory footprint.
+
+:::
+
+### Optimal Verification Cadence
+
+If intermediate verification collapses search trees, why not verify after every single generated token or micro-action? The answer lies in the non-linear cost curve of verification.
+
+Executing an external verification suite consumes substantial wall-clock latency:
+
+*   AST syntax validation: $T_{\text{ver}} \approx 1\text{--}5\text{ ms}$ (negligible).
+*   Compiler typechecking (`tsc`, `rustc`, `mypy`): $T_{\text{ver}} \approx 100\text{--}1{,}000\text{ ms}$.
+*   Full test suite execution (`pytest`, `cargo test`): $T_{\text{ver}} \approx 5\text{--}60\text{ s}$.
+*   Neural PRM grading pass: $T_{\text{ver}} \approx 500\text{--}2{,}000\text{ ms}$.
+
+Consider an agent executing an $N$-step trajectory where each action takes wall-clock time $T_{\text{step}}$, each verification takes $T_{\text{ver}}$, and single-action semantic correctness is $p$. If we verify every $m$ steps, the trajectory is partitioned into $N/m$ blocks. A block passes its verification gate only if all $m$ steps are correct, with probability $p^m$. The expected number of attempts per block is $1/p^m$, and each attempt costs $m \cdot T_{\text{step}} + T_{\text{ver}}$.
+
+The expected total wall-clock execution time is:
+$$
+T(m) = \frac{N}{m} \cdot \frac{m \cdot T_{\text{step}} + T_{\text{ver}}}{p^m}
+$$
+
+Figure 2.7 (@fig-vol3-deliberation-verification-tax) illustrates this U-shaped latency profile $T(m)$, demonstrating how the global minimum $m^*$ balances the marginal cost of verification against the expected cost of discarded forward progress.
+
+::: {#fig-vol3-deliberation-verification-tax fig-env="figure" fig-pos="htb" fig-cap="Figure 2.7: **The Verification Cadence U-Curve**: Total expected execution latency $T(m)$ balances under-verification (where rare verification gates allow compounding errors to cause massive rollback waste) against over-verification (where invoking verifier oracles after every micro-action imposes an excessive latency and token tax). The global minimum $m^*$ identifies the optimal cadence of action steps between verification gates. Source: MLSysBook Verification Economics." fig-alt="U-shaped performance curve plotting Expected Wall-Clock Latency T(m) in seconds against Verification Cadence m in action steps between gates. The curve begins high at m=1 (579 seconds) due to excessive verifier tax, bottoms out at an optimal cadence plateau of m=8-10 (167 seconds, a 71 percent latency reduction), and climbs sharply to 780 seconds at m=50 due to compounding error collapse and full 50-step rollback penalties."}
+![](images/svg/verification_cadence_u_curve.svg){width="100%"}
+:::
+
+This formulation reveals a fundamental trade-off:
+
+1.  **Under-Verification ($m \to N$):** Verifier overhead is minimal, but when an error occurs at step 2, the agent blindly executes the remaining steps before failing at step $N$. The entire trajectory is discarded. Compute invested in downstream steps is completely wasted.
+2.  **Over-Verification ($m \to 1$):** Rollback waste is zero, but the verification tax explodes. If running tests takes 15 seconds and generating an action takes 1 second, the system operates at a fraction of execution efficiency, paralyzed by verifier overhead.
+
+The optimal cadence $m^*$ minimizes $T(m)$, balancing the marginal cost of verification against the expected cost of discarded forward progress. Table 2.4 (@tbl-vol3-deliberation-verification-cadence) parameterizes the latency profiles, verification cost ratios, optimal cadences ($m^*$), and isolation requirements across representative verification regimes:
+
+::: {.callout-note title="Systems Insight: The Verification Cadence U-Curve"}
+The optimal verification cadence $m^*$ balances two competing forms of systems waste:
+
+- **Over-Verification ($m \to 1$):** Invoking heavyweight verifiers (e.g., containerized unit test suites taking 15 seconds) after every single micro-action paralyzes the serving pipeline, bounding throughput by verifier latency rather than GPU decode speed ($T_{\text{ver}} \gg T_{\text{step}}$).
+- **Under-Verification ($m \to N$):** Delaying verification until terminal execution allows unhandled early errors to compound, forcing the total discard of long trajectories and wasting all downstream generation FLOPs.
+Optimizing $m^*$ requires profiling the ratio of verifier latency to generation latency ($T_{\text{ver}} / T_{\text{step}}$) and the empirical single-step reliability $p$.
+:::
+
+| Verification Regime / Oracle Type                                    | Verification Latency ($T_{\text{ver}}$) | Normalized Cost Ratio ($T_{\text{ver}} / T_{\text{step}}$) | Optimal Cadence ($m^*$) at $p=0.95$ | Isolation & Execution Substrate                         | Over-Verification vs. Under-Verification Vulnerability                                                                         |
+|:---------------------------------------------------------------------|:----------------------------------------|:-----------------------------------------------------------|:------------------------------------|:--------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------|
+| **AST & Syntax Linter** (`tree-sitter`, `ruff`)                      | $1\text{--}5\text{ ms}$                 | $\approx 0.001\text{--}0.005\times$                        | $m^* \approx 1\text{--}2$ steps     | In-process Python/Rust C-FFI binding                    | Over-verification penalty negligible; under-verification permits syntactic hallucinations to pollute context                   |
+| **Typechecker & Static Analysis** (`mypy`, `tsc`, `rustc`)           | $100\text{--}1{,}000\text{ ms}$         | $\approx 0.1\text{--}1.0\times$                            | $m^* \approx 3\text{--}5$ steps     | Local subprocess sandbox with filesystem cache          | High cadence degrades interactive decode throughput; low cadence causes cascading interface mismatches                         |
+| **Step-Level Neural PRM** (Process Reward Model [@lightman2023lets]) | $500\text{--}2{,}000\text{ ms}$         | $\approx 0.5\text{--}2.0\times$                            | $m^* \approx 1\text{--}3$ steps     | GPU inference worker with shared KV prefix              | Excessive PRM passes exhaust accelerator memory; infrequent checks enable Goodhart reward exploitation                         |
+| **Unit Test Suite** (`pytest`, `cargo test`)                         | $5\text{--}30\text{ s}$                 | $\approx 5\text{--}30\times$                               | $m^* \approx 8\text{--}12$ steps    | Containerized Linux cgroup / namespace sandbox          | Frequent calls paralyze execution pipeline ($T_{\text{ver}} \gg T_{\text{step}}$); delayed calls discard large swathes of code |
+| **Integration Test & Build Harness** (`docker build`, E2E test)      | $30\text{--}300\text{ s}$               | $\approx 30\text{--}300\times$                             | $m^* \approx 20\text{--}40$ steps   | Ephemeral microVM (Firecracker) or isolated cluster pod | Single premature call destroys batch latency; under-verification forces complete trajectory discard ($T \to N$)                |
+
+: Table 2.4: **Verification Regimes and Optimal Cadence Parameters**: Latency profiles, normalized verification costs ($T_{\text{ver}} / T_{\text{step}}$ for $T_{\text{step}} = 1.0\text{ s}$), optimal checkpoint intervals ($m^*$), sandboxing isolation boundaries, and failure risks across verifier classes under an $N=40$ step trajectory with single-step reliability $p=0.95$. {#tbl-vol3-deliberation-verification-cadence tbl-colwidths="[25,15,15,10,20,15]"}
+
+### Verifier Taxonomy: Deterministic Oracles vs. Learned PRMs
+
+The reliability of test-time deliberation depends fundamentally on the verifier's architecture:
+
+#### Deterministic Environmental Oracles
+Compilers, linters, unit tests, and formal theorem provers (e.g., Lean, Z3).
+*   **Strengths:** Provide unambiguous binary ground truth ($R \in \{0, 1\}$); completely immune to reward hacking or adversarial exploitation.
+*   **Weaknesses:** High execution latency; binary feedback provides no gradient or partial credit indicating *why* a step failed.
+
+#### Learned Process Reward Models (PRMs) [@lightman2023lets]
+Neural classifiers trained on step-by-step annotations to grade intermediate natural language reasoning steps ($r_{\text{PRM}} \in [-1, 1]$) [@lightman2023let].
+*   **Strengths:** Dense step-level feedback; grades natural language thoughts and incomplete derivations where deterministic compilers cannot run.
+*   **Failure Modes:**
+    *   **False Positives (Reward Hacking):** Assigning high scores to confident, plausible-sounding, but mathematically false statements. Under high search budgets ($N \gg 100$), search algorithms ruthlessly exploit these blind spots. This represents a catastrophic manifestation of Goodhart's Law: when a learned metric becomes the target of a high-capacity search algorithm, the metric ceases to be a good measure. Because the PRM is a neural network mapping high-dimensional text to a scalar, its decision boundary contains adversarial pockets. As the search algorithm samples thousands of candidates, it inevitably discovers and selects these adversarial pockets—such as injecting academic jargon or formatting a fundamentally broken equation so beautifully that the PRM assigns it a perfect score.
+    *   **False Negatives (Premature Pruning):** Penalizing unconventional or creative reasoning paths, killing viable solutions before they mature.
+
+Table 2.5 (@tbl-vol3-deliberation-verifier-taxonomy) formalizes the architectural taxonomy of deliberation verifiers, contrasting deterministic oracles, learned process and outcome models, and human supervisory gates across their operational and systems dimensions:
+
+| Verifier Class                                                  | Output Signal Domain                                                           | Evaluation Latency ($T_{\text{eval}}$)           | Credit Assignment & Diagnostic Granularity                                            | Goodhart Exploitation Vulnerability                                            | State Reversibility Requirement                                        | Infrastructure & Execution Footprint                               |
+|:----------------------------------------------------------------|:-------------------------------------------------------------------------------|:-------------------------------------------------|:--------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|:-----------------------------------------------------------------------|:-------------------------------------------------------------------|
+| **Deterministic Compiler & Linter Oracles**                     | Discrete binary ground truth $R \in \{0, 1\}$ with exit status code            | $10^0\text{--}10^3\text{ ms}$                    | Coarse-grained pass/fail with compiler diagnostics and line-numbered syntax traces    | Completely immune to reward hacking; zero policy exploitation                  | Reversible in-memory AST or ephemeral filesystem scratchpad            | CPU-bound subprocess execution; negligible memory overhead         |
+| **Property-Based & Unit Test Suites**                           | Boolean assertion vector $\mathbf{r} \in \{0, 1\}^K$ with failure traces       | $10^3\text{--}10^5\text{ ms}$                    | Medium-grained component coverage; pinpoints specific behavioral invariant breaches   | Very low; tests define rigid contractual bounds (rare test-mock hacking)       | Requires transactional sandbox (OverlayFS, tmpfs, Git detached HEAD)   | CPU/container sandbox with cgroup CPU/memory throttling            |
+| **Step-Level Process Reward Models (PRMs) [@lightman2023lets]** | Continuous scalar score $r_{\text{PRM}} \in [-1, 1]$ per reasoning turn        | $10^2\text{--}10^3\text{ ms}$                    | Dense step-level feedback; isolates exact reasoning step containing logical fallacy   | High under deep search ($N \gg 100$); policy exploits reward model blind spots | Purely internal; evaluates thought tokens without environment mutation | Dedicated GPU accelerator worker; competes for inference HBM       |
+| **Outcome Reward Models (ORMs) [@cobbe2021training]**           | Scalar terminal value $R_{\text{ORM}} \in [0, 1]$ on full trajectory           | $10^2\text{--}10^3\text{ ms}$                    | Sparse terminal feedback; zero credit assignment across intermediate derivation steps | High vulnerability to superficial formatting and length bias exploitation      | Trajectory-level evaluation; executed prior to external commit         | GPU inference pass over full sequence length $T$                   |
+| **Human Supervisory Oversight Gates**                           | Categorical verdict: `{Approve, Reject, Amend}` with natural language critique | $10^4\text{--}10^6\text{ ms}$ (seconds to hours) | High semantic density; explicit operational intent and nuanced domain guidance        | Negligible; grounded in human judgment and organizational policy               | Mandatory at the Reversibility Boundary before irreversible mutations  | Asynchronous event suspension queue; swaps agent state to host RAM |
+
+: Table 2.5: **Architectural Taxonomy of Deliberation Verifiers**: Comparison of verifier classes across output signal domain, evaluation latency, credit assignment precision, reward hacking vulnerability, state reversibility constraints, and runtime infrastructure footprints. {#tbl-vol3-deliberation-verifier-taxonomy tbl-colwidths="[15,15,10,20,15,10,15]"}
+
+::: {#pri-vol3-verifier-anchoring .callout-principle title="The Ground-Truth Anchoring Principle"}
+**Invariant:** Learned Process Reward Models can guide intermediate search expansion, but terminal state commitment must always be gated by a deterministic environmental oracle. Never deploy an agent with an unanchored neural verifier on irreversible action spaces.
+:::
+
+::: {.callout-note title="Checkpoint"}
+
+**Deriving Verification Economics, Cadence Optimization, and Ground-Truth Anchoring**
+
+- [ ] **Effective branching collapse**: Given a planning tree with initial branching factor $b = 6$ and horizon $d = 5$, what survival fraction $\alpha$ must an intermediate verifier achieve to ensure that total candidate nodes across the search do not exceed $200$?
+- [ ] **The Verification Cadence U-Curve**: Using the latency equation $T(m) = \frac{N}{m} \frac{m T_{\text{step}} + T_{\text{ver}}}{p^m}$, explain why both extreme regimes ($m \to 1$ and $m \to N$) cause execution latency to explode. If verification latency $T_{\text{ver}}$ increases by $10\times$, how does the optimal cadence $m^*$ shift?
+- [ ] **PRM false negatives vs. false positives**: Compare the operational consequences of a false positive versus a false negative from a learned Process Reward Model [@lightman2023lets] during intermediate tree search. Which error mode triggers Goodhart exploitation, and which prematurely truncates creative solution paths?
+- [ ] **Ground-truth anchoring in tool use**: Why can learned PRMs safely guide internal thought expansion while external environment mutations (e.g., executing database migrations or deploying code) strictly require deterministic environmental oracles?
+
+:::
+
+The verification tax establishes the physical limits of test-time compute scaling: intermediate oracles collapse exponential branching, but only when their cadence is tuned to minimize both generation waste and verification overhead. When these economic constraints are ignored, architectural traps follow.
+
+## Fallacies and Pitfalls {#sec-vol3-deliberation-fallacies}
+
+Engineering test-time deliberation systems requires navigating these economic constraints while avoiding critical architectural fallacies and operational traps. The following fallacies and pitfalls highlight common missteps in scaling search.
+
+**Fallacy**: *Scaling Best-of-$N$ indefinitely will solve any reasoning task.*
+Naively increasing $N$ from 10 to 10,000 exhibits sharply diminishing logarithmic returns. If the underlying policy has zero probability of generating a key algorithmic insight ($P(a^* \mid s) = 0$), sampling millions of trajectories merely samples noise. Furthermore, under learned reward models, large $N$ triggers catastrophic Goodhart overoptimization, selecting pathologically hallucinated outputs.
+
+**Fallacy**: *Tree search requires simulating full trajectories to terminal leaf states.*
+Simulating full 50-step agent trajectories for every candidate branch creates prohibitive latency and destroys GPU throughput. Production systems rely on step-level Process Reward Models (PRMs) [@lightman2023lets] or deterministic state linting to evaluate partial hypotheses after 1 or 2 steps.
+
+**Fallacy**: *A foundation model can be trusted to self-terminate its own execution loop.*
+Foundation models are probabilistic text completers, not deterministic controllers. When confronted with unfamiliar tool errors or ambiguous outputs, models regularly enter infinite retry loops. Every autonomous loop must be bound by out-of-band kernel watchdogs, hard step ceilings, and token burn circuit breakers.
+
+**Pitfall**: *Unpruned exponential branching in open-ended tool spaces.*
+Allowing an agent to branch across arbitrary bash commands or Python scripts yields an infinite branching factor ($b \to \infty$). Without strict beam bounds ($B \le 5$) or top-$k$ action filtering, search engines exhaust cluster memory and queue capacity within seconds.
+
+**Pitfall**: *Neglecting the memory footprint of shared search prefixes.*
+Deploying tree search on top of standard stateless inference endpoints duplicates prompt prefixes across all branches, triggering immediate GPU HBM Out-of-Memory crashes. Production tree search requires native tree-structured KV-cache engines with Copy-on-Write page sharing.
+
+**Pitfall**: *Shared environment mutation during multi-branch search.*
+Allowing concurrent search branches to execute mutating tool calls (e.g., file writes, shell commands) against a single shared sandbox leads to state corruption and catastrophic interference. Multi-branch search requires isolated, copy-on-write environment snapshots to guarantee branch independence.
+
+**Pitfall**: *Unconstrained peer-to-peer agent swarms.*
+Deploying flat multi-agent chat rooms produces quadratic message complexity $\mathcal{O}(N^2)$, context dilution, and diffuse accountability. Production architectures enforce hierarchical supervisor trees with unidirectional command flow and schema-gated verification.
+
+By internalizing these limits and rejecting unconstrained architectural patterns, teams can design deliberate reasoning systems that safely execute complex workflows.
+
+## Summary {#sec-vol3-deliberation-summary}
+
+Test-time deliberation transforms the foundation model from a brittle, single-pass text predictor into a resilient, self-correcting problem solver. By navigating structured decision trees, evaluating intermediate states, and enforcing formal control topologies, systems trade inference FLOPs for verifiable task success.
+
+::: {.callout-takeaways title="The Thermodynamics of Deliberation"}
+*   **System 2 Deliberation:** Scaling inference compute dynamically across candidate search trees decouples task difficulty from static pretraining parameter counts, allowing compact models with search to outperform massive models running greedy decode.
+*   **The Von Neumann Proposal Engine:** In deliberate architectures, the foundation model's forward pass is demoted from an authoritative oracle to a stochastic proposal engine $\pi_\theta(a \mid s)$, while external runtimes and verifiers arbitrate state transitions.
+*   **Formal Control Topologies:** Unconstrained loops are architectural vulnerabilities. Runtimes must enforce Directed Acyclic Graphs, hierarchical supervisor trees, and the Anti-Swarm Principle to prevent quadratic message explosion and semantic livelocks.
+*   **Multi-Tier Cycle Detection:** Because livelocked agents paraphrase actions, runtimes combine tool hashing, semantic embedding distance, observation equivalence, and physical $\epsilon$-progress metrics ($\Delta \mathcal{S}_{\text{env}}$) to detect and halt loops.
+*   **Search Topologies:** Best-of-$N$ provides embarrassingly parallel sampling with terminal verification; Beam Search bounds working memory via synchronous pruning; MCTS balances exploration and exploitation via PUCT; Graph of Thoughts enables multi-path synthesis.
+*   **The Verification Tax ($C_{\text{ver}}$):** Allocating compute to intermediate verification collapses exponential search trees ($b^d \to b_{\text{eff}}^d$). The optimal verification cadence $m^*$ balances verifier latency against catastrophic rollback waste.
+:::
+
+Table 2.6 (@tbl-vol3-deliberation-summary-synthesis) synthesizes the architectural subsystems, governing abstractions, primary systems bottlenecks, dominant failure modes, and production systems mitigations established across this chapter:
+
+| Architectural Subsystem       | Core Abstraction & Theoretical Formulation                                                                        | Primary Systems Bottleneck                                                       | Dominant Failure Mode                                                      | Production Systems Mitigation                                                                                        |
+|:------------------------------|:------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------|:---------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
+| **Cognitive Core (System 2)** | Dynamic inference compute scaling: $\text{Error}(C_{\text{test}}) \propto C_{\text{test}}^{-\beta_{\text{test}}}$ | Quadratic pretraining scaling wall; compute waste on trivial tokens              | Cognitive drift; premise rationalization under greedy autoregression       | Foundation model demotion to stochastic proposal engine $\pi_\theta(a \mid s)$                                       |
+| **Control Topologies**        | Directed Acyclic Graphs (DAGs) and Hierarchical Statecharts                                                       | Non-deterministic state transitions and unconstrained looping                    | Semantic livelocks; quadratic $\mathcal{O}(N^2)$ swarm chatter explosion   | Hierarchical supervisor trees; unidirectional delegation; Anti-Swarm Principle                                       |
+| **Watchdog Invariants**       | Dynamic Circuit Breaker FSM (`CLOSED`, `HALF-OPEN`, `OPEN`)                                                       | Out-of-band monitoring overhead; false-positive aborts                           | Unbounded API billing burn; runaway recursive tool execution               | Multi-tier cycle detection (Tiers 1--4) and physical $\epsilon$-progress metrics ($\Delta \mathcal{S}_{\text{env}}$) |
+| **Test-Time Search**          | Tree/Graph search over semantic state space $(\mathcal{V}, \mathcal{E})$ via PUCT / MCTS                          | Combinatorial branching factor ($b^d$); GPU lock-step barrier stalls             | All-or-nothing token waste; myopic pruning of non-monotonic paths          | Step-level heuristic expansion; PUCT exploration bonus; asynchronous backpropagation                                 |
+| **Verification Engine**       | Verification Tax formulation: $C_{\text{total}} = \sum C_{\text{gen}} + \sum C_{\text{ver}}$                      | High execution latency of sandboxed tests ($T_{\text{ver}} \gg T_{\text{step}}$) | Over-verification pipeline paralysis vs. under-verification rollback waste | Optimal verification cadence $m^*$; Ground-Truth Anchoring with deterministic oracles                                |
+| **Serving Substrate**         | Tree-structured KV-cache with Copy-on-Write page allocation                                                       | Accelerator HBM capacity exhaustion under multi-branch search                    | Out-of-Memory crashes from redundant prefix replication ($B \cdot L$)      | RadixAttention [@zheng2023sglang] prefix tree reuse; PagedAttention [@kwon2023efficient] block table sharing         |
+
+: Table 2.6: **Architectural Synthesis of Test-Time Deliberation Systems**: Subsystems, governing abstractions, primary systems bottlenecks, dominant failure modes, and production systems mitigations across the complete deliberate reasoning architecture. {#tbl-vol3-deliberation-summary-synthesis tbl-colwidths="[15,20,20,20,25]"}
+
+### Architectural Bridge: From Deliberation to Volatile Memory
+
+Figure 2.8 (@fig-vol3-deliberation-tree-kv-cache) illustrates the physical memory disparity between naive prefix duplication and tree-structured radix prefix sharing, which serves as the bridge between test-time search and volatile memory management.
+
+::: {#fig-vol3-deliberation-tree-kv-cache fig-env="figure" fig-pos="htb" fig-cap="Figure 2.8: **Tree-Structured KV-Cache Allocation and Radix Prefix Sharing**: Panel A shows naive independent branch serving, where identical system prompt and execution trace prefixes are duplicated across all candidate branches, causing rapid HBM exhaustion. Panel B demonstrates RadixAttention [@zheng2023sglang] with copy-on-write page allocation, where shared prefix tokens are retained once in accelerator memory and child branches allocate only incremental delta tokens. Source: Adapted from Zheng et al. (2024, SGLang) and MLSysBook Memory Hierarchy Blueprint." fig-alt="Two-panel memory allocation diagram: Panel A depicts four search branches stored independently in GPU HBM, allocating redundant identical prompt and trace tokens (10,500 redundant tokens out of 16,000 total); Panel B depicts the same four branches structured as a radix prefix tree where root and intermediate step nodes are shared with reference counts, reducing total allocated tokens to 5,500."}
+![](images/svg/tree_kv_cache_radix.svg){width="100%"}
+:::
+
+[^fn-test-time-deliberation]: **Test-Time Deliberation**\index{Test-Time Deliberation}: The dynamic allocation of runtime inference compute (FLOPs, memory capacity, and wall-clock latency) to explore alternative execution trajectories, evaluate intermediate candidate states via verification oracles, and backtrack from unviable paths before committing irreversible actions to the physical environment.
+
+[^fn-semantic-livelock]: **Semantic Livelock**\index{Semantic Livelock}: A dynamic failure state wherein a non-deterministic agent repeatedly executes paraphrased variations of an ineffective action while producing plausible self-rationalizations of progress. Because external environment state remains invariant ($\Delta \mathcal{S}_{\text{env}} = 0$), semantic livelocks evade syntactic tool hashing and exhaust bounded token budgets without halting.
+
+[^fn-prm]: **Process Reward Model (PRM)**\index{Process Reward Model (PRM)}: A step-level evaluation oracle that computes a scalar credit score $r_{\text{PRM}}(s_t, a_{t+1}) \in [-1, 1]$ evaluating the logical soundness or utility of an individual reasoning step or intermediate action without requiring full trajectory rollout to a terminal state.
+
+[^fn-verification-tax]: **Verification Tax**\index{Verification Tax}: The cumulative computational FLOPs, token overhead, and wall-clock latency expended in evaluating candidate states via verification oracles relative to the compute expended on policy token generation during test-time search: $T_v = \sum C_{\text{ver}}(v) / \sum C_{\text{gen}}(v)$.
+
+::: {.callout-chapter-connection title="From Search Trees to Working Sets"}
+Test-time deliberation expands reasoning trajectories into branching computational trees. However, executing multi-branch search over extended horizons exposes a severe physical bottleneck: **GPU High-Bandwidth Memory (HBM)**.
+
+Every active branch requires maintaining a Key-Value (KV) cache of past activations. In naive serving engines, exploring $B$ concurrent branches duplicates millions of identical prefix tokens, triggering immediate Out-of-Memory crashes. As shown in @fig-vol3-deliberation-tree-kv-cache, tree-structured radix prefix sharing with copy-on-write page tables provides the physical substrate that makes branching search tractable.
+
+In **Part II (Volatile Memory)**, @sec-vol3-working-sets examines the physical memory systems that make deliberation possible: context working sets, Denning's working set theory, attention economics [@dao2022flashattention], attention sinks [@xiao2023efficient], and semantic context compaction.
+:::
+
+## Quantitative Problems {#sec-vol3-deliberation-problems}
+
+1. **The Cost of Combinatorial Branching**
+An autonomous data science agent generates SQL queries using MCTS over a search horizon of $d = 6$ steps with a branching factor of $b = 4$. Each generated step consumes $1,500$ generation tokens on a 14B parameter model ($C_{\text{gen}} \approx 8.4$ TFLOPs).
+Calculate the total generation FLOPs required to exhaustively expand this tree without verification. If a deterministic semantic SQL linter (costing $0.05$ TFLOPs and $150$ ms of wall-clock time per node) can reject invalid queries and collapse the effective branching factor to $b_{\text{eff}} = 1.3$, calculate the net percentage savings in total test-time FLOPs.
+
+2. **Verification Cadence and Error Rollback**
+A code-refactoring agent executes a $N=60$ step trajectory. Each step requires $T_{\text{step}} = 1.2$ seconds of inference latency and has a single-step reliability of $p = 0.92$. The team is deciding how frequently to invoke an isolated unit test suite that consumes $T_{\text{ver}} = 18$ seconds.
+Calculate the expected wall-clock execution time $T(m)$ for cadences $m = 1$, $m = 10$, and $m = 60$. Which cadence represents the optimal trade-off between verifier overhead and trajectory rollback waste?
+
+3. **Prefix Duplication and Memory Exhaustion**
+An orchestrator serves Best-of-$N$ sampling for $N=64$ parallel branches. The shared system context requires $12,000$ tokens, and each branch generates $800$ tokens. The model employs FP16 Key-Value cache costing $1$ MB per $1,000$ tokens.
+Calculate the peak HBM required if the serving engine naively duplicates the prefix for every branch. Next, calculate the peak HBM required if the runtime utilizes RadixAttention to share the prefix tree. What is the memory savings ratio?
+
+4. **Reward Hacking and Verification Economics**
+A PRM assigns scores $r \in [-1, 1]$ to intermediate mathematical derivations. The generator proposes branches, and the search algorithm selects the top $10\%$ of branches by score. When $N$ candidate branches are expanded, the probability that the search algorithm encounters an adversarial artifact (a formally incorrect derivation graded $r > 0.95$ by the PRM) scales as $P(\text{hack}) = 1 - e^{-\lambda N}$ where $\lambda = 0.005$.
+At what branch scale $N$ does the probability of selecting an adversarial hallucination exceed $50\%$? At this break-even point, what is the mandatory structural remedy to prevent catastrophic policy commitment?
+
+```{=latex}
+\part{key:vol3_serving}
+```

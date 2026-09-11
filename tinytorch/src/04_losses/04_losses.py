@@ -44,7 +44,7 @@ Let's measure prediction quality!
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `src/04_losses/04_losses.py`
+**Learning Side:** You work in `modules/04_losses/losses.ipynb`
 **Building Side:** Code exports to `tinytorch.core.losses`
 
 ```python
@@ -86,13 +86,9 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module
   Foundation          Nonlinearity              Architecture        Error Measurement
 ```
 
-**Import Strategy**:
-This module imports directly from the TinyTorch package (`from tinytorch.core.*`).
-**Assumption**: Modules 01 (Tensor), 02 (Activations), and 03 (Layers) have been completed and exported to the package.
-If you see import errors, ensure you've run `tito export` after completing previous modules.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "setup", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
 #| default_exp core.losses
 #| export
 
@@ -101,7 +97,7 @@ rng = np.random.default_rng(7)
 from typing import Optional
 
 # Import from TinyTorch package (previous modules must be completed and exported)
-from tinytorch.core.tensor import Tensor
+from tinytorch.core.tensor import Tensor, Function
 from tinytorch.core.activations import ReLU
 from tinytorch.core.layers import Linear
 
@@ -109,7 +105,7 @@ from tinytorch.core.layers import Linear
 EPSILON = 1e-7  # Small value to prevent log(0) and numerical instability
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What Are Loss Functions?
 
 Loss functions are the mathematical conscience of machine learning. They measure the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
@@ -153,7 +149,7 @@ Cross-Entropy Penalty Curve:
       |  \
     2 |   \
       |    \
-    0 |_____\\____> Predicted Probability of Correct Class
+    0 |_____\____> Predicted Probability of Correct Class
       0   0.5   1.0
 
 Logarithmic: wrong confident predictions get severe penalty
@@ -236,7 +232,7 @@ Naive softmax can explode with large numbers:
 ```
 Naive approach:
   logits = [100, 200, 300]
-  exp(300) = 1.97 × 10^130  ← This breaks computers!
+  exp(300) = 1.94 × 10^130  ← This breaks computers!
 
 Stable approach:
   max_logit = 300
@@ -269,41 +265,52 @@ Both give the same result, but the stable version never overflows!
 
 # %% nbgrader={"grade": false, "grade_id": "log-softmax", "solution": true}
 #| export
+class LogSoftmax(Function):
+    """
+    The log-softmax operation along an axis. forward() works on NumPy arrays; Module 06 adds backward().
+    """
+    dim = -1
+
+    def forward(self, x):
+        """
+        Compute log-softmax with numerical stability.
+
+        TODO: Implement numerically stable log-softmax using the log-sum-exp trick
+
+        APPROACH:
+        1. Find maximum along dimension (for stability)
+        2. Subtract max from input (prevents overflow)
+        3. Compute log(sum(exp(shifted_input)))
+        4. Return input - max - log_sum_exp
+
+        EXAMPLE:
+        >>> logits = Tensor([[1.0, 2.0, 3.0], [0.1, 0.2, 0.9]])
+        >>> result = log_softmax(logits, dim=-1)
+        >>> print(result.shape)
+        (2, 3)
+
+        HINT: Use np.max(x, axis=dim, keepdims=True) to preserve dimensions
+        """
+        ### BEGIN SOLUTION
+        # Step 1: Find max along dimension for numerical stability
+        max_vals = np.max(x, axis=self.dim, keepdims=True)
+
+        # Step 2: Subtract max to prevent overflow
+        shifted = x - max_vals
+
+        # Step 3: Compute log(sum(exp(shifted)))
+        log_sum_exp = np.log(np.sum(np.exp(shifted), axis=self.dim, keepdims=True))
+
+        # Step 4: Return log_softmax = input - max - log_sum_exp
+        result = x - max_vals - log_sum_exp
+
+        return result
+        ### END SOLUTION
+
+
 def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
-    """
-    Compute log-softmax with numerical stability.
-
-    TODO: Implement numerically stable log-softmax using the log-sum-exp trick
-
-    APPROACH:
-    1. Find maximum along dimension (for stability)
-    2. Subtract max from input (prevents overflow)
-    3. Compute log(sum(exp(shifted_input)))
-    4. Return input - max - log_sum_exp
-
-    EXAMPLE:
-    >>> logits = Tensor([[1.0, 2.0, 3.0], [0.1, 0.2, 0.9]])
-    >>> result = log_softmax(logits, dim=-1)
-    >>> print(result.shape)
-    (2, 3)
-
-    HINT: Use np.max(x.data, axis=dim, keepdims=True) to preserve dimensions
-    """
-    ### BEGIN SOLUTION
-    # Step 1: Find max along dimension for numerical stability
-    max_vals = np.max(x.data, axis=dim, keepdims=True)
-
-    # Step 2: Subtract max to prevent overflow
-    shifted = x.data - max_vals
-
-    # Step 3: Compute log(sum(exp(shifted)))
-    log_sum_exp = np.log(np.sum(np.exp(shifted), axis=dim, keepdims=True))
-
-    # Step 4: Return log_softmax = input - max - log_sum_exp
-    result = x.data - max_vals - log_sum_exp
-
-    return Tensor(result)
-    ### END SOLUTION
+    """Compute log-softmax of a Tensor along dim (see LogSoftmax)."""
+    return LogSoftmax.apply(x, dim=dim)
 
 # %% [markdown]
 """
@@ -409,23 +416,22 @@ Error Sensitivity Comparison:
 
 # %% nbgrader={"grade": false, "grade_id": "mse-loss", "solution": true}
 #| export
-class MSELoss:
-    """Mean Squared Error loss for regression tasks."""
+class MSEFunction(Function):
+    """
+    The MSELoss operation. forward() works on NumPy arrays; Module 06 adds backward().
+    """
 
-    def __init__(self):
-        """Initialize MSE loss function."""
-        pass
-
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+    def forward(self, predictions, targets):
         """
         Compute mean squared error between predictions and targets.
 
         TODO: Implement MSE loss calculation
 
         APPROACH:
-        1. Compute difference: predictions - targets
-        2. Square the differences: diff²
-        3. Take mean across all elements
+        1. Require matching, nonempty shapes: each prediction has one target
+        2. Compute difference: predictions - targets
+        3. Square the differences: diff²
+        4. Take mean across all elements
 
         EXAMPLE:
         >>> loss_fn = MSELoss()
@@ -436,13 +442,16 @@ class MSELoss:
         MSE Loss: 0.1800
 
         HINTS:
-        - Use (predictions.data - targets.data) for element-wise difference
+        - Use (predictions - targets) for element-wise difference
         - Square with **2 or np.power(diff, 2)
         - Use np.mean() to average over all elements
         """
         ### BEGIN SOLUTION
+        if predictions.shape != targets.shape or predictions.size == 0:
+            raise ValueError("MSELoss requires matching, nonempty prediction and target shapes")
+
         # Step 1: Compute element-wise difference
-        diff = predictions.data - targets.data
+        diff = predictions - targets
 
         # Step 2: Square the differences
         squared_diff = diff ** 2
@@ -450,20 +459,25 @@ class MSELoss:
         # Step 3: Take mean across all elements
         mse = np.mean(squared_diff)
 
-        return Tensor(mse)
+        return mse
         ### END SOLUTION
+
+
+class MSELoss:
+    """Mean Squared Error loss for regression tasks."""
+
+    def __init__(self):
+        """Initialize the loss function."""
+        pass
+
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        """Compute the loss through its operation, so Module 06 will be able to record it for gradients."""
+        return MSEFunction.apply(predictions, targets)
 
     def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
         """Allows the loss function to be called like a function."""
         return self.forward(predictions, targets)
 
-    def backward(self) -> Tensor:
-        """
-        Compute gradients (placeholder — gradient computation is separate).
-
-        For now, this is a stub that students can ignore.
-        """
-        pass
 
 # %% [markdown]
 """
@@ -504,6 +518,12 @@ def test_unit_mse_loss():
     random_loss = loss_fn.forward(random_pred, random_target)
     assert random_loss.data >= 0, f"MSE loss should be non-negative, got {random_loss.data}"
 
+    # Broadcasting would compare each prediction with every target by mistake.
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([[1.0], [2.0]]), Tensor([1.0, 2.0]))
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([]), Tensor([]))
+
     print("✅ MSELoss works correctly!")
 
 if __name__ == "__main__":
@@ -530,21 +550,21 @@ Scenario: Image Classification (3 classes: cat, dog, bird)
 
 Case 1: Correct and Confident
 Model Output (logits): [5.0, 1.0, 0.1]  ← Very confident about "cat"
-After Softmax:        [0.95, 0.047, 0.003]
+After Softmax:        [0.975, 0.018, 0.007]
 True Label:           cat (class 0)
-Loss: -log(0.95) = 0.05  ← Very low loss ✅
+Loss: -log(0.975) = 0.03  ← Very low loss ✅
 
 Case 2: Correct but Uncertain
 Model Output:         [1.1, 1.0, 0.9]  ← Uncertain between classes
-After Softmax:        [0.4, 0.33, 0.27]
+After Softmax:        [0.367, 0.332, 0.301]
 True Label:           cat (class 0)
-Loss: -log(0.4) = 0.92  ← Higher loss (uncertainty penalized)
+Loss: -log(0.367) = 1.00  ← Higher loss (uncertainty penalized)
 
 Case 3: Wrong and Confident
 Model Output:         [0.1, 5.0, 1.0]  ← Very confident about "dog"
-After Softmax:        [0.003, 0.95, 0.047]
+After Softmax:        [0.007, 0.975, 0.018]
 True Label:           cat (class 0)
-Loss: -log(0.003) = 5.8  ← Very high loss ❌
+Loss: -log(0.007) = 4.93  ← Very high loss ❌
 ```
 
 ### Cross-Entropy's Learning Signal
@@ -555,10 +575,10 @@ What Cross-Entropy Teaches the Model:
 ┌─────────────────┬─────────────────┬───────────────────────────┐
 │ Prediction      │ True Label      │ Learning Signal           │
 ├─────────────────┼─────────────────┼───────────────────────────┤
-│ Confident ✅    │ Correct ✅      │ "Keep doing this"         │
-│ Uncertain ⚠️    │ Correct ✅      │ "Be more confident"       │
-│ Confident ❌    │ Wrong ❌        │ "STOP! Change everything" │
-│ Uncertain ⚠️    │ Wrong ❌        │ "Learn the right answer"  │
+│ Confident       │ Correct         │ "Keep doing this"         │
+│ Uncertain       │ Correct         │ "Be more confident"       │
+│ Confident       │ Wrong           │ "STOP! Change everything" │
+│ Uncertain       │ Wrong           │ "Learn the right answer"  │
 └─────────────────┴─────────────────┴───────────────────────────┘
 
 Loss Landscape by Confidence:
@@ -597,23 +617,23 @@ Uses: CrossEntropyLoss            Uses: BinaryCrossEntropyLoss
 
 # %% nbgrader={"grade": false, "grade_id": "cross-entropy-loss", "solution": true}
 #| export
-class CrossEntropyLoss:
-    """Cross-entropy loss for multi-class classification."""
+class CrossEntropyFunction(Function):
+    """
+    The CrossEntropyLoss operation. forward() works on NumPy arrays; Module 06 adds backward().
+    """
 
-    def __init__(self):
-        """Initialize cross-entropy loss function."""
-        pass
-
-    def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
+    def forward(self, logits, targets):
         """
         Compute cross-entropy loss between logits and target class indices.
 
         TODO: Implement cross-entropy loss with numerical stability
 
         APPROACH:
-        1. Compute log-softmax of logits (numerically stable)
-        2. Select log-probabilities for correct classes
-        3. Return negative mean of selected log-probabilities
+        1. Require nonempty logits (batch, classes) and targets (batch,)
+        2. Check targets are finite integers with 0 <= t < num_classes,
+           then compute log-softmax of logits (numerically stable)
+        3. Select log-probabilities for correct classes
+        4. Return negative mean of selected log-probabilities
 
         EXAMPLE:
         >>> loss_fn = CrossEntropyLoss()
@@ -623,39 +643,58 @@ class CrossEntropyLoss:
         >>> print(f"Cross-Entropy Loss: {loss.data:.4f}")
 
         HINTS:
-        - Use log_softmax() for numerical stability
-        - targets.data.astype(int) ensures integer indices
+        - Use LogSoftmax().forward(logits) for numerical stability (the array-level log-softmax you wrote above)
+        - Tensor stores float32; validate whole-number labels before targets.astype(int)
+        - num_classes is logits.shape[-1]; validate before indexing, because
+        NumPy would let a negative target silently select the wrong class
+        and would raise a bare IndexError for one that is too large
         - Use np.arange(batch_size) for row indexing: log_probs[np.arange(batch_size), targets]
         - Return negative mean: -np.mean(selected_log_probs)
         """
         ### BEGIN SOLUTION
-        # Step 1: Compute log-softmax for numerical stability
-        log_probs = log_softmax(logits, dim=-1)
+        if logits.ndim != 2 or logits.size == 0 or targets.shape != (logits.shape[0],):
+            raise ValueError("CrossEntropyLoss requires nonempty logits (batch, classes) and targets (batch,)")
+        if not np.all(np.isfinite(targets)) or np.any(targets != np.floor(targets)):
+            raise ValueError("CrossEntropyLoss targets must be finite integer class indices")
 
-        # Step 2: Select log-probabilities for correct classes
-        batch_size = logits.shape[0]
-        target_indices = targets.data.astype(int)
+        batch_size, num_classes = logits.shape
+        out_of_range = (targets < 0) | (targets >= num_classes)
+        if np.any(out_of_range):
+            bad_values = np.unique(targets[out_of_range])
+            raise ValueError(
+                f"CrossEntropyLoss target index out of range: {bad_values.tolist()}\n"
+                f"  Valid range for {num_classes} classes is [0, {num_classes - 1}]"
+            )
+
+        # Validate before casting: conversion would silently truncate fractional labels.
+        target_indices = targets.astype(int)
+        log_probs = LogSoftmax().forward(logits)
 
         # Select correct class log-probabilities using advanced indexing
-        selected_log_probs = log_probs.data[np.arange(batch_size), target_indices]
+        selected_log_probs = log_probs[np.arange(batch_size), target_indices]
 
         # Step 3: Return negative mean (cross-entropy is negative log-likelihood)
         cross_entropy = -np.mean(selected_log_probs)
 
-        return Tensor(cross_entropy)
+        return cross_entropy
         ### END SOLUTION
+
+
+class CrossEntropyLoss:
+    """Cross-entropy loss for multi-class classification."""
+
+    def __init__(self):
+        """Initialize the loss function."""
+        pass
+
+    def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
+        """Compute the loss through its operation, so Module 06 will be able to record it for gradients."""
+        return CrossEntropyFunction.apply(logits, targets)
 
     def __call__(self, logits: Tensor, targets: Tensor) -> Tensor:
         """Allows the loss function to be called like a function."""
         return self.forward(logits, targets)
 
-    def backward(self) -> Tensor:
-        """
-        Compute gradients (placeholder — gradient computation is separate).
-
-        For now, this is a stub that students can ignore.
-        """
-        pass
 
 # %% [markdown]
 """
@@ -700,6 +739,10 @@ def test_unit_cross_entropy_loss():
     large_loss = loss_fn.forward(large_logits, large_targets)
     assert not np.isnan(large_loss.data), "Loss should not be NaN with large logits"
     assert not np.isinf(large_loss.data), "Loss should not be infinite with large logits"
+
+    for invalid_targets in ([0.5, 1], [-1, 1], [[0], [1]]):
+        with np.testing.assert_raises(ValueError):
+            loss_fn(uniform_logits, Tensor(invalid_targets))
 
     print("✅ CrossEntropyLoss works correctly!")
 
@@ -774,8 +817,8 @@ Target: 1.0 (is spam)            Target: 1 (class index)
 Formula:                         Formula:
 -[y*log(p) + (1-y)*log(1-p)]    -log(p[target_class])
 
-Handles class imbalance well     Assumes balanced classes
-Optimized for 2-class case      General for N classes
+One output, one probability      One output per class
+Specialized for 2 classes        General for N classes
 ```
 
 ### Why Binary Cross-Entropy is Special
@@ -810,23 +853,22 @@ Message: "Be confident about positive class, uncertain is okay,
 
 # %% nbgrader={"grade": false, "grade_id": "binary-cross-entropy-loss", "solution": true}
 #| export
-class BinaryCrossEntropyLoss:
-    """Binary cross-entropy loss for binary classification."""
+class BinaryCrossEntropyFunction(Function):
+    """
+    The BinaryCrossEntropyLoss operation. forward() works on NumPy arrays; Module 06 adds backward().
+    """
 
-    def __init__(self):
-        """Initialize binary cross-entropy loss function."""
-        pass
-
-    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+    def forward(self, predictions, targets):
         """
         Compute binary cross-entropy loss.
 
         TODO: Implement binary cross-entropy with numerical stability
 
         APPROACH:
-        1. Clamp predictions to avoid log(0) and log(1)
-        2. Compute: -(targets * log(predictions) + (1-targets) * log(1-predictions))
-        3. Return mean across all samples
+        1. Require matching, nonempty shapes and probabilities/targets in [0, 1]
+        2. Clamp predictions to keep both logarithms finite
+        3. Compute: -(targets * log(predictions) + (1-targets) * log(1-predictions))
+        4. Return mean across all elements
 
         EXAMPLE:
         >>> loss_fn = BinaryCrossEntropyLoss()
@@ -836,39 +878,50 @@ class BinaryCrossEntropyLoss:
         >>> print(f"Binary Cross-Entropy Loss: {loss.data:.4f}")
 
         HINTS:
-        - Use np.clip(predictions.data, 1e-7, 1-1e-7) to prevent log(0)
+        - Use np.clip(predictions, 1e-7, 1-1e-7) to prevent log(0)
         - Binary cross-entropy: -(targets * log(preds) + (1-targets) * log(1-preds))
         - Use np.mean() to average over all samples
         """
         ### BEGIN SOLUTION
+        if predictions.shape != targets.shape or predictions.size == 0:
+            raise ValueError("BinaryCrossEntropyLoss requires matching, nonempty prediction and target shapes")
+        for values in (predictions, targets):
+            if not np.all(np.isfinite(values)) or np.any((values < 0) | (values > 1)):
+                raise ValueError("BinaryCrossEntropyLoss predictions and targets must be finite values in [0, 1]")
+
         # Step 1: Clamp predictions to avoid numerical issues with log(0) and log(1)
         eps = EPSILON
-        clamped_preds = np.clip(predictions.data, eps, 1 - eps)
+        clamped_preds = np.clip(predictions, eps, 1 - eps)
 
         # Step 2: Compute binary cross-entropy
         # BCE = -(targets * log(preds) + (1-targets) * log(1-preds))
         log_preds = np.log(clamped_preds)
         log_one_minus_preds = np.log(1 - clamped_preds)
 
-        bce_per_sample = -(targets.data * log_preds + (1 - targets.data) * log_one_minus_preds)
+        bce_per_sample = -(targets * log_preds + (1 - targets) * log_one_minus_preds)
 
         # Step 3: Return mean across all samples
         bce_loss = np.mean(bce_per_sample)
 
-        return Tensor(bce_loss)
+        return bce_loss
         ### END SOLUTION
+
+
+class BinaryCrossEntropyLoss:
+    """Binary cross-entropy loss for binary classification."""
+
+    def __init__(self):
+        """Initialize the loss function."""
+        pass
+
+    def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
+        """Compute the loss through its operation, so Module 06 will be able to record it for gradients."""
+        return BinaryCrossEntropyFunction.apply(predictions, targets)
 
     def __call__(self, predictions: Tensor, targets: Tensor) -> Tensor:
         """Allows the loss function to be called like a function."""
         return self.forward(predictions, targets)
 
-    def backward(self) -> Tensor:
-        """
-        Compute gradients (placeholder — gradient computation is separate).
-
-        For now, this is a stub that students can ignore.
-        """
-        pass
 
 # %% [markdown]
 """
@@ -913,6 +966,11 @@ def test_unit_binary_cross_entropy_loss():
     boundary_loss = loss_fn.forward(boundary_predictions, boundary_targets)
     assert not np.isnan(boundary_loss.data), "Loss should not be NaN at boundaries"
     assert not np.isinf(boundary_loss.data), "Loss should not be infinite at boundaries"
+
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([[0.2], [0.8]]), Tensor([0.0, 1.0]))
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([1.2]), Tensor([1.0]))
 
     print("✅ BinaryCrossEntropyLoss works correctly!")
 
@@ -969,7 +1027,7 @@ BCE/CE: Logarithmic growth, explodes with confident wrong predictions
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": false}
 def analyze_loss_behaviors():
     """
     📊 Compare how different loss functions behave with various prediction patterns.
@@ -1013,7 +1071,7 @@ def analyze_loss_behaviors():
     return mse.data, ce.data, bce.data
 
 
-# %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": false}
 def analyze_loss_sensitivity():
     """
     📊 Analyze how sensitive each loss function is to prediction errors.
@@ -1068,7 +1126,6 @@ def analyze_loss_sensitivity():
     print("   - BCE grows logarithmically, heavily penalizing wrong confident predictions")
     print("   - Both encourage correct predictions but with different curvatures")
 
-# Run integration analysis when developing
 if __name__ == "__main__":
     analyze_loss_behaviors()
     analyze_loss_sensitivity()
@@ -1141,7 +1198,7 @@ Memory: 3*B*sizeof(float)            │ log + index
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": false}
 def analyze_numerical_stability():
     """
     📊 Demonstrate why numerical stability matters in loss computation.
@@ -1176,17 +1233,17 @@ def analyze_numerical_stability():
 
     print(f"\n💡 Key Insight: Log-sum-exp trick prevents overflow")
     print("   Without it: exp(700) would cause overflow in standard softmax")
-    print("   With it: We can handle arbitrarily large logits safely")
+    print("   With it: These finite float32 logits avoid exponential overflow")
 
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": false}
 def analyze_loss_memory():
     """
     📊 Analyze memory usage patterns of different loss functions.
 
     Understanding memory helps with batch size decisions.
     """
-    print("\n📊 Analysis: Loss Function Memory Usage...")
+    print("\n📊 Analysis: Selected Loss Buffers (Estimate)...")
 
     batch_sizes = [32, 128, 512, 1024]
     num_classes = 1000  # Like ImageNet
@@ -1221,10 +1278,10 @@ def analyze_loss_memory():
     print(f"\n💡 Memory Insights:")
     print("   - CrossEntropy dominates due to large vocabulary (num_classes)")
     print("   - Memory scales linearly with batch size")
-    print("   - Intermediate activations (softmax) double CE memory")
-    print(f"   - For batch=1024, CE needs {ce_memory:.1f}MB just for loss computation")
+    print("   - The estimate includes one CE intermediate buffer")
+    print("   - Temporary arrays and allocator overhead are omitted; this is not measured peak memory")
+    print(f"   - For batch=1024, the selected CE buffers total {ce_memory:.1f}MB")
 
-# Run systems analysis when developing
 if __name__ == "__main__":
     analyze_numerical_stability()
     analyze_loss_memory()
@@ -1284,7 +1341,7 @@ Common Production Optimizations:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": false}
 def analyze_production_patterns():
     """
     📊 Analyze loss function patterns in production ML systems.
@@ -1328,7 +1385,6 @@ def analyze_production_patterns():
     print("   - Numerical stability becomes critical at scale (FP16 training)")
     print("   - Loss computation is often <5% of total training time")
 
-# Run production analysis when developing
 if __name__ == "__main__":
     analyze_production_patterns()
 
@@ -1408,19 +1464,13 @@ def test_module():
     print("Run: tito module complete 04")
 
 
-# %%
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of loss functions and their systems implications:
 
-### 1. Memory and Performance
+### Question 1: Memory and Performance
 
 **Question**: Loss Function Selection for Large Vocabulary
 
@@ -1446,7 +1496,7 @@ Strategies to reduce memory:
 
 ---
 
-### 2. Loss Function Performance Bottleneck
+### Question 2: Loss Function Performance Bottleneck
 **Question**: Performance Analysis
 
 You profile your training loop and find:
@@ -1474,7 +1524,7 @@ Your model has 1000 output classes. What's the bottleneck and how would you fix 
 
 ---
 
-### 3. Numerical Stability
+### Question 3: Numerical Stability
 **Question**: Debugging Exploding Loss
 
 During training, you see:
@@ -1514,7 +1564,7 @@ loss = -log_softmax[target]
 
 ---
 
-### 4. Production Considerations
+### Question 4: Production Considerations
 **Question**: Real-Time Inference Latency
 
 Your spam filter needs to classify emails in <10ms. Currently:
@@ -1556,7 +1606,7 @@ confidence = abs(prediction.data - 0.5) * 2  # Distance from decision boundary
 
 ---
 
-### 5. Class Imbalance in Medical Diagnosis
+### Question 5: Class Imbalance in Medical Diagnosis
 **Question**: Handling Class Imbalance
 
 You're building a cancer detection system:
@@ -1604,7 +1654,7 @@ Automatically downweights easy examples (majority class).
 
 ---
 
-### 6. Batch Size and Loss Computation
+### Question 6: Batch Size and Loss Computation
 **Question**: Systems Thinking
 
 You're training on a GPU with 24GB memory. With batch size 32, memory usage is 8GB. You increase batch size to 128.
@@ -1619,7 +1669,7 @@ What happens to:
 <details>
 <summary>💡 Hint</summary>
 
-**Memory Usage**: YES, approximately 32GB (4× increase) - **EXCEEDS GPU MEMORY! Training will crash.**
+**Memory Usage**: Almost. About 29 GB (1 GB fixed + 4 × 7 GB of activations) - **EXCEEDS GPU MEMORY! Training will crash.**
 
 **Why linear scaling?**
 ```
@@ -1721,6 +1771,11 @@ Congratulations! You've built the measurement system that enables all machine le
 - **Numerical stability**: Log-sum-exp trick prevents overflow with large logits
 - **Computational cost**: CE is C times more expensive than MSE due to softmax
 - **Production patterns**: Hierarchical softmax and sampled softmax for large vocabularies
+
+### Ready for Next Steps
+Your loss functions turn predictions into a single number to minimize. That
+number is the only signal the optimizer ever sees, so getting it numerically
+right matters more than getting it fast.
 
 Export with: `tito module complete 04`
 

@@ -90,9 +90,7 @@ class TestCapstoneValidation:
         WHY: This is the core of training. If gradients don't flow,
         the model cannot learn.
         """
-        from tinytorch.core.autograd import enable_autograd
-        enable_autograd()
-
+        import tinytorch.core.autograd
         x = Tensor([2.0], requires_grad=True)
         y = x * x  # y = x^2
         y.backward()
@@ -127,11 +125,8 @@ class TestEndToEndIntegration:
         WHY: This is the ultimate integration test.
         If this works, the student's TinyTorch is complete.
         """
-        from tinytorch.core.autograd import enable_autograd
+        import tinytorch.core.autograd
         from tinytorch.core.optimizers import SGD
-        enable_autograd()
-
-        # Simple model
         layer = Linear(2, 1)
         # Use small learning rate to avoid gradient explosion
         optimizer = SGD(layer.parameters(), lr=0.01)

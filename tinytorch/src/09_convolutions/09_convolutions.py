@@ -25,13 +25,13 @@ Welcome to Module 09! You'll implement spatial operations that transform machine
 
 **Connection Map**:
 ```
-Training Pipeline → Spatial Operations → CNN (Milestone 03)
+Training Pipeline → Spatial Operations → CNN (Milestone 04)
     (MLPs)            (Conv/Pool)        (Computer Vision)
 ```
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement Conv2d with explicit loops to understand O(N²M²K²) complexity
+1. Implement Conv2d with explicit loops to see its O(H·W·C_in·C_out·K²) cost
 2. Build pooling operations (Max and Average) for spatial reduction
 3. Understand receptive fields and spatial feature extraction
 4. Analyze memory vs computation trade-offs in spatial operations
@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/09_convolutions/convolutions_dev.py`
+**Learning Side:** You work in `modules/09_convolutions/convolutions.ipynb`
 **Building Side:** Code exports to `tinytorch.core.spatial`
 
 ```python
@@ -54,30 +54,6 @@ from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 - **Consistency:** All convolution and pooling operations in core.spatial
 - **Integration:** Works seamlessly with existing layers for complete CNN architectures
 """
-
-# %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": true}
-#| default_exp core.spatial
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-import time
-
-from tinytorch.core.tensor import Tensor
-
-# Enable autograd for gradient tracking (required for BatchNorm2d learnable parameters)
-from tinytorch.core.autograd import enable_autograd, Function, ReLUBackward
-enable_autograd()
-
-# Constants for convolution defaults
-DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
-DEFAULT_STRIDE = 1  # Default stride for convolutions
-DEFAULT_PADDING = 0  # Default padding for convolutions
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -93,12 +69,12 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 - `tinytorch.core.tensor` (Tensor class from Module 01)
 - `tinytorch.core.autograd` (gradient tracking from Module 06)
 
-**Important**: This module builds on the complete training pipeline.
+This module builds on the complete training pipeline.
 Spatial operations will integrate with your existing layers and training system.
 
 **Dependency Flow**:
 ```
-Training Pipeline (Modules 01-08) → Spatial Operations (Module 09) → CNNs (Milestone 03)
+Training Pipeline (Modules 01-08) → Spatial Operations (Module 09) → CNNs (Milestone 04)
          ↓
   Complete training system enables CNN development
 ```
@@ -106,6 +82,29 @@ Training Pipeline (Modules 01-08) → Spatial Operations (Module 09) → CNNs (M
 Students completing this module will have built the spatial processing
 foundation that powers computer vision applications.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": false}
+#| default_exp core.spatial
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+import time
+
+from tinytorch.core.tensor import Tensor, Function
+from tinytorch.core.activations import ReLU
+from tinytorch.core.layers import Linear
+import tinytorch.core.autograd  # completes every operation with its backward half
+
+# Constants for convolution defaults
+DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
+DEFAULT_STRIDE = 1  # Default stride for convolutions
+DEFAULT_PADDING = 0  # Default padding for convolutions
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -121,54 +120,59 @@ Spatial operations transform machine learning from working with simple vectors t
 ### Visual Example: How Convolution Works
 
 ```
-Input Image (5×5):        Kernel (3×3):        Output (3×3):
-┌─────────────────┐      ┌───────────┐       ┌─────────┐
-│ 1  2  3  4  5   │      │  1  0  -1 │       │ ?  ?  ? │
-│ 6  7  8  9  0   │  *   │  1  0  -1 │   =   │ ?  ?  ? │
-│ 1  2  3  4  5   │      │  1  0  -1 │       │ ?  ?  ? │
-│ 6  7  8  9  0   │      └───────────┘       └─────────┘
-│ 1  2  3  4  5   │
-└─────────────────┘
+Input Image (5×5):     Kernel (3×3):      Output (3×3):
+┌───────────────┐      ┌──────────┐       ┌─────────┐
+│ 1  2  3  4  5 │      │  1  0 -1 │       │ ?  ?  ? │
+│ 6  7  8  9  0 │  *   │  1  0 -1 │   =   │ ?  ?  ? │
+│ 1  2  3  4  5 │      │  1  0 -1 │       │ ?  ?  ? │
+│ 6  7  8  9  0 │      └──────────┘       └─────────┘
+│ 1  2  3  4  5 │
+└───────────────┘
 
+At each valid position, the kernel and overlapping image patch are multiplied
+elementwise and summed.
 Sliding Window Process:
-Position (0,0): [1,2,3]   Position (0,1): [2,3,4]   Position (0,2): [3,4,5]
-               [6,7,8] *               [7,8,9] *               [8,9,0] *
-               [1,2,3]                 [2,3,4]                 [3,4,5]
-               = Output[0,0]           = Output[0,1]           = Output[0,2]
+
+Position (0,0): [1,2,3]      Position (0,1): [2,3,4]       Position (0,2): [3,4,5]
+                [6,7,8]                      [7,8,9]                       [8,9,0]
+                [1,2,3]                      [2,3,4]                       [3,4,5]
+                = Output[0,0]                = Output[0,1]                 = Output[0,2]
 ```
 
-Each output pixel summarizes a local neighborhood, allowing the network to detect patterns like edges, corners, and textures.
+Each output pixel summarizes a local neighborhood, allowing the network to
+detect edges, corners, and textures while preserving their spatial relationships.
 
 ### Why Spatial Operations Transform ML
 
 ```
-Without Convolution:                    With Convolution:
-32×32×3 image = 3,072 inputs          32×32×3 → Conv → 32×32×16
-↓                                      ↓                     ↓
-Dense(3072 → 1000) = 3M parameters    Shared 3×3 kernel = 432 parameters
-↓                                      ↓                     ↓
-Memory explosion + no spatial awareness Efficient + preserves spatial structure
+Without Convolution:                       With Convolution:
+32×32×3 image = 3,072 inputs               32×32×3 → Conv → 30×30×16
+        ↓                                             ↓
+Dense(3072 → 1000) = 3M parameters         16 shared 3×3×3 kernels = 432 weights
+        ↓                                             ↓
+Memory explosion + no spatial awareness    Efficient + preserves spatial structure
 ```
 
-Convolution achieves dramatic parameter reduction (1000× fewer!) while preserving the spatial relationships that matter for visual understanding.
+Convolution achieves dramatic parameter reduction (more than 1000×!) while preserving the spatial relationships that matter for visual understanding.
 """
 
 # %% [markdown]
 """
-## 📐 Mathematical Foundations
+## 📐 Foundations: Convolution, Step by Step
 
 ### Understanding Convolution Step by Step
 
-Convolution sounds complex, but it's just "sliding window multiplication and summation." Let's see exactly how it works:
+Convolution sounds complex, but it's just a "sliding window dot product".
+Let's see exactly how it works:
 
 ```
 Step 1: Position the kernel over input
-Input:          Kernel:
-┌─────────┐     ┌─────┐
-│ 1 2 3 4 │     │ 1 0 │  ← Place kernel at position (0,0)
-│ 5 6 7 8 │  ×  │ 0 1 │
-│ 9 0 1 2 │     └─────┘
-└─────────┘
+Input:            Kernel:
+┌───────────┐     ┌─────┐
+│ [1 2] 3 4 │     │ 1 0 │  ← Kernel placed at position (0,0)
+│ [5 6] 7 8 │  ×  │ 0 1 │    covers the bracketed 2×2 patch
+│  9 0 1 2  │     └─────┘
+└───────────┘
 
 Step 2: Multiply corresponding elements
 Overlap:        Computation:
@@ -178,25 +182,33 @@ Overlap:        Computation:
 └─────┘
 
 Step 3: Slide kernel and repeat
-Position (0,1):  Position (1,0):  Position (1,1):
-┌─────┐         ┌─────┐          ┌─────┐
-│ 2 3 │         │ 5 6 │          │ 6 7 │
-│ 6 7 │         │ 9 0 │          │ 0 1 │
-└─────┘         └─────┘          └─────┘
-Result: 9       Result: 5        Result: 7
+Position (0,1):  Position (0,2):
+   ┌─────┐          ┌─────┐
+   │ 2 3 │          │ 3 4 │
+   │ 6 7 │          │ 7 8 │
+   └─────┘          └─────┘
+   Result: 9        Result: 11
 
-Final Output:  ┌─────┐
-               │ 7 9 │
-               │ 5 7 │
-               └─────┘
+Position (1,0):  Position (1,1):  Position (1,2):
+   ┌─────┐          ┌─────┐          ┌─────┐
+   │ 5 6 │          │ 6 7 │          │ 7 8 │
+   │ 9 0 │          │ 0 1 │          │ 1 2 │
+   └─────┘          └─────┘          └─────┘
+   Result: 5        Result: 7        Result: 9
+
+Final Output:  ┌────────┐
+               │ 7 9 11 │
+               │ 5 7 9  │
+               └────────┘
 ```
 
 ### The Mathematical Formula
 
-For 2D convolution, we slide kernel K across input I:
+Suppose `n` is the kernel height (rows) and `m` the kernel width (columns).
+Then, for a 2D convolution, we slide kernel K across input I:
 ```
-O[i,j] = Σ Σ I[i+m, j+n] × K[m,n]
-         m n
+O[i,j] = Σ Σ I[i+n, j+m] × K[n,m]
+         n m
 ```
 
 This formula captures the "multiply and sum" operation for each kernel position.
@@ -206,18 +218,18 @@ This formula captures the "multiply and sum" operation for each kernel position.
 ```
 Max Pooling Example (2×2 window):
 Input:             Output:
-┌───────────────┐  ┌───────┐
-│ 1  3  2  4    │  │ 6   8 │  ← max([1,3,5,6])=6, max([2,4,7,8])=8
-│ 5  6  7  8    │  │ 9   9 │  ← max([2,9,0,1])=9, max([1,3,9,3])=9
-│ 2  9  1  3    │  └───────┘
-│ 0  1  9  3    │
-└───────────────┘
+┌────────────┐  ┌───────┐
+│ 1  3  2  4 │  │ 6   8 │  ← max([1,3,5,6])=6, max([2,4,7,8])=8
+│ 5  6  7  8 │  │ 9   9 │  ← max([2,9,0,1])=9, max([1,3,9,3])=9
+│ 2  9  1  3 │  └───────┘
+│ 0  1  9  3 │
+└────────────┘
 
 Average Pooling (same window):
-┌─────────────┐
-│ 3.75   5.25 │  ← avg([1,3,5,6])=3.75, avg([2,4,7,8])=5.25
-│ 3.0    4.0  │  ← avg([2,9,0,1])=3.0, avg([1,3,9,3])=4.0
-└─────────────┘
+┌────────────┐
+│ 3.75  5.25 │  ← avg([1,3,5,6])=3.75, avg([2,4,7,8])=5.25
+│ 3.0   4.0  │  ← avg([2,9,0,1])=3.0, avg([1,3,9,3])=4.0
+└────────────┘
 ```
 
 ### Why This Complexity Matters
@@ -226,7 +238,7 @@ For convolution with input (1, 3, 224, 224) and kernel (64, 3, 3, 3):
 - **Operations**: 1 × 64 × 3 × 3 × 3 × 224 × 224 = 86.7 million multiply-adds
 - **Memory**: Input (600KB) + Weights (6.9KB) + Output (12.8MB) = ~13.4MB
 
-This is why kernel size matters enormously - a 7×7 kernel would require 5.4× more computation!
+This is why kernel size matters enormously - a 7×7 kernel would require ~5.4× more computation!
 
 ### Key Properties That Enable Deep Learning
 
@@ -248,13 +260,13 @@ Convolution slides a small filter (kernel) across the entire input, computing we
 
 ```
 Convolution Visualization:
-Input (4×4):              Kernel (3×3):           Output (2×2):
-┌─────────────┐          ┌─────────┐             ┌─────────┐
-│ a b c d │            │ k1 k2 k3│             │ o1  o2 │
-│ e f g h │     ×      │ k4 k5 k6│      =      │ o3  o4 │
-│ i j k l │            │ k7 k8 k9│             └─────────┘
-│ m n o p │            └─────────┘
-└─────────────┘
+Input (4×4):          Kernel (3×3):           Output (2×2):
+┌─────────┐           ┌──────────┐             ┌───────┐
+│ a b c d │           │ k1 k2 k3 │             │ o1 o2 │
+│ e f g h │     ×     │ k4 k5 k6 │      =      │ o3 o4 │
+│ i j k l │           │ k7 k8 k9 │             └───────┘
+│ m n o p │           └──────────┘
+└─────────┘
 
 Computation Details:
 o1 = a×k1 + b×k2 + c×k3 + e×k4 + f×k5 + g×k6 + i×k7 + j×k8 + k×k9
@@ -263,7 +275,7 @@ o3 = e×k1 + f×k2 + g×k3 + i×k4 + j×k5 + k×k6 + m×k7 + n×k8 + o×k9
 o4 = f×k1 + g×k2 + h×k3 + j×k4 + k×k5 + l×k6 + n×k7 + o×k8 + p×k9
 ```
 
-### The Six Nested Loops of Convolution
+### The Seven Nested Loops of Convolution
 
 Our implementation will use explicit loops to show exactly where the computational cost comes from:
 
@@ -298,7 +310,6 @@ This is NOT a student task -- it is shared infrastructure.
 
 # %% nbgrader={"grade": false, "grade_id": "validate-4d-input", "solution": false}
 #| export
-
 
 def validate_4d_input(x, layer_name):
     """
@@ -342,14 +353,14 @@ def validate_4d_input(x, layer_name):
 
 # %% [markdown]
 """
-### Conv2d Implementation - Building the Core of Computer Vision
+### Conv2d Implementation: Building the Core of Computer Vision
 
 Conv2d is the workhorse of computer vision. It slides learned filters across images to detect patterns like edges, textures, and eventually complex objects.
 
 #### How Conv2d Transforms Machine Learning
 
 ```
-Before Conv2d (Dense Only):         After Conv2d (Spatial Aware):
+Before Conv2d (Dense Only):        After Conv2d (Spatial Aware):
 Input: 32×32×3 = 3,072 values      Input: 32×32×3 structured as image
          ↓                                   ↓
 Dense(3072→1000) = 3M params       Conv2d(3→16, 3×3) = 448 params
@@ -365,18 +376,18 @@ Our Conv2d uses He initialization, specifically designed for ReLU activations:
 - **Solution**: std = sqrt(2 / fan_in) where fan_in = channels × kernel_height × kernel_width
 - **Why it works**: Maintains variance through ReLU nonlinearity
 
-#### The 6-Loop Implementation Strategy
+#### The 7-Loop Implementation Strategy
 
 We'll implement convolution with explicit loops to show the true computational cost:
 
 ```
 Nested Loop Structure:
-for batch:           ← Process each sample in parallel (in practice)
-  for out_channel:   ← Generate each output feature map
-    for out_h:       ← Each row of output
-      for out_w:     ← Each column of output
-        for k_h:     ← Each row of kernel
-          for k_w:   ← Each column of kernel
+for batch:             ← Process each sample in parallel (in practice)
+  for out_channel:     ← Generate each output feature map
+    for out_h:         ← Each row of output
+      for out_w:       ← Each column of output
+        for k_h:       ← Each row of kernel
+          for k_w:     ← Each column of kernel
             for in_ch: ← Accumulate across input channels
               result += input[...] * weight[...]
 ```
@@ -444,18 +455,18 @@ from the input and compute its dot product with the kernel:
 
 ```
 Convolution = Sliding Window Dot Products:
-┌──────────────────────────────────┐
-│ For EACH output position:        │
-│  Input patch     Kernel          │
-│  ┌───┬───┬───┐  ┌───┬───┬───┐  │
-│  │ a │ b │ c │  │ w₁│ w₂│ w₃│  │
-│  ├───┼───┼───┤  ├───┼───┼───┤  │
-│  │ d │ e │ f │ ×│ w₄│ w₅│ w₆│  │
-│  ├───┼───┼───┤  ├───┼───┼───┤  │
-│  │ g │ h │ i │  │ w₇│ w₈│ w₉│  │
-│  └───┴───┴───┘  └───┴───┴───┘  │
-│  output = a·w₁ + b·w₂ + ... + i·w₉  │
-└──────────────────────────────────┘
+┌────────────────────────────────────┐
+│ For EACH output position:          │
+│  Input patch      Kernel           │
+│  ┌───┬───┬───┐   ┌────┬────┬────┐  │
+│  │ a │ b │ c │   │ w₁ │ w₂ │ w₃ │  │
+│  ├───┼───┼───┤   ├────┼────┼────┤  │
+│  │ d │ e │ f │ × │ w₄ │ w₅ │ w₆ │  │
+│  ├───┼───┼───┤   ├────┼────┼────┤  │
+│  │ g │ h │ i │   │ w₇ │ w₈ │ w₉ │  │
+│  └───┴───┴───┘   └────┴────┴────┘  │
+│ output = a·w₁ + b·w₂ + ... + i·w₉  │
+└────────────────────────────────────┘
 ```
 
 The 7 nested loops iterate over:
@@ -466,12 +477,12 @@ The 7 nested loops iterate over:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "conv2d-class", "solution": true}
-
 #| export
 
-class Conv2dBackward(Function):
+class Conv2dFunction(Function):
     """
-    Gradient computation for 2D convolution.
+    The 2D convolution operation: forward runs the layer's sliding-window loops,
+    backward computes the gradients.
 
     Computes gradients for Conv2d backward pass:
     - grad_input: gradient w.r.t. input (for backprop to previous layer)
@@ -482,21 +493,23 @@ class Conv2dBackward(Function):
     the educational approach of the forward pass.
     """
 
-    def __init__(self, x, weight, bias, stride, padding, kernel_size, padded_shape):
-        # Register all tensors that need gradients with autograd
+    def forward(self, x, weight, bias=None):
+        """
+        Convolve the (already validated) input. The layer that owns the weights
+        is passed as `layer`, so the student-written helpers below do the work:
+        _apply_padding and _convolve_loops.
+        """
+        batch_size = x.shape[0]
+        out_height, out_width = self.layer._compute_output_shape(x.shape[2], x.shape[3])
+        padded_input = self.layer._apply_padding(x)
+        output = self.layer._convolve_loops(padded_input, batch_size, out_height, out_width)
         if bias is not None:
-            super().__init__(x, weight, bias)
-        else:
-            super().__init__(x, weight)
-        self.x = x
-        self.weight = weight
-        self.bias = bias
-        self.stride = stride
-        self.padding = padding
-        self.kernel_size = kernel_size
-        self.padded_shape = padded_shape
+            for out_ch in range(self.layer.out_channels):
+                output[:, out_ch, :, :] += bias[out_ch]
+        return output
 
-    def apply(self, grad_output):
+
+    def backward(self, grad_output):
         """
         Compute gradients for convolution inputs and parameters.
 
@@ -507,22 +520,26 @@ class Conv2dBackward(Function):
         Returns:
             Tuple of (grad_input, grad_weight, grad_bias)
         """
+        x, weight = self.inputs[0], self.inputs[1]
+        bias = self.inputs[2] if len(self.inputs) > 2 else None
+        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+
         batch_size, out_channels, out_height, out_width = grad_output.shape
-        _, in_channels, in_height, in_width = self.x.shape
-        kernel_h, kernel_w = self.kernel_size
+        _, in_channels, in_height, in_width = x.shape
+        kernel_h, kernel_w = kernel_size
 
         # Apply padding to input if needed (for gradient computation)
-        if self.padding > 0:
-            padded_input = np.pad(self.x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
+        if padding > 0:
+            padded_input = np.pad(x.data,
+                                ((0, 0), (0, 0), (padding, padding), (padding, padding)),
                                 mode='constant', constant_values=0)
         else:
-            padded_input = self.x.data
+            padded_input = x.data
 
         # Initialize gradients
         grad_input_padded = np.zeros_like(padded_input)
-        grad_weight = np.zeros_like(self.weight.data)
-        grad_bias = None if self.bias is None else np.zeros_like(self.bias.data)
+        grad_weight = np.zeros_like(weight.data)
+        grad_bias = None if bias is None else np.zeros_like(bias.data)
 
         # Compute gradients using explicit loops (educational approach)
         for b in range(batch_size):
@@ -530,8 +547,8 @@ class Conv2dBackward(Function):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
                         # Position in input
-                        in_h_start = out_h * self.stride
-                        in_w_start = out_w * self.stride
+                        in_h_start = out_h * stride
+                        in_w_start = out_w * stride
 
                         # Gradient value flowing back to this position
                         grad_val = grad_output[b, out_ch, out_h, out_w]
@@ -551,7 +568,7 @@ class Conv2dBackward(Function):
 
                                     # Gradient w.r.t. input
                                     grad_input_padded[b, in_ch, in_h, in_w] += (
-                                        self.weight.data[out_ch, in_ch, k_h, k_w] * grad_val
+                                        weight.data[out_ch, in_ch, k_h, k_w] * grad_val
                                     )
 
         # Compute gradient w.r.t. bias (sum over batch and spatial dimensions)
@@ -560,19 +577,17 @@ class Conv2dBackward(Function):
                 grad_bias[out_ch] = grad_output[:, out_ch, :, :].sum()
 
         # Remove padding from input gradient
-        if self.padding > 0:
+        if padding > 0:
             grad_input = grad_input_padded[:, :,
-                                          self.padding:-self.padding,
-                                          self.padding:-self.padding]
+                                          padding:-padding,
+                                          padding:-padding]
         else:
             grad_input = grad_input_padded
 
-        # Tuple length must match saved_tensors: (x, weight) or (x, weight, bias).
-        if self.bias is None:
+        # One gradient per input: (x, weight) or (x, weight, bias).
+        if bias is None:
             return grad_input, grad_weight
         return grad_input, grad_weight, grad_bias
-
-#| export
 
 class Conv2d:
     """
@@ -760,12 +775,14 @@ class Conv2d:
         """
         Forward pass through Conv2d layer.
 
-        This method composes four steps:
+        This method composes five steps:
         1. Validate input is 4D (shared helper)
         2. Compute output spatial dimensions
         3. Pad input if needed
         4. Run the sliding window convolution loops
-        5. Add bias and attach gradient tracking
+        5. Add bias
+
+        Steps 3-5 run inside Conv2dFunction.apply, which records the operation for backward.
 
         Each step is a separate helper you implement below.
         See the individual helper docstrings for details.
@@ -781,33 +798,17 @@ class Conv2d:
         validate_4d_input(x, "Conv2d")
 
         batch_size, in_channels, in_height, in_width = x.shape
-
-        # Step 2: Compute output dimensions
+        if in_channels != self.in_channels:
+            raise ValueError(f"Conv2d expected {self.in_channels} input channels, got {in_channels}")
         out_height, out_width = self._compute_output_shape(in_height, in_width)
+        if out_height <= 0 or out_width <= 0:
+            raise ValueError("Conv2d kernel must fit within the padded input")
 
-        # Step 3: Apply padding
-        padded_input = self._apply_padding(x.data)
-
-        # Step 4: Run convolution loops
-        output = self._convolve_loops(padded_input, batch_size, out_height, out_width)
-
-        # Step 5: Add bias if present
+        # Steps 3-5: pad, convolve, add bias. The operation runs the helpers
+        # (via `layer=self`) and Module 06's apply() records it for backward.
         if self.bias is not None:
-            for out_ch in range(self.out_channels):
-                output[:, out_ch, :, :] += self.bias.data[out_ch]
-
-        # Return Tensor with gradient tracking enabled
-        result = Tensor(output, requires_grad=(x.requires_grad or self.weight.requires_grad))
-
-        # Attach backward function for gradient computation (following TinyTorch protocol)
-        if result.requires_grad:
-            result._grad_fn = Conv2dBackward(
-                x, self.weight, self.bias,
-                self.stride, self.padding, self.kernel_size,
-                padded_input.shape
-            )
-
-        return result
+            return Conv2dFunction.apply(x, self.weight, self.bias, layer=self)
+        return Conv2dFunction.apply(x, self.weight, layer=self)
         ### END SOLUTION
 
     def parameters(self):
@@ -844,11 +845,9 @@ Examples:
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-output-shape", "locked": true, "points": 5}
-
-
 def test_unit_conv2d_output_shape():
-    """Test Conv2d._compute_output_shape for various configurations."""
-    print("Testing Conv2d output shape computation...")
+    """🧪 Test Conv2d._compute_output_shape for various configurations."""
+    print("🧪 Unit Test: Conv2d Output Shape...")
 
     # Same padding: output == input
     conv_same = Conv2d(3, 16, kernel_size=3, padding=1, stride=1)
@@ -875,7 +874,7 @@ def test_unit_conv2d_output_shape():
     oh, ow = conv_5x5._compute_output_shape(32, 32)
     assert (oh, ow) == (28, 28), f"5x5 kernel: expected (28, 28), got ({oh}, {ow})"
 
-    print("Conv2d output shape computation works correctly!")
+    print("✅ Conv2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_output_shape()
@@ -904,11 +903,9 @@ Before padding (1, 1, 3, 3):       After padding=1 (1, 1, 5, 5):
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-padding", "locked": true, "points": 5}
-
-
 def test_unit_conv2d_padding():
-    """Test Conv2d._apply_padding for zero-padding behavior."""
-    print("Testing Conv2d padding...")
+    """🧪 Test Conv2d._apply_padding for zero-padding behavior."""
+    print("🧪 Unit Test: Conv2d Padding...")
 
     # No padding: input unchanged
     conv_no_pad = Conv2d(1, 1, kernel_size=3, padding=0)
@@ -939,7 +936,7 @@ def test_unit_conv2d_padding():
     assert result.shape[0] == 2, "Batch dim should be unchanged"
     assert result.shape[1] == 3, "Channel dim should be unchanged"
 
-    print("Conv2d padding works correctly!")
+    print("✅ Conv2d padding works correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_padding()
@@ -952,18 +949,18 @@ This test validates the core sliding window computation in `_convolve_loops`.
 
 ```
 Convolution = Sliding Window Dot Products:
-┌──────────────────────────────────┐
-│ For EACH output position:        │
-│  Input patch     Kernel          │
-│  ┌───┬───┬───┐  ┌───┬───┬───┐  │
-│  │ a │ b │ c │  │ w₁│ w₂│ w₃│  │
-│  ├───┼───┼───┤  ├───┼───┼───┤  │
-│  │ d │ e │ f │ ×│ w₄│ w₅│ w₆│  │
-│  ├───┼───┼───┤  ├───┼───┼───┤  │
-│  │ g │ h │ i │  │ w₇│ w₈│ w₉│  │
-│  └───┴───┴───┘  └───┴───┴───┘  │
-│  output = a·w₁ + b·w₂ + ... + i·w₉  │
-└──────────────────────────────────┘
+┌────────────────────────────────────┐
+│ For EACH output position:          │
+│  Input patch      Kernel           │
+│  ┌───┬───┬───┐   ┌────┬────┬────┐  │
+│  │ a │ b │ c │   │ w₁ │ w₂ │ w₃ │  │
+│  ├───┼───┼───┤   ├────┼────┼────┤  │
+│  │ d │ e │ f │ × │ w₄ │ w₅ │ w₆ │  │
+│  ├───┼───┼───┤   ├────┼────┼────┤  │
+│  │ g │ h │ i │   │ w₇ │ w₈ │ w₉ │  │
+│  └───┴───┴───┘   └────┴────┴────┘  │
+│ output = a·w₁ + b·w₂ + ... + i·w₉  │
+└────────────────────────────────────┘
 ```
 
 **What we're testing**: The 7-nested-loop convolution produces correct values
@@ -972,11 +969,9 @@ Convolution = Sliding Window Dot Products:
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-convolve", "locked": true, "points": 15}
-
-
 def test_unit_conv2d_convolve_loops():
-    """Test Conv2d._convolve_loops with known input/weight values."""
-    print("Testing Conv2d convolution loops...")
+    """🧪 Test Conv2d._convolve_loops with known input/weight values."""
+    print("🧪 Unit Test: Conv2d Convolution Loops...")
 
     # Create a Conv2d with known weights (1 input channel, 1 output channel, 2x2 kernel)
     conv = Conv2d(in_channels=1, out_channels=1, kernel_size=2, bias=False)
@@ -1019,7 +1014,7 @@ def test_unit_conv2d_convolve_loops():
     assert np.allclose(output2[0, 0], expected_ch0), f"Channel 0 mismatch"
     assert np.allclose(output2[0, 1], expected_ch1), f"Channel 1 mismatch"
 
-    print("Conv2d convolution loops work correctly!")
+    print("✅ Conv2d convolution loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_conv2d_convolve_loops()
@@ -1038,11 +1033,9 @@ and gradient tracking.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-forward", "locked": true, "points": 15}
-
-
 def test_unit_conv2d():
-    """Test Conv2d forward pass with multiple configurations."""
-    print("Testing Conv2d...")
+    """🧪 Test Conv2d forward pass with multiple configurations."""
+    print("🧪 Unit Test: Conv2d Forward...")
 
     # Test 1: Basic convolution without padding
     print("  Testing basic convolution...")
@@ -1106,7 +1099,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Pooling Operations - Spatial Dimension Reduction
+## 🏗️ Pooling Operations: Spatial Dimension Reduction
 
 Pooling operations compress spatial information while keeping the most important features. Think of them as creating "thumbnail summaries" of local regions.
 
@@ -1168,13 +1161,13 @@ Information Trade-off:
 Both pooling operations follow the same sliding window pattern:
 
 ```
-Sliding 2×2 window with stride=2:
-Step 1:     Step 2:     Step 3:     Step 4:
-┌──┐        ┌──┐
-│▓▓│        │▓▓│
-└──┘        └──┘                    ┌──┐        ┌──┐
-                                    │▓▓│        │▓▓│
-                                    └──┘        └──┘
+Sliding 2×2 window with stride=2 on a 4×4 matrix:
+Step 1:       Step 2:       Step 3:       Step 4:
+┌──┬──┐       ┌──┬──┐       ┌──┬──┐       ┌──┬──┐
+│▓▓│  │       │  │▓▓│       │  │  │       │  │  │
+├──┼──┤       ├──┼──┤       ├──┼──┤       ├──┼──┤
+│  │  │       │  │  │       │▓▓│  │       │  │▓▓│
+└──┴──┘       └──┴──┘       └──┴──┘       └──┴──┘
 
 Non-overlapping windows → Each input pixel used exactly once
 Stride=2 → Output dimensions halved in each direction
@@ -1185,7 +1178,7 @@ The key difference: MaxPool takes max(window), AvgPool takes mean(window).
 
 # %% [markdown]
 """
-### MaxPool2d Implementation - Preserving Strong Features
+### MaxPool2d Implementation: Preserving Strong Features
 
 MaxPool2d finds the strongest activation in each spatial window, creating a compressed representation that keeps the most important information.
 
@@ -1241,28 +1234,29 @@ For input (1, 64, 224, 224) with 2×2 pooling:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "maxpool2d-class", "solution": true}
-
 #| export
 
-class MaxPool2dBackward(Function):
+class MaxPool2dFunction(Function):
     """
-    Gradient computation for 2D max pooling.
+    Forward and backward passes for 2D max pooling.
 
     Max pooling gradients flow only to the positions that were selected
     as the maximum in the forward pass.
     """
 
-    def __init__(self, x, output_shape, kernel_size, stride, padding):
-        super().__init__(x)
-        self.x = x
-        self.output_shape = output_shape
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        # Store max positions for gradient routing
-        self.max_positions = {}
+    def forward(self, x):
+        """Pool the (already validated) input using the layer's helpers, passed as `layer`."""
+        batch_size, channels, in_height, in_width = x.shape
+        out_height, out_width = self.layer._compute_pool_output_shape(in_height, in_width)
+        if self.layer.padding > 0:
+            padded_input = np.pad(x,
+                                ((0, 0), (0, 0), (self.layer.padding, self.layer.padding), (self.layer.padding, self.layer.padding)),
+                                mode='constant', constant_values=-np.inf)
+        else:
+            padded_input = x
+        return self.layer._maxpool_loops(padded_input, batch_size, channels, out_height, out_width)
 
-    def apply(self, grad_output):
+    def backward(self, grad_output):
         """
         Route gradients back to max positions.
 
@@ -1272,27 +1266,29 @@ class MaxPool2dBackward(Function):
         Returns:
             Gradient w.r.t. input
         """
-        batch_size, channels, in_height, in_width = self.x.shape
-        _, _, out_height, out_width = self.output_shape
-        kernel_h, kernel_w = self.kernel_size
+        x, = self.inputs
+        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+        batch_size, channels, in_height, in_width = x.shape
+        _, _, out_height, out_width = self.output.shape
+        kernel_h, kernel_w = kernel_size
 
         # Apply padding if needed
-        if self.padding > 0:
-            padded_input = np.pad(self.x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
+        if padding > 0:
+            padded_input = np.pad(x.data,
+                                ((0, 0), (0, 0), (padding, padding), (padding, padding)),
                                 mode='constant', constant_values=-np.inf)
             grad_input_padded = np.zeros_like(padded_input)
         else:
-            padded_input = self.x.data
-            grad_input_padded = np.zeros_like(self.x.data)
+            padded_input = x.data
+            grad_input_padded = np.zeros_like(x.data)
 
         # Route gradients to max positions
         for b in range(batch_size):
             for c in range(channels):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
-                        in_h_start = out_h * self.stride
-                        in_w_start = out_w * self.stride
+                        in_h_start = out_h * stride
+                        in_w_start = out_w * stride
 
                         # Find max position in this window
                         max_val = -np.inf
@@ -1310,17 +1306,15 @@ class MaxPool2dBackward(Function):
                         grad_input_padded[b, c, max_h, max_w] += grad_output[b, c, out_h, out_w]
 
         # Remove padding
-        if self.padding > 0:
+        if padding > 0:
             grad_input = grad_input_padded[:, :,
-                                          self.padding:-self.padding,
-                                          self.padding:-self.padding]
+                                          padding:-padding,
+                                          padding:-padding]
         else:
             grad_input = grad_input_padded
 
         # Return as tuple (following Function protocol)
         return (grad_input,)
-
-#| export
 
 class MaxPool2d:
     """
@@ -1465,26 +1459,9 @@ class MaxPool2d:
         # Step 2: Compute output dimensions
         out_height, out_width = self._compute_pool_output_shape(in_height, in_width)
 
-        # Step 3: Apply padding (use -inf for max pooling so padded values are never selected)
-        if self.padding > 0:
-            padded_input = np.pad(x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
-                                mode='constant', constant_values=-np.inf)
-        else:
-            padded_input = x.data
-
-        # Step 4: Run max pooling loops
-        output = self._maxpool_loops(padded_input, batch_size, channels, out_height, out_width)
-
-        # Step 5: Return Tensor with gradient tracking
-        result = Tensor(output, requires_grad=x.requires_grad)
-
-        if result.requires_grad:
-            result._grad_fn = MaxPool2dBackward(
-                x, result.shape, self.kernel_size, self.stride, self.padding
-            )
-
-        return result
+        # Steps 3-5: pad and pool inside the operation (via `layer=self`);
+        # Module 06's apply() records it for backward.
+        return MaxPool2dFunction.apply(x, layer=self)
         ### END SOLUTION
 
     def parameters(self):
@@ -1497,7 +1474,7 @@ class MaxPool2d:
 
 # %% [markdown]
 """
-### Unit Test: MaxPool2d Output Shape
+### 🧪 Unit Test: MaxPool2d Output Shape
 
 This test validates that `_compute_pool_output_shape` correctly computes
 the spatial dimensions after max pooling.
@@ -1516,11 +1493,9 @@ Common case: kernel=2, stride=2, padding=0
 """
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-output-shape", "locked": true, "points": 3}
-
-
 def test_unit_maxpool2d_output_shape():
-    """Test MaxPool2d._compute_pool_output_shape."""
-    print("Testing MaxPool2d output shape computation...")
+    """🧪 Test MaxPool2d._compute_pool_output_shape."""
+    print("🧪 Unit Test: MaxPool2d Output Shape...")
 
     # Standard 2x2 pooling with stride 2: halves dimensions
     pool = MaxPool2d(kernel_size=2, stride=2)
@@ -1541,14 +1516,14 @@ def test_unit_maxpool2d_output_shape():
     oh, ow = pool_large._compute_pool_output_shape(16, 16)
     assert (oh, ow) == (4, 4), f"4x4 stride 4: expected (4, 4), got ({oh}, {ow})"
 
-    print("MaxPool2d output shape computation works correctly!")
+    print("✅ MaxPool2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_maxpool2d_output_shape()
 
 # %% [markdown]
 """
-### Unit Test: MaxPool2d Loops
+### 🧪 Unit Test: MaxPool2d Loops
 
 This test validates that `_maxpool_loops` correctly finds the maximum
 value in each pooling window.
@@ -1570,11 +1545,9 @@ MaxPool2d sliding window (2x2, stride 2):
 """
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-loops", "locked": true, "points": 7}
-
-
 def test_unit_maxpool2d_loops():
-    """Test MaxPool2d._maxpool_loops with known values."""
-    print("Testing MaxPool2d loops...")
+    """🧪 Test MaxPool2d._maxpool_loops with known values."""
+    print("🧪 Unit Test: MaxPool2d Loops...")
 
     pool = MaxPool2d(kernel_size=2, stride=2)
 
@@ -1601,14 +1574,14 @@ def test_unit_maxpool2d_loops():
     output_neg = pool_small._maxpool_loops(padded_neg, 1, 1, 1, 1)
     assert output_neg[0, 0, 0, 0] == -1.0, f"Max of negatives: expected -1.0, got {output_neg[0,0,0,0]}"
 
-    print("MaxPool2d loops work correctly!")
+    print("✅ MaxPool2d loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_maxpool2d_loops()
 
 # %% [markdown]
 """
-### AvgPool2d Implementation - Smoothing and Generalizing Features
+### AvgPool2d Implementation: Smoothing and Generalizing Features
 
 AvgPool2d computes the average of each spatial window, creating smoother features that are less sensitive to noise and exact pixel positions.
 
@@ -1617,7 +1590,7 @@ AvgPool2d computes the average of each spatial window, creating smoother feature
 ```
 Same Input Window (2×2):    MaxPool Output:    AvgPool Output:
 ┌─────┬─────┐
-│ 0.1 │ 0.9 │               0.9              0.425
+│ 0.1 │ 0.9 │               0.9              0.4
 ├─────┼─────┤              (max)             (mean)
 │ 0.3 │ 0.3 │
 └─────┴─────┘
@@ -1666,27 +1639,30 @@ Memory access pattern identical to MaxPool, just different aggregation!
 """
 
 # %% nbgrader={"grade": false, "grade_id": "avgpool2d-class", "solution": true}
-
 #| export
 
-class AvgPool2dBackward(Function):
+class AvgPool2dFunction(Function):
     """
-    Gradient computation for 2D average pooling.
+    Forward and backward passes for 2D average pooling.
 
     Each output is the mean of the kernel_h*kernel_w inputs in its window, so
     the gradient is distributed equally (1/kernel_area) to every input position
     that contributed, accumulating where windows overlap.
     """
 
-    def __init__(self, x, output_shape, kernel_size, stride, padding):
-        super().__init__(x)
-        self.x = x
-        self.output_shape = output_shape
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
+    def forward(self, x):
+        """Pool the (already validated) input using the layer's helpers, passed as `layer`."""
+        batch_size, channels, in_height, in_width = x.shape
+        out_height, out_width = self.layer._compute_pool_output_shape(in_height, in_width)
+        if self.layer.padding > 0:
+            padded_input = np.pad(x,
+                                ((0, 0), (0, 0), (self.layer.padding, self.layer.padding), (self.layer.padding, self.layer.padding)),
+                                mode='constant', constant_values=0)
+        else:
+            padded_input = x
+        return self.layer._avgpool_loops(padded_input, batch_size, channels, out_height, out_width)
 
-    def apply(self, grad_output):
+    def backward(self, grad_output):
         """
         Distribute each output gradient equally across its pooling window.
 
@@ -1696,46 +1672,46 @@ class AvgPool2dBackward(Function):
         Returns:
             Gradient w.r.t. input
         """
-        batch_size, channels, in_height, in_width = self.x.shape
-        _, _, out_height, out_width = self.output_shape
-        kernel_h, kernel_w = self.kernel_size
+        x, = self.inputs
+        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+        batch_size, channels, in_height, in_width = x.shape
+        _, _, out_height, out_width = self.output.shape
+        kernel_h, kernel_w = kernel_size
         kernel_area = kernel_h * kernel_w
 
         # Average pooling pads with zeros, so the gradient buffer is padded with
         # zeros too (matching the forward pass).
-        if self.padding > 0:
+        if padding > 0:
             grad_input_padded = np.zeros(
                 (batch_size, channels,
-                 in_height + 2 * self.padding,
-                 in_width + 2 * self.padding)
+                 in_height + 2 * padding,
+                 in_width + 2 * padding)
             )
         else:
-            grad_input_padded = np.zeros_like(self.x.data)
+            grad_input_padded = np.zeros_like(x.data)
 
         # Spread each output gradient equally over its window, accumulating overlaps.
         for b in range(batch_size):
             for c in range(channels):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
-                        in_h_start = out_h * self.stride
-                        in_w_start = out_w * self.stride
+                        in_h_start = out_h * stride
+                        in_w_start = out_w * stride
                         share = grad_output[b, c, out_h, out_w] / kernel_area
                         for k_h in range(kernel_h):
                             for k_w in range(kernel_w):
                                 grad_input_padded[b, c, in_h_start + k_h, in_w_start + k_w] += share
 
         # Remove padding
-        if self.padding > 0:
+        if padding > 0:
             grad_input = grad_input_padded[:, :,
-                                          self.padding:-self.padding,
-                                          self.padding:-self.padding]
+                                          padding:-padding,
+                                          padding:-padding]
         else:
             grad_input = grad_input_padded
 
         # Return as tuple (following Function protocol)
         return (grad_input,)
-
-#| export
 
 class AvgPool2d:
     """
@@ -1879,26 +1855,9 @@ class AvgPool2d:
         # Step 2: Compute output dimensions
         out_height, out_width = self._compute_pool_output_shape(in_height, in_width)
 
-        # Step 3: Apply padding (use zeros for average pooling)
-        if self.padding > 0:
-            padded_input = np.pad(x.data,
-                                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
-                                mode='constant', constant_values=0)
-        else:
-            padded_input = x.data
-
-        # Step 4: Run average pooling loops
-        output = self._avgpool_loops(padded_input, batch_size, channels, out_height, out_width)
-
-        # Step 5: Return Tensor with gradient tracking
-        result = Tensor(output, requires_grad=x.requires_grad)
-
-        if result.requires_grad:
-            result._grad_fn = AvgPool2dBackward(
-                x, result.shape, self.kernel_size, self.stride, self.padding
-            )
-
-        return result
+        # Steps 3-5: pad and pool inside the operation (via `layer=self`);
+        # Module 06's apply() records it for backward.
+        return AvgPool2dFunction.apply(x, layer=self)
         ### END SOLUTION
 
     def parameters(self):
@@ -1911,7 +1870,7 @@ class AvgPool2d:
 
 # %% [markdown]
 """
-### Unit Test: AvgPool2d Output Shape
+### 🧪 Unit Test: AvgPool2d Output Shape
 
 This test validates that `_compute_pool_output_shape` correctly computes
 the spatial dimensions after average pooling.
@@ -1922,11 +1881,9 @@ the spatial dimensions after average pooling.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-output-shape", "locked": true, "points": 3}
-
-
 def test_unit_avgpool2d_output_shape():
-    """Test AvgPool2d._compute_pool_output_shape."""
-    print("Testing AvgPool2d output shape computation...")
+    """🧪 Test AvgPool2d._compute_pool_output_shape."""
+    print("🧪 Unit Test: AvgPool2d Output Shape...")
 
     # Standard 2x2 pooling: halves dimensions
     pool = AvgPool2d(kernel_size=2, stride=2)
@@ -1942,14 +1899,14 @@ def test_unit_avgpool2d_output_shape():
     oh, ow = pool_overlap._compute_pool_output_shape(5, 5)
     assert (oh, ow) == (3, 3), f"Overlapping: expected (3, 3), got ({oh}, {ow})"
 
-    print("AvgPool2d output shape computation works correctly!")
+    print("✅ AvgPool2d output shape computation works correctly!")
 
 if __name__ == "__main__":
     test_unit_avgpool2d_output_shape()
 
 # %% [markdown]
 """
-### Unit Test: AvgPool2d Loops
+### 🧪 Unit Test: AvgPool2d Loops
 
 This test validates that `_avgpool_loops` correctly computes the mean of
 each pooling window.
@@ -1957,8 +1914,8 @@ each pooling window.
 ```
 AvgPool2d sliding window (2x2, stride 2):
 ┌─────┬─────┐    ┌───────────┐
-│ 1 2 │ 3 4 │    │ 3.5   5.5 │
-│ 5 6 │ 7 8 │ -> │11.5  13.5 │
+│ 1 2 │ 3 4 │    │  3.5  5.5 │
+│ 5 6 │ 7 8 │ -> │ 11.5 13.5 │
 ├─────┼─────┤    └───────────┘
 │ 9 10│11 12│
 │13 14│15 16│
@@ -1973,11 +1930,9 @@ Top-left: (1+2+5+6)/4 = 3.5
 """
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-loops", "locked": true, "points": 7}
-
-
 def test_unit_avgpool2d_loops():
-    """Test AvgPool2d._avgpool_loops with known values."""
-    print("Testing AvgPool2d loops...")
+    """🧪 Test AvgPool2d._avgpool_loops with known values."""
+    print("🧪 Unit Test: AvgPool2d Loops...")
 
     pool = AvgPool2d(kernel_size=2, stride=2)
 
@@ -2002,14 +1957,14 @@ def test_unit_avgpool2d_loops():
     max_output = pool_max._maxpool_loops(padded, 1, 1, 2, 2)
     assert np.all(output <= max_output), "Average should always be <= maximum"
 
-    print("AvgPool2d loops work correctly!")
+    print("✅ AvgPool2d loops work correctly!")
 
 if __name__ == "__main__":
     test_unit_avgpool2d_loops()
 
 # %% [markdown]
 """
-## 🏗️ Batch Normalization - Stabilizing Deep Network Training
+## 🏗️ Batch Normalization: Stabilizing Deep Network Training
 
 Batch Normalization (BatchNorm) is one of the most important techniques for training deep networks. It normalizes activations across the batch dimension, dramatically improving training stability and speed.
 
@@ -2063,8 +2018,124 @@ current batch                      consistent inference
 **Why this matters**: During inference, you might process just 1 image. Batch statistics from 1 sample would be meaningless. Running statistics provide stable normalization.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "batchnorm2d-class", "solution": true}
+# %% [markdown]
+"""
+### The Backward Pass: Why BatchNorm Needs Its Own Function
 
+Every other layer in this module -- `Conv2d`, `MaxPool2d`, `AvgPool2d` -- pairs
+its forward pass with an explicit `Function` subclass. BatchNorm needs one too, and
+its gradient is the most interesting of the four.
+
+The reason is that `μ` and `σ²` are **computed from the batch**. In every layer
+so far, changing one input element changed one region of the output. Here,
+changing a single pixel shifts the mean and the variance, which shifts *every
+other* normalized value in that channel. The gradient has to account for all
+three routes:
+
+```
+                      ┌──────────────► (direct)
+x ──┬─────────────────┤
+    ├──► μ  ──────────┼──────────────► x̂ ──► γx̂+β ──► y
+    └──► σ² ──────────┘
+```
+
+Collapsing those three paths gives the standard form, where sums run over the
+batch and spatial axes and N = batch x height x width:
+
+```
+dx = (1/N) · (1/σ) · [ N·dx̂  -  Σ dx̂  -  x̂ · Σ(dx̂ · x̂) ]
+                        │        │              │
+                    direct   through μ     through σ²
+```
+
+In **eval mode** none of this applies: the statistics are frozen constants read
+from `running_mean` / `running_var`, so no gradient flows through them and the
+whole thing collapses to `dx = dx̂ / σ`. Same layer, two different backward
+passes, decided by a boolean.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "batchnorm2d-backward", "solution": false}
+#| export
+class BatchNorm2dFunction(Function):
+    """
+    The BatchNorm2d operation: normalize with the given statistics, then scale and shift.
+
+    Computes gradients for x, gamma, and beta in one pass.
+    output = gamma * ((x - mean) / sqrt(var + eps)) + beta
+
+    In training mode the batch statistics depend on x, so the gradient for x
+    carries three terms. In eval mode the statistics are frozen constants and
+    only the direct term survives.
+    """
+
+    def forward(self, x, gamma, beta):
+        """Normalize with self.mean / self.var (chosen by the layer), then scale and shift."""
+        channels = x.shape[1]
+        mean_reshaped = np.asarray(self.mean).reshape(1, channels, 1, 1)
+        var_reshaped = np.asarray(self.var).reshape(1, channels, 1, 1)
+        # Keep 1/std: the forward needs it, and so does every term of the backward
+        self.inv_std = 1.0 / np.sqrt(var_reshaped + self.eps)
+        self.normalized_data = (np.asarray(x) - mean_reshaped) * self.inv_std
+        gamma_reshaped = np.asarray(gamma).reshape(1, channels, 1, 1)
+        beta_reshaped = np.asarray(beta).reshape(1, channels, 1, 1)
+        return gamma_reshaped * self.normalized_data + beta_reshaped
+
+
+    def backward(self, grad_output):
+        """Compute gradients for BatchNorm2d (x, gamma, beta)."""
+        x, gamma, beta = self.inputs
+
+        grad_x = grad_gamma = grad_beta = None
+        normalized = self.normalized_data
+        reduce_axes = (0, 2, 3)   # everything except the channel axis
+
+        # Gradient for beta: it was added to every position, so sum them all back
+        if isinstance(beta, Tensor) and beta.requires_grad:
+            grad_beta = grad_output.sum(axis=reduce_axes)
+
+        # Gradient for gamma: it scaled the normalized values
+        if isinstance(gamma, Tensor) and gamma.requires_grad:
+            grad_gamma = (grad_output * normalized).sum(axis=reduce_axes)
+
+        # Gradient for x
+        if isinstance(x, Tensor) and x.requires_grad:
+            gamma_data = gamma.data if isinstance(gamma, Tensor) else gamma
+            channels = normalized.shape[1]
+            grad_norm = grad_output * np.asarray(gamma_data).reshape(1, channels, 1, 1)
+
+            if self.training:
+                # Batch statistics depend on x, so all three paths contribute.
+                n = normalized.shape[0] * normalized.shape[2] * normalized.shape[3]
+                sum_grad = grad_norm.sum(axis=reduce_axes, keepdims=True)
+                sum_grad_norm = (grad_norm * normalized).sum(axis=reduce_axes, keepdims=True)
+                grad_x = (self.inv_std / n) * (
+                    n * grad_norm - sum_grad - normalized * sum_grad_norm
+                )
+            else:
+                # Frozen statistics are constants: only the direct path survives.
+                grad_x = grad_norm * self.inv_std
+
+        return (grad_x, grad_gamma, grad_beta)
+
+# %% [markdown]
+"""
+### BatchNorm2d: The Layer Itself
+
+With the gradient rules in place, the layer is the easier half. It holds two
+learnable parameters and two running statistics, and it behaves differently
+depending on which mode it is in.
+
+```
+Training:  normalize with THIS BATCH's mean/var,  update the running stats
+Eval:      normalize with the RUNNING mean/var,   update nothing
+```
+
+That mode switch is the part people get wrong in production. A model left in
+training mode at inference time normalizes a batch of one against itself, which
+produces all zeros before gamma and beta -- confident, stable, and meaningless.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "batchnorm2d-class", "solution": true}
 #| export
 
 class BatchNorm2d:
@@ -2103,8 +2174,6 @@ class BatchNorm2d:
         >>> print(bn.gamma.shape)  # (64,)
         >>> print(bn.training)     # True
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         self.num_features = num_features
         self.eps = eps
@@ -2237,30 +2306,20 @@ class BatchNorm2d:
 
         HINTS:
         - Reshape mean/var/gamma/beta to (1, C, 1, 1) for broadcasting
+        - Run the normalization through BatchNorm2dFunction.apply, like Conv2d
+          runs through Conv2dFunction.apply. A Tensor built by hand would
+          advertise no gradients, the optimizer would update nothing, and the
+          network would silently not learn
         """
         ### BEGIN SOLUTION
         self._validate_input(x)
 
         batch_size, channels, height, width = x.shape
         mean, var = self._get_stats(x)
-
-        # Normalize: (x - mean) / sqrt(var + eps)
-        # Reshape mean and var for broadcasting: (C,) -> (1, C, 1, 1)
-        mean_reshaped = mean.reshape(1, channels, 1, 1)
-        var_reshaped = var.reshape(1, channels, 1, 1)
-
-        x_normalized = (x.data - mean_reshaped) / np.sqrt(var_reshaped + self.eps)
-
-        # Apply scale (gamma) and shift (beta)
-        gamma_reshaped = self.gamma.data.reshape(1, channels, 1, 1)
-        beta_reshaped = self.beta.data.reshape(1, channels, 1, 1)
-
-        output = gamma_reshaped * x_normalized + beta_reshaped
-
-        # Return Tensor with gradient tracking
-        result = Tensor(output, requires_grad=x.requires_grad or self.gamma.requires_grad)
-
-        return result
+        # Normalize, scale, and shift inside the operation; Module 06's apply()
+        # records it so gamma and beta actually train.
+        return BatchNorm2dFunction.apply(x, self.gamma, self.beta,
+                                         mean=mean, var=var, eps=self.eps, training=self.training)
         ### END SOLUTION
 
     def parameters(self):
@@ -2364,8 +2423,6 @@ This test validates batch normalization implementation.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d", "locked": true, "points": 10}
-
-
 def test_unit_batchnorm2d():
     """🧪 Test BatchNorm2d implementation."""
     print("🧪 Unit Test: BatchNorm2d...")
@@ -2447,6 +2504,96 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+### 🧪 Unit Test: BatchNorm2d Gradients
+
+**What we're testing**: That gamma and beta receive gradients, and that the
+analytic backward matches a numerical estimate
+**Why it matters**: BatchNorm's parameters are handed to the optimizer. If no
+gradient reaches them the layer looks fine, trains fine, and learns nothing --
+the failure is invisible from the forward pass alone
+**Expected**: Non-None gradients of the right shape, matching finite differences
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d-grad", "locked": true, "points": 10}
+def test_unit_batchnorm2d_gradients():
+    """🧪 Test BatchNorm2d gradient flow."""
+    print("🧪 Unit Test: BatchNorm2d Gradients...")
+
+    # Test 1: gradients actually arrive
+    print("  Testing gradients reach gamma and beta...")
+    bn = BatchNorm2d(num_features=3)
+    x = Tensor(rng.standard_normal((4, 3, 2, 2)), requires_grad=True)
+    out = bn(x)
+
+    assert out._grad_fn is not None, \
+        "BatchNorm output has no _grad_fn: backward() will silently do nothing"
+
+    out.sum().backward()
+
+    assert bn.gamma.grad is not None, "gamma received no gradient -- it will never train"
+    assert bn.beta.grad is not None, "beta received no gradient -- it will never train"
+    assert x.grad is not None, "no gradient reached the input: the graph is severed here"
+    assert bn.gamma.grad.shape == (3,), f"gamma grad shape {bn.gamma.grad.shape}, expected (3,)"
+    assert bn.beta.grad.shape == (3,), f"beta grad shape {bn.beta.grad.shape}, expected (3,)"
+
+    # beta is added to every position, so its gradient is that position count
+    expected_beta_grad = 4 * 2 * 2
+    assert np.allclose(np.asarray(bn.beta.grad.data), expected_beta_grad), \
+        f"d(sum)/d(beta) should be N*H*W={expected_beta_grad} per channel"
+
+    # Test 2: analytic gradient matches finite differences
+    print("  Testing against numerical gradients...")
+    bn2 = BatchNorm2d(num_features=2)
+    bn2.gamma = Tensor(np.array([1.3, 0.7]), requires_grad=True)
+    bn2.beta = Tensor(np.array([0.2, -0.4]), requires_grad=True)
+
+    x_data = rng.standard_normal((3, 2, 2, 2))
+    weights = rng.standard_normal((3, 2, 2, 2))   # random projection to a scalar
+
+    def scalar_loss():
+        probe = BatchNorm2d(num_features=2)
+        probe.gamma, probe.beta = bn2.gamma, bn2.beta
+        return float((np.asarray(probe(Tensor(x_data)).data) * weights).sum())
+
+    xt = Tensor(x_data, requires_grad=True)
+    (bn2(xt) * Tensor(weights)).sum().backward()
+    analytic = np.asarray(xt.grad.data)
+
+    # h=1e-2: large enough that float32 round-off does not swamp the difference,
+    # small enough that the second-order truncation term stays negligible
+    h = 1e-2
+    numerical = np.zeros_like(x_data)
+    it = np.nditer(x_data, flags=['multi_index'])
+    while not it.finished:
+        idx = it.multi_index
+        original = x_data[idx]
+        x_data[idx] = original + h
+        high = scalar_loss()
+        x_data[idx] = original - h
+        low = scalar_loss()
+        x_data[idx] = original
+        numerical[idx] = (high - low) / (2 * h)
+        it.iternext()
+
+    assert np.allclose(analytic, numerical, atol=1e-3), \
+        f"Analytic and numerical gradients disagree: max diff {np.abs(analytic - numerical).max():.2e}"
+
+    # Test 3: eval mode still delivers gradients, via the simpler path
+    print("  Testing eval mode gradients...")
+    bn3 = BatchNorm2d(num_features=3)
+    bn3.eval()
+    x3 = Tensor(rng.standard_normal((2, 3, 2, 2)), requires_grad=True)
+    bn3(x3).sum().backward()
+    assert bn3.gamma.grad is not None, "gamma should still train when statistics are frozen"
+    assert x3.grad is not None, "gradient should still reach the input in eval mode"
+
+    print("✅ BatchNorm2d gradients work correctly!")
+
+if __name__ == "__main__":
+    test_unit_batchnorm2d_gradients()
+
+# %% [markdown]
+"""
 ### 🧪 Unit Test: Pooling Operations
 
 This test validates both max and average pooling implementations.
@@ -2457,8 +2604,6 @@ This test validates both max and average pooling implementations.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-pooling", "locked": true, "points": 10}
-
-
 def test_unit_pooling():
     """🧪 Test MaxPool2d and AvgPool2d implementations."""
     print("🧪 Unit Test: Pooling Operations...")
@@ -2529,6 +2674,323 @@ if __name__ == "__main__":
     test_unit_pooling()
 
 # %% [markdown]
+r"""
+## 🔧 Integration: Building a Complete CNN
+
+Now let's combine convolution and pooling into a complete CNN architecture. You'll see how spatial operations work together to transform raw pixels into meaningful features.
+
+### CNN Architecture: From Pixels to Predictions
+
+A CNN processes images through alternating convolution and pooling layers, gradually extracting higher-level features:
+
+```
+Complete CNN Pipeline:
+
+Input Image (32×32×3)    Raw RGB pixels
+       ↓
+Conv2d(3→16, 3×3)        Detect edges, textures
+       ↓
+ReLU Activation          Remove negative values
+       ↓
+MaxPool(2×2)             Reduce to (16×16×16)
+       ↓
+Conv2d(16→32, 3×3)       Detect shapes, patterns
+       ↓
+ReLU Activation          Remove negative values
+       ↓
+MaxPool(2×2)             Reduce to (8×8×32)
+       ↓
+Flatten                  Reshape to vector (2048,)
+       ↓
+Linear(2048→10)          Final classification
+       ↓
+Softmax                  Probability distribution
+```
+
+### The Parameter Efficiency Story
+
+```
+CNN vs Dense Network Comparison:
+
+CNN Approach:                     Dense Approach:
+┌─────────────────┐               ┌─────────────────┐
+│ Conv1: 3→16     │               │ Input: 32×32×3  │
+│ Params: 448     │               │ = 3,072 values  │
+├─────────────────┤               ├─────────────────┤
+│ Conv2: 16→32    │               │ Hidden: 1,000   │
+│ Params: 4,640   │               │ Params: 3M+     │
+├─────────────────┤               ├─────────────────┤
+│ Linear: 2048→10 │               │ Output: 10      │
+│ Params: 20,490  │               │ Params: 10K     │
+└─────────────────┘               └─────────────────┘
+Total: ~25K params                Total: ~3M params
+
+CNN wins with 120× fewer parameters!
+```
+
+### Spatial Hierarchy: Why This Architecture Works
+
+```
+Layer-by-Layer Feature Evolution:
+
+Layer 1 (Conv 3→16):              Layer 2 (Conv 16→32):
+┌──────┐ ┌──────┐ ┌──────┐        ┌───────┐ ┌────────┐ ┌─────────┐
+│ Edge │ │ Edge │ │ Edge │        │ Shape │ │ Corner │ │ Texture │
+│  \ / │ │  |   │ │  / \ │        │   ◇   │ │    L   │ │  ≈≈≈≈≈  │
+└──────┘ └──────┘ └──────┘        └───────┘ └────────┘ └─────────┘
+Simple features                   Complex combinations
+
+Why pooling between layers:
+✓ Reduces computation for next layer
+✓ Increases receptive field (each conv sees larger input area)
+✓ Provides translation invariance (cat moved 1 pixel still detected)
+```
+
+This hierarchical approach mirrors human vision: we first detect edges, then shapes, then objects!
+"""
+
+# %% [markdown]
+"""
+### SimpleCNN Implementation: Putting It All Together
+
+Now we'll build a complete CNN that demonstrates how convolution and pooling work together. This is your first step from processing individual tensors to understanding complete images!
+
+#### The CNN Architecture Pattern
+
+```
+SimpleCNN Architecture Visualization:
+
+Input: (batch, 3, 32, 32)     ← RGB images
+         ↓
+┌─────────────────────────┐
+│ Conv2d(3→16, 3×3, p=1)  │    ← Detect edges, textures
+│ ReLU()                  │    ← Remove negative values
+│ MaxPool(2×2)            │    ← Reduce to (batch, 16, 16, 16)
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│ Conv2d(16→32, 3×3, p=1) │   ← Detect shapes, patterns
+│ ReLU()                  │   ← Remove negative values
+│ MaxPool(2×2)            │   ← Reduce to (batch, 32, 8, 8)
+└─────────────────────────┘
+         ↓
+┌─────────────────────────┐
+│ Flatten()               │   ← Reshape to (batch, 2048)
+│ Linear(2048→10)         │   ← Final classification
+└─────────────────────────┘
+         ↓
+Output: (batch, 10)           ← Class probabilities
+```
+
+#### Why This Architecture Works
+
+```
+Feature Hierarchy Development:
+
+Raw RGB images → simple features → complex combinations → class prediction
+
+Spatial Dimension Reduction:
+32×32 → 16×16 → 8×8
+1024     256    64  (per channel)
+
+Channel Expansion:
+3 → 16 → 32
+More feature types at each level
+```
+
+#### Parameter Efficiency Demonstration
+
+```
+CNN vs Dense Comparison for 32×32×3 → 10 classes:
+
+CNN Approach:                    Dense Approach:
+┌────────────────────┐          ┌────────────────────┐
+│ Conv1: 3→16, 3×3   │          │ Input: 3072 values │
+│ Params: 448        │          │        ↓           │
+├────────────────────┤          │ Dense: 3072→512    │
+│ Conv2: 16→32, 3×3  │          │ Params: 1.57M      │
+│ Params: 4,640      │          ├────────────────────┤
+├────────────────────┤          │ Dense: 512→10      │
+│ Dense: 2048→10     │          │ Params: 5,130      │
+│ Params: 20,490     │          └────────────────────┘
+└────────────────────┘          Total: 1.58M params
+Total: 25,578 params
+
+CNN has 62× fewer parameters while preserving spatial structure!
+```
+
+#### Receptive Field Growth
+
+```
+How each layer sees progressively larger input regions:
+
+Layer 1 Conv (3×3):           Layer 2 Conv (3×3):
+Each output pixel sees        Each output pixel sees
+3×3 = 9 input pixels          8×8 = 64 input pixels
+                              (after conv, pooling, and conv)
+
+Final Result: Layer 2 can detect complex patterns
+spanning 8×8 regions of original image!
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "simple-cnn", "solution": true}
+#| export
+
+class SimpleCNN:
+    """
+    Simple CNN demonstrating spatial operations integration.
+
+    Architecture:
+    - Conv2d(3→16, 3×3) + ReLU + MaxPool(2×2)
+    - Conv2d(16→32, 3×3) + ReLU + MaxPool(2×2)
+    - Flatten + Linear(features→num_classes)
+    """
+
+    def __init__(self, num_classes=10):
+        """
+        Initialize SimpleCNN.
+
+        TODO: Build CNN architecture with spatial and dense layers
+
+        APPROACH:
+        1. Conv layer 1: 3 → 16 channels, 3×3 kernel, padding=1
+        2. Pool layer 1: 2×2 max pooling
+        3. Conv layer 2: 16 → 32 channels, 3×3 kernel, padding=1
+        4. Pool layer 2: 2×2 max pooling
+        5. Calculate flattened size and add the final Linear layer (Module 03)
+
+        HINT: For 32×32 input → 32 → 16 → 8 spatial reduction
+        Final feature size: 32 channels × 8 × 8 = 2048 features
+        Linear(in_features, out_features) maps those 2048 features to num_classes logits
+        """
+        ### BEGIN SOLUTION
+        # Convolutional layers
+        self.conv1 = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+        self.pool1 = MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv2 = Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.pool2 = MaxPool2d(kernel_size=2, stride=2)
+
+        # Calculate flattened size
+        # Input: 32×32 → Conv1+Pool1: 16×16 → Conv2+Pool2: 8×8
+        # Final: 32 channels × 8 × 8 = 2048 features
+        self.flattened_size = 32 * 8 * 8
+
+        # Classification head: the Linear layer from Module 03
+        self.fc = Linear(self.flattened_size, num_classes)
+        self.relu = ReLU()
+        self.num_classes = num_classes
+        ### END SOLUTION
+
+    def forward(self, x):
+        """
+        Forward pass through SimpleCNN.
+
+        TODO: Implement CNN forward pass
+
+        APPROACH:
+        1. Apply conv1 → ReLU → pool1
+        2. Apply conv2 → ReLU → pool2
+        3. Flatten spatial dimensions
+        4. Apply the final Linear layer to get class logits
+
+        EXAMPLE:
+        >>> model = SimpleCNN(num_classes=10)
+        >>> logits = model(Tensor(rng.standard_normal((2, 3, 32, 32))))
+        >>> print(logits.shape)  # (2, 10)
+        """
+        ### BEGIN SOLUTION
+        # First conv block
+        x = self.conv1(x)
+        x = self.relu(x)  # ReLU activation
+        x = self.pool1(x)
+
+        # Second conv block
+        x = self.conv2(x)
+        x = self.relu(x)  # ReLU activation
+        x = self.pool2(x)
+
+        # Flatten for classification (reshape to 2D)
+        batch_size = x.shape[0]
+        x = x.reshape(batch_size, -1)
+
+        # Classification head
+        return self.fc(x)
+        ### END SOLUTION
+
+    def parameters(self):
+        """Return all trainable parameters."""
+        params = []
+        params.extend(self.conv1.parameters())
+        params.extend(self.conv2.parameters())
+        params.extend(self.fc.parameters())
+        return params
+
+    def __call__(self, x):
+        """Enable model(x) syntax."""
+        return self.forward(x)
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: SimpleCNN Integration
+
+This test validates that spatial operations work together in a complete CNN architecture.
+
+**What we're testing**: End-to-end spatial processing pipeline
+**Why it matters**: Spatial operations must compose correctly for real CNNs
+**Expected**: Proper dimension reduction and one logit per class
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-simple-cnn", "locked": true, "points": 10}
+
+
+def test_unit_simple_cnn():
+    """🧪 Test SimpleCNN integration with spatial operations."""
+    print("🧪 Unit Test: SimpleCNN Integration...")
+
+    # Test 1: Forward pass with CIFAR-10 sized input
+    print("  Testing forward pass...")
+    model = SimpleCNN(num_classes=10)
+    x = Tensor(rng.standard_normal((2, 3, 32, 32)))  # Batch of 2, RGB, 32×32
+
+    logits = model(x)
+
+    # Expected: 2 samples, one logit per class
+    expected_shape = (2, 10)
+    assert logits.shape == expected_shape, f"Expected {expected_shape}, got {logits.shape}"
+
+    # Test 2: Parameter counting
+    print("  Testing parameter counting...")
+    params = model.parameters()
+
+    # Conv1: (16, 3, 3, 3) + bias (16,) = 432 + 16 = 448
+    # Conv2: (32, 16, 3, 3) + bias (32,) = 4608 + 32 = 4640
+    # Linear: (2048, 10) + bias (10,) = 20480 + 10 = 20490
+    # Total: 448 + 4640 + 20490 = 25578 parameters
+
+    conv1_params = 16 * 3 * 3 * 3 + 16  # weights + bias
+    conv2_params = 32 * 16 * 3 * 3 + 32  # weights + bias
+    fc_params = 2048 * 10 + 10  # weights + bias
+    expected_total = conv1_params + conv2_params + fc_params
+
+    actual_total = sum(np.prod(p.shape) for p in params)
+    assert actual_total == expected_total, f"Expected {expected_total} parameters, got {actual_total}"
+
+    # Test 3: Batch processing
+    print("  Testing batch processing...")
+    x_batch = Tensor(rng.standard_normal((8, 3, 32, 32)))
+    logits_batch = model(x_batch)
+
+    expected_batch = (8, 10)
+    assert logits_batch.shape == expected_batch, f"Expected {expected_batch}, got {logits_batch.shape}"
+
+    print("✅ SimpleCNN integration works correctly!")
+
+if __name__ == "__main__":
+    test_unit_simple_cnn()
+
+# %% [markdown]
 """
 ## 📊 Systems Analysis: Spatial Operation Performance
 
@@ -2537,9 +2999,7 @@ Let's understand ONE key systems concept: **computational complexity and memory 
 This single analysis reveals why certain design choices matter for real-world performance, and why modern CNNs use specific architectural patterns.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": true}
-
-
+# %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": false}
 def analyze_convolution_complexity():
     """📊 Analyze convolution computational complexity across different configurations."""
     print("📊 Analyzing Convolution Complexity...")
@@ -2593,13 +3053,10 @@ def analyze_convolution_complexity():
     print("🔸 Large kernels dramatically increase computational cost")
     print("🚀 This motivates more efficient convolution variants that reduce computational cost")
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_convolution_complexity()
 
-# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": true}
-
-
+# %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": false}
 def analyze_pooling_effects():
     """📊 Analyze pooling's impact on spatial dimensions and features."""
     print("\n📊 Analyzing Pooling Effects...")
@@ -2641,352 +3098,8 @@ def analyze_pooling_effects():
     print("🔸 Larger pooling windows lose more spatial detail")
     print("🚀 Choice depends on task: classification vs detection vs segmentation")
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_pooling_effects()
-
-# %% [markdown]
-"""
-## 🔧 Integration - Building a Complete CNN
-
-Now let's combine convolution and pooling into a complete CNN architecture. You'll see how spatial operations work together to transform raw pixels into meaningful features.
-
-### CNN Architecture: From Pixels to Predictions
-
-A CNN processes images through alternating convolution and pooling layers, gradually extracting higher-level features:
-
-```
-Complete CNN Pipeline:
-
-Input Image (32×32×3)     Raw RGB pixels
-       ↓
-Conv2d(3→16, 3×3)        Detect edges, textures
-       ↓
-ReLU Activation          Remove negative values
-       ↓
-MaxPool(2×2)             Reduce to (16×16×16)
-       ↓
-Conv2d(16→32, 3×3)       Detect shapes, patterns
-       ↓
-ReLU Activation          Remove negative values
-       ↓
-MaxPool(2×2)             Reduce to (8×8×32)
-       ↓
-Flatten                  Reshape to vector (2048,)
-       ↓
-Linear(2048→10)          Final classification
-       ↓
-Softmax                  Probability distribution
-```
-
-### The Parameter Efficiency Story
-
-```
-CNN vs Dense Network Comparison:
-
-CNN Approach:                     Dense Approach:
-┌─────────────────┐               ┌─────────────────┐
-│ Conv1: 3→16     │               │ Input: 32×32×3  │
-│ Params: 448     │               │ = 3,072 values  │
-├─────────────────┤               ├─────────────────┤
-│ Conv2: 16→32    │               │ Hidden: 1,000   │
-│ Params: 4,640   │               │ Params: 3M+     │
-├─────────────────┤               ├─────────────────┤
-│ Linear: 2048→10 │               │ Output: 10      │
-│ Params: 20,490  │               │ Params: 10K     │
-└─────────────────┘               └─────────────────┘
-Total: ~25K params                Total: ~3M params
-
-CNN wins with 120× fewer parameters!
-```
-
-### Spatial Hierarchy: Why This Architecture Works
-
-```
-Layer-by-Layer Feature Evolution:
-
-Layer 1 (Conv 3→16):              Layer 2 (Conv 16→32):
-┌─────┐ ┌─────┐ ┌─────┐           ┌─────┐ ┌──────┐ ┌───────┐
-│Edge │ │Edge │ │Edge │           │Shape│ │Corner│ │Texture│
-│ \\ /│ │  |  │ │ / \\│           │ ◇   │ │  L   │ │ ≈≈≈≈≈ │
-└─────┘ └─────┘ └─────┘           └─────┘ └──────┘ └───────┘
-Simple features                   Complex combinations
-
-Why pooling between layers:
-✓ Reduces computation for next layer
-✓ Increases receptive field (each conv sees larger input area)
-✓ Provides translation invariance (cat moved 1 pixel still detected)
-```
-
-This hierarchical approach mirrors human vision: we first detect edges, then shapes, then objects!
-"""
-
-# %% [markdown]
-"""
-### SimpleCNN Implementation - Putting It All Together
-
-Now we'll build a complete CNN that demonstrates how convolution and pooling work together. This is your first step from processing individual tensors to understanding complete images!
-
-#### The CNN Architecture Pattern
-
-```
-SimpleCNN Architecture Visualization:
-
-Input: (batch, 3, 32, 32)     ← RGB images (CIFAR-10 size)
-         ↓
-┌─────────────────────────┐
-│ Conv2d(3→16, 3×3, p=1)  │    ← Detect edges, textures
-│ ReLU()                  │    ← Remove negative values
-│ MaxPool(2×2)            │    ← Reduce to (batch, 16, 16, 16)
-└─────────────────────────┘
-         ↓
-┌─────────────────────────┐
-│ Conv2d(16→32, 3×3, p=1) │   ← Detect shapes, patterns
-│ ReLU()                  │   ← Remove negative values
-│ MaxPool(2×2)            │   ← Reduce to (batch, 32, 8, 8)
-└─────────────────────────┘
-         ↓
-┌─────────────────────────┐
-│ Flatten()               │   ← Reshape to (batch, 2048)
-│ Linear(2048→10)         │   ← Final classification
-└─────────────────────────┘
-         ↓
-Output: (batch, 10)           ← Class probabilities
-```
-
-#### Why This Architecture Works
-
-```
-Feature Hierarchy Development:
-
-Layer 1 Features (3→16):     Layer 2 Features (16→32):
-┌─────┬─────┬─────┬─────┐   ┌─────┬─────┬─────┬─────┐
-│Edge │Edge │Edge │Blob │   │Shape│Corner│Tex-│Pat- │
-│ \\  │  |  │ /   │  ○  │   │ ◇   │  L  │ture│tern  │
-└─────┴─────┴─────┴─────┘   └─────┴─────┴─────┴─────┘
-Simple features             Complex combinations
-
-Spatial Dimension Reduction:
-32×32 → 16×16 → 8×8
- 1024    256     64  (per channel)
-
-Channel Expansion:
-3 → 16 → 32
-More feature types at each level
-```
-
-#### Parameter Efficiency Demonstration
-
-```
-CNN vs Dense Comparison for 32×32×3 → 10 classes:
-
-CNN Approach:                    Dense Approach:
-┌────────────────────┐          ┌────────────────────┐
-│ Conv1: 3→16, 3×3   │          │ Input: 3072 values │
-│ Params: 448        │          │        ↓           │
-├────────────────────┤          │ Dense: 3072→512    │
-│ Conv2: 16→32, 3×3  │          │ Params: 1.57M      │
-│ Params: 4,640      │          ├────────────────────┤
-├────────────────────┤          │ Dense: 512→10      │
-│ Dense: 2048→10     │          │ Params: 5,120      │
-│ Params: 20,490     │          └────────────────────┘
-└────────────────────┘          Total: 1.58M params
-Total: 25,578 params
-
-CNN has 62× fewer parameters while preserving spatial structure!
-```
-
-#### Receptive Field Growth
-
-```
-How each layer sees progressively larger input regions:
-
-Layer 1 Conv (3×3):           Layer 2 Conv (3×3):
-Each output pixel sees        Each output pixel sees
-3×3 = 9 input pixels         7×7 = 49 input pixels
-                             (due to pooling+conv)
-
-Final Result: Layer 2 can detect complex patterns
-spanning 7×7 regions of original image!
-```
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "simple-cnn", "solution": true}
-
-#| export
-
-class SimpleCNN:
-    """
-    Simple CNN demonstrating spatial operations integration.
-
-    Architecture:
-    - Conv2d(3→16, 3×3) + ReLU + MaxPool(2×2)
-    - Conv2d(16→32, 3×3) + ReLU + MaxPool(2×2)
-    - Flatten + Linear(features→num_classes)
-    """
-
-    def __init__(self, num_classes=10):
-        """
-        Initialize SimpleCNN.
-
-        TODO: Build CNN architecture with spatial and dense layers
-
-        APPROACH:
-        1. Conv layer 1: 3 → 16 channels, 3×3 kernel, padding=1
-        2. Pool layer 1: 2×2 max pooling
-        3. Conv layer 2: 16 → 32 channels, 3×3 kernel, padding=1
-        4. Pool layer 2: 2×2 max pooling
-        5. Calculate flattened size and add final linear layer
-
-        HINT: For 32×32 input → 32→16→8 spatial reduction
-        Final feature size: 32 channels × 8×8 = 2048 features
-        """
-        super().__init__()
-
-        ### BEGIN SOLUTION
-        # Convolutional layers
-        self.conv1 = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-        self.pool1 = MaxPool2d(kernel_size=2, stride=2)
-
-        self.conv2 = Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
-        self.pool2 = MaxPool2d(kernel_size=2, stride=2)
-
-        # Calculate flattened size
-        # Input: 32×32 → Conv1+Pool1: 16×16 → Conv2+Pool2: 8×8
-        # Wait, let's recalculate: 32×32 → Pool1: 16×16 → Pool2: 8×8
-        # Final: 32 channels × 8×8 = 2048 features
-        self.flattened_size = 32 * 8 * 8
-
-        # Import Linear layer (we'll implement a simple version)
-        # For now, we'll use a placeholder that we can replace
-        # This represents the final classification layer
-        self.num_classes = num_classes
-        self.flattened_size = 32 * 8 * 8  # Will be used when we add Linear layer
-        ### END SOLUTION
-
-    def forward(self, x):
-        """
-        Forward pass through SimpleCNN.
-
-        TODO: Implement CNN forward pass
-
-        APPROACH:
-        1. Apply conv1 → ReLU → pool1
-        2. Apply conv2 → ReLU → pool2
-        3. Flatten spatial dimensions
-        4. Apply final linear layer (when available)
-
-        For now, return features before final linear layer
-        since we haven't imported Linear from layers module yet.
-        """
-        ### BEGIN SOLUTION
-        # First conv block
-        x = self.conv1(x)
-        x = self.relu(x)  # ReLU activation
-        x = self.pool1(x)
-
-        # Second conv block
-        x = self.conv2(x)
-        x = self.relu(x)  # ReLU activation
-        x = self.pool2(x)
-
-        # Flatten for classification (reshape to 2D)
-        batch_size = x.shape[0]
-        x = x.reshape(batch_size, -1)
-
-        # Return flattened features
-        # In a complete implementation, this would go through a Linear layer
-        return x
-        ### END SOLUTION
-
-    def relu(self, x):
-        """ReLU activation with gradient tracking for CNN."""
-        result_data = np.maximum(0, x.data)
-        result = Tensor(result_data)
-        if x.requires_grad:
-            result.requires_grad = True
-            result._grad_fn = ReLUBackward(x)
-        return result
-
-    def parameters(self):
-        """Return all trainable parameters."""
-        params = []
-        params.extend(self.conv1.parameters())
-        params.extend(self.conv2.parameters())
-        # Linear layer parameters would be added here
-        return params
-
-    def __call__(self, x):
-        """Enable model(x) syntax."""
-        return self.forward(x)
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: SimpleCNN Integration
-
-This test validates that spatial operations work together in a complete CNN architecture.
-
-**What we're testing**: End-to-end spatial processing pipeline
-**Why it matters**: Spatial operations must compose correctly for real CNNs
-**Expected**: Proper dimension reduction and feature extraction
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-simple-cnn", "locked": true, "points": 10}
-
-
-def test_unit_simple_cnn():
-    """🧪 Test SimpleCNN integration with spatial operations."""
-    print("🧪 Unit Test: SimpleCNN Integration...")
-
-    # Test 1: Forward pass with CIFAR-10 sized input
-    print("  Testing forward pass...")
-    model = SimpleCNN(num_classes=10)
-    x = Tensor(rng.standard_normal((2, 3, 32, 32)))  # Batch of 2, RGB, 32×32
-
-    features = model(x)
-
-    # Expected: 2 samples, 32 channels × 8×8 spatial = 2048 features
-    expected_shape = (2, 2048)
-    assert features.shape == expected_shape, f"Expected {expected_shape}, got {features.shape}"
-
-    # Test 2: Parameter counting
-    print("  Testing parameter counting...")
-    params = model.parameters()
-
-    # Conv1: (16, 3, 3, 3) + bias (16,) = 432 + 16 = 448
-    # Conv2: (32, 16, 3, 3) + bias (32,) = 4608 + 32 = 4640
-    # Total: 448 + 4640 = 5088 parameters
-
-    conv1_params = 16 * 3 * 3 * 3 + 16  # weights + bias
-    conv2_params = 32 * 16 * 3 * 3 + 32  # weights + bias
-    expected_total = conv1_params + conv2_params
-
-    actual_total = sum(np.prod(p.shape) for p in params)
-    assert actual_total == expected_total, f"Expected {expected_total} parameters, got {actual_total}"
-
-    # Test 3: Different input sizes
-    print("  Testing different input sizes...")
-
-    # Test with different spatial dimensions
-    x_small = Tensor(rng.standard_normal((1, 3, 16, 16)))
-    features_small = model(x_small)
-
-    # 16×16 → 8×8 → 4×4, so 32 × 4×4 = 512 features
-    expected_small = (1, 512)
-    assert features_small.shape == expected_small, f"Expected {expected_small}, got {features_small.shape}"
-
-    # Test 4: Batch processing
-    print("  Testing batch processing...")
-    x_batch = Tensor(rng.standard_normal((8, 3, 32, 32)))
-    features_batch = model(x_batch)
-
-    expected_batch = (8, 2048)
-    assert features_batch.shape == expected_batch, f"Expected {expected_batch}, got {features_batch.shape}"
-
-    print("✅ SimpleCNN integration works correctly!")
-
-if __name__ == "__main__":
-    test_unit_simple_cnn()
 
 # %% [markdown]
 """
@@ -2996,8 +3109,6 @@ Final validation that everything works together correctly.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 15}
-
-
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -3034,6 +3145,7 @@ def test_module():
 
     # Remaining unit tests
     test_unit_batchnorm2d()
+    test_unit_batchnorm2d_gradients()
     test_unit_pooling()
     test_unit_simple_cnn()
 
@@ -3049,6 +3161,7 @@ def test_module():
     conv2 = Conv2d(8, 16, kernel_size=3, padding=1)
     bn2 = BatchNorm2d(16)
     pool2 = AvgPool2d(2, stride=2)
+    relu = ReLU()
 
     # Process batch of images (training mode)
     batch_images = Tensor(rng.standard_normal((4, 3, 32, 32)))
@@ -3056,12 +3169,12 @@ def test_module():
     # Forward pass: Conv → BatchNorm → ReLU → Pool (modern pattern)
     x = conv1(batch_images)  # (4, 8, 32, 32)
     x = bn1(x)               # (4, 8, 32, 32) - normalized
-    x = Tensor(np.maximum(0, x.data))  # ReLU
+    x = relu(x)
     x = pool1(x)             # (4, 8, 16, 16)
 
     x = conv2(x)             # (4, 16, 16, 16)
     x = bn2(x)               # (4, 16, 16, 16) - normalized
-    x = Tensor(np.maximum(0, x.data))  # ReLU
+    x = relu(x)
     features = pool2(x)      # (4, 16, 8, 8)
 
     # Validate shapes at each step
@@ -3125,19 +3238,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 09")
 
-# Run module test when this cell is executed
-if __name__ == "__main__":
-    test_module()
-
-
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of spatial operations and their systems implications:
 
-### 1. Conv2d Memory Footprint
+### Question 1: Conv2d Memory Footprint
 A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 - Calculate the memory footprint during the forward pass
 - Consider: input activations, output activations, filter weights, and biases
@@ -3147,7 +3254,7 @@ A Conv2d layer with 64 filters (3×3) processes a (224×224×3) image.
 
 ---
 
-### 2. Spatial Locality and CPU Performance
+### Question 2: Spatial Locality and CPU Performance
 Why are CNNs faster on CPUs than fully-connected networks of similar parameter count?
 
 **Consider**:
@@ -3159,7 +3266,7 @@ Why are CNNs faster on CPUs than fully-connected networks of similar parameter c
 
 ---
 
-### 3. Im2col Trade-off
+### Question 3: Im2col Trade-off
 The im2col algorithm transforms convolution into matrix multiplication, using more memory but speeding up computation.
 
 **When is this trade-off worthwhile?**
@@ -3172,7 +3279,7 @@ The im2col algorithm transforms convolution into matrix multiplication, using mo
 
 ---
 
-### 4. Pooling's Systems Benefits
+### Question 4: Pooling's Systems Benefits
 MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 
 **What's the systems benefit beyond reducing parameters?**
@@ -3185,7 +3292,7 @@ MaxPool2d reduces spatial dimensions (e.g., 224×224 → 112×112).
 
 ---
 
-### 5. Mobile ML Deployment
+### Question 5: Mobile ML Deployment
 Why do mobile ML models prefer depthwise-separable convolutions over standard Conv2d?
 
 **Analyze the FLOPs**:
@@ -3247,7 +3354,7 @@ if __name__ == "__main__":
 Congratulations! You've built the spatial processing foundation that powers computer vision!
 
 ### Key Accomplishments
-- **Built Conv2d** with explicit loops showing O(N^2 M^2 K^2) complexity
+- **Built Conv2d** with explicit loops showing the O(H·W·C_in·C_out·K²) cost
 - **Implemented BatchNorm2d** with train/eval mode and running statistics
 - **Implemented MaxPool2d and AvgPool2d** for spatial dimension reduction
 - **Created SimpleCNN** demonstrating spatial operation integration
@@ -3257,14 +3364,15 @@ Congratulations! You've built the spatial processing foundation that powers comp
 ### Systems Insights Discovered
 - **Convolution Complexity**: Quadratic scaling with spatial size; kernel size significantly impacts cost
 - **Batch Normalization**: Train vs eval mode is critical (batch stats during training, running stats during inference)
-- **Memory Patterns**: Pooling provides 4x memory reduction while preserving important features
+- **Memory Patterns**: Pooling provides 4× memory reduction while preserving important features
 - **Architecture Design**: Strategic spatial reduction enables parameter-efficient feature extraction
 - **Cache Performance**: Spatial locality in convolution benefits from optimal memory access patterns
 
 ### Ready for Next Steps
 Your spatial operations enable building complete CNNs for computer vision tasks!
 
-**Next**: Milestone 03 will combine your spatial operations with training pipeline to build a CNN for CIFAR-10!
 
 Export with: `tito module complete 09`
+
+**Next**: Milestone 04 will combine your spatial operations with training pipeline to build a CNN for CIFAR-10!
 """

@@ -44,12 +44,12 @@ export class ZooTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           return this.getHardwareDevices('Cloud', [
             ['H100 SXM5', '989 TFLOPS FP16, 80 GB HBM3, 3350 GB/s'],
             ['H200 SXM', '989 TFLOPS FP16, 141 GB HBM3e, 4800 GB/s'],
-            ['B200 SXM', '2250 TFLOPS FP16, 192 GB HBM3e, 8000 GB/s'],
+            ['B200 SXM', '2250 TFLOPS FP16, 180 GB HBM3e, 8000 GB/s'],
             ['A100 SXM', '312 TFLOPS FP16, 80 GB HBM2e, 2039 GB/s'],
             ['V100 SXM2', '125 TFLOPS FP16, 32 GB HBM2, 900 GB/s'],
             ['MI300X', '1307 TFLOPS FP16, 192 GB HBM3, 5300 GB/s'],
             ['TPU v5p', '459 TFLOPS BF16, 95 GB HBM2e, 2765 GB/s'],
-            ['T4', '65 TFLOPS FP16, 16 GB GDDR6, 300 GB/s'],
+            ['T4', '65 TFLOPS FP16, 16 GB GDDR6, 320 GB/s'],
           ]);
         case 'hw-workstation':
           return this.getHardwareDevices('Workstation', [

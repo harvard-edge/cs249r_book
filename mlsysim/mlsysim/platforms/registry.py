@@ -33,7 +33,7 @@ MOBILE_TDP_RANGE_W = "3-5"
 CLOUD_MEM_GIB = 100 * GiB
 MOBILE_MEM_GIB = 8 * GiB
 TINY_MEM_KIB = 512 * KiB
-SMARTPHONE_RAM_GB = 8 * GB
+SMARTPHONE_RAM_GIB = 8 * GiB
 MCU_RAM_KIB = 512 * KiB
 
 
@@ -53,7 +53,7 @@ class Platforms(Registry):
     )
     Edge = PlatformEnvelope(
         name="Edge",
-        ram=32 * GB,
+        ram=32 * GiB,
         storage=1 * TB,
         typical_latency_budget=50 * ureg.ms,
         latency_range_ms=EDGE_LATENCY_RANGE_MS,
@@ -63,7 +63,7 @@ class Platforms(Registry):
     )
     Mobile = PlatformEnvelope(
         name="Mobile",
-        ram=SMARTPHONE_RAM_GB,
+        ram=SMARTPHONE_RAM_GIB,
         storage=256 * GB,
         typical_latency_budget=30 * ureg.ms,
         latency_range_ms=MOBILE_LATENCY_RANGE_MS,
@@ -75,7 +75,7 @@ class Platforms(Registry):
     Tiny = PlatformEnvelope(
         name="TinyML",
         ram=MCU_RAM_KIB,
-        storage=4 * MB,
+        storage=4 * ureg.MiB,
         typical_latency_budget=100 * ureg.ms,
         latency_range_ms=TINY_LATENCY_RANGE_MS,
         ram_range=f"{TINY_MEM_KIB.to('KiB').magnitude:.0f} KiB",

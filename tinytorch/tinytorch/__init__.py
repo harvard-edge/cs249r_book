@@ -65,11 +65,10 @@ except ImportError:
 
 # Module 06: Autograd - Enable if available
 try:
-    from .core.autograd import enable_autograd
-    enable_autograd()
+    from .core import autograd  # completes every operation with its backward half
+    from .core.autograd import no_grad
 except ImportError:
-    enable_autograd = None
-    pass
+    no_grad = None
 
 # Module 07: Optimizers
 try:
@@ -167,7 +166,7 @@ __all__ = [
     'Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax',
     'Layer', 'Linear', 'Dropout', 'Sequential',
     'MSELoss', 'CrossEntropyLoss', 'BinaryCrossEntropyLoss',
-    'enable_autograd',
+    'no_grad',
     'SGD', 'Adam', 'AdamW',
     'Trainer', 'CosineSchedule', 'clip_grad_norm',
     # Data

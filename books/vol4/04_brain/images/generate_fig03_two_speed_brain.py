@@ -1,0 +1,116 @@
+import os
+
+def create_svg():
+    os.makedirs('images/svg', exist_ok=True)
+    
+    svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" width="1000" height="650">
+    <defs>
+        <style>
+            .text-title { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 24px; font-weight: bold; fill: #2D3748; }
+            .text-large { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 20px; font-weight: bold; fill: #2D3748; }
+            .text-medium { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: bold; fill: #2D3748; }
+            .text-small { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 14px; fill: #2D3748; }
+            .text-white { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 16px; font-weight: bold; fill: #FFFFFF; }
+            .text-blue { fill: #1F407A; }
+            .text-red { fill: #A51C30; }
+            
+            .box-untrusted { fill: #E2E8F0; stroke: #1F407A; stroke-width: 3; stroke-dasharray: 8 4; }
+            .box-trusted { fill: #E2E8F0; stroke: #A51C30; stroke-width: 3; }
+            .box-inner { fill: #FFFFFF; stroke: #2D3748; stroke-width: 2; }
+            
+            .boundary { stroke: #2D3748; stroke-width: 4; stroke-dasharray: 10 10; }
+            .arrow { stroke: #2D3748; stroke-width: 3; marker-end: url(#arrowhead); }
+            .arrow-red { stroke: #A51C30; stroke-width: 3; marker-end: url(#arrowhead-red); }
+            .arrow-blue { stroke: #1F407A; stroke-width: 3; marker-end: url(#arrowhead-blue); }
+        </style>
+        
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#2D3748" />
+        </marker>
+        <marker id="arrowhead-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#A51C30" />
+        </marker>
+        <marker id="arrowhead-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#1F407A" />
+        </marker>
+    </defs>
+
+    <!-- Background -->
+    <rect width="1000" height="650" fill="#FFFFFF" />
+
+    <!-- Title -->
+    <text x="500" y="50" text-anchor="middle" class="text-title">Two-Speed Brain Architecture &amp; Privilege Boundary</text>
+    
+    <!-- Boundary line -->
+    <line x1="500" y1="80" x2="500" y2="580" class="boundary" />
+    <rect x="360" y="70" width="280" height="30" rx="4" fill="#FFFFFF" stroke="#2D3748" stroke-width="2" />
+    <text x="500" y="91" text-anchor="middle" class="text-medium">Proposal–Permission Boundary</text>
+
+    <!-- Untrusted Realm -->
+    <rect x="50" y="120" width="410" height="440" rx="8" class="box-untrusted" />
+    <text x="255" y="160" text-anchor="middle" class="text-large text-blue">Untrusted Deliberative Realm</text>
+    <text x="255" y="185" text-anchor="middle" class="text-medium text-blue">Update Rate: 1 - 50 Hz</text>
+    <text x="255" y="210" text-anchor="middle" class="text-small text-blue">Complex, non-deterministic planning</text>
+    
+    <!-- AI Planner Box -->
+    <rect x="90" y="240" width="330" height="130" rx="6" class="box-inner" />
+    <text x="255" y="275" text-anchor="middle" class="text-large">Deliberative Models</text>
+    <text x="255" y="305" text-anchor="middle" class="text-small">Vision-Language Models</text>
+    <text x="255" y="325" text-anchor="middle" class="text-small">World Models &amp; Global Planners</text>
+    <text x="255" y="345" text-anchor="middle" class="text-small">Heuristic/AI-based pathfinding</text>
+
+    <!-- Proposal Generation Box -->
+    <rect x="140" y="440" width="230" height="50" rx="6" fill="#1F407A" />
+    <text x="255" y="471" text-anchor="middle" class="text-white">Generates Action Proposal</text>
+
+    <!-- Arrow from Models to Proposal -->
+    <line x1="255" y1="370" x2="255" y2="430" class="arrow-blue" />
+    
+    <!-- Trusted Realm -->
+    <rect x="540" y="120" width="410" height="440" rx="8" class="box-trusted" />
+    <text x="745" y="160" text-anchor="middle" class="text-large text-red">Trusted Real-time Realm</text>
+    <text x="745" y="185" text-anchor="middle" class="text-medium text-red">Update Rate: 1000 Hz</text>
+    <text x="745" y="210" text-anchor="middle" class="text-small text-red">Deterministic, high-frequency control</text>
+
+    <!-- Enforcer Box -->
+    <rect x="580" y="240" width="330" height="130" rx="6" class="box-inner" />
+    <text x="745" y="275" text-anchor="middle" class="text-large">Real-time Enforcer</text>
+    <text x="745" y="305" text-anchor="middle" class="text-small">Checks Stopping Clearance</text>
+    <text x="745" y="325" text-anchor="middle" class="text-small">Validates State &amp; Safety Constraints</text>
+    <text x="745" y="345" text-anchor="middle" class="text-small">Fast, Provably Safe Logic</text>
+
+    <!-- Actuators Box -->
+    <rect x="645" y="440" width="200" height="50" rx="6" fill="#A51C30" />
+    <text x="745" y="471" text-anchor="middle" class="text-white">Hardware Actuators</text>
+
+    <!-- Arrow from Enforcer to Actuators -->
+    <line x1="745" y1="370" x2="745" y2="430" class="arrow-red" />
+    <text x="755" y="405" text-anchor="start" class="text-medium text-red">Permission Granted</text>
+
+    <!-- Communication Across Boundary -->
+    <!-- Proposal from Deliberative to Enforcer -->
+    <path d="M 355 465 L 500 465 L 500 295 L 570 295" class="arrow-blue" fill="none" stroke-linejoin="round" />
+    <rect x="420" y="415" width="160" height="24" rx="4" fill="#FFFFFF" stroke="#1F407A" stroke-width="1" />
+    <text x="500" y="432" text-anchor="middle" class="text-small text-blue">Proposal Sent</text>
+    
+    <!-- Rejection/Feedback from Enforcer to Deliberative -->
+    <path d="M 580 325 L 500 325 L 500 285 L 420 285" class="arrow-red" stroke-dasharray="5 5" fill="none" stroke-linejoin="round" />
+    <rect x="420" y="250" width="160" height="24" rx="4" fill="#FFFFFF" stroke="#A51C30" stroke-width="1" />
+    <text x="500" y="267" text-anchor="middle" class="text-small text-red">Violations Rejected</text>
+
+    <!-- High-frequency state loop -->
+    <path d="M 845 465 C 940 465, 960 400, 960 305 L 920 305" class="arrow" fill="none" />
+    <text x="975" y="380" text-anchor="middle" class="text-small" transform="rotate(-90 975 380)">1000 Hz State Feedback</text>
+    
+    <!-- Text Explanation at Bottom -->
+    <text x="500" y="605" text-anchor="middle" class="text-small">The enforcer runs often enough to check every proposal against stopping clearance and state constraints</text>
+    <text x="500" y="625" text-anchor="middle" class="text-small">before energizing an actuator, rejecting deterministically when a contract is violated.</text>
+</svg>"""
+
+    filepath = 'images/svg/fig03_two_speed_brain.svg'
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(svg_content)
+    print(f"Generated {filepath}")
+
+if __name__ == "__main__":
+    create_svg()

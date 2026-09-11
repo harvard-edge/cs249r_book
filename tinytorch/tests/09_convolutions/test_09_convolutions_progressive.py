@@ -31,86 +31,71 @@ class TestConvolutionCore:
         """
         ✅ TEST: Conv2d class exists and is importable
         """
-        try:
-            from tinytorch.core.spatial import Conv2d
-            
-            assert Conv2d is not None, "Conv2d class not found"
-            
-        except ImportError:
-            assert True, "Conv2d not implemented yet"
+        from tinytorch.core.spatial import Conv2d
+
+        assert Conv2d is not None, "Conv2d class not found"
+
 
     def test_conv2d_initialization(self):
         """
         ✅ TEST: Conv2d can be initialized with proper parameters
         """
-        try:
-            from tinytorch.core.spatial import Conv2d
-            
-            conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
-            
-            assert hasattr(conv, 'weight'), "Conv2d missing weight"
-            assert hasattr(conv, 'forward'), "Conv2d missing forward"
-            
-            # Check weight shape: (out_channels, in_channels, kernel_h, kernel_w)
-            if hasattr(conv, 'weight'):
-                assert conv.weight.shape[0] == 16, "Conv2d out_channels wrong"
-                assert conv.weight.shape[1] == 3, "Conv2d in_channels wrong"
-                
-        except ImportError:
-            assert True, "Conv2d not implemented yet"
+        from tinytorch.core.spatial import Conv2d
+
+        conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
+
+        assert hasattr(conv, 'weight'), "Conv2d missing weight"
+        assert hasattr(conv, 'forward'), "Conv2d missing forward"
+
+        # Check weight shape: (out_channels, in_channels, kernel_h, kernel_w)
+        if hasattr(conv, 'weight'):
+            assert conv.weight.shape[0] == 16, "Conv2d out_channels wrong"
+            assert conv.weight.shape[1] == 3, "Conv2d in_channels wrong"
+
 
     def test_conv2d_forward(self):
         """
         ✅ TEST: Conv2d forward pass produces correct output shape
         """
-        try:
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.tensor import Tensor
-            
-            conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-            
-            # Input: (batch, channels, height, width)
-            x = Tensor(rng.standard_normal((2, 3, 32, 32)))
-            
-            output = conv(x)
-            
-            # With padding=1, kernel=3, output size should be same as input
-            assert output.shape == (2, 16, 32, 32), f"Conv2d output shape wrong: {output.shape}"
-            
-        except ImportError:
-            assert True, "Conv2d forward not implemented yet"
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.tensor import Tensor
+
+        conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+
+        # Input: (batch, channels, height, width)
+        x = Tensor(rng.standard_normal((2, 3, 32, 32)))
+
+        output = conv(x)
+
+        # With padding=1, kernel=3, output size should be same as input
+        assert output.shape == (2, 16, 32, 32), f"Conv2d output shape wrong: {output.shape}"
+
 
     def test_maxpool2d_exists(self):
         """
         ✅ TEST: MaxPool2d class exists
         """
-        try:
-            from tinytorch.core.spatial import MaxPool2d
-            
-            assert MaxPool2d is not None, "MaxPool2d not found"
-            
-        except ImportError:
-            assert True, "MaxPool2d not implemented yet"
+        from tinytorch.core.spatial import MaxPool2d
+
+        assert MaxPool2d is not None, "MaxPool2d not found"
+
 
     def test_maxpool2d_forward(self):
         """
         ✅ TEST: MaxPool2d produces correct output shape
         """
-        try:
-            from tinytorch.core.spatial import MaxPool2d
-            from tinytorch.core.tensor import Tensor
-            
-            pool = MaxPool2d(kernel_size=2)
-            
-            x = Tensor(rng.standard_normal((2, 16, 32, 32)))
-            
-            output = pool(x)
-            
-            # Pool with kernel=2 halves spatial dimensions
-            assert output.shape == (2, 16, 16, 16), f"MaxPool2d output shape wrong: {output.shape}"
-            
-        except ImportError:
-            assert True, "MaxPool2d not implemented yet"
+        from tinytorch.core.spatial import MaxPool2d
+        from tinytorch.core.tensor import Tensor
+
+        pool = MaxPool2d(kernel_size=2)
+
+        x = Tensor(rng.standard_normal((2, 16, 32, 32)))
+
+        output = pool(x)
+
+        # Pool with kernel=2 halves spatial dimensions
+        assert output.shape == (2, 16, 16, 16), f"MaxPool2d output shape wrong: {output.shape}"
+
 
 
 class TestConvWithPriorModules:
@@ -122,115 +107,100 @@ class TestConvWithPriorModules:
         """
         ✅ TEST: Conv2d + ReLU activation
         """
-        try:
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.activations import ReLU
-            from tinytorch.core.tensor import Tensor
-            
-            conv = Conv2d(3, 16, kernel_size=3, padding=1)
-            relu = ReLU()
-            
-            x = Tensor(rng.standard_normal((2, 3, 16, 16)))
-            
-            conv_out = conv(x)
-            activated = relu(conv_out)
-            
-            # ReLU should not change shape
-            assert activated.shape == conv_out.shape, "ReLU changed shape"
-            # ReLU should make all values >= 0
-            assert np.all(activated.data >= 0), "ReLU not working"
-            
-        except ImportError:
-            assert True, "Conv + activation not ready"
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.activations import ReLU
+        from tinytorch.core.tensor import Tensor
+
+        conv = Conv2d(3, 16, kernel_size=3, padding=1)
+        relu = ReLU()
+
+        x = Tensor(rng.standard_normal((2, 3, 16, 16)))
+
+        conv_out = conv(x)
+        activated = relu(conv_out)
+
+        # ReLU should not change shape
+        assert activated.shape == conv_out.shape, "ReLU changed shape"
+        # ReLU should make all values >= 0
+        assert np.all(activated.data >= 0), "ReLU not working"
+
 
     def test_conv_with_linear(self):
         """
         ✅ TEST: CNN feature extraction → Linear classifier
         """
-        try:
-            from tinytorch.core.spatial import Conv2d, MaxPool2d
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.activations import ReLU
-            from tinytorch.core.tensor import Tensor
-            
-            # CNN layers
-            conv = Conv2d(3, 16, kernel_size=3, padding=1)  # (3, 32, 32) → (16, 32, 32)
-            pool = MaxPool2d(kernel_size=2)  # (16, 32, 32) → (16, 16, 16)
-            relu = ReLU()
-            
-            # Classifier
-            fc = Linear(16 * 16 * 16, 10)
-            
-            # Forward pass
-            x = Tensor(rng.standard_normal((2, 3, 32, 32)))
-            
-            conv_out = relu(conv(x))
-            pooled = pool(conv_out)
-            
-            # Flatten for linear layer
-            flat = Tensor(pooled.data.reshape(2, -1))
-            logits = fc(flat)
-            
-            assert logits.shape == (2, 10), f"CNN classifier output wrong: {logits.shape}"
-            
-        except ImportError:
-            assert True, "CNN + Linear not ready"
+        from tinytorch.core.spatial import Conv2d, MaxPool2d
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.activations import ReLU
+        from tinytorch.core.tensor import Tensor
+
+        # CNN layers
+        conv = Conv2d(3, 16, kernel_size=3, padding=1)  # (3, 32, 32) → (16, 32, 32)
+        pool = MaxPool2d(kernel_size=2)  # (16, 32, 32) → (16, 16, 16)
+        relu = ReLU()
+
+        # Classifier
+        fc = Linear(16 * 16 * 16, 10)
+
+        # Forward pass
+        x = Tensor(rng.standard_normal((2, 3, 32, 32)))
+
+        conv_out = relu(conv(x))
+        pooled = pool(conv_out)
+
+        # Flatten for linear layer
+        flat = pooled.reshape(2, -1)
+        logits = fc(flat)
+
+        assert logits.shape == (2, 10), f"CNN classifier output wrong: {logits.shape}"
+
 
     def test_conv_with_dataloader(self):
         """
         ✅ TEST: Convolutions work with DataLoader batches
         """
-        try:
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.dataloader import TensorDataset, DataLoader
-            from tinytorch.core.tensor import Tensor
-            
-            # Image dataset
-            images = Tensor(rng.standard_normal((20, 3, 16, 16)))
-            labels = Tensor(np.arange(20).astype(float))
-            
-            dataset = TensorDataset(images, labels)
-            dataloader = DataLoader(dataset, batch_size=4)
-            
-            conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            
-            for batch_x, batch_y in dataloader:
-                out = conv(batch_x)
-                assert out.shape[0] == batch_x.shape[0], "Batch size changed"
-                break
-                
-        except ImportError:
-            assert True, "Conv + DataLoader not ready"
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.dataloader import TensorDataset, DataLoader
+        from tinytorch.core.tensor import Tensor
+
+        # Image dataset
+        images = Tensor(rng.standard_normal((20, 3, 16, 16)))
+        labels = Tensor(np.arange(20).astype(float))
+
+        dataset = TensorDataset(images, labels)
+        dataloader = DataLoader(dataset, batch_size=4)
+
+        conv = Conv2d(3, 8, kernel_size=3, padding=1)
+
+        for batch_x, batch_y in dataloader:
+            out = conv(batch_x)
+            assert out.shape[0] == batch_x.shape[0], "Batch size changed"
+            break
+
 
     def test_conv_gradients(self):
         """
         ✅ TEST: Convolution gradients (if autograd works)
         """
-        try:
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.tensor import Tensor
-            
-            conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            
-            x = Tensor(rng.standard_normal((2, 3, 8, 8)), requires_grad=True)
-            
-            out = conv(x)
-            
-            if hasattr(out, 'backward'):
-                try:
-                    out.backward(Tensor(np.ones(out.shape)))
-                    
-                    if x.grad is not None:
-                        assert x.grad.shape == x.shape, "Input gradient shape wrong"
-                    
-                    if hasattr(conv, 'weight') and conv.weight.grad is not None:
-                        assert conv.weight.grad.shape == conv.weight.shape, \
-                            "Conv weight gradient shape wrong"
-                except (TypeError, AttributeError):
-                    pass  # Gradients not fully implemented
-                    
-        except (ImportError, TypeError):
-            assert True, "Conv gradients not ready"
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.tensor import Tensor
+
+        conv = Conv2d(3, 8, kernel_size=3, padding=1)
+
+        x = Tensor(rng.standard_normal((2, 3, 8, 8)), requires_grad=True)
+
+        out = conv(x)
+
+        if hasattr(out, 'backward'):
+            out.backward(Tensor(np.ones(out.shape)))
+
+            if x.grad is not None:
+                assert x.grad.shape == x.shape, "Input gradient shape wrong"
+
+            if hasattr(conv, 'weight') and conv.weight.grad is not None:
+                assert conv.weight.grad.shape == conv.weight.shape, \
+                    "Conv weight gradient shape wrong"
+
 
 
 class TestCNNArchitecture:
@@ -242,83 +212,79 @@ class TestCNNArchitecture:
         """
         ✅ TEST: Simple CNN (Conv → Pool → Conv → Pool → FC)
         """
-        try:
-            from tinytorch.core.spatial import Conv2d, MaxPool2d
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.activations import ReLU
-            from tinytorch.core.tensor import Tensor
-            
-            # LeNet-style architecture
-            conv1 = Conv2d(1, 6, kernel_size=5)  # (1, 28, 28) → (6, 24, 24)
-            pool1 = MaxPool2d(kernel_size=2)     # → (6, 12, 12)
-            conv2 = Conv2d(6, 16, kernel_size=5) # → (16, 8, 8)
-            pool2 = MaxPool2d(kernel_size=2)     # → (16, 4, 4)
-            fc = Linear(16 * 4 * 4, 10)
-            relu = ReLU()
-            
-            # Forward
-            x = Tensor(rng.standard_normal((4, 1, 28, 28)))
-            
-            h = relu(conv1(x))
-            h = pool1(h)
-            h = relu(conv2(h))
-            h = pool2(h)
-            h = Tensor(h.data.reshape(4, -1))
-            logits = fc(h)
-            
-            assert logits.shape == (4, 10), f"CNN output wrong: {logits.shape}"
-            
-        except ImportError:
-            assert True, "Simple CNN not ready"
+        from tinytorch.core.spatial import Conv2d, MaxPool2d
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.activations import ReLU
+        from tinytorch.core.tensor import Tensor
+
+        # LeNet-style architecture
+        conv1 = Conv2d(1, 6, kernel_size=5)  # (1, 28, 28) → (6, 24, 24)
+        pool1 = MaxPool2d(kernel_size=2)     # → (6, 12, 12)
+        conv2 = Conv2d(6, 16, kernel_size=5) # → (16, 8, 8)
+        pool2 = MaxPool2d(kernel_size=2)     # → (16, 4, 4)
+        fc = Linear(16 * 4 * 4, 10)
+        relu = ReLU()
+
+        # Forward
+        x = Tensor(rng.standard_normal((4, 1, 28, 28)))
+
+        h = relu(conv1(x))
+        h = pool1(h)
+        h = relu(conv2(h))
+        h = pool2(h)
+        h = h.reshape(4, -1)
+        logits = fc(h)
+
+        assert logits.shape == (4, 10), f"CNN output wrong: {logits.shape}"
+
 
     def test_cnn_training_ready(self):
         """
         ✅ TEST: CNN can be trained (components work together)
         """
-        try:
-            from tinytorch.core.spatial import Conv2d, MaxPool2d
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.activations import ReLU
-            from tinytorch.core.losses import MSELoss
-            from tinytorch.core.optimizers import SGD
-            from tinytorch.core.tensor import Tensor
-            
-            # Simple CNN
-            conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            pool = MaxPool2d(kernel_size=2)
-            fc = Linear(8 * 8 * 8, 5)
-            relu = ReLU()
-            
-            # Collect parameters
-            params = []
-            for module in [conv, fc]:
-                if hasattr(module, 'parameters'):
-                    params.extend(module.parameters())
-            
-            optimizer = SGD(params, lr=0.01)
-            loss_fn = MSELoss()
-            
-            # Training step
-            x = Tensor(rng.standard_normal((2, 3, 16, 16)))
-            target = Tensor(rng.standard_normal((2, 5)))
-            
-            # Forward
-            h = relu(conv(x))
-            h = pool(h)
-            h = Tensor(h.data.reshape(2, -1))
-            pred = fc(h)
-            
-            loss = loss_fn(pred, target)
-            
-            if hasattr(loss, 'backward'):
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            
-            assert loss.data.size == 1, "CNN training loss wrong"
-            
-        except ImportError:
-            assert True, "CNN training not ready"
+        from tinytorch.core.spatial import Conv2d, MaxPool2d
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.activations import ReLU
+        from tinytorch.core.losses import MSELoss
+        from tinytorch.core.optimizers import SGD
+        from tinytorch.core.tensor import Tensor
+
+        # Simple CNN
+        conv = Conv2d(3, 8, kernel_size=3, padding=1)
+        pool = MaxPool2d(kernel_size=2)
+        fc = Linear(8 * 8 * 8, 5)
+        relu = ReLU()
+
+        # Collect parameters
+        params = []
+        for module in [conv, fc]:
+            if hasattr(module, 'parameters'):
+                params.extend(module.parameters())
+
+        optimizer = SGD(params, lr=0.01)
+        loss_fn = MSELoss()
+
+        # Training step
+        x = Tensor(rng.standard_normal((2, 3, 16, 16)))
+        target = Tensor(rng.standard_normal((2, 5)))
+
+        # Forward
+        h = relu(conv(x))
+        h = pool(h)
+        h = h.reshape(2, -1)
+        pred = fc(h)
+
+        loss = loss_fn(pred, target)
+
+        before = [p.data.copy() for p in params]
+        optimizer.zero_grad()
+        loss.backward()
+        assert all(p.grad is not None for p in params)
+        optimizer.step()
+        assert not np.array_equal(before[0], params[0].data), "Upstream weights must update"
+
+        assert loss.data.size == 1, "CNN training loss wrong"
+
 
 
 class TestRegressionPrevention:
@@ -392,7 +358,7 @@ class TestRegressionPrevention:
             x = Tensor([1.0], requires_grad=True)
             assert hasattr(x, 'requires_grad')
         except TypeError:
-            pass  # OK if requires_grad not supported
+            raise
         except Exception as e:
             assert False, f"Module 06: {e}"
 
@@ -414,22 +380,22 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
             from tinytorch.core.optimizers import SGD
-            
+
             layer = Linear(4, 2)
             loss_fn = MSELoss()
             opt = SGD(layer.parameters(), lr=0.1)
-            
+
             x = Tensor(rng.standard_normal((2, 4)))
             y = Tensor(rng.standard_normal((2, 2)))
-            
+
             pred = layer(x)
             loss = loss_fn(pred, y)
-            
+
             if hasattr(loss, 'backward'):
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
-                
+
             assert loss.data.size == 1
         except Exception as e:
             assert False, f"Module 08: {e}"
@@ -443,7 +409,7 @@ class TestModule09Completion:
     def test_convolution_foundation_complete(self):
         """
         ✅ FINAL TEST: Convolution ready for attention/transformers
-        
+
         🎯 SUCCESS = Ready for Module 10: Tokenization!
         """
         capabilities = {
@@ -453,40 +419,40 @@ class TestModule09Completion:
             "MaxPool2d forward works": False,
             "CNN architecture works": False,
         }
-        
+
         try:
             from tinytorch.core.spatial import Conv2d, MaxPool2d
             from tinytorch.core.tensor import Tensor
-            
+
             # Test 1: Conv2d exists
             capabilities["Conv2d exists"] = True
-            
+
             # Test 2: Conv2d forward
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
             x = Tensor(rng.standard_normal((2, 3, 16, 16)))
             out = conv(x)
             if out.shape == (2, 8, 16, 16):
                 capabilities["Conv2d forward works"] = True
-            
+
             # Test 3: MaxPool2d exists
             capabilities["MaxPool2d exists"] = True
-            
+
             # Test 4: MaxPool2d forward
             pool = MaxPool2d(kernel_size=2)
             pooled = pool(out)
             if pooled.shape == (2, 8, 8, 8):
                 capabilities["MaxPool2d forward works"] = True
-            
+
             # Test 5: CNN architecture
             from tinytorch.core.layers import Linear
             fc = Linear(8 * 8 * 8, 10)
-            flat = Tensor(pooled.data.reshape(2, -1))
+            flat = pooled.reshape(2, -1)
             logits = fc(flat)
             if logits.shape == (2, 10):
                 capabilities["CNN architecture works"] = True
-            
+
             completed = sum(capabilities.values())
-            assert completed >= 4, f"Convolutions not ready: {capabilities}"
-            
+            assert completed == len(capabilities), f"Convolutions not ready: {capabilities}"
+
         except ImportError as e:
             assert False, f"Module 09 import failed: {e}"

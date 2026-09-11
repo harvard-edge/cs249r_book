@@ -32,75 +32,41 @@ class TestProfilingCore:
         """
         ✅ TEST: Profiler class exists
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            
-            assert Profiler is not None
-            
-        except ImportError:
-            assert True, "Profiler not implemented yet"
+        from tinytorch.perf.profiling import Profiler
+
+        assert Profiler is not None
 
     def test_profiler_context_manager(self):
         """
         ✅ TEST: Profiler works as context manager
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            from tinytorch.core.tensor import Tensor
-            
-            profiler = Profiler()
-            
-            with profiler:
-                # Some computation
-                x = Tensor(rng.standard_normal((100, 100)))
-                y = x @ x.transpose()
-            
-            # Should have recorded timing
-            assert hasattr(profiler, 'elapsed') or hasattr(profiler, 'duration'), \
-                "Profiler missing timing"
-                
-        except ImportError:
-            assert True, "Profiler not implemented yet"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.tensor import Tensor
+
+        profiler = Profiler()
+
+        with profiler:
+            # Some computation
+            x = Tensor(rng.standard_normal((100, 100)))
+            y = x @ x.transpose()
+
+        # Should have recorded timing
+        assert hasattr(profiler, 'elapsed') or hasattr(profiler, 'duration'), \
+            "Profiler missing timing"
 
     def test_memory_profiling(self):
-        """
-        ✅ TEST: Memory profiling capability
-        """
-        try:
-            from tinytorch.perf.profiling import profile_memory, MemoryProfiler
-            from tinytorch.core.tensor import Tensor
-            
-            # Profile memory usage
-            with MemoryProfiler() as mp:
-                tensors = [Tensor(rng.standard_normal(1000)) for _ in range(10)]
-            
-            if hasattr(mp, 'peak_memory'):
-                assert mp.peak_memory > 0, "Memory profiling not working"
-                
-        except ImportError:
-            assert True, "Memory profiling not implemented yet"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.layers import Linear
+        report = Profiler().measure_memory(Linear(4, 2), (3, 4))
+        assert report['parameter_memory_mb'] > 0
+        assert report['peak_memory_mb'] >= report['parameter_memory_mb']
 
     def test_execution_timing(self):
-        """
-        ✅ TEST: Execution timing works
-        """
-        try:
-            from tinytorch.perf.profiling import Timer
-            from tinytorch.core.tensor import Tensor
-            
-            timer = Timer()
-            
-            timer.start()
-            # Some computation
-            for _ in range(100):
-                x = Tensor(rng.standard_normal((50, 50)))
-                y = x @ x.transpose()
-            elapsed = timer.stop()
-            
-            assert elapsed > 0, "Timer should measure positive time"
-            
-        except ImportError:
-            assert True, "Timer not implemented yet"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.tensor import Tensor
+        assert Profiler().measure_latency(Linear(4, 2), Tensor([[1., 2., 3., 4.]]),
+                                          warmup=1, iterations=3) > 0
 
 
 class TestProfilingWithModels:
@@ -112,70 +78,58 @@ class TestProfilingWithModels:
         """
         ✅ TEST: Profile Linear layer execution
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.tensor import Tensor
-            
-            layer = Linear(100, 50)
-            profiler = Profiler()
-            
-            x = Tensor(rng.standard_normal((32, 100)))
-            
-            with profiler:
-                for _ in range(10):
-                    output = layer(x)
-            
-            # Profiler should capture timing
-            assert hasattr(profiler, 'elapsed') or hasattr(profiler, 'stats'), \
-                "Profiler should capture stats"
-                
-        except ImportError:
-            assert True, "Profiler integration not ready"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.tensor import Tensor
+
+        layer = Linear(100, 50)
+        profiler = Profiler()
+
+        x = Tensor(rng.standard_normal((32, 100)))
+
+        with profiler:
+            for _ in range(10):
+                output = layer(x)
+
+        # Profiler should capture timing
+        assert hasattr(profiler, 'elapsed') or hasattr(profiler, 'stats'), \
+            "Profiler should capture stats"
 
     def test_profile_conv_layer(self):
         """
         ✅ TEST: Profile Conv2d layer execution
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.tensor import Tensor
-            
-            conv = Conv2d(3, 16, kernel_size=3, padding=1)
-            profiler = Profiler()
-            
-            x = Tensor(rng.standard_normal((4, 3, 32, 32)))
-            
-            with profiler:
-                output = conv(x)
-            
-            assert output.shape[1] == 16
-            
-        except ImportError:
-            assert True, "Conv profiling not ready"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.tensor import Tensor
+
+        conv = Conv2d(3, 16, kernel_size=3, padding=1)
+        profiler = Profiler()
+
+        x = Tensor(rng.standard_normal((4, 3, 32, 32)))
+
+        with profiler:
+            output = conv(x)
+
+        assert output.shape[1] == 16
 
     def test_profile_transformer_block(self):
         """
         ✅ TEST: Profile TransformerBlock execution
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            from tinytorch.core.transformers import TransformerBlock
-            from tinytorch.core.tensor import Tensor
-            
-            block = TransformerBlock(64, 8, ff_dim=256)
-            profiler = Profiler()
-            
-            x = Tensor(rng.standard_normal((2, 10, 64)))
-            
-            with profiler:
-                output = block(x)
-            
-            assert output.shape == x.shape
-            
-        except ImportError:
-            assert True, "Transformer profiling not ready"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.transformers import TransformerBlock
+        from tinytorch.core.tensor import Tensor
+
+        block = TransformerBlock(64, 8, ff_dim=256)
+        profiler = Profiler()
+
+        x = Tensor(rng.standard_normal((2, 10, 64)))
+
+        with profiler:
+            output = block(x)
+
+        assert output.shape == x.shape
 
 
 class TestProfilingWithTraining:
@@ -187,35 +141,31 @@ class TestProfilingWithTraining:
         """
         ✅ TEST: Profile training step
         """
-        try:
-            from tinytorch.perf.profiling import Profiler
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.losses import MSELoss
-            from tinytorch.core.optimizers import SGD
-            from tinytorch.core.tensor import Tensor
-            
-            layer = Linear(10, 5)
-            loss_fn = MSELoss()
-            optimizer = SGD(layer.parameters(), lr=0.1)
-            
-            profiler = Profiler()
-            
-            x = Tensor(rng.standard_normal((4, 10)))
-            target = Tensor(rng.standard_normal((4, 5)))
-            
-            with profiler:
-                pred = layer(x)
-                loss = loss_fn(pred, target)
-                
-                if hasattr(loss, 'backward'):
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-            
-            assert loss.data.size == 1
-            
-        except ImportError:
-            assert True, "Training profiling not ready"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.losses import MSELoss
+        from tinytorch.core.optimizers import SGD
+        from tinytorch.core.tensor import Tensor
+
+        layer = Linear(10, 5)
+        loss_fn = MSELoss()
+        optimizer = SGD(layer.parameters(), lr=0.1)
+
+        profiler = Profiler()
+
+        x = Tensor(rng.standard_normal((4, 10)))
+        target = Tensor(rng.standard_normal((4, 5)))
+
+        with profiler:
+            pred = layer(x)
+            loss = loss_fn(pred, target)
+
+            if hasattr(loss, 'backward'):
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+        assert loss.data.size == 1
 
 
 class TestRegressionPrevention:
@@ -275,39 +225,30 @@ class TestRegressionPrevention:
 
     def test_convolutions_still_work(self):
         """✅ Module 09"""
-        try:
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.tensor import Tensor
-            conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
-            y = conv(x)
-            assert y.shape[0] == 2
-        except ImportError:
-            pass
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.tensor import Tensor
+        conv = Conv2d(3, 8, kernel_size=3, padding=1)
+        x = Tensor(rng.standard_normal((2, 3, 8, 8)))
+        y = conv(x)
+        assert y.shape[0] == 2
 
     def test_attention_still_works(self):
         """✅ Module 12"""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.tensor import Tensor
-            mha = MultiHeadAttention(32, 4)
-            x = Tensor(rng.standard_normal((1, 5, 32)))
-            out = mha(x)
-            assert out.shape == x.shape
-        except ImportError:
-            pass
+        from tinytorch.core.attention import MultiHeadAttention
+        from tinytorch.core.tensor import Tensor
+        mha = MultiHeadAttention(32, 4)
+        x = Tensor(rng.standard_normal((1, 5, 32)))
+        out = mha(x)
+        assert out.shape == x.shape
 
     def test_transformers_still_work(self):
         """✅ Module 13"""
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-            from tinytorch.core.tensor import Tensor
-            block = TransformerBlock(32, 4, ff_dim=128)
-            x = Tensor(rng.standard_normal((1, 5, 32)))
-            out = block(x)
-            assert out.shape == x.shape
-        except ImportError:
-            pass
+        from tinytorch.core.transformers import TransformerBlock
+        from tinytorch.core.tensor import Tensor
+        block = TransformerBlock(32, 4, ff_dim=128)
+        x = Tensor(rng.standard_normal((1, 5, 32)))
+        out = block(x)
+        assert out.shape == x.shape
 
 
 class TestModule14Completion:
@@ -318,34 +259,13 @@ class TestModule14Completion:
     def test_profiling_foundation_complete(self):
         """
         ✅ FINAL TEST: Profiling ready for quantization
-        
+
         🎯 SUCCESS = Ready for Module 15: Quantization!
         """
-        capabilities = {
-            "Profiler exists": False,
-            "Timing works": False,
-        }
-        
-        try:
-            from tinytorch.perf.profiling import Profiler
-            
-            # Test 1: Profiler exists
-            capabilities["Profiler exists"] = True
-            
-            # Test 2: Timing
-            profiler = Profiler()
-            start = time.time()
-            with profiler:
-                _ = [i**2 for i in range(1000)]
-            
-            if hasattr(profiler, 'elapsed') or hasattr(profiler, 'duration') or hasattr(profiler, 'stats'):
-                capabilities["Timing works"] = True
-            else:
-                # At minimum, context manager should work
-                capabilities["Timing works"] = True
-            
-            completed = sum(capabilities.values())
-            assert completed >= 1, f"Profiling not ready: {capabilities}"
-            
-        except ImportError:
-            assert True, "Profiler not implemented yet"
+        from tinytorch.perf.profiling import Profiler
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.tensor import Tensor
+        report = Profiler().profile_forward_pass(Linear(4, 2), Tensor([[1., 2., 3., 4.]]))
+        assert report['parameters'] == 10
+        assert report['flops'] == 16
+        assert report['latency_ms'] > 0

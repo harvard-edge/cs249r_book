@@ -34,19 +34,19 @@ By the end of this module, you will:
 1. **Enhance Tensor** with automatic differentiation capabilities
 2. **Build computation graphs** that track operations for gradient flow
 3. **Implement backward()** method for reverse-mode differentiation
-4. **Create Function classes** for operation-specific gradient rules
+4. **Complete the Function classes** from Module 01 with their backward() rules
 5. **Test gradient correctness** with mathematical validation
 
 **CRITICAL**: This module enhances the existing Tensor class - no new wrapper classes needed!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/06_autograd/autograd_dev.py`
+**Learning Side:** You work in `modules/06_autograd/autograd.ipynb`
 **Building Side:** Code exports to `tinytorch.core.autograd`
 
 ```python
 # How to use this module:
-from tinytorch.core.autograd import Function, enable_autograd
+from tinytorch.core.autograd import method_of, no_grad
 ```
 
 **Why this matters:**
@@ -58,7 +58,39 @@ from tinytorch.core.autograd import Function, enable_autograd
 Let's get started!
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01, 02, and 04 must be complete
+- Module 01: Tensor and the operation classes (their forward halves)
+- Module 02: the activation operations
+- Module 04: the loss operations
+
+This module imports those operation classes and completes each one with its
+backward half. Nothing else is imported: the gradient engine stays independent
+of any particular layer.
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `typing` (for type hints)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor.Tensor` - Core tensor operations
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 06 (Autograd) → Module 07 (Optimizers)
+        ↓                     ↓                      ↓
+   data structure      gradient engine        parameter updates
+```
+
+This module completes the operation classes built in Modules 01, 02, and 04
+with their `backward()` halves and gives the Tensor class its `backward()` method. Everything downstream that trains -- optimizers,
+training loops, transformers -- depends on the graph this module builds.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.autograd
 #| export
 
@@ -68,7 +100,14 @@ from typing import Optional, List, Tuple
 import sys
 import os
 
-from tinytorch.core.tensor import Tensor
+from tinytorch.core.tensor import (
+    Tensor, Function,
+    Add, Sub, Mul, Div, MatMul,
+    Reshape, Permute, Copy, Slice, MaskedFill,
+    Sum, Mean, Max,
+)
+from tinytorch.core.activations import SigmoidFunction, ReLUFunction, TanhFunction, GELUFunction, SoftmaxFunction
+from tinytorch.core.losses import LogSoftmax, MSEFunction, BinaryCrossEntropyFunction, CrossEntropyFunction
 
 # Constants for numerical differentiation
 EPSILON = 1e-7  # Small perturbation for numerical gradient computation
@@ -164,12 +203,12 @@ Computation Graph Memory Structure:
 ├─────────────────────────────────────────────────────────┤
 │ Node 1: x=2 (leaf, requires_grad=True) │ grad: None→66  │
 │ Node 2: y=3 (leaf, requires_grad=True) │ grad: None→44  │
-│ Node 3: z=x*y (MulFunction)            │ grad: None→22  │
+│ Node 3: z=x*y (Mul)                    │ grad: None→22  │
 │         saved: (x=2, y=3)              │ inputs: [x,y]  │
-│ Node 4: w=z+5 (AddFunction)            │ grad: None→22  │
+│ Node 4: w=z+5 (Add)                    │ grad: None→22  │
 │         saved: (z=6, 5)                │ inputs: [z]    │
-│ Node 5: L=w² (PowFunction)             │ grad: 1        │
-│         saved: (w=11)                  │ inputs: [w]    │
+│ Node 5: L=w*w (Mul)                    │ grad: 1        │
+│         saved: (w=11, w=11)            │ inputs: [w]    │
 └─────────────────────────────────────────────────────────┘
 
 Memory Cost: 2× parameters (data + gradients) + graph overhead
@@ -193,15 +232,16 @@ Function Class Design:
 ┌─────────────────────────────────────┐
 │ Function (Base Class)               │
 ├─────────────────────────────────────┤
-│ • saved_tensors    ← Store data     │
-│ • apply()          ← Compute grads  │
+│ • inputs           ← Store data     │
+│ • forward()        ← Module 01      │
+│ • backward()       ← Module 06      │
 └─────────────────────────────────────┘
           ↑
     ┌─────┴─────┬─────────┬──────────┐
     │           │         │          │
 ┌───▼────┐ ┌────▼───┐ ┌───▼────┐ ┌───▼────┐
-│  Add   │ │  Mul   │ │ Matmul │ │  Sum   │
-│Backward│ │Backward│ │Backward│ │Backward│
+│  Add   │ │  Mul   │ │ MatMul │ │  Sum   │
+│forward │ │forward │ │forward │ │forward │
 └────────┘ └────────┘ └────────┘ └────────┘
 ```
 
@@ -210,73 +250,58 @@ Each operation inherits from Function and implements specific gradient rules.
 
 # %% [markdown]
 """
-### Function Base Class - The Foundation of Autograd
+### Function Base Class: The Foundation of Autograd
 
 The Function class is the foundation that makes autograd possible. Every differentiable operation (addition, multiplication, etc.) inherits from this class.
 
 **Why Functions Matter:**
 - They remember inputs needed for backward pass
-- They implement gradient computation via apply()
+- They implement gradient computation via backward()
 - They connect to form computation graphs
 - They enable the chain rule to flow gradients
 
 **The Pattern:**
 ```
 Forward:  inputs → Function.forward() → output
-Backward: grad_output → Function.apply() → grad_inputs
+Backward: grad_output → Function.backward() → grad_inputs
 ```
 
 This pattern enables the chain rule to flow gradients through complex computations.
+
+The `Function` class itself was built in Module 01 (`tinytorch.core.tensor`), where every operation received its `forward()`. This module fills in the `backward()` of those same classes. The `method_of` helper below attaches each one to its class, so the exported file reads as a list of completions with the class named on the line above each.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "function-base", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "function-base", "solution": false}
 #| export
-class Function:
+def method_of(cls):
     """
-    Base class for differentiable operations.
+    Attach the decorated function to `cls` under the function's own name.
 
-    Every operation that needs gradients (add, multiply, matmul, etc.)
-    will inherit from this class and implement the apply() method.
+    Module 01 defined every operation with a forward() and left backward()
+    raising NotImplementedError. This module writes those backward() halves:
 
-    **Key Concepts:**
-    - **saved_tensors**: Store inputs needed for backward pass
-    - **apply()**: Compute gradients using chain rule
-
-    **Example Usage:**
     ```python
-    class AddBackward(Function):
-        def apply(self, grad_output):
-            # Addition distributes gradients equally
-            return grad_output, grad_output
+    @method_of(Add)
+    def backward(self, grad_output):
+        ...
     ```
+
+    is the same as writing backward() inside `class Add` in Module 01, without
+    editing that module. The attachment happens when this module is imported,
+    which is a teaching convenience: PyTorch defines both halves in one place.
+    The same helper gives Function.apply() its recording lines and Tensor its
+    backward() method further down.
     """
-
-    def __init__(self, *tensors):
-        """
-        Initialize function with input tensors.
-
-        Args:
-            *tensors: Input tensors that will be saved for backward pass
-        """
-        self.saved_tensors = tensors
-
-    def apply(self, grad_output):
-        """
-        Compute gradients for inputs.
-
-        Args:
-            grad_output: Gradient flowing backward from the output
-
-        Returns:
-            Tuple of gradients for each input tensor
-
-        **Must be implemented by subclasses**
-        """
-        raise NotImplementedError("Each Function must implement apply() method")
+    def attach(fn):
+        raw = fn.__func__ if isinstance(fn, (classmethod, staticmethod)) else fn
+        raw.__qualname__ = f"{cls.__name__}.{raw.__name__}"   # so tracebacks read Add.backward
+        setattr(cls, raw.__name__, fn)
+        return fn
+    return attach
 
 # %% [markdown]
 """
-### Operation Functions - Implementing Gradient Rules
+### Operation Functions: Implementing Gradient Rules
 
 Now we'll implement specific operations that compute gradients correctly. Each operation has mathematical rules for how gradients flow backward.
 
@@ -310,7 +335,7 @@ Each operation stores the inputs it needs for computing gradients.
 
 # %% [markdown]
 """
-### 🔍 Understanding Broadcasting in Gradients
+### Understanding Broadcasting in Gradients
 
 Before implementing gradient operations, we need to understand a critical challenge:
 **Broadcasting in Forward Pass vs. Gradient Reduction in Backward Pass**
@@ -323,26 +348,26 @@ NumPy automatically broadcasts tensors of different shapes during forward operat
 Forward Pass (Broadcasting):
 ┌─────────────────────────────────────────────────────────────┐
 │ Example: Adding bias to batched data                        │
-│                                                              │
+│                                                             │
 │ x:    (32, 128)  ← Batch of 32 samples, 128 features        │
 │ bias: (128,)     ← Just 128 features (no batch dimension)   │
-│                                                              │
-│ Forward: y = x + bias                                        │
+│                                                             │
+│ Forward: y = x + bias                                       │
 │          NumPy broadcasts bias from (128,) to (32, 128)     │
-│          Result shape: (32, 128)                             │
+│          Result shape: (32, 128)                            │
 └─────────────────────────────────────────────────────────────┘
 
 Backward Pass (Gradient Reduction):
 ┌─────────────────────────────────────────────────────────────┐
 │ grad_output: (32, 128)  ← Gradient from upstream            │
-│                                                              │
+│                                                             │
 │ grad_x:    (32, 128)    ← Same shape as x ✓                 │
 │ grad_bias: (128,)       ← Must match bias shape!            │
-│                                                              │
+│                                                             │
 │ Problem: grad_output is (32, 128) but bias is (128,)        │
 │ Solution: Sum gradients over batch dimension                │
 │           grad_bias = grad_output.sum(axis=0)               │
-│           Result: (128,) ✓                                   │
+│           Result: (128,) ✓                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -442,7 +467,7 @@ def _reduce_broadcast_grad(grad, original_shape):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Broadcast Gradient Reduction
+### 🧪 Unit Test: Broadcast Gradient Reduction
 
 This test validates our gradient reduction helper handles all broadcasting scenarios.
 
@@ -453,8 +478,8 @@ This test validates our gradient reduction helper handles all broadcasting scena
 
 # %% nbgrader={"grade": true, "grade_id": "test-reduce-broadcast-grad", "locked": true, "points": 5}
 def test_unit_reduce_broadcast_grad():
-    """🔬 Test _reduce_broadcast_grad helper function."""
-    print("🔬 Unit Test: _reduce_broadcast_grad...")
+    """🧪 Test _reduce_broadcast_grad helper function."""
+    print("🧪 Unit Test: _reduce_broadcast_grad...")
     
     # Test 1: Remove leading dimension
     grad = np.ones((32, 128))
@@ -504,7 +529,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### AddBackward - Gradient Rules for Addition
+### Add.backward: Gradient Rules for Addition
 
 Addition is the simplest gradient operation: gradients flow unchanged to both inputs.
 
@@ -525,8 +550,9 @@ but we must "unbroadcast" gradients in backward pass to match original shapes.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "add-backward", "solution": true}
-#| export
-class AddBackward(Function):
+#| exporti
+@method_of(Add)
+def backward(self, grad_output):
     """
     Gradient computation for tensor addition.
 
@@ -537,78 +563,77 @@ class AddBackward(Function):
 
     **Broadcasting Handling:** When input shapes differ due to broadcasting,
     we sum gradients appropriately to match original tensor shapes.
+
+    Compute gradients for addition.
+
+    Args:
+        grad_output: Gradient flowing backward from output
+
+    Returns:
+        Tuple of (grad_a, grad_b) for the two inputs
+
+    **Mathematical Foundation:**
+    - ∂(a+b)/∂a = 1 → grad_a = grad_output
+    - ∂(a+b)/∂b = 1 → grad_b = grad_output
+
+    TODO: Implement gradient computation for addition operation.
+
+    APPROACH:
+    1. Extract input tensors from self.inputs
+    2. Initialize gradients to None; promote a left vector to a row and a right
+       vector to a column, restoring these axes on grad_output as well
+    3. For first input (a): if it requires gradients:
+       - Set grad_a = grad_output
+       - Use _reduce_broadcast_grad() to handle shape mismatch if needed
+    4. For second input (b): if it requires gradients:
+       - Set grad_b = grad_output
+       - Use _reduce_broadcast_grad() to handle shape mismatch if needed
+    5. Remove any promoted vector axes and return (grad_a, grad_b). The engine
+       sums broadcast batch dimensions back to each input shape.
+
+    EXAMPLE (Same Shape):
+    >>> a = Tensor([1, 2, 3], requires_grad=True)
+    >>> b = Tensor([4, 5, 6], requires_grad=True)
+    >>> z = a + b  # z = [5, 7, 9]
+    >>> # During backward: grad_output = [1, 1, 1]
+    >>> # Result: grad_a = [1, 1, 1], grad_b = [1, 1, 1]
+
+    EXAMPLE (Broadcasting):
+    >>> x = Tensor(np.ones((32, 128)), requires_grad=True)
+    >>> bias = Tensor(np.zeros(128), requires_grad=True)
+    >>> y = x + bias  # bias broadcasts to (32, 128)
+    >>> # During backward: grad_output shape (32, 128)
+    >>> # grad_bias must be reduced to (128,) by summing over batch
+    >>> # Result: grad_x shape (32, 128), grad_bias shape (128,)
+
+    HINTS:
+    - Addition distributes gradients equally (derivative of a+b w.r.t. both is 1)
+    - Use _reduce_broadcast_grad(grad, tensor.data.shape) to handle broadcasting
+    - Check isinstance(tensor, Tensor) and tensor.requires_grad before computing
+    - Return None for inputs that don't require gradients
     """
+    ### BEGIN SOLUTION
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def apply(self, grad_output):
-        """
-        Compute gradients for addition.
+    # Gradient for first input
+    if isinstance(a, Tensor) and a.requires_grad:
+        grad_a = grad_output
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
-        Args:
-            grad_output: Gradient flowing backward from output
+    # Gradient for second input
+    if isinstance(b, Tensor) and b.requires_grad:
+        grad_b = grad_output
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
-        Returns:
-            Tuple of (grad_a, grad_b) for the two inputs
-
-        **Mathematical Foundation:**
-        - ∂(a+b)/∂a = 1 → grad_a = grad_output
-        - ∂(a+b)/∂b = 1 → grad_b = grad_output
-
-        TODO: Implement gradient computation for addition operation.
-
-        APPROACH:
-        1. Extract input tensors from self.saved_tensors
-        2. Initialize grad_a and grad_b to None
-        3. For first input (a): if it requires gradients:
-           - Set grad_a = grad_output
-           - Use _reduce_broadcast_grad() to handle shape mismatch if needed
-        4. For second input (b): if it requires gradients:
-           - Set grad_b = grad_output
-           - Use _reduce_broadcast_grad() to handle shape mismatch if needed
-        5. Return tuple (grad_a, grad_b)
-
-        EXAMPLE (Same Shape):
-        >>> a = Tensor([1, 2, 3], requires_grad=True)
-        >>> b = Tensor([4, 5, 6], requires_grad=True)
-        >>> z = a + b  # z = [5, 7, 9]
-        >>> # During backward: grad_output = [1, 1, 1]
-        >>> # Result: grad_a = [1, 1, 1], grad_b = [1, 1, 1]
-
-        EXAMPLE (Broadcasting):
-        >>> x = Tensor(np.ones((32, 128)), requires_grad=True)
-        >>> bias = Tensor(np.zeros(128), requires_grad=True)
-        >>> y = x + bias  # bias broadcasts to (32, 128)
-        >>> # During backward: grad_output shape (32, 128)
-        >>> # grad_bias must be reduced to (128,) by summing over batch
-        >>> # Result: grad_x shape (32, 128), grad_bias shape (128,)
-
-        HINTS:
-        - Addition distributes gradients equally (derivative of a+b w.r.t. both is 1)
-        - Use _reduce_broadcast_grad(grad, tensor.data.shape) to handle broadcasting
-        - Check isinstance(tensor, Tensor) and tensor.requires_grad before computing
-        - Return None for inputs that don't require gradients
-        """
-        ### BEGIN SOLUTION
-        a, b = self.saved_tensors
-        grad_a = grad_b = None
-
-        # Gradient for first input
-        if isinstance(a, Tensor) and a.requires_grad:
-            grad_a = grad_output
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
-
-        # Gradient for second input
-        if isinstance(b, Tensor) and b.requires_grad:
-            grad_b = grad_output
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
-
-        return grad_a, grad_b
-        ### END SOLUTION
+    return grad_a, grad_b
+    ### END SOLUTION
 
 # %% [markdown]
 """
-### MulBackward - Gradient Rules for Element-wise Multiplication
+### Mul.backward: Gradient Rules for Element-wise Multiplication
 
 Element-wise multiplication follows the product rule of calculus.
 
@@ -633,8 +658,9 @@ Backward: grad_z=[1,1]
 """
 
 # %% nbgrader={"grade": false, "grade_id": "mul-backward", "solution": true}
-#| export
-class MulBackward(Function):
+#| exporti
+@method_of(Mul)
+def backward(self, grad_output):
     """
     Gradient computation for tensor multiplication.
 
@@ -645,75 +671,67 @@ class MulBackward(Function):
 
     **Applications:** Used in weight scaling, binary masking,
     and anywhere element-wise multiplication occurs.
+
+    Compute gradients for multiplication.
+
+    Args:
+        grad_output: Gradient flowing backward from output
+
+    Returns:
+        Tuple of (grad_a, grad_b) for the two inputs
+
+    **Mathematical Foundation:**
+    - ∂(a*b)/∂a = b → grad_a = grad_output * b
+    - ∂(a*b)/∂b = a → grad_b = grad_output * a
+
+    TODO: Implement gradient computation for element-wise multiplication.
+
+    APPROACH:
+    1. Extract input tensors a, b from self.inputs
+    2. Initialize grad_a and grad_b to None
+    3. For first input (a): if requires_grad:
+       - Compute grad_a = grad_output * b
+       - Use _reduce_broadcast_grad() to handle shape mismatch
+    4. For second input (b): if requires_grad:
+       - Compute grad_b = grad_output * a
+       - Use _reduce_broadcast_grad() to handle shape mismatch
+    5. Return tuple (grad_a, grad_b)
+
+    EXAMPLE:
+    >>> a = Tensor([2, 3], requires_grad=True)
+    >>> b = Tensor([4, 5], requires_grad=True)
+    >>> z = a * b  # z = [8, 15]
+    >>> # During backward: grad_output = [1, 1]
+    >>> # grad_a = [1, 1] * [4, 5] = [4, 5]
+    >>> # grad_b = [1, 1] * [2, 3] = [2, 3]
+
+    HINTS:
+    - Product rule: each input's gradient equals grad_output times the OTHER input
+    - Use _reduce_broadcast_grad() to handle broadcasting correctly
+    - b is always a Tensor here (Tensor.__mul__ wrapped any scalar), so b.data is safe
     """
+    ### BEGIN SOLUTION
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def apply(self, grad_output):
-        """
-        Compute gradients for multiplication.
+    # Gradient for first input: grad_output * b
+    if isinstance(a, Tensor) and a.requires_grad:
+        grad_a = grad_output * b.data
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
-        Args:
-            grad_output: Gradient flowing backward from output
+    # Gradient for second input: grad_output * a
+    if isinstance(b, Tensor) and b.requires_grad:
+        grad_b = grad_output * a.data
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
-        Returns:
-            Tuple of (grad_a, grad_b) for the two inputs
-
-        **Mathematical Foundation:**
-        - ∂(a*b)/∂a = b → grad_a = grad_output * b
-        - ∂(a*b)/∂b = a → grad_b = grad_output * a
-
-        TODO: Implement gradient computation for element-wise multiplication.
-
-        APPROACH:
-        1. Extract input tensors a, b from self.saved_tensors
-        2. Initialize grad_a and grad_b to None
-        3. For first input (a): if requires_grad:
-           - Compute grad_a = grad_output * b
-           - Use _reduce_broadcast_grad() to handle shape mismatch
-        4. For second input (b): if requires_grad:
-           - Compute grad_b = grad_output * a
-           - Use _reduce_broadcast_grad() to handle shape mismatch
-        5. Handle both Tensor and scalar cases for b
-        6. Return tuple (grad_a, grad_b)
-
-        EXAMPLE:
-        >>> a = Tensor([2, 3], requires_grad=True)
-        >>> b = Tensor([4, 5], requires_grad=True)
-        >>> z = a * b  # z = [8, 15]
-        >>> # During backward: grad_output = [1, 1]
-        >>> # grad_a = [1, 1] * [4, 5] = [4, 5]
-        >>> # grad_b = [1, 1] * [2, 3] = [2, 3]
-
-        HINTS:
-        - Product rule: each input's gradient equals grad_output times the OTHER input
-        - Use _reduce_broadcast_grad() to handle broadcasting correctly
-        - Check if b is a Tensor or scalar before accessing .data
-        - Use b.data if Tensor, or b directly if scalar
-        """
-        ### BEGIN SOLUTION
-        a, b = self.saved_tensors
-        grad_a = grad_b = None
-
-        # Gradient for first input: grad_output * b
-        if isinstance(a, Tensor) and a.requires_grad:
-            if isinstance(b, Tensor):
-                grad_a = grad_output * b.data
-            else:
-                grad_a = grad_output * b
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
-
-        # Gradient for second input: grad_output * a
-        if isinstance(b, Tensor) and b.requires_grad:
-            grad_b = grad_output * a.data
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
-
-        return grad_a, grad_b
-        ### END SOLUTION
+    return grad_a, grad_b
+    ### END SOLUTION
 
 # %% [markdown]
 """
-### SubBackward - Gradient Rules for Subtraction
+### Sub.backward: Gradient Rules for Subtraction
 
 Subtraction is mathematically simple but important for operations like normalization.
 
@@ -729,67 +747,65 @@ This is crucial for operations like centering data (`x - mean`).
 """
 
 # %% nbgrader={"grade": false, "grade_id": "sub-backward", "solution": true}
-#| export
-class SubBackward(Function):
+#| exporti
+@method_of(Sub)
+def backward(self, grad_output):
     """
     Gradient computation for tensor subtraction.
 
     **Mathematical Rule:** If z = a - b, then ∂z/∂a = 1 and ∂z/∂b = -1
+
+    Compute gradients for subtraction.
+
+    Returns:
+        Tuple of (grad_a, grad_b) where grad_b is negated
+
+    TODO: Implement gradient computation for subtraction operation.
+
+    APPROACH:
+    1. Extract input tensors from self.inputs
+    2. Initialize grad_a and grad_b to None
+    3. For first input (a): if requires_grad:
+       - Set grad_a = grad_output
+       - Use _reduce_broadcast_grad() to handle shape mismatch
+    4. For second input (b): if requires_grad:
+       - Set grad_b = -grad_output (note the negative!)
+       - Use _reduce_broadcast_grad() to handle shape mismatch
+    5. Return tuple (grad_a, grad_b)
+
+    EXAMPLE:
+    >>> a = Tensor([5, 7], requires_grad=True)
+    >>> b = Tensor([2, 3], requires_grad=True)
+    >>> z = a - b  # z = [3, 4]
+    >>> # During backward: grad_output = [1, 1]
+    >>> # grad_a = [1, 1], grad_b = -[1, 1] = [-1, -1]
+
+    HINTS:
+    - ∂(a-b)/∂a = 1 (gradient flows unchanged to first operand)
+    - ∂(a-b)/∂b = -1 (gradient is negated for second operand)
+    - Use _reduce_broadcast_grad() to handle broadcasting correctly
+    - The negative sign is crucial for correct gradient flow
     """
+    ### BEGIN SOLUTION
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def apply(self, grad_output):
-        """
-        Compute gradients for subtraction.
+    if isinstance(a, Tensor) and a.requires_grad:
+        grad_a = grad_output  # ∂(a-b)/∂a = 1
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
-        Returns:
-            Tuple of (grad_a, grad_b) where grad_b is negated
+    if isinstance(b, Tensor) and b.requires_grad:
+        grad_b = -grad_output  # ∂(a-b)/∂b = -1 (note the negative!)
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
-        TODO: Implement gradient computation for subtraction operation.
-
-        APPROACH:
-        1. Extract input tensors from self.saved_tensors
-        2. Initialize grad_a and grad_b to None
-        3. For first input (a): if requires_grad:
-           - Set grad_a = grad_output
-           - Use _reduce_broadcast_grad() to handle shape mismatch
-        4. For second input (b): if requires_grad:
-           - Set grad_b = -grad_output (note the negative!)
-           - Use _reduce_broadcast_grad() to handle shape mismatch
-        5. Return tuple (grad_a, grad_b)
-
-        EXAMPLE:
-        >>> a = Tensor([5, 7], requires_grad=True)
-        >>> b = Tensor([2, 3], requires_grad=True)
-        >>> z = a - b  # z = [3, 4]
-        >>> # During backward: grad_output = [1, 1]
-        >>> # grad_a = [1, 1], grad_b = -[1, 1] = [-1, -1]
-
-        HINTS:
-        - ∂(a-b)/∂a = 1 (gradient flows unchanged to first operand)
-        - ∂(a-b)/∂b = -1 (gradient is negated for second operand)
-        - Use _reduce_broadcast_grad() to handle broadcasting correctly
-        - The negative sign is crucial for correct gradient flow
-        """
-        ### BEGIN SOLUTION
-        a, b = self.saved_tensors
-        grad_a = grad_b = None
-
-        if isinstance(a, Tensor) and a.requires_grad:
-            grad_a = grad_output  # ∂(a-b)/∂a = 1
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
-
-        if isinstance(b, Tensor) and b.requires_grad:
-            grad_b = -grad_output  # ∂(a-b)/∂b = -1 (note the negative!)
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
-
-        return grad_a, grad_b
-        ### END SOLUTION
+    return grad_a, grad_b
+    ### END SOLUTION
 
 # %% [markdown]
 """
-### DivBackward - Gradient Rules for Division
+### Div.backward: Gradient Rules for Division
 
 Division requires the quotient rule from calculus.
 
@@ -804,76 +820,70 @@ If z = a / b, then:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "div-backward", "solution": true}
-#| export
-class DivBackward(Function):
+#| exporti
+@method_of(Div)
+def backward(self, grad_output):
     """
     Gradient computation for tensor division.
 
     **Mathematical Rule:** If z = a / b, then:
     - ∂z/∂a = 1/b
     - ∂z/∂b = -a/b²
+
+    Compute gradients for division using quotient rule.
+
+    Returns:
+        Tuple of (grad_a, grad_b)
+
+    TODO: Implement gradient computation for division operation.
+
+    APPROACH:
+    1. Extract input tensors from self.inputs
+    2. Initialize grad_a and grad_b to None
+    3. For first input (a): if requires_grad:
+       - Compute grad_a = grad_output / b
+       - Use _reduce_broadcast_grad() to handle shape mismatch
+    4. For second input (b): if requires_grad:
+       - Compute grad_b = -grad_output * a / (b²)
+       - Use _reduce_broadcast_grad() to handle shape mismatch
+    5. Return tuple (grad_a, grad_b)
+
+    EXAMPLE:
+    >>> a = Tensor([8.0, 12.0], requires_grad=True)
+    >>> b = Tensor([2.0, 3.0], requires_grad=True)
+    >>> z = a / b  # z = [4.0, 4.0]
+    >>> # During backward: grad_output = [1, 1]
+    >>> # grad_a = [1, 1] / [2, 3] = [0.5, 0.333...]
+    >>> # grad_b = -[1, 1] * [8, 12] / ([2, 3]²) = [-2, -1.333...]
+
+    HINTS:
+    - Quotient rule: ∂(a/b)/∂a = 1/b, ∂(a/b)/∂b = -a/b²
+    - Use _reduce_broadcast_grad() to handle broadcasting correctly
+    - b is always a Tensor here (Tensor.__truediv__ wrapped any scalar), so b.data is safe
+    - b² means b.data ** 2
     """
+    ### BEGIN SOLUTION
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def apply(self, grad_output):
-        """
-        Compute gradients for division using quotient rule.
+    if isinstance(a, Tensor) and a.requires_grad:
+        # ∂(a/b)/∂a = 1/b
+        grad_a = grad_output / b.data
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
-        Returns:
-            Tuple of (grad_a, grad_b)
+    if isinstance(b, Tensor) and b.requires_grad:
+        # ∂(a/b)/∂b = -a/b²
+        grad_b = -grad_output * a.data / (b.data ** 2)
+        # Handle broadcasting: reduce gradient to match original shape
+        grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
-        TODO: Implement gradient computation for division operation.
-
-        APPROACH:
-        1. Extract input tensors from self.saved_tensors
-        2. Initialize grad_a and grad_b to None
-        3. For first input (a): if requires_grad:
-           - Compute grad_a = grad_output / b
-           - Use _reduce_broadcast_grad() to handle shape mismatch
-        4. For second input (b): if requires_grad:
-           - Compute grad_b = -grad_output * a / (b²)
-           - Use _reduce_broadcast_grad() to handle shape mismatch
-        5. Handle both Tensor and scalar cases for b
-        6. Return tuple (grad_a, grad_b)
-
-        EXAMPLE:
-        >>> a = Tensor([8.0, 12.0], requires_grad=True)
-        >>> b = Tensor([2.0, 3.0], requires_grad=True)
-        >>> z = a / b  # z = [4.0, 4.0]
-        >>> # During backward: grad_output = [1, 1]
-        >>> # grad_a = [1, 1] / [2, 3] = [0.5, 0.333...]
-        >>> # grad_b = -[1, 1] * [8, 12] / ([2, 3]²) = [-2, -1.333...]
-
-        HINTS:
-        - Quotient rule: ∂(a/b)/∂a = 1/b, ∂(a/b)/∂b = -a/b²
-        - Use _reduce_broadcast_grad() to handle broadcasting correctly
-        - Use b.data if Tensor, or b directly if scalar
-        - b² means b.data ** 2 for tensors
-        """
-        ### BEGIN SOLUTION
-        a, b = self.saved_tensors
-        grad_a = grad_b = None
-
-        if isinstance(a, Tensor) and a.requires_grad:
-            # ∂(a/b)/∂a = 1/b
-            if isinstance(b, Tensor):
-                grad_a = grad_output / b.data
-            else:
-                grad_a = grad_output / b
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
-
-        if isinstance(b, Tensor) and b.requires_grad:
-            # ∂(a/b)/∂b = -a/b²
-            grad_b = -grad_output * a.data / (b.data ** 2)
-            # Handle broadcasting: reduce gradient to match original shape
-            grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
-
-        return grad_a, grad_b
-        ### END SOLUTION
+    return grad_a, grad_b
+    ### END SOLUTION
 
 # %% [markdown]
 """
-### MatmulBackward - Gradient Rules for Matrix Multiplication
+### MatMul.backward: Gradient Rules for Matrix Multiplication
 
 Matrix multiplication has more complex gradient rules based on matrix calculus.
 
@@ -900,8 +910,9 @@ Backward: grad_Z(m×n) @ B.T(n×k) = grad_A(m×k) ✓
 """
 
 # %% nbgrader={"grade": false, "grade_id": "matmul-backward", "solution": true}
-#| export
-class MatmulBackward(Function):
+#| exporti
+@method_of(MatMul)
+def backward(self, grad_output):
     """
     Gradient computation for matrix multiplication.
 
@@ -914,171 +925,182 @@ class MatmulBackward(Function):
 
     **Applications:** Core operation in neural networks for computing outputs
     in linear layers and combining feature representations.
+
+    Compute gradients for matrix multiplication.
+
+    Args:
+        grad_output: Gradient flowing backward from output
+
+    Returns:
+        Tuple of (grad_a, grad_b) for the two matrix inputs
+
+    **Mathematical Foundation:**
+    - ∂(A@B)/∂A = grad_output @ B.T
+    - ∂(A@B)/∂B = A.T @ grad_output
+
+    **Batched Operation:** For 3D+ tensors, we transpose only the last two
+    dimensions using np.swapaxes, preserving batch dimensions.
+
+    TODO: Implement gradient computation for matrix multiplication.
+
+    APPROACH:
+    1. Extract input tensors a, b from self.inputs
+    2. Initialize gradients to None; promote a left vector to a row and a right
+       vector to a column, restoring these axes on grad_output as well
+    3. For first input (a):
+       - Transpose b: use np.swapaxes(b_matrix, -2, -1) for batched tensors
+       - Compute grad_a = grad_output @ b_T using np.matmul
+    4. For second input (b):
+       - Transpose a: use np.swapaxes(a_matrix, -2, -1) for batched tensors
+       - Compute grad_b = a_T @ grad_output using np.matmul
+    5. Remove any promoted vector axes and return (grad_a, grad_b). The engine
+       sums broadcast batch dimensions back to each input shape.
+
+    EXAMPLE:
+    >>> A = Tensor([[1, 2]], requires_grad=True)  # (1, 2)
+    >>> B = Tensor([[3], [4]], requires_grad=True)  # (2, 1)
+    >>> C = A @ B  # (1, 1), result = [[11]]
+    >>> # During backward: grad_output = [[1]]
+    >>> # grad_A = [[1]] @ [[3, 4]] = [[3, 4]]
+    >>> # grad_B = [[1, 2]].T @ [[1]] = [[1], [2]]
+
+    HINTS:
+    - Matrix multiplication gradients involve transposing one input
+    - Use np.swapaxes(array, -2, -1) to transpose last two dimensions
+    - This preserves batch dimensions for 3D+ tensors
+    - Use np.matmul for the actual matrix multiplication
     """
+    ### BEGIN SOLUTION
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def apply(self, grad_output):
-        """
-        Compute gradients for matrix multiplication.
+    # A vector behaves as a one-row left matrix or a one-column right matrix.
+    # Restore those dimensions on the output gradient before applying the same
+    # two matrix rules; remove them again before returning each input gradient.
+    a_vector, b_vector = a.data.ndim == 1, b.data.ndim == 1
+    a_matrix = a.data[np.newaxis, :] if a_vector else a.data
+    b_matrix = b.data[:, np.newaxis] if b_vector else b.data
+    matrix_grad = grad_output
+    if b_vector:
+        matrix_grad = np.expand_dims(matrix_grad, -1)
+    if a_vector:
+        matrix_grad = np.expand_dims(matrix_grad, -2)
 
-        Args:
-            grad_output: Gradient flowing backward from output
+    if a.requires_grad:
+        grad_a = np.matmul(matrix_grad, np.swapaxes(b_matrix, -2, -1))
+        if a_vector:
+            grad_a = np.squeeze(grad_a, axis=-2)
+    if b.requires_grad:
+        grad_b = np.matmul(np.swapaxes(a_matrix, -2, -1), matrix_grad)
+        if b_vector:
+            grad_b = np.squeeze(grad_b, axis=-1)
 
-        Returns:
-            Tuple of (grad_a, grad_b) for the two matrix inputs
+    return grad_a, grad_b
+    ### END SOLUTION
 
-        **Mathematical Foundation:**
-        - ∂(A@B)/∂A = grad_output @ B.T
-        - ∂(A@B)/∂B = A.T @ grad_output
+# %% [markdown]
+"""
+### 🧪 Unit Test: Arithmetic Backward Passes
 
-        **Batched Operation:** For 3D+ tensors, we transpose only the last two
-        dimensions using np.swapaxes, preserving batch dimensions.
+Four arithmetic rules and the matrix multiply, checked before you go on to the
+shape operations. Each is small enough to differentiate by hand, so this test
+states the expected gradient rather than probing for one.
 
-        TODO: Implement gradient computation for matrix multiplication.
+**What we're testing**: Add, Sub, Mul, Div and MatMul backward, against
+hand-computed gradients rather than shapes
+**Why it matters**: A gradient with the right shape and the wrong value trains a
+model that quietly learns the wrong thing. Shape checks pass for a transposed
+matmul gradient and for a subtraction that forgets its sign
+**Expected**: Add passes the gradient through, Sub negates the second operand,
+Mul swaps the operands, Div carries the squared denominator, and MatMul matches
+G@B^T and A^T@G
+"""
 
-        APPROACH:
-        1. Extract input tensors a, b from self.saved_tensors
-        2. Initialize grad_a and grad_b to None
-        3. For first input (a):
-           - Transpose b: use np.swapaxes(b.data, -2, -1) for batched tensors
-           - Compute grad_a = grad_output @ b_T using np.matmul
-        4. For second input (b):
-           - Transpose a: use np.swapaxes(a.data, -2, -1) for batched tensors
-           - Compute grad_b = a_T @ grad_output using np.matmul
-        5. Return tuple (grad_a, grad_b)
 
-        EXAMPLE:
-        >>> A = Tensor([[1, 2]], requires_grad=True)  # (1, 2)
-        >>> B = Tensor([[3], [4]], requires_grad=True)  # (2, 1)
-        >>> C = A @ B  # (1, 1), result = [[11]]
-        >>> # During backward: grad_output = [[1]]
-        >>> # grad_A = [[1]] @ [[3, 4]] = [[3, 4]]
-        >>> # grad_B = [[1, 2]].T @ [[1]] = [[1], [2]]
+# %% nbgrader={"grade": true, "grade_id": "test-arithmetic-backward", "locked": true, "points": 8}
+def test_unit_arithmetic_backward():
+    """🧪 Test the arithmetic and matmul backward passes."""
+    print("🧪 Unit Test: Arithmetic Backward Passes...")
 
-        HINTS:
-        - Matrix multiplication gradients involve transposing one input
-        - Use np.swapaxes(array, -2, -1) to transpose last two dimensions
-        - This preserves batch dimensions for 3D+ tensors
-        - Use np.matmul for the actual matrix multiplication
-        """
-        ### BEGIN SOLUTION
-        a, b = self.saved_tensors
-        grad_a = grad_b = None
+    # Note: We call backward() on each operation directly, in isolation, before
+    # Tensor.backward() exists. requires_grad is a constructor argument from Module 01.
 
-        # Gradient for first input: grad_output @ b.T
-        if isinstance(a, Tensor) and a.requires_grad:
-            if b.data.ndim >= 2:
-                # Batched: transpose only the last two dims
-                b_T = np.swapaxes(b.data, -2, -1)
-                grad_a = np.matmul(grad_output, b_T)
-            else:
-                # 1D b: A(m,k) @ b(k,) -> out(m,)
-                # grad_A = outer(grad_output, b): (m,) x (k,) -> (m, k)
-                grad_a = np.outer(grad_output, b.data)
+    # Test Add.backward
+    a = Tensor([1, 2, 3])
+    a.requires_grad = True
+    b = Tensor([4, 5, 6])
+    b.requires_grad = True
+    add_func = Add(a, b)
+    grad_output = np.array([1, 1, 1])
+    grad_a, grad_b = add_func.backward(grad_output)
+    assert np.allclose(grad_a, grad_output), f"Add.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, grad_output), f"Add.backward grad_b failed: {grad_b}"
 
-        # Gradient for second input: a.T @ grad_output
-        if isinstance(b, Tensor) and b.requires_grad:
-            if a.data.ndim >= 2:
-                # Batched: transpose only the last two dims
-                a_T = np.swapaxes(a.data, -2, -1)
-                grad_b = np.matmul(a_T, grad_output)
-            else:
-                # 1D a: a(k,) @ B(k,n) -> out(n,)
-                # grad_B = outer(a, grad_output): (k,) x (n,) -> (k, n)
-                grad_b = np.outer(a.data, grad_output)
+    # Test Mul.backward
+    mul_func = Mul(a, b)
+    grad_a, grad_b = mul_func.backward(grad_output)
+    assert np.allclose(grad_a, b.data), f"Mul.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, a.data), f"Mul.backward grad_b failed: {grad_b}"
 
-        return grad_a, grad_b
-        ### END SOLUTION
+    # Test Sub.backward: the second operand's gradient carries the minus sign
+    sub_func = Sub(a, b)
+    grad_output = np.array([1, 1, 1])
+    grad_a, grad_b = sub_func.backward(grad_output)
+    assert np.allclose(grad_a, grad_output), f"Sub.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, -grad_output), f"Sub.backward grad_b failed: {grad_b}"
 
-# %% nbgrader={"grade": false, "grade_id": "transpose-backward", "solution": true}
-#| export
-class TransposeBackward(Function):
-    """
-    Gradient computation for transpose operation.
+    # Test Div.backward: d(a/b)/da = 1/b, d(a/b)/db = -a/b^2
+    div_func = Div(a, b)
+    grad_a, grad_b = div_func.backward(grad_output)
+    assert np.allclose(grad_a, 1.0 / b.data), f"Div.backward grad_a failed: {grad_a}"
+    assert np.allclose(grad_b, -a.data / b.data ** 2), f"Div.backward grad_b failed: {grad_b}"
 
-    **Mathematical Rule:** If Y = X.T, then:
-    - ∂Y/∂X = grad_Y.T
+    # Test MatMul.backward. Shapes alone would pass for a transposed or
+    # swapped implementation, so pin the values: dA = G @ B^T, dB = A^T @ G.
+    a_mat = Tensor([[1, 2], [3, 4]])
+    a_mat.requires_grad = True
+    b_mat = Tensor([[5, 6], [7, 8]])
+    b_mat.requires_grad = True
+    matmul_func = MatMul(a_mat, b_mat)
+    grad_mat = np.ones((2, 2))
+    grad_a, grad_b = matmul_func.backward(grad_mat)
+    assert np.allclose(grad_a, grad_mat @ b_mat.data.T), f"MatMul.backward grad_a: {grad_a}"
+    assert np.allclose(grad_b, a_mat.data.T @ grad_mat), f"MatMul.backward grad_b: {grad_b}"
 
-    **Key Insight:** The gradient of transpose is just transpose the gradient!
-    This is because transpose is a linear operation that just rearranges elements.
+    print("✅ Arithmetic backward passes work correctly!")
 
-    **Applications:** Used in weight gradient computation (W.T), data reshaping,
-    and any operation that needs to swap matrix dimensions.
-    """
+if __name__ == "__main__":
+    test_unit_arithmetic_backward()
 
-    def __init__(self, tensor, dim0, dim1):
-        """
-        Args:
-            tensor: Input tensor
-            dim0: First dimension to swap (None for default)
-            dim1: Second dimension to swap (None for default)
-        """
-        super().__init__(tensor)
-        self.dim0 = dim0
-        self.dim1 = dim1
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for transpose.
+# %% [markdown]
+"""
+### Permute: Gradient Rules for Transpose and General Reordering
 
-        Args:
-            grad_output: Gradient flowing backward from output
+Permute is transpose for more than two axes. The gradient is the same idea, with
+one extra step: you have to invert the permutation rather than just reapply it.
 
-        Returns:
-            Tuple with single gradient for input tensor
+**Mathematical Principle:**
+```
+If Z = A.permute(axes), then grad_A = grad_Z.permute(argsort(axes))
+```
 
-        **Mathematical Foundation:**
-        - ∂(X.T)/∂X = grad_output.T
-        - Just transpose the gradient back!
+**Why argsort and not axes:**
+```
+axes = (2, 0, 1)  means  Z's axis 0 came from A's axis 2
+                          Z's axis 1 came from A's axis 0
+                          Z's axis 2 came from A's axis 1
+To send gradients home you need the inverse map: (1, 2, 0) = argsort(axes)
+```
 
-        TODO: Implement gradient computation for transpose operation.
-
-        APPROACH:
-        1. Extract input tensor x from self.saved_tensors
-        2. Initialize grad_x to None
-        3. If x requires gradients:
-           - Check if default transpose (last two dims) or specific dims
-           - For default: swap last two dimensions of grad_output
-           - For specific dims: swap the specified dimensions back
-        4. Return tuple (grad_x,)
-
-        EXAMPLE:
-        >>> X = Tensor([[1, 2], [3, 4]], requires_grad=True)
-        >>> Y = X.transpose()  # [[1, 3], [2, 4]]
-        >>> # During backward: grad_output = [[a, b], [c, d]]
-        >>> # grad_X = grad_output.T = [[a, c], [b, d]]
-
-        HINTS:
-        - Transpose gradient is simply transposing the gradient back
-        - Use np.transpose(grad_output, axes) to specify axis order
-        - For default transpose, swap axes[-2] and axes[-1]
-        - Return as single-element tuple: (grad_x,)
-        """
-        ### BEGIN SOLUTION
-        x, = self.saved_tensors
-        grad_x = None
-
-        if isinstance(x, Tensor) and x.requires_grad:
-            # Transpose gradient using the same dims
-            if self.dim0 is None and self.dim1 is None:
-                # Default: transpose last two dimensions
-                if grad_output.ndim < 2:
-                    grad_x = grad_output.copy()
-                else:
-                    axes = list(range(grad_output.ndim))
-                    axes[-2], axes[-1] = axes[-1], axes[-2]
-                    grad_x = np.transpose(grad_output, axes)
-            else:
-                # Specific dimensions: swap them back
-                axes = list(range(grad_output.ndim))
-                axes[self.dim0], axes[self.dim1] = axes[self.dim1], axes[self.dim0]
-                grad_x = np.transpose(grad_output, axes)
-
-        return (grad_x,)
-        ### END SOLUTION
+Reapplying `axes` works for a 2D transpose only because swapping twice is the
+identity. It is wrong in general, which is what makes this one worth writing out.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "permute-backward", "solution": true}
-#| export
-class PermuteBackward(Function):
+#| exporti
+@method_of(Permute)
+def backward(self, grad_output):
     """
     Gradient computation for arbitrary axis permutation (general transpose).
 
@@ -1092,64 +1114,77 @@ class PermuteBackward(Function):
     If axis i went to position axes[i], then in the inverse, position axes[i] should go to i.
 
     **Applications:** Rearranging tensor dimensions for different computation patterns (e.g., swapping batch and feature dimensions).
+
+    Compute gradient for permutation.
+
+    The gradient is permuted back using the inverse permutation.
+
+    **Mathematical Foundation:**
+    - ∂(X.permute(axes))/∂X = grad_output.permute(inverse_axes)
+
+    TODO: Implement gradient computation for permutation operation.
+
+    APPROACH:
+    1. Extract input tensor x from self.inputs
+    2. Initialize grad_x to None
+    3. If x requires gradients:
+       - Permute grad_output using np.argsort(self.axes)
+       - Use np.transpose(grad_output, np.argsort(self.axes))
+    4. Return tuple (grad_x,)
+
+    EXAMPLE:
+    >>> X = Tensor([[[1, 2], [3, 4]]], requires_grad=True)  # (1, 2, 2)
+    >>> Y = X.permute((0, 2, 1))  # Swap last two dims → (1, 2, 2)
+    >>> # During backward: inverse axes computed with np.argsort(self.axes)
+    >>> # grad_X = np.transpose(grad_output, inverse_axes)
+
+    HINTS:
+    - inverse_axes = tuple(np.argsort(self.axes)); if axes[i] = j then inverse_axes[j] = i
+    - Apply np.transpose(grad_output, inverse_axes)
+    - Return as single-element tuple: (grad_x,)
     """
+    ### BEGIN SOLUTION
+    x, = self.inputs
+    grad_x = None
 
-    def __init__(self, tensor, axes):
-        """
-        Args:
-            tensor: Input tensor
-            axes: Tuple of axis indices defining the permutation
-        """
-        super().__init__(tensor)
-        self.axes = axes
-        # Compute inverse permutation: if axes[i] = j, then inverse_axes[j] = i
-        self.inverse_axes = tuple(np.argsort(axes))
+    if isinstance(x, Tensor) and x.requires_grad:
+        # Permute gradient back to original axis order.
+        # If axes[i] = j, then inverse_axes[j] = i.
+        inverse_axes = tuple(np.argsort(self.axes))
+        grad_x = np.transpose(grad_output, inverse_axes)
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for permutation.
+    return (grad_x,)
+    ### END SOLUTION
 
-        The gradient is permuted back using the inverse permutation.
+# %% [markdown]
+"""
+### Slice.backward: Gradient Rules for Indexing
 
-        **Mathematical Foundation:**
-        - ∂(X.permute(axes))/∂X = grad_output.permute(inverse_axes)
+Slicing keeps some values and drops the rest. Gradients follow the same split:
+the kept positions receive their gradient, and everything else receives zero.
 
-        TODO: Implement gradient computation for permutation operation.
+**Mathematical Principle:**
+```
+If Z = A[key], then grad_A = zeros_like(A); grad_A[key] = grad_Z
+```
 
-        APPROACH:
-        1. Extract input tensor x from self.saved_tensors
-        2. Initialize grad_x to None
-        3. If x requires gradients:
-           - Permute grad_output using self.inverse_axes
-           - Use np.transpose(grad_output, self.inverse_axes)
-        4. Return tuple (grad_x,)
+**Why a zeros scaffold:**
+```
+Forward:  A=[1,2,3,4,5] → A[1:3] → Z=[2,3]
+Backward: grad_Z=[g0,g1] → grad_A=[0,g0,g1,0,0]
+                            ↑ positions that were never read contributed
+                              nothing to the output, so their gradient is 0
+```
 
-        EXAMPLE:
-        >>> X = Tensor([[[1, 2], [3, 4]]], requires_grad=True)  # (1, 2, 2)
-        >>> Y = X.permute((0, 2, 1))  # Swap last two dims → (1, 2, 2)
-        >>> # During backward: inverse_axes computed in __init__
-        >>> # grad_X = np.transpose(grad_output, inverse_axes)
-
-        HINTS:
-        - Inverse permutation is precomputed in __init__ using np.argsort
-        - Simply apply np.transpose with inverse_axes
-        - Return as single-element tuple: (grad_x,)
-        """
-        ### BEGIN SOLUTION
-        x, = self.saved_tensors
-        grad_x = None
-
-        if isinstance(x, Tensor) and x.requires_grad:
-            # Permute gradient back to original axis order
-            grad_x = np.transpose(grad_output, self.inverse_axes)
-
-        return (grad_x,)
-        ### END SOLUTION
-
+This is the first backward that has to build a tensor the shape of its INPUT
+rather than reshaping its output. Embedding lookup in Module 11 is the same
+pattern at scale.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "slice-backward", "solution": true}
-#| export
-class SliceBackward(Function):
+#| exporti
+@method_of(Slice)
+def backward(self, grad_output):
     """
     Gradient computation for tensor slicing/indexing operations.
 
@@ -1170,77 +1205,90 @@ class SliceBackward(Function):
     >>> loss = y.sum()
     >>> loss.backward()
     >>> # x.grad = [1, 1, 1, 0, 0] - gradients only for sliced positions
+
+    Compute gradient for slicing operation.
+
+    Args:
+        grad_output: Gradient flowing backward from sliced output
+
+    Returns:
+        Tuple with single gradient for input tensor
+
+    **Mathematical Foundation:**
+    - Slicing extracts a subset of elements
+    - Backward scatters gradients back to original positions
+    - Unsliced positions receive zero gradient
+
+    **Example:**
+    If X = [a, b, c, d, e] and Y = X[1:4] = [b, c, d]
+    Then dL/dX = [0, dL/db, dL/dc, dL/dd, 0]
+
+    TODO: Implement gradient computation for slicing/indexing operation.
+
+    APPROACH:
+    1. Extract input tensor from self.inputs
+    2. Initialize grad_input to None
+    3. If tensor requires gradients:
+       - Create zeros array: grad_input = np.zeros(the input's shape (self.inputs[0].shape))
+       - Scatter gradients back: np.add.at(grad_input, self.key, grad_output)
+    4. Return tuple (grad_input,)
+
+    EXAMPLE:
+    >>> X = Tensor([1, 2, 3, 4, 5], requires_grad=True)
+    >>> Y = X[:3]  # Slice first 3 elements → [1, 2, 3]
+    >>> # During backward: grad_output = [1, 1, 1]
+    >>> # grad_X = [1, 1, 1, 0, 0] (gradients only for sliced positions)
+
+    HINTS:
+    - Create zero gradient array with original tensor shape
+    - np.add.at(grad_input, self.key, grad_output) scatters through any index
+      (single index, ranges, tuples) and ACCUMULATES when an index repeats,
+      where plain assignment would silently keep only the last value
+    - Return as single-element tuple: (grad_input,)
     """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
+    grad_input = None
 
-    def __init__(self, tensor, key):
-        """
-        Args:
-            tensor: Original tensor being sliced
-            key: Slicing key (index, slice, tuple of slices, etc.)
-        """
-        super().__init__(tensor)
-        self.key = key
-        self.original_shape = tensor.shape
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        # Create gradient array with same shape as original tensor
+        grad_input = np.zeros(tensor.shape, dtype=np.float32)
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for slicing operation.
+        # Scatter gradients back into the sliced positions (the inverse of the
+        # forward slice). np.add.at accumulates when an index was used twice.
+        np.add.at(grad_input, self.key, grad_output)
 
-        Args:
-            grad_output: Gradient flowing backward from sliced output
+    return (grad_input,)
+    ### END SOLUTION
 
-        Returns:
-            Tuple with single gradient for input tensor
+# %% [markdown]
+"""
+### Reshape.backward: Gradient Rules for Changing Shape
 
-        **Mathematical Foundation:**
-        - Slicing extracts a subset of elements
-        - Backward scatters gradients back to original positions
-        - Unsliced positions receive zero gradient
+Reshape reinterprets the same values under a new shape. Nothing is added,
+dropped, or combined, so the gradient just needs its original shape back.
 
-        **Example:**
-        If X = [a, b, c, d, e] and Y = X[1:4] = [b, c, d]
-        Then dL/dX = [0, dL/db, dL/dc, dL/dd, 0]
+**Mathematical Principle:**
+```
+If Z = A.reshape(new_shape), then grad_A = grad_Z.reshape(A.shape)
+```
 
-        TODO: Implement gradient computation for slicing/indexing operation.
+**Why the input shape must be saved:**
+```
+Forward:  A(2,6) → reshape(3,4) → Z(3,4)
+Backward: grad_Z(3,4) → reshape(?, ?) → grad_A must be (2,6)
+                                ↑ the only way to know is to have stored A.shape
+```
 
-        APPROACH:
-        1. Extract input tensor from self.saved_tensors
-        2. Initialize grad_input to None
-        3. If tensor requires gradients:
-           - Create zeros array: grad_input = np.zeros(self.original_shape)
-           - Place gradients back: grad_input[self.key] = grad_output
-        4. Return tuple (grad_input,)
-
-        EXAMPLE:
-        >>> X = Tensor([1, 2, 3, 4, 5], requires_grad=True)
-        >>> Y = X[:3]  # Slice first 3 elements → [1, 2, 3]
-        >>> # During backward: grad_output = [1, 1, 1]
-        >>> # grad_X = [1, 1, 1, 0, 0] (gradients only for sliced positions)
-
-        HINTS:
-        - Create zero gradient array with original tensor shape
-        - Use fancy indexing: grad_input[self.key] = grad_output
-        - This automatically handles all slice types (single index, ranges, tuples)
-        - Return as single-element tuple: (grad_input,)
-        """
-        ### BEGIN SOLUTION
-        tensor, = self.saved_tensors
-        grad_input = None
-
-        if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # Create gradient array with same shape as original tensor
-            grad_input = np.zeros(self.original_shape, dtype=np.float32)
-
-            # Place gradients back into the sliced positions
-            # This is the inverse of the forward slicing operation
-            grad_input[self.key] = grad_output
-
-        return (grad_input,)
-        ### END SOLUTION
+Every backward in this group saves something from the forward pass. Reshape
+saves a shape, slice saves a key, permute saves an axis order. That is the
+general rule: the backward pass needs whatever the forward pass consumed.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "reshape-backward", "solution": true}
-#| export
-class ReshapeBackward(Function):
+#| exporti
+@method_of(Reshape)
+def backward(self, grad_output):
     """
     Gradient computation for reshape operation.
 
@@ -1252,67 +1300,55 @@ class ReshapeBackward(Function):
 
     **Applications:** Flattening tensors for linear layers, reshaping
     between convolutional and dense layers.
+
+    Compute gradient for reshape.
+
+    Args:
+        grad_output: Gradient flowing backward from output
+
+    Returns:
+        Tuple with single gradient for input tensor
+
+    **Mathematical Foundation:**
+    - ∂(X.reshape(...))/∂X = grad_output.reshape(X.shape)
+    - Just reshape the gradient back!
+
+    TODO: Implement gradient computation for reshape operation.
+
+    APPROACH:
+    1. Extract input tensor x from self.inputs
+    2. Initialize grad_x to None
+    3. If x requires gradients:
+       - Reshape grad_output back to original shape
+       - Use grad_output.reshape(the input's shape (self.inputs[0].shape))
+    4. Return tuple (grad_x,)
+
+    EXAMPLE:
+    >>> X = Tensor([[1, 2], [3, 4]], requires_grad=True)  # (2, 2)
+    >>> Y = X.reshape(4)  # [1, 2, 3, 4]
+    >>> # During backward: grad_output = [1, 1, 1, 1]
+    >>> # grad_X = grad_output.reshape((2, 2)) = [[1, 1], [1, 1]]
+
+    HINTS:
+    - Reshape just rearranges elements, doesn't change values
+    - Simply reshape gradient back to original shape
+    - Use .reshape() method on grad_output numpy array
+    - Return as single-element tuple: (grad_x,)
     """
+    ### BEGIN SOLUTION
+    x, = self.inputs
+    grad_x = None
 
-    def __init__(self, tensor, original_shape):
-        """
-        Args:
-            tensor: Input tensor
-            original_shape: Shape before reshape
-        """
-        super().__init__(tensor)
-        self.original_shape = original_shape
+    if isinstance(x, Tensor) and x.requires_grad:
+        # Reshape gradient back to original shape
+        grad_x = grad_output.reshape(x.shape)
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for reshape.
-
-        Args:
-            grad_output: Gradient flowing backward from output
-
-        Returns:
-            Tuple with single gradient for input tensor
-
-        **Mathematical Foundation:**
-        - ∂(X.reshape(...))/∂X = grad_output.reshape(X.shape)
-        - Just reshape the gradient back!
-
-        TODO: Implement gradient computation for reshape operation.
-
-        APPROACH:
-        1. Extract input tensor x from self.saved_tensors
-        2. Initialize grad_x to None
-        3. If x requires gradients:
-           - Reshape grad_output back to original shape
-           - Use grad_output.reshape(self.original_shape)
-        4. Return tuple (grad_x,)
-
-        EXAMPLE:
-        >>> X = Tensor([[1, 2], [3, 4]], requires_grad=True)  # (2, 2)
-        >>> Y = X.reshape(4)  # [1, 2, 3, 4]
-        >>> # During backward: grad_output = [1, 1, 1, 1]
-        >>> # grad_X = grad_output.reshape((2, 2)) = [[1, 1], [1, 1]]
-
-        HINTS:
-        - Reshape just rearranges elements, doesn't change values
-        - Simply reshape gradient back to original shape
-        - Use .reshape() method on grad_output numpy array
-        - Return as single-element tuple: (grad_x,)
-        """
-        ### BEGIN SOLUTION
-        x, = self.saved_tensors
-        grad_x = None
-
-        if isinstance(x, Tensor) and x.requires_grad:
-            # Reshape gradient back to original shape
-            grad_x = grad_output.reshape(self.original_shape)
-
-        return (grad_x,)
-        ### END SOLUTION
+    return (grad_x,)
+    ### END SOLUTION
 
 # %% [markdown]
 """
-### SumBackward - Gradient Rules for Reduction Operations
+### Sum.backward: Gradient Rules for Reduction Operations
 
 Sum operations reduce tensor dimensions, so gradients must be broadcast back.
 
@@ -1335,8 +1371,9 @@ Case 2: Axis sum
 """
 
 # %% nbgrader={"grade": false, "grade_id": "sum-backward", "solution": true}
-#| export
-class SumBackward(Function):
+#| exporti
+@method_of(Sum)
+def backward(self, grad_output):
     """
     Gradient computation for tensor sum.
 
@@ -1347,117 +1384,263 @@ class SumBackward(Function):
 
     **Applications:** Used in loss functions, mean operations, and
     anywhere tensor reduction occurs.
+
+    Compute gradients for sum operation.
+
+    Args:
+        grad_output: Gradient flowing backward from output
+
+    Returns:
+        Tuple containing gradient for the input tensor
+
+    **Mathematical Foundation:**
+    - ∂sum(a)/∂a[i] = 1 → grad_a = ones_like(a) * grad_output
+
+    TODO: Implement gradient computation for sum reduction operation.
+
+    APPROACH:
+    1. Extract input tensor from self.inputs
+    2. If tensor requires gradients:
+       - Create ones array: np.ones_like(tensor.data)
+       - Multiply by grad_output: ones * grad_output
+       - Return as tuple: (grad_tensor,)
+    3. Else return (None,)
+
+    EXAMPLE:
+    >>> X = Tensor([1, 2, 3], requires_grad=True)
+    >>> Y = X.sum()  # Y = 6 (scalar)
+    >>> # During backward: grad_output = 1 (scalar)
+    >>> # grad_X = [1, 1, 1] * 1 = [1, 1, 1]
+
+    HINTS:
+    - Sum distributes gradient equally to all elements
+    - Use np.ones_like(tensor.data) to create gradient template
+    - Multiply ones by grad_output (broadcasting handles scalar/tensor)
+    - Return as single-element tuple: (grad_result,)
     """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
 
-    def __init__(self, tensor, axis=None, keepdims=False):
-        super().__init__(tensor)
-        self.axis = axis
-        self.keepdims = keepdims
-
-    def apply(self, grad_output):
-        """
-        Compute gradients for sum operation.
-
-        Args:
-            grad_output: Gradient flowing backward from output
-
-        Returns:
-            Tuple containing gradient for the input tensor
-
-        **Mathematical Foundation:**
-        - ∂sum(a)/∂a[i] = 1 → grad_a = ones_like(a) * grad_output
-
-        TODO: Implement gradient computation for sum reduction operation.
-
-        APPROACH:
-        1. Extract input tensor from self.saved_tensors
-        2. If tensor requires gradients:
-           - Create ones array: np.ones_like(tensor.data)
-           - Multiply by grad_output: ones * grad_output
-           - Return as tuple: (grad_tensor,)
-        3. Else return (None,)
-
-        EXAMPLE:
-        >>> X = Tensor([1, 2, 3], requires_grad=True)
-        >>> Y = X.sum()  # Y = 6 (scalar)
-        >>> # During backward: grad_output = 1 (scalar)
-        >>> # grad_X = [1, 1, 1] * 1 = [1, 1, 1]
-
-        HINTS:
-        - Sum distributes gradient equally to all elements
-        - Use np.ones_like(tensor.data) to create gradient template
-        - Multiply ones by grad_output (broadcasting handles scalar/tensor)
-        - Return as single-element tuple: (grad_result,)
-        """
-        ### BEGIN SOLUTION
-        tensor, = self.saved_tensors
-
-        if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # For axis-reduced sums, expand grad_output back along the summed
-            # axis before broadcasting, so each row/column gets its own gradient.
-            if self.axis is not None and not self.keepdims:
-                grad_output = np.expand_dims(grad_output, axis=self.axis)
-            return np.ones_like(tensor.data) * grad_output,
-        return None,
-        ### END SOLUTION
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        # For axis-reduced sums, expand grad_output back along the summed
+        # axis before broadcasting, so each row/column gets its own gradient.
+        if self.axis is not None and not self.keepdims:
+            grad_output = np.expand_dims(grad_output, axis=self.axis)
+        return np.ones_like(tensor.data) * grad_output,
+    return None,
+    ### END SOLUTION
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Function Classes
+### Mean, Max, Copy, MaskedFill.backward: The Remaining Module 01 Operations
 
-This test validates our Function classes compute gradients correctly.
+Every operation Module 01 gave a forward needs a backward, or the first `loss.mean()` you write will stop here. These four are short:
 
-**What we're testing**: Forward and backward passes for each operation
-**Why it matters**: These are the building blocks of autograd
-**Expected**: Correct gradients that satisfy mathematical definitions
+- **Mean** is a Sum divided by the number of elements averaged, so each element receives the output gradient over that count.
+- **Max** routes the gradient to the element that won and nothing to the rest. `apply()` saves the operation's output on the node as `self.output`, so the winners are wherever the input equals it. If several elements tie, the gradient is split evenly among them (PyTorch's `max()` picks one of them instead).
+- **Copy** changed nothing, so the gradient passes straight through.
+- **MaskedFill** overwrote the masked positions with a constant, so they receive no gradient; everything else passes through.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test-function-classes", "locked": true, "points": 15}
-def test_unit_function_classes():
-    """🔬 Test Function classes."""
-    print("🔬 Unit Test: Function Classes...")
+# %% nbgrader={"grade": false, "grade_id": "mean-max-copy-maskedfill-backward", "solution": true}
+#| exporti
+def _expand_reduced(grad_output, shape, axis, keepdims):
+    """Broadcast a reduced gradient back to the shape it was reduced from."""
+    if axis is not None and not keepdims:
+        axes = (axis,) if isinstance(axis, int) else tuple(axis)
+        for ax in sorted(ax % len(shape) for ax in axes):
+            grad_output = np.expand_dims(grad_output, axis=ax)
+    return np.broadcast_to(grad_output, shape)
 
-    # Note: We manually set requires_grad here because enable_autograd() hasn't been
-    # called yet. This tests the Backward classes in isolation before the full
-    # autograd system is enabled.
 
-    # Test AddBackward
-    a = Tensor([1, 2, 3])
-    a.requires_grad = True  # Set manually (enable_autograd not called yet)
-    b = Tensor([4, 5, 6])
-    b.requires_grad = True
-    add_func = AddBackward(a, b)
-    grad_output = np.array([1, 1, 1])
-    grad_a, grad_b = add_func.apply(grad_output)
-    assert np.allclose(grad_a, grad_output), f"AddBackward grad_a failed: {grad_a}"
-    assert np.allclose(grad_b, grad_output), f"AddBackward grad_b failed: {grad_b}"
+@method_of(Mean)
+def backward(self, grad_output):
+    """
+    Gradient computation for tensor mean.
 
-    # Test MulBackward
-    mul_func = MulBackward(a, b)
-    grad_a, grad_b = mul_func.apply(grad_output)
-    assert np.allclose(grad_a, b.data), f"MulBackward grad_a failed: {grad_a}"
-    assert np.allclose(grad_b, a.data), f"MulBackward grad_b failed: {grad_b}"
+    **Mathematical Rule:** If z = mean(a) over N elements, then ∂z/∂a[i] = 1/N
 
-    # Test MatmulBackward
-    a_mat = Tensor([[1, 2], [3, 4]])
-    a_mat.requires_grad = True
-    b_mat = Tensor([[5, 6], [7, 8]])
-    b_mat.requires_grad = True
-    matmul_func = MatmulBackward(a_mat, b_mat)
-    grad_output = np.ones((2, 2))
-    grad_a, grad_b = matmul_func.apply(grad_output)
-    assert grad_a.shape == a_mat.shape, f"MatmulBackward grad_a shape: {grad_a.shape}"
-    assert grad_b.shape == b_mat.shape, f"MatmulBackward grad_b shape: {grad_b.shape}"
+    TODO: Spread the gradient evenly, divided by the number of elements averaged.
+
+    APPROACH:
+    1. tensor, = self.inputs
+    2. count = tensor.data.size // self.output.data.size (elements averaged per output)
+    3. Expand grad_output back to tensor.data.shape with _expand_reduced, divide by count
+    """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
+
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        count = tensor.data.size // self.output.data.size
+        return _expand_reduced(grad_output, tensor.data.shape, self.axis, self.keepdims) / count,
+    return None,
+    ### END SOLUTION
+
+
+@method_of(Max)
+def backward(self, grad_output):
+    """
+    Gradient computation for tensor max.
+
+    **Mathematical Rule:** ∂max(a)/∂a[i] = 1 where a[i] is the maximum, else 0
+
+    TODO: Send the gradient to the winning positions only.
+
+    APPROACH:
+    1. Expand self.output.data back to the input shape with _expand_reduced
+    2. winners = (tensor.data == expanded output)
+    3. Return the expanded grad_output times winners, divided by the number of ties per output
+    """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
+
+    if not (isinstance(tensor, Tensor) and tensor.requires_grad):
+        return None,
+
+    shape = tensor.data.shape
+    # 1. Which positions won? Compare the input against the max broadcast back.
+    winners = tensor.data == _expand_reduced(self.output.data, shape, self.axis, self.keepdims)
+    # 2. Share the gradient equally among tied winners.
+    if self.axis is None:
+        ties = np.sum(winners)
+    else:
+        ties = _expand_reduced(np.sum(winners, axis=self.axis, keepdims=True), shape, self.axis, True)
+    # 3. Route the upstream gradient to the winners only.
+    grad = _expand_reduced(grad_output, shape, self.axis, self.keepdims)
+    return grad * winners / ties,
+    ### END SOLUTION
+
+
+@method_of(Copy)
+def backward(self, grad_output):
+    """
+    Gradient computation for a copy: the values did not change, so neither does the gradient.
+
+    TODO: Return grad_output unchanged (as a one-element tuple).
+    """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
+
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        return grad_output,
+    return None,
+    ### END SOLUTION
+
+
+@method_of(MaskedFill)
+def backward(self, grad_output):
+    """
+    Gradient computation for masked_fill.
+
+    **Mathematical Rule:** Masked positions received a constant, so their gradient is 0.
+    Every other position passed through unchanged.
+
+    TODO: Zero the gradient where self.mask is True.
+
+    HINT: grad_output * ~self.mask
+    """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
+
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        return grad_output * ~self.mask,
+    return None,
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Shape and Reduction Backward Passes
+
+This test validates the backward pass of every Function class you just wrote,
+one family at a time: the arithmetic ops, the matrix multiply, the shape ops
+that move gradients around, and the reductions that spread one gradient back
+over many inputs.
+
+**What we're testing**: Every backward in this section, against hand-computed
+gradients rather than shapes alone
+**Why it matters**: A backward with the right shape and the wrong values trains
+a model that quietly learns the wrong thing. Shape checks pass for a transposed
+matmul gradient, a slice that drops its scatter, and a max that rewards every
+element instead of the winner
+**Expected**: Sub negates the second gradient, Div carries the squared
+denominator, MatMul matches G@B^T and A^T@G, Permute inverts its axes, Slice
+scatters into the sliced positions and zeros elsewhere, MaskedFill gives masked
+positions nothing, and Sum, Mean and Max distribute as their definitions require
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-shape-reduction-backward", "locked": true, "points": 7}
+def test_unit_shape_reduction_backward():
+    """🧪 Test the shape and reduction backward passes."""
+    print("🧪 Unit Test: Shape and Reduction Backward Passes...")
+
+    x = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    x.requires_grad = True
+
+    # The shape operations move gradients around rather than scaling them, so
+    # each one is checked by where the gradient lands, not by its magnitude.
+    x = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    x.requires_grad = True
+
+    # Permute: the gradient comes back through the INVERSE permutation. This
+    # uses three axes on purpose. A 2D transpose is its own inverse, so a
+    # backward that permutes by axes instead of argsort(axes) would pass it.
+    cube = Tensor(np.arange(24, dtype=np.float32).reshape(2, 3, 4))
+    cube.requires_grad = True
+    perm_axes = (1, 2, 0)
+    perm_func = Permute(cube, axes=perm_axes)
+    g_perm = np.arange(24, dtype=np.float32).reshape(3, 4, 2)
+    grad_cube, = perm_func.backward(g_perm)
+    assert grad_cube.shape == cube.shape, f"Permute.backward shape: {grad_cube.shape}"
+    expected_perm = np.transpose(g_perm, np.argsort(perm_axes))
+    assert np.allclose(grad_cube, expected_perm), f"Permute.backward failed: {grad_cube}"
+
+    # Reshape: same elements, original shape restored
+    g_reshape = np.arange(6, dtype=np.float32).reshape(3, 2)
+    reshape_func = Reshape(x, shape=(3, 2))
+    grad_x, = reshape_func.backward(g_reshape)
+    assert np.allclose(grad_x, g_reshape.reshape(2, 3)), f"Reshape.backward failed: {grad_x}"
+
+    # Slice: gradient is scattered back into the sliced positions, zeros elsewhere
+    v = Tensor([1.0, 2.0, 3.0, 4.0])
+    v.requires_grad = True
+    slice_func = Slice(v, key=slice(1, 3))
+    grad_v, = slice_func.backward(np.array([10.0, 20.0]))
+    assert np.allclose(grad_v, [0.0, 10.0, 20.0, 0.0]), f"Slice.backward failed: {grad_v}"
+
+    # MaskedFill: masked positions consumed a constant, so they get no gradient
+    mask = np.array([[True, False, False], [False, False, True]])
+    fill_func = MaskedFill(x, mask=mask, value=-1e9)
+    g_ones = np.ones((2, 3))
+    grad_x, = fill_func.backward(g_ones)
+    assert np.allclose(grad_x, np.where(mask, 0.0, 1.0)), f"MaskedFill.backward failed: {grad_x}"
+
+    # The reductions spread one output gradient back over the inputs it summarized.
+    sum_func = Sum(x)
+    grad_x, = sum_func.backward(np.array(2.0))
+    assert np.allclose(grad_x, np.full((2, 3), 2.0)), f"Sum.backward failed: {grad_x}"
+
+    # Mean and Max read the forward result that apply() records on the node.
+    # This test runs before Tensor.backward() exists, so stand that value in.
+    mean_func = Mean(x)
+    mean_func.output = Tensor(np.mean(x.data))
+    grad_x, = mean_func.backward(np.array(6.0))
+    assert np.allclose(grad_x, np.full((2, 3), 1.0)), f"Mean.backward failed: {grad_x}"
+
+    max_func = Max(x)
+    max_func.output = Tensor(np.max(x.data))
+    grad_x, = max_func.backward(np.array(1.0))
+    expected_max = np.zeros((2, 3))
+    expected_max[1, 2] = 1.0          # only the winning element receives gradient
+    assert np.allclose(grad_x, expected_max), f"Max.backward failed: {grad_x}"
 
     print("✅ Function classes work correctly!")
 
-# NOTE: test_unit_function_classes() is called from test_module() which runs AFTER
-# enable_autograd(). Do NOT call it here - Tensor class doesn't have requires_grad yet!
-# See GitHub issue #1128 for details.
+if __name__ == "__main__":
+    test_unit_shape_reduction_backward()
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Broadcasting in Gradients
+### 🧪 Unit Test: Broadcasting in Gradients
 This test validates that gradient reduction works correctly when operations
 involve broadcasting. This is crucial for real-world training where bias terms,
 normalization parameters, and other operations broadcast over batches.
@@ -1469,12 +1652,11 @@ normalization parameters, and other operations broadcast over batches.
 
 # %% nbgrader={"grade": true, "grade_id": "test-broadcast-gradients", "locked": true, "points": 10}
 def test_unit_broadcast_gradients():
-    """🔬 Test gradient broadcasting reduction."""
-    print("🔬 Unit Test: Broadcasting in Gradients...")
+    """🧪 Test gradient broadcasting reduction."""
+    print("🧪 Unit Test: Broadcasting in Gradients...")
 
-    # Note: We set requires_grad manually here because enable_autograd() hasn't
-    # been called yet. This tests the Backward classes in isolation before the
-    # full autograd system upgrades the Tensor constructor to accept requires_grad.
+    # Note: We call backward() on each operation directly, in isolation, before
+    # Tensor.backward() exists.
 
     # Scenario 1: Bias-like broadcasting (most common case)
     # Shape: (batch, features) + (features,) → (batch, features)
@@ -1483,9 +1665,9 @@ def test_unit_broadcast_gradients():
     bias = Tensor(np.ones(3))
     bias.requires_grad = True
     
-    add_func = AddBackward(x, bias)
+    add_func = Add(x, bias)
     grad_output = np.ones((4, 3))
-    grad_x, grad_bias = add_func.apply(grad_output)
+    grad_x, grad_bias = add_func.backward(grad_output)
     
     # Check shapes
     assert grad_x.shape == x.data.shape, \
@@ -1506,14 +1688,12 @@ def test_unit_broadcast_gradients():
     x.requires_grad = True
     scalar_val = 5.0
     
-    add_func = AddBackward(x, scalar_val)
+    add_func = Add(x, Tensor(scalar_val))
     grad_output = np.ones((3, 4))
-    grad_x, grad_scalar = add_func.apply(grad_output)
+    grad_x, grad_scalar = add_func.backward(grad_output)
     
     assert grad_x.shape == x.data.shape, \
         f"Expected grad_x shape {x.data.shape}, got {grad_x.shape}"
-    # Scalar gradients don't get reduced (not a Tensor)
-    
     print("  ✓ Scalar broadcasting works")
     
     # Scenario 3: Multiple dimension broadcasting
@@ -1523,9 +1703,9 @@ def test_unit_broadcast_gradients():
     y = Tensor(rng.standard_normal((10, 1)))
     y.requires_grad = True
     
-    mul_func = MulBackward(x, y)
+    mul_func = Mul(x, y)
     grad_output = np.ones((32, 10, 5))
-    grad_x, grad_y = mul_func.apply(grad_output)
+    grad_x, grad_y = mul_func.backward(grad_output)
     
     assert grad_x.shape == x.data.shape, \
         f"Expected grad_x shape {x.data.shape}, got {grad_x.shape}"
@@ -1541,24 +1721,24 @@ def test_unit_broadcast_gradients():
     b.requires_grad = True
     
     # Test Addition
-    add_func = AddBackward(a, b)
-    grad_a, grad_b = add_func.apply(np.ones((8, 16)))
-    assert grad_b.shape == (16,), f"AddBackward: Expected (16,), got {grad_b.shape}"
+    add_func = Add(a, b)
+    grad_a, grad_b = add_func.backward(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"Add.backward: Expected (16,), got {grad_b.shape}"
     
     # Test Multiplication
-    mul_func = MulBackward(a, b)
-    grad_a, grad_b = mul_func.apply(np.ones((8, 16)))
-    assert grad_b.shape == (16,), f"MulBackward: Expected (16,), got {grad_b.shape}"
+    mul_func = Mul(a, b)
+    grad_a, grad_b = mul_func.backward(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"Mul.backward: Expected (16,), got {grad_b.shape}"
     
     # Test Subtraction
-    sub_func = SubBackward(a, b)
-    grad_a, grad_b = sub_func.apply(np.ones((8, 16)))
-    assert grad_b.shape == (16,), f"SubBackward: Expected (16,), got {grad_b.shape}"
+    sub_func = Sub(a, b)
+    grad_a, grad_b = sub_func.backward(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"Sub.backward: Expected (16,), got {grad_b.shape}"
     
     # Test Division
-    div_func = DivBackward(a, b)
-    grad_a, grad_b = div_func.apply(np.ones((8, 16)))
-    assert grad_b.shape == (16,), f"DivBackward: Expected (16,), got {grad_b.shape}"
+    div_func = Div(a, b)
+    grad_a, grad_b = div_func.backward(np.ones((8, 16)))
+    assert grad_b.shape == (16,), f"Div.backward: Expected (16,), got {grad_b.shape}"
     
     print("  ✓ All operations handle broadcasting correctly")
     
@@ -1573,8 +1753,8 @@ def test_unit_broadcast_gradients():
     # In real Linear layer, bias gradient comes from output gradient
     activations = Tensor(np.zeros((batch_size, out_features)))
     activations.requires_grad = True
-    add_func = AddBackward(activations, bias)
-    _, grad_bias = add_func.apply(output_grad)
+    add_func = Add(activations, bias)
+    _, grad_bias = add_func.backward(output_grad)
     
     assert grad_bias.shape == (out_features,), \
         f"Linear layer bias: Expected ({out_features},), got {grad_bias.shape}"
@@ -1593,7 +1773,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Enhancing Tensor with Autograd Capabilities
+## 🔧 Integration: Enhancing Tensor with Autograd Capabilities
 
 Now we'll enhance the existing Tensor class to use these gradient functions and build computation graphs automatically.
 
@@ -1608,7 +1788,7 @@ Before Autograd:             After Autograd:
 
 **The Enhancement Strategy:**
 1. **Add backward() method** - Triggers gradient computation
-2. **Enhance operations** - Replace simple ops with gradient-tracking versions
+2. **Complete operations** - Give every operation from Modules 01-04 its backward() rule
 3. **Track computation graphs** - Each tensor remembers how it was created
 4. **Maintain compatibility** - All existing code continues to work
 
@@ -1623,195 +1803,242 @@ This means:
 
 # %% [markdown]
 """
-### The enable_autograd() Function
+### Gradient Rules for Activations and Losses
 
-This function is the magic that brings gradients to life! It enhances the existing Tensor class with autograd capabilities by:
+The Function classes above covered arithmetic and shape. This next group covers
+the two remaining kinds of node in a network's graph: the activations that sit
+between layers, and the losses that sit at the very end.
 
-1. **Monkey-patching operations** - Replaces `__add__`, `__mul__`, etc. with gradient-aware versions
-2. **Adding backward() method** - Implements reverse-mode automatic differentiation
-3. **Maintaining compatibility** - All existing code continues to work unchanged
+They share a property the earlier group did not. Every one of them can compute
+its gradient from values it already has -- usually its own output -- so none of
+them re-runs the forward computation. Watch for that as you write them; it is
+the difference between an autograd engine that is usable and one that doubles
+the cost of every backward pass.
 
-**The Pattern:**
 ```
-Original: x + y → simple addition
-Enhanced: x + y → addition + gradient tracking (if requires_grad=True)
+ReLU     -> gate: gradient passes or it does not
+Sigmoid  -> z·(1-z)          from the output alone
+Tanh     -> 1-z²             from the output alone
+Softmax  -> outputs coupled: raising one lowers the others
+GELU     -> smooth gate: both what passes AND how open the gate is
+MSE, BCE -> the losses, where every backward pass begins
 ```
-
-This approach follows PyTorch 2.0 style - clean, modern, and educational.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "relu-backward", "solution": true}
-#| export
-class ReLUBackward(Function):
+#| exporti
+@method_of(ReLUFunction)
+def backward(self, grad_output):
     """
     Gradient computation for ReLU activation.
 
     ReLU: f(x) = max(0, x)
     Derivative: f'(x) = 1 if x > 0, else 0
+
+    Compute gradient for ReLU.
+
+    TODO: Implement gradient computation for ReLU activation.
+
+    APPROACH:
+    1. Extract input tensor from self.inputs
+    2. If tensor requires gradients:
+       - Compute ReLU mask: (tensor.data > 0).astype(np.float32)
+       - Multiply grad_output by mask: grad_output * relu_grad
+       - Return as tuple: (result,)
+    3. Else return (None,)
+
+    EXAMPLE:
+    >>> X = Tensor([-2, -1, 0, 1, 2], requires_grad=True)
+    >>> Y = relu(X)  # [0, 0, 0, 1, 2]
+    >>> # During backward: grad_output = [1, 1, 1, 1, 1]
+    >>> # relu_mask = [0, 0, 0, 1, 1] (1 where x > 0)
+    >>> # grad_X = [0, 0, 0, 1, 1]
+
+    HINTS:
+    - ReLU derivative: 1 if x > 0, else 0
+    - Use boolean mask: tensor.data > 0
+    - Convert to float32 for gradient computation
     """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
 
-    def __init__(self, input_tensor):
-        """Initialize with input tensor."""
-        super().__init__(input_tensor)
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        # ReLU gradient: 1 if x > 0, else 0
+        relu_grad = (tensor.data > 0).astype(np.float32)
+        return grad_output * relu_grad,
+    return None,
+    ### END SOLUTION
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for ReLU.
+# %% [markdown]
+"""
+### SigmoidFunction.backward: Gradient Rules for Sigmoid
 
-        TODO: Implement gradient computation for ReLU activation.
+Sigmoid's derivative has a property worth exploiting: it can be written entirely
+in terms of the OUTPUT, so the backward pass never needs the input.
 
-        APPROACH:
-        1. Extract input tensor from self.saved_tensors
-        2. If tensor requires gradients:
-           - Compute ReLU mask: (tensor.data > 0).astype(np.float32)
-           - Multiply grad_output by mask: grad_output * relu_grad
-           - Return as tuple: (result,)
-        3. Else return (None,)
+**Mathematical Principle:**
+```
+If z = σ(a) = 1 / (1 + e^-a), then ∂z/∂a = z · (1 - z)
+```
 
-        EXAMPLE:
-        >>> X = Tensor([-2, -1, 0, 1, 2], requires_grad=True)
-        >>> Y = relu(X)  # [0, 0, 0, 1, 2]
-        >>> # During backward: grad_output = [1, 1, 1, 1, 1]
-        >>> # relu_mask = [0, 0, 0, 1, 1] (1 where x > 0)
-        >>> # grad_X = [0, 0, 0, 1, 1]
+**Why saving the output beats saving the input:**
+```
+Saving a:  recompute σ(a), then σ(a)·(1-σ(a))   -> one exp per element, again
+Saving z:  z·(1-z) directly                     -> two multiplies, no exp
+```
 
-        HINTS:
-        - ReLU derivative: 1 if x > 0, else 0
-        - Use boolean mask: tensor.data > 0
-        - Convert to float32 for gradient computation
-        """
-        ### BEGIN SOLUTION
-        tensor, = self.saved_tensors
-
-        if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # ReLU gradient: 1 if x > 0, else 0
-            relu_grad = (tensor.data > 0).astype(np.float32)
-            return grad_output * relu_grad,
-        return None,
-        ### END SOLUTION
-
+**The systems consequence**: the gradient peaks at 0.25 (when z = 0.5) and decays
+toward zero at both tails. Stack ten sigmoid layers and the gradient reaching the
+first one is scaled by at most 0.25^10 -- about one in a million. That is the
+vanishing gradient problem, and it is why ReLU replaced sigmoid in hidden layers.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "sigmoid-backward", "solution": true}
-#| export
-class SigmoidBackward(Function):
+#| exporti
+@method_of(SigmoidFunction)
+def backward(self, grad_output):
     """
     Gradient computation for sigmoid activation.
 
     Sigmoid: σ(x) = 1/(1 + exp(-x))
     Derivative: σ'(x) = σ(x) * (1 - σ(x))
+
+    Compute gradient for sigmoid.
+
+    TODO: Implement gradient computation for sigmoid activation.
+
+    APPROACH:
+    1. Extract input tensor from self.inputs
+    2. If tensor requires gradients:
+       - Use saved output: σ(x) = self.output.data
+       - Compute sigmoid derivative: σ'(x) = σ(x) * (1 - σ(x))
+       - Multiply by grad_output: grad_output * sigmoid_grad
+       - Return as tuple: (result,)
+    3. Else return (None,)
+
+    EXAMPLE:
+    >>> X = Tensor([0.0], requires_grad=True)
+    >>> Y = sigmoid(X)  # Y = 0.5
+    >>> # During backward: grad_output = 1
+    >>> # σ'(0) = 0.5 * (1 - 0.5) = 0.25
+    >>> # grad_X = 1 * 0.25 = 0.25
+
+    HINTS:
+    - Sigmoid derivative: σ'(x) = σ(x) * (1 - σ(x))
+    - Output is saved as self.output by apply(), which this module completes further down
+    - This avoids recomputing sigmoid during backward pass
     """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
 
-    def __init__(self, input_tensor, output_tensor):
-        """
-        Initialize with both input and output.
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        # σ'(x) = σ(x) * (1 - σ(x)), using the output apply() saved on this node
+        sigmoid_grad = self.output.data * (1 - self.output.data)
+        return grad_output * sigmoid_grad,
+    return None,
+    ### END SOLUTION
 
-        Args:
-            input_tensor: Original input to sigmoid
-            output_tensor: Output of sigmoid (saves recomputation)
-        """
-        super().__init__(input_tensor)
-        self.output_data = output_tensor.data
+# %% [markdown]
+"""
+### TanhFunction.backward: Gradient Rules for Tanh
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for sigmoid.
+Tanh is sigmoid's zero-centered cousin, and its gradient is also expressible from
+the output alone.
 
-        TODO: Implement gradient computation for sigmoid activation.
+**Mathematical Principle:**
+```
+If z = tanh(a), then ∂z/∂a = 1 - z²
+```
 
-        APPROACH:
-        1. Extract input tensor from self.saved_tensors
-        2. If tensor requires gradients:
-           - Use saved output: σ(x) = self.output_data
-           - Compute sigmoid derivative: σ'(x) = σ(x) * (1 - σ(x))
-           - Multiply by grad_output: grad_output * sigmoid_grad
-           - Return as tuple: (result,)
-        3. Else return (None,)
+**Compared with sigmoid:**
+```
+tanh max gradient: 1.0   (at z = 0)
+sigmoid max gradient: 0.25
+```
 
-        EXAMPLE:
-        >>> X = Tensor([0.0], requires_grad=True)
-        >>> Y = sigmoid(X)  # Y = 0.5
-        >>> # During backward: grad_output = 1
-        >>> # σ'(0) = 0.5 * (1 - 0.5) = 0.25
-        >>> # grad_X = 1 * 0.25 = 0.25
-
-        HINTS:
-        - Sigmoid derivative: σ'(x) = σ(x) * (1 - σ(x))
-        - Output is already computed and saved in self.output_data
-        - This avoids recomputing sigmoid during backward pass
-        """
-        ### BEGIN SOLUTION
-        tensor, = self.saved_tensors
-
-        if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # σ'(x) = σ(x) * (1 - σ(x))
-            sigmoid_grad = self.output_data * (1 - self.output_data)
-            return grad_output * sigmoid_grad,
-        return None,
-        ### END SOLUTION
-
+Tanh saturates too, but its gradient peaks four times higher, so it vanishes more
+slowly through depth. That is the whole reason tanh outlasted sigmoid inside RNNs
+long after ReLU had taken over feed-forward networks.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "tanh-backward", "solution": true}
-#| export
-class TanhBackward(Function):
+#| exporti
+@method_of(TanhFunction)
+def backward(self, grad_output):
     """
     Gradient computation for tanh activation.
 
     Tanh: tanh(x) = (eˣ - e⁻ˣ) / (eˣ + e⁻ˣ)
     Derivative: tanh'(x) = 1 - tanh(x)²
+
+    Compute gradient for tanh.
+
+    TODO: Implement gradient computation for tanh activation.
+
+    APPROACH:
+    1. Extract input tensor from self.inputs
+    2. If tensor requires gradients:
+       - Use saved output: tanh(x) = self.output.data
+       - Compute tanh derivative: tanh'(x) = 1 - tanh(x)²
+       - Multiply by grad_output: grad_output * tanh_grad
+       - Return as tuple: (result,)
+    3. Else return (None,)
+
+    EXAMPLE:
+    >>> X = Tensor([0.0], requires_grad=True)
+    >>> Y = tanh(X)  # Y = 0.0
+    >>> # During backward: grad_output = 1
+    >>> # tanh'(0) = 1 - 0² = 1
+    >>> # grad_X = 1 * 1 = 1
+
+    HINTS:
+    - Tanh derivative: tanh'(x) = 1 - tanh(x)²
+    - Output is saved as self.output by apply(), which this module completes further down
+    - This avoids recomputing tanh during backward pass
     """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
 
-    def __init__(self, input_tensor, output_tensor):
-        """
-        Initialize with both input and output.
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        # tanh'(x) = 1 - tanh(x)², using the output apply() saved on this node
+        tanh_grad = 1 - self.output.data ** 2
+        return grad_output * tanh_grad,
+    return None,
+    ### END SOLUTION
 
-        Args:
-            input_tensor: Original input to tanh
-            output_tensor: Output of tanh (saves recomputation)
-        """
-        super().__init__(input_tensor)
-        self.output_data = output_tensor.data
+# %% [markdown]
+"""
+### SoftmaxFunction.backward: Gradient Rules for a Coupled Output
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for tanh.
+Softmax is the first backward here where outputs are not independent. Raising one
+logit lowers every other probability, because they must still sum to one. The
+gradient has to account for that coupling.
 
-        TODO: Implement gradient computation for tanh activation.
+**Mathematical Principle:**
+```
+If z = softmax(a), the Jacobian is
+    ∂z_i/∂a_j = z_i · (δ_ij - z_j)
+which contracts with an incoming gradient g to
+    grad_a = z · (g - Σ_k g_k · z_k)
+```
 
-        APPROACH:
-        1. Extract input tensor from self.saved_tensors
-        2. If tensor requires gradients:
-           - Use saved output: tanh(x) = self.output_data
-           - Compute tanh derivative: tanh'(x) = 1 - tanh(x)²
-           - Multiply by grad_output: grad_output * tanh_grad
-           - Return as tuple: (result,)
-        3. Else return (None,)
+**Why the subtraction term exists:**
+```
+Σ_k g_k · z_k  is the probability-weighted average of the incoming gradient.
+Subtracting it removes the component that would push all logits the same way --
+which softmax ignores anyway, since adding a constant to every logit changes
+nothing.
+```
 
-        EXAMPLE:
-        >>> X = Tensor([0.0], requires_grad=True)
-        >>> Y = tanh(X)  # Y = 0.0
-        >>> # During backward: grad_output = 1
-        >>> # tanh'(0) = 1 - 0² = 1
-        >>> # grad_X = 1 * 1 = 1
-
-        HINTS:
-        - Tanh derivative: tanh'(x) = 1 - tanh(x)²
-        - Output is already computed and saved in self.output_data
-        - This avoids recomputing tanh during backward pass
-        """
-        ### BEGIN SOLUTION
-        tensor, = self.saved_tensors
-
-        if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # tanh'(x) = 1 - tanh(x)²
-            tanh_grad = 1 - self.output_data ** 2
-            return grad_output * tanh_grad,
-        return None,
-        ### END SOLUTION
-
+Computing the full n×n Jacobian would cost O(n²) per sample. The contracted form
+above is O(n). For a 50,000-token vocabulary that is the difference between
+feasible and not.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "softmax-backward", "solution": true}
-#| export
-class SoftmaxBackward(Function):
+#| exporti
+@method_of(SoftmaxFunction)
+def backward(self, grad_output):
     """
     Gradient computation for softmax activation.
 
@@ -1823,299 +2050,366 @@ class SoftmaxBackward(Function):
 
     **Key Insight:** The gradient depends on all elements of softmax due to
     the normalization, not just the element being differentiated.
+
+    Compute gradient for softmax.
+
+    Mathematical formula:
+    ∂L/∂x[i] = softmax[i] * (∂L/∂y[i] - sum_j(∂L/∂y[j] * softmax[j]))
+
+    This can be vectorized as:
+    grad_x = softmax * (grad_y - sum(grad_y * softmax, keepdims=True))
+
+    TODO: Implement gradient computation for softmax activation.
+
+    APPROACH:
+    1. Extract input tensor from self.inputs
+    2. If tensor requires gradients:
+       - Compute sum term: np.sum(grad_output * self.output.data, axis=self.dim, keepdims=True)
+       - Compute gradient: self.output.data * (grad_output - sum_term)
+       - Return as tuple: (grad_x,)
+    3. Else return (None,)
+
+    EXAMPLE:
+    >>> X = Tensor([[1.0, 2.0, 3.0]], requires_grad=True)
+    >>> Y = softmax(X)  # [[0.09, 0.24, 0.67]] approximately
+    >>> # During backward: grad_output = [[1, 0, 0]]
+    >>> # sum_term = sum([1*0.09, 0*0.24, 0*0.67]) = 0.09
+    >>> # grad_X[i] = softmax[i] * (grad_output[i] - sum_term)
+
+    HINTS:
+    - Softmax gradient depends on all elements due to normalization
+    - Use keepdims=True in np.sum to maintain dimensions for broadcasting
+    - Vectorized formula: softmax * (grad_output - sum(grad_output * softmax))
     """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
 
-    def __init__(self, input_tensor, output_tensor, dim=-1):
-        """
-        Initialize with input, output, and dimension.
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        softmax = self.output.data
+        # Compute sum(grad_output * softmax) along the softmax dimension
+        sum_term = np.sum(grad_output * softmax, axis=self.dim, keepdims=True)
 
-        Args:
-            input_tensor: Original input to softmax
-            output_tensor: Output of softmax (needed for gradient)
-            dim: Dimension along which softmax was applied
-        """
-        super().__init__(input_tensor)
-        self.output_data = output_tensor.data
-        self.dim = dim
+        # Softmax gradient: softmax * (grad_output - sum_term)
+        grad_x = softmax * (grad_output - sum_term)
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for softmax.
+        return (grad_x,)
+    return (None,)
+    ### END SOLUTION
 
-        Mathematical formula:
-        ∂L/∂x[i] = softmax[i] * (∂L/∂y[i] - sum_j(∂L/∂y[j] * softmax[j]))
+# %% [markdown]
+"""
+### GELUFunction.backward: Gradient Rules for the Transformer Activation
 
-        This can be vectorized as:
-        grad_x = softmax * (grad_y - sum(grad_y * softmax, keepdims=True))
+GELU is the activation inside every transformer MLP you will build in Module 13.
+Unlike ReLU it is smooth everywhere, so its gradient is defined at every point,
+including zero.
 
-        TODO: Implement gradient computation for softmax activation.
+**Mathematical Principle (the sigmoid form Module 02 built):**
+```
+z = a·s            where s = σ(1.702·a) and σ is Module 02's sigmoid
 
-        APPROACH:
-        1. Extract input tensor from self.saved_tensors
-        2. If tensor requires gradients:
-           - Compute sum term: np.sum(grad_output * self.output_data, axis=self.dim, keepdims=True)
-           - Compute gradient: self.output_data * (grad_output - sum_term)
-           - Return as tuple: (grad_x,)
-        3. Else return (None,)
+∂z/∂a = s + a·1.702·s·(1 - s)
+        └┘   └── how the gate itself moves with a ──┘
+        how much passes
+```
 
-        EXAMPLE:
-        >>> X = Tensor([[1.0, 2.0, 3.0]], requires_grad=True)
-        >>> Y = softmax(X)  # [[0.09, 0.24, 0.67]] approximately
-        >>> # During backward: grad_output = [[1, 0, 0]]
-        >>> # sum_term = sum([1*0.09, 0*0.24, 0*0.67]) = 0.09
-        >>> # grad_X[i] = softmax[i] * (grad_output[i] - sum_term)
+**Why two terms and not one:**
+```
+ReLU's gate is a step: it is either open or shut, so only the first term exists.
+GELU's gate is smooth, so changing a changes BOTH what passes through and how far
+open the gate is. Both effects carry gradient.
+```
 
-        HINTS:
-        - Softmax gradient depends on all elements due to normalization
-        - Use keepdims=True in np.sum to maintain dimensions for broadcasting
-        - Vectorized formula: softmax * (grad_output - sum(grad_output * softmax))
-        """
-        ### BEGIN SOLUTION
-        tensor, = self.saved_tensors
-
-        if isinstance(tensor, Tensor) and tensor.requires_grad:
-            # Compute sum(grad_output * softmax) along the softmax dimension
-            sum_term = np.sum(grad_output * self.output_data, axis=self.dim, keepdims=True)
-
-            # Softmax gradient: softmax * (grad_output - sum_term)
-            grad_x = self.output_data * (grad_output - sum_term)
-
-            return (grad_x,)
-        return (None,)
-        ### END SOLUTION
-
+**The systems consequence**: GELU costs an exponential and several multiplies per
+element where ReLU costs one comparison. Module 17 will fuse the whole expression
+into a single pass over memory for exactly that reason.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-backward", "solution": true}
-#| export
-class GELUBackward(Function):
+#| exporti
+@method_of(GELUFunction)
+def backward(self, grad_output):
     """
     Gradient computation for GELU activation.
 
-    GELU: f(x) = x * Φ(x) where Φ is the CDF of standard normal
-    Approximation: gelu(x) ≈ 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
+    GELU: f(x) = x * Φ(x) where Φ is the CDF of the standard normal.
+    Module 02 implements the sigmoid form gelu(x) ≈ x * σ(1.702x), so this
+    backward differentiates that same expression.
 
-    **Key Insight:** GELU is smoother than ReLU, providing non-zero gradients
-    for negative values, which helps training deep networks.
+    **Key Insight:** GELU is smooth, so negative inputs still receive a small
+    gradient, unlike ReLU's hard zero.
+
+    TODO: Implement gradient computation for GELU activation.
+
+    APPROACH:
+    1. Extract input tensor from self.inputs
+    2. If tensor requires gradients:
+       - Compute s = σ(1.702 * x) with Module 02's stable sigmoid
+       - Product rule: gelu_grad = s + x * 1.702 * s * (1 - s)
+       - Multiply by grad_output
+    3. Else return (None,)
+
+    HINTS:
+    - SigmoidFunction().forward(1.702 * x) gives a stable σ without rewriting it
+    - The two terms are "what passes" and "how the gate moves"; both carry gradient
     """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
 
-    def __init__(self, input_tensor):
-        """Initialize with input tensor."""
-        super().__init__(input_tensor)
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        x = tensor.data
+        # forward: gelu(x) = x * sig(1.702x)   (Module 02)
+        # d/dx [x * sig(1.702x)] = sig(1.702x) + x * 1.702 * sig(1.702x) * (1 - sig(1.702x))
+        sig = SigmoidFunction().forward(1.702 * x)   # Module 02's stable sigmoid
+        gelu_grad = sig + x * 1.702 * sig * (1.0 - sig)
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for GELU.
+        return (grad_output * gelu_grad,)
+    return (None,)
+    ### END SOLUTION
 
-        Mathematical formula (using approximation):
-        ∂gelu/∂x ≈ 0.5 * (1 + tanh(...)) + 0.5 * x * sech²(...) * (...)
+# %% [markdown]
+"""
+### 🧪 Unit Test: Activation Backward Passes
 
-        Simplified: We compute the derivative numerically or use the formula.
+Five activations, five derivatives, and no way to eyeball whether any of them is
+right. So this test does not hardcode the five formulas. It perturbs each input
+slightly, measures how the output actually moves, and checks the backward pass
+against that measurement. A derivative that is subtly wrong, a sign flipped or a
+term dropped, shows up as a mismatch no matter which activation it belongs to.
 
-        TODO: Implement gradient computation for GELU activation.
+**What we're testing**: Every activation backward, against central differences
+taken through its own forward
+**Why it matters**: A wrong activation gradient does not crash. The network
+trains, slowly and to a worse place, and the cause is invisible in the loss curve
+**Expected**: Analytic and numeric gradients agree to within 1e-3
+"""
 
-        APPROACH:
-        1. Extract input tensor from self.saved_tensors
-        2. If tensor requires gradients:
-           - Compute tanh approximation components
-           - Compute sech² (derivative of tanh)
-           - Apply GELU derivative formula
-           - Multiply by grad_output
-        3. Else return (None,)
 
-        HINTS:
-        - GELU is smoother than ReLU, providing gradients for negative values
-        - Use tanh approximation for numerical stability
-        - Formula: 0.5 * (1 + tanh(...)) + 0.5 * x * sech²(...) * d(tanh_arg)/dx
-        """
-        ### BEGIN SOLUTION
-        tensor, = self.saved_tensors
+# %% nbgrader={"grade": true, "grade_id": "test-activation-backward", "locked": true, "points": 10}
+def test_unit_activation_backward():
+    """🧪 Test activation backward passes against finite differences."""
+    print("🧪 Unit Test: Activation Backward Passes...")
 
-        if isinstance(tensor, Tensor) and tensor.requires_grad:
-            x = tensor.data
-            # GELU derivative using the sigmoid approximation (matches forward):
-            # forward: gelu(x) = x * sigmoid(1.702 * x)
-            # d/dx [x * sig(1.702x)] = sig(1.702x) + x * 1.702 * sig(1.702x) * (1 - sig(1.702x))
-            sig = 1.0 / (1.0 + np.exp(-1.702 * x))
-            gelu_grad = sig + x * 1.702 * sig * (1.0 - sig)
+    def numeric_check(cls, x_np, upstream, name):
+        """Compare cls.backward against central differences through cls.forward."""
+        t = Tensor(x_np.copy())
+        t.requires_grad = True
+        node = cls(t)
+        # apply() records the forward result on the node; some backwards read it.
+        node.output = Tensor(node.forward(x_np.copy()))
+        analytic, = node.backward(upstream)
 
-            return (grad_output * gelu_grad,)
-        return (None,)
-        ### END SOLUTION
+        eps = 1e-3
+        numeric = np.zeros_like(x_np, dtype=np.float64)
+        flat = x_np.astype(np.float64).ravel()
+        for i in range(flat.size):
+            hi, lo = flat.copy(), flat.copy()
+            hi[i] += eps
+            lo[i] -= eps
+            f_hi = cls(Tensor(hi.reshape(x_np.shape))).forward(hi.reshape(x_np.shape))
+            f_lo = cls(Tensor(lo.reshape(x_np.shape))).forward(lo.reshape(x_np.shape))
+            numeric.ravel()[i] = np.sum(upstream * (f_hi - f_lo)) / (2 * eps)
 
+        assert np.allclose(analytic, numeric, atol=1e-3), (
+            f"{name}.backward disagrees with finite differences.\n"
+            f"  analytic: {np.asarray(analytic).ravel()}\n"
+            f"  numeric:  {numeric.ravel()}"
+        )
+        print(f"✅ {name} gradient matches finite differences")
+
+    # Values chosen to sit on both sides of zero, so a sign error cannot hide.
+    x = np.array([-1.5, -0.25, 0.75, 2.0], dtype=np.float32)
+    ones = np.ones_like(x)
+
+    numeric_check(ReLUFunction, x, ones, "ReLU")
+    numeric_check(SigmoidFunction, x, ones, "Sigmoid")
+    numeric_check(TanhFunction, x, ones, "Tanh")
+    numeric_check(GELUFunction, x, ones, "GELU")
+
+    # Softmax needs a non-uniform upstream gradient. It is shift-invariant, so a
+    # uniform upstream produces an all-zero gradient and would pass against a
+    # backward that returns zeros unconditionally.
+    upstream = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    numeric_check(SoftmaxFunction, x, upstream, "Softmax")
+
+    print("✅ Activation backward passes work correctly!")
+
+if __name__ == "__main__":
+    test_unit_activation_backward()
+
+
+# %% [markdown]
+"""
+### MSEFunction.backward: Gradient Rules for Mean Squared Error
+
+Loss functions are where the backward pass begins. MSE has the gentlest gradient
+of the two you will build, and the most obvious.
+
+**Mathematical Principle:**
+```
+If L = (1/n)·Σ(pred - target)², then ∂L/∂pred = (2/n)·(pred - target)
+```
+
+**Why the gradient is just the scaled error:**
+```
+prediction too high  -> (pred - target) > 0 -> gradient positive -> step down
+prediction too low   -> (pred - target) < 0 -> gradient negative -> step up
+prediction exact     -> gradient 0          -> no update
+```
+
+**The systems consequence**: the gradient is proportional to the error, so a
+single wildly wrong prediction produces a wildly large gradient. That is why MSE
+is sensitive to outliers, and why the training loop in Module 08 will need gradient
+clipping.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "mse-backward", "solution": true}
-#| export
-class MSEBackward(Function):
+#| exporti
+@method_of(MSEFunction)
+def backward(self, grad_output):
     """
     Gradient computation for Mean Squared Error Loss.
 
     MSE: L = mean((predictions - targets)²)
     Derivative: ∂L/∂predictions = 2 * (predictions - targets) / N
+
+    Compute gradient for MSE loss.
+
+    TODO: Implement gradient computation for Mean Squared Error loss.
+
+    APPROACH:
+    1. Extract predictions tensor from self.inputs
+    2. If predictions requires gradients:
+       - Compute difference: predictions.data - targets.data
+       - Apply MSE derivative: 2 * difference / N
+       - Multiply by grad_output: grad * grad_output
+       - Return (result, None): targets carry no gradient
+    3. Else return (None, None)
+
+    EXAMPLE:
+    >>> predictions = Tensor([2.0, 3.0], requires_grad=True)
+    >>> targets = Tensor([1.0, 2.0])
+    >>> loss = MSE(predictions, targets)  # (1² + 1²)/2 = 1.0
+    >>> # During backward: grad_output = 1
+    >>> # grad = 2 * ([2, 3] - [1, 2]) / 2 = [1, 1]
+
+    HINTS:
+    - MSE derivative: ∂MSE/∂pred = 2 * (pred - target) / N
+    - N = np.size(targets.data) (total number of elements)
+    - Multiply by grad_output for chain rule
     """
+    ### BEGIN SOLUTION
+    predictions, targets = self.inputs
 
-    def __init__(self, predictions, targets):
-        """Initialize with predictions and targets."""
-        super().__init__(predictions)
-        self.targets_data = targets.data
-        self.num_samples = np.size(targets.data)
+    if isinstance(predictions, Tensor) and predictions.requires_grad:
+        # Gradient: 2 * (predictions - targets) / N
+        num_samples = np.size(targets.data)
+        grad = 2.0 * (predictions.data - targets.data) / num_samples
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for MSE loss.
+        return grad * grad_output, None
+    return None, None
+    ### END SOLUTION
 
-        TODO: Implement gradient computation for Mean Squared Error loss.
+# %% [markdown]
+"""
+### BinaryCrossEntropyFunction.backward: Gradient Rules for Binary Cross-Entropy
 
-        APPROACH:
-        1. Extract predictions tensor from self.saved_tensors
-        2. If predictions requires gradients:
-           - Compute difference: predictions.data - self.targets_data
-           - Apply MSE derivative: 2 * difference / N
-           - Multiply by grad_output: grad * grad_output
-           - Return as tuple: (result,)
-        3. Else return (None,)
+Binary cross-entropy is the loss for yes/no predictions. Its gradient looks
+alarming written out, then collapses into something remarkably clean.
 
-        EXAMPLE:
-        >>> predictions = Tensor([2.0, 3.0], requires_grad=True)
-        >>> targets = Tensor([1.0, 2.0])
-        >>> loss = MSE(predictions, targets)  # (1² + 1²)/2 = 1.0
-        >>> # During backward: grad_output = 1
-        >>> # grad = 2 * ([2, 3] - [1, 2]) / 2 = [1, 1]
+**Mathematical Principle:**
+```
+If L = -[y·log(p) + (1-y)·log(1-p)], then
+    ∂L/∂p = (p - y) / (p·(1 - p))
+```
 
-        HINTS:
-        - MSE derivative: ∂MSE/∂pred = 2 * (pred - target) / N
-        - N = self.num_samples (total number of elements)
-        - Multiply by grad_output for chain rule
-        """
-        ### BEGIN SOLUTION
-        predictions, = self.saved_tensors
+**And when p came from a sigmoid, the pieces cancel:**
+```
+∂L/∂logit = ∂L/∂p · ∂p/∂logit
+          = (p - y)/(p(1-p))  ·  p(1-p)
+          = p - y
+```
 
-        if isinstance(predictions, Tensor) and predictions.requires_grad:
-            # Gradient: 2 * (predictions - targets) / N
-            grad = 2.0 * (predictions.data - self.targets_data) / self.num_samples
+The same clean form as MSE, arrived at by a very different route. This
+cancellation is why sigmoid and BCE are always paired.
 
-            return grad * grad_output,
-        return None,
-        ### END SOLUTION
-
+**The systems consequence**: the un-cancelled form divides by p·(1-p), which goes
+to zero as the model becomes confident. A confident wrong prediction produces a
+gradient that overflows. Real frameworks fuse sigmoid and BCE into one operation
+so the cancellation happens before any division does.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "bce-backward", "solution": true}
-#| export
-class BCEBackward(Function):
+#| exporti
+@method_of(BinaryCrossEntropyFunction)
+def backward(self, grad_output):
     """
     Gradient computation for Binary Cross-Entropy Loss.
 
     BCE: L = -[y*log(p) + (1-y)*log(1-p)]
     Derivative: ∂L/∂p = (p - y) / (p*(1-p)*N)
-    """
 
-    def __init__(self, predictions, targets):
-        """Initialize with predictions and targets."""
-        super().__init__(predictions)
-        self.targets_data = targets.data
-        self.num_samples = np.size(targets.data)
+    Compute gradient for BCE loss.
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for BCE loss.
-
-        TODO: Implement gradient computation for Binary Cross-Entropy loss.
-
-        APPROACH:
-        1. Extract predictions tensor from self.saved_tensors
-        2. If predictions requires gradients:
-           - Clip predictions: p = np.clip(predictions.data, eps, 1-eps)
-           - Get targets: y = self.targets_data
-           - Apply BCE derivative: (p - y) / (p * (1-p) * N)
-           - Multiply by grad_output
-           - Return as tuple: (result,)
-        3. Else return (None,)
-
-        EXAMPLE:
-        >>> predictions = Tensor([0.7, 0.3], requires_grad=True)
-        >>> targets = Tensor([1.0, 0.0])
-        >>> loss = BCE(predictions, targets)
-        >>> # During backward: grad = (p - y) / (p * (1-p) * N)
-
-        HINTS:
-        - BCE derivative: ∂BCE/∂p = (p - y) / (p * (1-p)) per sample
-        - Clip predictions to avoid log(0) instability
-        - Divide by N for mean loss
-        """
-        ### BEGIN SOLUTION
-        predictions, = self.saved_tensors
-
-        if isinstance(predictions, Tensor) and predictions.requires_grad:
-            eps = EPSILON
-            p = np.clip(predictions.data, eps, 1 - eps)
-            y = self.targets_data
-
-            # Gradient: (p - y) / (p * (1-p) * N)
-            grad = (p - y) / (p * (1 - p) * self.num_samples)
-
-            return grad * grad_output,
-        return None,
-        ### END SOLUTION
-
-# %% [markdown]
-"""
-### Helper: Numerically Stable Softmax
-
-Computing softmax naively as `exp(x) / sum(exp(x))` overflows for large values.
-The fix is to subtract the maximum value first, which is mathematically equivalent
-but numerically stable.
-
-```
-Naive (overflows):     softmax(x) = exp(x) / sum(exp(x))
-Stable (safe):         softmax(x) = exp(x - max(x)) / sum(exp(x - max(x)))
-
-Why it works:
-  exp(x - max(x)) / sum(exp(x - max(x)))
-= exp(x) * exp(-max(x)) / (sum(exp(x)) * exp(-max(x)))
-= exp(x) / sum(exp(x))
-```
-
-This helper is used by CrossEntropyBackward to convert logits to probabilities.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "stable-softmax-helper", "solution": true}
-#| export
-def _stable_softmax(logits_data):
-    """
-    Compute softmax probabilities with numerical stability.
-
-    Subtracts the max value per row before exponentiating to prevent overflow.
-
-    Args:
-        logits_data: numpy array of shape (batch_size, num_classes)
-
-    Returns:
-        numpy array of softmax probabilities, same shape as input
-
-    TODO: Implement numerically stable softmax computation.
+    TODO: Implement gradient computation for Binary Cross-Entropy loss.
 
     APPROACH:
-    1. Find the maximum value per row: np.max(logits_data, axis=1, keepdims=True)
-    2. Subtract max from logits: logits_data - max_logits
-    3. Exponentiate: np.exp(shifted_logits)
-    4. Normalize by row sum: exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+    1. Extract predictions tensor from self.inputs
+    2. If predictions requires gradients:
+       - Clip predictions: p = np.clip(predictions.data, eps, 1-eps)
+       - Get targets: y = targets.data
+       - Apply BCE derivative: (p - y) / (p * (1-p) * N)
+       - Multiply by grad_output
+       - Return (result, None): targets carry no gradient
+    3. Else return (None, None)
 
     EXAMPLE:
-    >>> logits = np.array([[2.0, 1.0, 0.1]])
-    >>> probs = _stable_softmax(logits)
-    >>> # probs ≈ [[0.659, 0.242, 0.099]]
-    >>> # Each row sums to 1.0
+    >>> predictions = Tensor([0.7, 0.3], requires_grad=True)
+    >>> targets = Tensor([1.0, 0.0])
+    >>> loss = BCE(predictions, targets)
+    >>> # During backward: grad = (p - y) / (p * (1-p) * N)
 
-    HINT: keepdims=True is essential for correct broadcasting.
+    HINTS:
+    - BCE derivative: ∂BCE/∂p = (p - y) / (p * (1-p)) per sample
+    - Clip predictions to avoid log(0) instability
+    - Divide by N for mean loss
     """
     ### BEGIN SOLUTION
-    max_logits = np.max(logits_data, axis=1, keepdims=True)
-    exp_logits = np.exp(logits_data - max_logits)
-    return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+    predictions, targets = self.inputs
+
+    if isinstance(predictions, Tensor) and predictions.requires_grad:
+        eps = EPSILON
+        p = np.clip(predictions.data, eps, 1 - eps)
+        y = targets.data
+        num_samples = np.size(targets.data)
+
+        # Gradient: (p - y) / (p * (1-p) * N)
+        grad = (p - y) / (p * (1 - p) * num_samples)
+
+        return grad * grad_output, None
+    return None, None
     ### END SOLUTION
 
 # %% [markdown]
 """
-### Unit Test: Stable Softmax Helper
+### Softmax Probabilities, Reused from Module 02
+
+CrossEntropyFunction.backward needs the softmax probabilities of the logits as a
+plain array. Module 02 already solved the hard part, subtracting the row maximum
+before exponentiating so large logits cannot overflow, and its `SoftmaxFunction`
+does its arithmetic on NumPy arrays. So this helper is one line: call that
+operation's `forward` on the array rather than deriving the trick a second time.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "stable-softmax-helper", "solution": false}
+#| export
+def _stable_softmax(logits_data):
+    """Softmax over the last axis of a (batch, classes) array, via Module 02's numerically stable operation."""
+    return SoftmaxFunction().forward(logits_data)
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Stable Softmax Helper
 
 **What we're testing**: Numerically stable softmax computation
 **Why it matters**: Unstable softmax causes NaN/Inf in cross-entropy gradients
@@ -2124,8 +2418,8 @@ def _stable_softmax(logits_data):
 
 # %% nbgrader={"grade": true, "grade_id": "test-stable-softmax-helper", "locked": true, "points": 3}
 def test_unit_stable_softmax():
-    """Test stable softmax helper."""
-    print("Testing stable softmax helper...")
+    """🧪 Test stable softmax helper."""
+    print("🧪 Unit Test: Stable Softmax Helper...")
 
     # Basic correctness
     logits = np.array([[1.0, 2.0, 3.0]])
@@ -2149,14 +2443,72 @@ def test_unit_stable_softmax():
     assert batch_probs.shape == (3, 2), f"Expected (3, 2), got {batch_probs.shape}"
     assert np.allclose(batch_probs.sum(axis=1), np.ones(3)), "Each row should sum to 1"
 
-    print("  Stable softmax helper works correctly!")
+    print("✅ Stable softmax helper works correctly!")
 
 if __name__ == "__main__":
     test_unit_stable_softmax()
 
 # %% [markdown]
 """
-### Helper: One-Hot Encoding
+### 🧪 Unit Test: Loss Backward Passes
+
+A loss gradient is the first thing the whole backward pass consumes, so an error
+here scales every gradient behind it. These two are small enough to differentiate
+by hand, which is what this test does: it states the closed form and checks it.
+
+**What we're testing**: MSE and binary cross-entropy backward against their
+closed-form gradients
+**Why it matters**: A loss gradient off by a constant factor still trains, just
+at the wrong learning rate, and a missing 1/N makes that factor the batch size
+**Expected**: MSE gives 2(p - t)/N and BCE gives (p - t)/(p(1 - p)N)
+"""
+
+
+# %% nbgrader={"grade": true, "grade_id": "test-loss-backward", "locked": true, "points": 10}
+def test_unit_loss_backward():
+    """🧪 Test loss backward passes against closed-form gradients."""
+    print("🧪 Unit Test: Loss Backward Passes...")
+
+    preds = Tensor([0.5, 0.8, 0.2, 0.9])
+    preds.requires_grad = True
+    targets = Tensor([1.0, 1.0, 0.0, 0.0])
+    n = preds.data.size
+
+    # MSE: d/dp mean((p - t)^2) = 2(p - t)/N
+    mse = MSEFunction(preds, targets)
+    mse.output = Tensor(np.mean((preds.data - targets.data) ** 2))
+    grad_p, grad_t = mse.backward(np.array(1.0))
+    expected = 2 * (preds.data - targets.data) / n
+    assert np.allclose(grad_p, expected), f"MSE.backward failed: {grad_p} vs {expected}"
+    print("✅ MSE gradient is 2(p - t)/N")
+
+    # The factor of two and the division by N are the two things that go missing,
+    # and neither shows up as a crash, so pin them separately.
+    assert not np.allclose(grad_p, (preds.data - targets.data) / n), \
+        "MSE.backward is missing its factor of 2"
+    assert not np.allclose(grad_p, 2 * (preds.data - targets.data)), \
+        "MSE.backward is missing its division by N"
+
+    # BCE: d/dp mean(-[t log p + (1-t) log(1-p)]) = (p - t) / (p(1-p)N)
+    bce = BinaryCrossEntropyFunction(preds, targets)
+    p_c = np.clip(preds.data, 1e-7, 1 - 1e-7)
+    bce.output = Tensor(np.mean(-(targets.data * np.log(p_c)
+                                  + (1 - targets.data) * np.log(1 - p_c))))
+    grad_p, grad_t = bce.backward(np.array(1.0))
+    expected = (p_c - targets.data) / (p_c * (1 - p_c) * n)
+    assert np.allclose(grad_p, expected, atol=1e-5), \
+        f"BCE.backward failed: {grad_p} vs {expected}"
+    print("✅ BCE gradient is (p - t)/(p(1 - p)N)")
+
+    print("✅ Loss backward passes work correctly!")
+
+if __name__ == "__main__":
+    test_unit_loss_backward()
+
+
+# %% [markdown]
+"""
+### One-Hot Encoding
 
 Converts class indices to one-hot vectors. This is needed by the cross-entropy
 gradient formula: `grad = softmax - one_hot`.
@@ -2207,7 +2559,7 @@ def _one_hot_encode(targets, batch_size, num_classes):
 
 # %% [markdown]
 """
-### Unit Test: One-Hot Encoding Helper
+### 🧪 Unit Test: One-Hot Encoding Helper
 
 **What we're testing**: Conversion from class indices to one-hot vectors
 **Why it matters**: Incorrect one-hot encoding produces wrong cross-entropy gradients
@@ -2216,8 +2568,8 @@ def _one_hot_encode(targets, batch_size, num_classes):
 
 # %% nbgrader={"grade": true, "grade_id": "test-one-hot-helper", "locked": true, "points": 3}
 def test_unit_one_hot_encode():
-    """Test one-hot encoding helper."""
-    print("Testing one-hot encoding helper...")
+    """🧪 Test one-hot encoding helper."""
+    print("🧪 Unit Test: One-Hot Encoding Helper...")
 
     # Basic test
     targets = np.array([0, 2, 1])
@@ -2236,14 +2588,14 @@ def test_unit_one_hot_encode():
     result_batch = _one_hot_encode(targets_batch, batch_size=5, num_classes=5)
     assert np.allclose(result_batch.sum(axis=1), np.ones(5)), "Each row should sum to 1"
 
-    print("  One-hot encoding helper works correctly!")
+    print("✅ One-hot encoding helper works correctly!")
 
 if __name__ == "__main__":
     test_unit_one_hot_encode()
 
 # %% [markdown]
 """
-### CrossEntropyBackward - Gradient Rules for Cross-Entropy Loss
+### CrossEntropyFunction.backward: Gradient Rules for Cross-Entropy Loss
 
 The cross-entropy gradient combines three sub-computations:
 1. **Stable softmax**: Convert raw logits to probabilities
@@ -2263,8 +2615,9 @@ This is one of the most elegant results in machine learning.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "ce-backward", "solution": true}
-#| export
-class CrossEntropyBackward(Function):
+#| exporti
+@method_of(CrossEntropyFunction)
+def backward(self, grad_output):
     """
     Gradient computation for Cross-Entropy Loss.
 
@@ -2277,64 +2630,88 @@ class CrossEntropyBackward(Function):
     - The gradient is simply the difference between predictions and targets
     - It naturally scales with how wrong we are
     - It's numerically stable when computed via softmax
+
+    Compute gradient for cross-entropy loss.
+
+    Uses helper functions for each sub-computation:
+    - _stable_softmax(): Converts logits to probabilities (numerically stable)
+    - _one_hot_encode(): Converts target indices to one-hot vectors
+
+    TODO: Implement gradient computation for Cross-Entropy loss.
+
+    APPROACH:
+    1. Extract logits tensor from self.inputs
+    2. If logits requires gradients:
+       - Compute softmax using _stable_softmax(logits.data)
+       - Encode targets using _one_hot_encode(targets, batch_size, num_classes)
+       - Apply CE derivative: (softmax - one_hot) / batch_size
+       - Multiply by grad_output
+       - Return (result, None): targets carry no gradient
+    3. Else return (None, None)
+
+    EXAMPLE:
+    >>> logits = Tensor([[2.0, 1.0, 0.1]], requires_grad=True)
+    >>> targets = Tensor([0])  # Correct class is 0
+    >>> loss = CrossEntropy(logits, targets)
+    >>> # softmax ≈ [0.66, 0.24, 0.10]
+    >>> # one_hot = [1, 0, 0]
+    >>> # grad = ([0.66, 0.24, 0.10] - [1, 0, 0]) / 1 = [-0.34, 0.24, 0.10]
+
+    HINTS:
+    - CE gradient: (softmax(logits) - one_hot(targets)) / batch_size
+    - Use _stable_softmax() for numerically stable softmax
+    - Use _one_hot_encode() for target encoding
     """
+    ### BEGIN SOLUTION
+    logits, targets = self.inputs
 
-    def __init__(self, logits, targets):
-        """Initialize with logits and target class indices."""
-        super().__init__(logits)
-        self.targets_data = targets.data.astype(int)
-        self.batch_size = logits.data.shape[0]
-        self.num_classes = logits.data.shape[1]
+    if isinstance(logits, Tensor) and logits.requires_grad:
+        batch_size, num_classes = logits.data.shape[0], logits.data.shape[1]
+        softmax = _stable_softmax(logits.data)
+        one_hot = _one_hot_encode(targets.data.astype(int), batch_size, num_classes)
 
-    def apply(self, grad_output):
-        """
-        Compute gradient for cross-entropy loss.
+        # Gradient: (softmax - one_hot) / batch_size
+        grad = (softmax - one_hot) / batch_size
 
-        Uses helper functions for each sub-computation:
-        - _stable_softmax(): Converts logits to probabilities (numerically stable)
-        - _one_hot_encode(): Converts target indices to one-hot vectors
+        return grad * grad_output, None
+    return None, None
+    ### END SOLUTION
 
-        TODO: Implement gradient computation for Cross-Entropy loss.
+# %% [markdown]
+"""
+### LogSoftmax.backward: Gradient Rules for Log-Softmax
 
-        APPROACH:
-        1. Extract logits tensor from self.saved_tensors
-        2. If logits requires gradients:
-           - Compute softmax using _stable_softmax(logits.data)
-           - Encode targets using _one_hot_encode(targets, batch_size, num_classes)
-           - Apply CE derivative: (softmax - one_hot) / batch_size
-           - Multiply by grad_output
-           - Return as tuple: (result,)
-        3. Else return (None,)
+`log_softmax` from Module 04 is an operation too, and models that call it directly (rather than through `CrossEntropyLoss`) need its gradient.
 
-        EXAMPLE:
-        >>> logits = Tensor([[2.0, 1.0, 0.1]], requires_grad=True)
-        >>> targets = Tensor([0])  # Correct class is 0
-        >>> loss = CrossEntropy(logits, targets)
-        >>> # softmax ≈ [0.66, 0.24, 0.10]
-        >>> # one_hot = [1, 0, 0]
-        >>> # grad = ([0.66, 0.24, 0.10] - [1, 0, 0]) / 1 = [-0.34, 0.24, 0.10]
+**Mathematical Rule:** If y = log_softmax(x) along an axis, then
+∂L/∂x = grad_y - softmax(x) * sum(grad_y) along that axis, and softmax(x) = exp(y).
+"""
 
-        HINTS:
-        - CE gradient: (softmax(logits) - one_hot(targets)) / batch_size
-        - Use _stable_softmax() for numerically stable softmax
-        - Use _one_hot_encode() for target encoding
-        """
-        ### BEGIN SOLUTION
-        logits, = self.saved_tensors
+# %% nbgrader={"grade": false, "grade_id": "log-softmax-backward", "solution": true}
+#| exporti
+@method_of(LogSoftmax)
+def backward(self, grad_output):
+    """
+    Gradient computation for log-softmax.
 
-        if isinstance(logits, Tensor) and logits.requires_grad:
-            softmax = _stable_softmax(logits.data)
-            one_hot = _one_hot_encode(self.targets_data, self.batch_size, self.num_classes)
+    TODO: Implement grad_output - exp(output) * sum(grad_output) along self.dim.
 
-            # Gradient: (softmax - one_hot) / batch_size
-            grad = (softmax - one_hot) / self.batch_size
+    APPROACH:
+    1. softmax = np.exp(self.output.data)  (apply() saved the log-softmax output on the node)
+    2. total = np.sum(grad_output, axis=self.dim, keepdims=True)
+    3. Return (grad_output - softmax * total,)
+    """
+    ### BEGIN SOLUTION
+    tensor, = self.inputs
 
-            return grad * grad_output,
-        return None,
-        ### END SOLUTION
+    if isinstance(tensor, Tensor) and tensor.requires_grad:
+        softmax = np.exp(self.output.data)
+        total = np.sum(grad_output, axis=self.dim, keepdims=True)
+        return grad_output - softmax * total,
+    return None,
+    ### END SOLUTION
 
-
-# %% nbgrader={"grade": false, "grade_id": "no-grad-context", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "no-grad-context", "solution": false}
 #| export
 # ===== Global Gradient Tracking Flag =====
 # Why this exists: During inference or parameter updates, we don't need to build
@@ -2401,708 +2778,273 @@ class no_grad:
         return False  # Don't suppress exceptions
 
 
-# %% nbgrader={"grade": false, "grade_id": "enable-autograd", "solution": true}
-#| export
-def enable_autograd(quiet=False):
-    """
-    Enable gradient tracking for all Tensor operations.
+# %% [markdown]
+"""
+### Walking the Graph in the Right Order
 
-    This function enhances the existing Tensor class with autograd capabilities.
-    Call this once to activate gradients globally.
+We have every gradient rule. What remains is the traversal: given the output,
+visit the graph and hand each tensor its gradient. The obvious approach is
+recursion -- compute a tensor's gradient, then immediately recurse into its
+parents. That works, right up until a tensor is used twice.
+
+```
+        x ──► y ──┬──► loss = y * y
+                  └──►
+```
+
+Here `y` feeds the multiply twice, so the true gradient at `y` is the SUM of
+what both edges send back. Naive recursion reaches `y` on the first edge and
+descends the whole subtree below it before the second edge has contributed
+anything. So `x` is updated from a partial gradient. Worse, when the second
+edge arrives it descends that same subtree all over again -- work doubles at
+every reused node, which is exponential on a graph with several of them.
+
+The fix is a **topological order**: an ordering of the graph in which every
+consumer of a tensor appears before the tensor itself.
+
+```
+   build order (DFS post-order)    reversed = topological order
+   [x, y, loss]                    [loss, y, x]
+                                     │     │   └─ visited last, gradient complete
+                                     │     └───── both edges have contributed
+                                     └─────────── the seed
+```
+
+Process tensors in that order and each one is visited exactly once, at the
+moment its gradient is complete. Correct, and linear in the size of the graph
+rather than exponential.
+
+This is the piece that makes reverse-mode AD practical, and it is why PyTorch,
+JAX, and every other framework sort before they walk. `backward()` below builds
+the order with a depth-first post-order traversal, reverses it, then makes a
+single pass -- accumulating into each `.grad` and passing each parent its share.
+
+One consequence worth noticing: the graph can only be freed *after* the whole
+walk. Releasing each node as you pass it would drop exactly the second
+contribution the sort exists to collect.
+"""
+
+# %% [markdown]
+"""
+### Completing apply() and Adding backward()
+
+Module 01 left two slots open. `Function.apply()` runs an operation but forgets it, and `Tensor.backward()` raises. The cell below fills both in:
+
+1. **apply() records the graph** - After running forward(), the output remembers the operation that produced it (`_grad_fn`) whenever an input has requires_grad=True
+2. **Adding backward() method** - Implements reverse-mode automatic differentiation
+3. **Maintaining compatibility** - Tensor's operators were already routed through apply() in Module 01, so all existing code continues to work unchanged
+
+**The Pattern:**
+```
+Module 01: x + y → Add.apply(x, y) → result
+Module 06: x + y → Add.apply(x, y) → result that remembers Add (if requires_grad=True)
+```
+
+This is how PyTorch's `torch.autograd.Function` works - clean, modern, and educational.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "apply-and-backward", "solution": false}
+#| exporti
+@method_of(Function)
+def __repr__(self):
+    """The name PyTorch shows for a grad_fn, e.g. <AddBackward> or <Conv2dBackward>."""
+    name = type(self).__name__
+    if name.endswith("Function"):
+        name = name[: -len("Function")]
+    return f"<{name}Backward>"
+
+
+@method_of(Function)
+@classmethod
+def apply(cls, *inputs, **params):
+    """
+    Run the operation and, when a gradient is wanted, remember it on the output.
+
+    This replaces the Module 01 version, which computed the result and forgot
+    the operation. Two things are new. The node keeps its output (several
+    backward() rules need it), and when any input has requires_grad=True and
+    tracking is on, the output records the node in `_grad_fn`. The chain of
+    `_grad_fn` links is the computation graph.
+    """
+    node = cls(*inputs, **params)
+    out = Tensor(node.forward(*[t.data for t in inputs]))
+    node.output = out
+    if _GRAD_TRACKING_ENABLED and any(t.requires_grad for t in inputs):
+        out.requires_grad = True
+        out._grad_fn = node
+    return out
+
+
+@method_of(Tensor)
+def backward(self, gradient=None, retain_graph=False):
+    """
+    Compute gradients via backpropagation.
+
+    This is the key method that makes training possible!
+    It implements reverse-mode automatic differentiation.
+
+    **Algorithm:**
+    1. Build a topological order of the graph, so every tensor is visited
+       only after all of the operations that consumed it
+    2. Seed the output tensor with the incoming gradient
+    3. Walk that order once, accumulating into each tensor's `.grad` and
+       handing each parent its share
+    4. Release the graph once, at the end (unless retain_graph=True)
+
+    **Why the topological order matters.** A tensor can feed more than one
+    operation -- a residual connection, a reused activation, or something as
+    small as `loss = y * y`. Its true gradient is the SUM of what every
+    consumer sends back, so it must not propagate until all of them have
+    contributed. Walking the graph in topological order guarantees exactly
+    that, and visits every tensor exactly once.
 
     **Args:**
-        quiet (bool): If True, suppress status messages. Default: False.
-
-    **What it does:**
-    - Replaces Tensor operations with gradient-tracking versions
-    - Adds backward() method for reverse-mode differentiation
-    - Enables computation graph building
-    - Maintains full backward compatibility
-
-    **After calling this:**
-    - Tensor operations will track computation graphs
-    - backward() method becomes available
-    - Gradients will flow through operations
-    - requires_grad=True enables tracking per tensor
+        gradient: External gradient to seed backpropagation. If None, assumes
+            scalar output and uses ones_like as the seed.
+        retain_graph: If False (default), releases the computation graph after
+            backward to free memory. Set True if you need to call backward()
+            multiple times on the same graph. Otherwise, recompute the forward
+            pass before using an intermediate again. Retaining this graph does
+            not provide higher-order derivatives; backward uses NumPy arrays.
 
     **Example:**
     ```python
-    enable_autograd()  # Call once
     x = Tensor([2.0], requires_grad=True)
     y = x * 3
-    y.backward()
+    y.backward()   # Computes gradients for x, then releases the graph
     print(x.grad)  # [3.0]
+
+    # A reused tensor accumulates from every consumer:
+    h = x * 2
+    (h * h).backward()   # dL/dx = 2*(2x)*2 = 8*x
     ```
     """
 
-    # Educational Note: hasattr() is LEGITIMATE here because:
-    # 1. This is a runtime monkey-patch system (meta-programming)
-    # 2. We're checking if a class has been dynamically modified
-    # 3. _autograd_enabled is a marker attribute we add at runtime
-    # This is the CORRECT use of hasattr() for dynamic class modification
-    if hasattr(Tensor, '_autograd_enabled'):
-        # Silently return if already enabled - no need to warn
+    # Only compute gradients if required
+    if not self.requires_grad:
         return
 
-    # ===== STEP 1: Add gradient infrastructure to Tensor =====
-    # Store original __init__ to extend it
-    _original_init = Tensor.__init__
-
-    def gradient_aware_init(self, data, requires_grad=False):
-        """Extended Tensor init that supports gradient tracking."""
-        _original_init(self, data)
-        self.requires_grad = requires_grad
-        self.grad = None
-
-    # Replace __init__ with gradient-aware version
-    Tensor.__init__ = gradient_aware_init
-
-    # Store original operations
-    # These are guaranteed to exist from Module 01 (Tensor class)
-    _original_add = Tensor.__add__
-    _original_sub = Tensor.__sub__
-    _original_mul = Tensor.__mul__
-    _original_div = Tensor.__truediv__
-    _original_getitem = Tensor.__getitem__
-
-    # These methods are also guaranteed from Module 01 - trust Single Tensor Class
-    _original_matmul = Tensor.matmul
-    _original_transpose = Tensor.transpose
-    _original_reshape = Tensor.reshape
-
-    # Helper to safely check requires_grad (handles tensors created before enable_autograd)
-    def _get_requires_grad(tensor):
-        """Safely get requires_grad, defaulting to False for pre-autograd tensors.
-
-        Also returns False when inside a no_grad() context, since we should
-        not build computation graphs there.
-        """
-        if not _GRAD_TRACKING_ENABLED:
-            return False
-        return getattr(tensor, 'requires_grad', False) if isinstance(tensor, Tensor) else False
-
-    def _ensure_grad_attrs(tensor):
-        """Ensure tensor has gradient attributes (for tensors created before enable_autograd)."""
-        if isinstance(tensor, Tensor):
-            if not hasattr(tensor, 'requires_grad'):
-                tensor.requires_grad = False
-            if not hasattr(tensor, 'grad'):
-                tensor.grad = None
-
-    # Enhanced operations that track gradients
-    def tracked_add(self, other):
-        """
-        Addition with gradient tracking.
-
-        Enhances the original __add__ method to build computation graphs
-        when requires_grad=True for any input.
-        """
-        # Ensure self has gradient attributes
-        _ensure_grad_attrs(self)
-
-        # Convert scalar to Tensor if needed
-        if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
-
-        # Call original operation
-        result = _original_add(self, other)
-        _ensure_grad_attrs(result)
-
-        # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
-            result.requires_grad = True
-            result._grad_fn = AddBackward(self, other)
-
-        return result
-
-    def tracked_radd(self, other):
-        """Scalar-left addition with gradient tracking."""
-        return tracked_add(self, other)
-
-    def tracked_mul(self, other):
-        """
-        Multiplication with gradient tracking.
-
-        Enhances the original __mul__ method to build computation graphs
-        when requires_grad=True for any input.
-        """
-        _ensure_grad_attrs(self)
-
-        if not isinstance(other, Tensor):
-            other_tensor = Tensor(other)
+    # Initialize gradient if not provided (for scalar outputs)
+    if gradient is None:
+        if self.data.size == 1:
+            gradient = np.ones_like(self.data)
         else:
-            other_tensor = other
-        _ensure_grad_attrs(other_tensor)
+            raise ValueError(
+                f"backward() called on non-scalar tensor without gradient argument.\n"
+                f"  Tensor shape: {self.shape}\n"
+                f"  Issue: For non-scalar outputs, you must provide the gradient from the next layer.\n"
+                f"  Fix: Call backward(gradient) with the gradient tensor from the loss function."
+            )
 
-        result = _original_mul(self, other)
-        _ensure_grad_attrs(result)
+    if isinstance(gradient, Tensor):
+        gradient = gradient.data
+    gradient = np.asarray(gradient)
+    if gradient.shape != self.shape:
+        raise ValueError(
+            f"backward gradient shape {gradient.shape} must match output shape {self.shape}. "
+            "Supply one gradient value per output element."
+        )
 
-        # Pass other_tensor (always a Tensor) so MulBackward can call .data on it.
-        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
-            result.requires_grad = True
-            result._grad_fn = MulBackward(self, other_tensor)
+    # ---- Step 1: topological sort -------------------------------------
+    # Depth-first from the output, appending each tensor only AFTER its
+    # parents. Reversing that post-order gives an order in which every
+    # consumer of a tensor appears before the tensor itself.
+    topo_order = []
+    seen = set()
+    # Iterative depth-first post-order (a recursive visit would hit Python's
+    # recursion limit on a few thousand chained operations).
+    stack = [(self, False)]
+    while stack:
+        tensor, expanded = stack.pop()
+        if expanded:
+            topo_order.append(tensor)
+            continue
+        if id(tensor) in seen:
+            continue
+        # Check every intermediate before changing any gradients. A released
+        # intermediate has no grad_fn, but it is not a new leaf: stopping there
+        # would silently lose the gradient to the original inputs.
+        if getattr(tensor, "_graph_released", False):
+            raise RuntimeError(
+                "Trying to backward through a graph that was released. "
+                "Recompute the forward pass, or use retain_graph=True on the earlier backward()."
+            )
+        seen.add(id(tensor))
+        stack.append((tensor, True))
+        fn = tensor._grad_fn
+        if fn is not None:
+            for parent in fn.inputs:
+                if isinstance(parent, Tensor) and parent.requires_grad:
+                    stack.append((parent, False))
+    topo_order.reverse()
 
-        return result
+    # ---- Step 2: seed the output --------------------------------------
+    # pending[id(tensor)] holds the gradient accumulated from the consumers
+    # visited so far. Keyed by id() because Tensors are not hashable.
+    pending = {id(self): gradient}
 
-    def tracked_rmul(self, other):
-        """Scalar-left multiplication with gradient tracking."""
-        return tracked_mul(self, other)
+    # ---- Step 3: one pass, in topological order ------------------------
+    for tensor in topo_order:
+        grad = pending.get(id(tensor))
+        if grad is None:
+            continue
 
-    def tracked_matmul(self, other):
-        """
-        Matrix multiplication with gradient tracking.
+        if not tensor.requires_grad:
+            continue
 
-        Enhances the original matmul method to build computation graphs
-        when requires_grad=True for any input.
-        """
-        _ensure_grad_attrs(self)
-        _ensure_grad_attrs(other)
+        # Accumulate into this tensor's .grad
+        if tensor.grad is None:
+            tensor.grad = np.zeros_like(tensor.data)
+        grad = _reduce_broadcast_grad(grad, tensor.grad.shape)
+        if np.shape(grad) != tensor.grad.shape:
+            raise ValueError(f"gradient of shape {np.shape(grad)} does not match tensor of shape {tensor.grad.shape}")
+        tensor.grad += grad
 
-        # Call original matmul from Module 01
-        result = _original_matmul(self, other)
-        _ensure_grad_attrs(result)
-
-        # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
-            result.requires_grad = True
-            result._grad_fn = MatmulBackward(self, other)
-
-        return result
-
-    def tracked_transpose(self, dim0=None, dim1=None):
-        """
-        Transpose with gradient tracking.
-
-        Enhances the original transpose method to build computation graphs
-        when requires_grad=True for the input.
-        """
-        _ensure_grad_attrs(self)
-
-        # Call original transpose from Module 01
-        result = _original_transpose(self, dim0, dim1)
-        _ensure_grad_attrs(result)
-
-        # Track gradient if needed
-        if _get_requires_grad(self):
-            result.requires_grad = True
-            result._grad_fn = TransposeBackward(self, dim0, dim1)
-
-        return result
-
-    def tracked_reshape(self, *shape):
-        """
-        Reshape with gradient tracking.
-
-        Enhances the original reshape method to build computation graphs
-        when requires_grad=True for the input.
-        """
-        _ensure_grad_attrs(self)
-        original_shape = self.shape
-
-        # Call original reshape from Module 01
-        result = _original_reshape(self, *shape)
-        _ensure_grad_attrs(result)
-
-        # Track gradient if needed
-        if _get_requires_grad(self):
-            result.requires_grad = True
-            result._grad_fn = ReshapeBackward(self, original_shape)
-
-        return result
-
-    def tracked_sub(self, other):
-        """
-        Subtraction with gradient tracking.
-
-        Enhances the original __sub__ method to build computation graphs
-        when requires_grad=True for any input.
-        """
-        _ensure_grad_attrs(self)
-
-        # Convert scalar to Tensor if needed
-        if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
-
-        # Call original operation
-        result = _original_sub(self, other)
-        _ensure_grad_attrs(result)
-
-        # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
-            result.requires_grad = True
-            result._grad_fn = SubBackward(self, other)
-
-        return result
-
-    def tracked_rsub(self, other):
-        """Scalar-left subtraction with gradient tracking."""
-        if not isinstance(other, Tensor):
-            other = Tensor(other)
-        return tracked_sub(other, self)
-
-    def tracked_div(self, other):
-        """
-        Division with gradient tracking.
-
-        Enhances the original __truediv__ method to build computation graphs
-        when requires_grad=True for any input.
-        """
-        _ensure_grad_attrs(self)
-
-        # Convert scalar to Tensor if needed
-        if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
-
-        # Call original operation
-        result = _original_div(self, other)
-        _ensure_grad_attrs(result)
-
-        # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
-            result.requires_grad = True
-            result._grad_fn = DivBackward(self, other)
-
-        return result
-
-    def tracked_rdiv(self, other):
-        """Scalar-left division with gradient tracking."""
-        if not isinstance(other, Tensor):
-            other = Tensor(other)
-        return tracked_div(other, self)
-
-    def tracked_getitem(self, key):
-        """
-        Indexing/slicing with gradient tracking.
-
-        Enhances the original __getitem__ method to build computation graphs
-        when requires_grad=True for the input.
-        """
-        _ensure_grad_attrs(self)
-
-        # Call original __getitem__ from Module 01
-        result = _original_getitem(self, key)
-        _ensure_grad_attrs(result)
-
-        # Track gradient if needed
-        if _get_requires_grad(self):
-            result.requires_grad = True
-            result._grad_fn = SliceBackward(self, key)
-
-        return result
-
-    def sum_op(self, axis=None, keepdims=False):
-        """
-        Sum operation with gradient tracking.
-
-        Creates a new sum method that builds computation graphs
-        when requires_grad=True.
-        """
-        _ensure_grad_attrs(self)
-
-        result_data = np.sum(self.data, axis=axis, keepdims=keepdims)
-        result = Tensor(result_data)
-
-        if _get_requires_grad(self):
-            result.requires_grad = True
-            result._grad_fn = SumBackward(self, axis=axis, keepdims=keepdims)
-
-        return result
-
-    def backward(self, gradient=None, retain_graph=False):
-        """
-        Compute gradients via backpropagation.
-
-        This is the key method that makes training possible!
-        It implements reverse-mode automatic differentiation.
-
-        **Algorithm:**
-        1. Initialize gradient if not provided (for scalar outputs)
-        2. Accumulate gradient in self.grad
-        3. If this tensor has a _grad_fn, call it to propagate gradients
-        4. Recursively call backward() on parent tensors
-        5. Release computation graph (unless retain_graph=True)
-
-        **Args:**
-            gradient: External gradient to seed backpropagation. If None, assumes
-                scalar output and uses ones_like as the seed.
-            retain_graph: If False (default), releases the computation graph after
-                backward to free memory. Set True if you need to call backward()
-                multiple times on the same graph (e.g., for higher-order gradients).
-                Matches PyTorch's retain_graph parameter.
-
-        **Example:**
-        ```python
-        x = Tensor([2.0], requires_grad=True)
-        y = x * 3
-        y.backward()  # Computes gradients for x, then releases graph
-        print(x.grad)  # [3.0]
-        # y.backward()  # Would fail — graph already released!
-
-        # To backward twice, use retain_graph=True:
-        y2 = x * 3
-        y2.backward(retain_graph=True)  # Graph kept alive
-        y2.backward()  # Works! (releases graph this time)
-        ```
-        """
-        # Ensure gradient attributes exist
-        _ensure_grad_attrs(self)
-
-        # Only compute gradients if required
-        if not _get_requires_grad(self):
-            return
-
-        # Initialize gradient if not provided (for scalar outputs)
-        if gradient is None:
-            if self.data.size == 1:
-                gradient = np.ones_like(self.data)
-            else:
+        # Hand each parent its share
+        fn = tensor._grad_fn
+        if fn is None:
+            continue
+        parent_grads = fn.backward(grad)
+        for parent, parent_grad in zip(fn.inputs, parent_grads):
+            if not isinstance(parent, Tensor) or parent_grad is None:
+                continue
+            if not parent.requires_grad:
+                continue
+            parent_grad = _reduce_broadcast_grad(parent_grad, parent.data.shape)
+            if np.shape(parent_grad) != parent.data.shape:
                 raise ValueError(
-                    f"backward() called on non-scalar tensor without gradient argument.\n"
-                    f"  Tensor shape: {self.shape}\n"
-                    f"  Issue: For non-scalar outputs, you must provide the gradient from the next layer.\n"
-                    f"  Fix: Call backward(gradient) with the gradient tensor from the loss function."
+                    f"{fn!r} returned a gradient of shape {np.shape(parent_grad)} for an input of shape {parent.data.shape}"
                 )
+            if id(parent) in pending:
+                pending[id(parent)] = pending[id(parent)] + parent_grad
+            else:
+                pending[id(parent)] = parent_grad
 
-        # Initialize or accumulate gradient
-        if self.grad is None:
-            self.grad = np.zeros_like(self.data)
+    # ---- Step 4: release the graph, once ------------------------------
+    # The graph holds references to every intermediate tensor, so without
+    # this, memory grows with each training step. Releasing per-node DURING
+    # the walk would be a bug: a tensor with two consumers would lose the
+    # second contribution.
+    if not retain_graph:
+        for tensor in topo_order:
+            if tensor._grad_fn is not None:
+                tensor._graph_released = True
+            tensor._grad_fn = None
 
-        # Handle broadcasting: sum gradient to match self.data shape
-        # This happens when operations broadcast tensors (e.g., adding bias to batch)
-        if gradient.shape != self.grad.shape:
-            # Step 1: Remove extra leading dimensions added during forward pass
-            # Example: gradient (batch_size, features) → self.grad (features,)
-            while gradient.ndim > self.grad.ndim:
-                gradient = gradient.sum(axis=0)
 
-            # Step 2: Sum over dimensions that were size-1 in original tensor
-            # Example: bias with shape (1,) broadcast to (batch_size,) during forward
-            for i in range(gradient.ndim):
-                if self.grad.shape[i] == 1 and gradient.shape[i] != 1:
-                    gradient = gradient.sum(axis=i, keepdims=True)
+@method_of(Tensor)
+def zero_grad(self):
+    """
+    Reset gradients to zero.
 
-        self.grad += gradient
-
-        # Propagate gradients through computation graph
-        # _grad_fn is set by autograd enhancement when tensor is created from an operation
-        grad_fn = getattr(self, '_grad_fn', None)
-        if grad_fn is not None:
-            grads = grad_fn.apply(gradient)
-
-            # Recursively call backward on parent tensors
-            for tensor, grad in zip(grad_fn.saved_tensors, grads):
-                if isinstance(tensor, Tensor) and tensor.requires_grad and grad is not None:
-                    tensor.backward(grad, retain_graph=retain_graph)
-
-            # Release computation graph to free memory (matches PyTorch's default)
-            # Why: The graph stores references to all intermediate tensors. Without
-            # cleanup, these references prevent garbage collection, causing memory
-            # to grow linearly with the number of training steps.
-            if not retain_graph:
-                self._grad_fn = None
-
-    def zero_grad(self):
-        """
-        Reset gradients to zero.
-
-        Call this before each backward pass to prevent gradient accumulation
-        from previous iterations.
-        """
-        self.grad = None
-
-    # Install enhanced operations
-    Tensor.__add__ = tracked_add
-    Tensor.__radd__ = tracked_radd
-    Tensor.__sub__ = tracked_sub
-    Tensor.__rsub__ = tracked_rsub
-    Tensor.__mul__ = tracked_mul
-    Tensor.__rmul__ = tracked_rmul
-    Tensor.__truediv__ = tracked_div
-    Tensor.__rtruediv__ = tracked_rdiv
-    Tensor.__getitem__ = tracked_getitem
-    Tensor.matmul = tracked_matmul
-    Tensor.transpose = tracked_transpose
-    Tensor.reshape = tracked_reshape
-    Tensor.sum = sum_op
-    Tensor.backward = backward
-    Tensor.zero_grad = zero_grad
-
-    # Patch activations and losses to track gradients
-    try:
-        from tinytorch.core.activations import Sigmoid, ReLU, Softmax, GELU, Tanh
-        from tinytorch.core.losses import BinaryCrossEntropyLoss, MSELoss, CrossEntropyLoss
-
-        # Store original methods
-        _original_sigmoid_forward = Sigmoid.forward
-        _original_relu_forward = ReLU.forward
-        _original_softmax_forward = Softmax.forward
-        _original_gelu_forward = GELU.forward
-        _original_tanh_forward = Tanh.forward
-        _original_bce_forward = BinaryCrossEntropyLoss.forward
-        _original_mse_forward = MSELoss.forward
-        _original_ce_forward = CrossEntropyLoss.forward
-
-        def tracked_sigmoid_forward(self, x):
-            """Sigmoid with gradient tracking."""
-            result_data = 1.0 / (1.0 + np.exp(-x.data))
-            result = Tensor(result_data)
-
-            if _GRAD_TRACKING_ENABLED and x.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = SigmoidBackward(x, result)
-
-            return result
-
-        def tracked_tanh_forward(self, x):
-            """Tanh with gradient tracking."""
-            result_data = np.tanh(x.data)
-            result = Tensor(result_data)
-
-            if _GRAD_TRACKING_ENABLED and x.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = TanhBackward(x, result)
-
-            return result
-
-        def tracked_relu_forward(self, x):
-            """ReLU with gradient tracking."""
-            result_data = np.maximum(0, x.data)
-            result = Tensor(result_data)
-
-            if _GRAD_TRACKING_ENABLED and x.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = ReLUBackward(x)
-
-            return result
-
-        def tracked_softmax_forward(self, x, dim=-1):
-            """Softmax with gradient tracking."""
-            # Call original forward to get result using Tensor operations
-            result = _original_softmax_forward(self, x, dim=dim)
-
-            # Attach the correct gradient function
-            if _GRAD_TRACKING_ENABLED and x.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = SoftmaxBackward(x, result, dim)
-
-            return result
-
-        def tracked_gelu_forward(self, x):
-            """GELU with gradient tracking."""
-            # Call original forward to get result
-            result = _original_gelu_forward(self, x)
-
-            # Attach the correct gradient function
-            if _GRAD_TRACKING_ENABLED and x.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = GELUBackward(x)
-
-            return result
-
-        def tracked_bce_forward(self, predictions, targets):
-            """Binary cross-entropy with gradient tracking."""
-            # Compute BCE loss
-            eps = EPSILON
-            clamped_preds = np.clip(predictions.data, eps, 1 - eps)
-            log_preds = np.log(clamped_preds)
-            log_one_minus_preds = np.log(1 - clamped_preds)
-            bce_per_sample = -(targets.data * log_preds + (1 - targets.data) * log_one_minus_preds)
-            bce_loss = np.mean(bce_per_sample)
-
-            result = Tensor(bce_loss)
-
-            if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = BCEBackward(predictions, targets)
-
-            return result
-
-        def tracked_mse_forward(self, predictions, targets):
-            """MSE loss with gradient tracking."""
-            # Compute MSE loss
-            diff = predictions.data - targets.data
-            squared_diff = diff ** 2
-            mse = np.mean(squared_diff)
-
-            result = Tensor(mse)
-
-            if _GRAD_TRACKING_ENABLED and predictions.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = MSEBackward(predictions, targets)
-
-            return result
-
-        def tracked_ce_forward(self, logits, targets):
-            """Cross-entropy loss with gradient tracking."""
-            from tinytorch.core.losses import log_softmax
-
-            # Compute log-softmax for numerical stability
-            log_probs = log_softmax(logits, dim=-1)
-
-            # Select log-probabilities for correct classes
-            batch_size = logits.shape[0]
-            target_indices = targets.data.astype(int)
-            selected_log_probs = log_probs.data[np.arange(batch_size), target_indices]
-
-            # Return negative mean
-            ce_loss = -np.mean(selected_log_probs)
-
-            result = Tensor(ce_loss)
-
-            if _GRAD_TRACKING_ENABLED and logits.requires_grad:
-                result.requires_grad = True
-                result._grad_fn = CrossEntropyBackward(logits, targets)
-
-            return result
-
-        # Install patched methods
-        Sigmoid.forward = tracked_sigmoid_forward
-        ReLU.forward = tracked_relu_forward
-        Softmax.forward = tracked_softmax_forward
-        GELU.forward = tracked_gelu_forward
-        Tanh.forward = tracked_tanh_forward
-        BinaryCrossEntropyLoss.forward = tracked_bce_forward
-        MSELoss.forward = tracked_mse_forward
-        CrossEntropyLoss.forward = tracked_ce_forward
-
-    except ImportError:
-        # Activations/losses not yet available (happens during module development)
-        pass
-
-    # Mark as enabled
-    Tensor._autograd_enabled = True
-
-    if not quiet:
-        print("✅ Autograd enabled! Tensors now track gradients.")
-        print("   - Operations build computation graphs")
-        print("   - backward() computes gradients")
-        print("   - requires_grad=True enables tracking")
-
-# Auto-enable when module is imported
-# Always quiet to avoid cluttering user imports
-import os
-enable_autograd(quiet=True)
+    Call this before each backward pass to prevent gradient accumulation
+    from previous iterations.
+    """
+    self.grad = None
 
 # %% [markdown]
 """
-## ⚠️ DANGER: In-Place Operations Break Autograd
-
-**THIS IS THE MOST COMMON SILENT FAILURE IN TINYTORCH!**
-
-### Critical Rule: Never Modify Tensors In-Place When requires_grad=True
-
-**WRONG ❌ - This Corrupts the Gradient Graph:**
-```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * 2
-x.data[0] = 999  # ❌ CORRUPTS GRADIENT GRAPH WITHOUT ERROR!
-y.backward()     # ❌ Wrong gradients or crash
-```
-
-**RIGHT ✅ - Create New Tensors Instead:**
-```python
-x = Tensor([1, 2, 3], requires_grad=True)
-y = x * 2
-x = Tensor([999, 2, 3], requires_grad=True)  # ✅ New tensor, safe
-y.backward()  # ✅ Correct gradients
-```
-
-### Why This Breaks Everything
-
-Autograd records operations on the **original tensor values**. When you modify `.data` directly:
-
-1. **Forward pass** records: "y = x * 2" where x = [1, 2, 3]
-2. **You corrupt**: x.data[0] = 999, so x = [999, 2, 3]
-3. **Backward pass** uses: corrupted x values, causing wrong gradients or crashes
-
-**The computation graph becomes inconsistent** - forward used [1, 2, 3], backward uses [999, 2, 3].
-
-### Common In-Place Operations to AVOID
-
-```python
-# ❌ FORBIDDEN - Direct index assignment
-x.data[0] = value
-x.data[:, 0] = values
-x.data[mask] = values
-
-# ❌ FORBIDDEN - In-place arithmetic
-x.data += other
-x.data *= scalar
-x.data -= value
-
-# ❌ FORBIDDEN - NumPy in-place operations
-np.fill(x.data, value)
-np.add(x.data, other, out=x.data)
-x.data.fill(value)
-
-# ✅ CORRECT - Create new tensors
-x = x + other              # Creates new tensor
-x = Tensor(x.data + other) # Explicit new tensor
-x = Tensor([new_values])   # Complete replacement
-```
-
-### Real-World Example: Parameter Update Gone Wrong
-
-```python
-# ❌ WRONG - This is a common mistake in custom optimizers
-W = Tensor([[0.5, 0.3]], requires_grad=True)
-y = x.matmul(W.T)
-loss = compute_loss(y, target)
-loss.backward()
-
-# Student writes custom optimizer:
-W.data -= 0.01 * W.grad  # ❌ CORRUPTS GRAPH! Next forward pass is broken!
-
-# ✅ CORRECT - Create new parameter tensor
-W = Tensor(W.data - 0.01 * W.grad, requires_grad=True)  # ✅ Safe
-```
-
-### How to Debug In-Place Corruption
-
-If your gradients look wrong or you get mysterious errors:
-
-1. **Search your code** for `.data[` assignments
-2. **Search for** in-place operators: `+=`, `-=`, `*=`, `/=` on `.data`
-3. **Check custom functions** that modify tensors
-4. **Verify** all parameter updates create new tensors
-
-### Why PyTorch Has torch.no_grad()
-
-PyTorch explicitly disables gradient tracking during parameter updates to allow safe in-place operations.
-TinyTorch now supports this via the `no_grad` context manager:
-
-```python
-# PyTorch pattern
-with torch.no_grad():
-    W -= 0.01 * W.grad  # Safe inside no_grad context
-
-# TinyTorch equivalent
-from tinytorch.core.autograd import no_grad
-with no_grad():
-    W -= 0.01 * W.grad  # No graph built, safe for parameter updates
-```
-
-**How it works**: `no_grad()` sets a global flag that all tracked operations check.
-When the flag is off, operations skip graph construction entirely -- the result tensor
-will have `requires_grad=False` regardless of its inputs.
-
-### Memory Impact
-
-**Question**: "Doesn't creating new tensors waste memory?"
-
-**Answer**: Gradient tracking already stores intermediate tensors for backprop. Creating new tensors is negligible compared to the computation graph memory overhead. Correctness > premature perf.
-
-**Bottom Line**: If a tensor has `requires_grad=True`, treat it as **immutable**. Always create new tensors instead of modifying in-place.
-
----
-"""
-
-# %% [markdown]
-"""
-### 🔬 Unit Test: Tensor Autograd Enhancement
+### 🧪 Unit Test: Tensor Autograd Enhancement
 
 This test validates our enhanced Tensor class computes gradients correctly.
 
@@ -3113,8 +3055,8 @@ This test validates our enhanced Tensor class computes gradients correctly.
 
 # %% nbgrader={"grade": true, "grade_id": "test-tensor-autograd", "locked": true, "points": 20}
 def test_unit_tensor_autograd():
-    """🔬 Test Tensor autograd enhancement."""
-    print("🔬 Unit Test: Tensor Autograd Enhancement...")
+    """🧪 Test Tensor autograd enhancement."""
+    print("🧪 Unit Test: Tensor Autograd Enhancement...")
 
     # Test simple gradient computation
     x = Tensor([2.0], requires_grad=True)
@@ -3145,6 +3087,205 @@ def test_unit_tensor_autograd():
 
 if __name__ == "__main__":
     test_unit_tensor_autograd()
+
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Gradients Through a Reused Tensor
+
+This test validates the topological traversal: a tensor consumed by more than
+one operation must accumulate from every consumer before it propagates.
+
+**What we're testing**: Gradients are correct when an intermediate tensor is used twice
+**Why it matters**: Residual connections, attention, and any `y * y` hit this path;
+a traversal that visits a node once per edge silently halves the gradient
+**Expected**: Analytic gradients, with the default `retain_graph=False`
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-reused-tensor-gradients", "locked": true, "points": 10}
+def test_unit_reused_tensor_gradients():
+    """🧪 Test gradient accumulation through a tensor with multiple consumers."""
+    print("🧪 Unit Test: Reused Tensor Gradients...")
+
+    # loss = (x @ W)^2  ->  dL/dW = 2(xW)x = 24,  dL/dx = 2(xW)W = 36
+    x = Tensor(np.array([[2.0]]), requires_grad=True)
+    W = Tensor(np.array([[3.0]]), requires_grad=True)
+    y = x.matmul(W)
+    (y * y).backward()
+    assert np.allclose(W.grad, 24.0), f"Expected dL/dW = 24, got {W.grad}"
+    assert np.allclose(x.grad, 36.0), f"Expected dL/dx = 36, got {x.grad}"
+    print("   ✅ y = x@W, loss = y*y: both gradients correct")
+
+    # out = z + z  ->  dout/dW = 2x = 4
+    x2 = Tensor(np.array([[2.0]]), requires_grad=True)
+    W2 = Tensor(np.array([[3.0]]), requires_grad=True)
+    z = x2.matmul(W2)
+    (z + z).backward()
+    assert np.allclose(W2.grad, 4.0), f"Expected dout/dW = 4, got {W2.grad}"
+    print("   ✅ z = x@W, out = z+z: gradient accumulates from both edges")
+
+    # A tensor reused at several depths: each level doubles the gradient
+    x3 = Tensor(np.array([[1.0]]), requires_grad=True)
+    W3 = Tensor(np.array([[1.0]]), requires_grad=True)
+    h = x3.matmul(W3)
+    for _ in range(8):
+        h = h + h
+    h.backward()
+    assert np.allclose(W3.grad, 2 ** 8), f"Expected 2^8 = 256, got {W3.grad}"
+    print("   ✅ eight reuse levels: gradient is 2^8, computed in one pass")
+
+    # Across separate backward calls, retaining the graph is an explicit choice.
+    leaf = Tensor([2.0], requires_grad=True)
+    shared = leaf * 2
+    (shared * 3).sum().backward(retain_graph=True)
+    (shared * 4).sum().backward()
+    assert np.allclose(leaf.grad, [14.0]), "Both retained branches must reach the leaf"
+    try:
+        (shared * 5).sum().backward()
+    except RuntimeError as error:
+        assert "released" in str(error)
+    else:
+        raise AssertionError("A released intermediate must not silently stop gradient flow")
+    assert np.allclose(leaf.grad, [14.0]), "Rejected backward must leave gradients unchanged"
+
+    vector = Tensor([1.0, 2.0], requires_grad=True)
+    try:
+        vector.backward(np.ones((3, 2)))
+    except ValueError as error:
+        assert "shape" in str(error)
+    else:
+        raise AssertionError("The incoming gradient must match the output shape")
+
+    print("✅ Reused-tensor gradients work correctly!")
+
+if __name__ == "__main__":
+    test_unit_reused_tensor_gradients()
+
+# %% [markdown]
+"""
+### In-Place Operations Break Autograd
+
+**THIS IS THE MOST COMMON SILENT FAILURE IN TINYTORCH!**
+
+#### Critical Rule: Never Modify Tensors In-Place When requires_grad=True
+
+**WRONG ❌ - This Corrupts the Gradient Graph:**
+```python
+x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = (x * x).sum()      # .sum() because backward() starts from a scalar
+x.data[0] = 999        # ❌ Mul saved x, and backward will read the new value
+y.backward()
+x.grad                 # ❌ [1998., 4., 6.] -- the first entry should be 2.
+```
+
+**RIGHT ✅ - Leave the Recorded Values Alone:**
+```python
+x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = (x * x).sum()
+y.backward()
+x.grad                 # ✅ [2., 4., 6.]
+
+# Need different values? Start a new tensor and a new forward pass.
+x = Tensor([999.0, 2.0, 3.0], requires_grad=True)
+```
+
+Both blocks run as written. The only difference is the assignment to `x.data`
+between the forward and backward passes, and it changes the first gradient from
+2 to 1998.
+
+#### Why This Breaks Everything
+
+Autograd records operations on the **original tensor values**. When you modify `.data` directly:
+
+1. **Forward pass** records: "y = sum(x * x)" and saves x = [1, 2, 3]
+2. **You corrupt**: x.data[0] = 999, so the saved array now reads [999, 2, 3]
+3. **Backward pass** computes 2x from the corrupted array: 2 x 999 = 1998, not 2
+
+**The computation graph becomes inconsistent** - forward used [1, 2, 3], backward uses [999, 2, 3].
+
+#### Common In-Place Operations to AVOID
+
+```python
+# ❌ FORBIDDEN - Direct index assignment
+x.data[0] = value
+x.data[:, 0] = values
+x.data[mask] = values
+
+# ❌ FORBIDDEN - In-place arithmetic
+x.data += other
+x.data *= scalar
+x.data -= value
+
+# ❌ FORBIDDEN - NumPy in-place operations
+np.copyto(x.data, value)
+np.add(x.data, other, out=x.data)
+x.data.fill(value)
+
+# ✅ CORRECT - Create new tensors
+x = x + other              # Creates new tensor
+x = Tensor(x.data + other) # Explicit new tensor
+x = Tensor([new_values])   # Complete replacement
+```
+
+#### Real-World Example: Parameter Update Gone Wrong
+
+```python
+# ❌ WRONG - touching a parameter BETWEEN forward and backward
+W = Tensor([[0.5, 0.3]], requires_grad=True)
+y = x.matmul(W.transpose())
+loss = compute_loss(y, target)
+W.data *= 0.9            # ❌ the recorded graph still points at W
+loss.backward()          # ❌ MatMul.backward now reads the modified W
+
+# ✅ CORRECT - update AFTER backward, once the graph has been released
+W = Tensor([[0.5, 0.3]], requires_grad=True)
+y = x.matmul(W.transpose())
+loss = compute_loss(y, target)
+loss.backward()
+W.data -= 0.01 * W.grad  # ✅ exactly what Module 07's optimizers will do
+```
+
+#### How to Debug In-Place Corruption
+
+If your gradients look wrong or you get mysterious errors:
+
+1. **Search your code** for `.data[` assignments
+2. **Search for** in-place operators: `+=`, `-=`, `*=`, `/=` on `.data`
+3. **Check custom functions** that modify tensors
+4. **Verify** parameter updates run after backward(), never between forward and backward
+
+#### Why PyTorch Has torch.no_grad()
+
+PyTorch switches gradient tracking off wherever a computation must not be recorded:
+parameter updates, and evaluation passes that would otherwise save every forward
+tensor. TinyTorch has the same switch:
+
+```python
+from tinytorch.core.autograd import no_grad
+with no_grad():
+    logits = model(x)   # forward only: no graph, no saved tensors
+```
+
+Module 07's optimizers will not need it: they write `param.data` after `backward()`
+has released the graph, so nothing is recording. Reach for `no_grad()` in
+evaluation loops, where the saved forward tensors would only cost memory.
+
+**How it works**: `no_grad()` sets a global flag that all tracked operations check.
+When the flag is off, operations skip graph construction entirely -- the result tensor
+will have `requires_grad=False` regardless of its inputs.
+
+#### Memory Impact
+
+**Question**: "Why not update `.data` between forward and backward and save a pass?"
+
+**Answer**: The recorded graph holds references to the tensors it saw during the
+forward pass. Change one of them and backward() differentiates a computation that
+never happened. Correctness > premature perf.
+
+**Bottom Line**: If a tensor has `requires_grad=True`, treat it as **immutable**. Always create new tensors instead of modifying in-place.
+
+---
+"""
 
 # %% [markdown]
 """
@@ -3182,7 +3323,7 @@ def analyze_computation_graph_memory():
         # Estimate graph overhead: saved tensors in grad_fn
         graph_overhead = 0
         if hasattr(z, '_grad_fn') and z._grad_fn is not None:
-            for tensor in z._grad_fn.saved_tensors:
+            for tensor in z._grad_fn.inputs:
                 if isinstance(tensor, Tensor):
                     graph_overhead += tensor.data.nbytes
 
@@ -3204,7 +3345,6 @@ def analyze_computation_graph_memory():
 
     print("\n" + "=" * 60)
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_computation_graph_memory()
 
@@ -3233,13 +3373,19 @@ def test_module():
     print("Running unit tests...")
     test_unit_stable_softmax()
     test_unit_one_hot_encode()
-    test_unit_function_classes()
+    test_unit_reduce_broadcast_grad()
+    test_unit_arithmetic_backward()
+    test_unit_shape_reduction_backward()
+    test_unit_broadcast_gradients()
+    test_unit_activation_backward()
+    test_unit_loss_backward()
     test_unit_tensor_autograd()
+    test_unit_reused_tensor_gradients()
 
     print("\nRunning integration scenarios...")
 
     # Test 1: Multi-layer computation graph
-    print("🔬 Integration Test: Multi-layer Neural Network...")
+    print("🧪 Integration Test: Multi-layer Neural Network...")
 
     # Create a 3-layer computation: x -> Linear -> Linear -> Linear -> loss
     x = Tensor([[1.0, 2.0]], requires_grad=True)
@@ -3273,7 +3419,7 @@ def test_module():
     print("✅ Multi-layer neural network gradients work!")
 
     # Test 2: Gradient accumulation
-    print("🔬 Integration Test: Gradient Accumulation...")
+    print("🧪 Integration Test: Gradient Accumulation...")
 
     x = Tensor([2.0], requires_grad=True)
 
@@ -3290,7 +3436,7 @@ def test_module():
     print("✅ Gradient accumulation works!")
 
     # Test 3: Complex mathematical operations
-    print("🔬 Integration Test: Complex Operations...")
+    print("🧪 Integration Test: Complex Operations...")
 
     a = Tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
     b = Tensor([[2.0, 1.0], [1.0, 2.0]], requires_grad=True)
@@ -3310,14 +3456,17 @@ def test_module():
 
     print("✅ Complex mathematical operations work!")
 
+    # Test 4: the reductions and views every model uses
+    x = Tensor([[1.0, 5.0, 3.0], [4.0, 2.0, 6.0]], requires_grad=True)
+    (x.mean() + x.max(axis=1).sum() + x.contiguous().sum()).backward()
+    assert np.allclose(x.grad, np.full((2, 3), 1 / 6) + np.array([[0, 1, 0], [0, 0, 1]]) + 1)
+    print("✅ Mean, max, and copy gradients work!")
+
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 06")
 
-# Test function defined above, will be called in main block
-
 # %%
-# Run comprehensive module test
 if __name__ == "__main__":
     test_module()
 
@@ -3414,8 +3563,6 @@ for batch in dataloader:
 
 ---
 
-### Reflection Prompts
-
 After answering these questions, consider:
 1. **Which surprised you most?** What behavior was counterintuitive?
 2. **What trade-offs exist?** Memory vs. compute? Simplicity vs. efficiency?
@@ -3478,8 +3625,8 @@ Congratulations! You've built the gradient engine that makes neural networks lea
 ### Key Accomplishments
 - **Enhanced Tensor class** with backward() method (no new wrapper classes!)
 - **Built computation graph tracking** for automatic differentiation
-- **Implemented Function classes** (Add, Mul, Matmul, Sum) with correct gradients
-- **Created enable_autograd()** function that activates gradients globally
+- **Implemented backward() for every operation** (Add, Mul, Matmul, Sum, ...) with correct gradients
+- **Completed apply()** so every operation records itself in the graph
 - **Tested complex multi-layer** computation graphs with gradient propagation
 - **All tests pass** (validated by `test_module()`)
 

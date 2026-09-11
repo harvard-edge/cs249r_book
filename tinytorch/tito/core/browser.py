@@ -13,7 +13,7 @@ from rich.panel import Panel
 def is_wsl() -> bool:
     """Check if running in WSL (Windows Subsystem for Linux) environment."""
     try:
-        with open('/proc/version', 'r') as f:
+        with open('/proc/version', 'r', encoding='utf-8') as f:
             return 'microsoft' in f.read().lower()
     except:
         return False

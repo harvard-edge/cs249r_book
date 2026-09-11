@@ -1,0 +1,170 @@
+import os
+
+def generate_svg():
+    import sys
+    svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" width="1100" height="600" style="background-color: white; font-family: sans-serif;">
+    <defs>
+        <!-- Textbook palette: dark blue #1F407A, crisp greys #E2E8F0, #2D3748, deep red #A51C30 -->
+        <style>
+            .title { font-family: sans-serif; font-size: 18px; font-weight: bold; fill: #1F407A; }
+            .subtitle { font-family: sans-serif; font-size: 14px; font-weight: bold; fill: #2D3748; }
+            .label { font-family: sans-serif; font-size: 12px; fill: #2D3748; }
+            .axis-line { stroke: #2D3748; stroke-width: 1.5; }
+            .grid-line { stroke: #E2E8F0; stroke-width: 1; stroke-dasharray: 4,4; }
+            .chunk-a { stroke: #1F407A; stroke-width: 3; fill: none; }
+            .chunk-b { stroke: #4A90E2; stroke-width: 3; fill: none; stroke-dasharray: 6,4; }
+            .error-line { stroke: #A51C30; stroke-width: 3; fill: none; }
+            .bridge-line { stroke: #2CA02C; stroke-width: 3; fill: none; }
+            .callout-box { fill: #F7FAFC; stroke: #CBD5E0; stroke-width: 1; rx: 4; ry: 4; }
+            .callout-text { font-family: sans-serif; font-size: 11px; fill: #2D3748; }
+            .alert-text { font-family: sans-serif; font-size: 11px; font-weight: bold; fill: #A51C30; }
+        </style>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#2D3748" />
+        </marker>
+        <marker id="arrowhead-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#A51C30" />
+        </marker>
+    </defs>
+
+    <!-- Background -->
+    <rect width="1000" height="600" fill="#FFFFFF" />
+
+    <!-- Title -->
+    <text x="500" y="30" class="title" text-anchor="middle">Action Chunk Seam Boundary Dynamics</text>
+    
+    <!-- LEFT PANEL: Case A: Unchecked C0 Concatenation -->
+    <g transform="translate(50, 80)">
+        <text x="200" y="0" class="subtitle" text-anchor="middle">Case A: Unchecked C⁰ Concatenation</text>
+        
+        <!-- Axes for Velocity -->
+        <text x="-30" y="40" class="label" text-anchor="middle" transform="rotate(-90, -30, 40)">Velocity (rad/s)</text>
+        <line x1="0" y1="120" x2="400" y2="120" class="axis-line" marker-end="url(#arrowhead)" />
+        <line x1="0" y1="120" x2="0" y2="20" class="axis-line" marker-end="url(#arrowhead)" />
+        
+        <text x="200" y="155" class="label" text-anchor="middle">Time (ms)</text>
+        <text x="200" y="135" class="label" text-anchor="middle">t_seam = 50ms</text>
+        <line x1="200" y1="20" x2="200" y2="120" class="grid-line" />
+        
+        <!-- Velocity Plot -->
+        <!-- Chunk A ends at (200, 80) with slope. Chunk B starts at (200, 30) -->
+        <path fill="none" d="M 0 100 Q 100 90 200 80" class="chunk-a" />
+        <path fill="none" d="M 200 40 Q 300 50 400 60" class="chunk-b" />
+        <line x1="200" y1="80" x2="200" y2="40" class="error-line" />
+        <circle cx="200" cy="80" r="4" fill="#1F407A" />
+        <circle cx="200" cy="40" r="4" fill="#A51C30" />
+        
+        <!-- Velocity callout -->
+        <rect x="220" y="45" width="160" height="40" class="callout-box" />
+        <text x="230" y="60" class="alert-text">Δv = +0.60 rad/s step</text>
+        <text x="230" y="75" class="callout-text">over single 1.0 ms period</text>
+
+        <!-- Axes for Torque -->
+        <text x="-30" y="240" class="label" text-anchor="middle" transform="rotate(-90, -30, 240)">Torque (N·m)</text>
+        <line x1="0" y1="320" x2="400" y2="320" class="axis-line" marker-end="url(#arrowhead)" />
+        <line x1="0" y1="320" x2="0" y2="160" class="axis-line" marker-end="url(#arrowhead)" />
+        
+        <text x="200" y="355" class="label" text-anchor="middle">Time (ms)</text>
+        <line x1="200" y1="160" x2="200" y2="320" class="grid-line" />
+        
+        <!-- Limits -->
+        <line x1="0" y1="280" x2="400" y2="280" class="grid-line" />
+        
+        <line x1="0" y1="240" x2="400" y2="240" stroke="#A51C30" stroke-width="1" stroke-dasharray="4,4" />
+        
+        <line x1="0" y1="180" x2="400" y2="180" stroke="#A51C30" stroke-width="2" />
+        
+        <!-- Torque Plot -->
+        <path fill="none" d="M 0 300 Q 100 295 199 290" class="chunk-a" />
+        <path fill="none" d="M 201 290 Q 300 295 400 300" class="chunk-b" />
+        <path fill="none" d="M 199 290 L 200 170 L 201 290" class="error-line" />
+        
+        <!-- Torque callout -->
+        <rect x="220" y="190" width="160" height="55" class="callout-box" />
+        <text x="230" y="205" class="alert-text">τ = 324 N·m impulse</text>
+        <text x="230" y="220" class="callout-text">Exceeds yield limit!</text>
+        <text x="230" y="235" class="callout-text">Result: Drive pin fracture</text>
+    </g>
+
+    <!-- RIGHT PANEL: Case B: C2 Jerk-Continuous Spline Synthesis -->
+    <g transform="translate(550, 80)">
+        <text x="200" y="0" class="subtitle" text-anchor="middle">Case B: C² Jerk-Continuous Spline Synthesis</text>
+        
+        <!-- Axes for Velocity -->
+        <text x="-30" y="40" class="label" text-anchor="middle" transform="rotate(-90, -30, 40)">Velocity (rad/s)</text>
+        <line x1="0" y1="120" x2="400" y2="120" class="axis-line" marker-end="url(#arrowhead)" />
+        <line x1="0" y1="120" x2="0" y2="20" class="axis-line" marker-end="url(#arrowhead)" />
+        
+        <text x="200" y="155" class="label" text-anchor="middle">Time (ms)</text>
+        <line x1="150" y1="20" x2="150" y2="120" class="grid-line" />
+        <line x1="250" y1="20" x2="250" y2="120" class="grid-line" />
+        
+        <!-- Velocity Plot -->
+        <path fill="none" d="M 0 100 Q 75 92 150 85" class="chunk-a" />
+        <!-- 5th order spline bridge from (150, 85) to (250, 45) -->
+        <path fill="none" d="M 150 85 C 190 80, 210 50, 250 45" class="bridge-line" />
+        <path fill="none" d="M 250 45 Q 325 55 400 65" class="chunk-b" />
+        
+        <circle cx="150" cy="85" r="4" fill="#1F407A" />
+        <circle cx="250" cy="45" r="4" fill="#1F407A" />
+        
+        <!-- Bridge callout -->
+        <rect x="170" y="25" width="160" height="40" class="callout-box" />
+        <text x="180" y="40" class="title" style="font-size: 11px; fill: #2CA02C;">T_blend = 20 ms Bridge</text>
+        <text x="180" y="55" class="callout-text">5th-order polynomial</text>
+        
+        <!-- Axes for Torque -->
+        <text x="-30" y="240" class="label" text-anchor="middle" transform="rotate(-90, -30, 240)">Torque (N·m)</text>
+        <line x1="0" y1="320" x2="400" y2="320" class="axis-line" marker-end="url(#arrowhead)" />
+        <line x1="0" y1="320" x2="0" y2="160" class="axis-line" marker-end="url(#arrowhead)" />
+        
+        <text x="200" y="355" class="label" text-anchor="middle">Time (ms)</text>
+        <line x1="150" y1="160" x2="150" y2="320" class="grid-line" />
+        <line x1="250" y1="160" x2="250" y2="320" class="grid-line" />
+        
+        <!-- Limits -->
+        <line x1="0" y1="280" x2="400" y2="280" class="grid-line" />
+        <text x="405" y="285" class="label">Continuous (45 N·m)</text>
+        
+        <line x1="0" y1="240" x2="400" y2="240" stroke="#A51C30" stroke-width="1" stroke-dasharray="4,4" />
+        <text x="405" y="245" class="label" fill="#A51C30">Transient Peak (110 N·m)</text>
+        
+        <line x1="0" y1="180" x2="400" y2="180" stroke="#A51C30" stroke-width="2" />
+        <text x="405" y="185" class="alert-text">Shear Yield (285 N·m)</text>
+        
+        <!-- Torque Plot -->
+        <path fill="none" d="M 0 300 Q 75 296 150 292" class="chunk-a" />
+        <path fill="none" d="M 150 292 C 180 310, 220 270, 250 298" class="bridge-line" />
+        <path fill="none" d="M 250 298 Q 325 301 400 304" class="chunk-b" />
+        
+        <!-- Torque callout -->
+        <rect x="230" y="250" width="160" height="40" class="callout-box" />
+        <text x="240" y="265" class="title" style="font-size: 11px; fill: #2CA02C;">τ ≤ 38 N·m</text>
+        <text x="240" y="280" class="callout-text">Within continuous limit</text>
+    </g>
+    
+    <!-- Legend -->
+    <g transform="translate(350, 480)">
+        <rect x="0" y="0" width="300" height="80" class="callout-box" />
+        <text x="150" y="15" class="subtitle" text-anchor="middle">Legend</text>
+        
+        <line x1="20" y1="35" x2="60" y2="35" class="chunk-a" />
+        <text x="70" y="40" class="label">Active Chunk A</text>
+        
+        <line x1="20" y1="60" x2="60" y2="60" class="chunk-b" />
+        <text x="70" y="65" class="label">Incoming Chunk B</text>
+        
+        <line x1="170" y1="35" x2="210" y2="35" class="bridge-line" />
+        <text x="220" y="40" class="label">C² Spline Bridge</text>
+        
+        <line x1="170" y1="60" x2="210" y2="60" class="error-line" />
+        <text x="220" y="65" class="label">Discontinuity Step</text>
+    </g>
+
+</svg>
+"""
+    with open('/Users/VJ/GitHub/MLSysBook/books/vol4/11_planning/images/svg/fig11_action_chunk_seam_continuity.svg', 'w') as f:
+        f.write(svg_content)
+
+if __name__ == "__main__":
+    generate_svg()

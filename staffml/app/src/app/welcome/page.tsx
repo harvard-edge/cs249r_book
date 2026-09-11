@@ -1,0 +1,182 @@
+"use client";
+
+/**
+ * /welcome — First-run landing moment.
+ *
+ * Shown once to brand-new visitors (0 attempts logged AND no
+ * staffml_firstrun_welcome flag in localStorage) before they land on
+ * the Vault grid. The single job of this page is to make the scale
+ * of the project legible in the first five seconds, then get out of
+ * the way.
+ *
+ * Design brief:
+ *   - One screen, no scrolling on desktop 1440×900.
+ *   - Hero uses real numbers from src/lib/stats.ts so the hook ages
+ *     with the corpus.
+ *   - Three equal action cards: Try Random / Practice / Mock Interview.
+ *     "Try Random" is the lowest-activation click and is placed first
+ *     so a decision-fatigued visitor can just click once and see a
+ *     real question.
+ *   - Skip link at the bottom opens the Vault directly.
+ *   - Flag is set on ANY exit path (card click or Skip), not on mount,
+ *     so a visitor who closes the tab without interacting will see the
+ *     page again next time. The only way to re-trigger it after dismiss
+ *     is to clear localStorage.
+ */
+
+import { useCallback, useEffect } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Target, Crosshair, Shuffle, ArrowRight, Map, Library } from "lucide-react";
+import {
+  QUESTION_COUNT_FORMATTED,
+  TOPIC_COUNT,
+  TRACK_COUNT,
+  LEVEL_COUNT,
+} from "@/lib/stats";
+
+const FLAG_KEY = "staffml_firstrun_welcome";
+
+function markSeen() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(FLAG_KEY, "1");
+  } catch {
+    /* localStorage may be disabled — fail silently */
+  }
+}
+
+export default function WelcomePage() {
+  const router = useRouter();
+
+  // Mark this tab session as "already bounced" so clicking "Vault" in
+  // the nav from /welcome doesn't ping-pong back. The localStorage flag
+  // (cross-session dismissal) still only sets on explicit action.
+  useEffect(() => {
+    try { sessionStorage.setItem("staffml_firstrun_bounced", "1"); } catch { /* noop */ }
+  }, []);
+
+  const handleAction = useCallback(
+    (href: string) => {
+      markSeen();
+      router.push(href);
+    },
+    [router],
+  );
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
+      <div className="max-w-3xl w-full">
+        {/* ─── Mark ─── */}
+        <div className="flex items-center justify-center gap-2 mb-8">
+          <svg viewBox="0 0 32 32" className="w-8 h-8 drop-shadow-[0_0_10px_rgba(59,130,246,0.4)]">
+            <path d="M5,25 L16,9 L27,9" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            <circle cx="16" cy="9" r="2.5" fill="#3b82f6" />
+            <circle cx="16" cy="9" r="1" fill="currentColor" />
+          </svg>
+          <span className="text-lg tracking-tight">
+            <span className="text-textPrimary font-extrabold">Staff</span>
+            <span className="text-accentBlue font-bold ml-[2px]">ML</span>
+          </span>
+        </div>
+
+        {/* ─── Hero ─── */}
+        <h1 className="text-[28px] sm:text-4xl font-extrabold text-textPrimary tracking-tight text-center leading-tight mb-4">
+          <span className="text-accentBlue">{QUESTION_COUNT_FORMATTED}</span> physics-grounded{" "}
+          <br className="hidden sm:block" />
+          ML systems interview questions.
+        </h1>
+        <p className="text-[15px] sm:text-base text-textSecondary text-center max-w-xl mx-auto leading-relaxed mb-2">
+          {TOPIC_COUNT} topics across {TRACK_COUNT} deployment tracks, at {LEVEL_COUNT} difficulty levels.
+          Backed by the{" "}
+          <a
+            href="https://mlsysbook.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accentBlue hover:underline"
+          >
+            Machine Learning Systems
+          </a>
+          {" "}textbook. Runs entirely in your browser.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-10">
+          <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">No accounts</span>
+          <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">No tracking</span>
+          <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">100% free</span>
+          <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">Open source</span>
+        </div>
+
+        {/* ─── Recommended path (hero CTA) ─── */}
+        <button
+          onClick={() => handleAction("/plans")}
+          className="w-full p-6 rounded-xl border-2 border-accentBlue/40 bg-accentBlue/5 hover:bg-accentBlue/10 transition-all text-left group mb-6"
+        >
+          <div className="flex items-center gap-3 mb-2">
+            <Map className="w-6 h-6 text-accentBlue" />
+            <h3 className="text-lg font-bold text-textPrimary">Start a Study Path</h3>
+          </div>
+          <p className="text-sm text-textSecondary leading-relaxed mb-3">
+            Pick a curated interview plan or build your own L1-to-L6+ learning path.
+            Choose a track, set your level, and resume any time.
+          </p>
+          <span className="inline-flex items-center gap-1 text-sm font-bold text-accentBlue">
+            Choose a plan <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </button>
+
+        {/* ─── How StaffML works ─── */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+          <div className="p-4 rounded-lg border border-border bg-surface/50">
+            <Library className="w-5 h-5 text-accentPurple mb-2" />
+            <h4 className="text-[13px] font-bold text-textPrimary mb-1">Vault</h4>
+            <p className="text-[11px] text-textSecondary leading-relaxed">
+              Browse {QUESTION_COUNT_FORMATTED} questions organized by topic, track, and difficulty.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-surface/50">
+            <Target className="w-5 h-5 text-accentAmber mb-2" />
+            <h4 className="text-[13px] font-bold text-textPrimary mb-1">Practice</h4>
+            <p className="text-[11px] text-textSecondary leading-relaxed">
+              Answer questions with spaced repetition. Wrong answers come back tomorrow.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-surface/50">
+            <Crosshair className="w-5 h-5 text-accentRed mb-2" />
+            <h4 className="text-[13px] font-bold text-textPrimary mb-1">Mock Interview</h4>
+            <p className="text-[11px] text-textSecondary leading-relaxed">
+              Timed gauntlet mode. The clock matters, the feedback is the signal.
+            </p>
+          </div>
+        </div>
+
+        {/* ─── Quick start fallback ─── */}
+        <div className="flex items-center justify-center gap-4">
+          <button
+            onClick={() => handleAction("/practice?random=1")}
+            className="inline-flex items-center gap-1.5 text-[12px] text-textTertiary hover:text-accentBlue transition-colors"
+          >
+            <Shuffle className="w-3 h-3" /> Try one random question
+          </button>
+          <span className="text-textTertiary text-[10px]">or</span>
+          <button
+            onClick={() => handleAction("/")}
+            className="inline-flex items-center gap-1.5 text-[12px] text-textTertiary hover:text-textSecondary transition-colors"
+          >
+            Skip to Vault <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+
+        {/* ─── About link (small, bottom) ─── */}
+        <div className="flex items-center justify-center mt-8 pt-8 border-t border-borderSubtle">
+          <Link
+            href="/about"
+            onClick={markSeen}
+            className="text-[12px] text-textTertiary hover:text-accentBlue transition-colors"
+          >
+            How was this built? →
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}

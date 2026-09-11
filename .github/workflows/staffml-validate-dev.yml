@@ -17,8 +17,8 @@ name: '🎯 StaffML · ✅ Validate (Dev)'
 #   5. SUMMARY            — Aggregate results
 #
 # Triggers:
-#   - push: dev branch, interviews/staffml/** paths
-#   - pull_request: interviews/staffml/** changes
+#   - push: dev branch, staffml/app/** paths
+#   - pull_request: staffml/app/** changes
 #   - workflow_dispatch: manual
 #
 # Deploys to: N/A (validate only)
@@ -38,13 +38,13 @@ on:
   workflow_call:
   pull_request:
     paths:
-      - 'interviews/staffml/**'
+      - 'staffml/app/**'
       - '.github/workflows/staffml-validate-dev.yml'
       - '.github/workflows/staffml-preview-dev.yml'
   push:
     branches: [dev]
     paths:
-      - 'interviews/staffml/**'
+      - 'staffml/app/**'
       - '.github/workflows/staffml-validate-dev.yml'
       - '.github/workflows/staffml-preview-dev.yml'
 
@@ -70,11 +70,13 @@ env:
   # Workflow-wide single source for paths and versions. See docs/CI-VARIABLES.md.
   # The `paths:` trigger filter is intentionally NOT vars-ified — GitHub Actions
   # evaluates trigger filters at workflow-load time, before vars are resolved.
-  STAFFML_ROOT:    ${{ vars.STAFFML_ROOT    || 'interviews/staffml' }}
-  VAULT_DIR:       ${{ vars.VAULT_DIR       || 'interviews/vault' }}
-  VAULT_CLI_DIR:   ${{ vars.VAULT_CLI_DIR   || 'interviews/vault-cli' }}
+  STAFFML_ROOT:    staffml/app
+  VAULT_DIR:       staffml/vault
+  VAULT_CLI_DIR:   staffml/vault-cli
   DEV_STAFFML_PATH: ${{ vars.DEV_STAFFML_PATH || 'staffml' }}
   NODE_VERSION:    ${{ vars.NODE_VERSION    || '20' }}
+  # Wrangler 4.120 requires Node 22 or newer.
+  WORKER_NODE_VERSION: '22'
   PYTHON_VERSION:  ${{ vars.PYTHON_VERSION  || '3.12' }}
 
 jobs:
@@ -90,6 +92,20 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
+        with:
+          # Every job in this workflow needs the staffml app, the vault YAMLs,
+          # and vault-cli. Keep the set identical across jobs so a build step
+          # added to one does not trip it.
+          #
+          # A full checkout of this ~3 GB repo intermittently stalls past 10
+          # minutes inside `git fetch` (3 of 8 checkouts in run 30787355750,
+          # 2026-08-07); sparse checkouts across the same window stayed under
+          # 30 s. Cone mode still brings down root-level files, so .gitignore
+          # and top-level config are present.
+          sparse-checkout: |
+            ${{ env.STAFFML_ROOT }}
+            ${{ env.VAULT_DIR }}
+            ${{ env.VAULT_CLI_DIR }}
 
       - name: 🐍 Setup Python (for vault-cli)
         uses: actions/setup-python@v6
@@ -124,6 +140,21 @@ jobs:
         working-directory: ${{ env.STAFFML_ROOT }}
         run: npm test
 
+      - name: 🔧 Setup Worker Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.WORKER_NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.STAFFML_ROOT }}/worker/package-lock.json
+
+      - name: 📦 Install Worker dependencies
+        working-directory: ${{ env.STAFFML_ROOT }}/worker
+        run: npm ci
+
+      - name: 🔍 Type check Worker
+        working-directory: ${{ env.STAFFML_ROOT }}/worker
+        run: npx tsc --noEmit
+
   # ===========================================================================
   # Stage 2: Static build (no deploy)
   # ===========================================================================
@@ -136,6 +167,12 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
+        with:
+          # See the sparse-checkout note on typecheck-and-test above.
+          sparse-checkout: |
+            ${{ env.STAFFML_ROOT }}
+            ${{ env.VAULT_DIR }}
+            ${{ env.VAULT_CLI_DIR }}
 
       - name: 🐍 Setup Python (for vault-cli)
         uses: actions/setup-python@v6
@@ -204,16 +241,25 @@ jobs:
   # Would have caught the hydration shape-mismatch bug from PR #1440
   # before merge. Loads a handful of critical routes in a real browser
   # and fails on uncaught page errors / console.error / missing content.
-  # See interviews/staffml/scripts/e2e-smoke.py for the allowlist +
+  # See staffml/app/scripts/e2e-smoke.py for the allowlist +
   # assertion catalog.
   e2e-smoke:
     name: '🎭 E2E Smoke (headless Chromium)'
     runs-on: ubuntu-latest
     needs: build
-    timeout-minutes: 10
+    # 25 min, not 10: this job's checkout hung for the full 10 min budget on
+    # 2026-08-07 (run 30787355750) and cancelled the whole run, turning the
+    # README badge red while every other check passed.
+    timeout-minutes: 25
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
+        with:
+          # See the sparse-checkout note on typecheck-and-test above.
+          sparse-checkout: |
+            ${{ env.STAFFML_ROOT }}
+            ${{ env.VAULT_DIR }}
+            ${{ env.VAULT_CLI_DIR }}
 
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
@@ -268,6 +314,12 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
+        with:
+          # See the sparse-checkout note on typecheck-and-test above.
+          sparse-checkout: |
+            ${{ env.STAFFML_ROOT }}
+            ${{ env.VAULT_DIR }}
+            ${{ env.VAULT_CLI_DIR }}
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v6
@@ -281,7 +333,7 @@ jobs:
 
       - name: 🔄 Regenerate staffml bundle (corpus.json is a build artifact)
         # Same contract as staffml-preview-dev / publish-live: YAMLs are
-        # source of truth; --local-json emits staffml/src/data/corpus.json
+        # source of truth; --local-json emits staffml/app/src/data/corpus.json
         # for validate-vault.py and inline corpus invariants (not in git).
         run: |
           vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-smoke --local-json
@@ -300,7 +352,7 @@ jobs:
           python3 - <<'PYEOF'
           import json, sys
 
-          with open('interviews/staffml/src/data/corpus.json') as f:
+          with open('staffml/app/src/data/corpus.json') as f:
               corpus = json.load(f)
           assert len(corpus) >= 4000, f'Corpus too small: {len(corpus)} questions'
           print(f'✅ Corpus: {len(corpus)} questions')
@@ -322,7 +374,7 @@ jobs:
           assert not bad, f'{len(bad)} invalid levels: {bad[:3]}'
           print('✅ All levels valid (L1-L6+)')
 
-          with open('interviews/staffml/src/data/vault-manifest.json') as f:
+          with open('staffml/app/src/data/vault-manifest.json') as f:
               manifest = json.load(f)
           assert 'releaseId' in manifest, 'Manifest missing releaseId'
           assert 'releaseHash' in manifest and len(manifest['releaseHash']) >= 16, \
@@ -343,7 +395,7 @@ jobs:
     name: '🔗 Check Links'
     uses: ./.github/workflows/infra-link-check.yml
     with:
-      path_pattern: './interviews/**/*.{md,mdx,qmd}'
+      path_pattern: './staffml/**/*.{md,mdx,qmd}'
       lycheeignore_path: 'shared/config/.lycheeignore'
       fail_on_broken: false
       max_concurrency: 8

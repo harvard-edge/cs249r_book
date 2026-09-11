@@ -2,8 +2,8 @@
 Test gradient flow through spatial operations (Conv2d, MaxPool2d).
 
 These tests ensure that:
-1. Conv2dBackward is properly attached to Conv2d outputs
-2. MaxPool2dBackward is properly attached to MaxPool2d outputs
+1. Conv2dFunction is properly attached to Conv2d outputs
+2. MaxPool2dFunction is properly attached to MaxPool2d outputs
 3. Gradients flow correctly to all parameters (weight, bias)
 4. Integration with autograd system works end-to-end
 
@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.spatial import Conv2d, MaxPool2d
 
 
@@ -37,10 +37,10 @@ def test_conv2d_has_backward_function():
     # Check _grad_fn is attached
     assert hasattr(output, '_grad_fn'), "Conv2d output should have _grad_fn"
     assert output._grad_fn is not None, "Conv2d output._grad_fn should not be None"
-    assert type(output._grad_fn).__name__ == "Conv2dBackward", \
-        f"Expected Conv2dBackward, got {type(output._grad_fn).__name__}"
+    assert type(output._grad_fn).__name__ == "Conv2dFunction", \
+        f"Expected Conv2dFunction, got {type(output._grad_fn).__name__}"
 
-    print("✅ Conv2d properly attaches Conv2dBackward")
+    print("✅ Conv2d properly attaches Conv2dFunction")
 
 
 def test_conv2d_weight_gradient_flow():
@@ -123,10 +123,10 @@ def test_maxpool2d_has_backward_function():
     # Check _grad_fn is attached
     assert hasattr(output, '_grad_fn'), "MaxPool2d output should have _grad_fn"
     assert output._grad_fn is not None, "MaxPool2d output._grad_fn should not be None"
-    assert type(output._grad_fn).__name__ == "MaxPool2dBackward", \
-        f"Expected MaxPool2dBackward, got {type(output._grad_fn).__name__}"
+    assert type(output._grad_fn).__name__ == "MaxPool2dFunction", \
+        f"Expected MaxPool2dFunction, got {type(output._grad_fn).__name__}"
 
-    print("✅ MaxPool2d properly attaches MaxPool2dBackward")
+    print("✅ MaxPool2d properly attaches MaxPool2dFunction")
 
 
 def test_maxpool2d_gradient_flow():

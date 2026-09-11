@@ -1,0 +1,69 @@
+schema_version: '1.0'
+id: cloud-202609-2fc8
+track: cloud
+level: L4
+zone: specification
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: analyze
+phase: inference
+title: Blackwell NVFP4 Microscaling Block Sizing and Memory Bandwidth Scaling
+scenario: You are deploying a dense 70B parameter LLM on NVIDIA Blackwell B200 GPUs with 8.0 TB/s HBM3e bandwidth and 4.5 PFLOPS dense FP4 Tensor Core compute. You must specify the exact memory footprint and single-batch autoregressive decoding throughput when migrating weights and activations from FP8 (E4M3) to NVFP4 (E2M1 microscaling format with a shared 8-bit scale factor per 16-element block).
+question: What is the effective bit-width per parameter for NVFP4 with 16-element block scaling, how much HBM memory is required for the 70B weights, and what is the theoretical memory-bandwidth-bound token generation latency at batch size 1?
+details:
+  realistic_solution: |
+    NVFP4 employs an E2M1 floating-point representation (1 sign bit, 2 exponent bits, 1 mantissa bit), representing 16 discrete values: {0, +/-0.5, +/-1.0, +/-1.5, +/-2.0, +/-3.0, +/-4.0, +/-6.0}. To prevent catastrophic underflow and overflow across dynamic range variations, weights and activations are grouped into micro-blocks of k = 16 elements, sharing an 8-bit FP8 (E8M0 or E4M3) scale factor.
+
+    Storage per 16-element micro-block:
+    - 16 quantized elements * 4 bits = 64 bits = 8 bytes.
+    - 1 shared scale factor = 8 bits = 1 byte.
+    - Total block storage: 8 bytes + 1 byte = 9 bytes (72 bits).
+    - Effective bit-width per parameter: 72 bits / 16 elements = 4.5 bits/parameter.
+
+    For a 70B model (70 * 10^9 parameters):
+    - Weight memory footprint: 70 * 10^9 * 4.5 bits / 8 bits/byte = 39.375 GB.
+    This compares to 70.0 GB under FP8 (8 bits/param) and 140.0 GB under FP16 (16 bits/param).
+
+    At batch size 1, autoregressive generation is strictly memory-bandwidth bound: each token requires streaming the full 39.375 GB weight matrix through the memory bus.
+    On a single Blackwell B200 GPU with 8.0 TB/s (8,000 GB/s) HBM3e bandwidth:
+    - Memory transfer time per token: 39.375 GB / 8,000 GB/s = 0.004922 seconds = 4.92 ms/token.
+    - Generation throughput: 1 / 0.004922 s = 203.2 tokens/second.
+    Compared to FP8 (70.0 GB / 8,000 GB/s = 8.75 ms, or 114.3 tok/s), NVFP4 delivers a 1.78x speedup while fitting the entire 70B model inside a single 192 GB B200 GPU.
+  common_mistake: |
+    **The Pitfall:** Calculating NVFP4 weight memory assuming exactly 4.0 bits per parameter (35.0 GB) without accounting for the micro-block scale factor overhead.
+    **The Rationale:** In unscaled uniform INT4 quantization, 4 bits are allocated per weight without per-vector scale vectors.
+    **The Consequence:** Under-allocating weight memory buffers by 4.375 GB, causing runtime allocation faults or miscalculating multi-tenant GPU memory headroom.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B parameters (70 * 10^9 weights).
+    - Quantization: NVFP4 E2M1 with block size k = 16 and 8-bit scale factor.
+    - Hardware: NVIDIA Blackwell B200 (8.0 TB/s HBM3e bandwidth).
+    - Concurrency: Batch size = 1 (decode phase).
+
+    **Calculations:**
+    - Effective bits per parameter: 4.0 + (8.0 / 16) = 4.5 bits/param.
+    - Weight memory footprint: (70 * 10^9 * 4.5) / (8 * 10^9) = 39.375 GB.
+    - Memory read time per token: 39.375 GB / 8,000 GB/s = 4.922 ms.
+    - Theoretical throughput: 1,000 ms / 4.922 ms = 203.17 tokens/s.
+    - FP8 comparison: 70.0 GB / 8,000 GB/s = 8.750 ms (114.28 tokens/s).
+    - Speedup ratio: 8.750 ms / 4.922 ms = 1.778x.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth-Bound.** NVFP4 achieves 203 tok/s single-batch decode on Blackwell B200, maintaining full numerical range via a 12.5% scale factor overhead (4.5 vs 4.0 bits).
+status: published
+provenance: human
+requires_explanation: true
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-09-04'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-09-04'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: verified
+  by: vj@eecs.harvard.edu
+  date: '2026-09-04'
+  notes: 'NVFP4 microscaling block sizing and bandwidth math verification'

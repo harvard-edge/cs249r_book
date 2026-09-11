@@ -30,7 +30,7 @@ Usage from a workflow step:
     # → 0.1.1 on stdout
 
     python3 scripts/version/release.py compute-hash \\
-        --paths interviews/vault/questions interviews/vault/release-policy.yaml
+        --paths staffml/vault/questions staffml/vault/release-policy.yaml
     # → 64-char hex hash on stdout
 
     python3 scripts/version/release.py emit-release \\
@@ -40,7 +40,7 @@ Usage from a workflow step:
 
     python3 scripts/version/release.py emit-manifest \\
         --project staffml --release-id 0.1.1 --release-hash <hash> \\
-        --output interviews/staffml/src/data/vault-manifest.json
+        --output staffml/app/src/data/vault-manifest.json
 """
 
 from __future__ import annotations

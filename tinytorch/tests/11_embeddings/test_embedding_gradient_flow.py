@@ -2,7 +2,7 @@
 Test gradient flow through Embedding layer.
 
 These tests ensure that:
-1. EmbeddingBackward is properly attached to Embedding outputs
+1. EmbeddingFunction is properly attached to Embedding outputs
 2. Gradients flow correctly to embedding weight matrix
 3. Integration with autograd system works end-to-end
 
@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.embeddings import Embedding
 
 
@@ -36,10 +36,10 @@ def test_embedding_has_backward_function():
     # Check _grad_fn is attached
     assert hasattr(output, '_grad_fn'), "Embedding output should have _grad_fn"
     assert output._grad_fn is not None, "Embedding output._grad_fn should not be None"
-    assert type(output._grad_fn).__name__ == "EmbeddingBackward", \
-        f"Expected EmbeddingBackward, got {type(output._grad_fn).__name__}"
+    assert type(output._grad_fn).__name__ == "EmbeddingFunction", \
+        f"Expected EmbeddingFunction, got {type(output._grad_fn).__name__}"
 
-    print("✅ Embedding properly attaches EmbeddingBackward")
+    print("✅ Embedding properly attaches EmbeddingFunction")
 
 
 def test_embedding_weight_gradient_flow():
@@ -91,7 +91,7 @@ def test_embedding_sparse_gradients():
     assert embed.weight.grad is not None, "Embedding weight should have gradient"
     assert not np.allclose(embed.weight.grad.data, 0), "Embedding weight gradient should be non-zero"
 
-    # Note: Detailed sparse gradient checking depends on EmbeddingBackward implementation
+    # Note: Detailed sparse gradient checking depends on EmbeddingFunction implementation
     # The milestone tests validate end-to-end sparse behavior
 
     print(f"✅ Embedding sparse gradients: gradient flows correctly")

@@ -1,216 +1,157 @@
+#!/usr/bin/env python
 """
-TinyTorch Module Integration Tests
+Module Integration Tests for TinyTorch
+======================================
 
-Tests that modules work together correctly when integrated.
-These tests focus on inter-module compatibility, not individual module functionality.
+Guards the boundary between the 20 source modules and the package they build.
 
-Integration test categories:
-1. Core module integration (tensor + autograd + layers)
-2. Training pipeline integration (optimizers + training + data)
-3. Optimization module integration (profiler + quantization + pruning)
-4. End-to-end integration (complete model training)
+This file previously tested a package layout that no longer exists
+(`tinytorch.core.autograd.Variable`, `tinytorch.utils`, `tinytorch.profiler`).
+Every one of its five tests failed, and every one reported success anyway,
+because failure was signalled with `return False` -- which pytest discards.
+Rewritten to check things that are true of the current package and that fail
+loudly when they stop being true.
+
+What it guards:
+  1. Every module's export target imports, in module order.
+  2. Every import shown in a module's "Where This Code Lives" block resolves.
+     (This is the check that caught OlympicEvent silently not being exported.)
+  3. Progressive disclosure: no module imports from a later-numbered module.
+  4. Data flows across the module boundary: tensor -> layer -> loss -> backward.
 """
 
-import sys
-import os
+import re
+import importlib
+import pathlib
+
+import numpy as np
 import pytest
 
-pytestmark = pytest.mark.skip(
-    reason=(
-        "Legacy integration scaffold targets stale package paths; current release "
-        "integration coverage lives in the focused integration tests."
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+SRC = REPO_ROOT / "src"
+
+
+def _module_files():
+    """(number, name, path) for each of the 20 source modules, in order."""
+    out = []
+    for d in sorted(SRC.glob("[0-9][0-9]_*")):
+        py = next(d.glob("[0-9]*.py"), None)
+        if py is not None:
+            out.append((int(d.name[:2]), d.name, py))
+    return out
+
+
+def _export_targets():
+    """Map 'tinytorch.core.tensor' -> (1, '01_tensor') from each default_exp."""
+    targets = {}
+    for num, name, py in _module_files():
+        m = re.search(r"^#\|\s*default_exp\s+([\w.]+)", py.read_text(), re.M)
+        if m:
+            targets[f"tinytorch.{m.group(1)}"] = (num, name)
+    return targets
+
+
+MODULES = _module_files()
+TARGETS = _export_targets()
+
+
+def test_all_modules_present():
+    """All 20 modules exist and each declares an export target."""
+    assert len(MODULES) == 20, f"Expected 20 source modules, found {len(MODULES)}"
+    assert len(TARGETS) == 20, (
+        f"Expected 20 export targets, found {len(TARGETS)}. A module is missing "
+        f"its '#| default_exp' directive."
     )
-)
+    numbers = [n for n, _, _ in MODULES]
+    assert numbers == list(range(1, 21)), f"Module numbering has a gap: {numbers}"
 
-sys.path.insert(0, os.path.abspath('.'))
 
-def test_core_module_integration():
-    """Test that core modules work together: tensor → autograd → layers"""
-    print("🔧 Testing Core Module Integration")
-    print("-" * 40)
+@pytest.mark.parametrize("target", sorted(TARGETS), ids=lambda t: t.split(".")[-1])
+def test_export_target_imports(target):
+    """Each module's built package imports cleanly."""
+    importlib.import_module(target)
 
-    try:
-        # Test tensor + autograd integration
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.autograd import Variable
 
-        # Create tensor and wrap in Variable
-        t = Tensor([1.0, 2.0, 3.0])
-        v = Variable(t, requires_grad=True)
-        print("✅ Tensor + Autograd integration working")
+def test_documented_imports_resolve():
+    """
+    Every symbol a module tells students to import must actually be importable.
 
-        # Test tensor + layers integration
-        from tinytorch.core.layers import Linear
-        layer = Linear(3, 2)
+    A module's "Where This Code Lives" block shows a `from tinytorch... import`
+    line. If a name there is missing from the built package, a student
+    following the instructions gets an ImportError.
+    """
+    broken = []
+    for num, name, py in MODULES:
+        for line in py.read_text().splitlines():
+            m = re.match(r"\s*from (tinytorch\.[\w.]+) import (.+?)\s*(?:#.*)?$", line)
+            if not m:
+                continue
+            mod_path, names = m.group(1), m.group(2)
+            if "(" in names or names.strip() == "*":
+                continue
+            try:
+                mod = importlib.import_module(mod_path)
+            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+                broken.append(f"{name}: cannot import {mod_path} ({exc})")
+                continue
+            for sym in (s.strip() for s in names.split(",")):
+                if sym and not hasattr(mod, sym):
+                    broken.append(f"{name}: {mod_path} has no '{sym}'")
 
-        # This tests that layers can accept tensor inputs
-        # result = layer(t)  # Simplified test
-        print("✅ Tensor + Layers integration working")
+    assert not broken, "Documented imports that do not resolve:\n  " + "\n  ".join(broken)
 
-        return True
 
-    except Exception as e:
-        print(f"❌ Core module integration failed: {e}")
-        return False
+def test_progressive_disclosure():
+    """
+    No module may import from a later-numbered module.
 
-def test_training_pipeline_integration():
-    """Test training pipeline: data → model → optimizer → training"""
-    print("\n🏋️ Testing Training Pipeline Integration")
-    print("-" * 40)
+    Students work through 01 to 20 in order. A backwards dependency means a
+    module needs something the reader has not built yet.
+    """
+    violations = []
+    for num, name, py in MODULES:
+        for i, line in enumerate(py.read_text().splitlines(), 1):
+            m = re.match(r"\s*from (tinytorch\.[\w.]+) import ", line)
+            if not m:
+                continue
+            target = m.group(1)
+            if target in TARGETS and TARGETS[target][0] > num:
+                violations.append(
+                    f"{name}:{i} imports {target} (built in module "
+                    f"{TARGETS[target][1]})"
+                )
+    assert not violations, "Backwards dependencies:\n  " + "\n  ".join(violations)
 
-    try:
-        # Test data + model integration
-        from tinytorch.utils.data import DataLoader, SimpleDataset
-        from tinytorch.core.layers import Linear
-        from tinytorch.core.optimizers import SGD
-
-        # Create simple dataset
-        dataset = SimpleDataset([(i, i*2) for i in range(10)])
-        dataloader = DataLoader(dataset, batch_size=2)
-        print("✅ Data loading integration working")
-
-        # Create model
-        model = Linear(1, 1)
-        optimizer = SGD([model.weight], lr=0.01)
-        print("✅ Model + Optimizer integration working")
-
-        # Test that training components work together
-        for batch_data, batch_labels in dataloader:
-            # output = model(batch_data)  # Simplified
-            # optimizer.step()  # Simplified
-            break
-        print("✅ Training pipeline integration working")
-
-        return True
-
-    except Exception as e:
-        print(f"❌ Training pipeline integration failed: {e}")
-        return False
-
-def test_optimization_module_integration():
-    """Test optimization modules work with core modules"""
-    print("\n⚡ Testing Optimization Module Integration")
-    print("-" * 40)
-
-    try:
-        # Test profiler + core modules
-        from tinytorch.core.tensor import Tensor
-        import tinytorch.profiler
-
-        # Test that profiler can analyze core operations
-        def tensor_operation():
-            t1 = Tensor([1, 2, 3])
-            t2 = Tensor([4, 5, 6])
-            return t1, t2
-
-        # This tests that profiler can measure core operations
-        print("✅ Profiler + Core integration working")
-
-        # Test quantization + models (when available)
-        import tinytorch.quantization
-        from tinytorch.core.layers import Linear
-
-        model = Linear(10, 5)
-        # quantized_model = tinytorch.quantization.quantize(model)  # When implemented
-        print("✅ Quantization + Models integration ready")
-
-        return True
-
-    except Exception as e:
-        print(f"❌ Optimization module integration failed: {e}")
-        return False
-
-def test_import_compatibility():
-    """Test that all import paths work and don't conflict"""
-    print("\n📦 Testing Import Compatibility")
-    print("-" * 40)
-
-    try:
-        # Test PyTorch-style imports don't conflict with core
-        import tinytorch.profiler
-        import tinytorch.quantization
-        import tinytorch.backends
-        import tinytorch.experimental
-        from tinytorch.nn.utils import prune
-
-        # Test core imports still work
-        from tinytorch.core import tensor, autograd
-        from tinytorch.core.layers import Linear, functional
-        from tinytorch.utils.data import DataLoader
-
-        print("✅ All import paths compatible")
-        print("✅ No namespace conflicts detected")
-
-        return True
-
-    except Exception as e:
-        print(f"❌ Import compatibility failed: {e}")
-        return False
 
 def test_cross_module_data_flow():
-    """Test data can flow between different modules correctly"""
-    print("\n🌊 Testing Cross-Module Data Flow")
-    print("-" * 40)
+    """A tensor built in module 01 survives a round trip through 03, 04 and 06."""
+    from tinytorch.core.tensor import Tensor
+    from tinytorch.core.layers import Linear
+    from tinytorch.core.losses import MSELoss
+    from tinytorch.core.optimizers import SGD
 
-    try:
-        from tinytorch.core.tensor import Tensor
-        from tinytorch.core.layers import Linear
-        from tinytorch.utils.data import SimpleDataset
+    rng = np.random.default_rng(7)
+    x = Tensor(rng.standard_normal((4, 3)).astype(np.float32))
+    target = Tensor(rng.standard_normal((4, 2)).astype(np.float32))
 
-        # Create data
-        data = [(Tensor([i]), Tensor([i*2])) for i in range(5)]
-        dataset = SimpleDataset(data)
+    layer = Linear(3, 2)
+    # Constructing the optimizer is what enables requires_grad on parameters.
+    optimizer = SGD(layer.parameters(), lr=0.01)
 
-        # Test data flows through model
-        model = Linear(1, 1)
-        sample_input, sample_target = dataset[0]
+    prediction = layer(x)
+    assert prediction.shape == (4, 2), f"Linear reshaped wrongly: {prediction.shape}"
 
-        # Test that tensor from data works with model
-        # output = model(sample_input)  # Simplified
-        print("✅ Data flows correctly between modules")
+    loss = MSELoss()(prediction, target)
+    assert loss._grad_fn is not None, (
+        "Loss carries no _grad_fn, so backward() would silently do nothing"
+    )
 
-        return True
+    loss.backward()
+    assert layer.weight.grad is not None, "No gradient reached the layer weight"
+    assert layer.bias.grad is not None, "No gradient reached the layer bias"
 
-    except Exception as e:
-        print(f"❌ Cross-module data flow failed: {e}")
-        return False
-
-def run_all_integration_tests():
-    """Run all module integration tests"""
-    print("🧪 TINYTORCH MODULE INTEGRATION TESTS")
-    print("=" * 60)
-
-    tests = [
-        test_core_module_integration,
-        test_training_pipeline_integration,
-        test_optimization_module_integration,
-        test_import_compatibility,
-        test_cross_module_data_flow
-    ]
-
-    passed = 0
-    total = len(tests)
-
-    for test in tests:
-        try:
-            if test():
-                passed += 1
-        except Exception as e:
-            print(f"❌ Test {test.__name__} crashed: {e}")
-
-    print(f"\n📊 INTEGRATION TEST RESULTS")
-    print("=" * 40)
-    print(f"Passed: {passed}/{total}")
-    print(f"Success Rate: {passed/total*100:.1f}%")
-
-    if passed == total:
-        print("🎉 ALL INTEGRATION TESTS PASSED!")
-        print("✅ Modules integrate correctly with each other")
-        return True
-    else:
-        print("⚠️  Some integration tests failed")
-        print("🔧 Check module compatibility and fix integration issues")
-        return False
-
-if __name__ == "__main__":
-    run_all_integration_tests()
+    before = np.array(layer.weight.data, copy=True)
+    optimizer.step()
+    assert not np.allclose(before, np.asarray(layer.weight.data)), (
+        "optimizer.step() did not change the weight"
+    )

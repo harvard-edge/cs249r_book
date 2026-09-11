@@ -236,13 +236,14 @@ jobs:
           ref: dev
           path: ./repo-scripts
           sparse-checkout: |
-            ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py
+            binder/tools/scripts/publish/modify_dev_announcement.py
+            .github/scripts/visual_smoke.py
             .github/scripts/rewrite-dev-urls.sh
             .github/scripts/flatten-vol-urls.sh
           sparse-checkout-cone-mode: false
 
       - name: 🔧 Flatten volume URL structure
-        # Moves contents/vol{N}/* to the site root so preview URLs are
+        # Moves vol{N}/* to the site root so preview URLs are
         # devsite/vol{N}/{chapter}/{chapter}.html (not double-nested).
         # Must run before rewrite-dev-urls so depth calculations are correct.
         run: |
@@ -258,6 +259,36 @@ jobs:
           bash ./repo-scripts/.github/scripts/rewrite-dev-urls.sh vol1 ./preview-site/vol1 --live-external
           bash ./repo-scripts/.github/scripts/rewrite-dev-urls.sh vol2 ./preview-site/vol2 --live-external
 
+      - name: 🧾 Create dev release manifests
+        env:
+          BUILD_SHA: ${{ steps.run_info.outputs.head_sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          build_sha = os.environ["BUILD_SHA"]
+          build_date = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+          for volume in ("vol1", "vol2"):
+              site_dir = Path("preview-site") / volume
+              if not site_dir.is_dir():
+                  continue
+              manifest = {
+                  "buildDate": build_date,
+                  "project": f"book-{volume}-dev",
+                  "releaseHash": hashlib.sha256(build_sha.encode()).hexdigest(),
+                  "releaseId": f"dev-{build_sha[:8]}",
+                  "schemaVersion": "1",
+                  "tier": "dev",
+              }
+              (site_dir / "release-manifest.json").write_text(
+                  json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+              )
+          PY
+
       - name: 🔧 Modify announcement for dev preview
         run: |
           echo "🔧 Modifying announcement banner for development preview..."
@@ -268,11 +299,38 @@ jobs:
 
           echo "📝 Adding dev preview banner with commit info: $COMMIT_SHORT"
 
-          python3 ./repo-scripts/${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+          python3 ./repo-scripts/binder/tools/scripts/publish/modify_dev_announcement.py \
             ./preview-site \
             --verbose \
             --commit-hash "$COMMIT_HASH" \
             --commit-short "$COMMIT_SHORT"
+
+      - name: 🎭 Install browser for book layout smoke test
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: 👁️ Verify rendered book layout before deployment
+        run: |
+          python3 ./repo-scripts/.github/scripts/visual_smoke.py \
+            --build-dir ./preview-site \
+            --site book-dev \
+            --pages \
+              /vol1/index.html \
+              /vol1/introduction/introduction.html \
+              /vol1/training/training.html \
+              /vol2/index.html \
+            --scan-all-book-pages \
+            --report-dir ./book-visual-smoke-report
+
+      - name: 📤 Upload book layout smoke report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: book-dev-visual-smoke-${{ steps.run_info.outputs.head_sha }}
+          path: ./book-visual-smoke-report
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -281,16 +339,39 @@ jobs:
           echo "🔐 Starting ssh-agent..."
           eval "$(ssh-agent -s)"
           echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
-          # Add github.com to known hosts to avoid prompt
+          # Add github.com to known hosts to avoid prompt. Port 22 intermittently
+          # refuses connections from runners, so trust the 443 endpoint too and
+          # keep it available as a fallback rather than losing a whole build.
           mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -p 443 ssh.github.com >> ~/.ssh/known_hosts
 
           echo "🔧 Configuring git..."
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
           echo "🔄 Cloning target repository (${{ vars.DEV_REPO }})..."
-          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          clone_target() {
+            git clone --depth=1 "${{ vars.DEV_REPO_URL }}" target-repo
+          }
+          cloned=false
+          for attempt in 1 2 3; do
+            if clone_target; then
+              cloned=true
+              break
+            fi
+            rm -rf target-repo
+            echo "⚠️  Clone attempt ${attempt} failed."
+            if [ "$attempt" -eq 2 ]; then
+              echo "🔁 Falling back to ssh.github.com:443 for the final attempt."
+              printf 'Host github.com\n  Hostname ssh.github.com\n  Port 443\n  User git\n' >> ~/.ssh/config
+            fi
+            sleep $((attempt * 10))
+          done
+          if [ "$cloned" != true ]; then
+            echo "❌ Could not reach the dev site repository over SSH after 3 attempts."
+            exit 1
+          fi
 
           echo "🔄 Entering target repository..."
           cd target-repo

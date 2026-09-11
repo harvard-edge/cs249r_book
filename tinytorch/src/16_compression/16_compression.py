@@ -16,12 +16,12 @@
 """
 # Module 16: Compression - Pruning and Model Optimization
 
-Welcome to Module 16! You're about to build model compression techniques that make neural networks smaller and more efficient while preserving their intelligence.
+Welcome to Module 16! You're about to build model compression techniques that make neural networks smaller, and the measurements that say what each technique cost.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete optimization pipeline with profiling (14) and quantization (15)
 **You'll Build**: Pruning (magnitude & structured), knowledge distillation, and low-rank approximation
-**You'll Enable**: Compressed models that maintain accuracy while using dramatically less storage and memory
+**You'll Enable**: Pruned, factorized, and distilled models, plus the sparsity and output-drift measurements that show what each technique changed
 
 **Connection Map**:
 ```
@@ -41,12 +41,15 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/16_compression/compression_dev.py
+**Learning Side:** You work in modules/16_compression/compression.ipynb
 **Building Side:** Code exports to tinytorch.perf.compression
 
 ```python
 # Final package structure:
-from tinytorch.perf.compression import magnitude_prune, structured_prune, measure_sparsity
+from tinytorch.perf.compression import (
+    measure_sparsity, magnitude_prune, structured_prune,
+    low_rank_approximate, KnowledgeDistillation, compress_model, Compressor,
+)
 ```
 
 **Why this matters:**
@@ -56,32 +59,11 @@ from tinytorch.perf.compression import magnitude_prune, structured_prune, measur
 - **Integration:** Works seamlessly with models and quantization for complete optimization pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| default_exp perf.compression
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-import copy
-from typing import List, Dict, Any, Tuple, Optional
-import time
-
-# Import from TinyTorch package (previous modules must be completed and exported)
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear, Sequential
-from tinytorch.core.activations import ReLU
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
-# Sequential provides model container with .layers and .parameters()
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-15 must be completed (especially 14 Profiling, 15 Quantization)
+**Prerequisites**: Modules 01-15 must be completed. This module uses Tensor (01), Linear and Sequential (03), ReLU (02), log-softmax (04), autograd (06), SGD (07), and the Profiler (14). Quantization (15) is not called here; Milestone 06 stacks the two.
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
@@ -91,7 +73,10 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 - `tinytorch.core.tensor` (Tensor class)
 - `tinytorch.core.layers` (Linear, Sequential)
 - `tinytorch.core.activations` (ReLU)
-- `tinytorch.perf.profiling` (Profiler, analyze_weight_distribution)
+- `tinytorch.core.losses` (log_softmax)
+- `tinytorch.core.autograd` (gradient tracking)
+- `tinytorch.core.optimizers` (SGD for the training test)
+- `tinytorch.perf.profiling` (Profiler)
 
 **Dependency Flow**:
 ```
@@ -104,29 +89,43 @@ Students completing this module will have built compression techniques
 that integrate with profiling and quantization for complete model optimization.
 """
 
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp perf.compression
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+import copy
+from typing import Dict, Any
+
+# Import from TinyTorch package (previous modules must be completed and exported)
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear, Sequential
+from tinytorch.core.activations import ReLU
+from tinytorch.core.losses import log_softmax
+import tinytorch.core.autograd  # Module 06: record gradients for student training
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+
 # %% [markdown]
 """
-### Note on Sequential Usage in This Module
+## 💡 Introduction: Why Compression Matters
 
-This module uses `Sequential` as a parameter container for compression operations.
-`Sequential` is familiar from Module 03 and is used here as a convenience — it gives
-compression wrappers a clean way to hold the original model's layers and expose them
-for inspection, pruning, and quantization. The compression logic itself remains explicit
-and visible throughout the module.
-"""
-
-# %% [markdown]
-"""
-## 💡 Motivation: Why Compression Matters
-
-Before we learn compression, let's profile a model to analyze its weight
-distribution. We'll discover that many weights are tiny and might not matter much!
+Before we learn compression, let's profile a layer's weights with the Module 14
+Profiler. The layer below is freshly initialized, so its weights follow the
+initializer's distribution, not anything learned. That is exactly the point of
+the exercise: a fresh layer already has a wide spread of magnitudes, and the
+question every pruning method asks is how much of the small end can go. The
+evidence that the answer is "most of it" comes from trained networks, which is
+why Milestone 06 measures accuracy before and after pruning on real digits.
 """
 
 # %%
 # Profile weight distribution to discover pruning opportunities
 # Module 14 (Profiling) must be completed before Module 16
-from tinytorch.perf.profiling import Profiler, analyze_weight_distribution
+from tinytorch.perf.profiling import Profiler
 
 def show_weight_distribution_motivation():
     """Display weight distribution analysis - motivates compression techniques."""
@@ -134,64 +133,61 @@ def show_weight_distribution_motivation():
 
     # Create a model and analyze its weights
     model = Linear(512, 512)
-    input_data = Tensor(rng.standard_normal((1, 512)))
+    param_count = profiler.count_parameters(model)
 
-    # Profile basic characteristics
-    profile = profiler.profile_forward_pass(model, input_data)
-
-    print("🧪 Profiling Parameter Distribution:\n")
-    print(f"   Total parameters: {profile['parameters']:,}")
-    print(f"   Model memory: {profile['parameters'] * BYTES_PER_FLOAT32 / MB_TO_BYTES:.1f} MB (FP32)")
+    print("🧪 Profiling Parameter Distribution (freshly initialized Linear(512, 512)):\n")
+    print(f"   Total parameters: {param_count:,}")
+    print(f"   Model memory: {param_count * BYTES_PER_FLOAT32 / MB_TO_BYTES:.1f} MB (FP32)")
 
     # Analyze weight distribution
     weights = model.weight.data.flatten()
     abs_weights = np.abs(weights)
+    largest = np.max(abs_weights)
 
-    print("\n   Weight Statistics:")
+    print("\n   |Weight| Statistics:")
     print(f"   Mean: {np.mean(abs_weights):.4f}")
     print(f"   Std:  {np.std(abs_weights):.4f}")
     print(f"   Min:  {np.min(abs_weights):.4f}")
-    print(f"   Max:  {np.max(abs_weights):.4f}")
+    print(f"   Max:  {largest:.4f}")
 
-    # Check how many weights are small
-    thresholds = [0.001, 0.01, 0.1, 0.5]
-    print("\n   Weights Below Threshold:")
-    print("   Threshold  |  Percentage")
-    print("   -----------|--------------")
-    for threshold in thresholds:
-        percentage = np.sum(abs_weights < threshold) / len(weights) * 100
-        print(f"   < {threshold:<6}  |  {percentage:5.1f}%")
+    # Thresholds relative to the largest weight, so the table means the same
+    # thing whatever scale the initializer (or a trained network) uses
+    fractions = [0.01, 0.05, 0.10, 0.25]
+    below = {}
+    print("\n   Weights Below a Fraction of the Largest |Weight|:")
+    print("   Threshold        |  Percentage")
+    print("   -----------------|--------------")
+    for fraction in fractions:
+        below[fraction] = np.sum(abs_weights < fraction * largest) / len(weights) * 100
+        print(f"   < {fraction:4.0%} of max   |  {below[fraction]:5.1f}%")
 
-    print("\n💡 Key Observations:")
-    print("   • Many weights are very small (close to zero)")
-    print("   • Weight distribution typically: mean ≈ 0, concentrated near zero")
-    print("   • Small weights contribute little to final predictions")
-    print("   • Typical finding: 50-90% of weights can be removed!")
+    print("\n💡 Key Observations (computed from this layer):")
+    print(f"   • {below[0.10]:.0f}% of the weights are under a tenth of the largest one")
+    print(f"   • {below[0.25]:.0f}% are under a quarter of it; the spread is wide even before training")
+    print("   • A fresh layer proves only that magnitudes vary; trained networks are the evidence")
+    print("     that the small end can go (Han et al., 2015, removed 50-90% of the weights of")
+    print("     trained networks with little accuracy loss)")
 
     print("\n🎯 The Problem:")
-    print("   Why store and compute with weights that barely matter?")
-    print("   • They take memory")
-    print("   • They require computation")
-    print("   • They slow down inference")
-    print("   • But removing them has minimal accuracy impact!")
+    print("   Every weight, however small, costs the same to store and multiply.")
 
     print("\n✨ The Solution:")
     print("   Prune (remove) small weights:")
     print("   • Magnitude pruning: Set small weights to zero")
-    print("   • Structured pruning: Remove entire neurons/channels")
-    print("   • Typical: 80-90% sparsity with <1% accuracy loss")
-    print("   • Benefit: Smaller models, faster inference, less memory\n")
+    print("   • Structured pruning: Zero entire neurons/channels so they can later be deleted")
+    print("   • Then measure what it cost: this module measures output drift,")
+    print("     Milestone 06 measures accuracy\n")
 
 if __name__ == "__main__":
     show_weight_distribution_motivation()
 
 # %% [markdown]
 """
-## 💡 Introduction: Model Compression Concepts
+### Model Compression Concepts
 
 Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
 
-Model compression reduces the size and computational requirements of neural networks while preserving their intelligence. It's the bridge between powerful research models and practical deployment.
+Model compression reduces the size and computational requirements of neural networks at some cost in accuracy, and the engineering is in measuring that cost and keeping it small. It's the bridge between research models and practical deployment.
 
 ### Why Compression Matters in ML Systems
 
@@ -219,11 +215,11 @@ Neural Network Compression Techniques:
 │  ┌────────────────────────────────┐ │  ┌────────────────────────────┐ │
 │  │ Magnitude Pruning              │ │  │ Knowledge Distillation     │ │
 │  │ • Remove small weights         │ │  │ • Teacher → Student        │ │
-│  │ • 90% sparsity achievable      │ │  │ • 10x size reduction       │ │
+│  │ • Scattered zeros              │ │  │ • Smaller architecture     │ │
 │  │                                │ │  │                            │ │
 │  │ Structured Pruning             │ │  │ Neural Architecture        │ │
 │  │ • Remove entire channels       │ │  │ Search (NAS)               │ │
-│  │ • Hardware-friendly            │ │  │ • Automated design         │ │
+│  │ • Zeros that can be deleted    │ │  │ • Automated design         │ │
 │  │                                │ │  │                            │ │
 │  │ Low-Rank Approximation         │ │  │ Early Exit                 │ │
 │  │ • Matrix factorization         │ │  │ • Adaptive compute         │ │
@@ -259,9 +255,9 @@ Sparsity Calculation:
     Sparsity = (Zero weights / Total weights) × 100%
 ```
 
-### Structured Pruning: Hardware-Friendly Compression
+### Structured Pruning: Zeros in Deletable Shapes
 
-Unlike magnitude pruning which creates scattered zeros, structured pruning removes entire computational units (neurons, channels, attention heads).
+Unlike magnitude pruning which creates scattered zeros, structured pruning removes entire computational units (neurons, channels, attention heads). In this module "removes" means zeros the whole column; the shape change that actually deletes it is a separate step (see the Structured Pruning section).
 
 ```
 Channel Importance Metrics:
@@ -288,13 +284,17 @@ Distillation Loss Function:
     L_total = α × L_soft + (1-α) × L_hard
 
 Where:
-    L_soft = KL_divergence(σ(z_s/T), σ(z_t/T))  # Soft targets
+    L_soft = KL(σ(z_t/T) ‖ σ(z_s/T))             # Soft targets: teacher is the reference
     L_hard = CrossEntropy(σ(z_s), y_true)        # Hard targets
 
     σ(z/T) = Softmax with temperature T
     z_s = Student logits, z_t = Teacher logits
     α = Balance parameter (typically 0.7)
     T = Temperature parameter (typically 3-5)
+
+KL is not symmetric. KL(p ‖ q) = Σ p log(p/q) is zero when q matches p and
+grows fastest where p puts probability that q does not, so the teacher's
+distribution goes first: it is the target the student is pulled toward.
 
 Temperature Effect:
     T=1: Standard softmax (sharp probabilities)
@@ -311,9 +311,12 @@ SVD Decomposition:
 
 Parameter Reduction:
     Original: m × n parameters
-    Compressed: (m × k) + k + (k × n) = k(m + n + 1) parameters
+    Compressed (Σ folded into U or V): (m × k) + (k × n) = k(m + n) parameters
 
-    Compression achieved when: k < mn/(m+n+1)
+    Compression achieved when: k < mn/(m+n)
+
+    This module counts low-rank parameters this way everywhere: the k singular
+    values fold into one factor, so storing them separately costs nothing.
 
 Reconstruction Error:
     ||W - W_approx||_F = √(Σᵢ₌ₖ₊₁ʳ σᵢ²)
@@ -434,7 +437,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Magnitude-Based Pruning
+## 🏗️ Magnitude-Based Pruning
 
 Magnitude pruning is the simplest and most intuitive compression technique. It's based on the observation that weights with small magnitudes contribute little to the model's output.
 
@@ -447,10 +450,10 @@ Magnitude Pruning Process:
 
 Step 1: Collect All Weights (20 total across 2 layers)
 ┌──────────────────────────────────────────────────┐
-│ Layer 1: [2.1, 0.08, -1.8, 0.04, 3.2,             │
-│           -0.02, 1.5, -0.03, 2.8, 0.06]           │
-│ Layer 2: [0.7, 2.4, -0.05, 1.9, 0.01,             │
-│           -1.3, 0.03, 2.1, -0.07, 0.09]           │
+│ Layer 1: [2.1, 0.08, -1.8, 0.04, 3.2,            │
+│           -0.02, 1.5, -0.03, 2.8, 0.06]          │
+│ Layer 2: [0.7, 2.4, -0.05, 1.9, 0.01,            │
+│           -1.3, 0.03, 2.1, -0.07, 0.09]          │
 └──────────────────────────────────────────────────┘
                     ↓
 Step 2: Calculate Magnitudes
@@ -469,8 +472,8 @@ Step 3: Find Threshold (e.g., 50th percentile)
 Step 4: Apply Pruning Mask
 ┌──────────────────────────────────────────────────┐
 │ Layer 1: [2.1, 0.0, -1.8, 0.0, 3.2,              │
-│           0.0, 1.5, 0.0, 2.8, 0.0]               │ 50% weights → 0
-│ Layer 2: [0.7, 2.4, 0.0, 1.9, 0.0,               │ 50% preserved
+│           0.0, 1.5, 0.0, 2.8, 0.0]              │ 50% weights → 0
+│ Layer 2: [0.7, 2.4, 0.0, 1.9, 0.0,              │ 50% preserved
 │           -1.3, 0.0, 2.1, 0.0, 0.0]              │
 └──────────────────────────────────────────────────┘
 
@@ -506,8 +509,8 @@ def magnitude_prune(model, sparsity=0.9):
     APPROACH:
     1. Collect all weights from the model
     2. Calculate absolute values to get magnitudes
-    3. Find threshold at desired sparsity percentile
-    4. Set weights below threshold to zero (in-place)
+    3. Rank magnitudes and select floor(sparsity * weight_count) entries
+    4. Zero those entries in-place; stable ordering breaks magnitude ties
 
     EXAMPLE:
     >>> # Create model with explicit layer composition
@@ -521,33 +524,28 @@ def magnitude_prune(model, sparsity=0.9):
     Achieved 80.0% sparsity
 
     HINTS:
-    - Use np.percentile() to find threshold
+    - Use np.argsort(..., kind="stable") to rank even equal magnitudes
     - Modify model parameters in-place
     - Consider only weight matrices, not biases
     """
     ### BEGIN SOLUTION
-    # Collect all weights (excluding biases)
-    all_weights = []
-    weight_params = []
-
-    for param in model.parameters():
-        # Skip biases (typically 1D)
-        if len(param.shape) > 1:
-            all_weights.extend(param.data.flatten())
-            weight_params.append(param)
-
-    if not all_weights:
+    if not np.isfinite(sparsity) or not 0 <= sparsity <= 1:
+        raise ValueError("sparsity must be between 0 and 1")
+    weight_params = [p for p in model.parameters() if p.ndim > 1]
+    if not weight_params:
         return model
 
-    # Calculate magnitude threshold
-    magnitudes = np.abs(all_weights)
-    threshold = np.percentile(magnitudes, sparsity * 100)
-
-    # Apply pruning to each weight parameter
+    # Rank globally, including existing zeros. Selecting by index also handles
+    # tied magnitudes and the endpoints 0% and 100% exactly.
+    magnitudes = np.concatenate([np.abs(p.data).ravel() for p in weight_params])
+    prune_count = int(sparsity * magnitudes.size)
+    prune_mask = np.zeros(magnitudes.size, dtype=bool)
+    prune_mask[np.argsort(magnitudes, kind="stable")[:prune_count]] = True
+    offset = 0
     for param in weight_params:
-        mask = np.abs(param.data) >= threshold
-        param.data = param.data * mask
-
+        mask = prune_mask[offset:offset + param.size].reshape(param.shape)
+        param.data[mask] = 0
+        offset += param.size
     return model
     ### END SOLUTION
 
@@ -603,7 +601,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Structured Pruning
+## 🏗️ Structured Pruning
 
 While magnitude pruning creates scattered zeros throughout the network, structured pruning removes entire computational units (channels, neurons, heads). This creates sparsity patterns that modern hardware can actually accelerate.
 
@@ -682,7 +680,8 @@ def structured_prune(model, prune_ratio=0.5):
     TODO: Implement structured pruning for Linear layers
 
     APPROACH:
-    1. For each Linear layer, calculate L2 norm of each output channel
+    1. For each hidden Linear layer (every Linear but the last, whose output
+       channels are the classes), calculate the L2 norm of each output channel
     2. Rank channels by importance (L2 norm)
     3. Remove lowest importance channels by setting to zero
     4. This creates block sparsity that's hardware-friendly
@@ -694,10 +693,10 @@ def structured_prune(model, prune_ratio=0.5):
     >>> model = Sequential(layer1, layer2)
     >>> original_shape = layer1.weight.shape
     >>> structured_prune(model, prune_ratio=0.3)
-    >>> # 30% of channels are now completely zero
+    >>> # 30% of layer1's channels are now completely zero; the head (layer2) is untouched
     >>> final_sparsity = measure_sparsity(model)
     >>> print(f"Structured sparsity: {final_sparsity:.1f}%")
-    Structured sparsity: 30.0%
+    Structured sparsity: 27.3%
 
     HINTS:
     - Calculate L2 norm for all channels at once: np.linalg.norm(weight, axis=0)
@@ -705,28 +704,34 @@ def structured_prune(model, prune_ratio=0.5):
     - Set entire channels to zero: weight[:, prune_indices] = 0
     """
     ### BEGIN SOLUTION
-    # All Linear layers have .weight attribute
-    for layer in model.layers:
-        if isinstance(layer, Linear):
-            weight = layer.weight.data
+    if not np.isfinite(prune_ratio) or not 0 <= prune_ratio <= 1:
+        raise ValueError("prune_ratio must be between 0 and 1")
+    # Prune the hidden Linear layers. The last Linear is the head: its output
+    # channels are the classes, so zeroing them removes classes, not neurons.
+    # A model with a single Linear has nothing else to prune and is pruned as is.
+    linears = [layer for layer in model.layers if isinstance(layer, Linear)]
+    hidden = linears[:-1] if len(linears) > 1 else linears
 
-            # Calculate L2 norm for each output channel (column)
-            channel_norms = np.linalg.norm(weight, axis=0)
+    for layer in hidden:
+        weight = layer.weight.data
 
-            # Find channels to prune (lowest importance)
-            num_channels = weight.shape[1]
-            num_to_prune = int(num_channels * prune_ratio)
+        # Calculate L2 norm for each output channel (column)
+        channel_norms = np.linalg.norm(weight, axis=0)
 
-            if num_to_prune > 0:
-                # Get indices of channels to prune (smallest norms)
-                prune_indices = np.argpartition(channel_norms, num_to_prune)[:num_to_prune]
+        # Find channels to prune (lowest importance)
+        num_channels = weight.shape[1]
+        num_to_prune = int(num_channels * prune_ratio)
 
-                # Zero out entire channels
-                weight[:, prune_indices] = 0
+        if num_to_prune > 0:
+            # Get indices of channels to prune (smallest norms)
+            prune_indices = np.argsort(channel_norms, kind="stable")[:num_to_prune]
 
-                # Also zero corresponding bias elements if bias exists
-                if layer.bias is not None:
-                    layer.bias.data[prune_indices] = 0
+            # Zero out entire channels
+            weight[:, prune_indices] = 0
+
+            # Also zero corresponding bias elements if bias exists
+            if layer.bias is not None:
+                layer.bias.data[prune_indices] = 0
 
     return model
     ### END SOLUTION
@@ -787,7 +792,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Low-Rank Approximation
+## 🏗️ Low-Rank Approximation
 
 Low-rank approximation discovers that large weight matrices often contain redundant information that can be captured with much smaller matrices through mathematical decomposition.
 
@@ -883,6 +888,8 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     - Return U[:,:k], S[:k], V[:k,:] for reconstruction
     """
     ### BEGIN SOLUTION
+    if not np.isfinite(rank_ratio) or not 0 < rank_ratio <= 1:
+        raise ValueError("rank_ratio must be in (0, 1]")
     m, n = weight_matrix.shape
 
     # Perform SVD
@@ -948,7 +955,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Knowledge Distillation
+## 🏗️ Knowledge Distillation
 
 Knowledge distillation is like having an expert teacher simplify complex concepts for a student. The large "teacher" model shares its knowledge with a smaller "student" model, achieving similar performance with far fewer parameters.
 
@@ -997,9 +1004,9 @@ Temperature Effect on Probability Distributions:
 Without Temperature (T=1):           With Temperature (T=3):
 Teacher Logits: [1.0, 2.0, 0.5]    Teacher Logits: [1.0, 2.0, 0.5]
                        ↓                               ↓ ÷ 3
-Softmax: [0.09, 0.67, 0.24]         Logits/T: [0.33, 0.67, 0.17]
+Softmax: [0.23, 0.63, 0.14]         Logits/T: [0.33, 0.67, 0.17]
          ^      ^      ^                       ↓
-      Low   High   Med              Softmax: [0.21, 0.42, 0.17]
+      Med   High   Low              Softmax: [0.31, 0.43, 0.26]
                                              ^      ^      ^
 Sharp decisions (hard to learn)           Soft   decisions (easier to learn)
 
@@ -1020,7 +1027,7 @@ Combined Loss Function:
 L_total = α × L_soft + (1-α) × L_hard
 
 Where:
-    L_soft = KL_divergence(Student_soft, Teacher_soft)
+    L_soft = KL_divergence(Teacher_soft, Student_soft)
              │
              └─ Measures how well student mimics teacher
 
@@ -1039,6 +1046,14 @@ Temperature T:
 • T = 3-5: Good balance (typical range)
 • T = 10+: Very soft (may lose information)
 ```
+
+Both terms average over samples, so duplicating a batch leaves the loss and
+the balance set by α unchanged. The teacher supplies fixed targets; only the
+student's log-probabilities retain a gradient path. We reuse Module 04's stable
+`log_softmax` and Module 06's autograd instead of extracting the student's NumPy
+array. The returned scalar Tensor can then drive the same backward-and-step
+cycle used for ordinary training. This version keeps the unscaled KL objective;
+it omits the optional T² multiplier discussed in the analysis below.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "distillation", "solution": true}
@@ -1086,60 +1101,73 @@ class KnowledgeDistillation:
             alpha: Weight for soft target loss (1-alpha for hard targets)
         """
         ### BEGIN SOLUTION
+        if not np.isfinite(temperature) or temperature <= 0:
+            raise ValueError("temperature must be finite and positive")
+        if not np.isfinite(alpha) or not 0 <= alpha <= 1:
+            raise ValueError("alpha must be between 0 and 1")
         self.teacher_model = teacher_model
         self.student_model = student_model
         self.temperature = temperature
         self.alpha = alpha
         ### END SOLUTION
 
-    def distillation_loss(self, student_logits, teacher_logits, true_labels):
+    def distillation_loss(self, student_logits: Tensor, teacher_logits: Tensor, true_labels) -> Tensor:
         """
-        Calculate combined distillation loss.
+        Calculate a differentiable, batch-mean distillation loss.
 
         TODO: Implement knowledge distillation loss function
 
         APPROACH:
-        1. Calculate hard target loss (student vs true labels)
-        2. Calculate soft target loss (student vs teacher, with temperature)
-        3. Combine losses: alpha * soft_loss + (1-alpha) * hard_loss
+        1. Validate class IDs or target probabilities for each sample
+        2. Compute student log-probabilities with log_softmax, preserving autograd
+        3. Compute detached teacher probabilities and batch-mean KL(teacher || student)
+        4. Compute the batch-mean hard loss and combine using alpha
 
         EXAMPLE:
         >>> kd = KnowledgeDistillation(teacher, student)
         >>> loss = kd.distillation_loss(student_out, teacher_out, labels)
-        >>> print(f"Distillation loss: {loss:.4f}")
+        >>> loss.backward()  # Gradients flow to the student, not the teacher
+        >>> print(f"Distillation loss: {loss.data:.4f}")
 
         HINTS:
         - Use temperature to soften distributions: logits/temperature
-        - Soft targets use KL divergence or cross-entropy
-        - Hard targets use standard classification loss
+        - Wrap teacher_logits.data in a fresh Tensor to treat it as a constant
+        - Sum over classes, then mean over samples for both loss terms
+        - Class IDs may be NumPy integers or integer-valued Tensor data
         """
         ### BEGIN SOLUTION
-        # Extract numpy arrays from Tensors
-        # student_logits and teacher_logits are always Tensors from forward passes
-        student_logits = student_logits.data
-        teacher_logits = teacher_logits.data
+        if student_logits.ndim != 2 or student_logits.shape != teacher_logits.shape:
+            raise ValueError("Student and teacher logits must have matching (batch, classes) shapes")
+        batch_size, num_classes = student_logits.shape
+        if batch_size == 0 or num_classes == 0:
+            raise ValueError("Distillation needs at least one sample and one class")
+        labels = true_labels.data if isinstance(true_labels, Tensor) else np.asarray(true_labels)
+        if labels.shape == (batch_size,):
+            if (not np.all(np.isfinite(labels)) or np.any(labels != np.floor(labels))
+                    or np.any(labels < 0) or np.any(labels >= num_classes)):
+                raise ValueError("Class labels must be integer IDs in [0, num_classes)")
+            labels = labels.astype(np.intp)
+        elif labels.shape == student_logits.shape:
+            if (not np.all(np.isfinite(labels)) or np.any(labels < 0)
+                    or not np.allclose(labels.sum(axis=1), 1.0)):
+                raise ValueError("Target probabilities must be nonnegative and sum to one per sample")
+        else:
+            raise ValueError("Labels must have shape (batch,) or (batch, classes)")
 
-        # true_labels might be numpy array or Tensor
-        if isinstance(true_labels, Tensor):
-            true_labels = true_labels.data
+        # Only the student side is differentiable. The teacher's log-probabilities
+        # are constants even when its forward pass was recorded by autograd.
+        student_log_probs = log_softmax(student_logits / self.temperature)
+        teacher_log_probs = log_softmax(Tensor(teacher_logits.data) / self.temperature)
+        teacher_probs = Tensor(np.exp(teacher_log_probs.data))
+        soft_loss = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(axis=-1).mean()
 
-        # Soften distributions with temperature
-        student_soft = self._softmax(student_logits / self.temperature)
-        teacher_soft = self._softmax(teacher_logits / self.temperature)
+        hard_log_probs = log_softmax(student_logits)
+        if labels.ndim == 1:
+            hard_loss = hard_log_probs[np.arange(batch_size), labels].mean() * -1.0
+        else:
+            hard_loss = (Tensor(labels) * hard_log_probs).sum(axis=-1).mean() * -1.0
 
-        # Soft target loss (KL divergence)
-        soft_loss = self._kl_divergence(student_soft, teacher_soft)
-
-        # Hard target loss (cross-entropy)
-        student_hard = self._softmax(student_logits)
-        hard_loss = self._cross_entropy(student_hard, true_labels)
-
-        # Combined loss
-        # Note: Standard knowledge distillation (Hinton 2015) scales soft loss by T².
-        # This simplified version omits T² scaling for educational clarity.
-        total_loss = self.alpha * soft_loss + (1 - self.alpha) * hard_loss
-
-        return total_loss
+        return self.alpha * soft_loss + (1 - self.alpha) * hard_loss
         ### END SOLUTION
 
     def _softmax(self, logits):
@@ -1149,10 +1177,10 @@ class KnowledgeDistillation:
 
     def _kl_divergence(self, p, q):
         """Compute KL divergence between distributions."""
-        return np.sum(p * np.log(p / (q + 1e-8) + 1e-8))
+        return np.mean(np.sum(p * np.log((p + 1e-8) / (q + 1e-8)), axis=-1))
 
     def _cross_entropy(self, predictions, labels):
-        """Compute cross-entropy loss."""
+        """Compute a NumPy batch-mean cross-entropy for the analysis table."""
         # Simple implementation for integer labels
         if labels.ndim == 1:
             return -np.mean(np.log(predictions[np.arange(len(labels)), labels] + 1e-8))
@@ -1165,9 +1193,9 @@ class KnowledgeDistillation:
 
 This test validates teacher-student knowledge transfer with temperature scaling.
 
-**What we're testing**: Distillation loss combining soft and hard targets
+**What we're testing**: A differentiable loss combining soft and hard targets
 **Why it matters**: Enables training small models with teacher knowledge
-**Expected**: Valid loss computation for teacher-student training
+**Expected**: Student parameters receive gradients; teacher parameters do not
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-distillation", "locked": true, "points": 15}
@@ -1184,6 +1212,11 @@ def test_unit_knowledge_distillation():
     student_l1 = Linear(10, 5)
     student = Sequential(student_l1)  # Direct connection, no hidden layer
 
+    # As in Module 07, construct the optimizer before the first forward pass:
+    # registering parameters marks them requires_grad=True.
+    from tinytorch.core.optimizers import SGD
+    optimizer = SGD(student.parameters(), lr=0.1)
+
     # Initialize knowledge distillation with temperature scaling
     kd = KnowledgeDistillation(teacher, student, temperature=3.0, alpha=0.7)
 
@@ -1199,9 +1232,21 @@ def test_unit_knowledge_distillation():
     loss = kd.distillation_loss(student_output, teacher_output, true_labels)
 
     # Verify loss is reasonable
-    assert isinstance(loss, (float, np.floating)), f"Loss should be float, got {type(loss)}"
-    assert loss > 0, f"Loss should be positive, got {loss}"
-    assert not np.isnan(loss), "Loss should not be NaN"
+    assert isinstance(loss, Tensor), f"Loss must preserve autograd, got {type(loss)}"
+    assert np.isfinite(loss.data), "Loss should be finite"
+    loss.backward()
+    assert all(p.grad is not None for p in student.parameters()), "Student needs gradients"
+    assert all(p.grad is None for p in teacher.parameters()), "Teacher must remain fixed"
+
+    # The loss must drive learning, not merely print a plausible scalar.
+    initial = float(loss.data)
+    for _ in range(10):
+        optimizer.zero_grad()
+        loss = kd.distillation_loss(student(input_data), teacher_output, Tensor(true_labels))
+        loss.backward()
+        optimizer.step()
+    final = kd.distillation_loss(student(input_data), teacher_output, true_labels)
+    assert float(final.data) < initial, "Training should reduce the fixed-batch distillation loss"
 
     print("✅ knowledge_distillation works correctly!")
 
@@ -1278,6 +1323,7 @@ CLOUD SERVICE (Minimal compression):
 """
 
 # %% nbgrader={"grade": false, "grade_id": "compress-model-comprehensive", "solution": true}
+#| export
 def compress_model(model, compression_config):
     """
     Apply comprehensive model compression based on configuration.
@@ -1287,22 +1333,31 @@ def compress_model(model, compression_config):
     APPROACH:
     1. Apply magnitude pruning if specified
     2. Apply structured pruning if specified
-    3. Apply low-rank approximation if specified
-    4. Return compression statistics
+    3. Return compression statistics
+    Low-rank factors require rebuilding layers; use low_rank_approximate separately.
 
     EXAMPLE:
     >>> config = {
     ...     'magnitude_prune': 0.8,
-    ...     'structured_prune': 0.3,
-    ...     'low_rank': 0.5
+    ...     'structured_prune': 0.3
     ... }
     >>> stats = compress_model(model, config)
-    >>> print(f"Final sparsity: {stats['sparsity']:.1f}%")
+    >>> print(f"Final sparsity: {stats['final_sparsity']:.1f}%")
     Final sparsity: 85.0%
 
     HINT: Apply techniques sequentially and measure results
     """
     ### BEGIN SOLUTION
+    # Validate before modifying any weights; unsupported work must not be
+    # recorded as successfully applied.
+    if 'low_rank' in compression_config:
+        raise ValueError("Use low_rank_approximate() and rebuild the layer from its factors")
+    unknown = set(compression_config) - {'magnitude_prune', 'structured_prune'}
+    if unknown:
+        raise ValueError(f"Unknown compression techniques: {sorted(unknown)}")
+    for ratio in compression_config.values():
+        if not np.isfinite(ratio) or not 0 <= ratio <= 1:
+            raise ValueError("Pruning ratios must be between 0 and 1")
     original_params = sum(p.size for p in model.parameters())
     original_sparsity = measure_sparsity(model)
 
@@ -1323,12 +1378,6 @@ def compress_model(model, compression_config):
         ratio = compression_config['structured_prune']
         structured_prune(model, prune_ratio=ratio)
         stats['applied_techniques'].append(f'structured_prune_{ratio}')
-
-    # Apply low-rank approximation (conceptually - would need architecture changes)
-    if 'low_rank' in compression_config:
-        ratio = compression_config['low_rank']
-        # For demo, we'll just record that it would be applied
-        stats['applied_techniques'].append(f'low_rank_{ratio}')
 
     # Final measurements
     final_sparsity = measure_sparsity(model)
@@ -1390,199 +1439,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis: Compression Trade-offs
-
-Understanding the real-world effectiveness of different compression techniques through systematic measurement and comparison.
-
-The fundamental challenge in model compression is balancing three competing objectives: model size, inference speed, and prediction accuracy.
-"""
-
-# %% [markdown]
-"""
-## 📊 Measuring Compression Impact with Profiler
-
-Now let's use the **Profiler** tool from Module 14 to measure the actual parameter reduction from pruning. This demonstrates the complete workflow: profile baseline (M14) → apply compression (M16) → measure impact (M14+M16).
-
-This is the production workflow: measure → prune → validate → deploy.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": true}
-# Import Profiler from Module 14 (already imported above)
-
-def explore_compression_with_profiler():
-    """📊 Demonstrate parameter reduction using Profiler from Module 14."""
-    print("📊 Measuring Compression Impact with Profiler")
-    print("=" * 70)
-
-    profiler = Profiler()
-
-    # Create a simple model (Linear already imported above)
-    model = Linear(512, 256)
-    model.name = "baseline_model"
-
-    print("\n🏋️  BEFORE: Dense Model")
-    print("-" * 70)
-
-    # Measure baseline
-    param_count_before = profiler.count_parameters(model)
-    sparsity_before = measure_sparsity(model)
-    input_shape = (32, 512)
-    memory_before = profiler.measure_memory(model, input_shape)
-
-    print(f"   Parameters: {param_count_before:,}")
-    print(f"   Sparsity: {sparsity_before:.1f}% (zeros)")
-    print(f"   Memory: {memory_before['parameter_memory_mb']:.2f} MB")
-    print(f"   Active parameters: {int(param_count_before * (1 - sparsity_before / 100)):,}")
-
-    # Apply magnitude pruning
-    target_sparsity = 0.7  # Remove 70% of parameters
-    print(f"\n✂️  Applying {target_sparsity*100:.0f}% Magnitude Pruning...")
-    pruned_model = magnitude_prune(model, sparsity=target_sparsity)
-    pruned_model.name = "pruned_model"
-
-    print("\n🪶 AFTER: Pruned Model")
-    print("-" * 70)
-
-    # Measure after pruning
-    param_count_after = profiler.count_parameters(pruned_model)
-    sparsity_after = measure_sparsity(pruned_model)
-    memory_after = profiler.measure_memory(pruned_model, input_shape)
-
-    print(f"   Parameters: {param_count_after:,} (same, but many are zero)")
-    print(f"   Sparsity: {sparsity_after:.1f}% (zeros)")
-    print(f"   Memory: {memory_after['parameter_memory_mb']:.2f} MB (same storage)")
-    print(f"   Active parameters: {int(param_count_after * (1 - sparsity_after / 100)):,}")
-
-    print("\n📈 COMPRESSION RESULTS")
-    print("=" * 70)
-    sparsity_gain = sparsity_after - sparsity_before
-    active_before = int(param_count_before * (1 - sparsity_before / 100))
-    active_after = int(param_count_after * (1 - sparsity_after / 100))
-    reduction_ratio = active_before / active_after if active_after > 0 else 1
-    params_removed = active_before - active_after
-
-    print(f"   Sparsity increased: {sparsity_before:.1f}% → {sparsity_after:.1f}%")
-    print(f"   Active params reduced: {active_before:,} → {active_after:,}")
-    print(f"   Parameters removed: {params_removed:,} ({sparsity_gain:.1f}% of total)")
-    print(f"   Compression ratio: {reduction_ratio:.1f}x fewer active parameters")
-
-    print("\n💡 Key Insight:")
-    print(f"   Magnitude pruning removes {sparsity_gain:.0f}% of parameters")
-    print(f"   With sparse storage formats, this means {reduction_ratio:.1f}x less memory!")
-    print(f"   Critical for: edge devices, mobile apps, energy efficiency")
-    print("\n✅ This is the power of compression: remove what doesn't matter!")
-
-if __name__ == "__main__":
-    explore_compression_with_profiler()
-
-# %% [markdown]
-"""
-### Comparing Compression Techniques
-
-Let's analyze compression ratios across different techniques systematically.
-"""
-
-# %%
-def analyze_compression_techniques():
-    """📊 Compare compression ratios across different techniques."""
-    print("📊 Analyzing Compression Techniques")
-    print("=" * 60)
-
-    # Create baseline model (Linear already imported above)
-    model_configs = [
-        ("Small MLP", [Linear(128, 64), Linear(64, 32)]),
-        ("Medium MLP", [Linear(512, 256), Linear(256, 128)]),
-        ("Large MLP", [Linear(1024, 512), Linear(512, 256)])
-    ]
-
-    print(f"\n{'Model':<15} {'Technique':<20} {'Sparsity':<12} {'Compression':<12}")
-    print("-" * 60)
-
-    for model_name, layers in model_configs:
-        # Create model with explicit composition
-        model = Sequential(*layers)
-        baseline_params = sum(p.size for p in model.parameters())
-
-        # Test magnitude pruning on copy of model
-        # Create fresh layers for magnitude pruning test
-        mag_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
-        for i, layer in enumerate(mag_layers):
-            layer.weight = Tensor(layers[i].weight.data.copy())
-            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
-        mag_model = Sequential(*mag_layers)
-        magnitude_prune(mag_model, sparsity=0.8)
-        mag_sparsity = measure_sparsity(mag_model)
-        mag_ratio = 1.0 / (1.0 - mag_sparsity / 100) if mag_sparsity < 100 else float('inf')
-
-        print(f"{model_name:<15} {'Magnitude (80%)':<20} {mag_sparsity:>10.1f}% {mag_ratio:>10.1f}x")
-
-        # Test structured pruning on separate copy
-        # Create fresh layers for structured pruning test
-        struct_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
-        for i, layer in enumerate(struct_layers):
-            layer.weight = Tensor(layers[i].weight.data.copy())
-            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
-        struct_model = Sequential(*struct_layers)
-        structured_prune(struct_model, prune_ratio=0.5)
-        struct_sparsity = measure_sparsity(struct_model)
-        struct_ratio = 1.0 / (1.0 - struct_sparsity / 100) if struct_sparsity < 100 else float('inf')
-
-        print(f"{'':<15} {'Structured (50%)':<20} {struct_sparsity:>10.1f}% {struct_ratio:>10.1f}x")
-        print()
-
-    print("💡 Key Insights:")
-    print("   • Magnitude pruning achieves higher sparsity (80%+)")
-    print("   • Structured pruning creates hardware-friendly patterns")
-    print("   • Larger models compress more effectively")
-    print("   • Compression ratio = 1 / (1 - sparsity)")
-
-if __name__ == "__main__":
-    analyze_compression_techniques()
-
-# %% [markdown]
-"""
-### Knowledge Distillation Analysis
-
-Now let's analyze how knowledge distillation compares to other compression techniques for different compression ratios and accuracy preservation goals.
-"""
-
-# %%
-def analyze_distillation_effectiveness():
-    """📊 Analyze knowledge distillation compression and accuracy trade-offs."""
-    print("\n📊 Analyzing Knowledge Distillation Effectiveness")
-    print("=" * 60)
-
-    # Simulate teacher-student scenarios
-    scenarios = [
-        ("Large→Small", 100_000, 10_000, 0.95, 0.90, 10.0),
-        ("Medium→Tiny", 50_000, 5_000, 0.92, 0.87, 10.0),
-        ("Small→Micro", 10_000, 1_000, 0.88, 0.83, 10.0),
-    ]
-
-    print(f"\n{'Scenario':<15} {'Teacher':<12} {'Student':<12} {'Ratio':<10} {'Acc Loss':<10}")
-    print("-" * 60)
-
-    for name, teacher_params, student_params, teacher_acc, student_acc, compression in scenarios:
-        acc_retention = (student_acc / teacher_acc) * 100
-        acc_loss = teacher_acc - student_acc
-
-        print(f"{name:<15} {teacher_params:>10,}p {student_params:>10,}p {compression:>8.1f}x {acc_loss*100:>8.1f}%")
-
-    print("\n💡 Knowledge Distillation Insights:")
-    print("   • Achieves 10x+ compression with 5-10% accuracy loss")
-    print("   • Student learns teacher's 'soft' predictions")
-    print("   • More effective than naive pruning for large reductions")
-    print("   • Requires retraining (unlike pruning/quantization)")
-    print("\n🚀 Best Use Case:")
-    print("   Deploy small student models on edge devices")
-    print("   Train expensive teacher once, distill many students")
-
-if __name__ == "__main__":
-    analyze_distillation_effectiveness()
-
-# %% [markdown]
-"""
-## 🔧 Consolidated Compression Classes for Export
+### The Compressor Class: Consolidated for Export
 
 Now that we've implemented all compression techniques, let's create a consolidated class
 for export to the tinytorch package. This allows milestones to use the complete compression system.
@@ -1633,24 +1490,17 @@ class Compressor:
         Returns:
             Compressed model with sparsity stats (fractions 0-1)
         """
-        stats = {
-            'original_sparsity': Compressor.measure_sparsity(model)
-        }
-
-        # Apply magnitude pruning
-        if 'magnitude_sparsity' in compression_config:
-            model = Compressor.magnitude_prune(
-                model, compression_config['magnitude_sparsity']
-            )
-
-        # Apply structured pruning
-        if 'structured_prune_ratio' in compression_config:
-            model = Compressor.structured_prune(
-                model, compression_config['structured_prune_ratio']
-            )
-
-        stats['final_sparsity'] = Compressor.measure_sparsity(model)
-        stats['compression_ratio'] = 1.0 / (1.0 - stats['final_sparsity']) if stats['final_sparsity'] < 1.0 else float('inf')
+        key_map = {'magnitude_sparsity': 'magnitude_prune',
+                   'structured_prune_ratio': 'structured_prune'}
+        unknown = set(compression_config) - key_map.keys()
+        if unknown:
+            raise ValueError(f"Unknown compression settings: {sorted(unknown)}")
+        report = compress_model(model, {key_map[k]: v for k, v in compression_config.items()})
+        stats = {'original_sparsity': report['original_sparsity'] / 100.0,
+                 'final_sparsity': report['final_sparsity'] / 100.0}
+        # An ideal nonzero-weight ratio, not actual dense-array byte savings.
+        stats['compression_ratio'] = (1.0 / (1.0 - stats['final_sparsity'])
+                                      if stats['final_sparsity'] < 1.0 else float('inf'))
 
         return model, stats
 
@@ -1659,69 +1509,191 @@ class Compressor:
 
 # %% [markdown]
 """
-## 🔧 Verification: Prove Pruning Works
+## 📊 Systems Analysis: Compression Trade-offs
 
-Before running the full integration test, let's create a verification function that
-proves pruning actually creates zeros using real zero counting.
+Understanding the real-world effectiveness of different compression techniques through systematic measurement and comparison.
+
+The fundamental challenge in model compression is balancing three competing objectives: model size, inference speed, and prediction accuracy.
+"""
+
+# %% [markdown]
+"""
+### Measuring Compression Impact with Profiler
+
+Now let's use the **Profiler** tool from Module 14 to measure the actual parameter reduction from pruning. This demonstrates the complete workflow: profile baseline (M14) → apply compression (M16) → measure impact (M14+M16).
+
+This is the production workflow: measure → prune → validate → deploy.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": false}
+# Import Profiler from Module 14 (already imported above)
+
+def explore_compression_with_profiler():
+    """📊 Demonstrate parameter reduction using Profiler from Module 14."""
+    print("📊 Measuring Compression Impact with Profiler")
+    print("=" * 70)
+
+    profiler = Profiler()
+
+    # Create a simple model (Linear already imported above)
+    model = Linear(512, 256)
+
+    print("\n🏋️  BEFORE: Dense Model")
+    print("-" * 70)
+
+    # Measure baseline
+    param_count_before = profiler.count_parameters(model)
+    sparsity_before = measure_sparsity(model)
+    input_shape = (32, 512)
+    memory_before = profiler.measure_memory(model, input_shape)
+
+    print(f"   Parameters: {param_count_before:,}")
+    print(f"   Sparsity: {sparsity_before:.1f}% (zeros)")
+    print(f"   Memory: {memory_before['parameter_memory_mb']:.2f} MB")
+    print(f"   Active parameters: {int(param_count_before * (1 - sparsity_before / 100)):,}")
+
+    # Apply magnitude pruning
+    target_sparsity = 0.7  # Remove 70% of parameters
+    print(f"\n✂️  Applying {target_sparsity*100:.0f}% Magnitude Pruning...")
+    pruned_model = magnitude_prune(model, sparsity=target_sparsity)  # prunes in place, returns the same model
+
+    print("\n🪶 AFTER: Pruned Model")
+    print("-" * 70)
+
+    # Measure after pruning
+    param_count_after = profiler.count_parameters(pruned_model)
+    sparsity_after = measure_sparsity(pruned_model)
+    memory_after = profiler.measure_memory(pruned_model, input_shape)
+
+    print(f"   Parameters: {param_count_after:,} (same, but many are zero)")
+    print(f"   Sparsity: {sparsity_after:.1f}% (zeros)")
+    print(f"   Memory: {memory_after['parameter_memory_mb']:.2f} MB (same storage)")
+    print(f"   Active parameters: {int(param_count_after * (1 - sparsity_after / 100)):,}")
+
+    print("\n📈 COMPRESSION RESULTS")
+    print("=" * 70)
+    sparsity_gain = sparsity_after - sparsity_before
+    active_before = int(param_count_before * (1 - sparsity_before / 100))
+    active_after = int(param_count_after * (1 - sparsity_after / 100))
+    reduction_ratio = active_before / active_after if active_after > 0 else 1
+    params_removed = active_before - active_after
+
+    print(f"   Sparsity increased: {sparsity_before:.1f}% → {sparsity_after:.1f}%")
+    print(f"   Active params reduced: {active_before:,} → {active_after:,}")
+    print(f"   Parameters removed: {params_removed:,} ({sparsity_gain:.1f}% of total)")
+    print(f"   Compression ratio: {reduction_ratio:.1f}x fewer active parameters")
+
+    print("\n💡 Key Insight:")
+    print(f"   Magnitude pruning removes {sparsity_gain:.0f}% of parameters")
+    print(f"   With sparse storage formats, this means {reduction_ratio:.1f}x less memory!")
+    print(f"   Critical for: edge devices, mobile apps, energy efficiency")
+    print("\n✅ This is the power of compression: remove what doesn't matter!")
+
+if __name__ == "__main__":
+    explore_compression_with_profiler()
+
+# %% [markdown]
+"""
+#### Comparing Compression Techniques
+
+Let's analyze compression ratios across different techniques systematically.
 """
 
 # %%
-#| export
-def verify_pruning_works(model, target_sparsity=0.8):
-    """
-    Verify pruning actually creates zeros using real zero counting.
+def analyze_compression_techniques():
+    """📊 Compare compression ratios across different techniques."""
+    print("📊 Analyzing Compression Techniques")
+    print("=" * 60)
 
-    This is NOT a theoretical calculation - we count actual zero values
-    in parameter arrays and honestly report memory footprint (unchanged with dense storage).
+    # Create baseline model (Linear already imported above)
+    model_configs = [
+        ("Small MLP", [Linear(128, 64), Linear(64, 32)]),
+        ("Medium MLP", [Linear(512, 256), Linear(256, 128)]),
+        ("Large MLP", [Linear(1024, 512), Linear(512, 256)])
+    ]
 
-    Args:
-        model: Model with pruned parameters (Sequential with .parameters())
-        target_sparsity: Expected sparsity ratio (default 0.8 = 80%)
+    print(f"\n{'Model':<15} {'Technique':<20} {'Sparsity':<12} {'Compression':<12}")
+    print("-" * 60)
 
-    Returns:
-        dict: Verification results with sparsity, zeros, total, verified
+    for model_name, layers in model_configs:
+        # Create model with explicit composition
+        model = Sequential(*layers)
+        baseline_params = sum(p.size for p in model.parameters())
 
-    Example:
-        >>> model = Sequential(Linear(100, 50))
-        >>> magnitude_prune(model, sparsity=0.8)
-        >>> results = verify_pruning_works(model, target_sparsity=0.8)
-        >>> assert results['verified']  # Pruning actually works!
-    """
-    print("🧪 Verifying pruning sparsity with actual zero counting...")
+        # Prune a deep copy so each technique starts from the same weights
+        mag_model = Sequential(*copy.deepcopy(layers))
+        magnitude_prune(mag_model, sparsity=0.8)
+        mag_sparsity = measure_sparsity(mag_model)
+        mag_ratio = 1.0 / (1.0 - mag_sparsity / 100) if mag_sparsity < 100 else float('inf')
 
-    # Count actual zeros in model parameters
-    zeros = sum(np.sum(p.data == 0) for p in model.parameters())
-    total = sum(p.data.size for p in model.parameters())
-    sparsity = zeros / total
-    memory_bytes = sum(p.data.nbytes for p in model.parameters())
+        print(f"{model_name:<15} {'Magnitude (80%)':<20} {mag_sparsity:>10.1f}% {mag_ratio:>10.1f}x")
 
-    # Display results
-    print(f"   Total parameters: {total:,}")
-    print(f"   Zero parameters: {zeros:,}")
-    print(f"   Active parameters: {total - zeros:,}")
-    print(f"   Sparsity achieved: {sparsity*100:.1f}%")
-    print(f"   Memory footprint: {memory_bytes / MB_TO_BYTES:.2f} MB (unchanged with dense storage)")
+        struct_model = Sequential(*copy.deepcopy(layers))
+        structured_prune(struct_model, prune_ratio=0.5)
+        struct_sparsity = measure_sparsity(struct_model)
+        struct_ratio = 1.0 / (1.0 - struct_sparsity / 100) if struct_sparsity < 100 else float('inf')
 
-    # Verify target met (allow 15% tolerance for structured pruning variations)
-    verified = abs(sparsity - target_sparsity) < 0.15
-    status = '✓' if verified else '✗'
-    print(f"   {status} Meets {target_sparsity*100:.0f}% sparsity target")
+        print(f"{'':<15} {'Structured (50%)':<20} {struct_sparsity:>10.1f}% {struct_ratio:>10.1f}x")
+        print()
 
-    assert verified, f"Sparsity target not met: {sparsity:.2f} vs {target_sparsity:.2f}"
+    print("💡 Key Insights:")
+    print("   • Magnitude pruning achieves higher sparsity (80%+)")
+    print("   • Structured pruning creates hardware-friendly patterns")
+    print("   • Larger models compress more effectively")
+    print("   • Compression ratio = 1 / (1 - sparsity)")
 
-    print(f"\n✅ VERIFIED: {sparsity*100:.1f}% sparsity achieved")
-    print(f"⚠️ Memory saved: 0 MB (dense numpy arrays)")
-    print(f"💡 LEARNING: Compute savings ~{sparsity*100:.1f}% (skip zero multiplications)")
-    print(f"   In production: Use sparse formats (scipy.sparse.csr_matrix) for memory savings")
+if __name__ == "__main__":
+    analyze_compression_techniques()
 
-    return {
-        'sparsity': sparsity,
-        'zeros': zeros,
-        'total': total,
-        'active': total - zeros,
-        'memory_mb': memory_bytes / MB_TO_BYTES,
-        'verified': verified
-    }
+# %% [markdown]
+"""
+#### Knowledge Distillation Analysis
+
+Now let's analyze how knowledge distillation compares to other compression techniques for different compression ratios and accuracy preservation goals.
+"""
+
+# %%
+def analyze_distillation_effectiveness():
+    """📊 Analyze knowledge distillation compression and accuracy trade-offs."""
+    print("\n📊 Analyzing Knowledge Distillation Effectiveness")
+    print("=" * 60)
+
+    # A big teacher and a small student, both untrained: measure the loss itself
+    teacher = Sequential(Linear(32, 128), ReLU(), Linear(128, 10))
+    student = Sequential(Linear(32, 16), ReLU(), Linear(16, 10))
+    teacher_params = sum(p.size for p in teacher.parameters())
+    student_params = sum(p.size for p in student.parameters())
+    print(f"\nTeacher: {teacher_params:,} params   Student: {student_params:,} params   "
+          f"({teacher_params / student_params:.1f}x smaller)")
+
+    x = Tensor(rng.standard_normal((16, 32)))
+    labels = rng.integers(0, 10, size=16)
+    teacher_logits = teacher.forward(x)
+    student_logits = student.forward(x)
+
+    print(f"\n{'Temperature':<12} {'Soft (KL)':<12} {'Hard (CE)':<12} {'Combined'}")
+    print("-" * 50)
+
+    for temperature in [1.0, 2.0, 5.0, 10.0]:
+        kd = KnowledgeDistillation(teacher, student, temperature=temperature, alpha=0.7)
+        soft = kd._kl_divergence(kd._softmax(teacher_logits.data / temperature),
+                                 kd._softmax(student_logits.data / temperature))
+        hard = kd._cross_entropy(kd._softmax(student_logits.data), labels)
+        combined = kd.distillation_loss(student_logits, teacher_logits, labels)
+        print(f"{temperature:<12.1f} {soft:<12.4f} {hard:<12.4f} {combined.data:.4f}")
+
+    print("\n💡 Knowledge Distillation Insights:")
+    print("   • Higher temperature flattens both distributions, so the KL term shrinks;")
+    print("     Hinton et al. scale it by T² to compensate (omitted here for clarity)")
+    print("   • The soft term carries the teacher's ranking of wrong answers, not just the right one")
+    print("   • More effective than naive pruning for large reductions")
+    print("   • Requires retraining (unlike pruning/quantization)")
+    print("\n🚀 Best Use Case:")
+    print("   Deploy small student models on edge devices")
+    print("   Train expensive teacher once, distill many students")
+
+if __name__ == "__main__":
+    analyze_distillation_effectiveness()
 
 # %% [markdown]
 """
@@ -1839,7 +1811,7 @@ def test_module():
 
 Answer these to deepen your understanding of compression techniques and their systems implications:
 
-### 1. Compression Trade-offs
+### Question 1: Compression Trade-offs
 **Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
 
 **Consider**:
@@ -1851,7 +1823,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 2. Structured vs Unstructured Sparsity
+### Question 2: Structured vs Unstructured Sparsity
 **Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
 
 **Consider**:
@@ -1863,7 +1835,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 3. Knowledge Distillation Efficiency
+### Question 3: Knowledge Distillation Efficiency
 **Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
 
 **Calculate**:
@@ -1875,7 +1847,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 4. Low-Rank Decomposition
+### Question 4: Low-Rank Decomposition
 **Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
 
 **Calculate**:
@@ -1888,7 +1860,7 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 ---
 
-### 5. Pruning Strategy Selection
+### Question 5: Pruning Strategy Selection
 **Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
 
 **Consider**:
@@ -1925,7 +1897,7 @@ def demo_compression():
     original_total = layer.weight.data.size
 
     # Apply 50% pruning
-    Compressor.magnitude_prune(layer, sparsity=0.5)
+    magnitude_prune(layer, sparsity=0.5)
 
     pruned_nonzero = np.count_nonzero(layer.weight.data)
     sparsity = 1 - (pruned_nonzero / original_total)

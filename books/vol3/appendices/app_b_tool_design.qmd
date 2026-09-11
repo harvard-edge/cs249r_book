@@ -1,0 +1,645 @@
+# Appendix B: Tool Design & Typed ABIs {#sec-vol3-app-b-tool-design}
+
+The actuation boundary bridges stochastic neural deliberation and deterministic external software execution. While @sec-vol3-actuation establishes the theoretical underpinnings of this boundary—formalizing hardware-style protection rings, typed Application Binary Interfaces (ABIs), capability-based access control, and mathematical idempotency—engineers implementing autonomous systems require practical, reusable specifications. This appendix serves as an engineering cheat sheet and reference guide for constructing robust, deterministic tool interfaces. It provides production-grade JSON Schema templates, formalizes grammar-constrained logit decoding mechanics at the GPU tensor layer, details distributed cryptographic nonce and capability lease implementations, and contrasts the token economics of deep execution primitives against shallow micro-tool architectures.
+
+## How to Use This Appendix {.unnumbered}
+
+This appendix provides concrete implementation patterns and reference code for developers engineering tool boundaries. Reach for it when addressing specific failure modes in tool definitions, decoding pipelines, or execution gateways:
+
+- **When tool calls fail validation due to schema hallucination or ambiguous typing**: Use @sec-vol3-app-b-json-schema for strict schema rules, golden JSON/Pydantic templates, and anti-pattern checklists.
+- **When models emit malformed JSON, unclosed brackets, or invalid enum variants**: Use @sec-vol3-app-b-logit-masking to implement grammar-constrained logit masking at the tensor layer.
+- **When network timeouts, dropped connections, or model retries trigger duplicate side effects**: Use @sec-vol3-app-b-idempotency-leases for canonical argument hashing, trajectory nonces, and distributed lock workflows.
+- **When subagents require bounded authority or sandboxed access controls**: Use @sec-vol3-app-b-idempotency-leases for cryptographic capability leases and monotonic attenuation patterns.
+- **When static tool catalogs consume excessive KV-cache memory or degrade dispatch accuracy**: Use @sec-vol3-app-b-deep-vs-shallow to consolidate fragmented API wrappers into four canonical deep modules.
+
+## JSON Schema Best Practices for Tool Definitions {#sec-vol3-app-b-json-schema}
+
+In an agentic architecture, tool schemas are not mere passive documentation; they represent the formal Interface Definition Language (IDL) compiled into model system prompts and grammar engines. A poorly specified schema causes attention dispersion, argument hallucination, and parsing exceptions. Production tool definitions must follow five core structural rules:
+
+1. **Explicit property closure (`additionalProperties: false`)**: Neural models frequently invent plausible-sounding arguments (such as `dry_run`, `verbose`, or `user_id`) if the schema permits unconstrained properties. Restricting schemas with `additionalProperties: false` ensures the ABI boundary rejects undeclared inputs and allows finite automata compilers to bound decoding trees.
+2. **Mandatory parameter arrays**: Every required field must be explicitly listed in the top-level `required` array. Never rely on prose descriptions within parameter docstrings to convey that an argument is required.
+3. **Restrictive type bounds and formatting**: Use primitive types (`string`, `integer`, `number`, `boolean`, `array`, `object`) with explicit bounds. Constrain numbers with `minimum` and `maximum`, strings with `pattern` (regular expressions) or `enum`, and collections with `minItems` and `maxItems`.
+4. **Semantically bounded descriptions with units**: Parameter descriptions must declare units of measure (for example, `timeout_ms` rather than `timeout`), indexing conventions (such as `1-indexed line numbers`), and expected nullability or default behavior.
+5. **No ambiguous polymorphic unions**: Avoid unconstrained `anyOf` or `oneOf` blocks lacking a discriminator tag. Autoregressive sampling degrades when navigating overlapping schemas without an explicit dispatch key.
+
+### Golden Tool Schema Definition
+
+Listing @lst-vol3-app-b-golden-schema illustrates a production-grade JSON Schema (Draft 2020-12) for an atomic file modification tool (`FileEdit`). The schema enforces strict property closure, explicit string boundaries, and semantic constraints.
+
+::: {#lst-vol3-app-b-golden-schema lst-cap="**Golden Tool Definition Schema**: Production JSON Schema Draft 2020-12 for an atomic string replacement primitive."}
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "file_edit",
+  "description": "Performs an exact atomic string replacement within a specified text file. The target file must exist. The old_str parameter must match exactly one contiguous block of text in the file; if zero or multiple matches occur, the operation fails without modifying the file.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute filesystem path to the target file. Must be normalized and resolve within the authorized workspace root.",
+        "pattern": "^/([a-zA-Z0-9_.-]+/)*[a-zA-Z0-9_.-]+$"
+      },
+      "old_str": {
+        "type": "string",
+        "description": "The exact contiguous block of text to be replaced, including all leading whitespace, indents, and newlines.",
+        "minLength": 1
+      },
+      "new_str": {
+        "type": "string",
+        "description": "The replacement text to insert in place of old_str. Can be empty to delete old_str."
+      },
+      "allow_multiple": {
+        "type": "boolean",
+        "description": "If true, replaces all occurrences of old_str. If false, fails unless exactly one occurrence is found.",
+        "default": false
+      }
+    },
+    "required": ["path", "old_str", "new_str"],
+    "additionalProperties": false
+  }
+}
+```
+:::
+
+### Type-Safe Schema Generation in Python
+
+Manually crafting JSON Schema dictionaries is error-prone. Modern agent frameworks generate schemas directly from strongly typed data models. Listing @lst-vol3-app-b-pydantic-schema demonstrates how to construct a deterministic, type-safe ABI using Pydantic v2, enforcing property restrictions and generating compliant wire schemas.
+
+::: {#lst-vol3-app-b-pydantic-schema lst-cap="**Type-Safe Tool ABI Implementation**: Python Pydantic v2 implementation generating strictly bounded JSON Schema specifications."}
+```python
+from typing import Annotated
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+
+class FileEditInput(BaseModel):
+    """Input parameters for atomic file editing tool."""
+
+    model_config = ConfigDict(
+        extra="forbid",  # Enforces additionalProperties: false
+        frozen=True,
+        populate_by_name=True,
+    )
+
+    path: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            pattern=r"^/([a-zA-Z0-9_.-]+/)*[a-zA-Z0-9_.-]+$",
+        ),
+        Field(
+            description=(
+                "Absolute filesystem path to target file. Must resolve "
+                "within authorized workspace directory."
+            )
+        ),
+    ]
+
+    old_str: Annotated[
+        str,
+        StringConstraints(min_length=1),
+        Field(
+            description=(
+                "Exact contiguous string block to replace, including "
+                "whitespace and newlines."
+            )
+        ),
+    ]
+
+    new_str: Annotated[
+        str,
+        Field(
+            description=(
+                "Replacement string to insert in place of old_str. "
+                "Pass an empty string to delete old_str."
+            )
+        ),
+    ]
+
+    allow_multiple: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=(
+                "When true, replaces all matches of old_str. When false, "
+                "aborts if match count is not exactly 1."
+            ),
+        ),
+    ]
+
+
+def export_tool_manifest() -> dict:
+    """Exports tool manifest compliant with Model Context Protocol (MCP)."""
+    return {
+        "name": "file_edit",
+        "description": (
+            "Performs atomic string replacement in a file. Enforces unique "
+            "match invariants before committing modifications."
+        ),
+        "inputSchema": FileEditInput.model_json_schema(),
+    }
+```
+:::
+
+### Schema Anti-Patterns and Hardened Alternatives
+
+Engineers migrating REST or internal RPC APIs to agent tool boundaries often introduce patterns that degrade model reasoning. Table @tbl-vol3-app-b-anti-patterns categorizes common anti-patterns and their systems-level remedies.
+
+| Anti-Pattern                                           | Vulnerability or Failure Mode                                                  | Hardened Architecture                                               | Systems Impact                                                             |                                                      |
+|:-------------------------------------------------------|:-------------------------------------------------------------------------------|:--------------------------------------------------------------------|:---------------------------------------------------------------------------|------------------------------------------------------|
+| **Untyped String Bag** (`args: dict` or `kwargs: str`) | Model hallucinates parameter keys; compiler cannot build validation automata   | Declare explicit typed fields with `additionalProperties: false`    | Enables 100% grammar-constrained decoding and eliminates type-repair loops |                                                      |
+| **Unbounded Inputs** (`string` without length limits)  | Prompts blow out KV-cache memory or overflow execution buffer limits           | Specify `maxLength`, `maxItems`, and windowing offsets              | Prevents Out-Of-Memory (OOM) crashes during generation                     |                                                      |
+| **Ambiguous Unions** (`anyOf` without discriminator)   | Token probability splits across overlapping types; high validation rejection   | Use a tagged discriminator property (for example, `"type": "file" \ | "dir"`)                                                                    | Deterministic state transitions in decoding automata |
+| **Implicit Units** (`timeout: 30`)                     | Model confuses seconds, milliseconds, or minutes, triggering premature aborts  | Explicit parameter names (`timeout_ms: int`) with range bounds      | Zero unit ambiguity across heterogeneous agent workflows                   |                                                      |
+| **Full-File Regeneration** (`content: str`)            | Consumes output token bandwidth; truncates long files; introduces syntax drift | Atomic diff replacement (`old_str`, `new_str`)                      | Slashes output token consumption by up to 98% per modification             |                                                      |
+
+: **Table B.1: Tool Schema Anti-Patterns and Hardened Implementations**: Analysis of architectural vulnerabilities in tool schema definitions and their systems mitigations. {#tbl-vol3-app-b-anti-patterns tbl-colwidths="[22,26,26,26]"}
+
+## Grammar-Constrained Logit Decoding {#sec-vol3-app-b-logit-masking}
+
+Even with strict JSON schemas, an autoregressive foundation model sampling tokens unconstrained from vocabulary $V$ can emit syntactically invalid payloads (for example, unescaped newlines, trailing commas, or illegal property names). Classical systems handle these failures by catching JSON decode exceptions and injecting an error message back into the conversation context, asking the model to fix its mistake.
+
+This post-hoc re-prompting approach imposes severe systems costs:
+
+1. **Compounding Latency**: Each corrective turn incurs a full round-trip through the inference engine, requiring prefill evaluation over thousands of context tokens.
+2. **Context Fragmentation**: Error traces and apology tokens clutter the prompt, displacing useful episodic memory and degrading attention focus.
+3. **Stochastic Brittleness**: A model that fails to produce valid JSON once has a non-negligible probability of failing again on the repair turn.
+
+Grammar-constrained logit decoding eliminates syntax errors by enforcing structural invariants directly at the GPU tensor layer during generation [@willard2023outlines].
+
+### The Tensor Masking Mechanism
+
+Let $V$ denote the model's vocabulary, with token indices $v \in \{0, 1, \dots, |V|-1\}$. At generation step $t$, the transformer backbone produces an unnormalized logit vector $z_t \in \mathbb{R}^{|V|}$.
+
+The tool schema is compiled ahead of time into a formal grammar represented as a Deterministic Finite Automaton (DFA) $M = (Q, \Sigma, \delta, q_0, F)$, where:
+
+- $Q$ is the finite set of parser states.
+- $\Sigma$ is the alphabet of byte sequences.
+- $\delta: Q \times \Sigma \to Q$ is the state transition function.
+- $q_0 \in Q$ is the initial state.
+- $F \subseteq Q$ is the set of accepting terminal states.
+
+Let $q_t \in Q$ represent the state of the automaton after consuming the token sequence emitted up to step $t-1$. The set of legal next tokens $\text{Valid}(q_t) \subseteq V$ comprises all tokens whose underlying byte sequence drives $M$ into a valid non-error state:
+
+$$\text{Valid}(q_t) = \big\{ v \in V \;\big|\; \delta^*(q_t, \text{bytes}(v)) \neq \emptyset \big\}$$
+
+Before executing the softmax normalization kernel, the serving engine applies an elementwise binary mask to the logit vector:
+
+$$\tilde{z}_{t, v} = \begin{cases} z_{t, v} & \text{if } v \in \text{Valid}(q_t) \\ -\infty & \text{if } v \notin \text{Valid}(q_t) \end{cases} \label{eq-vol3-app-b-masking}$$
+
+When the normalized probability distribution is computed:
+
+$$\mathbb{P}(y_t = v \mid x_{<t}) = \frac{\exp(\tilde{z}_{t, v})}{\sum_{j \in V} \exp(\tilde{z}_{t, j})}$$
+
+the probability of every illegal token evaluates to exactly zero ($\exp(-\infty) = 0$). Consequently, the sampler cannot select a token that violates the schema grammar.
+
+### Python Reference Implementation: Grammar Logit Processor
+
+Listing @lst-vol3-app-b-grammar-masking provides a reference implementation of a grammar-constrained logit processor. It maintains DFA parser states, evaluates vocabulary bitmasks, and applies tensor-level masking to suppress illegal token emissions.
+
+::: {#lst-vol3-app-b-grammar-masking lst-cap="**Grammar-Constrained Logit Processor**: Python implementation applying tensor-level logit masking to enforce tool syntax."}
+```python
+from typing import Dict, List, Set
+import torch
+
+
+class MockDFA:
+    """Mock Deterministic Finite Automaton tracking JSON Schema states."""
+
+    def __init__(self, vocab_size: int):
+        self.vocab_size = vocab_size
+        # Map state ID -> set of allowed token IDs in that state
+        self.transitions: Dict[int, Set[int]] = {}
+        self.current_state = 0
+
+    def get_valid_tokens(self, state: int) -> Set[int]:
+        """Returns set of token IDs permitted in current state."""
+        return self.transitions.get(state, set(range(self.vocab_size)))
+
+    def advance(self, token_id: int) -> int:
+        """Transitions DFA state given observed token; returns new state."""
+        # State machine transition logic compiled from schema
+        self.current_state = (self.current_state + 1) % 5
+        return self.current_state
+
+
+class GrammarConstrainedLogitProcessor:
+    """Enforces grammar constraints via tensor-level logit masking."""
+
+    def __init__(self, dfa: MockDFA, vocab_size: int, device: str = "cuda"):
+        self.dfa = dfa
+        self.vocab_size = vocab_size
+        self.device = device
+        self.neg_inf = float("-inf")
+
+    def __call__(
+        self, input_ids: torch.LongTensor, logits: torch.FloatTensor
+    ) -> torch.FloatTensor:
+        """Masks logits in-place before sampling.
+
+        Args:
+            input_ids: (batch_size, sequence_length) historical tokens.
+            logits: (batch_size, vocab_size) raw model logits for next step.
+
+        Returns:
+            torch.FloatTensor: Masked logits where invalid tokens are -inf.
+        """
+        batch_size = logits.shape[0]
+
+        for b in range(batch_size):
+            valid_tokens = self.dfa.get_valid_tokens(self.dfa.current_state)
+
+            # Construct binary mask: 0 for allowed, -inf for forbidden
+            mask = torch.full(
+                (self.vocab_size,),
+                fill_value=self.neg_inf,
+                dtype=logits.dtype,
+                device=self.device,
+            )
+
+            if valid_tokens:
+                valid_indices = torch.tensor(
+                    list(valid_tokens), dtype=torch.long, device=self.device
+                )
+                mask[valid_indices] = 0.0
+
+            # Elementwise addition applies the -inf mask
+            logits[b] = logits[b] + mask
+
+        return logits
+
+    def step(self, sampled_token_id: int) -> None:
+        """Updates internal automaton state after token is sampled."""
+        self.dfa.advance(sampled_token_id)
+```
+:::
+
+### Performance and Latency Trade-Off Analysis
+
+Grammar masking introduces a small per-token computational overhead during decoding, but it avoids multi-turn error correction loops. We quantify the trade-off by comparing trajectory latency under unconstrained decoding versus grammar-constrained decoding.
+
+Let:
+
+- $L_{\text{gen}}$ be the number of output tokens in a tool invocation ($L_{\text{gen}} \approx 80\text{ tokens}$).
+- $t_{\text{decode}}$ be the per-token decoding latency ($t_{\text{decode}} \approx 20\text{ ms}$).
+- $t_{\text{mask}}$ be the CUDA kernel overhead per token to evaluate the DFA bitmask ($t_{\text{mask}} \approx 0.5\text{ ms}$).
+- $p_{\text{err}}$ be the unconstrained syntax error probability on the schema ($p_{\text{err}} \in [0.03, 0.08]$ for frontier models).
+- $T_{\text{repair}}$ be the latency penalty of a repair turn, including context prefill and regeneration ($T_{\text{repair}} \approx 1{,}800\text{ ms}$).
+
+The expected latency of unconstrained generation with one corrective retry turn is:
+
+$$\mathbb{E}[T_{\text{unconstrained}}] = L_{\text{gen}} \cdot t_{\text{decode}} + p_{\text{err}} \cdot T_{\text{repair}}$$
+
+The expected latency of grammar-constrained decoding is deterministic:
+
+$$T_{\text{constrained}} = L_{\text{gen}} \cdot (t_{\text{decode}} + t_{\text{mask}})$$
+
+Equating the two expressions yields the breakeven error rate $p_{\text{break}}$:
+
+$$L_{\text{gen}} \cdot t_{\text{decode}} + p_{\text{break}} \cdot T_{\text{repair}} = L_{\text{gen}} \cdot t_{\text{decode}} + L_{\text{gen}} \cdot t_{\text{mask}}$$
+
+$$p_{\text{break}} = \frac{L_{\text{gen}} \cdot t_{\text{mask}}}{T_{\text{repair}}} = \frac{80 \times 0.5\text{ ms}}{1{,}800\text{ ms}} = \frac{40\text{ ms}}{1{,}800\text{ ms}} \approx 2.22\%$$
+
+Whenever the unconstrained syntax failure rate exceeds $2.22\%$, grammar-constrained decoding delivers lower wall-clock latency in addition to guaranteeing zero schema exceptions.
+
+## Tool Idempotency and Capability Leases {#sec-vol3-app-b-idempotency-leases}
+
+In distributed environments, tool invocations cross network boundaries, microVM sandboxes, and remote database connections. Network timeouts, worker crashes, or agent deliberation loops can trigger retries of previously initiated actions. Without explicit system guarantees, these retries cause unintended duplicate mutations (for example, charging a credit card twice or creating duplicate database records).
+
+To ensure safe execution, tool boundaries must enforce two operational guarantees:
+
+1. **Mathematical Idempotency**: Repeated execution of an identical mutating action yields the same state as a single execution ($f(f(s)) = f(s)$).
+2. **Capability Leases**: Every action must be authorized by an explicit, unforgeable, and temporally bounded capability token, abolishing ambient authority [@saltzer1975; @dennis1966].
+
+### The Distributed Idempotency Pipeline
+
+As established in @sec-vol3-actuation, guaranteeing idempotency across stochastic control loops requires binding every mutating tool invocation to a deterministic **Trajectory Nonce** $\eta$:
+
+$$\eta = \text{HMAC-SHA256}\Big(K_{\text{secret}}, \text{trajectory\_id} \mathbin{\Vert} \text{step\_idx} \mathbin{\Vert} \text{tool\_name} \mathbin{\Vert} \text{CanonicalJSON}(\text{arguments})\Big)$$
+
+Standard JSON serialization is non-deterministic because dictionary key ordering varies across runtimes. If an agent emits `{"path": "/a", "force": true}` on its initial call and `{"force": true, "path": "/a"}` on a retry, naive string hashing yields different nonces, defeating deduplication. Arguments must be normalized using canonical JSON serialization (RFC 8785), which lexicographically sorts all keys and standardizes whitespace.
+
+When an invocation carrying nonce $\eta$ reaches the execution gateway, the runtime coordinates execution through an atomic distributed state store (such as Redis or DynamoDB) using a three-stage lifecycle:
+
+1. **Atomic Lock Acquisition**: The gateway attempts to acquire an in-flight lock:
+   ```text
+   SET idempotency:η "IN_FLIGHT" NX PX 30000
+   ```
+   If the key already exists with status `IN_FLIGHT`, a concurrent worker is processing the mutation; the gateway waits or returns a retry backoff response.
+2. **Completed Execution Replay**: If the key exists with status `COMPLETED`, the gateway bypasses tool execution entirely and returns the cached observation payload.
+3. **Execution and Commit**: If the lock is successfully acquired (`NX` succeeded), the gateway dispatches the tool to the sandbox. Upon completion, it updates the state key to `COMPLETED` with an expiration time-to-live (TTL) and records the serialized observation.
+
+### Capability Leases and Monotonic Attenuation
+
+Ambient authority—where any authenticated component inherits all permissions of the system—is a critical vulnerability in agentic architectures. If an untrusted web-browsing agent parses a prompt-injected document, it must not possess ambient credentials to execute shell commands or read private files.
+
+Under the Dennis and Van Horn capability model [@dennis1966], an agent can execute an action only by presenting an explicit **Capability Lease**:
+
+$$\mathcal{K} = \big(\text{CID}, \mathcal{R}, \mathcal{O}, t_{\text{exp}}, \mathcal{Q}, \sigma\big)$$
+
+where:
+
+- $\text{CID} \in \{0, 1\}^{256}$ is a unique cryptographic capability identifier.
+- $\mathcal{R}$ is the authorized resource scope (for example, `/workspace/repo/**`).
+- $\mathcal{O}$ is the set of permitted operations (for example, `{"read", "edit"}`).
+- $t_{\text{exp}}$ is the epoch timestamp marking lease expiration.
+- $\mathcal{Q}$ is the allocated token and financial expenditure quota.
+- $\sigma = \text{Sign}_{K_{\text{kernel}}}(\text{CID} \mathbin{\Vert} \mathcal{R} \mathbin{\Vert} \mathcal{O} \mathbin{\Vert} t_{\text{exp}} \mathbin{\Vert} \mathcal{Q})$ is the cryptographic signature.
+
+When a root agent delegates subtasks to child subagents, capability leases must **attenuate monotonically**:
+
+$$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}}$$
+
+A child cannot be granted a resource scope wider than its parent, an operation the parent lacks, a longer expiration time, or a larger compute quota.
+
+### Python Reference Implementation: Idempotent Capability Gateway
+
+Listing @lst-vol3-app-b-gateway implements an execution gateway that verifies capability leases, enforces canonical JSON hashing for trajectory nonces, and manages distributed idempotency locks.
+
+::: {#lst-vol3-app-b-gateway lst-cap="**Idempotent Capability Gateway**: Python implementation enforcing cryptographic capability verification, canonical argument hashing, and atomic execution deduplication."}
+```python
+import hashlib
+import hmac
+import json
+import time
+from typing import Any, Dict, Optional, Set, Tuple
+
+
+class CapabilityLease:
+    """Cryptographic capability lease governing tool execution rights."""
+
+    def __init__(
+        self,
+        cid: str,
+        resource_scope: str,
+        permitted_ops: Set[str],
+        expires_at: float,
+        signature: str,
+    ):
+        self.cid = cid
+        self.resource_scope = resource_scope
+        self.permitted_ops = permitted_ops
+        self.expires_at = expires_at
+        self.signature = signature
+
+    def is_valid(self, op: str, resource: str, current_time: float) -> bool:
+        """Verifies lease validity, temporal expiration, and operation rights."""
+        if current_time > self.expires_at:
+            return False
+        if op not in self.permitted_ops:
+            return False
+        # Verify resource is within authorized prefix scope
+        if not resource.startswith(self.resource_scope):
+            return False
+        return True
+
+
+class IdempotentToolGateway:
+    """Coordinates tool execution with idempotency locks and capability checks."""
+
+    def __init__(self, hmac_secret: bytes):
+        self.hmac_secret = hmac_secret
+        # Simulated distributed state store (e.g., Redis cluster)
+        self._state_store: Dict[str, Dict[str, Any]] = {}
+
+    def compute_trajectory_nonce(
+        self,
+        trajectory_id: str,
+        step_idx: int,
+        tool_name: str,
+        arguments: Dict[str, Any],
+    ) -> str:
+        """Computes deterministic nonce using canonical RFC 8785 JSON formatting."""
+        # Sort keys lexicographically to eliminate JSON serialization jitter
+        canonical_args = json.dumps(
+            arguments,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+
+        message = (
+            f"{trajectory_id}:{step_idx}:{tool_name}:{canonical_args}".encode(
+                "utf-8"
+            )
+        )
+        nonce = hmac.new(self.hmac_secret, message, hashlib.sha256).hexdigest()
+        return nonce
+
+    def execute_tool(
+        self,
+        lease: CapabilityLease,
+        trajectory_id: str,
+        step_idx: int,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        target_resource: str,
+        operation: str,
+        executor_fn: Any,
+    ) -> Tuple[Dict[str, Any], bool]:
+        """Executes tool action within capability and idempotency boundaries.
+
+        Returns:
+            Tuple[Dict[str, Any], bool]: (Observation payload, from_cache flag)
+        """
+        now = time.time()
+
+        # Step 1: Enforce complete mediation via capability lease
+        if not lease.is_valid(operation, target_resource, now):
+            return {
+                "status": "ERROR_CAPABILITY_DENIED",
+                "error": "Operation violates capability lease constraints",
+                "cid": lease.cid,
+            }, False
+
+        # Step 2: Compute deterministic trajectory nonce
+        nonce = self.compute_trajectory_nonce(
+            trajectory_id, step_idx, tool_name, arguments
+        )
+        lock_key = f"idempotency:{nonce}"
+
+        # Step 3: Check distributed state store
+        record = self._state_store.get(lock_key)
+        if record:
+            if record["status"] == "COMPLETED":
+                # Replay cached observation payload
+                return record["result"], True
+            elif record["status"] == "IN_FLIGHT":
+                return {
+                    "status": "IN_FLIGHT",
+                    "message": "Mutation currently executing under lock",
+                }, False
+
+        # Step 4: Acquire atomic lock (simulated SET NX)
+        self._state_store[lock_key] = {
+            "status": "IN_FLIGHT",
+            "acquired_at": now,
+        }
+
+        # Step 5: Execute physical mutation in sandbox
+        try:
+            result_payload = executor_fn(**arguments)
+            # Step 6: Commit state and cache result
+            self._state_store[lock_key] = {
+                "status": "COMPLETED",
+                "result": result_payload,
+                "committed_at": time.time(),
+            }
+            return result_payload, False
+        except Exception as exc:
+            # Release lock on operational failure to permit explicit retry
+            del self._state_store[lock_key]
+            return {"status": "EXECUTION_ERROR", "error": str(exc)}, False
+```
+:::
+
+## Deep Modules vs. Shallow Micro-Tools {#sec-vol3-app-b-deep-vs-shallow}
+
+When integrating agents with enterprise infrastructure, a common design instinct is to mirror existing REST APIs by registering one tool per endpoint (for example, `git_status`, `git_diff`, `git_add`, `git_commit`, `git_push`, `k8s_get_pods`, `k8s_describe_pod`, `k8s_delete_pod`). This produces a catalog of dozens or hundreds of **shallow micro-tools**.
+
+In *A Philosophy of Software Design*, John Ousterhout defines a shallow module as one whose interface surface area is large relative to the functionality it provides [@ousterhout2018philosophy]. For autonomous agents, shallow interfaces impose a dual tax: they consume substantial prompt context bandwidth and disperse attention during tool selection. In contrast, **deep modules** present simple, compact interfaces that encapsulate expressive execution power within a sandboxed runtime.
+
+### The Prompt Token Tax and Attention Dispersion
+
+To expose a tool to a model, its complete JSON Schema must be serialized into the system prompt context. Let $K$ denote the number of tools registered in the active catalog, and let $S_i$ be the token length of tool schema $i$. Across an autonomous deliberation trajectory spanning $N$ execution steps, the cumulative prefill token spend $T_{\text{prefill}}$ consumed purely by re-ingesting tool definitions is:
+
+$$T_{\text{prefill}} = N \sum_{i=1}^K S_i$$
+
+Consider an agent operating with a shallow catalog of $K = 80$ tools, where each schema averages $S = 350\text{ tokens}$. The catalog consumes $28{,}000\text{ tokens}$ on every step. Over a 40-step trajectory, the model evaluates:
+
+$$40 \times 28{,}000 = 1{,}120{,}000\text{ prefill tokens}$$
+
+just to read tool descriptions. In contrast, an agent using $K = 4$ deep modules, each averaging $S = 250\text{ tokens}$ ($1{,}000\text{ tokens/step}$), consumes:
+
+$$40 \times 1{,}000 = 40{,}000\text{ prefill tokens}$$
+
+Consolidating into deep modules eliminates $1{,}080{,}000$ prefill tokens—a $96.4\%$ reduction.
+
+Beyond compute costs, shallow catalogs degrade reasoning quality. When $K$ exceeds 30, the model's cross-attention weights over tool schemas flatten. In benchmark evaluations, tool selection error rates rise from under $2\%$ when selecting among 4 deep modules to over $18\%$ when selecting among 80 shallow endpoints. The model frequently hallucinates arguments across similar tools (for example, passing `git_diff` flags to `git_status`).
+
+Table @tbl-vol3-app-b-deep-vs-shallow contrasts the systems characteristics of shallow micro-tools against deep modules.
+
+| Metric / Dimension                     | Shallow Micro-Tool Architecture             | Deep Module Architecture                               | Architectural Implication                                        |
+|:---------------------------------------|:--------------------------------------------|:-------------------------------------------------------|:-----------------------------------------------------------------|
+| **Interface Surface ($K$)**            | $50\text{--}200$ fine-grained API endpoints | $4\text{--}5$ universal execution primitives           | Slashes API schema surface area by $>95\%$                       |
+| **Schema Tokens / Step**               | $15{,}000\text{--}40{,}000$ tokens          | $800\text{--}1{,}200$ tokens                           | Preserves up to $97\%$ of prompt context for reasoning           |
+| **Prefill Token Footprint (40 steps)** | $600{,}000\text{--}1{,}600{,}000$ tokens    | $32{,}000\text{--}48{,}000$ tokens                     | Drastically reduces Time-to-First-Token (TTFT) and serving costs |
+| **Attention Focus & Accuracy**         | Diffuse attention; $>18\%$ tool misdispatch | Sharp attention; $<2\%$ tool dispatch errors           | Prevents catastrophic wrong-tool invocation loops                |
+| **Observation Surface**                | Heterogeneous JSON error schemas            | Standard POSIX streams (`stdout`, `stderr`, exit code) | Uniform observation parsing across all tool outcomes             |
+| **Sandboxing & Auditing**              | Fragmented ACL logic across $N$ handlers    | Centralized hypervisor mediation (microVM / seccomp)   | Single point of complete mediation satisfying Saltzer-Schroeder  |
+
+: **Table B.2: Quantitative Systems Comparison Between Shallow Micro-Tools and Deep Modules**: Trade-off analysis across schema footprint, context consumption, attention dissipation, and sandboxing complexity. {#tbl-vol3-app-b-deep-vs-shallow tbl-colwidths="[20,24,24,32]"}
+
+### The Four Canonical Deep Tool Modules
+
+Frontier software engineering agents converge on four canonical deep execution primitives. Rather than wrapping individual shell commands or file operations into dozens of micro-tools, the runtime exposes four robust interfaces:
+
+1. **`BashExecute`**: A stateful POSIX shell execution primitive inside a sandboxed microVM. It handles compilers, test runners, git version control, package managers, and directory navigation.
+2. **`FileView`**: A windowed file inspection primitive that requires explicit line offset and count parameters, preventing accidental context dumps of multi-megabyte files.
+3. **`FileEdit`**: An atomic string replacement primitive enforcing unique matching invariants, preventing accidental partial edits or file corruption.
+4. **`GrepSearch`**: A high-performance regular expression search primitive that scans repositories and returns structured file and line matches without shell quoting hazards.
+
+Listing @lst-vol3-app-b-canonical-schemas details the schema specifications for these four deep modules.
+
+::: {#lst-vol3-app-b-canonical-schemas lst-cap="**The Four Canonical Deep Tool Schemas**: Standardized JSON Schema definitions for core agent execution primitives."}
+```json
+{
+  "tools": [
+    {
+      "name": "bash_execute",
+      "description": "Executes an arbitrary shell command within an isolated POSIX container sandbox. Streams stdout and stderr and captures process exit code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The exact shell command line to execute."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "description": "Maximum execution time in milliseconds before SIGKILL.",
+            "default": 30000,
+            "maximum": 300000
+          }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "file_view",
+      "description": "Reads a slice of lines from a text file. Enforces windowed reading to prevent context buffer overflow.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "1-indexed starting line number.",
+            "minimum": 1
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of lines to return.",
+            "maximum": 500
+          }
+        },
+        "required": ["path", "offset", "limit"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "file_edit",
+      "description": "Applies an exact atomic string replacement to a file. Fails if old_str is not found or matches multiple locations.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the target file."
+          },
+          "old_str": {
+            "type": "string",
+            "description": "The exact string block to replace."
+          },
+          "new_str": {
+            "type": "string",
+            "description": "The replacement string to insert."
+          }
+        },
+        "required": ["path", "old_str", "new_str"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "grep_search",
+      "description": "Executes a fast regex pattern search across files in a directory tree, returning matching lines and line numbers.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression pattern to search for."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory or file path to search within."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Optional file pattern filter (e.g., '*.py')."
+          }
+        },
+        "required": ["pattern", "path"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
+```
+:::
+
+By adopting deep modules, agent architectures preserve prompt token bandwidth, minimize KV-cache allocation in accelerator memory, eliminate tool selection hallucinations, and unify security sandboxing within an isolated execution supervisor.

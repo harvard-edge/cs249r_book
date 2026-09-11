@@ -102,7 +102,7 @@ class TestFoundationStackStillWorks:
                     # Check gradients exist (optional - autograd may not be complete)
                     # If backward runs without error, that's a pass
                 except (TypeError, AttributeError):
-                    pass  # Autograd not fully implemented
+                    raise
 
         except ImportError as e:
             assert False, f"Foundation import broken: {str(e)}"
@@ -195,7 +195,7 @@ class TestModule07OptimizersCore:
             assert param.data is not None, "Parameter not updated"
 
         except ImportError:
-            assert True, "SGD with momentum not implemented yet (expected)"
+            raise
         except Exception as e:
             assert False, f"SGD momentum broken: {str(e)}"
 
@@ -236,7 +236,7 @@ class TestModule07OptimizersCore:
                 "Adam step() not updating parameters"
 
         except ImportError:
-            assert True, "Adam optimizer not implemented yet (expected)"
+            raise
         except Exception as e:
             assert False, f"Adam optimizer broken: {str(e)}"
 
@@ -379,7 +379,7 @@ class TestOptimizerIntegration:
                     try:
                         loss.backward()
                     except (TypeError, AttributeError):
-                        pass  # Autograd not fully implemented
+                        raise
 
                 optimizer.step()
 

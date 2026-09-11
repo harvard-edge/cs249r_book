@@ -15,7 +15,7 @@ rng = np.random.default_rng(7)
 import pytest
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 
 class TestConv2dOperations:
@@ -54,7 +54,6 @@ class TestConv2dOperations:
             f"Expected edge response ~3.0, got {output.data[0, 0, 0, 0]}"
 
         print("✅ Conv2d actually performs convolution (not just shape manipulation)")
-        return True
 
     def test_conv2d_shape_transformations(self):
         """Test that Conv2d produces correct output shapes for various configurations."""
@@ -74,7 +73,6 @@ class TestConv2dOperations:
                 f"Conv2d({in_ch}→{out_ch}, k={kernel_size}): expected {expected_shape}, got {output.shape}"
 
         print("✅ Conv2d shape transformations correct for all configurations")
-        return True
 
     def test_conv2d_parameter_count(self):
         """Verify Conv2d has the correct number of parameters."""
@@ -94,7 +92,6 @@ class TestConv2dOperations:
         assert total_params == 448, f"Expected 448 total params, got {total_params}"
 
         print(f"✅ Conv2d parameter count correct: {total_params} params (432 weights + 16 bias)")
-        return True
 
 
 class TestPoolingOperations:
@@ -126,7 +123,6 @@ class TestPoolingOperations:
             f"MaxPool2d not computing max correctly.\nExpected:\n{expected}\nGot:\n{output.data}"
 
         print("✅ MaxPool2d actually computes maximum (not just shape manipulation)")
-        return True
 
     def test_avgpool2d_actually_averages(self):
         """Verify AvgPool2d actually computes averages."""
@@ -154,7 +150,6 @@ class TestPoolingOperations:
             f"AvgPool2d not computing average correctly.\nExpected:\n{expected}\nGot:\n{output.data}"
 
         print("✅ AvgPool2d actually computes averages (not just shape manipulation)")
-        return True
 
     def test_pooling_shape_transformations(self):
         """Test that pooling operations produce correct output shapes."""
@@ -181,22 +176,13 @@ class TestPoolingOperations:
                 f"AvgPool2d: expected {expected_shape}, got {avg_output.shape}"
 
         print("✅ Pooling shape transformations correct for all configurations")
-        return True
 
 
 class TestCNNGradientFlow:
-    """Test that gradients flow correctly through CNN layers.
-
-    NOTE: These tests require full autograd support for Conv2d input gradients,
-    which is an advanced feature not implemented in the educational version.
-    The educational Conv2d supports weight gradients but not input gradients.
-    """
+    """Test input and parameter gradients through CNN layers."""
 
     def test_conv2d_gradient_flow(self):
         """Verify that gradients flow through Conv2d layers correctly."""
-        enable_autograd()
-
-        # Create simple conv layer
         x = Tensor(rng.standard_normal((1, 3, 8, 8)), requires_grad=True)
         conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
         conv.weight.requires_grad = True
@@ -226,13 +212,9 @@ class TestCNNGradientFlow:
         print("✅ Gradients flow through Conv2d layers correctly")
         print(f"   Input grad norm: {np.linalg.norm(x.grad):.4f}")
         print(f"   Weight grad norm: {np.linalg.norm(conv.weight.grad):.4f}")
-        return True
 
     def test_complete_cnn_forward_backward(self):
         """Test complete CNN forward and backward pass with Conv → Pool → Conv."""
-        enable_autograd()
-
-        # Input
         x = Tensor(rng.standard_normal((2, 3, 16, 16)), requires_grad=True)
 
         # Layer 1: Conv2d
@@ -268,7 +250,6 @@ class TestCNNGradientFlow:
         print("✅ Complete CNN (Conv→Pool→Conv) forward/backward pass works")
         print(f"   Shape flow: {x.shape} → {out1.shape} → {out2.shape} → {out3.shape}")
         print(f"   All gradients computed and non-zero")
-        return True
 
 
 class TestCNNNumericalStability:
@@ -283,7 +264,6 @@ class TestCNNNumericalStability:
         # With zero input, output should be just bias (if exists)
         assert output.shape == (1, 16, 6, 6), f"Shape mismatch: {output.shape}"
         print("✅ Conv2d handles zero inputs correctly")
-        return True
 
     def test_pooling_with_negatives(self):
         """Test pooling handles negative values correctly."""
@@ -304,7 +284,6 @@ class TestCNNNumericalStability:
             f"MaxPool2d failed with negatives.\nExpected:\n{expected}\nGot:\n{output.data}"
 
         print("✅ Pooling handles negative values correctly")
-        return True
 
 
 def run_all_tests():
@@ -327,13 +306,11 @@ def run_all_tests():
     pool_tests.test_avgpool2d_actually_averages()
     pool_tests.test_pooling_shape_transformations()
 
-    # Test Gradient Flow (TODO: Add Conv2d backward support)
+    # Test Gradient Flow
     print("\n📦 Testing CNN Gradient Flow...")
-    print("⚠️  Skipping gradient tests - Conv2d backward not yet implemented")
-    print("   (Conv2d forward pass works, but needs autograd integration)")
-    # grad_tests = TestCNNGradientFlow()
-    # grad_tests.test_conv2d_gradient_flow()
-    # grad_tests.test_complete_cnn_forward_backward()
+    grad_tests = TestCNNGradientFlow()
+    grad_tests.test_conv2d_gradient_flow()
+    grad_tests.test_complete_cnn_forward_backward()
 
     # Test Numerical Stability
     print("\n📦 Testing Numerical Stability...")

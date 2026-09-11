@@ -118,8 +118,7 @@ reusable workflow never assumes a particular build tool.
 - One-shot scripts or internal tools that don't get cited or deployed.
 - Documentation that lives inside another project's repo (use the
   outer project's release identity).
-- Anything that doesn't run through a publish workflow at all
-  (Periodic-Table, currently — needs a publish workflow first).
+- Anything that doesn't run through a publish workflow at all.
 
 ## Validating an existing release
 
@@ -139,5 +138,5 @@ print('OK')
 ## See also
 
 - `docs/VERSIONING.md` — contributor-facing how-to
-- `interviews/staffml/src/lib/stats.ts` — StaffML's reference reader
+- `staffml/app/src/lib/stats.ts` — StaffML's reference reader
 - `.github/workflows/_release-publish.yml` — reusable workflow source

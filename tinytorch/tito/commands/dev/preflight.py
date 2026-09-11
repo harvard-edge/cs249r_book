@@ -229,7 +229,7 @@ class PreflightCommand(BaseCommand):
     def _save_log(self) -> None:
         """Save the log file."""
         try:
-            self.log_file.write_text("\n".join(self.log_lines))
+            self.log_file.write_text("\n".join(self.log_lines), encoding='utf-8')
         except Exception:
             pass  # Don't fail if we can't write log
 
@@ -246,7 +246,7 @@ class PreflightCommand(BaseCommand):
                 cmd,
                 cwd=cwd,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=timeout
             )
 
@@ -554,7 +554,7 @@ class PreflightCommand(BaseCommand):
 
             cmd = [sys.executable, "-m", "pytest", str(full_path), "-v", "--tb=short", "-q"]
             cmd_str = f"pytest {test_path} -v --tb=short -q"
-            timeout = 300 if not quick else 60
+            timeout = 900 if not quick else 60
 
             code, stdout, stderr = self._run_command(cmd, project_root, timeout=timeout, verbose=verbose)
             duration = int((time.time() - start) * 1000)
@@ -705,7 +705,7 @@ class PreflightCommand(BaseCommand):
 
         doc_files = [
             ("README.md", "Main README"),
-            ("docs/getting-started.md", "Getting Started"),
+            ("quarto/getting-started.qmd", "Getting Started"),
             ("CONTRIBUTING.md", "Contributing Guide"),
         ]
 

@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/10_tokenization/tokenization_dev.py
+**Learning Side:** You work in modules/10_tokenization/tokenization.ipynb
 **Building Side:** Code exports to tinytorch.core.tokenization
 
 ```python
@@ -55,18 +55,6 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 - **Integration:** Works seamlessly with embeddings and data loading for complete NLP pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| default_exp core.tokenization
-#| export
-
-from collections import Counter
-from typing import Dict, List, Optional, Set, Tuple
-
-import numpy as np
-
-# Constants for memory calculations
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -80,7 +68,7 @@ KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 **TinyTorch Dependencies**:
 - Module 01 (Tensor): Optional - only needed if converting tokens to Tensor format
 
-**Important**: This module focuses on text processing fundamentals that work independently.
+This module focuses on text processing fundamentals that work independently.
 The tokenization algorithms use only standard Python and NumPy.
 
 **Dependency Flow**:
@@ -93,6 +81,15 @@ Module 10 (Tokenization) → Module 11 (Embeddings)
 Students completing this module will have built the text processing foundation
 that enables all NLP tasks in TinyTorch.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.tokenization
+#| export
+
+from collections import Counter
+from typing import Dict, List, Optional, Set, Tuple
+
+import numpy as np
 
 # %% [markdown]
 """
@@ -115,7 +112,9 @@ Consider the sentence: "Hello, world!" - how do we turn this into numbers a neur
 │           │         ['H','e','l','l','o',',', ...']             │
 │           │                                                     │
 │           ├─ Step 2: Map to vocabulary IDs                      │
-│           │         [72, 101, 108, 108, 111, ...]               │
+│           │         [4, 6, 7, 7, 8, ...]                        │
+│           │         (vocab built from this sentence, sorted,    │
+│           │          with <UNK> at 0: ' '=1 '!'=2 ','=3 'H'=4)  │
 │           │                                                     │
 │           ├─ Step 3: Handle unknowns                            │
 │           │         Unknown chars → special <UNK> token         │
@@ -123,7 +122,7 @@ Consider the sentence: "Hello, world!" - how do we turn this into numbers a neur
 │           └─ Step 4: Enable decoding                            │
 │                     IDs → original text                         │
 │                                                                 │
-│  Output (Token IDs):  [72, 101, 108, 108, 111, 44, 32, ...]     │
+│  Output (Token IDs):  [4, 6, 7, 7, 8, 3, 1, 10, 8, 9, 7, 5, 2]  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -191,7 +190,7 @@ Different tokenization approaches make different trade-offs between vocabulary s
 │  │   2 → 'e'                                              │  │
 │  │   3 → 'l'                                              │  │
 │  │   3 → 'l'                                              │  │
-│  │   4 → 'o'                                              │  |
+│  │   4 → 'o'                                              │  │
 │  │                                                        │  │
 │  │  Result: "hello"                                       │  │
 │  └────────────────────────────────────────────────────────┘  │
@@ -201,8 +200,8 @@ Different tokenization approaches make different trade-offs between vocabulary s
 
 **Pros**:
 - Small vocabulary (~100 chars)
-- Handles any text perfectly
-- No unknown tokens (every character can be mapped)
+- Handles any text built from characters it has seen
+- `<UNK>` is rare (a whole character has to be absent from the corpus, not just a word)
 - Simple implementation
 
 **Cons**:
@@ -232,9 +231,9 @@ Text: "tokenization"
        ↓ Character level
 Initial: ['t', 'o', 'k', 'e', 'n', 'i', 'z', 'a', 't', 'i', 'o', 'n']
        ↓ Learn frequent pairs
-Merged: ['to', 'ken', 'ization']
+Merged: ['token', 'ization']
        ↓
-IDs:    [142, 1847, 2341]
+IDs:    [142, 1847]   (illustrative ids from a learned vocabulary)
 ```
 
 **Pros**: Balance between vocabulary size and sequence length
@@ -322,15 +321,17 @@ class Tokenizer:
         """
         Convert text to a list of token IDs.
 
-        TODO: Implement encoding logic in subclasses
+        TODO: Define the interface; the real encoders live in the subclasses
 
         APPROACH:
-        1. Subclasses will override this method
-        2. Return list of integer token IDs
+        1. This base method only states the contract, so raise NotImplementedError
+           with a message that points the caller at CharTokenizer or BPETokenizer
+        2. Each subclass overrides encode() to return a list of integer token IDs
 
         EXAMPLE:
-        >>> tokenizer = CharTokenizer(['a', 'b', 'c'])
-        >>> tokenizer.encode("abc")
+        >>> Tokenizer().encode("abc")
+        NotImplementedError: encode() not implemented in base Tokenizer class ...
+        >>> CharTokenizer(['a', 'b', 'c']).encode("abc")
         [1, 2, 3]
         """
         ### BEGIN SOLUTION
@@ -346,15 +347,17 @@ class Tokenizer:
         """
         Convert list of token IDs back to text.
 
-        TODO: Implement decoding logic in subclasses
+        TODO: Define the interface; the real decoders live in the subclasses
 
         APPROACH:
-        1. Subclasses will override this method
-        2. Return reconstructed text string
+        1. This base method only states the contract, so raise NotImplementedError
+           with a message that points the caller at CharTokenizer or BPETokenizer
+        2. Each subclass overrides decode() to return the reconstructed text
 
         EXAMPLE:
-        >>> tokenizer = CharTokenizer(['a', 'b', 'c'])
-        >>> tokenizer.decode([1, 2, 3])
+        >>> Tokenizer().decode([1, 2, 3])
+        NotImplementedError: decode() not implemented in base Tokenizer class ...
+        >>> CharTokenizer(['a', 'b', 'c']).decode([1, 2, 3])
         "abc"
         """
         ### BEGIN SOLUTION
@@ -617,10 +620,10 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-Character tokenization provides a simple, robust foundation for text processing. The key insight is that with a small vocabulary (typically <100 characters), we can represent any text without unknown tokens.
+Character tokenization provides a simple, robust foundation for text processing. The key insight is that with a small vocabulary (typically <100 characters), we can represent any text drawn from the characters the corpus contained; only a character the corpus never showed falls back to `<UNK>`, which the test above exercised with `'!'`.
 
 **Trade-offs**:
-- **Pro**: No out-of-vocabulary issues, handles any language
+- **Pro**: Out-of-vocabulary is rare (a character has to be unseen, not a word), and any language works once its characters are in the corpus
 - **Con**: Long sequences (1 char = 1 token), limited semantic understanding
 - **Use case**: When robustness is more important than efficiency
 """
@@ -629,7 +632,7 @@ Character tokenization provides a simple, robust foundation for text processing.
 """
 ## 🏗️ Byte Pair Encoding (BPE) Tokenizer
 
-BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It learns to merge frequent character pairs, creating subword units that balance vocabulary size with sequence length.
+BPE is the tokenizer behind the GPT family and Llama (BERT uses WordPiece, a close cousin that picks merges by a different score). It learns to merge frequent character pairs, creating subword units that balance vocabulary size with sequence length.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
@@ -640,26 +643,26 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ ┌───────────────────────────────────────────────────────────────────┐ │
 │ │ Training Data: ["hello", "hello", "help"]                         │ │
 │ │                                                                   │ │
-│ │ Initial Tokens (with end-of-word markers):                        │ │
-│ │   ['h','e','l','l','o</w>']    (hello)                            │ │
-│ │   ['h','e','l','l','o</w>']    (hello)                            │ │
+│ │ Initial Tokens (end-of-word marker fuses to the LAST character,   │ │
+│ │ so 'o</w>' is one token, not 'o' followed by '</w>'):             │ │
+│ │   ['h','e','l','l','o</w>']    (hello, seen twice)                │ │
 │ │   ['h','e','l','p</w>']        (help)                             │ │
 │ │                                                                   │ │
-│ │ Starting Vocab: ['h', 'e', 'l', 'o', 'p', '</w>']                 │ │
-│ │                   ↑ All unique characters                         │ │
+│ │ Starting Vocab: ['<UNK>', 'e', 'h', 'l', 'o</w>', 'p</w>']        │ │
+│ │                     ↑ id 0, then every distinct starting token    │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 2: Count All Adjacent Pairs                                      │
 │ ┌───────────────────────────────────────────────────────────────────┐ │
-│ │ Pair Frequency Analysis:                                          │ │
+│ │ Pair Frequency Analysis (weighted by word frequency):             │ │
 │ │                                                                   │ │
-│ │   ('h', 'e'): ██████  3 occurrences  ← MOST FREQUENT!             │ │
-│ │   ('e', 'l'): ██████  3 occurrences                               │ │
-│ │   ('l', 'l'): ████    2 occurrences                               │ │
-│ │   ('l', 'o'): ████    2 occurrences                               │ │
-│ │   ('o', '<'): ████    2 occurrences                               │ │
-│ │   ('l', 'p'): ██      1 occurrence                                │ │
-│ │   ('p', '<'): ██      1 occurrence                                │ │
+│ │   ('h', 'e')     : ██████  3   ← tied for most frequent           │ │
+│ │   ('e', 'l')     : ██████  3   ← also 3                           │ │
+│ │   ('l', 'l')     : ████    2                                      │ │
+│ │   ('l', 'o</w>') : ████    2                                      │ │
+│ │   ('l', 'p</w>') : ██      1                                      │ │
+│ │                                                                   │ │
+│ │ Ties are broken by first-seen order, so ('h','e') wins here.      │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 3: Merge Most Frequent Pair                                      │
@@ -668,39 +671,49 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 │ │                                                                   │ │
 │ │ BEFORE:                          AFTER:                           │ │
 │ │   ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']            │ │
-│ │   ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']            │ │
 │ │   ['h','e','l','p</w>']      →  ['he','l','p</w>']                │ │
 │ │                                                                   │ │
-│ │ Updated Vocab: ['h','e','l','o','p','</w>', 'he']                 │ │
-│ │                                              ↑ NEW TOKEN!         │ │
+│ │ Updated Vocab: ['<UNK>','e','h','l','o</w>','p</w>', 'he']        │ │
+│ │                                                     ↑ NEW TOKEN   │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ STEP 4: Repeat Until Target Vocab Size Reached                        │
 │ ┌───────────────────────────────────────────────────────────────────┐ │
-│ │ Iteration 2: Next most frequent is ('l', 'l')                     │ │
-│ │ Merge ('l','l') → 'll'                                            │ │
+│ │ Re-count from scratch -- merging changed the pairs. Now:          │ │
 │ │                                                                   │ │
-│ │   ['he','l','l','o</w>']     →  ['he','ll','o</w>']               │ │
-│ │   ['he','l','l','o</w>']     →  ['he','ll','o</w>']               │ │
-│ │   ['he','l','p</w>']         →  ['he','l','p</w>']                │ │
+│ │   ('he', 'l')    : ██████  3   ← the new winner                   │ │
+│ │   ('l', 'l')     : ████    2                                      │ │
+│ │   ('l', 'o</w>') : ████    2                                      │ │
+│ │   ('l', 'p</w>') : ██      1                                      │ │
 │ │                                                                   │ │
-│ │ Updated Vocab: ['h','e','l','o','p','</w>','he','ll']             │ │
-│ │                                                  ↑ NEW!           │ │
+│ │ Merge ('he','l') → 'hel'   (NOT ('l','l'): 3 beats 2, and the     │ │
+│ │ merge you just made creates the next candidate)                   │ │
+│ │                                                                   │ │
+│ │   ['he','l','l','o</w>']  →  ['hel','l','o</w>']                  │ │
+│ │   ['he','l','p</w>']      →  ['hel','p</w>']                      │ │
 │ │                                                                   │ │
 │ │ Continue merging until vocab_size target...                       │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ FINAL RESULTS:                                                        │
 │ ┌───────────────────────────────────────────────────────────────────┐ │
-│ │ Trained BPE can now encode efficiently:                           │ │
+│ │ Merges learned, in order:                                         │ │
+│ │   ('h','e')→'he'  ('he','l')→'hel'  ('hel','l')→'hell'            │ │
+│ │   ('hell','o</w>')→'hello</w>'      ('hel','p</w>')→'help</w>'    │ │
 │ │                                                                   │ │
-│ │ "hello" → ['he', 'll', 'o</w>']  = 3 tokens (vs 5 chars)          │ │
-│ │ "help"  → ['he', 'l', 'p</w>']   = 3 tokens (vs 4 chars)          │ │
+│ │ "hello" → ['hello</w>']   = 1 token (vs 5 chars)                  │ │
+│ │ "help"  → ['help</w>']    = 1 token (vs 4 chars)                  │ │
 │ │                                                                   │ │
-│ │  Key Insights: BPE automatically discovers:                       │ │
-│ │    - Common prefixes ('he')                                       │ │
-│ │    - Morphological patterns ('ll')                                │ │
-│ │    - Natural word boundaries (</w>)                               │ │
+│ │ Both words collapse to a single token, because a two-word corpus  │ │
+│ │ runs out of pairs long before it runs out of vocab budget. That   │ │
+│ │ IS the algorithm working: BPE spends its budget on whatever is    │ │
+│ │ most frequent, and here whole words are. On a real corpus the     │ │
+│ │ budget is exhausted while the frequent pieces are still SUBwords  │ │
+│ │ -- prefixes, suffixes, stems -- which is where the payoff is.     │ │
+│ │                                                                   │ │
+│ │ Key Insight: BPE discovers structure from frequency alone. No     │ │
+│ │ linguist labels 'he' as a prefix; it is merged because it is      │ │
+│ │ common. Scale is what turns that into morphology.                 │ │
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 └───────────────────────────────────────────────────────────────────────┘
@@ -720,14 +733,14 @@ appears across all words, weighted by word frequency. This tells us which pair t
 Count Pairs Across All Words (weighted by frequency):
 
   word_tokens:                     word_freq:
-  "hello" → ['h','e','l','l','o</w>']    freq=3
+  "hello" → ['h','e','l','l','o</w>']    freq=2
   "help"  → ['h','e','l','p</w>']        freq=1
 
   Pair counting (freq-weighted):
-    ('h','e'):  3+1 = 4   ← appears in both words
-    ('e','l'):  3+1 = 4   ← appears in both words
-    ('l','l'):  3   = 3   ← only in "hello"
-    ('l','o</w>'): 3 = 3  ← only in "hello"
+    ('h','e'):  2+1 = 3   ← appears in both words
+    ('e','l'):  2+1 = 3   ← appears in both words
+    ('l','l'):  2   = 2   ← only in "hello"
+    ('l','o</w>'): 2 = 2  ← only in "hello"
     ('l','p</w>'): 1 = 1  ← only in "help"
 ```
 """
@@ -756,7 +769,8 @@ def _count_byte_pairs(word_tokens: Dict[str, List[str]], word_freq: Counter) -> 
     >>> counts[('h', 'e')]
     3
 
-    HINT: For each word, get pairs with a zip-based loop, then add freq to each pair count
+    HINT: For each word, walk i from 0 to len(tokens) - 2 and add freq to the count
+    of (tokens[i], tokens[i + 1])
     """
     ### BEGIN SOLUTION
     pair_counts = Counter()
@@ -841,11 +855,13 @@ Algorithm (linear scan per word):
 #| export
 def _merge_pair(word_tokens: Dict[str, List[str]], pair: Tuple[str, str]) -> str:
     """
-    Merge the most frequent pair in all word token lists.
+    Merge one pair everywhere it occurs in all word token lists.
 
-    Scans through every word's tokens and replaces adjacent occurrences
-    of the pair with a single concatenated token. Modifies word_tokens
-    in place and returns the new merged token string.
+    The caller decides which pair (during training, the most frequent one;
+    during encoding, each learned merge in order). This function scans every
+    word's tokens and replaces adjacent occurrences of the pair with a single
+    concatenated token. Modifies word_tokens in place and returns the new
+    merged token string.
 
     TODO: Merge the given pair in all word token sequences
 
@@ -936,6 +952,26 @@ def test_unit_merge_pair():
 
 if __name__ == "__main__":
     test_unit_merge_pair()
+
+# %% [markdown]
+"""
+### BPETokenizer: Assembling the Pieces
+
+You have built the two halves of BPE separately: `_count_byte_pairs` finds the
+most frequent adjacent pair, and `_merge_pair` applies a merge everywhere it
+occurs. The tokenizer class is the loop that alternates them.
+
+```
+train():   count -> pick the winner -> merge -> repeat until vocab is full
+encode():  split into characters, then REPLAY the learned merges in order
+decode():  look each id up and join
+```
+
+The ordering in `encode` matters more than it looks: merges must be replayed in
+the order they were learned, because later merges were discovered on top of
+earlier ones. Replay them out of order and you get a different tokenization for
+the same text.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "bpe-tokenizer", "solution": true}
 #| export
@@ -1034,6 +1070,11 @@ class BPETokenizer(Tokenizer):
         then runs a greedy merge loop using _count_byte_pairs() to find the
         best pair and _merge_pair() to apply it.
 
+        The corpus is a list of texts. Each text is split on whitespace, exactly
+        as encode() does, so the symbols the trainer merges (with </w> marking
+        each word's last character) are the symbols encode() will later look up.
+        Merges never straddle a word boundary.
+
         TODO: Implement BPE training using the greedy merge loop
 
         APPROACH:
@@ -1059,8 +1100,11 @@ class BPETokenizer(Tokenizer):
         if vocab_size:
             self.vocab_size = vocab_size
 
-        # Count word frequencies and initialize character vocabulary
-        word_freq = Counter(corpus)
+        # Count word frequencies and initialize character vocabulary.
+        # Split each text on whitespace exactly as encode() does, so that the
+        # symbols the trainer merges (with </w> on each word's last character)
+        # are the symbols encode() will later look up.
+        word_freq = Counter(word for text in corpus for word in text.split())
         vocab = set()
         word_tokens = {}
 
@@ -1286,14 +1330,14 @@ BPE provides a balance between vocabulary size and sequence length. By learning 
 ```
 BPE Merging Visualization:
 
-Original: "tokenization" → ['t','o','k','e','n','i','z','a','t','i','o','n','</w>']
+Original: "tokenization" → ['t','o','k','e','n','i','z','a','t','i','o','n</w>']
                                                        ↓ Merge frequent pairs
-Step 1:   ('t','o') is frequent → ['to','k','e','n','i','z','a','t','i','o','n','</w>']
-Step 2:   ('i','o') is frequent → ['to','k','e','n','io','z','a','t','io','n','</w>']
-Step 3:   ('io','n') is frequent → ['to','k','e','n','io','z','a','t','ion','</w>']
-Step 4:   ('to','k') is frequent → ['tok','e','n','io','z','a','t','ion','</w>']
+Step 1:   ('t','o') is frequent → ['to','k','e','n','i','z','a','t','i','o','n</w>']
+Step 2:   ('i','o') is frequent → ['to','k','e','n','io','z','a','t','io','n</w>']
+Step 3:   ('io','n</w>') is frequent → ['to','k','e','n','io','z','a','t','ion</w>']
+Step 4:   ('to','k') is frequent → ['tok','e','n','io','z','a','t','ion</w>']
                                                        ↓ Continue merging...
-Final:    "tokenization" → ['token','ization']  # 2 tokens vs 13 characters!
+Final:    "tokenization" → ['token','ization</w>']  # 2 tokens vs 12 characters!
 ```
 
 **Key insights**:
@@ -1373,7 +1417,6 @@ def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: Lis
     return tokenizer
     ### END SOLUTION
 
-#| export
 def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = None) -> List[List[int]]:
     """
     Tokenize a dataset with optional length limits.
@@ -1397,12 +1440,14 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     - Truncate from the end if too long: tokens[:max_length]
     """
     ### BEGIN SOLUTION
+    if max_length is not None and (not isinstance(max_length, int) or max_length < 0):
+        raise ValueError("max_length must be a nonnegative integer or None")
     tokenized = []
     for text in texts:
         tokens = tokenizer.encode(text)
 
         # Apply length limit
-        if max_length and len(tokens) > max_length:
+        if max_length is not None and len(tokens) > max_length:
             tokens = tokens[:max_length]
 
         tokenized.append(tokens)
@@ -1410,7 +1455,6 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     return tokenized
     ### END SOLUTION
 
-#| export
 def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, float]:
     """
     Analyze tokenization statistics.
@@ -1436,16 +1480,11 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
     - Return dict with vocab_size, avg_sequence_length, max_sequence_length, etc.
     """
     ### BEGIN SOLUTION
-    all_tokens = []
-    total_chars = 0
-
-    for text in texts:
-        tokens = tokenizer.encode(text)
-        all_tokens.extend(tokens)
-        total_chars += len(text)
-
-    # Calculate statistics
-    tokenized_lengths = [len(tokenizer.encode(text)) for text in texts]
+    # Tokenize once, then derive every statistic from the result
+    tokenized = [tokenizer.encode(text) for text in texts]
+    all_tokens = [token for tokens in tokenized for token in tokens]
+    total_chars = sum(len(text) for text in texts)
+    tokenized_lengths = [len(tokens) for tokens in tokenized]
 
     stats = {
         'vocab_size': tokenizer.vocab_size,
@@ -1458,6 +1497,7 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
 
     return stats
     ### END SOLUTION
+
 
 # %% [markdown]
 """
@@ -1534,7 +1574,7 @@ def analyze_tokenization_strategies():
         ("BPE-500", create_tokenizer("bpe", vocab_size=500, corpus=corpus))
     ]
 
-    print(f"{'Strategy':<12} {'Vocab':<8} {'Avg Len':<8} {'Compression':<12} {'Coverage':<10}")
+    print(f"{'Strategy':<12} {'Vocab':<8} {'Avg Len':<8} {'Compression':<12} {'Unique':<10}")
     print("-" * 60)
 
     for name, tokenizer in strategies:
@@ -1551,13 +1591,12 @@ def analyze_tokenization_strategies():
     print("   3. Higher compression ratio = more characters per token = efficiency")
 
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
-    print("   - GPT-3/4 uses ~50K BPE tokens for balance")
+    print("   - GPT-2/3 use ~50K BPE tokens; GPT-4 uses ~100K")
     print("   - Character models need more compute (longer sequences)")
     print("   - Embedding table size scales with vocabulary size")
 
     print("\n" + "=" * 60)
 
-# Run the systems analysis
 if __name__ == "__main__":
     analyze_tokenization_strategies()
 
@@ -1572,6 +1611,8 @@ Let's measure the real memory footprint of different tokenization strategies. Th
 def analyze_tokenization_memory():
     """📊 Measure actual memory usage of different tokenizers."""
     import tracemalloc
+
+    KB_TO_BYTES = 1024
 
     print("📊 Analyzing Tokenization Memory Usage...")
     print("=" * 70)
@@ -1698,16 +1739,21 @@ Let's measure how BPE training time scales with corpus size.
 # %%
 def analyze_bpe_scaling():
     """📊 Analyze how BPE training scales with corpus size."""
+    import string
     import time
+
+    KB_TO_BYTES = 1024
 
     print("📊 Analyzing BPE Training Scaling...")
     print("=" * 70)
 
+    # Seeded locally so the table is reproducible without the package shipping a
+    # module-level generator.
+    rng = np.random.default_rng(7)
+
     # Generate random text helper
     def generate_random_text(length=10):
-        import random
-        import string
-        return ''.join(random.choices(string.ascii_lowercase + ' ', k=length))
+        return ''.join(rng.choice(list(string.ascii_lowercase + ' '), size=length))
 
     corpus_sizes = [100, 500, 1000, 2500]
 
@@ -1733,8 +1779,8 @@ def analyze_bpe_scaling():
         print(f"{size:<15} {train_time:<20.1f} {len(tokenizer.vocab):<15} {memory_kb:<15.1f}")
 
     print("\n💡 Key Insights:")
-    print("- BPE training scales roughly O(n²) with corpus size")
-    print("- Each merge iteration requires counting all pairs in all words")
+    print("- BPE training cost is about (number of merges) x (corpus size)")
+    print("- Each merge iteration rescans every word to count all pairs")
     print("- Memory usage grows linearly with vocabulary size")
     print("- Large corpora (millions of docs) need optimized implementations")
     print("\n🚀 Production strategies:")
@@ -1747,7 +1793,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 📊 Performance Analysis: Vocabulary Size vs Sequence Length
+### Performance Analysis: Vocabulary Size vs Sequence Length
 
 The fundamental trade-off in tokenization creates a classic systems engineering challenge:
 
@@ -1774,7 +1820,7 @@ coverage: 100% →   coverage: 99% →   coverage: 95% →   coverage: <80%
 
 **Real-world scaling examples**:
 ```
-GPT-3/4:     ~50K BPE tokens, avg 3-4 chars/token
+GPT-2/3:     ~50K BPE tokens, avg 3-4 chars/token (GPT-4: ~100K)
 BERT:        ~30K WordPiece tokens, avg 4-5 chars/token
 T5:          ~32K SentencePiece tokens, handles 100+ languages
 ChatGPT:     ~100K tokens with extended vocabulary
@@ -1877,17 +1923,13 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 10")
 
-# Call the comprehensive test only when running directly
-if __name__ == "__main__":
-    test_module()
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of tokenization and its systems implications:
 
-### 1. Vocabulary Size and Storage
+### Question 1: Vocabulary Size and Storage
 **Question**: You implemented tokenizers with different vocabulary sizes.
 
 **Calculate**:
@@ -1902,7 +1944,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 2. Sequence Length Trade-offs
+### Question 2: Sequence Length Trade-offs
 **Question**: Your character tokenizer produces longer sequences than BPE. For the text "machine learning" (16 characters):
 
 **Compare**:
@@ -1919,7 +1961,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 3. Tokenization Coverage and Robustness
+### Question 3: Tokenization Coverage and Robustness
 **Question**: Your BPE tokenizer handles unknown words by decomposing into subwords.
 
 **Consider**:
@@ -1932,7 +1974,7 @@ Answer these to deepen your understanding of tokenization and its systems implic
 
 ---
 
-### 4. Production Scale Considerations
+### Question 4: Production Scale Considerations
 **Question**: A production language model serves 1 million requests per day, each with average 500 tokens.
 
 **Calculate**:
@@ -2014,7 +2056,7 @@ Congratulations! You've built a complete tokenization system for converting text
 ### Systems Insights Discovered
 - **Memory scaling**: Embedding table size = vocab_size x embed_dim (can be 100+ MB)
 - **Sequence length trade-offs**: BPE compresses text, reducing compute by 3-4x
-- **Training complexity**: BPE training scales O(n^2) with corpus size
+- **Training complexity**: BPE training costs about (merges x corpus size), since every merge rescans the corpus
 - **Production patterns**: Rust tokenizers are 10-100x faster than pure Python
 
 ### Ready for Next Steps

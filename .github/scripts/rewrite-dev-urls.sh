@@ -43,6 +43,7 @@ declare -A SUBSITES=(
   [vol1]="vol1"
   [vol2]="vol2"
   [tinytorch]="tinytorch"
+  [physical]="physical"
   [kits]="kits"
   [labs]="labs"
   [mlsysim]="mlsysim"
@@ -136,6 +137,16 @@ find "${FIND_ARGS[@]}" | while IFS= read -r f; do
       replace_url "https://mlsysbook.ai/${key}/" "${ROOT_PREFIX}${dev_path}/" "$f"
     fi
   done
+
+  # The book's release-pill metadata uses a production-root absolute path.
+  # GitHub Pages serves the dev site below /cs249r_book_dev/, so make that
+  # manifest reference relative to the current volume page before deployment.
+  if [[ "$SUBSITE" == "vol1" || "$SUBSITE" == "vol2" ]]; then
+    replace_url \
+      "content=\"/${SUBSITE}/release-manifest.json\"" \
+      "content=\"${SELF_PREFIX}release-manifest.json\"" \
+      "$f"
+  fi
 
   # Catch-all: any remaining mlsysbook.ai/ base URL → dev root.
   # (Used by the navbar title-href and footer site links.)

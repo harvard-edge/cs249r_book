@@ -352,6 +352,8 @@ class DevTestCommand(BaseCommand):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     bufsize=1
                 )
 
@@ -370,6 +372,8 @@ class DevTestCommand(BaseCommand):
                     cwd=project_root,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=600  # 10 minutes for full build
                 )
                 returncode = result.returncode
@@ -464,6 +468,8 @@ class DevTestCommand(BaseCommand):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     bufsize=1
                 )
 
@@ -551,6 +557,8 @@ class DevTestCommand(BaseCommand):
                     env=env,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=timeout
                 )
 
@@ -658,6 +666,8 @@ class DevTestCommand(BaseCommand):
                      "dev", "export", module_num],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     cwd=project_root,
                     timeout=120  # 2 min for export
                 )
@@ -690,6 +700,8 @@ class DevTestCommand(BaseCommand):
                      "module", "complete", module_num],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     cwd=project_root,
                     timeout=300  # 5 min per module
                 )
@@ -917,6 +929,8 @@ class DevTestCommand(BaseCommand):
                      "module", "start", module_num, "--no-jupyter"],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     cwd=project_root,
                     timeout=120
                 )
@@ -951,6 +965,8 @@ class DevTestCommand(BaseCommand):
                      "module", "complete", module_num],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     cwd=project_root,
                     timeout=300
                 )
@@ -1007,6 +1023,8 @@ class DevTestCommand(BaseCommand):
                              "milestone", "run", milestone_id, "--skip-checks"],
                             capture_output=True,
                             text=True,
+                            encoding="utf-8",
+                            errors="replace",
                             cwd=project_root,
                             timeout=300  # 5 min for heavy milestones (CNN, Transformer)
                         )

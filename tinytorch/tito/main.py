@@ -63,7 +63,7 @@ def _get_version() -> str:
         tito_dir = Path(__file__).parent
         pyproject_path = tito_dir.parent / "pyproject.toml"
         if pyproject_path.exists():
-            content = pyproject_path.read_text()
+            content = pyproject_path.read_text(encoding='utf-8')
             for line in content.splitlines():
                 if line.strip().startswith("version"):
                     # Parse: version = "0.1.4"

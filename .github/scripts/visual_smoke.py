@@ -2,7 +2,7 @@
 # =============================================================================
 # Visual Smoke Test — Quarto site rendering sanity check
 # =============================================================================
-# Runs four cheap assertions against a built _build/ directory, at four
+# Runs five cheap assertions against a built _build/ directory, at five
 # viewport widths × light + dark color schemes, on each --page passed in:
 #
 #   1. STYLESHEETS_RESOLVE — every <link rel="stylesheet"> returns 200.
@@ -25,6 +25,11 @@
 #      breakpoint that issues #1 and #2 broke; one assertion proves the
 #      shared navbar is consistent across every site that consumes
 #      shared/config/navbar-common.yml.
+#
+#   5. MARGIN_FLOAT_ALIGNMENT — citation-bearing figures keep their image and
+#      caption aligned with the body column instead of nesting a page grid
+#      inside a body-constrained float. This catches margin notes crowding or
+#      crossing the figure/caption column on desktop book pages.
 #
 # Usage:
 #   visual_smoke.py --build-dir tinytorch/quarto/_build --site tinytorch
@@ -59,7 +64,7 @@ except ImportError:
 
 # Viewport widths chosen to bracket the navbar's xl collapse breakpoint:
 # 1199 → just below collapse, must be hamburger; 1200 → just at, must be expanded.
-VIEWPORTS: list[tuple[int, int]] = [(1400, 900), (1200, 900), (1199, 900), (992, 900)]
+VIEWPORTS: list[tuple[int, int]] = [(1920, 1080), (1400, 900), (1200, 900), (1199, 900), (992, 900)]
 COLOR_SCHEMES: list[str] = ["light", "dark"]
 NAVBAR_EXPANDED_MIN_WIDTH = 1200  # matches collapse-below: xl in navbar-common.yml
 
@@ -94,6 +99,13 @@ class Report:
         }
 
 
+class _QuietHandler(SimpleHTTPRequestHandler):
+    """Serve build artifacts without flooding CI logs with asset requests."""
+
+    def log_message(self, format: str, *args) -> None:
+        return
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -103,7 +115,7 @@ def _free_port() -> int:
 @contextlib.contextmanager
 def _serve(directory: Path, port: int):
     """Boot a SimpleHTTPServer rooted at directory; teardown on exit."""
-    handler = lambda *a, **kw: SimpleHTTPRequestHandler(*a, directory=str(directory), **kw)  # noqa: E731
+    handler = lambda *a, **kw: _QuietHandler(*a, directory=str(directory), **kw)  # noqa: E731
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -117,12 +129,13 @@ def _serve(directory: Path, port: int):
 
 
 def _check_page(page, base_url: str, page_path: str, vp: tuple[int, int], scheme: str, report: Report) -> None:
-    """Run all four assertions on one (page, viewport, scheme) tuple."""
+    """Run all five assertions on one (page, viewport, scheme) tuple."""
     url = base_url.rstrip("/") + page_path
     console_errors: list[str] = []
     page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
 
-    page.goto(url, wait_until="networkidle", timeout=30000)
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(250)
 
     # 1. STYLESHEETS_RESOLVE — every <link rel=stylesheet> returns 200.
     css_results = page.evaluate(
@@ -185,14 +198,64 @@ def _check_page(page, base_url: str, page_path: str, vp: tuple[int, int], scheme
                        f"width={vp[0]}: expected collapsed={expected_collapsed}, "
                        f"actual collapsed={actually_collapsed} (toggler visible={nav_state['togglerVisible']})")
 
+    if vp[0] >= 1600:
+        _check_margin_float_alignment(page, page_path, vp, scheme, report)
+
+
+def _check_margin_float_alignment(page, page_path: str, vp: tuple[int, int], scheme: str,
+                                  report: Report) -> None:
+    """Flag nested Quarto grids that shift citation-bearing floats off the body track."""
+    issues = page.evaluate(
+        """() => {
+          return Array.from(document.querySelectorAll('.quarto-float.page-columns.page-full'))
+            .filter(float => float.querySelector('.column-margin'))
+            .map(float => {
+              const rect = float.getBoundingClientRect();
+              return {
+                id: float.id || '(unnamed float)',
+                left: rect.left,
+                width: rect.width,
+                viewportWidth: document.documentElement.clientWidth,
+              };
+            })
+            .filter(item => item.width < item.viewportWidth * 0.8);
+        }"""
+    )
+    if issues:
+        details = ", ".join(
+            f"{item['id']} constrained to {item['width']:.1f}px "
+            f"at x={item['left']:.1f} (viewport={item['viewportWidth']:.0f}px)"
+            for item in issues[:3]
+        )
+        report.add(page_path, vp, scheme, "MARGIN_FLOAT_ALIGNMENT", details)
+
+
+def _load_book_page_with_retry(page, url: str) -> None:
+    """Load a large book page, retrying once after a transient navigation timeout."""
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    except Exception:
+        page.goto("about:blank", wait_until="commit", timeout=5000)
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run visual smoke checks against a built Quarto site.")
     parser.add_argument("--build-dir", type=Path, required=True, help="Path to _build/ directory")
     parser.add_argument("--site", required=True, help="Site name (for the report)")
-    parser.add_argument("--pages", nargs="+", default=["/index.html"], help="Page paths to check (default: /index.html)")
+    parser.add_argument(
+        "--pages",
+        nargs="*",
+        default=["/index.html"],
+        help="Page paths to check (default: /index.html; pass no values for an all-page layout-only scan)",
+    )
     parser.add_argument("--report-dir", type=Path, default=Path("_smoke-report"), help="Where to write results.json + failure screenshots")
     parser.add_argument("--port", type=int, default=0, help="Port to serve on (0 = pick free port)")
+    parser.add_argument(
+        "--scan-all-book-pages",
+        action="store_true",
+        help="At 1920px, scan every built HTML page for citation-bearing float alignment",
+    )
     args = parser.parse_args()
 
     if not args.build_dir.is_dir():
@@ -217,6 +280,12 @@ def main() -> int:
                                 viewport={"width": vp[0], "height": vp[1]},
                                 color_scheme=scheme,
                             )
+                            ctx.route(
+                                "**/*",
+                                lambda route: route.fulfill(status=204, body="")
+                                if route.request.resource_type == "media"
+                                else route.continue_(),
+                            )
                             page = ctx.new_page()
                             try:
                                 _check_page(page, base_url, page_path, vp, scheme, report)
@@ -230,6 +299,46 @@ def main() -> int:
                             finally:
                                 ctx.close()
                             report.matrix_runs += 1
+
+                if args.scan_all_book_pages:
+                    discovered = sorted(
+                        "/" + path.relative_to(args.build_dir).as_posix()
+                        for path in args.build_dir.rglob("*.html")
+                        if "site_libs" not in path.parts
+                    )
+                    report.pages_checked += len(discovered)
+                    ctx = browser.new_context(
+                        viewport={"width": 1920, "height": 1080},
+                        color_scheme="light",
+                    )
+                    ctx.route(
+                        "**/*",
+                        lambda route: route.fulfill(status=204, body="")
+                        if route.request.resource_type == "media"
+                        else route.continue_(),
+                    )
+                    page = ctx.new_page()
+                    try:
+                        for page_path in discovered:
+                            try:
+                                _load_book_page_with_retry(
+                                    page, base_url.rstrip("/") + page_path
+                                )
+                                page.wait_for_timeout(100)
+                                _check_margin_float_alignment(
+                                    page, page_path, (1920, 1080), "light", report
+                                )
+                            except Exception as exc:
+                                report.add(
+                                    page_path,
+                                    (1920, 1080),
+                                    "light",
+                                    "PAGE_LOAD",
+                                    f"{type(exc).__name__}: {exc}",
+                                )
+                            report.matrix_runs += 1
+                    finally:
+                        ctx.close()
             finally:
                 browser.close()
 

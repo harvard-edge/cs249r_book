@@ -214,7 +214,7 @@ tco = EconomicsModel().solve(fleet, duration_days=365, mfu=0.4)
 | A100 | 312 | 80 | 2.0 | 400 |
 | H100 | 989 | 80 | 3.35 | 700 |
 | H200 | 989 | 141* | 4.8 | 700 |
-| B200 | 2,250 | 192 | 8.0 | 1,000 |
+| B200 | 2,250 | 180 | 8.0 | 1,000 |
 | nRF52840 | 0.000064 | 0.001 (1 MB flash) | 0.000064 | 0.015 |
 
 *H200 capacity listed as 141 GB in registry (non-binary).

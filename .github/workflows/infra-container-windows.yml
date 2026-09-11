@@ -14,12 +14,12 @@ name: '🔧 Infra · 🐳 Container (Windows)'
 #   4. SUMMARY          — Report build status and image metadata
 #
 # Triggers:
-#   - push (dev): Changes to book/tools/dependencies/ or book/docker/windows/
+#   - push (dev): Changes to binder/tools/dependencies/ or binder/docker/windows/
 #   - schedule: Weekly rebuild (Sunday 2am UTC, after Linux container)
 #   - workflow_dispatch: Manual with force_rebuild, no_cache options
 #   - workflow_call: Reusable by other workflows
 #
-# Deploys to: ghcr.io/harvard-edge/mlsysbook/quarto-windows:latest
+# Deploys to: ghcr.io/harvard-edge/mlsysbooks/-windows:latest
 # Secrets:    GITHUB_TOKEN (automatic)
 # Vars:       BOOK_DOCKER
 #
@@ -106,17 +106,17 @@ on:
   push:
     branches: [dev]  # Only trigger on dev branch, not main
     paths:
-      - 'book/tools/dependencies/**'
-      - 'book/docker/windows/**'
+      - 'binder/tools/dependencies/**'
+      - 'binder/docker/windows/**'
       - '.github/workflows/book-build-windows-container.yml'
 
 env:
   # =============================================================================
-  # PATH CONFIGURATION - Uses GitHub Repository Variables (Settings > Variables)
+  # PATHS
   # =============================================================================
-  # MLSysBook content lives under book/ to accommodate TinyTorch at root
-  # Use ${{ vars.BOOK_ROOT }}, ${{ vars.BOOK_DOCKER }}, etc. in workflow steps
-  # Variables: BOOK_ROOT, BOOK_DOCKER, BOOK_TOOLS, BOOK_QUARTO, BOOK_DEPS
+  # Directory paths are written literally (books/, binder/, packages/, ...).
+  # Repository variables are shared by every branch while the layout is
+  # versioned per branch, and fork pull requests receive no variables at all.
 
   # Container Registry Configuration (configurable via inputs)
   REGISTRY: ${{ (github.event_name == 'workflow_dispatch' && inputs.container_registry) || 'ghcr.io' }}
@@ -124,8 +124,7 @@ env:
   CONTAINER_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.container_tag) || 'latest' }}
 
   # Container Build Configuration
-  # Using vars.BOOK_DOCKER (repository variable) - works in all contexts
-  DOCKERFILE_PATH: ./${{ vars.BOOK_DOCKER }}/windows/Dockerfile
+  DOCKERFILE_PATH: ./binder/docker/windows/Dockerfile
   CONTEXT_PATH: .
 
 jobs:
@@ -236,10 +235,49 @@ jobs:
           tags: |
             type=raw,value=${{ env.CONTAINER_TAG }}
 
+      - name: 🔓 Allow non-distributable layers to reach the registry
+        shell: pwsh
+        run: |
+          # The image is built FROM mcr.microsoft.com/windows/server, whose base
+          # layers are marked non-distributable. Docker refuses to upload those
+          # by default, so the manifest lands at GHCR referencing blobs the
+          # registry never received and the push ends in "unknown blob" after a
+          # two-hour build. Opting in for this registry uploads them instead.
+          $configDir = "C:\ProgramData\Docker\config"
+          $configPath = Join-Path $configDir "daemon.json"
+          New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+
+          if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+          } else {
+            $config = [PSCustomObject]@{}
+          }
+
+          $registries = @("${{ env.REGISTRY }}")
+          $config | Add-Member -NotePropertyName "allow-nondistributable-artifacts" `
+                               -NotePropertyValue $registries -Force
+
+          $config | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding utf8
+          Write-Host "📄 daemon.json:"
+          Get-Content $configPath | Write-Host
+
+          Restart-Service docker
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Get-Date) -lt $deadline) {
+            docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 3
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Docker daemon did not come back after restart"
+            exit 1
+          }
+          Write-Host "✅ Docker daemon restarted with $($registries -join ', ') allowed"
+
       - name: 🐳 Build and Push Windows container
         id: build
         shell: pwsh
-        # Use native Docker instead of book/docker/build-push-action for Windows containers
+        # Use native Docker instead of binder/docker/build-push-action for Windows containers
         # Buildx has compatibility issues with Windows containers on GitHub Actions
         run: |
           # Extract image name and tag from metadata

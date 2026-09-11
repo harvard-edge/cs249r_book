@@ -29,11 +29,9 @@ from tinytorch.core.activations import ReLU, Sigmoid, Softmax
 from tinytorch.core.losses import MSELoss, BinaryCrossEntropyLoss, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
 from tinytorch.core.spatial import Conv2d, MaxPool2d
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Enable autograd
-enable_autograd()
-
 def test_simple_linear_gradient_flow():
     """Test gradients flow through a single linear layer"""
     print("\n" + "="*70)
@@ -84,7 +82,6 @@ def test_simple_linear_gradient_flow():
     assert input_grad_norm > 1e-6, f"Input gradients too small: {input_grad_norm}"
 
     print("\n✅ TEST PASSED: Gradients flow correctly through linear layer")
-    return True
 
 
 def test_mlp_gradient_flow():
@@ -148,7 +145,6 @@ def test_mlp_gradient_flow():
     assert l2_bias_norm > 1e-6, "Layer2 bias gradients too small"
 
     print("\n✅ TEST PASSED: Gradients flow correctly through MLP")
-    return True
 
 
 def test_mlp_training_updates():
@@ -207,7 +203,6 @@ def test_mlp_training_updates():
     assert reduction_pct > 10, f"Loss reduction too small: {reduction_pct:.1f}%"
 
     print("\n✅ TEST PASSED: MLP learns successfully (loss decreases)")
-    return True
 
 
 def test_cnn_gradient_flow():
@@ -277,7 +272,6 @@ def test_cnn_gradient_flow():
     assert linear_grad_norm > 1e-6, f"Linear gradients too small: {linear_grad_norm}"
 
     print("\n✅ TEST PASSED: Gradients flow correctly through CNN")
-    return True
 
 
 def test_cnn_training_updates():
@@ -351,7 +345,6 @@ def test_cnn_training_updates():
     assert final_loss < initial_loss, f"Loss didn't decrease! Initial: {initial_loss}, Final: {final_loss}"
 
     print("\n✅ TEST PASSED: CNN learns successfully (loss decreases)")
-    return True
 
 
 def test_gradient_accumulation():
@@ -396,7 +389,6 @@ def test_gradient_accumulation():
     assert grad_diff > 1e-6, "Gradients didn't accumulate properly"
 
     print("\n✅ TEST PASSED: Gradients accumulate correctly")
-    return True
 
 
 def main():

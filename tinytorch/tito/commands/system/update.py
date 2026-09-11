@@ -104,7 +104,7 @@ class UpdateCommand(BaseCommand):
             result = subprocess.run(
                 ['curl', '-fsSL', '--max-time', '10', self.TAGS_API],
                 capture_output=True,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
 
             if result.returncode != 0:
@@ -203,7 +203,7 @@ class UpdateCommand(BaseCommand):
                     str(repo_dir)
                 ],
                 capture_output=True,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
 
             if result.returncode != 0:
@@ -215,7 +215,7 @@ class UpdateCommand(BaseCommand):
             result = subprocess.run(
                 ['git', 'sparse-checkout', 'set', self.SPARSE_PATH],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 cwd=repo_dir
             )
 

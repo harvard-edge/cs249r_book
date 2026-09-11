@@ -1,0 +1,118 @@
+import os
+
+# Define output paths
+repo_dir = "../../"
+images_dir = os.path.join(os.path.dirname(__file__), "")
+svg_dir = os.path.join(images_dir, "svg")
+svg_path = os.path.join(svg_dir, "fig03_vla_architecture.svg")
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600">
+    <defs>
+        <!-- Arrowhead markers -->
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#2D3748" />
+        </marker>
+        <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#A51C30" />
+        </marker>
+    </defs>
+
+    <rect width="1000" height="600" fill="#ffffff" />
+    
+    <!-- Title -->
+    <text x="500" y="40" font-family="sans-serif" font-size="24" font-weight="bold" fill="#1F407A" text-anchor="middle">Embodied Foundation Model Architecture</text>
+    
+    <!-- Inputs Area -->
+    <g transform="translate(40, 80)">
+        <text x="100" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Inputs</text>
+        
+        <rect x="0" y="20" width="200" height="60" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+        <text x="100" y="55" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Multi-view Cameras</text>
+
+        <rect x="0" y="100" width="200" height="60" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+        <text x="100" y="135" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Language Instructions</text>
+
+        <rect x="0" y="180" width="200" height="60" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+        <text x="100" y="215" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Proprioceptive State</text>
+    </g>
+
+    <!-- Encoders -->
+    <g transform="translate(300, 80)">
+        <text x="80" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Encoders</text>
+        
+        <rect x="0" y="20" width="160" height="140" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <text x="80" y="90" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">Vision &amp; Lang</text>
+        <text x="80" y="115" font-family="sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">Encoders</text>
+
+        <rect x="0" y="180" width="160" height="60" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <text x="80" y="215" font-family="sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">State Encoder</text>
+    </g>
+
+    <!-- Backbone -->
+    <g transform="translate(520, 80)">
+        <text x="80" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Backbone</text>
+        
+        <rect x="0" y="20" width="160" height="220" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <text x="80" y="125" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">Transformer</text>
+        <text x="80" y="150" font-family="sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">Backbone</text>
+    </g>
+
+    <!-- Decoders -->
+    <g transform="translate(740, 80)">
+        <text x="90" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Unprivileged Decoders</text>
+        
+        <rect x="10" y="20" width="160" height="100" fill="#E2E8F0" stroke="#2D3748" stroke-width="2" stroke-dasharray="4"/>
+        <text x="90" y="70" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Navigation</text>
+        <text x="90" y="90" font-family="sans-serif" font-size="14" fill="#1F407A" text-anchor="middle">(Proposes)</text>
+
+        <rect x="10" y="140" width="160" height="100" fill="#E2E8F0" stroke="#2D3748" stroke-width="2" stroke-dasharray="4"/>
+        <text x="90" y="190" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Manipulation</text>
+        <text x="90" y="210" font-family="sans-serif" font-size="14" fill="#1F407A" text-anchor="middle">(Proposes)</text>
+    </g>
+
+    <!-- Safety Monitors & Actuators -->
+    <g transform="translate(50, 390)">
+        <text x="450" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#A51C30" text-anchor="middle">Real-time Execution (1000 Hz)</text>
+        
+        <rect x="250" y="20" width="400" height="80" fill="#ffffff" stroke="#A51C30" stroke-width="3"/>
+        <text x="450" y="55" font-family="sans-serif" font-size="18" font-weight="bold" fill="#A51C30" text-anchor="middle">Real-time Safety Monitors</text>
+        <text x="450" y="80" font-family="sans-serif" font-size="14" fill="#2D3748" text-anchor="middle">Gates Execution / Prevents Unsafe Actions</text>
+        
+        <rect x="750" y="20" width="160" height="80" fill="#2D3748" stroke="#1F407A" stroke-width="2"/>
+        <text x="830" y="65" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">Actuators</text>
+    </g>
+
+    <!-- Arrows from Inputs to Encoders -->
+    <path fill="none" d="M 240 130 L 295 130" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
+    <path fill="none" d="M 240 210 L 295 210" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
+    <path fill="none" d="M 240 290 L 295 290" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/> 
+
+    <!-- Arrows from Encoders to Backbone -->
+    <path fill="none" d="M 460 170 L 515 170" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path fill="none" d="M 460 290 L 490 290 L 490 230 L 515 230" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- Arrows from Backbone to Decoders -->
+    <path fill="none" d="M 680 150 L 745 150" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+    <path fill="none" d="M 680 270 L 745 270" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- Arrows from Decoders to Monitors -->
+    <path fill="none" d="M 830 320 L 830 360 L 500 360 L 500 405" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- Arrows from Monitors to Actuators -->
+    <path fill="none" d="M 700 450 L 795 450" stroke="#A51C30" stroke-width="3" marker-end="url(#arrow-red)"/>
+    <text x="750" y="440" font-family="sans-serif" font-size="12" font-weight="bold" fill="#A51C30" text-anchor="middle">Commands</text>
+    
+    <!-- Legend / Quote -->
+    <rect x="200" y="520" width="600" height="40" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="1"/>
+    <text x="500" y="545" font-family="sans-serif" font-size="14" font-style="italic" fill="#2D3748" text-anchor="middle">"Everything upstream of the monitors proposes, and nothing upstream of them commands."</text>
+
+</svg>"""
+
+def main():
+    os.makedirs(svg_dir, exist_ok=True)
+    with open(svg_path, "w") as f:
+        f.write(svg_content)
+    print(f"Generated {svg_path}")
+
+if __name__ == "__main__":
+    main()

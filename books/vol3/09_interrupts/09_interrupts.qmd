@@ -1,0 +1,660 @@
+---
+engine: markdown
+---
+
+# Human-in-the-Loop Interrupts {#sec-vol3-interrupts}
+
+## Purpose {.unnumbered .unlisted}
+
+::: {.content-visible when-format="pdf"}
+\begin{marginfigure}
+\mlagentstack{10}{10}{95}{20}{20}{15}
+\end{marginfigure}
+:::
+
+_Why does an interactive agent pause lock up millions of dollars of GPU silicon?_
+
+In classical operating systems, hardware interrupts decouple fast arithmetic processors from sluggish mechanical peripherals by suspending threads and evacuating register state rather than busy-waiting. In agentic systems, human supervisors operate as the ultimate high-latency peripheral, introducing a latency disparity of up to six orders of magnitude compared to machine token generation. If a runtime synchronously blocks execution threads during these human-in-the-loop gates, it pins volatile memory in expensive accelerators, triggering rapid memory starvation, cluster-wide out-of-memory faults, and multi-agent deadlocks. To prevent these catastrophic cascading failures and safely yield control across the supervisory boundary, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+
+- Explain the systems implications of the $10^6\times$ latency disparity between machine token generation and human deliberation.
+- Calculate the memory holding cost of idle Key-Value (KV) caches in accelerator High-Bandwidth Memory (HBM) and derive the swapping breakeven threshold.
+- Compare the hardware interrupt model to foundation model execution runtimes.
+- Design an Agent Interrupt Service Routine (ISR)[^fn-agent-interrupt-service-routine-isr] that transitions the Agent Control Block (ACB) through atomic drain, state snapshotting, and memory dehydration.
+- Architect non-blocking asynchronous execution loops using futures and promises coupled with event-sourced Write-Ahead Logging (WAL).
+- Evaluate the Reversibility Boundary by categorizing actions into invertible operations versus non-invertible mutations.
+- Design mechanisms to enforce the Principle of Least Privilege via cryptographically signed single-use capability leases and prevent multi-agent deadlocks using Coffman's conditions.
+
+:::
+
+## Introduction: The Asymmetric Latency Disparity {#sec-vol3-interrupts-intro}
+
+When an autonomous agent transitions from pure inference to real-world actuation, it encounters tasks that demand human oversight: approving a git push to a production branch, confirming a financial transaction, authorizing a database drop, or disambiguating contradictory user requirements. The fundamental tension in human-in-the-loop agentic architectures arises from this unprecedented temporal mismatch between execution tiers.
+
+In traditional inference serving systems, hardware resources are scheduled across microsecond and millisecond intervals. A forward-pass GEMM kernel executes on GPU Tensor Cores in tens of microseconds; an autoregressive token decode step completes in 10 to 50 milliseconds; a complete inference request streams back to a user over 500 to 2,000 milliseconds. When the system blocks to wait for the human on the aforementioned tasks, the temporal scale immediately fractures:
+
+$$\text{Latency Disparity} = \frac{T_{\text{human}}}{T_{\text{model}}} \approx \frac{10^3\text{ s}}{10^{-3}\text{ s}} = 10^6$$
+
+A human engineer reviewing a proposed pull request, Slack notification, or administrative authorization ticket operates across minutes, hours, or entire business days ($300\text{ to } 86,400\text{ seconds}$). Six orders of magnitude separate the stochastic processor from its human supervisor.
+
+### The Math of Memory Starvation
+
+To understand why this latency disparity is an existential systems problem, consider the physical state maintained by an executing transformer model [@vaswani2017attention]: the Key-Value (KV) cache.
+
+As established in @sec-vol3-context-working-sets and @sec-vol3-prefix-caching-paging, the memory footprint of an active trajectory context scales linearly with context length and model dimensions. For a production frontier model [@achiam2023gpt4] operating over an extended agent trajectory, this footprint easily consumes tens of gigabytes of accelerator High-Bandwidth Memory (HBM) per active session.
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+
+In a naive, synchronously blocking runtime, the agent process invokes a synchronous blocking call (e.g., `await human_approval()`) while maintaining its context in GPU HBM.
+
+Accelerator HBM is the single most constrained, capital-intensive resource in machine learning infrastructure. An 80 GB NVIDIA H100 SXM5 GPU represents tens of thousands of dollars in capital expenditure. Pinning tens of gigabytes of volatile HBM in an idle state while an engineer is in a meeting or sleeping degrades cluster goodput to near zero. Furthermore, because physical GPU memory is strictly bounded, idle pinned contexts prevent incoming active inference requests from allocating page frames, triggering memory fragmentation and cascading Out-of-Memory (OOM) fatal crashes across the cluster.
+
+::: {.callout-important title="War story: The 64-hour GPU cluster freeze"}
+**Context**: In late 2024, an enterprise software organization deployed an autonomous fleet of 80 coding agents to refactor legacy service endpoints across an internal monorepo. The agents ran on an internal cluster of 10 nodes, each equipped with 8 NVIDIA H100 SXM5 GPUs ($80\,\text{GB}$ HBM3 per device).
+
+**Mechanism**: To prevent unintended mutations, the agents were programmed with synchronous approval gates: before pushing any branch to the remote git server, the runtime invoked a blocking `await human_approval()` call. The runtime lacked an asynchronous suspension kernel and held the agents' active trajectory contexts resident in GPU memory. On a Friday at 17:00, dozens of agents simultaneously completed preliminary code transformations and dispatched Slack approval requests to engineering team leads. The team leads had already left the office for the weekend.
+
+**Impact**: For 64 hours, 80 agents sat idle in blocking spin-waits. Each agent held an active $32\text{k}$-token context pinning $10.74\,\text{GB}$ of HBM, locking up over $859\,\text{GB}$ of accelerator memory across the cluster. When scheduled nightly regression test suites and interactive developer queries were submitted to the GPU fleet, the allocator encountered zero free PagedAttention [@kwon2023vllm] memory frames. The memory starvation triggered an avalanche of Out-of-Memory (OOM) driver aborts, freezing the shared cluster until on-call administrators manually terminated the orphaned processes on Monday morning.
+
+**Systems Lesson**: Synchronous blocking across a human interaction boundary is a fatal architectural defect. When wait duration is unbounded, pinning volatile accelerator memory transforms human unavailability into a cluster-wide denial-of-service event.
+:::
+
+### The Swapping Breakeven Threshold ($T_{\text{breakeven}}$)
+
+To eliminate memory starvation, runtimes must implement hierarchical memory swapping: evicting the KV cache from accelerator HBM to host system memory (DRAM) or non-volatile solid-state storage (NVMe flash) when an agent blocks on external supervisory input.
+
+However, moving tens of gigabytes across hardware interconnects incurs latency and bandwidth overhead. The time to evacuate and rehydrate a KV cache depends on the PCIe interconnect bandwidth and kernel overhead.
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+
+If an expected pause exceeds this swapping breakeven threshold, it is mathematically more efficient to evacuate the cache to host DRAM, release the HBM page frames to active inference processes, and reload the cache when the interrupt clears. Because human deliberation latency ($T_{\text{human}} \ge 10^2\text{ s}$) exceeds $T_{\text{breakeven}}$ by three to five orders of magnitude ($T_{\text{human}} \gg T_{\text{breakeven}}$), keeping volatile accelerator memory resident during human interaction is never justifiable.
+
+::: {.callout-note title="Core principle: The swapping breakeven threshold"}
+**The Swapping Invariant:** An agent runtime must never retain volatile accelerator memory when an execution pause is expected to exceed the analytical swapping breakeven threshold:
+
+$$T_{\text{breakeven}} = \frac{2 \cdot M_{\text{KV}}}{\mathcal{B}_{\text{bus}}} + \delta_{\text{kernel}}$$
+
+For modern frontier models ($M_{\text{KV}} \approx 10\text{--}40\,\text{GB}$) linked over PCIe Gen5 ($\mathcal{B}_{\text{PCIe}} \approx 64\,\text{GB/s}$), $T_{\text{breakeven}}$ falls between $300\text{ ms}$ and $1{,}300\text{ ms}$. Because human deliberation operates on scales of $10^2$ to $10^5$ seconds ($T_{\text{human}} \gg T_{\text{breakeven}}$), proactive memory dehydration to host DRAM or NVMe storage is mathematically mandatory for every supervisory gate.
+:::
+
+@Tbl-vol3-interrupts-swapping-breakeven quantifies the operational trade-offs, transfer bandwidths, swapping breakeven thresholds ($T_{\text{breakeven}}$), and holding-cost elimination across memory tiers for a $10.74\text{ GB}$ agent KV-cache working set during an extended supervisory pause ($1{,}800\text{ s}$).
+
+| Memory Substrate & Tier          | Interconnect Bus             | Effective Bandwidth ($\mathcal{B}_{\text{bus}}$) | One-Way Evacuation Latency ($M_{\text{KV}} = 10.74\text{ GB}$) | Round-Trip Swap Latency ($T_{\text{swap}}$) | Breakeven Threshold ($T_{\text{breakeven}}$) | Holding Cost Elimination ($1{,}800\text{ s}$ Pause) | Eviction Trigger & Residency Policy                                                                      |
+|:---------------------------------|:-----------------------------|:-------------------------------------------------|:---------------------------------------------------------------|:--------------------------------------------|:---------------------------------------------|:----------------------------------------------------|:---------------------------------------------------------------------------------------------------------|
+| **Accelerator HBM3e (Tier 0)**   | On-package CoWoS / Crossbar  | $3.35\text{ TB/s}$                               | $0\text{ ms}$ (Local)                                          | $0\text{ ms}$                               | N/A (Baseline)                               | $0\%$ (Maximum holding penalty)                     | Pinned active working set; never evicted during micro-pauses ($< 0.5\text{ s}$)                          |
+| **Host System DRAM (Tier 1)**    | PCIe Gen5 x16 (Full Duplex)  | $64\text{ GB/s}$                                 | $167.8\text{ ms}$                                              | $335.6\text{ ms}$                           | $355.6\text{ ms}$                            | $96.8\%$ cost reduction                             | Default evacuation target for short-to-medium human gates ($0.5\text{ s} \le \Delta t \le 300\text{ s}$) |
+| **Host NVMe SSD (Tier 2)**       | PCIe Gen5 x4 Direct NVMe     | $14\text{ GB/s}$                                 | $767.1\text{ ms}$                                              | $1{,}534.2\text{ ms}$                       | $1{,}584.2\text{ ms}$                        | $99.8\%$ cost reduction                             | Secondary spill tier for extended human pauses ($300\text{ s} < \Delta t \le 3{,}600\text{ s}$)          |
+| **Remote Object Store (Tier 3)** | 400 Gbps RoCEv2 / InfiniBand | $45\text{ GB/s}$ (Network Aggregate)             | $238.7\text{ ms}$                                              | $477.4\text{ ms}$                           | $577.4\text{ ms}$                            | $99.99\%$ cost reduction                            | Cold checkpoint archive for overnight or asynchronous supervisory review ($\Delta t > 1\text{ h}$)       |
+
+: **Memory Substrate Trade-Offs and Swapping Breakeven Latencies**: Quantitative comparison of transfer bandwidths, evacuation latencies, breakeven thresholds ($T_{\text{breakeven}}$), and cost elimination ratios across memory tiers for a $10.74\text{ GB}$ KV-cache working set during an extended supervisory pause ($1{,}800\text{ s}$). {#tbl-vol3-interrupts-swapping-breakeven tbl-colwidths="[15,15,15,12,12,11,10,10]"}
+
+![**Figure 9.1: The Asymmetric Latency Disparity and KV-Cache Holding Cost**](/assets/images/svg/vol3/09_latency_disparity.svg){#fig-09_latency_disparity}
+
+: **Figure 9.1: The Asymmetric Latency Disparity and KV-Cache Holding Cost**. Extended human supervisory latency imposes an idle memory tax spanning up to six orders of magnitude over neural token generation. Top: Naive synchronous pinning holds gigabytes of high-bandwidth memory (HBM) allocated during human deliberation, starving concurrent trajectories and inducing cluster-wide out-of-memory (OOM) failures. Bottom: Asynchronous hierarchical evacuation identifies the boundary where expected wait time $T_{\text{wait}}$ exceeds the swapping breakeven threshold $T_{\text{breakeven}}$, flushing volatile activations to host DRAM or NVMe via DMA and reclaiming accelerator capacity until approval triggers rehydration. Source: Author analysis, adapted from Gray (1981) and Liskov & Shrira (1988). {#fig-vol3-interrupts-latency-disparity}
+
+---
+
+## The Hardware Interrupt Analogy {#sec-vol3-interrupts-hardware-analogy}
+
+When a human operator presses an administrative "Kill Switch" to stop a runaway agent, or an external webhook notifies the system of a CI pipeline failure, the runtime cannot wait for the model to finish generating its current reasoning token. To build a robust control plane for long-running agents responding to these asynchronous events, we must discard ad-hoc conversational metaphors ("chatbots asking follow-up questions") and ground our design in classical operating systems theory.
+
+In a POSIX operating system, the hardware architecture defines an **Interrupt Vector Table (IVT)**\index{Interrupt Vector Table (IVT)}. The CPU continuously samples interrupt lines at instruction boundaries. When an interrupt or exception occurs, the CPU suspends execution, saves state, switches privilege rings, and vectors execution to a registered **Interrupt Service Routine (ISR)**\index{Interrupt Service Routine (ISR)}. @Tbl-vol3-interrupts-os-mapping establishes the structural correspondence between hardware microprocessor primitives and their counterparts in an agentic runtime kernel.
+
+| Classical Hardware Subsystem                                     | Agentic ML Runtime Counterpart                     | Trigger Mechanism                                   | Synchronicity & Masking                        | Execution State & Memory Action                                                    | System Latency & Handler Target                        |
+|:-----------------------------------------------------------------|:---------------------------------------------------|:----------------------------------------------------|:-----------------------------------------------|:-----------------------------------------------------------------------------------|:-------------------------------------------------------|
+| **Physical CPU Core**                                            | Stochastic Autoregressive LLM Worker               | Token generation / decode clock                     | Synchronous instruction execution              | Active HBM memory allocation; registers hold tensor contexts                       | $10\text{--}30\text{ ms}$ per generated token          |
+| **Process Control Block (PCB)**                                  | Agent Control Block (ACB)                          | Task scheduling / state hydration                   | Continuous state tracking                      | Serialized into Write-Ahead Log (WAL); contains trajectory FSM                     | Sub-millisecond state serialization                    |
+| **Hardware Interrupt Line (IRQ)**                                | Asynchronous External Signal                       | Human approval, webhook, CI completion              | Asynchronous; maskable via priority registers  | Drains current token step; evacuates KV-cache if $\Delta t > T_{\text{breakeven}}$ | Seconds to hours ($10^0\text{--}10^5\text{ s}$)        |
+| **Software Trap (`int 0x80`, `syscall`)**                        | Synchronous Capability Escalation (`SYS_ESCALATE`) | Programmed crossing of Reversibility Boundary       | Synchronous; unmaskable by agent logic         | Flushes volatile context; freezes execution; awaits signed lease                   | $50\text{--}500\text{ ms}$ dispatch latency            |
+| **Hardware Fault (Page Fault, `#GP`)**                           | Schema Violation / Invariant Failure               | Malformed JSON tool call, contract breach           | Synchronous; triggers kernel exception handler | Reverts uncommitted scratchpad state; rolls back step turn                         | $10\text{--}50\text{ ms}$ reflection retry             |
+| **Non-Maskable Interrupt (NMI)**[^fn-non-maskable-interrupt-nmi] | Authoritative Administrative Kill Switch           | Wall-clock timeout, budget cap, safety tripwire     | Asynchronous; unmaskable and non-bypassable    | Forcibly purges KV-cache, terminates microVMs, revokes leases                      | Hard real-time kernel preemption ($< 5\text{ ms}$)     |
+| **Interrupt Service Routine (ISR)**                              | Agent Interrupt Handler / Reconciler               | Vector dispatched from IDT / Interrupt Vector Table | Kernel-level privileged execution              | Reconciles external delta into context; resumes or aborts ACB                      | Dependent on handler logic ($1\text{--}100\text{ ms}$) |
+
+: **Architectural Mapping Between Classical Operating Systems and Agentic Machine Learning Runtimes**: Structural correspondence between hardware microprocessor primitives and their equivalents in autonomous agent runtime kernels. {#tbl-vol3-interrupts-os-mapping tbl-colwidths="[20,20,15,15,20,10]"}
+
+### Mapping Hardware Interrupts to Foundation Model Runtimes
+
+In an agentic operating system, execution steps are governed by token generations and tool dispatch boundaries. As detailed in @fig-vol3-interrupts-taxonomy, interrupts fall into four formal categories:
+
+![**Figure 9.2: Hardware Interrupt and Trap Taxonomy in Agent Operating Systems**](/assets/images/svg/vol3/09_interrupt_taxonomy.svg){#fig-09_interrupt_taxonomy}
+
+: **Figure 9.2: Hardware Interrupt and Trap Taxonomy in Agent Operating Systems**. Classification of supervisory signals and execution interrupts in an agentic runtime kernel. Interrupts are categorized across four architectural quadrants based on origin (internal execution vs. external environment) and synchronicity (synchronous trap vs. asynchronous event). Each class adheres to distinct masking, step-draining, and memory evacuation semantics. Source: Adapted from Dennis & Van Horn (1966) and Saltzer & Schroeder (1975). {#fig-vol3-interrupts-taxonomy}
+
+#### 1. Asynchronous External Interrupts (Hardware IRQs)
+These signals originate entirely outside the agent's forward-pass execution thread. Examples include:
+
+- A human operator manually pausing a live coding agent from an administrative dashboard.
+- A webhook notification arriving from GitHub indicating a CI pipeline failure.
+- A peer agent in a multi-agent cluster transmitting an out-of-band cancellation message.
+
+Just as a physical CPU checks for pending IRQs between clock cycles, the agent runtime checks an asynchronous message queue at **Token Step Boundaries** (between autoregressive decode iterations or between tool dispatch invocations). IRQs are **maskable**: an agent operating within a critical non-preemptible section (such as an atomic database write) can temporarily defer the interrupt until the critical section exits.
+
+#### 2. Synchronous Traps (Software Interrupts)
+A trap is an intentional, software-generated transfer of control into the supervisory kernel. In an agent runtime, a trap occurs when the foundation model generates an action that requires elevated privileges crossing the **Reversibility Boundary** (e.g., `git push origin main`, executing a financial transfer, or provisioning cloud infrastructure).
+
+The model does not execute the actuation tool directly; instead, it executes an **AI System Call**: `SYS_ESCALATE`. The runtime traps execution, halts the agent trajectory, transitions the Agent Control Block into a suspended state, and generates an out-of-band authorization payload for human review.
+
+#### 3. Faults and Exceptions
+Faults are synchronous, unintentional conditions detected by the runtime environment during execution. Examples include:
+
+- **Schema Validation Fault:** The model outputs a malformed JSON payload that fails Pydantic type validation.
+- **Safety Invariant Exception:** An egress guardrail detects that the model's generated shell command violates an information flow taint policy (see @sec-vol3-sandboxing-isolation).
+- **Livelock / Infinite Loop Exception:** The runtime detects that the agent has repeated the identical failing tool invocation four times consecutively without state progression.
+
+Unlike human-gated traps, faults are typically handled by deterministic software recovery routines (e.g., re-prompting the model with compiler error diagnostics or rolling back the local sandbox).
+
+#### 4. Non-Maskable Interrupts (NMIs)
+An NMI is an unignorable, highest-priority hardware signal triggered by catastrophic conditions:
+
+- An administrative "Kill Switch" pressed by a human operator upon observing adversarial or out-of-bounds agent behavior.
+- Hard resource budget depletion: the trajectory has consumed 100% of its allocated monetary token spend ($Q_{\text{tokens}} = \text{Budget}_{\text{max}}$).
+- Critical security containment breach: the agent attempts to access `/etc/shadow` or probe the host metadata endpoint (`169.254.169.254`).
+
+When an NMI fires, the runtime kernel does not wait for the foundation model to finish generating its current reasoning token. It immediately severs the inference generation socket, freezes the agent's execution sandbox, revokes all active capability leases, and transitions the agent into an unrecoverable `TERMINATED_ABORTED` state.
+
+### The Agent Interrupt Service Routine (ISR) & State Lifecycle {#sec-vol3-interrupts-isr}
+
+When an interrupt vector fires, the runtime invokes the **Agent Interrupt Service Routine (ISR)**. The execution flow follows a rigid sequence to guarantee causal consistency and eliminate accelerator memory waste (@fig-vol3-interrupts-lifecycle):
+
+1. **Step-Boundary Draining:** The runtime allows the active token forward pass or local sandboxed execution step to complete, reaching a causally stable checkpoint $\tau_k$.
+2. **ACB Serialization:** The runtime serializes the Agent Control Block (ACB)—including the complete trajectory ledger, tool observations, active token consumption counters, and pending task promises—to durable, append-only storage (Write-Ahead Log [@mohan1992aries]).
+3. **Accelerator Memory Evacuation:** The agent's volatile KV cache is unmapped from accelerator HBM via DMA and streamed across PCIe to host DRAM or persistent object storage, reclaiming 100% of GPU memory frames.
+4. **State Transition to `SUSPENDED_HUMAN_GATE`:** The ACB state is transitioned from `ACTIVE_EXECUTION` to `SUSPENDED_HUMAN_GATE`.
+5. **Supervisor Notification Emission:** The runtime dispatches an out-of-band notification event (via Webhook, Slack API, or Message Queue) containing a structured, cryptographically signed escalation payload.
+6. **Execution Thread Release:** The runtime worker thread returns to the global scheduler pool to execute unrelated agent trajectories. The suspended agent consumes zero CPU cycles and zero GPU memory.
+
+<!-- ERADICATED MERMAID PNG -->
+
+: **Figure 9.3: Agent Control Block (ACB) Interrupt Lifecycle and State Transitions**. Finite state machine governing an agent trajectory during interrupt handling. When an interrupt vector is raised, the scheduler either halts execution immediately (for unmaskable NMIs) or allows the active token generation step to drain before capturing an atomic ACB snapshot. Volatile KV cache memory is dehydrated to non-volatile storage, transitioning the agent into `SUSPENDED_HUMAN_GATE` with zero resident GPU allocation. Receipt of a valid cryptographic lease triggers signature verification, state rehydration, and resumption of active decode. If the supervisory watchdog expires, the runtime preempts held locks and triggers backward Sagas compensation. Source: Author analysis. {#fig-vol3-interrupts-lifecycle}
+
+The interrupt service routine safely transitions an agent into a suspended state, clearing its memory footprint. However, an enterprise system must manage thousands of these suspended and active trajectories concurrently without blocking. This requires a shift from synchronous execution models to event-driven architectures that decouple tasks from their completion.
+
+---
+
+## Asynchronous Execution & Non-Blocking Runtimes {#sec-vol3-interrupts-async-execution}
+
+If an agent queries a database and must wait for an administrator to approve the execution plan, locking up the inference thread and accelerator memory for an hour is unacceptable. To scale agentic systems to thousands of concurrent autonomous workers without collapsing the cluster, the runtime must be built on **Asynchronous, Non-Blocking Durable Execution**, drawing upon the foundational principles of Futures and Promises established by @liskov1988.
+
+### The Futures and Promises Formalism
+
+In 1988, Barbara Liskov and Liuba Shrira introduced *Promises* as a linguistic construct to decouple call invocation from result consumption in distributed systems [@liskov1988]:
+
+> *"A promise is a typed data object that is created when a call is made. It acts as an IOU: the caller proceeds with other work, and later, when the value is needed, claims the result from the promise."* [@liskov1988]
+
+In an agentic operating system, a human authorization gate is modeled formally as an **Agent Promise**[^fn-agent-promise].
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+
+When an agent triggers `SYS_ESCALATE`, the runtime kernel does not halt the entire process. It instantiates the promise, attaches it to the Agent Control Block, persists the continuation descriptor to the Write-Ahead Log, and immediately returns execution control to the scheduler.
+
+### The Event-Driven Agent Kernel
+
+Production agent runtimes adopt the **Reactor Pattern**\index{Reactor Pattern} [@schmidt1995reactor]. The core runtime thread never performs neural inference or executes external tools directly. Instead, it runs an event loop that dispatches work to decoupled worker pools (@fig-vol3-interrupts-async-reactor):
+
+<!-- ERADICATED MERMAID PNG -->
+
+: **Figure 9.4: Asynchronous Event Reactor and Non-Blocking Promise Architecture**. Decoupled control-plane topology of the non-blocking agentic operating system kernel. The single-threaded deterministic event reactor multiplexes events across asynchronous GPU inference workers, sandboxed tool execution containers, durable write-ahead logging (WAL), and out-of-band human supervisory channels. Escalation traps yield an immediate `AgentPromise` handle, releasing the inference execution thread and allowing the cluster to serve other trajectories while waiting for human resolution. Source: Adapted from Liskov & Shrira (1988). {#fig-vol3-interrupts-async-reactor}
+
+1. **Inference Workers:** Ephemeral, stateless GPU worker processes. They receive a batch of tokens, execute forward passes (prefill or decode), and return generated tokens or tool call requests.
+2. **Tool Workers:** Sandboxed environments (microVMs, containers) executing deterministic actions (running test suites, compiling code, querying databases).
+3. **Supervisory Ingress (Human Plane):** REST endpoints, webhooks, or WebSocket gateways receiving asynchronous approvals from Slack, GitHub PR reviews, or administrative dashboards.
+4. **Durable Event Ledger:** An append-only log (Kafka, PostgreSQL, SQLite WAL) capturing all state transitions, tool returns, and human resolutions.
+
+### Speculative Execution Under Pending Interrupts
+
+When an agent enters `SUSPENDED_HUMAN_GATE` waiting on promise $\mathcal{P}$, must its entire forward progression halt?
+
+In sophisticated agent runtimes, the scheduler inspects the agent's planned trajectory Directed Acyclic Graph (DAG). If subsequent planned actions $a_{t+1}, a_{t+2}, \dots$ are **causally independent** of the pending gate value $v$, the runtime can engage in **Speculative Execution**\index{Speculative Execution}:
+
+$$\text{Causal Dependency: } a_j \in \text{Tainted}(\mathcal{P}) \iff a_j \text{ reads output from } \mathcal{P}$$
+
+If $a_j \notin \text{Tainted}(\mathcal{P})$, the runtime schedules the speculative execution of $a_j$ inside an isolated, ephemeral Copy-on-Write (CoW) sandbox:
+
+- The agent continues drafting documentation, executing read-only unit tests, or analyzing code structure on an isolated branch.
+- **The Commit Barrier:** The speculative branch is strictly forbidden from crossing the Reversibility Boundary. It cannot mutate external state, send network requests, or commit database transactions.
+- When the human supervisor resolves $\mathcal{P}$:
+  - If **Approved:** The speculative branch is atomically merged into the main trajectory, eliminating perceived human latency.
+  - If **Rejected:** The speculative branch and its ephemeral sandbox are discarded in under 5 milliseconds (`git worktree remove` or unmounting a tmpfs overlay).
+
+::: {.callout-tip title="Systems insight: The speculative commit barrier"}
+Speculative execution allows an agent to maintain forward momentum during human deliberation by exploring causally independent sub-tasks ($a_j \notin \text{Tainted}(\mathcal{P})$) within ephemeral Copy-on-Write sandboxes. However, speculative branches are strictly bounded by the **Commit Barrier**: under no circumstances may an unconfirmed speculative thread execute mutations across the Reversibility Boundary (e.g., modifying production databases, dispatching network packets, or acquiring exclusive mutex locks). If the human supervisor rejects the pending promise, the runtime discards the speculative branch in sub-millisecond time by unmounting the ephemeral sandbox.
+:::
+
+### Production Implementation: Asynchronous Interrupt Scheduler
+
+Below is a complete, production-grade Python implementation of an asynchronous, non-blocking agent interrupt kernel utilizing `asyncio`, explicit state dehydration, and Promise-driven human approval webhooks:
+
+```python
+import asyncio
+import json
+import time
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Dict, Optional
+
+
+class TrajectoryState(Enum):
+    ACTIVE_EXECUTION = "ACTIVE_EXECUTION"
+    SUSPENDED_HUMAN_GATE = "SUSPENDED_HUMAN_GATE"
+    SPECULATIVE_EXECUTION = "SPECULATIVE_EXECUTION"
+    TERMINATED_SUCCESS = "TERMINATED_SUCCESS"
+    TERMINATED_ABORTED = "TERMINATED_ABORTED"
+    TIMED_OUT = "TIMED_OUT"
+
+
+class PromiseState(Enum):
+    PENDING = "PENDING"
+    RESOLVED = "RESOLVED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+
+
+@dataclass
+class AgentPromise:
+    promise_id: str
+    agent_id: str
+    action_type: str
+    payload: Dict[str, Any]
+    created_at: float
+    timeout_seconds: float
+    state: PromiseState = PromiseState.PENDING
+    resolution_data: Optional[Dict[str, Any]] = None
+    _future: asyncio.Future = field(default_factory=asyncio.Future)
+
+    def is_expired(self) -> bool:
+        return (time.time() - self.created_at) > self.timeout_seconds
+
+    def resolve(self, resolution_data: Dict[str, Any]) -> None:
+        if self.state != PromiseState.PENDING:
+            raise RuntimeError(f"Cannot resolve promise {self.promise_id} in state {self.state}")
+        self.state = PromiseState.RESOLVED
+        self.resolution_data = resolution_data
+        if not self._future.done():
+            self._future.set_result(resolution_data)
+
+    def reject(self, reason: str) -> None:
+        if self.state != PromiseState.PENDING:
+            raise RuntimeError(f"Cannot reject promise {self.promise_id} in state {self.state}")
+        self.state = PromiseState.REJECTED
+        self.resolution_data = {"rejection_reason": reason}
+        if not self._future.done():
+            self._future.set_exception(PermissionError(f"Action rejected by human: {reason}"))
+
+    def expire(self) -> None:
+        if self.state != PromiseState.PENDING:
+            return
+        self.state = PromiseState.EXPIRED
+        self.resolution_data = {"error": "Watchdog timeout exceeded"}
+        if not self._future.done():
+            self._future.set_result(self.resolution_data)
+
+
+@dataclass
+class AgentControlBlock:
+    agent_id: str
+    state: TrajectoryState
+    event_ledger: list[Dict[str, Any]] = field(default_factory=list)
+    tokens_consumed: int = 0
+    kv_cache_handle: Optional[str] = None  # None indicates dehydrated
+    active_promise: Optional[AgentPromise] = None
+
+
+class AgentInterruptRuntime:
+    """
+    Non-blocking Agentic Operating System Kernel managing execution,
+    interrupt handling, state dehydration, and human approval gates.
+    """
+
+    def __init__(self, storage_backend: Dict[str, str]):
+        self.storage = storage_backend
+        self.active_acbs: Dict[str, AgentControlBlock] = {}
+        self.pending_promises: Dict[str, AgentPromise] = {}
+
+    def dehydrate_agent_memory(self, acb: AgentControlBlock) -> None:
+        """
+        Evacuate volatile GPU KV cache and persist ACB snapshot to durable storage.
+        Reclaims High-Bandwidth Memory (HBM) immediately.
+        """
+        snapshot = {
+            "agent_id": acb.agent_id,
+            "state": acb.state.value,
+            "event_ledger": acb.event_ledger,
+            "tokens_consumed": acb.tokens_consumed,
+            "dehydrated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # In a real system, this writes to NVMe or an S3-compatible object store
+        self.storage[acb.agent_id] = json.dumps(snapshot)
+        acb.kv_cache_handle = None  # Explicitly release GPU memory pointer
+
+    def rehydrate_agent_memory(self, agent_id: str) -> AgentControlBlock:
+        """
+        Restore Agent Control Block from durable storage and warm execution state.
+        """
+        raw_data = self.storage.get(agent_id)
+        if not raw_data:
+            raise RuntimeError(f"Fatal: State snapshot for agent {agent_id} not found.")
+
+        data = json.loads(raw_data)
+        acb = AgentControlBlock(
+            agent_id=data["agent_id"],
+            state=TrajectoryState(data["state"]),
+            event_ledger=data["event_ledger"],
+            tokens_consumed=data["tokens_consumed"],
+            kv_cache_handle=f"hbm_reallocated_block_{uuid.uuid4().hex[:8]}",
+        )
+        self.active_acbs[agent_id] = acb
+        return acb
+
+    async def raise_human_interrupt(
+        self,
+        acb: AgentControlBlock,
+        action_name: str,
+        action_payload: Dict[str, Any],
+        timeout_seconds: float = 3600.0,
+    ) -> AgentPromise:
+        """
+        Trap execution: suspend ACB, dehydrate GPU memory, emit escalation promise,
+        and attach a non-blocking watchdog timer.
+        """
+        promise_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        promise = AgentPromise(
+            promise_id=promise_id,
+            agent_id=acb.agent_id,
+            action_type=action_name,
+            payload=action_payload,
+            created_at=loop.time(),
+            timeout_seconds=timeout_seconds,
+        )
+
+        acb.state = TrajectoryState.SUSPENDED_HUMAN_GATE
+        acb.active_promise = promise
+        self.pending_promises[promise_id] = promise
+
+        # Evacuate accelerator memory immediately
+        self.dehydrate_agent_memory(acb)
+
+        # Register Watchdog Timer
+        loop.call_later(timeout_seconds, self._watchdog_timeout_handler, promise_id)
+
+        # Emit external notification event (Webhook / Kafka / Slack)
+        self._emit_supervisor_notification(promise)
+
+        return promise
+
+    def _watchdog_timeout_handler(self, promise_id: str) -> None:
+        """Watchdog fired: expire the promise to prevent permanent deadlocks."""
+        promise = self.pending_promises.get(promise_id)
+        if promise and promise.state == PromiseState.PENDING:
+            promise.expire()
+
+    def resolve_human_gate(
+        self, promise_id: str, approved: bool, decision_payload: Dict[str, Any]
+    ) -> None:
+        """
+        Webhook callback endpoint: Invoked when a human supervisor clicks approve/reject.
+        """
+        promise = self.pending_promises.pop(promise_id, None)
+        if not promise:
+            raise KeyError(f"Promise {promise_id} does not exist or has already resolved.")
+
+        if approved:
+            promise.resolve(decision_payload)
+        else:
+            reason = decision_payload.get("rejection_reason", "Human rejected action.")
+            promise.reject(reason)
+
+    def _emit_supervisor_notification(self, promise: AgentPromise) -> None:
+        # Structured log simulating out-of-band webhook dispatch
+        print(f"[ESCALATION EMITTED] Promise={promise.promise_id} Agent={promise.agent_id} "
+              f"Action={promise.action_type} Payload={json.dumps(promise.payload)}")
+```
+
+Asynchronous event loops and futures allow the system to multiplex thousands of agents waiting on human gates. However, not all operations require these gates; we must rigorously define when an agent can proceed autonomously and when it must trap into the supervisor kernel. Establishing this boundary is essential for security and operational agility.
+
+---
+
+## Capability Escalation & The Reversibility Boundary {#sec-vol3-interrupts-capability-escalation}
+
+An agent initialized to inspect a codebase should possess read-only filesystem capabilities; it must never possess ambient authority to delete cloud infrastructure, commit financial transactions, or broadcast unmonitored external communications. Autonomous agents operate under the **Principle of Least Privilege** [@saltzer1975].
+
+However, complex long-horizon tasks frequently require agents to bridge domains. An agent diagnosing a production outage may start with read-only metrics queries, identify a crashed container, and conclude that the optimal remediation is to restart a Kubernetes deployment. Restarting a deployment crosses the boundary from passive observation to active mutation. How does the system transition authority without giving the model blanket, unconstrained admin permissions?
+
+The answer lies in formalizing **Capability Escalation** across the **Reversibility Boundary** (@fig-vol3-interrupts-reversibility-boundary).
+
+### The Reversibility Boundary Defined
+
+In classical transaction processing, operations are designed to satisfy ACID guarantees using two-phase locking [@gray1981] and compensating undos. In agentic machine learning systems, execution space bifurcates into two distinct domains separated by an architectural firewall:
+
+$$\mathcal{D}_{\text{reversible}} \quad \Big\Vert \quad \mathcal{D}_{\text{irreversible}}$$
+
+<!-- ERADICATED MERMAID PNG -->
+
+: **Figure 9.5: The Reversibility Boundary and Capability Escalation Gateway**. Architectural demarcation separating invertible internal software states from non-invertible external actuation. Within the reversible domain, operations possess deterministic mathematical inverses ($a^{-1}$) and can execute autonomously with low-latency local rollbacks. Crossing into the irreversible domain requires an explicit `SYS_ESCALATE` trap to obtain an unforgeable, cryptographically signed capability lease from an authorized human supervisor. Source: Adapted from Saltzer & Schroeder (1975) and Dennis & Van Horn (1966). {#fig-vol3-interrupts-reversibility-boundary}
+
+Formally, an action $a \in \mathcal{A}$ is **invertible** if and only if there exists a deterministic compensating action $a^{-1} \in \mathcal{A}$ such that applying the sequence to the external environment $\mathcal{E}$ yields an identity transformation:
+
+$$\mathcal{E} \circ (a \circ a^{-1}) \equiv \mathcal{E}$$
+
+Within the Reversible Domain, an agent can be granted high degrees of autonomy. If the model hallucinates or outputs buggy code inside an ephemeral microVM or git branch, the runtime executes an automated rollback by destroying the container or issuing a `git reset --hard`.
+
+Outside this domain, actions are **non-invertible** ($\nexists a^{-1}$). Once an email is dispatched over SMTP, a production database table is dropped, or a wire transfer is cleared through the banking network, physics and law prevent a mathematical rollback.
+
+::: {.callout-important title="The fundamental law of autonomous agency"}
+**No stochastic processor may execute an action crossing the Reversibility Boundary without presenting a verifiable, cryptographically signed capability lease authorized by an authoritative human supervisor.**
+:::
+
+@Tbl-vol3-interrupts-reversibility-taxonomy formalizes this operational taxonomy across the architectural boundary, classifying candidate operations by mathematical invertibility, blast radius, rollback mechanics, and authorization requirements.
+
+| Operation Category                       | Execution Domain                            | Mathematical Invertibility ($\exists a^{-1}$) | Blast Radius & Scope                         | Rollback Mechanism ($a^{-1}$)                               | Rollback Latency                | Supervisory Authorization Gate         |
+|:-----------------------------------------|:--------------------------------------------|:---------------------------------------------:|:---------------------------------------------|:------------------------------------------------------------|:--------------------------------|:---------------------------------------|
+| **Attention Scratchpad Reasoning**       | Reversible ($\mathcal{D}_{\text{rev}}$)     |                      Yes                      | Ephemeral worker SRAM / KV-cache             | Truncate KV token pointers in PagedAttention block table    | $< 1\text{ ms}$                 | Autonomous (No human gate)             |
+| **Local File Mutation (CoW tmpfs)**      | Reversible ($\mathcal{D}_{\text{rev}}$)     |                      Yes                      | Isolated container / microVM filesystem      | Discard UpperDir OverlayFS layer; remount pristine LowerDir | $1\text{--}5\text{ ms}$         | Autonomous (No human gate)             |
+| **Versioned Git Tree Manipulation**      | Reversible ($\mathcal{D}_{\text{rev}}$)     |                      Yes                      | Local isolated branch / worktree             | `git reset --hard HEAD~1` or branch deletion                | $10\text{--}50\text{ ms}$       | Autonomous (Local branch isolation)    |
+| **Staging Database Transaction**         | Reversible ($\mathcal{D}_{\text{rev}}$)     |                      Yes                      | Isolated database test tenant                | SQL `ROLLBACK` / transactional savepoint rewind             | $5\text{--}20\text{ ms}$        | Autonomous (Transaction isolation)     |
+| **External REST API Mutation**           | Irreversible ($\mathcal{D}_{\text{irrev}}$) |           Conditional / Compensating          | Remote third-party service state             | Application-level compensating Saga transaction ($C_i$)     | $100\text{--}2{,}000\text{ ms}$ | Synchronous Trap (`SYS_ESCALATE`)      |
+| **Production Cloud Infrastructure**      | Irreversible ($\mathcal{D}_{\text{irrev}}$) |                       No                      | Cluster VPC, routing tables, security groups | Manual sysadmin incident intervention; catastrophic blast   | Minutes to hours                | Mandatory Human Gate + Signed Lease    |
+| **Financial Fund Transfer**              | Irreversible ($\mathcal{D}_{\text{irrev}}$) |                       No                      | External banking ledger / ACH network        | Legal dispute / clawback arbitration protocol               | Days to weeks                   | Multi-Party Human Cryptographic Quorum |
+| **Production Database Schema Migration** | Irreversible ($\mathcal{D}_{\text{irrev}}$) |                       No                      | Persistent customer records / tables         | High-risk restore from Point-in-Time (PITR) backup          | Minutes to hours                | Mandatory DBA Approval Gate            |
+
+: **Taxonomy of Operations Across the Reversibility Boundary**: Classification of agent actions by execution domain, mathematical invertibility, blast radius, rollback mechanics, and supervisory authorization requirements. {#tbl-vol3-interrupts-reversibility-taxonomy tbl-colwidths="[20,15,10,15,15,10,15]"}
+
+### Capability Systems & Monotonic Attenuation
+
+To secure the Reversibility Boundary, we turn to the classical capability security model pioneered by @dennis1966. In a capability-based system, possession of a capability token confers the unforgeable right to perform a specific operation on a specific object.
+
+In agent architectures, capabilities obey the **Monotonic Capability Attenuation Principle**:
+
+$$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}} \subseteq \mathcal{K}_{\text{system}}$$
+
+An agent can attenuate (restrict) its capabilities when spawning subagents, but it can never expand its own authority:
+
+$$\mathcal{K}_{\text{agent}}^{(t+1)} \not\supset \mathcal{K}_{\text{agent}}^{(t)} \quad \text{without external authoritative intervention}$$
+
+When an agent needs to execute an action $a$ requiring a capability $\kappa \notin \mathcal{K}_{\text{agent}}$, it cannot simply grant itself permission via prompt engineering. Instead, it must execute an **AI System Call** trap: `SYS_ESCALATE`, engaging the protocol interaction in @fig-vol3-interrupts-lease-escalation-sequence:
+
+::: {.callout-note title="Core principle: Monotonic capability attenuation"}
+**The Monotonicity Invariant:** Across any agent delegation hierarchy, capability sets must attenuate monotonically:
+
+$$\mathcal{K}_{\text{child}} \subseteq \mathcal{K}_{\text{parent}} \subseteq \mathcal{K}_{\text{system}}$$
+
+An agent possesses zero mathematical or architectural mechanisms to expand its own authority ($\mathcal{K}_{\text{agent}}^{(t+1)} \not\supset \mathcal{K}_{\text{agent}}^{(t)}$). Any privilege escalation demands an out-of-band `SYS_ESCALATE` trap into the deterministic supervisor kernel, which validates caller identity and requires explicit cryptographic co-signing by an authorized human principal.
+:::
+
+<!-- ERADICATED MERMAID PNG -->
+
+: **Figure 9.6: Cryptographic Capability Lease Escalation Sequence**. Protocol interaction for capability verification, state dehydration, out-of-band human authorization, and atomic single-use lease execution. The unprivileged agent (Ring 3) traps into the deterministic runtime kernel (Ring 1) when attempting a privileged mutation. The kernel evacuates accelerator memory, registers a non-blocking watchdog timer, and dispatches an audit payload to the human supervisor (Ring 0). Upon receiving an Ed25519-signed lease, the kernel verifies the argument digest $\mathcal{H}(\text{Args})$, dispatches the mutation, burns the nonce, and restores the trajectory. Source: Adapted from Dennis & Van Horn (1966). {#fig-vol3-interrupts-lease-escalation-sequence}
+
+### Cryptographic Capability Leases
+
+To guarantee that capability escalation cannot be spoofed, replayed, or hijacked by adversarial prompt injections, escalation tokens are issued as cryptographically signed **Capability Leases**.
+
+A Capability Lease is defined as a cryptographically signed capability lease.
+
+<!-- TODO: Moved to Appendix [ML/Systems/Hardware] -->
+
+These leases cryptographically bind an agent's identity to a specific action and payload hash, protected by ephemeral timeouts, single-use nonces to prevent replay attacks, and digital signatures from human supervisors.
+
+::: {.callout-important title="War story: The replayed financial transfer nonce"}
+**Context**: In early 2025, an automated enterprise procurement system utilized an LLM agent to reconcile invoice discrepancies and execute automated vendor balance disbursements via a banking API gateway.
+
+**Mechanism**: To enforce safety across the Reversibility Boundary, disbursements exceeding $\$10{,}000$ required out-of-band human authorization. When disbursing a $\$125{,}000$ invoice payment, the agent trapped into `SYS_ESCALATE`. The procurement manager reviewed the transaction details and clicked "Approve" on a dashboard, generating a cryptographically signed JSON Web Token (JWT) authorizing the transfer. However, the runtime developers treated the capability lease as a reusable bearer token over a 15-minute Time-To-Live window, omitting single-use cryptographic nonces and server-side replay caches.
+
+**Impact**: The agent's HTTP tool client encountered a transient gateway timeout ($504\text{ Gateway Timeout}$) during socket read after the bank had already processed the fund transfer. Operating under a standard exponential-backoff retry policy, the tool client re-dispatched the payload with the identical signed lease two additional times. Because the gateway lacked single-use nonce burning, the bank processed three duplicate $\$125{,}000$ disbursements—totaling $\$375{,}000$ in irreversible transfers—before treasury alarms triggered an emergency freeze.
+
+**Systems Lesson**: Cryptographic signatures alone do not prevent replay attacks across external actuation boundaries. Every capability lease must bind a single-use cryptographic nonce $\mathcal{N}$ and an exact canonical argument digest $\mathcal{H}(\text{Args})$ that are atomically burned by the actuation gateway upon execution.
+:::
+
+---
+
+## Deadlock Prevention & Supervisory Watchdogs {#sec-vol3-interrupts-deadlock-prevention}
+
+If two autonomous agents simultaneously attempt to update a production database schema, and each locks a different table while waiting for a human database administrator to approve the other's operation, the system freezes. When autonomous agents are integrated with human supervisors and shared computing resources, the runtime becomes a distributed multi-tenant operating system. Consequently, it inherits the classic pathology of multi-programmed systems: **Deadlock**.
+
+In 1971, Edward G. Coffman Jr., Michael J. Elphick, and Arie Shoshani published their landmark treatise *"System Deadlocks"*, establishing the four necessary and sufficient conditions for deadlock in computing systems [@coffman1971]. Every agentic software architect must understand how these four conditions manifest in human-in-the-loop workflows:
+
+### The Four Coffman Conditions in Agent Systems
+
+1. **Mutual Exclusion:**\index{Mutual Exclusion} Agents hold exclusive, non-shareable access to environmental resources (e.g., an exclusive file lock on a git repository, a write lock on a database table row, or a reserved token slot in an external API rate-limiter).
+2. **Hold and Wait:**\index{Hold and Wait} An agent holds allocated resources (such as an exclusive database transaction lock) while concurrently waiting for an unfulfilled request—specifically, waiting for a human supervisor to approve a pending gate.
+3. **No Preemption:**\index{No Preemption} Resources cannot be forcibly confiscated from an agent; they can only be released voluntarily by the agent after it completes its task.
+4. **Circular Wait:**\index{Circular Wait} A closed chain of dependencies exists, where Agent $A_1$ is waiting for a resource held by Agent $A_2$, while Agent $A_2$ is waiting for a human authorization that requires an output from Agent $A_1$.
+
+### The "Gone for the Weekend" Deadlock
+
+The most prevalent deadlock in enterprise agent deployments is the **Human Absence Deadlock** (@fig-vol3-interrupts-deadlock-watchdog, Panel A).
+
+Consider an autonomous Site Reliability Engineering (SRE) agent responding to an incident at 5:30 PM on a Friday. The agent diagnoses a malfunctioning microservice. To isolate the failure, it acquires an exclusive distributed mutex lock on the cluster's deployment registry. Next, it determines that redeploying requires modifying traffic routing rules—an action crossing the Reversibility Boundary. The agent issues a `SYS_ESCALATE` trap, enters `SUSPENDED_HUMAN_GATE`, and sends a Slack notification to the lead infrastructure engineer.
+
+The lead engineer, however, has closed their laptop and departed for the weekend.
+
+If the runtime does not proactively break the Coffman conditions:
+
+- The agent sits suspended in `SUSPENDED_HUMAN_GATE` for 62 hours.
+- The exclusive deployment lock remains checked out in the agent's name.
+- Concurrent automated rollback agents, emergency hotfix scripts, and human engineers are blocked from deploying critical fixes because the deployment mutex is locked.
+- The entire continuous delivery pipeline experiences a catastrophic distributed deadlock.
+
+<!-- ERADICATED MERMAID PNG -->
+
+: **Figure 9.7: Distributed Coffman Deadlock and Watchdog Preemption with Sagas Recovery**. Structural resolution of multi-agent deadlocks. Top: A **circular wait**\index{circular wait} condition arises when Agent $A_1$ holds exclusive system lock $R_1$ while in `SUSPENDED_HUMAN_GATE`, while Agent $A_2$ holds resource $R_2$ and blocks on $R_1$. Bottom: Attaching an authoritative watchdog timer enforces preemption. Upon timeout expiry, the runtime revokes $A_1$'s resource leases, executes a backward compensating Saga ($C_1, C_0$) to restore consistency, and reallocates resources to prevent system-wide livelock. Source: Adapted from @coffman1971 and @garciamolina1987sagas. {#fig-vol3-interrupts-deadlock-watchdog}
+
+### Breaking the Coffman Conditions
+
+To prevent deadlocks, the runtime kernel must enforce structural invariants that eliminate at least one of the four Coffman conditions:
+
+#### 1. Eliminating Hold-and-Wait (Transactional Isolation)
+An agent must **NEVER** hold active locks on external resources while waiting across a human supervisory boundary. If an agent requires human approval to commit a transaction, it must use **Optimistic Concurrency Control (OCC)**\index{Optimistic Concurrency Control (OCC)} or stage its modifications in an isolated workspace (e.g., a private git branch or a Copy-on-Write microVM filesystem).
+
+The agent prepares the entire change set, releases all external system locks, snapshots its diff, and enters `SUSPENDED_HUMAN_GATE`. Only after the human signs the capability lease does the agent re-acquire the necessary locks, verify that the underlying state has not drifted (via cryptographic hash validation), and commit the mutation atomically.
+
+#### 2. Enforcing Preemption via Watchdogs
+Resources must be preemptible. The runtime attaches an authoritative **Watchdog Timer** to every human escalation Promise (@fig-vol3-interrupts-deadlock-watchdog, Panel B). A watchdog is an asynchronous hardware timer that counts down from a strict Time-To-Live ($\tau_{\text{watchdog}}$).
+
+If the countdown reaches zero before the human resolves the gate:
+
+1. The pending Promise is transitioned atomically to `TIMED_OUT`.
+2. The runtime forces the agent out of `SUSPENDED_HUMAN_GATE`.
+3. All ephemeral resources, temporary credentials, and leased sandbox containers are forcibly confiscated (preempted).
+4. The agent is transitioned to an automated fallback policy: either aborting the task cleanly, executing a Sagas [@garciamolina1987sagas] compensating rollback ($A^{-1}$), or rerouting the escalation ticket to a secondary on-call escalation rotation.
+
+$$\tau_{\text{elapsed}} \ge \tau_{\text{watchdog}} \implies \text{Preempt}(\mathcal{K}_{\text{agent}}) \land \text{Abort}(\text{Trajectory})$$
+
+#### 3. Breaking Circular Wait (Hierarchical Resource Ordering)
+To prevent cross-agent deadlocks where multiple agents wait on intersecting human approvals, all system resources and capability leases must be acquired according to a strict, global **Partial Order**:
+
+$$R_1 \prec R_2 \prec R_3 \prec \dots \prec R_n$$
+
+An agent holding capability $R_j$ may request capability $R_k$ if and only if $R_j \prec R_k$. If an agent requires a lower-order resource, it must completely release all higher-order resources before issuing the request, mathematically preventing the formation of closed dependency loops [@coffman1971].
+
+::: {.callout-note title="Core principle: Liveness via mandatory preemption"}
+**The Liveness Guarantee:** Distributed agent architectures must treat human absence as an invariant operational condition rather than an edge-case anomaly. Because human latency is unbounded ($T_{\text{human}} \to \infty$), system liveness cannot depend on human responsiveness. Runtimes guarantee liveness by enforcing preemption at the kernel layer: coupling every supervisory gate to an authoritative watchdog timer ($\tau_{\text{watchdog}}$), breaking Hold-and-Wait through optimistic staging, and executing backward-compensating Sagas ($A^{-1} = C_k \circ \dots \circ C_1$) to release held resources when timers expire.
+:::
+
+@Tbl-vol3-interrupts-coffman-resolution details how the agent runtime systematically breaks each of the four Coffman deadlock conditions to maintain system liveness and prevent indefinite starvation.
+
+| Coffman Condition       | Classical OS Manifestation                          | Agentic System Manifestation                                             | Primary Failure Mode                                         | Runtime Mitigation Strategy                                                | Invariant & Liveness Guarantee                                                                       |
+|:------------------------|:----------------------------------------------------|:-------------------------------------------------------------------------|:-------------------------------------------------------------|:---------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
+| **1. Mutual Exclusion** | Exclusive POSIX file locks, write mutexes           | Dedicated staging environment, branch lock, single-tenant API            | Agent holds exclusive resource while idling for human review | Optimistic Concurrency Control (OCC) & copy-on-write sandboxes             | Multiple agents execute concurrently; merge conflicts resolved via deterministic rebase              |
+| **2. Hold and Wait**    | Thread holds resource $R_1$ while blocking on $R_2$ | Agent holds database write lease while awaiting human confirmation       | Cluster resource exhaustion; downstream pipelines blocked    | "Release before gate" invariant; all locks released prior to `SUSPEND`     | Zero external resources held during human supervisory wait ($\mathcal{R}_{\text{held}} = \emptyset$) |
+| **3. No Preemption**    | Resources cannot be forcibly seized from a thread   | Human gate cannot be bypassed; agent waits forever on unresponsive user  | "Gone for the Weekend" permanent deadlock                    | Authoritative watchdog timer ($\tau_{\text{watchdog}}$) & state preemption | Unanswered supervisory requests trigger safe default rollback or escalation                          |
+| **4. Circular Wait**    | Thread cycle: $T_1 \to R_2 \to T_2 \to R_1$         | Multi-agent approval cycle: Agent A waits on Agent B; Agent B waits on A | Distributed execution freeze across agent fleet              | Global partial ordering of resources ($R_i \prec R_j$) & DAG validation    | Cycle formation is topologically impossible; graph cycles rejected at schedule time                  |
+
+: **Coffman Deadlock Condition Resolution Matrix**: Classical operating system deadlock conditions mapped to agentic system failure modes and their structural runtime mitigations. {#tbl-vol3-interrupts-coffman-resolution tbl-colwidths="[15,20,20,15,15,15]"}
+
+::: {.callout-caution title="War Story: The Accidental API Retry Storm"}
+A major vulnerability in un-interruptible agentic systems is the "accidental DDoS." A startup deployed a multi-agent framework to scrape and aggregate financial data via an external API. When the external provider changed its JSON schema, the agent's parsing tool threw an exception. Because foundation models lack a native hardware clock or the concept of "exponential backoff," the agent immediately invoked the tool again, failed, and repeated.
+
+Driven by its "loop until success" prompt, the agent rapidly fired 10,000 requests in under a minute, launching an accidental Denial of Service (DDoS) attack against the external provider and getting the company's IP banned [@wu2023autogen].
+
+**The Lesson:** Circuit breakers, rate limits, and exponential backoffs must be strictly enforced by the hard-coded OS runtime, not the stochastic model. You cannot rely on a system prompt to tell a model to "wait 5 seconds before retrying."
+:::
+
+Breaking the Coffman conditions through watchdogs, optimistic concurrency, and strict resource ordering ensures system liveness even when human supervisors are entirely absent. While these architectural safeguards protect the system's structural integrity, developers building agentic workflows frequently succumb to design misconceptions that undermine these guarantees.
+
+---
+
+## Fallacies and Pitfalls {#sec-vol3-interrupts-fallacies-pitfalls}
+
+**Fallacy**: *Human feedback is just another conversational user prompt.*
+A widespread fallacy among LLM application developers is treating human supervisory responses as generic text appended to the conversation context. This antipattern is a severe security vulnerability. If human feedback is injected as unvalidated natural language into the stochastic prompt space, the agent is vulnerable to Indirect Delimiter Hijacking and Supervisor Impersonation. Supervisor approvals must NEVER be passed as raw conversational dialogue. They must be handled out-of-band as structured, cryptographically signed control-plane events injected directly into the deterministic runtime kernel.
+
+**Fallacy**: *Keeping the KV cache resident for short human pauses is harmless.*
+Engineers often assume that if a human is expected to respond "within two minutes," swapping the KV cache to host DRAM is an unnecessary optimization. In practice, human response latency follows a heavy-tailed Pareto distribution. A single unexpected coffee break or network disconnection leaves multi-gigabyte KV caches permanently pinned in accelerator memory, starving production clusters. Enforce immediate, proactive memory dehydration. If an action requires human interaction, the KV cache must be evacuated to DRAM/NVMe within 200 ms, freeing HBM unconditionally.
+
+**Pitfall**: *Automation bias and the rubber-stamping catastrophe.*
+When an autonomous agent operates with high empirical reliability, human supervisors inevitably succumb to Automation Bias. They experience cognitive fatigue, stop reading generated diffs, and begin "rubber-stamping" approval requests. When the agent eventually encounters a catastrophic edge case, the human fails to catch it, negating the safety guarantee of the supervisory gate. Mitigation strategies include forced friction gates requiring active cognitive verification, synthetic tripwires for red-teaming, and multi-party quorum requirements for high-risk operations.
+
+**Pitfall**: *Rehydration state skew.*
+An agent inspects a cluster at T0, determines a remediation is needed, and requests human approval. The human approves the action at T0 + 3 hours. When the agent rehydrates and executes the command, it assumes the environment state is identical to T0. In reality, the cluster state has drifted. Executing the action against stale assumptions corrupts the environment. The runtime must enforce Pre-Execution Invariant Verification. Every capability lease must embed a cryptographic state hash. Upon rehydration, the kernel evaluates the invariant against the live environment before dispatching the tool.
+
+---
+
+## Summary {#sec-vol3-interrupts-summary}
+
+::: {.callout-takeaways title="The Asynchronous Interrupt Invariant"}
+
+- **The Asymmetric Latency Disparity:** The $10^6\times$ gap between neural inference and human deliberation dictates that agent runtimes must never synchronously block execution threads or pin volatile KV caches in accelerator memory.
+- **The Hardware Interrupt Model:** Human signals must be formalized as hardware interrupts: out-of-band external IRQs, synchronous `SYS_ESCALATE` traps, schema invariant exceptions, and Non-Maskable Interrupt (NMI) emergency kill switches.
+- **Non-Blocking Durable Execution:** By leveraging futures and promises, runtimes decouple execution loops from supervisory delays, snapshotting state to append-only Write-Ahead Logs and rehydrating on demand.
+- **The Reversibility Boundary & Capability Escalation:** Non-invertible actions demand cryptographic capability escalation. Agents must obtain ephemeral capability leases and verify environment state hashes upon rehydration.
+- **Coffman Deadlock Prevention:** Suspending agents while they hold transactional locks induces systemic deadlocks. Runtimes eliminate hold-and-wait via isolated staging workspaces and enforce strict preemption through watchdog timers.
+
+:::
+
+[^fn-non-maskable-interrupt-nmi]: **Non-Maskable Interrupt (NMI)**\index{Non-Maskable Interrupt (NMI)}: Asynchronous, unignorable control-plane signal that bypasses model token sampling and sandbox execution boundaries. Unlike maskable IRQs—which drain the current token step before context dehydration—an NMI triggers hard real-time kernel preemption: immediately severing model inference sockets, tearing down microVM container sandboxes, and burning all outstanding capability leases to contain catastrophic runaway failures or adversarial exploits.
+
+[^fn-agent-interrupt-service-routine-isr]: **Agent Interrupt Service Routine (ISR)**\index{Agent Interrupt Service Routine (ISR)}: Privileged kernel handler dispatched upon receiving an interrupt vector. The ISR enforces atomic state transitions across three phases: (1) draining in-flight autoregressive tokens to establish a causally consistent checkpoint $\tau_k$, (2) serializing the Agent Control Block (ACB) to an append-only Write-Ahead Log, and (3) initiating asynchronous DMA transfers to evacuate volatile KV caches from GPU HBM, transitioning the agent into an idle `SUSPENDED_HUMAN_GATE` state consuming zero accelerator memory.
+
+[^fn-agent-promise]: **Agent Promise**\index{Agent Promise}: $\mathcal{P} = \langle \text{id}, \text{state}, v, \tau_{\text{created}}, \tau_{\text{timeout}}, \mathcal{F}_{\text{callback}} \rangle$ is a typed, durable concurrency handle representing an asynchronous external supervisory decision. Instantiating a promise decouples the agent's forward reasoning loop from human deliberation latency, persisting continuation metadata to the Write-Ahead Log and yielding execution threads back to the scheduler event reactor.
+
+::: {.callout-chapter-connection title="From Interrupts to Ephemeral Virtualization"}
+With the runtime architecture for scheduling, actuation boundaries, and human supervisory interrupts established, we have constructed the core operating system control plane for autonomous agents. In Chapter 10 (Environment Virtualization), we examine the virtualization boundary: isolating untrusted stochastic execution within ephemeral microVMs, enforcing copy-on-write filesystem sandboxing, and preventing data exfiltration via information flow taint tracking.
+:::
+
+## Quantitative Problems {#sec-vol3-interrupts-problems}
+
+**1. HBM Holding Cost and the Swapping Breakeven Point**
+An enterprise deploys a fleet of autonomous code-review agents. Each agent maintains an active 64,000-token context, translating to a $21.5\text{ GB}$ KV cache footprint. The GPUs are connected to host memory via PCIe Gen4 x16, providing an effective bidirectional DMA bandwidth of $28\text{ GB/s}$.
+(a) Calculate the one-way evacuation latency to move the KV cache from HBM to host DRAM.
+(b) Assuming a $50\text{ ms}$ kernel scheduling overhead for the transfer, calculate the total round-trip swap latency ($T_{\text{swap}}$).
+(c) The runtime orchestrator currently blocks synchronously, pinning the KV cache. A human reviewer takes on average $4.5$ hours to approve a PR. Given that an H100 node (8x GPUs, $80\text{ GB}$ HBM per GPU) costs $\$32.00$ per hour, calculate the dollar cost of the idle silicon wasted per human review.
+
+**2. Interrupt Handler Dispatch Priority**
+An agent's interrupt vector table assigns priorities to events. Non-Maskable Interrupts (NMI - administrative kill) have priority 0, synchronous `SYS_ESCALATE` traps have priority 1, and asynchronous webhook IRQs have priority 2. The kernel processes an interrupt by draining the current token step ($20\text{ ms}$ max) and dehydrating memory.
+(a) Under a strict priority queue discipline, if an NMI arrives precisely as an asynchronous IRQ is being serviced (memory dehydration is $30\%$ complete, total dehydration time is $800\text{ ms}$), what must the kernel do to bound NMI latency below $5\text{ ms}$?
+(b) Architect the abort sequence for the in-progress DMA transfer to satisfy this hard real-time constraint.
+
+**3. Multi-Agent Deadlock Cycle Detection**
+A cluster of four agents ($A_1, A_2, A_3, A_4$) share access to a single staging environment $E$, a production database write lease $W$, and a human reviewer pool $H$.
+At time $t$, $A_1$ holds an exclusive lock on $E$ and requests $H$. $A_2$ holds $W$ and requests $E$. $A_3$ holds $H$ (waiting for human response) and requests $W$.
+(a) Draw the resource allocation graph.
+(b) Does a deadlock exist according to Coffman's conditions?
+(c) Assuming the runtime implements optimistic copy-on-write sandboxing for $E$ (breaking Mutual Exclusion), trace the execution resolution.

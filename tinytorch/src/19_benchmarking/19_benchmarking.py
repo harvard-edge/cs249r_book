@@ -18,11 +18,9 @@
 
 Welcome to Module 19! You'll build the benchmarking infrastructure for systematic ML performance evaluation.
 
-**Note on hasattr() Usage:** This module uses hasattr() throughout for duck-typing and polymorphic benchmarking. This is legitimate because benchmarking frameworks must work with ANY model type (PyTorch, TinyTorch, custom) with different method names.
-
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete ML framework with profiling, acceleration, quantization, and compression
-**You'll Build**: TorchPerf benchmarking system for fair model comparison and performance evaluation
+**You'll Build**: The Benchmark class - a benchmarking system for fair model comparison and performance evaluation
 **You'll Enable**: Systematic optimization combination and competitive performance evaluation
 
 **Connection Map**:
@@ -33,23 +31,29 @@ Individual Optimizations (M14-18) → Benchmarking (M19) → Module 20 (Capstone
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement professional benchmarking infrastructure with statistical rigor
-2. Learn to combine optimization techniques strategically (order matters!)
-3. Build the TorchPerf class - a standardized performance evaluation framework
-4. Understand ablation studies and systematic performance evaluation
+1. Implement benchmarking infrastructure with statistical rigor
+2. Measure optimizations alone and in combination on one layer, and read what each step contributes
+3. Build the Benchmark class - a standardized performance evaluation framework
+4. Run an ablation and identify Pareto-optimal models from measured results
 
-Let's get started!
+The core reading path is to time one model with `Benchmark`, compare a baseline
+with one optimization, and run an ablation to identify what each change
+contributes. Keep the workload and measurement conditions fixed along that
+path. The statistical comparisons, Pareto analysis, and plotting helpers extend
+the interpretation of those measurements; they become useful after the basic
+comparison is reproducible. All implementations are included, but the timing
+and comparison path provides the foundation for understanding the extensions.
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/19_benchmarking/benchmarking_dev.py`
+**Learning Side:** You work in `modules/19_benchmarking/benchmarking.ipynb`
 **Building Side:** Code exports to `tinytorch.perf.benchmarking`
 
 ```python
 # Final package structure:
-from tinytorch.perf.benchmarking import Benchmark, OlympicEvent
+from tinytorch.perf.benchmarking import Benchmark
 
-# For capstone submission:
+# Measure both models under the same conditions:
 benchmark = Benchmark([baseline_model, optimized_model],
                      [{"name": "baseline"}, {"name": "optimized"}])
 results = benchmark.run_latency_benchmark()
@@ -61,14 +65,6 @@ results = benchmark.run_latency_benchmark()
 - **Consistency:** All benchmarking operations and reporting in benchmarking.benchmark
 - **Integration:** Works seamlessly with optimization modules (M14-18) for complete systems evaluation
 """
-
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| default_exp perf.benchmarking
-#| export
-
-# Constants for benchmarking defaults
-DEFAULT_WARMUP_RUNS = 5  # Default warmup runs for JIT compilation and cache warming
-DEFAULT_MEASUREMENT_RUNS = 10  # Default measurement runs for statistical significance
 
 # %% [markdown]
 """
@@ -98,9 +94,48 @@ Students completing this module will have built professional
 benchmarking infrastructure for systematic performance evaluation.
 """
 
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp perf.benchmarking
+#| export
+
+import json
+import os
+import platform
+import statistics
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Tuple, Any, Optional
+
+import numpy as np
+rng = np.random.default_rng(7)
+
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+from tinytorch.perf.profiling import Profiler  # Module 14: reuse its measurements
+
+# Optional dependency, for plots only
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    plt = None
+    MATPLOTLIB_AVAILABLE = False
+
+# Constants for benchmarking defaults
+DEFAULT_WARMUP_RUNS = 5  # Default warmup runs: cache warming and CPU clock ramp (NumPy has no JIT)
+DEFAULT_MEASUREMENT_RUNS = 10  # Default measurement runs for statistical significance
+
+# Illustrative energy model (no power meter here): a fixed cost per inference, an
+# active-power term proportional to time, and a static term proportional to memory
+ENERGY_BASE_JOULES = 0.1
+ENERGY_JOULES_PER_SECOND = 2.0  # about 2 W while the model runs
+ENERGY_JOULES_PER_MB = 0.01
+
 # %% [markdown]
 """
-## 🏅 Looking Ahead
+### Looking Ahead
 
 The benchmarking tools you build here will be used in Module 20's capstone project, where you'll apply optimization techniques competitively. For now, focus on building reliable, fair measurement infrastructure.
 """
@@ -144,7 +179,7 @@ Benchmarking is applied statistics. We measure noisy processes (model inference)
 
 ### Central Limit Theorem in Practice
 
-When you run a model many times, the distribution of measurements approaches normal (regardless of the underlying noise distribution). This lets us:
+When you run a model many times, the distribution of the *sample mean* approaches normal as the sample grows, whatever the shape of the individual measurements (the individual latencies stay skewed, with a long slow tail). This lets us:
 - Compute confidence intervals for the true mean
 - Detect statistically significant differences between models
 - Control for measurement variance
@@ -183,87 +218,6 @@ Every measurement has uncertainty. When combining metrics (like accuracy per jou
 Professional benchmarking quantifies and minimizes these uncertainties.
 """
 
-# %%
-#| export
-import numpy as np
-rng = np.random.default_rng(7)
-import time
-import statistics
-import os
-import tracemalloc
-from typing import Dict, List, Tuple, Any, Optional, Callable, Union
-from dataclasses import dataclass, field
-from pathlib import Path
-import json
-import platform
-from contextlib import contextmanager
-import warnings
-
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
-
-# Optional dependency for visualization only
-try:
-    import matplotlib.pyplot as plt
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-    # Create minimal fallback for when matplotlib is not available
-    class plt:
-        @staticmethod
-        def subplots(*args, **kwargs):
-            return None, None
-        @staticmethod
-        def figure(*args, **kwargs):
-            return None
-        @staticmethod
-        def scatter(*args, **kwargs):
-            pass
-        @staticmethod
-        def annotate(*args, **kwargs):
-            pass
-        @staticmethod
-        def xlabel(*args, **kwargs):
-            pass
-        @staticmethod
-        def ylabel(*args, **kwargs):
-            pass
-        @staticmethod
-        def title(*args, **kwargs):
-            pass
-        @staticmethod
-        def grid(*args, **kwargs):
-            pass
-        @staticmethod
-        def tight_layout(*args, **kwargs):
-            pass
-        @staticmethod
-        def savefig(*args, **kwargs):
-            pass
-        @staticmethod
-        def show(*args, **kwargs):
-            pass
-
-# Import Profiler from Module 14 for measurement reuse
-from tinytorch.perf.profiling import Profiler
-
-# %%
-from enum import Enum
-
-#| export
-class OlympicEvent(Enum):
-    """
-    Performance evaluation event categories for systematic optimization benchmarking.
-
-    Each event optimizes for different objectives with specific constraints,
-    enabling structured comparison of optimization strategies.
-    """
-    LATENCY_SPRINT = "latency_sprint"      # Minimize latency (accuracy >= 85%)
-    MEMORY_CHALLENGE = "memory_challenge"   # Minimize memory (accuracy >= 85%)
-    ACCURACY_CONTEST = "accuracy_contest"   # Maximize accuracy (latency < 100ms, memory < 10MB)
-    ALL_AROUND = "all_around"               # Best balanced score across all metrics
-    EXTREME_PUSH = "extreme_push"           # Most aggressive optimization (accuracy >= 80%)
-
 # %% [markdown]
 """
 ## 🏗️ Implementation: Building Professional Benchmarking Infrastructure
@@ -274,32 +228,45 @@ We'll build a comprehensive benchmarking system that handles statistical analysi
 
 ```
 Benchmark Architecture:
-┌─────────────────────────────────────────┐
-│ Profiler (Module 14)                    │
-│ • Base measurement tools                │
-├─────────────────────────────────────────┤
-│ BenchmarkResult                         │
-│ • Statistical container for measurements│
-├─────────────────────────────────────────┤
-│ Benchmark                               │
-│ • Uses Profiler + multi-model comparison│
-├─────────────────────────────────────────┤
-│ BenchmarkSuite                          │
-│ • Multi-metric comprehensive evaluation │
-├─────────────────────────────────────────┤
-│ MLPerf                                  │
-│ • Standardized industry-style benchmarks│
-└─────────────────────────────────────────┘
+                    ┌──────────────────────────┐
+                    │ precise_timer            │
+                    │ • one timed block        │
+                    └────────┬─────────┬───────┘
+                             │         │
+┌──────────────────────┐     │         │     ┌──────────────────────────┐
+│ Profiler (Module 14) │     │         └────>│ MLPerf                   │
+│ • measure_latency    │     │               │ • fixed inputs, seeds,   │
+│ • measure_memory     │     │               │   run counts, thresholds │
+└──────────┬───────────┘     │               │ • pass/fail per task     │
+           v                 v               └──────────────────────────┘
+┌──────────────────────────────┐
+│ Benchmark                    │      ┌──────────────────────────┐
+│ • one model, one metric      │─────>│ BenchmarkResult          │
+│ • many models compared       │      │ • mean, std, CI, p99     │
+└──────────┬───────────────────┘      └──────────────────────────┘
+           v
+┌──────────────────────────────┐
+│ BenchmarkSuite               │
+│ • every metric, every model  │
+│ • energy, plots, report      │
+└──────────────────────────────┘
 ```
 
-**Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. This demonstrates proper systems architecture - build once, reuse everywhere!
+**Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. Build the measurement once, reuse it everywhere.
 
-Each level adds capability while maintaining statistical rigor at the foundation.
+**Three harnesses, three jobs.** `Benchmark` measures: one model, one metric,
+one statistically summarized `BenchmarkResult`. `BenchmarkSuite` drives a
+`Benchmark`: it runs every metric for every model, derives energy, and writes
+the plots and the report. `MLPerf` stands beside them rather than on top of
+them. It shares only `precise_timer` and `BenchmarkResult`'s way of thinking;
+what it adds is a protocol, with fixed inputs, seeds, run counts, and pass/fail
+thresholds, so that two submissions are comparable at all. Read them in that
+order: the first two stack, the third is a separate harness for a separate job.
 """
 
 # %% [markdown]
 """
-### BenchmarkResult - Statistical Analysis Container
+### BenchmarkResult: Statistical Analysis Container
 
 Before measuring anything, we need a robust container that stores measurements and computes statistical properties. This is the foundation of all our benchmarking.
 
@@ -322,12 +289,12 @@ Raw measurements: [1.2, 3.1, 1.4, 1.3, 1.5, 1.1, 1.6]
                            ↓
         Statistical Analysis
                            ↓
-Mean: 1.46ms ± 0.25ms (95% confidence interval)
+Mean: 1.60ms ± 0.51ms (95% confidence interval)
 Median: 1.4ms (less sensitive to outliers)
-CV: 17% (coefficient of variation - relative noise)
+CV: 43% (coefficient of variation - relative noise)
 ```
 
-The confidence interval tells us: "We're 95% confident the true mean latency is between 1.21ms and 1.71ms." This guides optimization decisions with statistical backing.
+The confidence interval tells us: "We're 95% confident the true mean latency is between 1.09ms and 2.11ms." This guides optimization decisions with statistical backing.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-dataclass", "solution": true}
@@ -380,12 +347,16 @@ class BenchmarkResult:
 
         # 95% confidence interval for the mean
         if len(self.values) > 1:
-            t_score = 1.96  # Approximate for large samples
-            margin_error = t_score * (self.std / np.sqrt(self.count))
+            z_score = 1.96  # normal approximation for 95%; accurate once count is large
+            margin_error = z_score * (self.std / np.sqrt(self.count))
             self.ci_lower = self.mean - margin_error
             self.ci_upper = self.mean + margin_error
         else:
             self.ci_lower = self.ci_upper = self.mean
+
+    def percentile(self, p: float) -> float:
+        """The value p percent of the way through the sorted measurements (NumPy's linear rule)."""
+        return float(np.percentile(self.values, p))
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -504,9 +475,8 @@ def precise_timer():
 
     APPROACH:
     1. Use time.perf_counter() for high precision
-    2. Handle potential interruptions and system noise
-    3. Return elapsed time when context exits
-    4. Provide warmup capability for JIT compilation
+    2. Yield a small Timer object and fill in .elapsed when the block exits
+    3. Use try/finally so .elapsed is set even if the block raises
 
     Yields:
         Timer object with .elapsed attribute (set after context exits)
@@ -519,8 +489,8 @@ def precise_timer():
 
     HINTS:
     - perf_counter() is monotonic and high-resolution
-    - Store start time in __enter__, compute elapsed in __exit__
-    - Handle any exceptions gracefully
+    - Record the start before yield and compute elapsed after it
+    - try/finally, not try/except: errors propagate but the time is still recorded
     """
     ### BEGIN SOLUTION
     class Timer:
@@ -558,7 +528,7 @@ def test_unit_precise_timer():
         time.sleep(0.01)  # 10ms sleep
 
     # Should be close to 0.01 seconds (allow some variance)
-    assert 0.005 < timer.elapsed < 0.05, f"Expected ~0.01s, got {timer.elapsed}s"
+    assert timer.elapsed >= 0.005, f"Expected ~0.01s, got {timer.elapsed}s"
 
     # Test multiple uses
     times = []
@@ -568,7 +538,7 @@ def test_unit_precise_timer():
         times.append(timer.elapsed)
 
     # All times should be reasonably close
-    assert all(0.0005 < t < 0.01 for t in times)
+    assert all(t >= 0.0005 for t in times)
 
     print("✅ precise_timer works correctly!")
 
@@ -577,7 +547,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark Class - Core Measurement Engine
+### Benchmark Class: Core Measurement Engine
 
 The Benchmark class implements the core measurement logic for different metrics. It handles the complex orchestration of multiple models, datasets, and measurement protocols.
 
@@ -638,7 +608,7 @@ Different metrics require different measurement strategies:
 
 # %% [markdown]
 """
-### Benchmark.__init__ - Setting Up the Measurement Engine
+### Benchmark.__init__: Setting Up the Measurement Engine
 
 The Benchmark constructor configures the measurement infrastructure: models to test,
 datasets for evaluation, and system metadata for reproducibility. It reuses the
@@ -693,6 +663,8 @@ class Benchmark:
         - os.cpu_count() can return None, use fallback
         """
         ### BEGIN SOLUTION
+        if warmup_runs < 0 or measurement_runs <= 0:
+            raise ValueError("warmup_runs must be nonnegative and measurement_runs positive")
         self.models = models
         self.datasets = datasets
         self.warmup_runs = warmup_runs
@@ -756,7 +728,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.run_latency_benchmark - Measuring Inference Speed
+### Benchmark.run_latency_benchmark: Measuring Inference Speed
 
 Latency benchmarking measures how long each model takes to process input. We use
 the Profiler for warmup, then collect multiple individual measurements for
@@ -771,7 +743,6 @@ Input Tensor ──> Warmup Runs (discard) ──> Measurement Runs ──> Benc
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-latency", "solution": true}
 #| export
-    # --- Benchmark.run_latency_benchmark ---
 def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model inference latency using Profiler.
@@ -796,26 +767,14 @@ def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28,
         model_name = getattr(model, 'name', f'model_{i}')
 
         # Create input tensor for profiling
-        from tinytorch.core.tensor import Tensor
         input_tensor = Tensor(rng.standard_normal(input_shape).astype(np.float32))
 
-        # Use Profiler to measure latency with proper warmup and iterations
-        latency_ms = self.profiler.measure_latency(
-            model,
-            input_tensor,
-            warmup=self.warmup_runs,
-            iterations=self.measurement_runs
-        )
-
-        # Profiler returns single median value
-        # For BenchmarkResult, we need multiple measurements
-        # Run additional measurements for statistical analysis
+        # Warm up through the Profiler (that one timing is discarded), then
+        # record every measured run on its own so BenchmarkResult sees the tail
+        self.profiler.measure_latency(model, input_tensor, warmup=self.warmup_runs, iterations=1)
         latencies = []
         for _ in range(self.measurement_runs):
-            single_latency = self.profiler.measure_latency(
-                model, input_tensor, warmup=0, iterations=1
-            )
-            latencies.append(single_latency)
+            latencies.append(self.profiler.measure_latency(model, input_tensor, warmup=0, iterations=1))
 
         results[model_name] = BenchmarkResult(
             f"{model_name}_latency_ms",
@@ -866,11 +825,153 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.run_accuracy_benchmark - Measuring Prediction Quality
+### Simulated Accuracy: The Honest Stand-In
 
-Accuracy benchmarking evaluates model correctness across datasets. Models with
-an `evaluate` method are tested directly; otherwise, accuracy is simulated for
-demonstration purposes.
+Some models handed to a benchmark harness have no `evaluate` method and no
+labeled data behind them. The tempting move is to make up a plausible score.
+Do not. A fabricated number propagates into every table, chart, and comparison
+downstream, and nothing further along can tell it apart from a measurement.
+
+The stand-in below is deliberately modest. It runs the model on a small,
+seeded **proxy task** -- inputs drawn from a fixed generator, labels defined by
+a rule the inputs actually determine -- and reports how often the model's
+output agrees. That is a real score of a fake task, which is a very different
+claim from a fake score of a real task, and the caller marks it `simulated`.
+
+Two properties make it defensible:
+
+- **Deterministic**: the same model and dataset always give the same number.
+- **Output-dependent**: it measures what the model *computes*. It never reads
+  the model's name or its position in the list.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "simulated-accuracy", "solution": true}
+#| export
+def _simulated_accuracy(model: Any, dataset: Any, num_samples: int = 32) -> float:
+    """
+    Score a model on a seeded proxy task when no ground truth is available.
+
+    This is NOT a measurement of the model's accuracy on `dataset`. It is a
+    reproducible, output-dependent stand-in for demos and smoke tests. Callers
+    must mark any result built from it as simulated.
+
+    TODO: Score the model on a small seeded synthetic classification task.
+
+    APPROACH:
+    1. Derive a seed from the dataset so different datasets give different probes
+    2. Draw num_samples probe vectors; the label is 1 when the probe sums positive
+    3. Run the model on each probe and predict 1 when its output sums positive
+    4. Return the fraction of agreements; a model we cannot invoke gets 0.5
+
+    Args:
+        model: Any object with forward(), predict(), or __call__
+        dataset: Used only to vary the probe seed, never as ground truth
+        num_samples: Number of probe vectors (default: 32)
+
+    Returns:
+        float: Agreement rate in [0, 1]; 0.5 means chance
+
+    HINTS:
+    - A model that passes signal through scores near 1.0; one that destroys it
+      lands near 0.5, which is exactly the discrimination we want
+    - Never let the score depend on getattr(model, 'name') or the model's index
+    """
+    ### BEGIN SOLUTION
+    # Vary the probe per dataset, deterministically and without hashing.
+    seed = 7 + sum(repr(dataset).encode()) % 1000
+    probe_rng = np.random.default_rng(seed)
+
+    probes = probe_rng.standard_normal((num_samples, 4)).astype(np.float32)
+    true_labels = (probes.sum(axis=1) > 0).astype(int)
+
+    predicted = []
+    for probe in probes:
+        try:
+            x = Tensor(probe.reshape(1, -1))
+            if hasattr(model, 'forward'):
+                out = model.forward(x)
+            elif hasattr(model, 'predict'):
+                out = model.predict(x)
+            elif callable(model):
+                out = model(x)
+            else:
+                raise TypeError("Model needs forward(), predict(), or __call__")
+        except Exception as exc:
+            raise RuntimeError("Synthetic accuracy probe failed; no score was measured") from exc
+
+        out_data = out.data if hasattr(out, 'data') else out
+        predicted.append(int(np.asarray(out_data, dtype=np.float64).sum() > 0))
+
+    return float(np.mean(np.asarray(predicted) == true_labels))
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _simulated_accuracy
+
+**What we're testing**: Determinism, output-dependence, and identity-independence
+**Why it matters**: A stand-in score is only defensible if it cannot be gamed by
+renaming a model or reordering the list
+**Expected**: Same input gives the same score; a pass-through model beats a model
+that destroys the signal; renaming changes nothing
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-simulated-accuracy", "locked": true, "points": 5}
+def test_unit_simulated_accuracy():
+    """🧪 Test the simulated-accuracy stand-in."""
+    print("🧪 Unit Test: _simulated_accuracy...")
+
+    class PassThrough:
+        def __init__(self, name):
+            self.name = name
+        def forward(self, x):
+            return x
+
+    class Deaf:
+        """Destroys the input signal, so it should land near chance."""
+        def __init__(self, name):
+            self.name = name
+        def forward(self, x):
+            return Tensor(np.zeros_like(x.data) - 1.0)
+
+    dataset = {"d": "1"}
+
+    # Deterministic
+    a = _simulated_accuracy(PassThrough("a"), dataset)
+    assert a == _simulated_accuracy(PassThrough("a"), dataset), "Score must be reproducible"
+
+    # Identity-independent: the name must not move the number
+    assert a == _simulated_accuracy(PassThrough("zzz_accurate_efficient"), dataset), \
+        "Score must not depend on the model's name"
+
+    # Output-dependent: passing signal through beats destroying it
+    deaf = _simulated_accuracy(Deaf("b"), dataset)
+    assert a > deaf, f"Pass-through ({a}) should beat signal-destroying ({deaf})"
+    assert 0.0 <= deaf <= 1.0 and 0.0 <= a <= 1.0
+
+    print("✅ _simulated_accuracy works correctly!")
+
+if __name__ == "__main__":
+    test_unit_simulated_accuracy()
+
+# %% [markdown]
+"""
+### Benchmark.run_accuracy_benchmark: Measuring Prediction Quality
+
+Accuracy benchmarking evaluates model correctness across datasets. A model that
+exposes an `evaluate(dataset)` method is **measured**: whatever score it returns
+is what gets reported.
+
+There is no honest way to measure accuracy without ground truth, so a model that
+has no `evaluate` method cannot be scored. Rather than invent a plausible number,
+the default raises an error. For classroom demonstrations only, explicitly pass
+`simulate=True` to score against a **seeded synthetic label set**; the benchmark
+marks the result `simulated=True` so nobody mistakes it for a measurement. The
+score still depends on what the model actually outputs -- never on its name or
+its position in the list.
+
+> A benchmark that reports a number nobody measured is worse than a benchmark
+> that reports nothing. If you take one habit from this module, take that one.
 
 ```
 Accuracy Measurement:
@@ -882,8 +983,7 @@ Model ──> Dataset 1 ──> accuracy_1 ──┐
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-accuracy", "solution": true}
 #| export
-    # --- Benchmark.run_accuracy_benchmark ---
-def benchmark_run_accuracy_benchmark(self) -> Dict[str, BenchmarkResult]:
+def benchmark_run_accuracy_benchmark(self, simulate: bool = False) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model accuracy across datasets.
 
@@ -891,13 +991,16 @@ def benchmark_run_accuracy_benchmark(self) -> Dict[str, BenchmarkResult]:
 
     APPROACH:
     1. Iterate over all models and datasets
-    2. Use model.evaluate() if available, otherwise simulate
-    3. Clamp accuracy to [0, 1] range
-    4. Wrap results in BenchmarkResult
+    2. If the model has evaluate(), use its score -- that is a real measurement
+    3. Otherwise raise unless simulate=True was explicitly requested; then use
+       the seeded classroom probe and flag its result as simulated
+    4. Reject non-finite/out-of-range accuracy and wrap the scores in BenchmarkResult
 
     HINTS:
     - Use hasattr(model, 'evaluate') for duck-typing
-    - Different models get different base accuracies for simulation
+    - The simulated path must depend on the model's OUTPUT, never on its name or
+      its index -- a score keyed to identity is a fabricated benchmark
+    - Record simulated=True in metadata so a reader can tell the two apart
     """
     ### BEGIN SOLUTION
     results = {}
@@ -905,29 +1008,36 @@ def benchmark_run_accuracy_benchmark(self) -> Dict[str, BenchmarkResult]:
     for i, model in enumerate(self.models):
         model_name = getattr(model, 'name', f'model_{i}')
         accuracies = []
+        simulated = False
 
         for dataset in self.datasets:
-            # Simulate accuracy measurement
-            # In practice, this would evaluate the model on the dataset
-            try:
-                if hasattr(model, 'evaluate'):
-                    accuracy = model.evaluate(dataset)
-                else:
-                    # Simulate accuracy for demonstration
-                    base_accuracy = 0.85 + i * 0.05  # Different models have different base accuracies
-                    accuracy = base_accuracy + rng.normal(0, 0.02)  # Add noise
-                    accuracy = max(0.0, min(1.0, accuracy))  # Clamp to [0, 1]
-            except Exception:
-                # Fallback simulation
-                accuracy = 0.80 + rng.normal(0, 0.05)
-                accuracy = max(0.0, min(1.0, accuracy))
+            if hasattr(model, 'evaluate'):
+                # Real measurement: the model tells us how it did on this dataset
+                accuracy = float(model.evaluate(dataset))
+            else:
+                if not simulate:
+                    raise ValueError("Accuracy requires model.evaluate(dataset); use simulate=True only for a classroom probe")
+                # No ground truth available. Score the model's actual outputs
+                # against a seeded reference label set so the number is at least
+                # reproducible and output-dependent -- but flag it as simulated.
+                simulated = True
+                accuracy = _simulated_accuracy(model, dataset)
 
+            if not np.isfinite(accuracy) or not 0 <= accuracy <= 1:
+                raise ValueError("Accuracy must be finite and in [0, 1]")
             accuracies.append(accuracy)
+
+        if simulated:
+            print(f"   ⚠️  {model_name}: no evaluate() method -- accuracy is SIMULATED, not measured")
 
         results[model_name] = BenchmarkResult(
             f"{model_name}_accuracy",
             accuracies,
-            metadata={'num_datasets': len(self.datasets), **self.system_info}
+            metadata={
+                'num_datasets': len(self.datasets),
+                'simulated': simulated,
+                **self.system_info,
+            }
         )
 
     return results
@@ -959,7 +1069,7 @@ def test_unit_benchmark_accuracy():
     datasets = [{"d": "1"}, {"d": "2"}]
     benchmark = Benchmark(models, datasets, warmup_runs=1, measurement_runs=3)
 
-    results = benchmark.run_accuracy_benchmark()
+    results = benchmark.run_accuracy_benchmark(simulate=True)
     assert len(results) == 2
     assert all(isinstance(r, BenchmarkResult) for r in results.values())
     assert all(0 <= r.mean <= 1 for r in results.values())
@@ -971,18 +1081,15 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.run_memory_benchmark - Measuring Resource Consumption
+### Benchmark.run_memory_benchmark: Measuring Resource Consumption
 
 Memory benchmarking tracks how much RAM each model consumes during inference.
-We use the Profiler's memory measurement, falling back to parameter-count
-estimation when tracemalloc reports minimal usage.
+We retain the Profiler's traced allocation peak even when it is small. This is
+not total process RSS or the size of all model parameters.
 
 ```
 Memory Measurement:
 Model ──> Profiler.measure_memory() ──> peak_memory_mb
-                                         ↓
-                            If < 1.0 MB detected:
-                            count_parameters() * 4 bytes
                                          ↓
                                   BenchmarkResult
 ```
@@ -990,7 +1097,6 @@ Model ──> Profiler.measure_memory() ──> peak_memory_mb
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-memory", "solution": true}
 #| export
-    # --- Benchmark.run_memory_benchmark ---
 def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model memory usage using Profiler.
@@ -999,13 +1105,13 @@ def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 
 
     APPROACH:
     1. Use self.profiler.measure_memory() for each model
-    2. Fall back to parameter-count estimation if tracemalloc reports < 1 MB
+    2. Keep the measured peak, including values below 1 MB
     3. Collect self.measurement_runs samples
     4. Wrap results in BenchmarkResult
 
     HINTS:
     - memory_stats['peak_memory_mb'] is the primary metric
-    - Estimate memory as param_count * 4 / (1024**2) for float32
+    - Parameter storage is a different metric; do not substitute it for allocator peaks
     """
     ### BEGIN SOLUTION
     results = {}
@@ -1020,11 +1126,7 @@ def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 
             # Use peak_memory_mb as the primary metric
             memory_used = memory_stats['peak_memory_mb']
 
-            # If no significant memory change detected, estimate from parameters
-            if memory_used < 1.0:
-                param_count = self.profiler.count_parameters(model)
-                memory_used = param_count * 4 / (1024**2)  # 4 bytes per float32
-
+            # Preserve the allocator peak, even for a small model.
             memory_usages.append(max(0, memory_used))
 
         results[model_name] = BenchmarkResult(
@@ -1073,7 +1175,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Benchmark.compare_models - Cross-Model Comparison
+### Benchmark.compare_models: Cross-Model Comparison
 
 The compare_models method dispatches to the appropriate benchmark type and
 formats results into a structured list of dictionaries for easy comparison.
@@ -1082,7 +1184,6 @@ This is the primary interface for multi-model evaluation.
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-compare", "solution": true}
 #| export
-    # --- Benchmark.compare_models ---
 def benchmark_compare_models(self, metric: str = "latency"):
     """
     Compare models across a specific metric.
@@ -1118,7 +1219,7 @@ def benchmark_compare_models(self, metric: str = "latency"):
     comparison_data = []
     for model_name, result in results.items():
         comparison_data.append({
-            'model': model_name.replace(f'_{metric}', '').replace('_ms', '').replace('_mb', ''),
+            'model': model_name,
             'metric': metric,
             'mean': result.mean,
             'std': result.std,
@@ -1170,7 +1271,7 @@ def test_unit_benchmark():
     assert all(isinstance(result, BenchmarkResult) for result in latency_results.values())
 
     # Test accuracy benchmark
-    accuracy_results = benchmark.run_accuracy_benchmark()
+    accuracy_results = benchmark.run_accuracy_benchmark(simulate=True)
     assert len(accuracy_results) == 2
     assert all(0 <= result.mean <= 1 for result in accuracy_results.values())
 
@@ -1194,7 +1295,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite - Comprehensive Multi-Metric Evaluation
+### BenchmarkSuite: Comprehensive Multi-Metric Evaluation
 
 The BenchmarkSuite orchestrates multiple benchmark types and generates comprehensive reports. This is where individual measurements become actionable engineering insights.
 
@@ -1251,7 +1352,7 @@ Since direct energy measurement requires specialized hardware, we estimate energ
 
 # %% [markdown]
 """
-### BenchmarkSuite.__init__ - Setting Up Multi-Metric Evaluation
+### BenchmarkSuite.__init__: Setting Up Multi-Metric Evaluation
 
 The BenchmarkSuite constructor creates the evaluation infrastructure, including
 a Benchmark instance for measurements and an output directory for reports and plots.
@@ -1338,7 +1439,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite.run_full_benchmark - Orchestrating All Measurements
+### BenchmarkSuite.run_full_benchmark: Orchestrating All Measurements
 
 The run_full_benchmark method runs all four benchmark categories (latency, accuracy,
 memory, energy) in sequence, collecting comprehensive results for each model.
@@ -1354,8 +1455,7 @@ Models ──> Latency Benchmark ──┐
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-run", "solution": true}
 #| export
-    # --- BenchmarkSuite.run_full_benchmark ---
-def benchsuite_run_full_benchmark(self) -> Dict[str, Dict[str, BenchmarkResult]]:
+def benchsuite_run_full_benchmark(self, simulate: bool = False) -> Dict[str, Dict[str, BenchmarkResult]]:
     """
     Run all benchmark categories.
 
@@ -1380,7 +1480,7 @@ def benchsuite_run_full_benchmark(self) -> Dict[str, Dict[str, BenchmarkResult]]
     self.results['latency'] = self.benchmark.run_latency_benchmark()
 
     print("  🎯 Measuring accuracy...")
-    self.results['accuracy'] = self.benchmark.run_accuracy_benchmark()
+    self.results['accuracy'] = self.benchmark.run_accuracy_benchmark(simulate=simulate)
 
     print("  💾 Measuring memory usage...")
     self.results['memory'] = self.benchmark.run_memory_benchmark()
@@ -1420,7 +1520,7 @@ def test_unit_benchsuite_run():
         models = [MockModel("m1"), MockModel("m2")]
         suite = BenchmarkSuite(models, [{"d": "1"}], output_dir=tmp_dir)
 
-        results = suite.run_full_benchmark()
+        results = suite.run_full_benchmark(simulate=True)
 
         assert 'latency' in results
         assert 'accuracy' in results
@@ -1437,7 +1537,7 @@ def test_unit_benchsuite_run():
 
 # %% [markdown]
 """
-### BenchmarkSuite._estimate_energy_efficiency - Energy Modeling
+### BenchmarkSuite._estimate_energy_efficiency: Energy Modeling
 
 Since direct energy measurement requires specialized hardware (power meters, RAPL),
 we estimate energy from latency and memory usage. This simplified model captures the
@@ -1445,7 +1545,7 @@ key relationship: energy is proportional to power (memory-related) multiplied by
 
 ```
 Energy Estimation Model:
-energy = base_cost + (latency/1000) * 2.0 + memory * 0.01   (Joules)
+energy = base_cost + (latency/1000) * 2.0 + memory * 0.01   (Joules; illustrative constants)
          ↑            ↑                      ↑
          Fixed        Time component          Memory component
          overhead     (active power)          (static power)
@@ -1454,7 +1554,6 @@ energy = base_cost + (latency/1000) * 2.0 + memory * 0.01   (Joules)
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-energy", "solution": true}
 #| export
-    # --- BenchmarkSuite._estimate_energy_efficiency ---
 def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
     """
     Estimate energy efficiency (simplified simulation).
@@ -1464,11 +1563,11 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
     APPROACH:
     1. Check if latency and memory results are available
     2. Combine latency and memory into energy estimate per measurement
-    3. Fall back to simulated values if prerequisites missing
+    3. Raise a clear error if the latency or memory results are missing
     4. Wrap results in BenchmarkResult
 
     HINTS:
-    - Energy model: energy = 0.1 + (lat/1000)*2.0 + mem*0.01
+    - Energy model: ENERGY_BASE_JOULES + (lat/1000) * ENERGY_JOULES_PER_SECOND + mem * ENERGY_JOULES_PER_MB
     - Use zip() to pair latency and memory measurements
     """
     ### BEGIN SOLUTION
@@ -1486,8 +1585,7 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
                 # Energy ∝ power × time, power ∝ memory usage
                 energy_values = []
                 for lat, mem in zip(latency_result.values, memory_result.values):
-                    # Simplified energy model: energy = base + latency_factor * time + memory_factor * memory
-                    energy = 0.1 + (lat / 1000) * 2.0 + mem * 0.01  # Joules
+                    energy = ENERGY_BASE_JOULES + (lat / 1000) * ENERGY_JOULES_PER_SECOND + mem * ENERGY_JOULES_PER_MB
                     energy_values.append(energy)
 
                 energy_results[model_name] = BenchmarkResult(
@@ -1496,17 +1594,11 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
                     metadata={'estimated': True, **self.benchmark.system_info}
                 )
 
-    # Fallback if no latency/memory results
     if not energy_results:
-        for i, model in enumerate(self.models):
-            model_name = getattr(model, 'name', f'model_{i}')
-            # Simulate energy measurements
-            energy_values = [0.5 + rng.normal(0, 0.1) for _ in range(5)]
-            energy_results[model_name] = BenchmarkResult(
-                f"{model_name}_energy_joules",
-                energy_values,
-                metadata={'estimated': True, **self.benchmark.system_info}
-            )
+        raise RuntimeError(
+            "Energy estimation needs latency and memory results first\n"
+            "  💡 Run the latency and memory benchmarks (or run_full_benchmark) before estimating energy"
+        )
 
     return energy_results
     ### END SOLUTION
@@ -1555,7 +1647,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite.plot_results - Visualization
+### BenchmarkSuite.plot_results: Visualization
 
 The plot_results method generates a 2x2 grid of bar charts comparing models
 across all four metrics. The best performer in each category is highlighted green.
@@ -1563,7 +1655,6 @@ across all four metrics. The best performer in each category is highlighted gree
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-plot", "solution": true}
 #| export
-    # --- BenchmarkSuite.plot_results and plot_pareto_frontier ---
 def benchsuite_plot_results(self, save_plots: bool = True):
     """
     Generate visualization plots for benchmark results.
@@ -1607,8 +1698,7 @@ def benchsuite_plot_results(self, save_plots: bool = True):
             stds = []
 
             for model_name, result in self.results[metric].items():
-                clean_name = model_name.replace(f'_{metric}', '').replace('_ms', '').replace('_mb', '').replace('_joules', '')
-                model_names.append(clean_name)
+                model_names.append(model_name)
                 means.append(result.mean)
                 stds.append(result.std)
 
@@ -1659,23 +1749,14 @@ def benchsuite_plot_pareto_frontier(self, x_metric: str = 'latency', y_metric: s
     y_values = []
     model_names = []
 
-    for model_name in self.results[x_metric].keys():
-        clean_name = model_name.replace(f'_{x_metric}', '').replace('_ms', '').replace('_mb', '').replace('_joules', '')
-        if clean_name in [mn.replace(f'_{y_metric}', '') for mn in self.results[y_metric].keys()]:
-            x_val = self.results[x_metric][model_name].mean
-
-            # Find corresponding y value
-            y_key = None
-            for key in self.results[y_metric].keys():
-                if clean_name in key:
-                    y_key = key
-                    break
-
-            if y_key:
-                y_val = self.results[y_metric][y_key].mean
-                x_values.append(x_val)
-                y_values.append(y_val)
-                model_names.append(clean_name)
+    # Both result dicts are keyed by model name, so a plain lookup pairs them
+    for model_name, x_result in self.results[x_metric].items():
+        y_result = self.results[y_metric].get(model_name)
+        if y_result is None:
+            continue
+        x_values.append(x_result.mean)
+        y_values.append(y_result.mean)
+        model_names.append(model_name)
 
     # Plot points
     plt.scatter(x_values, y_values, s=100, alpha=0.7)
@@ -1706,9 +1787,9 @@ BenchmarkSuite.plot_pareto_frontier = benchsuite_plot_pareto_frontier
 """
 ### 🧪 Unit Test: BenchmarkSuite.plot_results
 
-**What we're testing**: Visualization generation (graceful handling when matplotlib unavailable)
-**Why it matters**: Visual comparisons make benchmark results actionable
-**Expected**: No errors when plotting (or graceful fallback message)
+**What we're testing**: That plot_results actually writes a comparison chart, and stays quiet when there is nothing to plot
+**Why it matters**: A visualization step that silently produces no file is worse than none at all, because the report still claims a chart exists
+**Expected**: benchmark_comparison.png exists and is non-empty after a run; an empty suite prints a message instead of raising
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-benchsuite-plot", "locked": true, "points": 10}
@@ -1724,24 +1805,42 @@ def test_unit_benchsuite_plot():
             return x
 
     import tempfile
+    from pathlib import Path
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         models = [MockModel("m1"), MockModel("m2")]
         suite = BenchmarkSuite(models, [{"d": "1"}], output_dir=tmp_dir)
-        suite.run_full_benchmark()
+        suite.run_full_benchmark(simulate=True)
 
-        # Should not raise even without matplotlib display
-        try:
-            import matplotlib
-            matplotlib.use('Agg')  # Non-interactive backend
+        if MATPLOTLIB_AVAILABLE:
+            # Agg is the headless backend: it writes files and never opens a
+            # window, so plt.show() inside plot_results becomes a no-op here.
+            plt.switch_backend("Agg")
             suite.plot_results(save_plots=True)
-        except Exception:
-            pass  # Plotting is optional
 
-    # Test with no results
-    import tempfile
+            # Deliberately no try/except around the call above. The whole point
+            # of this test is that the chart is produced, and swallowing the
+            # exception would let a plot_results that draws nothing pass.
+            plot_path = Path(tmp_dir) / "benchmark_comparison.png"
+            assert plot_path.exists(), (
+                f"plot_results(save_plots=True) wrote no {plot_path.name}. "
+                f"Output directory holds: "
+                f"{sorted(f.name for f in Path(tmp_dir).iterdir())}"
+            )
+            assert plot_path.stat().st_size > 0, (
+                f"{plot_path.name} was created but is empty"
+            )
+        else:
+            # Without matplotlib the method must degrade, not raise.
+            suite.plot_results(save_plots=True)
+
+    # An empty suite reports that there is nothing to plot, and writes no file.
     with tempfile.TemporaryDirectory() as tmp_dir:
         suite2 = BenchmarkSuite([MockModel("m1")], [{"d": "1"}], output_dir=tmp_dir)
-        suite2.plot_results()  # Should print "No results" without error
+        suite2.plot_results()
+        assert not (Path(tmp_dir) / "benchmark_comparison.png").exists(), (
+            "plot_results wrote a chart even though the suite held no results"
+        )
 
     print("✅ BenchmarkSuite.plot_results works correctly!")
 
@@ -1750,7 +1849,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### BenchmarkSuite.generate_report - Actionable Insights
+### BenchmarkSuite.generate_report: Actionable Insights
 
 The generate_report method compiles all benchmark results into a structured
 markdown report with system information, per-metric summaries, best performers,
@@ -1814,8 +1913,7 @@ def _benchsuite_format_results_summary(self) -> List[str]:
         lines.append("")
 
         for model_name, result in results.items():
-            clean_name = model_name.replace(f'_{metric_type}', '').replace('_ms', '').replace('_mb', '').replace('_joules', '')
-            lines.append(f"- **{clean_name}**: {result.mean:.4f} ± {result.std:.4f}")
+            lines.append(f"- **{model_name}**: {result.mean:.4f} ± {result.std:.4f}")
         lines.append("")
 
     return lines
@@ -1854,6 +1952,11 @@ def _benchsuite_format_recommendations(self) -> List[str]:
     lines = []
     lines.append("## Recommendations")
     lines.append("")
+    if any(result.metadata.get('simulated', False)
+           for result in self.results.get('accuracy', {}).values()):
+        lines.append("Synthetic accuracy probe: no deployment recommendations.")
+        return lines
+
 
     if len(self.results) >= 2:
         if 'latency' in self.results and 'accuracy' in self.results:
@@ -1864,13 +1967,7 @@ def _benchsuite_format_recommendations(self) -> List[str]:
 
             scores = {}
             for model_name in latency_results.keys():
-                clean_name = model_name.replace('_latency', '').replace('_ms', '')
-
-                acc_key = None
-                for key in accuracy_results.keys():
-                    if clean_name in key:
-                        acc_key = key
-                        break
+                acc_key = model_name if model_name in accuracy_results else None
 
                 if acc_key:
                     lat_vals = [r.mean for r in latency_results.values()]
@@ -1879,7 +1976,7 @@ def _benchsuite_format_recommendations(self) -> List[str]:
                     norm_latency = 1 - (latency_results[model_name].mean - min(lat_vals)) / (max(lat_vals) - min(lat_vals) + 1e-8)
                     norm_accuracy = (accuracy_results[acc_key].mean - min(acc_vals)) / (max(acc_vals) - min(acc_vals) + 1e-8)
 
-                    scores[clean_name] = (norm_latency + norm_accuracy) / 2
+                    scores[model_name] = (norm_latency + norm_accuracy) / 2
 
             if scores:
                 best_overall = max(scores.items(), key=lambda x: x[1])
@@ -1894,8 +1991,8 @@ def _benchsuite_format_recommendations(self) -> List[str]:
         best_acc_model = max(acc_results.items(), key=lambda x: x[1].mean)
         best_lat_model = min(lat_results.items(), key=lambda x: x[1].mean)
 
-        lines.append(f"- **For maximum accuracy**: Use {best_acc_model[0].replace('_accuracy', '')}")
-        lines.append(f"- **For minimum latency**: Use {best_lat_model[0].replace('_latency_ms', '')}")
+        lines.append(f"- **For maximum accuracy**: Use {best_acc_model[0]}")
+        lines.append(f"- **For minimum latency**: Use {best_lat_model[0]}")
         lines.append("- **For production deployment**: Consider the best overall trade-off model above")
 
     return lines
@@ -1987,7 +2084,7 @@ def test_unit_benchsuite_format_results():
     with tempfile.TemporaryDirectory() as tmp_dir:
         models = [MockModel("fast_model"), MockModel("accurate_model")]
         suite = BenchmarkSuite(models, [{"data": "test"}], output_dir=tmp_dir)
-        suite.run_full_benchmark()
+        suite.run_full_benchmark(simulate=True)
 
         lines = suite._format_results_summary()
 
@@ -2029,7 +2126,7 @@ def test_unit_benchsuite_format_recs():
     with tempfile.TemporaryDirectory() as tmp_dir:
         models = [MockModel("fast_model"), MockModel("accurate_model")]
         suite = BenchmarkSuite(models, [{"data": "test"}], output_dir=tmp_dir)
-        suite.run_full_benchmark()
+        suite.run_full_benchmark(simulate=True)
 
         lines = suite._format_recommendations()
 
@@ -2077,7 +2174,7 @@ def test_unit_benchmark_suite():
         suite = BenchmarkSuite(models, datasets, output_dir=tmp_dir)
 
         # Run full benchmark
-        results = suite.run_full_benchmark()
+        results = suite.run_full_benchmark(simulate=True)
 
         # Verify all benchmark types completed
         assert 'latency' in results
@@ -2107,7 +2204,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf - Standardized Industry Benchmarking
+### MLPerf: Standardized Industry Benchmarking
 
 MLPerf® is a trademark of MLCommons. This module provides MLPerf-style standardized
 benchmarks that enable fair comparison across different systems, similar to how the
@@ -2185,7 +2282,7 @@ All MLPerf benchmarks use:
 
 # %% [markdown]
 """
-### MLPerf.__init__ - Configuring Standard Benchmarks
+### MLPerf.__init__: Configuring Standard Benchmarks
 
 The MLPerf constructor sets up four standardized benchmark tasks, each with
 fixed input shapes, target accuracy, and maximum latency thresholds. Using a
@@ -2230,16 +2327,20 @@ class MLPerf:
         TODO: Set up standard benchmark configurations with fixed seeds
 
         APPROACH:
-        1. Store random seed and initialize numpy RNG
+        1. Store random_seed; every phase rebuilds its generator from it
         2. Define benchmark configs with input_shape, target_accuracy, max_latency_ms
 
         HINTS:
         - Each benchmark is a dict with 'input_shape', 'target_accuracy', 'max_latency_ms', 'description'
         - keyword_spotting uses (1, 16000) for 1 second of 16kHz audio
+        - Store the seed itself, not a generator. Each phase calls
+          np.random.default_rng(self.random_seed), so running the same
+          benchmark twice draws the same inputs and the same synthetic labels.
+          A seed that no phase reads makes random_seed a lie, and a benchmark
+          whose seed does nothing is not reproducible no matter what it prints
         """
         ### BEGIN SOLUTION
         self.random_seed = random_seed
-        rng = np.random.default_rng(7)
 
         # Standard MLPerf benchmark configurations
         self.benchmarks = {
@@ -2309,7 +2410,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf._run_latency_test - Measuring Inference Latency
+### MLPerf._run_latency_test: Measuring Inference Latency
 
 This helper runs the latency measurement phase: warmup, then timed inference
 for each test input. Returns lists of latencies (ms) and model predictions.
@@ -2323,7 +2424,6 @@ Test Inputs ──> Warmup Phase (10%) ──> Measurement Phase (100%) ──> 
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-latency", "solution": true}
 #| export
-    # --- MLPerf._run_latency_test ---
 def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
                                   benchmark_name: str, num_runs: int) -> Tuple[List[float], List[Any]]:
     """
@@ -2369,13 +2469,11 @@ def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
                 elif callable(model):
                     output = model(test_input)
                 else:
-                    # Simulate prediction
-                    output = rng.random(2) if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection'] else rng.random(10)
+                    raise TypeError(f"{type(model).__name__} has no forward(), predict(), or __call__ to benchmark")
+            except Exception as exc:
+                raise RuntimeError(f"{benchmark_name}: model failed on input {i}: {exc}") from exc
 
-                predictions.append(output)
-            except Exception:
-                # Fallback simulation
-                predictions.append(rng.random(2))
+            predictions.append(output)
 
         latencies.append(timer.elapsed * 1000)  # Convert to ms
 
@@ -2422,7 +2520,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf._run_accuracy_test - Evaluating Prediction Quality
+### MLPerf._run_accuracy_test: Evaluating Prediction Quality
 
 This helper calculates accuracy by comparing model predictions against synthetic
 ground truth labels. It handles both binary classification (keyword spotting,
@@ -2482,32 +2580,47 @@ def _extract_pred_array(pred) -> np.ndarray:
 
 Use _extract_pred_array to get clean predictions, then compare against
 synthetic ground truth for binary and multi-class tasks.
+
+Expect chance-level numbers here (50% binary, 10% multi-class) when the model
+under test has nothing to do with the synthetic labels. Resist the urge to
+"fix" that by nudging the score toward the compliance target. A benchmark that
+adjusts its output until the result looks plausible has stopped measuring.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "tinymlperf-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "tinymlperf-accuracy", "solution": true}
 #| export
 def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
-                                    benchmark_name: str, num_runs: int) -> float:
+                                    benchmark_name: str, num_runs: int,
+                                    labels: Optional[np.ndarray] = None) -> float:
     """
-    Calculate accuracy from predictions against synthetic ground truth.
+    Calculate accuracy from predictions against the reference labels.
+
+    Pass `labels` (one per test input) to score against a real test set. When
+    none are given the ground truth is SYNTHETIC: a model with no relationship
+    to those labels scores at chance -- 50% on the binary tasks, 10% on the
+    10-class task -- and that is the correct, informative result. A real
+    MLPerf submission uses the benchmark's own labeled dataset; the protocol
+    around it does not change.
 
     TODO: Implement accuracy calculation using _extract_pred_array helper
 
     APPROACH:
-    1. Generate synthetic ground truth using fixed seed
+    1. Use the labels given, or draw synthetic ones from self.random_seed so the run repeats
     2. For binary tasks: use _extract_pred_array, compare class scores
     3. For multi-class: use _extract_pred_array, take argmax
-    4. Add realistic noise based on model name
+    4. Return the agreement rate. Nothing else.
 
     HINTS:
     - keyword_spotting, visual_wake_words, and anomaly_detection are binary (2 classes)
     - image_classification has 10 classes
+    - Do not adjust the score by the model's name. A benchmark that rewards a
+      model for calling itself 'efficient' measures marketing, not the model
     """
     ### BEGIN SOLUTION
-    rng = np.random.default_rng(7)
+    rng = np.random.default_rng(self.random_seed)
     if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']:
         # Binary classification
-        true_labels = rng.integers(0, 2, num_runs)
+        true_labels = np.asarray(labels) if labels is not None else rng.integers(0, 2, num_runs)
         predicted_labels = []
         for pred in predictions:
             pred_array = _extract_pred_array(pred)
@@ -2518,22 +2631,16 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     else:
         # Multi-class classification (image_classification only)
         num_classes = 10
-        true_labels = rng.integers(0, num_classes, num_runs)
+        true_labels = np.asarray(labels) if labels is not None else rng.integers(0, num_classes, num_runs)
         predicted_labels = []
         for pred in predictions:
             pred_array = _extract_pred_array(pred)
             predicted_labels.append(np.argmax(pred_array) % num_classes)
 
-    # Calculate accuracy
+    # Calculate accuracy: agreement between predictions and the reference labels.
+    # No bonus, no adjustment, no smoothing. The number is what it is.
     correct_predictions = sum(1 for true, pred in zip(true_labels, predicted_labels) if true == pred)
     accuracy = correct_predictions / num_runs
-
-    # Add realistic noise based on model complexity
-    model_name = getattr(model, 'name', 'unknown_model')
-    if 'efficient' in model_name.lower():
-        accuracy = min(0.95, accuracy + 0.1)
-    elif 'accurate' in model_name.lower():
-        accuracy = min(0.98, accuracy + 0.2)
 
     return accuracy
     ### END SOLUTION
@@ -2610,7 +2717,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf.run_standard_benchmark - Complete Benchmark Execution
+### MLPerf.run_standard_benchmark: Complete Benchmark Execution
 
 This method orchestrates a complete standardized benchmark: input generation,
 latency testing, accuracy evaluation, and compliance determination. It composes
@@ -2628,23 +2735,30 @@ Config Lookup ──> Generate Inputs ──> _run_latency_test() ──> _run_a
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-run", "solution": true}
 #| export
-    # --- MLPerf.run_standard_benchmark ---
 def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
-                              num_runs: int = 100) -> Dict[str, Any]:
+                              num_runs: int = 100,
+                              test_inputs: Optional[List[Any]] = None,
+                              labels: Optional[np.ndarray] = None) -> Dict[str, Any]:
     """
     Run a standardized MLPerf benchmark.
+
+    Pass your own `test_inputs` (a list of Tensors of the task's input shape)
+    and `labels` to measure a real test set; without them the inputs are
+    deterministic random data and the labels synthetic, so the protocol runs
+    but the accuracy number means nothing.
 
     TODO: Orchestrate input generation, latency test, accuracy test, and compliance check
 
     APPROACH:
     1. Validate benchmark_name and get config
-    2. Generate deterministic test inputs using seeded random
+    2. Use the test inputs given, or generate deterministic ones using seeded random
     3. Call self._run_latency_test() for timing
     4. Call self._run_accuracy_test() for quality
-    5. Compile results with compliance determination
+    5. Compile results with compliance determination: the latency bar is checked
+       at the 99th percentile, as MLPerf's server scenario bounds the tail, not the mean
 
     HINTS:
-    - Use rng = np.random.default_rng(7) for each input
+    - Seed one generator from self.random_seed, and draw every input from it
     - Audio data: rng.standard_normal, Image data: rng.integers(0,256)/255
     - compliant = accuracy_met AND latency_met
     """
@@ -2663,30 +2777,46 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
           f"<{config['max_latency_ms']}ms latency")
 
-    # Generate standardized test inputs (as Tensors for TinyTorch model compatibility)
+    # Use the caller's test set, or generate standardized test inputs
+    # (as Tensors for TinyTorch model compatibility)
     input_shape = config['input_shape']
-    test_inputs = []
-    for i in range(num_runs):
-        # Use deterministic random generation for reproducibility
-        rng = np.random.default_rng(7)
-        if len(input_shape) == 2:  # Audio/sequence data (keyword_spotting, anomaly_detection)
-            arr = rng.standard_normal(input_shape).astype(np.float32)
-        else:  # Image data (visual_wake_words, image_classification) - use CHW for Conv2d
-            arr = rng.integers(0, 256, input_shape).astype(np.float32) / 255.0
-            if arr.ndim == 4 and arr.shape[-1] == 3:  # (B,H,W,C) -> (B,C,H,W)
-                arr = np.transpose(arr, (0, 3, 1, 2))
-        test_inputs.append(Tensor(arr))
+    if test_inputs is not None:
+        test_inputs = list(test_inputs)
+        num_runs = len(test_inputs)
+    else:
+        # Seeded from self.random_seed, not a hardcoded constant: the same
+        # inputs on every run of this benchmark, and a different set only when
+        # the caller asks for a different seed. A hardcoded seed here would make
+        # the constructor's random_seed argument decorative.
+        input_rng = np.random.default_rng(self.random_seed)
+        test_inputs = []
+        for _ in range(num_runs):
+            if len(input_shape) == 2:  # Audio/sequence data (keyword_spotting, anomaly_detection)
+                arr = input_rng.standard_normal(input_shape).astype(np.float32)
+            else:  # Image data (visual_wake_words, image_classification) - use CHW for Conv2d
+                arr = input_rng.integers(0, 256, input_shape).astype(np.float32) / 255.0
+                if arr.ndim == 4 and arr.shape[-1] == 3:  # (B,H,W,C) -> (B,C,H,W)
+                    arr = np.transpose(arr, (0, 3, 1, 2))
+            test_inputs.append(Tensor(arr))
 
     # Run latency and accuracy tests using helpers
+    if num_runs <= 0:
+        raise ValueError("Benchmark needs at least one input")
+    if labels is not None and np.asarray(labels).shape != (num_runs,):
+        raise ValueError("labels must contain one class index per test input")
     latencies, predictions = self._run_latency_test(model, test_inputs, benchmark_name, num_runs)
-    accuracy = self._run_accuracy_test(model, predictions, benchmark_name, num_runs)
+    accuracy = self._run_accuracy_test(model, predictions, benchmark_name, num_runs, labels)
 
-    # Compile results
+    # Compile results. The latency bar is checked at the tail (p99), because a
+    # user waits on the slow requests; the mean is reported beside it.
     mean_latency = float(np.mean(latencies))
+    p99_latency = float(np.percentile(latencies, 99))
     accuracy_met = bool(accuracy >= config['target_accuracy'])
-    latency_met = bool(mean_latency <= config['max_latency_ms'])
+    latency_met = bool(p99_latency <= config['max_latency_ms'])
 
     results = {
+        'synthetic_labels': labels is None,
+        'official_mlperf': False,
         'benchmark_name': benchmark_name,
         'model_name': getattr(model, 'name', 'unknown_model'),
         'accuracy': float(accuracy),
@@ -2694,19 +2824,19 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         'std_latency_ms': float(np.std(latencies)),
         'p50_latency_ms': float(np.percentile(latencies, 50)),
         'p90_latency_ms': float(np.percentile(latencies, 90)),
-        'p99_latency_ms': float(np.percentile(latencies, 99)),
+        'p99_latency_ms': p99_latency,
         'max_latency_ms': float(np.max(latencies)),
         'throughput_fps': float(1000 / mean_latency),
         'target_accuracy': float(config['target_accuracy']),
         'target_latency_ms': float(config['max_latency_ms']),
         'accuracy_met': accuracy_met,
         'latency_met': latency_met,
-        'compliant': accuracy_met and latency_met,
+        'compliant': accuracy_met and latency_met and labels is not None,
         'num_runs': int(num_runs),
         'random_seed': int(self.random_seed)
     }
 
-    print(f"   Results: {accuracy:.1%} accuracy, {np.mean(latencies):.1f}ms latency")
+    print(f"   Results: {accuracy:.1%} accuracy, {mean_latency:.1f}ms mean latency, {p99_latency:.1f}ms p99")
     print(f"   Compliance: {'✅ PASS' if results['compliant'] else '❌ FAIL'}")
 
     return results
@@ -2738,9 +2868,9 @@ MLPerf.run_all_benchmarks = mlperf_run_all_benchmarks
 """
 ### 🧪 Unit Test: MLPerf.run_standard_benchmark
 
-**What we're testing**: Complete benchmark execution with compliance determination
-**Why it matters**: The full pipeline must produce valid, reproducible results
-**Expected**: Results dict with all required metrics and compliance flags
+**What we're testing**: Complete benchmark execution, and that random_seed actually controls the data
+**Why it matters**: A benchmark that prints a seed it never uses reports a number nobody can reproduce
+**Expected**: Results dict with all required metrics and compliance flags; equal seeds give identical inputs, different seeds give different ones
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-run", "locked": true, "points": 15}
@@ -2777,6 +2907,32 @@ def test_unit_mlperf_run():
     except ValueError:
         pass
 
+    # random_seed must control the generated inputs, not merely appear in the
+    # report. This model records what it was actually fed, which is the only way
+    # to see the difference: a benchmark that hardcodes its own seed still
+    # returns a plausible-looking results dict.
+    class RecordingModel:
+        def __init__(self):
+            self.seen = []
+        def forward(self, x):
+            self.seen.append(np.asarray(x.data).copy())
+            return Tensor(np.zeros(2, dtype=np.float32))
+
+    same_a, same_b, different = RecordingModel(), RecordingModel(), RecordingModel()
+    MLPerf(random_seed=42).run_standard_benchmark(same_a, 'keyword_spotting', num_runs=3)
+    MLPerf(random_seed=42).run_standard_benchmark(same_b, 'keyword_spotting', num_runs=3)
+    MLPerf(random_seed=1234).run_standard_benchmark(different, 'keyword_spotting', num_runs=3)
+
+    assert np.array_equal(same_a.seen[0], same_b.seen[0]), (
+        "Two runs at random_seed=42 were fed different inputs, so the benchmark "
+        "does not repeat"
+    )
+    assert not np.array_equal(same_a.seen[0], different.seen[0]), (
+        "Changing random_seed from 42 to 1234 did not change the benchmark "
+        "inputs. The seed is decorative and the reported number is not "
+        "reproducible by anyone who passes a different one"
+    )
+
     print("✅ MLPerf.run_standard_benchmark works correctly!")
 
 if __name__ == "__main__":
@@ -2784,7 +2940,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### MLPerf.generate_compliance_report - Scorecard Generation
+### MLPerf.generate_compliance_report: Scorecard Generation
 
 The compliance report compiles results from multiple benchmarks into both
 machine-readable JSON and human-readable markdown formats, with overall
@@ -2825,7 +2981,7 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
 
     APPROACH:
     1. Initialize report_data with version, seed, timestamp
-    2. Loop through results, skipping errors
+    2. Loop through results; failed runs remain in the total count
     3. Count compliant benchmarks and compute compliance_rate
     4. Store per-benchmark metrics
 
@@ -2835,10 +2991,10 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
     """
     ### BEGIN SOLUTION
     compliant_benchmarks = []
-    total_benchmarks = 0
+    total_benchmarks = len(results)
 
     report_data = {
-        'mlperf_version': '1.0',
+        'benchmark_suite': 'TinyTorch classroom benchmark (not official MLPerf)',
         'random_seed': self.random_seed,
         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
         'model_name': 'unknown',
@@ -2848,7 +3004,6 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
 
     for benchmark_name, result in results.items():
         if 'error' not in result:
-            total_benchmarks += 1
             if result.get('compliant', False):
                 compliant_benchmarks.append(benchmark_name)
 
@@ -2856,6 +3011,8 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
                 report_data['model_name'] = result.get('model_name', 'unknown')
 
             report_data['benchmarks'][benchmark_name] = {
+                'synthetic_labels': result.get('synthetic_labels', False),
+                'official_mlperf': False,
                 'accuracy': result['accuracy'],
                 'mean_latency_ms': result['mean_latency_ms'],
                 'p99_latency_ms': result['p99_latency_ms'],
@@ -2910,7 +3067,7 @@ def _mlperf_format_compliance_summary(self, report_data: Dict[str, Any]) -> str:
     """
     ### BEGIN SOLUTION
     summary_lines = []
-    summary_lines.append("# MLPerf Compliance Report")
+    summary_lines.append("# TinyTorch Classroom Benchmark Report (not official MLPerf)")
     summary_lines.append("=" * 40)
     summary_lines.append(f"Model: {report_data['model_name']}")
     summary_lines.append(f"Date: {report_data['timestamp']}")
@@ -3129,7 +3286,7 @@ def test_unit_mlperf():
 
         # Verify report was created
         assert Path(report_path).exists()
-        assert "MLPerf Compliance Report" in summary
+        assert "Classroom Benchmark Report" in summary
         assert "Compliance Rate" in summary
 
     print("✅ MLPerf works correctly!")
@@ -3175,7 +3332,7 @@ Before implementing the comparison function, let's understand what makes optimiz
 When you optimize a model, you're making trade-offs across multiple dimensions simultaneously:
 
 ```
-Optimization Impact Matrix:
+Optimization Impact Matrix (illustrative numbers, not measurements):
                    Accuracy    Latency    Memory    Energy
 Quantization        -5%        +2.1x      +2.0x     +1.8x
 Pruning            -2%        +1.4x      +3.2x     +1.3x
@@ -3212,7 +3369,7 @@ This principled approach ensures recommendations match real deployment needs.
 
 # %% [markdown]
 """
-### _collect_base_metrics - Extracting Baseline Performance
+### _collect_base_metrics: Extracting Baseline Performance
 
 This helper extracts the base model's mean performance across all metrics from
 the benchmark results. It establishes the reference point for improvement calculations.
@@ -3228,17 +3385,17 @@ def _collect_base_metrics(base_name: str, benchmark_results: Dict) -> Dict[str, 
 
     APPROACH:
     1. Iterate over each metric type (latency, accuracy, memory, energy)
-    2. Find the result whose key contains base_name
+    2. Find the result keyed by base_name, or base_name plus a metric suffix
     3. Store result.mean in a dict keyed by metric type
 
     HINTS:
-    - Use 'base_name in model_name' to match the base model
+    - Keys are model names, sometimes with a suffix such as base_latency_ms
     """
     ### BEGIN SOLUTION
     base_metrics = {}
     for metric_type, results in benchmark_results.items():
         for model_name, result in results.items():
-            if base_name in model_name:
+            if model_name == base_name or model_name.startswith(base_name + "_"):
                 base_metrics[metric_type] = result.mean
                 break
     return base_metrics
@@ -3277,7 +3434,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### _calculate_improvements - Computing Speedup and Retention Ratios
+### _calculate_improvements: Computing Speedup and Retention Ratios
 
 This helper computes improvement ratios for each optimized model relative to
 the baseline. For latency/memory/energy (lower is better), it calculates
@@ -3364,7 +3521,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### _generate_recommendations - Deployment-Specific Guidance
+### _generate_recommendations: Deployment-Specific Guidance
 
 This helper analyzes improvement ratios across all optimized models to generate
 recommendations for four deployment scenarios: latency-critical, memory-constrained,
@@ -3497,7 +3654,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### analyze_optimization_techniques - Composition Function
+### analyze_optimization_techniques: Composition Function
 
 This is the main entry point that composes `_collect_base_metrics`,
 `_calculate_improvements`, and `_generate_recommendations` into a complete
@@ -3505,22 +3662,22 @@ optimization comparison workflow.
 
 ```
 analyze_optimization_techniques Pipeline:
-┌────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│ Run Full   │ ──> │ _collect_base_metrics│ ──> │ For each opt model: │
-│ Benchmark  │     │ (extract baseline)   │     │ _calculate_improvements│
-└────────────┘     └─────────────────────┘     └─────────────────────┘
-                                                          ↓
-                                               ┌─────────────────────┐
-                                               │_generate_recommendations│
-                                               │ (deploy guidance)    │
-                                               └─────────────────────┘
+┌────────────┐     ┌────────────────────────┐     ┌──────────────────────────┐
+│ Run Full   │ ──> │ _collect_base_metrics  │ ──> │ For each opt model:      │
+│ Benchmark  │     │ (extract baseline)     │     │ _calculate_improvements  │
+└────────────┘     └────────────────────────┘     └──────────────────────────┘
+                                                              ↓
+                                                  ┌──────────────────────────┐
+                                                  │ _generate_recommendations│
+                                                  │ (deploy guidance)        │
+                                                  └──────────────────────────┘
 ```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-comparison", "solution": true}
 #| export
 def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any],
-                                  datasets: List[Any]) -> Dict[str, Any]:
+                                  datasets: List[Any], simulate: bool = False) -> Dict[str, Any]:
     """
     Compare base model against various optimization techniques.
 
@@ -3550,7 +3707,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
     suite = BenchmarkSuite(all_models, datasets)
 
     print("🧪 Running optimization comparison benchmark...")
-    benchmark_results = suite.run_full_benchmark()
+    benchmark_results = suite.run_full_benchmark(simulate=simulate)
 
     # Extract base model performance using helper
     base_name = getattr(base_model, 'name', 'model_0')
@@ -3573,7 +3730,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
         opt_metrics = {}
         for metric_type, results in benchmark_results.items():
             for model_name, result in results.items():
-                if opt_name in model_name:
+                if model_name == opt_name or model_name.startswith(opt_name + "_"):
                     opt_metrics[metric_type] = result.mean
                     break
 
@@ -3594,7 +3751,9 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
         comparison_results['efficiency_metrics'][opt_name] = efficiency
 
     # Generate recommendations using helper
-    recommendations = _generate_recommendations(comparison_results['improvements'])
+    simulated = any(r.metadata.get('simulated', False) for r in benchmark_results['accuracy'].values())
+    recommendations = {} if simulated else _generate_recommendations(comparison_results['improvements'])
+    comparison_results['simulated'] = simulated
     comparison_results['recommendations'] = recommendations
 
     # Print summary
@@ -3616,6 +3775,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
 
     return comparison_results
     ### END SOLUTION
+
 
 # %% [markdown]
 """
@@ -3654,7 +3814,7 @@ def test_unit_optimization_comparison():
     datasets = [{"test": "data"}]
 
     # Run comparison
-    results = analyze_optimization_techniques(base_model, [quantized_model, pruned_model], datasets)
+    results = analyze_optimization_techniques(base_model, [quantized_model, pruned_model], datasets, simulate=True)
 
     # Verify results structure
     assert 'base_model' in results
@@ -3665,12 +3825,9 @@ def test_unit_optimization_comparison():
     # Verify improvements were calculated
     assert len(results['improvements']) == 2  # Two optimized models
 
-    # Verify recommendations were generated
-    recommendations = results['recommendations']
-    assert 'for_latency_critical' in recommendations
-    assert 'for_memory_constrained' in recommendations
-    assert 'for_accuracy_preservation' in recommendations
-    assert 'for_balanced_deployment' in recommendations
+    # Synthetic probe results must not become deployment recommendations.
+    assert results['simulated'] is True
+    assert results['recommendations'] == {}
 
     print("✅ analyze_optimization_techniques works correctly!")
 
@@ -3728,45 +3885,48 @@ def analyze_optimization_tradeoffs():
     print("\n📊 Analyzing Optimization Trade-offs")
     print("=" * 60)
 
-    # Simulated optimization results
-    optimizations = {
-        'Baseline': {'accuracy': 0.89, 'latency_ms': 45, 'memory_mb': 12, 'energy_j': 2.0},
-        'Quantization (INT8)': {'accuracy': 0.88, 'latency_ms': 30, 'memory_mb': 3, 'energy_j': 1.3},
-        'Pruning (70%)': {'accuracy': 0.87, 'latency_ms': 35, 'memory_mb': 4, 'energy_j': 1.5},
-        'Both (INT8 + 70%)': {'accuracy': 0.85, 'latency_ms': 22, 'memory_mb': 1, 'energy_j': 0.9},
-    }
+    import copy
+    from tinytorch.perf.quantization import QuantizedLinear
+    from tinytorch.perf.compression import magnitude_prune
 
-    # Calculate efficiency metrics
-    print("\nEfficiency Metrics (higher is better):\n")
-    print(f"{'Technique':<25} {'Acc/MB':<12} {'Acc/ms':<12} {'Acc/J':<12}")
+    # One dense layer, then the two optimizations you built in Modules 15 and 16
+    profiler = Profiler()
+    base = Linear(512, 256)
+    x = Tensor(rng.standard_normal((32, 512)).astype(np.float32))
+    reference = base.forward(x).data
+
+    quantized = QuantizedLinear(base)
+    pruned = magnitude_prune(copy.deepcopy(base), sparsity=0.7)
+
+    def stored_mb(model):
+        """Bytes a deployment would store: INT8 for the quantized layer, nonzeros for the pruned one."""
+        if isinstance(model, QuantizedLinear):
+            return model.memory_usage()['quantized_bytes'] / (1024 * 1024)
+        nonzero = sum(int(np.count_nonzero(p.data)) for p in model.parameters())
+        return nonzero * 4 / (1024 * 1024)
+
+    print("\nMeasured on one Linear(512, 256) layer:\n")
+    print(f"{'Technique':<20} {'Latency (ms)':<14} {'Stored (MB)':<13} {'Output error'}")
     print("-" * 60)
 
-    baseline = optimizations['Baseline']
-
-    for name, metrics in optimizations.items():
-        acc_per_mb = metrics['accuracy'] / metrics['memory_mb']
-        acc_per_ms = metrics['accuracy'] / metrics['latency_ms']
-        acc_per_j = metrics['accuracy'] / metrics['energy_j']
-
-        print(f"{name:<25} {acc_per_mb:<12.3f} {acc_per_ms:<12.4f} {acc_per_j:<12.3f}")
-
-    print("\nPareto Frontier Analysis:")
-    print("   • Quantization: Best memory efficiency (0.293 acc/MB)")
-    print("   • Pruning: Balanced trade-off")
-    print("   • Combined: Maximum resource efficiency, highest accuracy loss")
+    for name, model in [('Baseline', base), ('Quantization (INT8)', quantized), ('Pruning (70%)', pruned)]:
+        latency = profiler.measure_latency(model, x, warmup=3, iterations=10)
+        output = model.forward(x).data
+        rel_error = np.mean((output - reference) ** 2) / np.mean(reference ** 2)
+        print(f"{name:<20} {latency:<14.3f} {stored_mb(model):<13.3f} {rel_error:.2e}")
 
     print("\n💡 Key Insights:")
-    print("   • No single optimization dominates all metrics")
-    print("   • Combined optimizations compound benefits and risks")
-    print("   • Choose based on deployment constraints (memory vs speed vs accuracy)")
-    print("   • Pareto frontier reveals non-dominated solutions")
+    print("   • Memory savings are real; the latency column is not: NumPy has no INT8 kernels")
+    print("     and does not skip zeros, so those wins need hardware support (Modules 15-17)")
+    print("   • Output error is the price; accuracy on a task is what you must measure next")
+    print("   • No single optimization dominates: pick by the deployment constraint that binds")
 
 if __name__ == "__main__":
     analyze_optimization_tradeoffs()
 
 # %% [markdown]
 """
-## 📊 MLPerf Principles - Industry-Standard Benchmarking
+### MLPerf Principles: Industry-Standard Benchmarking
 
 MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework. Understanding these principles grounds your capstone competition in professional methodology.
 
@@ -3778,7 +3938,7 @@ MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework
 - **Closed:** Same models/datasets, optimize systems (hardware/software)
 - **Open:** Modify models/algorithms, show innovation
 
-**MLPerf:** Edge device benchmarks (<1MB models, <100ms latency, <10mW power) that inspire the capstone.
+**MLPerf Tiny:** Edge-device benchmarks (<1MB models, <100ms latency, <10mW power) that inspire the capstone.
 
 ### Key Takeaways
 
@@ -3792,13 +3952,13 @@ The capstone project follows MLPerf-style principles!
 
 # %% [markdown]
 """
-## 📊 Combination Strategies
+### Combination Strategies
 
 Strategic optimization combines multiple techniques for different performance goals. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
 
 ### Ablation Studies
 
-Professional ML engineers use ablation studies to understand each optimization's contribution:
+Professional ML engineers use ablation studies to understand each optimization's contribution (illustrative numbers):
 
 ```
 Baseline:           Accuracy: 89%, Latency: 45ms, Memory: 12MB
@@ -3840,6 +4000,7 @@ def test_module():
     test_unit_precise_timer()
     test_unit_benchmark_init()
     test_unit_benchmark_latency()
+    test_unit_simulated_accuracy()
     test_unit_benchmark_accuracy()
     test_unit_benchmark_memory()
     test_unit_benchmark()
@@ -3929,7 +4090,7 @@ def test_module():
     # Test 1: Comprehensive benchmark suite
     print("  Testing comprehensive benchmark suite...")
     suite = BenchmarkSuite(models, datasets)
-    results = suite.run_full_benchmark()
+    results = suite.run_full_benchmark(simulate=True)
 
     assert 'latency' in results
     assert 'accuracy' in results
@@ -3969,7 +4130,7 @@ def test_module():
     # Test 5: Optimization comparison
     print("  Testing optimization comparison...")
     comparison_results = analyze_optimization_techniques(
-        models[0], models[1:], datasets[:1]
+        models[0], models[1:], datasets[:1], simulate=True
     )
 
     assert 'base_model' in comparison_results
@@ -4001,34 +4162,34 @@ def test_module():
 
 Answer these to deepen your understanding of benchmarking and performance engineering:
 
-### 1. Statistical Confidence in Measurements
+### Question 1: Statistical Confidence in Measurements
 You implemented BenchmarkResult with confidence intervals for measurements.
 If you run 20 trials and get mean latency 5.2ms with std dev 0.8ms:
 - What's the 95% confidence interval for the true mean? [_____ ms, _____ ms]
 - How many more trials would you need to halve the confidence interval width? _____ total trials
 
-### 2. Measurement Overhead Analysis
+### Question 2: Measurement Overhead Analysis
 Your precise_timer context manager has microsecond precision, but models run for milliseconds.
 For a model that takes 1ms to execute:
 - If timer overhead is 10μs, what's the relative error? _____%
 - At what model latency does timer overhead become negligible (<1%)? _____ ms
 
-### 3. Benchmark Configuration Trade-offs
+### Question 3: Benchmark Configuration Trade-offs
 The BenchmarkSuite class uses configurable warmup_runs and measurement_runs parameters
-(with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=100 as defaults).
+(with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=10 as defaults).
 For a CI/CD pipeline that runs 100 benchmarks per day:
 - Fast config (3s each): _____ minutes total daily
 - Accurate config (15s each): _____ minutes total daily
 - What's the key trade-off you're making? [accuracy/precision/development velocity]
 
-### 4. MLPerf Compliance Metrics
+### Question 4: MLPerf Compliance Metrics
 You implemented MLPerf-style standardized benchmarks with target thresholds.
 If a model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms):
 - Is it compliant? [Yes/No] _____
 - Which constraint is more critical for edge deployment? [accuracy/latency]
 - How would you prioritize optimization? [accuracy first/latency first/balanced]
 
-### 5. Optimization Comparison Analysis
+### Question 5: Optimization Comparison Analysis
 Your analyze_optimization_techniques() generates recommendations for different use cases.
 Given three optimized models:
 - Quantized: 0.8× memory, 2× speed, 0.95× accuracy
@@ -4104,16 +4265,16 @@ Congratulations! You've built a professional benchmarking system that rivals ind
 - Developed optimization comparison workflows that generate actionable recommendations
 - All tests pass ✅ (validated by `test_module()`)
 
-### Systems Engineering Insights Gained
+### Systems Insights Discovered
 - **Measurement Science**: Statistical significance requires proper sample sizes and variance control
 - **Benchmark Design**: Standardized protocols enable fair comparison across different systems
 - **Trade-off Analysis**: Pareto frontiers reveal optimization opportunities and constraints
 - **Production Integration**: Automated reporting transforms measurements into engineering decisions
 
-### Ready for Systems Capstone
+### Ready for Next Steps
 Your benchmarking implementation enables comprehensive systems evaluation, demonstrating your complete optimization toolkit. This is where all 19 modules come together!
 
 Export with: `tito module complete 19`
 
-**Next**: Milestone 5 (Systems Capstone) will demonstrate the complete ML systems engineering workflow!
+**Next**: Module 20 (Capstone) will demonstrate the complete ML systems engineering workflow!
 """

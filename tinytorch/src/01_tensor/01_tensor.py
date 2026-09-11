@@ -40,12 +40,11 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in src/01_tensor/01_tensor.py
+**Learning Side:** You work in `modules/01_tensor/tensor.ipynb`
 **Building Side:** Code exports to tinytorch.core.tensor
 
 ```python
-# Final package structure:
-# Other modules will import and use this Tensor
+from tinytorch.core.tensor import Tensor   # every later module starts here
 ```
 
 **Why this matters:**
@@ -54,18 +53,6 @@ Let's get started!
 - **Consistency:** All tensor operations and data manipulation in core.tensor
 - **Integration:** Foundation that every other module will build upon
 """
-
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| default_exp core.tensor
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -78,7 +65,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 **TinyTorch Dependencies**: NONE
 
-**Important**: This module has NO TinyTorch dependencies.
+This module has NO TinyTorch dependencies.
 Other modules will import FROM this module.
 
 **Dependency Flow**:
@@ -91,6 +78,17 @@ Module 01 (Tensor) → All Other Modules
 Students completing this module will have built the foundation
 that every other TinyTorch component depends on.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.tensor
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -144,14 +142,14 @@ Our Tensor class will support all fundamental operations that neural networks ne
 
 ```
 Operation Types:
-┌─────────────────┬─────────────────┬─────────────────┐
-│ Element-wise    │ Matrix Ops      │ Shape Ops       │
-├─────────────────┼─────────────────┼─────────────────┤
-│ + Addition      │ @ Matrix Mult   │ .reshape()      │
-│ - Subtraction   │ .transpose()    │ .sum()          │
-│ * Multiplication│                 │ .mean()         │
-│ / Division      │                 │ .max()          │
-└─────────────────┴─────────────────┴─────────────────┘
+┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
+│ Element-wise    │ Matrix Ops      │ Shape Ops       │ Reductions      │
+├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
+│ + Addition      │ @ Matrix Mult   │ .reshape()      │ .sum()          │
+│ - Subtraction   │ .transpose()    │ t[key] indexing │ .mean()         │
+│ * Multiplication│                 │ .masked_fill()  │ .max()          │
+│ / Division      │                 │                 │                 │
+└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
 ```
 
 ### Broadcasting: Making Tensors Work Together
@@ -178,14 +176,14 @@ Matrix:     Memory:
 [[1, 2, 3]  [1][2][3][4][5][6]
  [4, 5, 6]]  ↑  Row 1   ↑  Row 2
 
-Cache Behavior:
+Cache Behavior (once a row is longer than one cache line):
 Sequential Access: Fast (uses cache lines efficiently)
-  Row access: [1][2][3] → cache hit, hit, hit
-Random Access: Slow (cache misses)
-  Column access: [1][4] → cache hit, miss
+  Row access: [1][2][3] → one cache line, every byte in it is used
+Strided Access: Slow (cache misses)
+  Column access: [1][4] → a different cache line per element, one useful value each
 ```
 
-This memory layout affects performance in real ML workloads - algorithms that access data sequentially run faster than those that access randomly.
+The 2×3 example above is far too small to miss: all six float32 values fit in a single 64-byte cache line. The pattern matters once a row is longer than a cache line, which is the case for every matrix you will use for real work. Algorithms that access data sequentially run faster than those that stride through memory; the Systems Analysis section measures this on a 2000×2000 matrix.
 """
 
 # %% [markdown]
@@ -211,8 +209,15 @@ Tensor Class Structure:
 ├─────────────────────────────────┤
 │ Shape Operations:               │
 │ • reshape(), transpose()        │
-│ • sum(), mean(), max()          │
 │ • __getitem__ (indexing)        │
+│ • masked_fill()                 │
+├─────────────────────────────────┤
+│ Reductions:                     │
+│ • sum(), mean(), max()          │
+├─────────────────────────────────┤
+│ Operations delegate to:         │
+│ • Function subclasses (Add, ...)│
+│   via X.apply(...)              │
 ├─────────────────────────────────┤
 │ Utility Methods:                │
 │ • __repr__(), __str__()         │
@@ -221,8 +226,65 @@ Tensor Class Structure:
 └─────────────────────────────────┘
 ```
 
-This clean design focuses on what tensors fundamentally do: store and manipulate numerical data efficiently.
+This clean design focuses on what tensors fundamentally do: store numerical data and route every operation through one shared mechanism, `Function.apply`.
 """
+
+# %% [markdown]
+"""
+### Operations as Objects
+
+Every Tensor method below hands its work to an operation class instead of computing the result itself. `a + b` calls `Tensor.__add__`, which calls `Add.apply(a, b)`. `apply` unwraps the Tensors to NumPy arrays, runs the operation's `forward`, and wraps the result in a new Tensor.
+
+This is how PyTorch is built (`torch.autograd.Function`), and the reason is Module 06, which will add automatic differentiation: `apply` is the one place that has to remember which operation produced which Tensor. Nothing in the Tensor class changes. In this module you write the `forward` half of every operation, in the cells that follow each section's explanation; `backward` raises until Module 06, where you write the other half of the same classes. The Tensor class refers to these operations by name, so run this cell before running any test below.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "function-base", "solution": false}
+#| export
+def _as_tensor(x):
+    """Wrap a scalar or array as a Tensor; pass a Tensor through unchanged."""
+    return x if isinstance(x, Tensor) else Tensor(x)
+
+
+class Function:
+    """
+    Base class for every operation the framework can differentiate.
+
+    An operation has two halves. forward() computes the result from NumPy
+    arrays and is written in this module. backward() turns the gradient of the
+    output into gradients for the inputs and is written in Module 06. apply()
+    is the one method they share: it unwraps the input Tensors, runs forward(),
+    and wraps the result. Module 06 teaches apply() to also remember the
+    operation so that gradients can flow back through it.
+
+    **Example Usage:**
+    ```python
+    class Double(Function):
+        def forward(self, a):
+            return a * 2
+
+    y = Double.apply(x)   # x.data doubled, wrapped in a new Tensor
+    ```
+    """
+
+    def __init__(self, *inputs, **params):
+        self.inputs = inputs                 # the Tensors this operation consumed
+        for name, value in params.items():   # axis, shape, key, ... for the operation
+            setattr(self, name, value)
+
+    def forward(self, *arrays):
+        """Compute the result array from the input arrays. Each operation implements this."""
+        raise NotImplementedError(f"{type(self).__name__}.forward is not implemented")
+
+    def backward(self, grad_output):
+        """Return one gradient array per input. Module 06 implements this."""
+        raise NotImplementedError(f"Module 06 implements {type(self).__name__}.backward")
+
+    @classmethod
+    def apply(cls, *inputs, **params):
+        """Run the operation on Tensors and return a new Tensor."""
+        node = cls(*inputs, **params)
+        arrays = [t.data for t in inputs]
+        return Tensor(node.forward(*arrays))
 
 # %% [markdown]
 """
@@ -251,8 +313,24 @@ Tensor wraps with: shape=(2,3), size=6, dtype=float32
 **Why This Approach?**
 - **Performance**: NumPy's C implementations are highly optimized
 - **Compatibility**: Easy integration with scientific Python ecosystem
-- **Memory Efficiency**: No unnecessary data copying
-- **Future-Proof**: Easy transition to GPU tensors in advanced modules
+- **Memory Discipline**: `Function.apply` wraps each result in a fresh Tensor with independent storage. Operations leave their inputs unchanged; direct writes through `.data` or `.numpy()` remain the caller's responsibility
+- **Familiar Surface**: The method names match PyTorch's, so what you learn here transfers
+
+The complete class stays together so its public interface is visible in one
+place. Follow the path from `__init__` to an arithmetic method such as `__add__`,
+then to `Function.apply`. The operation classes after the Tensor definition
+provide the numerical work, and their adjacent tests check each operation.
+
+Three shape rules explain the methods in the class before we inspect them.
+`reshape` changes the grouping of elements without changing their count:
+six values can become a `(2, 3)` matrix, but not a `(2, 4)` matrix. `transpose`
+swaps axes: a `(2, 3)` matrix becomes `(3, 2)`, with entry `(i, j)` moving to
+`(j, i)`. Matrix multiplication contracts the shared dimension:
+`(2, 3) @ (3, 4)` produces `(2, 4)`, whereas `(2, 3) @ (2, 4)` is invalid.
+`_validate_matmul_shapes` checks that contract before NumPy performs the work.
+The later operation sections extend these examples to batched inputs and test
+the rules individually. Utility methods such as `__repr__` help inspect results;
+they can be read after the numerical path is clear.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tensor-class", "solution": true}
@@ -270,23 +348,27 @@ class Tensor:
     All arithmetic, matrix, and shape operations are built on this foundation.
     """
 
-    def __init__(self, data):
+    def __init__(self, data, requires_grad=False):
         """Create a new tensor from data.
 
         TODO: Initialize a Tensor by wrapping data in a NumPy array and setting attributes.
 
         APPROACH:
-        1. Convert data to NumPy array with dtype=float32
-        2. Store the array as self.data
+        1. If data is a list of Tensors, stack their arrays along a new first axis
+           (the same convenience as torch.stack)
+        2. Convert data to NumPy array with dtype=float32 and store it as self.data
         3. Set self.shape from the array's shape
         4. Set self.size from the array's size
         5. Set self.dtype from the array's dtype
+
         EXAMPLE:
         >>> t = Tensor([1, 2, 3])
         >>> print(t.shape)
         (3,)
         >>> print(t.size)
         3
+        >>> Tensor([t, t]).shape
+        (2, 3)
 
         HINT: Use np.array(data, dtype=np.float32) to convert data to NumPy array
         """
@@ -298,6 +380,10 @@ class Tensor:
         self.size = self.data.size
         self.dtype = self.data.dtype
         ### END SOLUTION
+        self.requires_grad = requires_grad   # Module 06 (autograd) will use this
+        self.grad = None                     # Module 06 (autograd) will use this
+        self._grad_fn = None                 # Module 06 (autograd) will use this
+        self._graph_released = False         # Module 06 (autograd) will use this
 
     def __repr__(self):
         """String representation of tensor for debugging."""
@@ -333,156 +419,59 @@ class Tensor:
 
     def contiguous(self):
         """Return a contiguous copy of the tensor data (PyTorch-compatible)."""
-        return Tensor(np.ascontiguousarray(self.data))
+        return Copy.apply(self)
 
     def view(self, *shape):
-        """Alias for reshape, matching PyTorch's Tensor.view() for contiguous tensors."""
+        """Reshape alias with independent storage; unlike PyTorch's view(), this copies."""
         return self.reshape(*shape)
 
     def masked_fill(self, mask, value):
         """Fill positions where mask is True with value, matching PyTorch's masked_fill.
 
-        Used in transformer attention to set padding positions to -inf before softmax.
+        Nothing in this module needs it yet. Module 12 will use it to blank out
+        positions a model must not look at before normalizing scores.
 
         Args:
             mask:  A Tensor or numpy array of booleans, same shape as self (or broadcastable).
-            value: Scalar fill value (e.g. float('-inf') for attention masking).
+            value: Scalar fill value (Module 12 will pass float('-inf')).
 
         Returns:
             New Tensor with masked positions replaced by value.
         """
         mask_array = mask.data.astype(bool) if isinstance(mask, Tensor) else np.asarray(mask, dtype=bool)
-        result = self.data.copy()
-        result[mask_array] = value
-        return Tensor(result)
+        return MaskedFill.apply(self, mask=mask_array, value=value)
 
     def __add__(self, other):
-        """Add two tensors element-wise with broadcasting support.
-
-        TODO: Implement element-wise addition that works with both Tensors and scalars.
-
-        APPROACH:
-        1. Check if other is a Tensor (use isinstance)
-        2. If Tensor: add self.data + other.data
-        3. If scalar: add self.data + other (broadcasting)
-        4. Wrap result in new Tensor
-
-        EXAMPLE:
-        >>> a = Tensor([1, 2, 3])
-        >>> b = Tensor([4, 5, 6])
-        >>> c = a + b
-        >>> print(c.data)
-        [5. 7. 9.]
-
-        HINT: NumPy's + operator handles broadcasting automatically
-        """
-        ### BEGIN SOLUTION
-        if isinstance(other, Tensor):
-            return Tensor(self.data + other.data)
-        else:
-            return Tensor(self.data + other)
-        ### END SOLUTION
+        """Add two tensors element-wise with broadcasting (the Add operation below)."""
+        return Add.apply(self, _as_tensor(other))
 
     def __radd__(self, other):
         """Support natural scalar arithmetic: scalar + tensor."""
         return self.__add__(other)
 
     def __sub__(self, other):
-        """Subtract two tensors element-wise.
-
-        TODO: Implement element-wise subtraction (same pattern as __add__).
-
-        APPROACH:
-        1. Check if other is a Tensor
-        2. If Tensor: subtract self.data - other.data
-        3. If scalar: subtract self.data - other
-        4. Return new Tensor with result
-
-        EXAMPLE:
-        >>> a = Tensor([5, 7, 9])
-        >>> b = Tensor([1, 2, 3])
-        >>> c = a - b
-        >>> print(c.data)
-        [4. 5. 6.]
-
-        HINT: Follow the same pattern as __add__ but with subtraction
-        """
-        ### BEGIN SOLUTION
-        if isinstance(other, Tensor):
-            return Tensor(self.data - other.data)
-        else:
-            return Tensor(self.data - other)
-        ### END SOLUTION
+        """Subtract two tensors element-wise (the Sub operation below)."""
+        return Sub.apply(self, _as_tensor(other))
 
     def __rsub__(self, other):
         """Support natural scalar arithmetic: scalar - tensor."""
-        if isinstance(other, Tensor):
-            return Tensor(other.data - self.data)
-        return Tensor(other - self.data)
+        return Sub.apply(_as_tensor(other), self)
 
     def __mul__(self, other):
-        """Multiply two tensors element-wise (NOT matrix multiplication).
-
-        TODO: Implement element-wise multiplication (same pattern as __add__).
-
-        APPROACH:
-        1. Check if other is a Tensor
-        2. If Tensor: multiply self.data * other.data
-        3. If scalar: multiply self.data * other
-        4. Return new Tensor with result
-
-        EXAMPLE:
-        >>> a = Tensor([1, 2, 3])
-        >>> b = Tensor([4, 5, 6])
-        >>> c = a * b
-        >>> print(c.data)
-        [ 4. 10. 18.]
-
-        HINT: Element-wise multiplication is *, not matrix multiplication (@)
-        """
-        ### BEGIN SOLUTION
-        if isinstance(other, Tensor):
-            return Tensor(self.data * other.data)
-        else:
-            return Tensor(self.data * other)
-        ### END SOLUTION
+        """Multiply two tensors element-wise, NOT matrix multiplication (the Mul operation below)."""
+        return Mul.apply(self, _as_tensor(other))
 
     def __rmul__(self, other):
         """Support natural scalar arithmetic: scalar * tensor."""
         return self.__mul__(other)
 
     def __truediv__(self, other):
-        """Divide two tensors element-wise.
-
-        TODO: Implement element-wise division (same pattern as __add__).
-
-        APPROACH:
-        1. Check if other is a Tensor
-        2. If Tensor: divide self.data / other.data
-        3. If scalar: divide self.data / other
-        4. Return new Tensor with result
-
-        EXAMPLE:
-        >>> a = Tensor([4, 6, 8])
-        >>> b = Tensor([2, 2, 2])
-        >>> c = a / b
-        >>> print(c.data)
-        [2. 3. 4.]
-
-        HINT: Division creates float results automatically due to float32 dtype
-        """
-        ### BEGIN SOLUTION
-        if isinstance(other, Tensor):
-            return Tensor(self.data / other.data)
-        else:
-            return Tensor(self.data / other)
-        ### END SOLUTION
+        """Divide two tensors element-wise (the Div operation below)."""
+        return Div.apply(self, _as_tensor(other))
 
     def __rtruediv__(self, other):
         """Support natural scalar arithmetic: scalar / tensor."""
-        if isinstance(other, Tensor):
-            return Tensor(other.data / self.data)
-        return Tensor(other / self.data)
+        return Div.apply(_as_tensor(other), self)
 
     def _validate_matmul_shapes(self, other):
         """Validate that two tensors are compatible for matrix multiplication.
@@ -490,14 +479,24 @@ class Tensor:
         This helper checks three conditions before any computation begins:
         1. The other operand must be a Tensor (not a plain number or array)
         2. Neither operand can be a 0D scalar (scalars use * instead)
-        3. For 2D+ tensors, the inner dimensions must align
+        3. The inner dimensions must align. Matrix multiplication contracts the
+           LAST axis of self against the ROWS axis of other. For a matrix that
+           rows axis is shape[-2]; a 1D vector has only one axis, so its rows
+           axis is shape[0]. Every case follows from that one rule:
+               (M, K) @ (K, N)  ->  (M, N)      matrix @ matrix
+               (M, K) @ (K,)    ->  (M,)        matrix @ vector
+               (K,)   @ (K, N)  ->  (N,)        vector @ matrix
+               (K,)   @ (K,)    ->  ()          vector @ vector (dot product)
+           and (2, 3) @ (2,) is a mismatch because 3 != 2.
 
         TODO: Implement the three validation checks for matrix multiplication.
 
         APPROACH:
         1. Check isinstance(other, Tensor) - raise TypeError if not
         2. Check both tensors are at least 1D - raise ValueError if 0D
-        3. For 2D+ tensors, check self.shape[-1] == other.shape[-2]
+        3. inner_self = self.shape[-1]
+           inner_other = other.shape[-2] if other has 2+ dims, else other.shape[0]
+           raise ValueError if they differ (put both numbers in the message)
 
         EXAMPLE:
         >>> a = Tensor([[1, 2], [3, 4]])  # 2x2
@@ -506,6 +505,9 @@ class Tensor:
         >>> c = Tensor([[1, 2, 3]])        # 1x3
         >>> d = Tensor([[1], [2]])         # 2x1
         >>> c._validate_matmul_shapes(d)   # ValueError - 3 != 2
+        >>> m = Tensor([[1, 2, 3], [4, 5, 6]])  # 2x3
+        >>> m._validate_matmul_shapes(Tensor([1, 2, 3]))  # No error - 3 == 3
+        >>> m._validate_matmul_shapes(Tensor([1, 2]))     # ValueError - 3 != 2
 
         HINT: Use len(tensor.shape) to check dimensionality and tensor.shape[-1]
         to access the last dimension.
@@ -516,127 +518,66 @@ class Tensor:
                 f"Matrix multiplication requires Tensor, got {type(other).__name__}\n"
                 f"  ❌ Cannot perform: Tensor @ {type(other).__name__}\n"
                 f"  💡 Matrix multiplication (@) only works between two Tensors\n"
-                f"  🔧 Wrap your data: Tensor({other}) @ other_tensor"
+                f"  🔧 Wrap the {type(other).__name__} first: tensor @ Tensor(other)"
             )
         if len(self.shape) == 0 or len(other.shape) == 0:
             raise ValueError(
                 f"Matrix multiplication requires at least 1D tensors\n"
                 f"  ❌ Got shapes: {self.shape} @ {other.shape}\n"
                 f"  💡 Scalars (0D tensors) cannot be matrix-multiplied; use * for element-wise\n"
-                f"  🔧 Reshape scalar to 1D: tensor.reshape(1) or use tensor * scalar"
+                f"  🔧 Use tensor * scalar instead"
             )
-        if len(self.shape) >= 2 and len(other.shape) >= 2:
-            if self.shape[-1] != other.shape[-2]:
-                raise ValueError(
-                    f"Matrix multiplication shape mismatch: {self.shape} @ {other.shape}\n"
-                    f"  ❌ Inner dimensions don't match: {self.shape[-1]} vs {other.shape[-2]}\n"
-                    f"  💡 For A @ B, A's last dim must equal B's second-to-last dim\n"
-                    f"  🔧 Try: other.transpose() to get shape {other.shape[::-1]}, or reshape self"
-                )
+        inner_self = self.shape[-1]
+        inner_other = other.shape[-2] if len(other.shape) >= 2 else other.shape[0]
+        if inner_self != inner_other:
+            if len(other.shape) >= 2:
+                fix = f"other.transpose() to get shape {other.shape[::-1]}, or reshape self"
+            else:
+                fix = f"a vector of length {inner_self}, or transpose self"
+            raise ValueError(
+                f"Matrix multiplication shape mismatch: {self.shape} @ {other.shape}\n"
+                f"  ❌ Inner dimensions don't match: {inner_self} vs {inner_other}\n"
+                f"  💡 For A @ B, A's last dim must equal B's rows (shape[-2] for a matrix, shape[0] for a vector)\n"
+                f"  🔧 Try: {fix}"
+            )
         ### END SOLUTION
 
     def matmul(self, other):
         """Matrix multiplication of two tensors.
 
-        Validates shapes via _validate_matmul_shapes, then computes the product.
-        For 2D matrices, uses explicit nested loops so you can see exactly how
-        each output element is a dot product of a row and a column. For batched
-        (3D+) inputs, delegates to np.matmul.
-
-        TODO: Validate inputs with _validate_matmul_shapes, then compute the
-        matrix product using explicit loops for 2D and np.matmul for 3D+.
-
-        APPROACH:
-        1. Call self._validate_matmul_shapes(other) to check compatibility
-        2. For 2D matrices: use explicit nested loops with np.dot per element
-        3. For batched (3D+): use np.matmul for correctness
-        4. Return result wrapped in Tensor
-
-        EXAMPLE:
-        >>> a = Tensor([[1, 2], [3, 4]])  # 2x2
-        >>> b = Tensor([[5, 6], [7, 8]])  # 2x2
-        >>> c = a.matmul(b)
-        >>> print(c.data)
-        [[19. 22.]
-         [43. 50.]]
-
-        HINTS:
-        - Inner dimensions must match: (M, K) @ (K, N) = (M, N)
-        - For 2D case: use np.dot(a[i, :], b[:, j]) for each output element
-        - The validation helper already handles all error cases
+        Validates shapes via _validate_matmul_shapes, then hands the arrays to
+        the MatMul operation, where the explicit-loop multiply lives.
         """
-        ### BEGIN SOLUTION
         self._validate_matmul_shapes(other)
-
-        # Educational implementation: explicit loops to show what matrix multiplication does
-        # This is intentionally slower than np.matmul to demonstrate the value of vectorization
-
-        a = self.data
-        b = other.data
-
-        # Handle 2D matrices with explicit loops (educational)
-        if len(a.shape) == 2 and len(b.shape) == 2:
-            M, K = a.shape
-            K2, N = b.shape
-            result_data = np.zeros((M, N), dtype=a.dtype)
-
-            # Explicit nested loops - students can see exactly what's happening!
-            # Each output element is a dot product of a row from A and a column from B
-            for i in range(M):
-                for j in range(N):
-                    # Dot product of row i from A with column j from B
-                    result_data[i, j] = np.dot(a[i, :], b[:, j])
-        else:
-            # For batched operations (3D+), use np.matmul for correctness
-            # Students will understand this once they grasp the 2D case
-            result_data = np.matmul(a, b)
-
-        return Tensor(result_data)
-        ### END SOLUTION
+        return MatMul.apply(self, other)
 
     def __matmul__(self, other):
         """Enable @ operator for matrix multiplication."""
         return self.matmul(other)
 
     def __getitem__(self, key):
-        """Enable indexing and slicing operations on Tensors.
-
-        TODO: Implement indexing and slicing that returns a new Tensor.
-
-        APPROACH:
-        1. Use NumPy indexing: self.data[key]
-        2. If result is not an ndarray, wrap in np.array
-        3. Return result wrapped in new Tensor
-
-        EXAMPLE:
-        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
-        >>> row = t[0]  # First row
-        >>> print(row.data)
-        [1. 2. 3.]
-        >>> element = t[0, 1]  # Single element
-        >>> print(element.data)
-        2.0
-
-        HINT: NumPy's indexing already handles all complex cases (slicing, fancy indexing)
-        """
-        ### BEGIN SOLUTION
-        result_data = self.data[key]
-        if not isinstance(result_data, np.ndarray):
-            result_data = np.array(result_data)
-        return Tensor(result_data)
-        ### END SOLUTION
+        """Indexing and slicing, t[key]. Delegates to the Slice operation."""
+        return Slice.apply(self, key=key)
 
     def reshape(self, *shape):
         """Reshape tensor to new dimensions.
+
+        A reshape keeps every element and changes only how they are grouped, so
+        the new shape must hold exactly self.size elements. One dimension may
+        be given as -1, meaning "whatever is left": with 6 elements,
+        reshape(2, -1) is reshape(2, 3) and reshape(-1, 3) is reshape(2, 3).
+        Any other negative size, or a zero, has no meaning and is rejected.
 
         TODO: Reshape tensor while preserving total element count.
 
         APPROACH:
         1. Handle both reshape(2, 3) and reshape((2, 3)) calling styles
-        2. If -1 in shape, infer that dimension from total size
-        3. Validate total elements match: np.prod(new_shape) == self.size
-        4. Use np.reshape to create new view
-        5. Return result wrapped in new Tensor
+        2. Reject any dimension that is 0 or below -1 (only -1 is special)
+        3. If -1 in shape, infer that dimension from total size:
+           known_size = product of the other dimensions;
+           the -1 becomes self.size // known_size (must divide evenly; only one -1 allowed)
+        4. Validate total elements match: np.prod(new_shape) == self.size
+        5. Hand the validated shape to the operation: return Reshape.apply(self, shape=new_shape)
 
         EXAMPLE:
         >>> t = Tensor([1, 2, 3, 4, 5, 6])
@@ -658,6 +599,14 @@ class Tensor:
             new_shape = tuple(shape[0])
         else:
             new_shape = shape
+        bad = [d for d in new_shape if d == 0 or d < -1]
+        if bad:
+            raise ValueError(
+                f"Cannot reshape {self.shape} to {new_shape}\n"
+                f"  ❌ Invalid dimension size {bad[0]}: sizes must be positive, or -1 to infer\n"
+                f"  💡 -1 is the only special value; it stands for 'whatever is left'\n"
+                f"  🔧 Replace {bad[0]} with a positive size or -1"
+            )
         if -1 in new_shape:
             if new_shape.count(-1) > 1:
                 raise ValueError(
@@ -690,21 +639,25 @@ class Tensor:
                 f"  💡 Reshape preserves data, so total elements must stay the same\n"
                 f"  🔧 Use -1 to infer a dimension: reshape(-1, {new_shape[-1] if len(new_shape) > 0 else 1}) lets NumPy calculate"
             )
-        reshaped_data = np.reshape(self.data, new_shape)
-        return Tensor(reshaped_data)
+        return Reshape.apply(self, shape=new_shape)
         ### END SOLUTION
 
     def transpose(self, dim0=None, dim1=None):
         """Transpose tensor dimensions.
 
+        Transposing swaps two axes: a (2, 3) matrix becomes (3, 2), with
+        element [i, j] moving to [j, i]. Permute asks NumPy to reorder axes
+        using a list such as (1, 0). NumPy can represent this as a view, but
+        Function.apply wraps it in a new Tensor with its own copied storage.
+        Your job here is to build the axes list.
+
         TODO: Swap tensor dimensions (default: swap last two dimensions).
 
         APPROACH:
         1. If no dims specified: swap last two dimensions (most common case)
-        2. For 1D tensors: return copy (no transpose needed)
+        2. For 1D tensors: return Copy.apply(self) (no transpose needed)
         3. If both dims specified: swap those specific dimensions
-        4. Use np.transpose with axes list to perform the swap
-        5. Return result wrapped in new Tensor
+        4. Hand the axes list to the operation: return Permute.apply(self, axes=tuple(axes))
 
         EXAMPLE:
         >>> t = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3
@@ -717,16 +670,15 @@ class Tensor:
         HINTS:
         - Create axes list: [0, 1, 2, ...] then swap positions
         - For default: axes[-2], axes[-1] = axes[-1], axes[-2]
-        - Use np.transpose(self.data, axes)
+        - The Permute operation calls np.transpose(a, axes); here you only build the axes list
         """
         ### BEGIN SOLUTION
         if dim0 is None and dim1 is None:
             if len(self.shape) < 2:
-                return Tensor(self.data.copy())
+                return Copy.apply(self)
             else:
                 axes = list(range(len(self.shape)))
                 axes[-2], axes[-1] = axes[-1], axes[-2]
-                transposed_data = np.transpose(self.data, axes)
         else:
             if dim0 is None or dim1 is None:
                 provided = f"dim0={dim0}" if dim1 is None else f"dim1={dim1}"
@@ -739,91 +691,28 @@ class Tensor:
                 )
             axes = list(range(len(self.shape)))
             axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
-            transposed_data = np.transpose(self.data, axes)
-        return Tensor(transposed_data)
+        return Permute.apply(self, axes=tuple(axes))
         ### END SOLUTION
 
     def sum(self, axis=None, keepdims=False):
-        """Sum tensor along specified axis.
-
-        TODO: Sum all elements or along specific axes.
-
-        APPROACH:
-        1. Use np.sum with axis and keepdims parameters
-        2. axis=None sums all elements (scalar result)
-        3. axis=N sums along dimension N
-        4. keepdims=True preserves original number of dimensions
-        5. Return result wrapped in Tensor
-
-        EXAMPLE:
-        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
-        >>> total = t.sum()
-        >>> print(total.data)
-        21.0
-        >>> col_sum = t.sum(axis=0)
-        >>> print(col_sum.data)
-        [5. 7. 9.]
-
-        HINT: np.sum(data, axis=axis, keepdims=keepdims) does all the work
-        """
-        ### BEGIN SOLUTION
-        result = np.sum(self.data, axis=axis, keepdims=keepdims)
-        return Tensor(result)
-        ### END SOLUTION
+        """Sum all elements or along an axis. Delegates to the Sum operation."""
+        return Sum.apply(self, axis=axis, keepdims=keepdims)
 
     def mean(self, axis=None, keepdims=False):
-        """Compute mean of tensor along specified axis.
-
-        TODO: Calculate average of elements along axis (same pattern as sum).
-
-        APPROACH:
-        1. Use np.mean with axis and keepdims parameters
-        2. axis=None averages all elements
-        3. axis=N averages along dimension N
-        4. Return result wrapped in Tensor
-
-        EXAMPLE:
-        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
-        >>> avg = t.mean()
-        >>> print(avg.data)
-        3.5
-        >>> col_mean = t.mean(axis=0)
-        >>> print(col_mean.data)
-        [2.5 3.5 4.5]
-
-        HINT: Follow the same pattern as sum() but with np.mean
-        """
-        ### BEGIN SOLUTION
-        result = np.mean(self.data, axis=axis, keepdims=keepdims)
-        return Tensor(result)
-        ### END SOLUTION
+        """Average all elements or along an axis. Delegates to the Mean operation."""
+        return Mean.apply(self, axis=axis, keepdims=keepdims)
 
     def max(self, axis=None, keepdims=False):
-        """Find maximum values along specified axis.
+        """Maximum over all elements or along an axis. Delegates to the Max operation."""
+        return Max.apply(self, axis=axis, keepdims=keepdims)
 
-        TODO: Find maximum element(s) along axis (same pattern as sum).
+    def backward(self, gradient=None, retain_graph=False):
+        """Propagate gradients to every tensor this one was computed from. Module 06 implements this."""
+        raise NotImplementedError("Module 06 (autograd) implements Tensor.backward")
 
-        APPROACH:
-        1. Use np.max with axis and keepdims parameters
-        2. axis=None finds maximum of all elements
-        3. axis=N finds maximum along dimension N
-        4. Return result wrapped in Tensor
-
-        EXAMPLE:
-        >>> t = Tensor([[1, 2, 3], [4, 5, 6]])
-        >>> maximum = t.max()
-        >>> print(maximum.data)
-        6.0
-        >>> row_max = t.max(axis=1)
-        >>> print(row_max.data)
-        [3. 6.]
-
-        HINT: Follow the same pattern as sum() and mean() but with np.max
-        """
-        ### BEGIN SOLUTION
-        result = np.max(self.data, axis=axis, keepdims=keepdims)
-        return Tensor(result)
-        ### END SOLUTION
+    def zero_grad(self):
+        """Forget the accumulated gradient. Module 06 implements this."""
+        raise NotImplementedError("Module 06 (autograd) implements Tensor.zero_grad")
 
 # %% [markdown]
 """
@@ -875,10 +764,11 @@ def test_unit_tensor_creation():
     assert vector.numel() == 3, "Vector has 3 elements"
     assert matrix.numel() == 4, "2x2 matrix has 4 elements"
 
-    # Test contiguous returns a copy with same data
-    contig = matrix.contiguous()
-    assert np.array_equal(contig.data, matrix.data)
-    assert contig.data is not matrix.data, "contiguous() should return a copy"
+    # A list of Tensors stacks along a new first axis (APPROACH step 1)
+    stacked = Tensor([vector, vector])
+    assert stacked.shape == (2, 3), f"Stacking two (3,) Tensors should give (2, 3), got {stacked.shape}"
+    assert np.array_equal(stacked.data[1], vector.data)
+    assert stacked.dtype == np.float32
 
     print("✅ Tensor creation works correctly!")
 
@@ -983,6 +873,91 @@ before element-wise operations like loss computation.
 
 # %% [markdown]
 """
+### Implement: Add, Sub, Mul, Div
+
+Write `forward` for each operation. The inputs are NumPy arrays; return an array. `Tensor` already wrapped scalars and will wrap your result.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "ops-arithmetic", "solution": true}
+#| export
+class Add(Function):
+    """Element-wise addition c = a + b, with NumPy broadcasting."""
+
+    def forward(self, a, b):
+        """
+        Add two arrays element-wise with broadcasting support.
+
+        TODO: Return the element-wise sum of a and b.
+
+        APPROACH:
+        1. Both inputs arrive as NumPy arrays (Tensor.__add__ already wrapped any scalar in a Tensor)
+        2. NumPy's + handles broadcasting automatically
+
+        EXAMPLE:
+        >>> a = Tensor([1, 2, 3])
+        >>> b = Tensor([4, 5, 6])
+        >>> c = a + b          # Tensor.__add__ -> Add.apply(a, b) -> this forward
+        >>> print(c.data)
+        [5. 7. 9.]
+        """
+        ### BEGIN SOLUTION
+        return a + b
+        ### END SOLUTION
+
+
+class Sub(Function):
+    """Element-wise subtraction c = a - b, with NumPy broadcasting."""
+
+    def forward(self, a, b):
+        """
+        Subtract two arrays element-wise.
+
+        TODO: Return a - b.
+
+        HINT: NumPy's - operator handles broadcasting automatically
+        """
+        ### BEGIN SOLUTION
+        return a - b
+        ### END SOLUTION
+
+
+class Mul(Function):
+    """Element-wise multiplication c = a * b (NOT matrix multiplication), with NumPy broadcasting."""
+
+    def forward(self, a, b):
+        """
+        Multiply two arrays element-wise.
+
+        TODO: Return a * b.
+
+        EXAMPLE:
+        >>> a = Tensor([1, 2, 3])
+        >>> b = Tensor([4, 5, 6])
+        >>> print((a * b).data)
+        [ 4. 10. 18.]
+        """
+        ### BEGIN SOLUTION
+        return a * b
+        ### END SOLUTION
+
+
+class Div(Function):
+    """Element-wise division c = a / b, with NumPy broadcasting."""
+
+    def forward(self, a, b):
+        """
+        Divide two arrays element-wise.
+
+        TODO: Return a / b.
+
+        HINT: Do not guard against zero. float32 division by zero gives inf, which is the honest answer.
+        """
+        ### BEGIN SOLUTION
+        return a / b
+        ### END SOLUTION
+
+# %% [markdown]
+"""
 ### 🧪 Unit Test: Arithmetic Operations
 
 This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior. Scalar arithmetic should feel natural whether the scalar appears before or after the tensor.
@@ -1018,17 +993,17 @@ def test_unit_arithmetic_operations():
     expected = np.array([[11, 22], [13, 24]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
 
-    # ⚠️ Broadcasting pitfall: verify shapes match before element-wise ops
-    # In ML, predictions (batch, features) minus targets (features,) broadcasts
-    # silently — the same target row repeats for every sample. Always check!
-    predictions = Tensor(np.ones((4, 3)))   # 4 samples, 3 features
-    targets_good = Tensor(np.zeros((4, 3)))  # correct: same shape
-    targets_bad = Tensor(np.zeros((3,)))     # dangerous: missing batch dim
-    assert predictions.shape == targets_good.shape, "Matching shapes — safe"
-    assert predictions.shape != targets_bad.shape, (
-        f"Shape mismatch: {predictions.shape} vs {targets_bad.shape}. "
-        f"NumPy broadcasts silently — this is almost always a bug in ML code."
-    )
+    # ⚠️ Broadcasting pitfall: predictions (batch, features) minus a targets
+    # vector (features,) does NOT raise. It broadcasts, and the single target
+    # row is subtracted from every sample. Watch the silent broadcast happen:
+    predictions = Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])  # 4 samples, 3 features
+    targets_bad = Tensor([1, 2, 3])                                          # missing batch dim
+    diff = predictions - targets_bad
+    assert diff.shape == (4, 3), f"Broadcast should give (4, 3), got {diff.shape}"
+    assert np.array_equal(diff.data[0], np.zeros(3, dtype=np.float32))     # row 0 happens to match
+    assert np.array_equal(diff.data[3], np.array([9, 9, 9], dtype=np.float32))  # row 3 was never meant to see [1,2,3]
+    # No error, no warning, and rows 1 to 3 are compared against the wrong target.
+    # Check shapes yourself before a loss computation; NumPy will not.
 
     # Test subtraction (data centering)
     result = b - a
@@ -1167,7 +1142,10 @@ plain Python number or a raw NumPy array. The second check catches 0D scalars,
 which have no rows or columns and therefore cannot participate in a matrix
 product (students should use `*` for scalar multiplication instead). The third
 check is the classic inner-dimension rule: for `A @ B` where A has shape
-`(M, K)` and B has shape `(K, N)`, the two `K` values must agree.
+`(M, K)` and B has shape `(K, N)`, the two `K` values must agree. The same rule
+covers vectors once you know where their `K` lives: a 1D operand has a single
+axis, so for `(M, K) @ (K,)` the vector's length is its rows count, and
+`(2, 3) @ (2,)` is a mismatch just as `(2, 3) @ (2, 1)` is.
 
 ```
 Validation Decision Tree:
@@ -1178,8 +1156,19 @@ Validation Decision Tree:
 ```
 
 Separating validation from computation keeps each function focused on a single
-concept: `_validate_matmul_shapes` teaches input checking, while `matmul`
-teaches the algorithm itself.
+concept: `_validate_matmul_shapes` teaches input checking, while
+`MatMul.forward` teaches the algorithm itself.
+"""
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Validate Matmul Shapes
+
+**What we're testing**: All three shape-mismatch categories are caught and named, for matrices and vectors alike
+**Why it matters**: A shape error caught at the boundary names the problem; one
+that slips through surfaces as a NumPy error deep inside a matmul, pages away
+from the line that caused it
+**Expected**: Valid shapes pass silently; each invalid case raises with its reason
 """
 
 # %% nbgrader={"grade": true, "grade_id": "tensor-validate-matmul", "locked": true, "points": 5}
@@ -1223,10 +1212,86 @@ def test_unit_validate_matmul_shapes():
         assert "Inner dimensions don't match" in str(e)
         assert "2 vs 3" in str(e)
 
+    # Check 3, vector case: a (2,3) matrix times a length-3 vector is fine,
+    # a length-2 vector is the same mismatch and must be caught HERE, not
+    # deep inside np.matmul
+    m = Tensor([[1, 2, 3], [4, 5, 6]])  # 2x3
+    m._validate_matmul_shapes(Tensor([1, 2, 3]))  # No exception (3 == 3)
+    try:
+        m._validate_matmul_shapes(Tensor([1, 2]))  # (2,3) @ (2,)
+        assert False, "Should have raised ValueError for matrix-vector mismatch"
+    except ValueError as e:
+        assert "Inner dimensions don't match" in str(e)
+        assert "3 vs 2" in str(e)
+
     print("✅ Matmul shape validation works correctly!")
 
 if __name__ == "__main__":
     test_unit_validate_matmul_shapes()
+
+# %% [markdown]
+"""
+### Implement: MatMul
+
+Write `forward` for the matrix product. The inputs are NumPy arrays whose shapes `Tensor.matmul` already validated; return an array. The explicit-loop guidance lives in the docstring below.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "ops-matmul", "solution": true}
+#| export
+class MatMul(Function):
+    """Matrix multiplication c = a @ b. Shapes were validated by Tensor.matmul."""
+
+    def forward(self, a, b):
+        """
+        Multiply two matrices.
+
+        For 2D matrices, uses explicit nested loops so you can see exactly how
+        each output element is a dot product of a row and a column. For anything
+        other than 2D @ 2D (a vector on either side, or batched 3D+ inputs),
+        delegates to np.matmul.
+
+        TODO: Compute the matrix product using explicit loops for 2D @ 2D and
+        np.matmul for every other case.
+
+        APPROACH:
+        1. For 2D @ 2D: use explicit nested loops with np.dot per element
+        2. For every other case (1D operands, batched 3D+): use np.matmul
+        3. Return the result array
+
+        EXAMPLE:
+        >>> a = Tensor([[1, 2], [3, 4]])  # 2x2
+        >>> b = Tensor([[5, 6], [7, 8]])  # 2x2
+        >>> print((a @ b).data)
+        [[19. 22.]
+         [43. 50.]]
+
+        HINTS:
+        - Inner dimensions must match: (M, K) @ (K, N) = (M, N)
+        - For 2D case: use np.dot(a[i, :], b[:, j]) for each output element
+        """
+        ### BEGIN SOLUTION
+        # Educational implementation: explicit loops to show what matrix multiplication does
+        # This is intentionally slower than np.matmul to demonstrate the value of vectorization
+
+        # Handle 2D matrices with explicit loops (educational)
+        if len(a.shape) == 2 and len(b.shape) == 2:
+            M, K = a.shape
+            _, N = b.shape   # b's row count is K; Tensor.matmul already checked it
+            result_data = np.zeros((M, N), dtype=a.dtype)
+
+            # Explicit nested loops - students can see exactly what's happening!
+            # Each output element is a dot product of a row from A and a column from B
+            for i in range(M):
+                for j in range(N):
+                    # Dot product of row i from A with column j from B
+                    result_data[i, j] = np.dot(a[i, :], b[:, j])
+        else:
+            # Anything other than 2D @ 2D (a 1D operand, or batched 3D+ inputs)
+            # goes to np.matmul. The mechanism is the same dot product per element.
+            result_data = np.matmul(a, b)
+
+        return result_data
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -1316,8 +1381,10 @@ Memory Layout (unchanged):
 Before: [1][2][3][4][5][6]
 After:  [1][2][3][4][5][6]  ← Same memory, different interpretation
 
-Key Insight: Reshape is O(1) operation - no data copying!
-Just changes how we interpret the memory layout.
+Key Insight: NumPy can reshape this contiguous array in O(1) by returning a
+view (other layouts may require a copy). Our Tensor wraps the result with np.array(), so
+TinyTorch's reshape is O(N). The layout reasoning is unchanged; the copy is
+the price of every Tensor owning its buffer outright.
 
 Common ML Reshapes:
 ┌───────────────────────┬─────────────────────┬─────────────────────┐
@@ -1339,11 +1406,15 @@ Result:  [[1, 4],        (shape: (3, 2))
           [2, 5],
           [3, 6]]
 
-Memory Layout (rearranged):
-Before: [1][2][3][4][5][6]
-After:  [1][4][2][5][3][6]  ← Same data, different stride interpretation — cache-unfriendly access pattern
+Memory Layout (unchanged; strides swapped):
+Before: [1][2][3][4][5][6]   read row-by-row  (row stride 3, col stride 1)
+After:  [1][2][3][4][5][6]   read column-by-column (row stride 1, col stride 3)
+        ↑ the bytes never move; only the strides do, so walking a row of the
+          transposed view now jumps through memory — cache-unfriendly
 
-Key Insight: Transpose is a non-contiguous view (no copy, but poor cache locality) - more expensive to access than reshape.
+Key Insight: transposing is a stride change, not a data move. NumPy returns a
+non-contiguous view; our Tensor copies it (preserving the layout), so the
+result is still cache-unfriendly to traverse row-wise.
 
 Common Linear Algebra Usage:
 ┌─────────────────────┬─────────────────────┬─────────────────────┐
@@ -1358,24 +1429,114 @@ Common Linear Algebra Usage:
 ### Performance Implications
 
 ```
-Operation Performance (for 1000×1000 matrix):
-┌─────────────────┬──────────────┬─────────────────┬─────────────────┐
-│ Operation       │ Time         │ Memory Access   │ Cache Behavior  │
-├─────────────────┼──────────────┼─────────────────┼─────────────────┤
-│ reshape()       │ ~0.001 ms    │ No data copy    │ No cache impact │
-│ transpose()     │ ~0.001 ms    │ Non-contiguous view │ Poor locality   │
-│ view() (future) │ ~0.001 ms    │ No data copy    │ No cache impact │
-└─────────────────┴──────────────┴─────────────────┴─────────────────┘
+Storage cost for N elements:
+┌─────────────────┬──────────────────────────┬──────────────────────────┐
+│ Operation       │ NumPy array behavior     │ TinyTorch Tensor result  │
+├─────────────────┼──────────────────────────┼──────────────────────────┤
+│ reshape()       │ View when layout allows  │ Copies N values          │
+│ transpose()     │ View with swapped strides│ Copies N values          │
+└─────────────────┴──────────────────────────┴──────────────────────────┘
 
-Why transpose() is slower:
-- Non-contiguous view: same data, different stride interpretation
-- Poor cache locality (accessing columns)
-- Can't be parallelized easily
+A view changes metadata without moving values. TinyTorch chooses independent
+storage instead, so both operations incur a copy. Layout still matters when
+reading the result: strided access can use cache lines less efficiently.
 ```
 
-This is why frameworks like PyTorch often use "lazy" transpose operations that defer the actual data movement until necessary.
+Measure the operation and its consumer separately. A cheap view can lead to a
+more expensive subsequent computation; a copy can cost time now and improve a
+later access pattern. The result depends on layout, kernel, and hardware.
+
 """
 
+
+# %% [markdown]
+"""
+### Implement: Slice, Reshape, Permute, Copy, MaskedFill
+
+Write `forward` for each operation. The input is a NumPy array; return an array. The Tensor methods pass the extra information (`key`, `shape`, `axes`, `mask` and `value`) as keyword parameters to `apply`, and `Function.__init__` stores each one on the node, so it is available as `self.key`, `self.shape`, and so on.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "ops-shape", "solution": true}
+#| export
+class Slice(Function):
+    """Indexing and slicing x[key]. Parameter: key (anything NumPy indexing accepts)."""
+
+    def forward(self, a):
+        """
+        Index or slice the array.
+
+        TODO: Return a[self.key].
+
+        APPROACH:
+        1. self.key is whatever the caller wrote inside the brackets (an int, a slice, a tuple, ...)
+        2. NumPy indexing already understands every one of those, so hand it the key
+        """
+        ### BEGIN SOLUTION
+        return a[self.key]
+        ### END SOLUTION
+
+
+class Reshape(Function):
+    """Same elements, new shape. Parameter: shape (already validated by Tensor.reshape)."""
+
+    def forward(self, a):
+        """
+        Reshape the array.
+
+        TODO: Return np.reshape(a, self.shape).
+        """
+        ### BEGIN SOLUTION
+        return np.reshape(a, self.shape)
+        ### END SOLUTION
+
+
+class Permute(Function):
+    """Reorder axes. Parameter: axes, the new order of the old axes (Tensor.transpose computes it)."""
+
+    def forward(self, a):
+        """
+        Permute the axes of the array.
+
+        TODO: Return np.transpose(a, self.axes).
+        """
+        ### BEGIN SOLUTION
+        return np.transpose(a, self.axes)
+        ### END SOLUTION
+
+
+class Copy(Function):
+    """A contiguous copy of the array (used by contiguous() and 1D transpose)."""
+
+    def forward(self, a):
+        """
+        Copy the array into contiguous memory.
+
+        TODO: Return np.ascontiguousarray(a), preserving the original shape.
+
+        HINT: NumPy promotes a scalar to shape (1,); reshape back to a.shape.
+        """
+        ### BEGIN SOLUTION
+        return np.ascontiguousarray(a).reshape(a.shape)
+        ### END SOLUTION
+
+
+class MaskedFill(Function):
+    """Replace masked positions with a value. Parameters: mask (bool array), value."""
+
+    def forward(self, a):
+        """
+        Fill the positions where self.mask is True with self.value.
+
+        TODO: Copy the array, broadcast the mask to its shape, and fill masked positions.
+
+        HINT: Copy first. Boolean indexing needs a full-size mask; use
+        np.broadcast_to(self.mask, a.shape) to expand a shared attention mask.
+        """
+        ### BEGIN SOLUTION
+        result = a.copy()
+        result[np.broadcast_to(self.mask, a.shape)] = self.value
+        return result
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -1444,10 +1605,25 @@ def test_unit_shape_manipulation():
                     f"got {swapped.data[k,j,i]}"
                 )
 
+    scalar = Tensor(3.0)
+    assert scalar.contiguous().shape == (), "Contiguous must preserve scalar rank"
+    assert scalar.transpose().shape == (), "Scalar transpose must preserve rank"
+
+    # Test contiguous returns a copy with same data
+    contig = matrix.contiguous()
+    assert np.array_equal(contig.data, matrix.data)
+    assert contig.data is not matrix.data, "contiguous() should return a copy"
+
     # Test common reshape pattern (flatten multi-dimensional data)
     batch_images = Tensor(rng.random((2, 3, 4)))  # (batch=2, height=3, width=4)
     flattened = batch_images.reshape(2, -1)  # (batch=2, features=12)
     assert flattened.shape == (2, 12)
+
+    # A shared feature mask broadcasts across rows (later used by attention).
+    masked = matrix.masked_fill(np.array([False, True, False]), -1)
+    assert np.array_equal(masked.data, [[1, -1, 3], [4, -1, 6]])
+    assert np.array_equal(matrix.data, [[1, 2, 3], [4, 5, 6]])
+    assert not np.shares_memory(matrix.data, transposed.data), "Transpose owns copied storage"
 
     print("✅ Shape manipulation works correctly!")
 
@@ -1524,24 +1700,88 @@ Reduction Performance:
 │ Operation       │ Time Complex │ Memory Access   │ Cache Behavior  │
 ├─────────────────┼──────────────┼─────────────────┼─────────────────┤
 │ .sum()          │ O(N)         │ Sequential read │ Excellent       │
-│ .sum(axis=0)    │ O(N)         │ Column access   │ Poor (strided)  │
-│ .sum(axis=1)    │ O(N)         │ Row access      │ Excellent       │
+│ .sum(axis=0)    │ O(N)         │ Walks rows      │ Vectorizes well │
+│ .sum(axis=1)    │ O(N)         │ Per-row reduce  │ Fair            │
 │ .mean()         │ O(N)         │ Sequential read │ Excellent       │
 │ .max()          │ O(N)         │ Sequential read │ Excellent       │
 └─────────────────┴──────────────┴─────────────────┴─────────────────┘
 
-Why axis=0 is slower:
-- Accesses elements with large strides
-- Poor cache locality (jumping rows)
-- Less vectorization-friendly
+Why axis=0 is usually FASTER than axis=1 (measured ~1.7x on a 4000x4000 array):
+- NumPy reduces over axis 0 by sweeping memory sequentially and accumulating
+  into an output row, which vectorizes cleanly
+- axis=1 is a horizontal reduction within each row, which vectorizes less well
+- The intuition that 'column access must be strided and therefore slow' is
+  about element-at-a-time access, not about how NumPy implements reductions
 
 Optimization strategies:
-- Prefer axis=-1 operations when possible
+- Measure before assuming a reduction axis is the slow one
 - Use keepdims=True to maintain shape for broadcasting
 - Consider reshaping before reduction for better cache behavior
 ```
 """
 
+
+# %% [markdown]
+"""
+### Implement: Sum, Mean, Max
+
+Write `forward` for each operation. The inputs are NumPy arrays; return an array. `Tensor` already wrapped scalars and will wrap your result.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "ops-reductions", "solution": true}
+#| export
+class Sum(Function):
+    """Sum over all elements or along an axis. Parameters: axis, keepdims."""
+    axis = None
+    keepdims = False
+
+    def forward(self, a):
+        """
+        Sum the array along self.axis.
+
+        TODO: Return np.sum(a, axis=self.axis, keepdims=self.keepdims).
+
+        APPROACH:
+        1. self.axis and self.keepdims were set by Tensor.sum (or default to the class attributes)
+        2. np.sum does the reduction; pass both parameters straight through
+
+        HINT: axis=None (the default) sums every element.
+        """
+        ### BEGIN SOLUTION
+        return np.sum(a, axis=self.axis, keepdims=self.keepdims)
+        ### END SOLUTION
+
+
+class Mean(Function):
+    """Average over all elements or along an axis. Parameters: axis, keepdims."""
+    axis = None
+    keepdims = False
+
+    def forward(self, a):
+        """
+        Average the array along self.axis.
+
+        TODO: Return np.mean(a, axis=self.axis, keepdims=self.keepdims).
+        """
+        ### BEGIN SOLUTION
+        return np.mean(a, axis=self.axis, keepdims=self.keepdims)
+        ### END SOLUTION
+
+
+class Max(Function):
+    """Largest element over all elements or along an axis. Parameters: axis, keepdims."""
+    axis = None
+    keepdims = False
+
+    def forward(self, a):
+        """
+        Take the maximum of the array along self.axis.
+
+        TODO: Return np.max(a, axis=self.axis, keepdims=self.keepdims).
+        """
+        ### BEGIN SOLUTION
+        return np.max(a, axis=self.axis, keepdims=self.keepdims)
+        ### END SOLUTION
 
 # %% [markdown]
 """
@@ -1616,81 +1856,6 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis: Memory Layout and Performance
-
-Let's understand ONE key systems concept: **memory layout and cache behavior**.
-
-This single analysis reveals why certain operations are fast while others are slow, and why framework designers make specific architectural choices.
-"""
-
-# %%
-def analyze_memory_layout():
-    """📊 Demonstrate cache effects with row vs column access patterns."""
-    print("📊 Analyzing Memory Access Patterns...")
-    print("=" * 60)
-
-    # Create a moderately-sized matrix (large enough to show cache effects)
-    size = 2000
-    matrix = Tensor(rng.random((size, size)))
-
-    import time
-
-    print(f"\nTesting with {size}×{size} matrix ({matrix.size * BYTES_PER_FLOAT32 / MB_TO_BYTES:.1f} MB)")
-    print("-" * 60)
-
-    # Test 1: Row-wise access (cache-friendly)
-    # Memory layout: [row0][row1][row2]... stored contiguously
-    print("\nTest 1: Row-wise Access (Cache-Friendly)")
-    start = time.time()
-    row_sums = []
-    for i in range(size):
-        row_sum = matrix.data[i, :].sum()  # Access entire row sequentially
-        row_sums.append(row_sum)
-    row_time = time.time() - start
-    print(f"   Time: {row_time*1000:.1f}ms")
-    print("   Access pattern: Sequential (follows memory layout)")
-
-    # Test 2: Column-wise access (cache-unfriendly)
-    # Must jump between rows, poor spatial locality
-    print("\nTest 2: Column-wise Access (Cache-Unfriendly)")
-    start = time.time()
-    col_sums = []
-    for j in range(size):
-        col_sum = matrix.data[:, j].sum()  # Access entire column with large strides
-        col_sums.append(col_sum)
-    col_time = time.time() - start
-    print(f"   Time: {col_time*1000:.1f}ms")
-    print(f"   Access pattern: Strided (jumps {size * BYTES_PER_FLOAT32} bytes per element)")
-
-    # Calculate slowdown
-    slowdown = col_time / row_time
-    print("\n" + "=" * 60)
-    print("📊 PERFORMANCE IMPACT:")
-    print(f"   Slowdown factor: {slowdown:.2f}× ({col_time/row_time:.1f}× slower)")
-    print(f"   Cache misses cause {(slowdown-1)*100:.0f}% performance loss")
-
-    # Educational insights
-    print("\n💡 KEY INSIGHTS:")
-    print("   1. Memory layout matters: Row-major (C-style) storage is sequential")
-    print("   2. Cache lines are ~64 bytes: Row access loads nearby elements \"for free\"")
-    print("   3. Column access misses cache: Must reload from DRAM every time")
-    print(f"   4. This is O(n) algorithm but {slowdown:.1f}× different wall-clock time!")
-
-    print("\n🚀 REAL-WORLD IMPLICATIONS:")
-    print("   • Image processing libraries use specific memory formats for cache efficiency")
-    print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
-    print(f"   • Transpose is expensive ({slowdown:.1f}×) because it creates a non-contiguous view with poor cache locality")
-    print("   • Hardware-optimized libraries leverage memory layout for better performance")
-
-    print("\n" + "=" * 60)
-
-# Run the systems analysis
-if __name__ == "__main__":
-    analyze_memory_layout()
-
-
-# %% [markdown]
-"""
 ## 🔧 Integration: Bringing It Together
 
 Let's test how our Tensor operations work together in realistic scenarios. This integration demonstrates that our individual operations combine correctly for complex workflows.
@@ -1743,6 +1908,80 @@ This simulation shows how our basic operations combine to create powerful comput
 
 You'll see this affine transformation pattern used extensively as we build more complex systems in later modules.
 """
+
+
+# %% [markdown]
+"""
+## 📊 Systems Analysis: Memory Layout and Performance
+
+Let's understand ONE key systems concept: **memory layout and cache behavior**.
+
+This single analysis reveals why certain operations are fast while others are slow, and why framework designers make specific architectural choices.
+"""
+
+# %%
+def analyze_memory_layout():
+    """📊 Demonstrate cache effects with row vs column access patterns."""
+    print("📊 Analyzing Memory Access Patterns...")
+    print("=" * 60)
+
+    # Create a moderately-sized matrix (large enough to show cache effects)
+    size = 2000
+    matrix = Tensor(rng.random((size, size)))
+
+    import time
+
+    print(f"\nTesting with {size}×{size} matrix ({matrix.size * BYTES_PER_FLOAT32 / MB_TO_BYTES:.1f} MB)")
+    print("-" * 60)
+
+    # Test 1: Row-wise access (cache-friendly)
+    # Memory layout: [row0][row1][row2]... stored contiguously
+    print("\nTest 1: Row-wise Access (Cache-Friendly)")
+    start = time.time()
+    row_sums = []
+    for i in range(size):
+        row_sum = matrix.data[i, :].sum()  # Access entire row sequentially
+        row_sums.append(row_sum)
+    row_time = time.time() - start
+    print(f"   Time: {row_time*1000:.1f}ms")
+    print("   Access pattern: Sequential (follows memory layout)")
+
+    # Test 2: Column-wise access (cache-unfriendly)
+    # Must jump between rows, poor spatial locality
+    print("\nTest 2: Column-wise Access (Cache-Unfriendly)")
+    start = time.time()
+    col_sums = []
+    for j in range(size):
+        col_sum = matrix.data[:, j].sum()  # Access entire column with large strides
+        col_sums.append(col_sum)
+    col_time = time.time() - start
+    print(f"   Time: {col_time*1000:.1f}ms")
+    print(f"   Access pattern: Strided (jumps {size * BYTES_PER_FLOAT32} bytes per element)")
+
+    # Calculate slowdown
+    slowdown = col_time / row_time
+    print("\n" + "=" * 60)
+    print("📊 PERFORMANCE IMPACT:")
+    print(f"   Slowdown factor: {slowdown:.2f}× ({col_time/row_time:.1f}× slower)")
+    print("   This timing ratio includes loop and reduction overhead; it does not count cache misses")
+
+    # Educational insights
+    print("\n💡 KEY INSIGHTS:")
+    print("   1. Memory layout matters: Row-major (C-style) storage is sequential")
+    print("   2. Cache lines are ~64 bytes: Row access loads nearby elements \"for free\"")
+    print("   3. Strided column access can use cache lines less efficiently")
+    print(f"   4. This is O(n) algorithm but {slowdown:.1f}× different wall-clock time!")
+
+    print("\n🚀 REAL-WORLD IMPLICATIONS:")
+    print("   • Image processing libraries use specific memory formats for cache efficiency")
+    print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
+    print(f"   • This run's column/row time ratio is {slowdown:.1f}×; other kernels may behave differently")
+    print("   • Hardware-optimized libraries leverage memory layout for better performance")
+
+    print("\n" + "=" * 60)
+
+if __name__ == "__main__":
+    analyze_memory_layout()
 
 
 # %% [markdown]
@@ -1852,10 +2091,6 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 01")
 
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
-
 
 # %% [markdown]
 """
@@ -1899,7 +2134,7 @@ What's the memory difference between float64 and float32 for a (1000, 1000) tens
 - Total elements: 1,000,000
 - Memory: float64 = 8MB, float32 = 4MB (2x difference)
 
-**Key Insight**: Production systems often use float16 or bfloat16 for 4x memory savings over float32,
+**Key Insight**: Production systems often use float16 or bfloat16 for 2x memory savings over float32 (2 bytes vs 4),
 trading precision for capacity. GPU memory limits (8-16GB) make this critical.
 
 ### Question 4: Production Scale Memory

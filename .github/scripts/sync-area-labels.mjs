@@ -13,7 +13,8 @@ const [OWNER, REPO_NAME] = REPO.split('/');
 const RULES = [
   { prefix: '.github/', label: 'area: tools' },
   { prefix: 'tools/', label: 'area: tools' },
-  { prefix: 'book/', label: 'area: book' },
+  { prefix: 'books/', label: 'area: book' },
+  { prefix: 'binder/', label: 'area: book' },
   { prefix: 'tinytorch/', label: 'area: tinytorch' },
   { prefix: 'kits/', label: 'area: kits' },
   { prefix: 'labs/', label: 'area: labs' },
@@ -21,7 +22,7 @@ const RULES = [
   { prefix: 'site/', label: 'area: website' },
   { prefix: 'website/', label: 'area: website' },
   { prefix: 'mlsysim/', label: 'area: mlsysim' },
-  { prefix: 'interviews/', label: 'area: staffml' },
+  { prefix: 'staffml/', label: 'area: staffml' },
 ];
 
 const TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -151,7 +152,7 @@ async function main() {
   // 1) Ensure new area labels
   for (const [name, color, desc] of [
     ['area: mlsysim', '1D76DB', 'Path mlsysim/ — auto-label'],
-    ['area: staffml', '0E8A16', 'Path interviews/ — auto-label; StaffML'],
+    ['area: staffml', '0E8A16', 'Path staffml/ — auto-label; StaffML'],
   ]) {
     const r = await ensureLabel(name, color, desc);
     console.log(r === 'exists' ? `  Label exists: ${name}` : `  Created label: ${name}`);

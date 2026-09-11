@@ -1,0 +1,280 @@
+---
+title: "Representing Sequences: Embeddings and Positional Encoding"
+---
+
+## Purpose {.unnumbered}
+
+_Why does a self-attention mechanism treat a shuffled sentence identically to the original without positional encodings?_
+
+Unlike Recurrent Neural Networks (RNNs) that process tokens sequentially step-by-step, transformer architectures process all tokens across an entire sequence simultaneously in parallel. Because the fundamental mathematical operation of self-attention consists of pairwise dot products, the architecture is inherently **permutation-invariant**: swapping the order of words in a sentence produces identical attention scores, destroying syntax and meaning. To represent natural language sequences, frameworks must perform two orthogonal transformations: mapping discrete integer token IDs into dense semantic feature spaces via an **`Embedding` lookup table** ($\mathbb{R}^{V \times D}$), and injecting sequence order via **Positional Encodings** ($\mathbb{R}^{S \times D}$). In a framework runtime, embedding lookup is a memory-bound gather operation that converts lightweight integer arrays into high-dimensional floating-point tensors.
+
+::: {.callout-learning-objectives}
+## Learning Objectives
+
+- **Construct** the `Embedding` layer encapsulating a learnable $(V, D)$ weight matrix with zero-copy integer index slicing.
+- **Prove** why attention mechanisms are permutation-invariant and demonstrate why positional encodings are mathematically required.
+- **Derive** and implement Vaswani sinusoidal positional encodings using geometric frequency progressions.
+- **Implement** learned positional embedding tables as used in autoregressive GPT architectures.
+- **Analyze** the memory bandwidth and cache locality trade-offs of sparse embedding gather and scatter operations.
+:::
+
+---
+
+## The Discrete Lookup Table: Zero-Compute Pointer Indexing
+
+An embedding layer maps discrete token integers $t \in \{0, 1, \dots, V-1\}$ to continuous $D$-dimensional vectors $\mathbf{e}_t \in \mathbb{R}^D$.
+
+Mathematically, an embedding lookup is formalized as multiplying a 1-hot row vector $\mathbf{x}_{\text{one-hot}} \in \{0, 1\}^V$ by a weight parameter matrix $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{V \times D}$:
+
+$$\mathbf{e}_t = \mathbf{x}_{\text{one-hot}} \mathbf{W}_{\text{embed}} = \mathbf{W}_{\text{embed}}[t, :]$$
+
+If executed literally as a matrix multiplication, evaluating $\mathbf{x}_{\text{one-hot}} \mathbf{W}_{\text{embed}}$ for a batch of sequences would require $B \cdot S \cdot V \cdot D$ multiply-accumulate operations—where $\frac{V-1}{V} \approx 99.999\%$ of arithmetic operations are multiplying zeros!
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Embedding Lookup: Mathematical Formalism vs. Physical Memory Reality   │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Mathematical Abstraction (Dense Matrix Multiply):                      │
+│  [0, 0, ..., 1, ..., 0] @ Matrix(V=32000, D=4096) ──> Vector(D)         │
+│  • FLOPs: 2 * 32,000 * 4,096 = 262,144,000 FLOPs (99.997% wasted on 0s)│
+├─────────────────────────────────────────────────────────────────────────┤
+│  Hardware Execution Reality (Zero-Compute Pointer Gather):              │
+│  Index = 42 ──> Pointer: Base_Address + 42 * 4096 * 4 bytes             │
+│  • FLOPs: EXACTLY ZERO!                                                 │
+│  • Memory Operation: Direct DRAM/HBM Strided Cache Line Fetch           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+In software and hardware execution, deep learning runtimes never allocate one-hot vectors or execute arithmetic multiplications for embeddings. Instead, the embedding layer is executed as an **$O(1)$ memory gather operation** (pointer indexing arithmetic):
+
+$$\text{Byte Address}(t) = \text{Base\_Pointer} + t \times D \times \text{sizeof}(\text{dtype})$$
+
+This fundamental architectural insight means embedding layers have an **arithmetic intensity of zero FLOPs per byte**: their performance is entirely bounded by DRAM/HBM memory bandwidth and cache latency.
+
+---
+
+## Implementing the Embedding Layer in TinyTorch
+
+```python
+# Listing 11.1: The Embedding Layer in TinyTorch
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Layer
+from typing import List, Optional
+import numpy as np
+
+class Embedding(Layer):
+    """
+    Learnable Embedding lookup table mapping token IDs to dense vectors.
+
+    Weights shape: (num_embeddings, embedding_dim)
+    """
+
+    def __init__(self, num_embeddings: int, embedding_dim: int) -> None:
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+
+        # Standard normal initialization with variance scaled to embedding_dim
+        weight_data = np.random.normal(0.0, 1.0 / np.sqrt(embedding_dim), (num_embeddings, embedding_dim)).astype(np.float32)
+        self.weight = Tensor(weight_data, requires_grad=True)
+
+    def forward(self, indices: Tensor) -> Tensor:
+        """
+        Lookup embeddings for input token tensor of shape (B, S).
+        Returns Tensor of shape (B, S, embedding_dim).
+        """
+        idx = indices.data.astype(int)
+        # Direct numpy integer fancy indexing (Memory Gather)
+        out = self.weight.data[idx]
+        return Tensor(out)
+
+    def parameters(self) -> List[Tensor]:
+        return [self.weight]
+```
+
+---
+
+## The Permutation Invariance Problem in Attention
+
+Consider two sentences with identical words in reversed order:
+
+1. *"The dog bit the cat."*
+2. *"The cat bit the dog."*
+
+If these words are converted into token embeddings $(\mathbf{e}_{\text{dog}}, \mathbf{e}_{\text{bit}}, \dots)$ and fed into an attention mechanism, the self-attention score between any two words $i$ and $j$ depends purely on their feature dot product:
+
+$$\text{Attention}(\mathbf{e}_i, \mathbf{e}_j) = \frac{\mathbf{e}_i \mathbf{e}_j^T}{\sqrt{D}}$$
+
+Because addition and dot products are commutative, the self-attention mechanism computes the exact same representation regardless of word order. The model cannot determine whether the dog or the cat performed the biting!
+
+::: {.callout-principle}
+## The Positional Invariant
+
+To allow a transformer to perceive word order, we must add a unique position-dependent vector $\mathbf{p}_{\text{pos}} \in \mathbb{R}^D$ directly to the token embedding $\mathbf{e}_t$:
+
+$$\mathbf{x}_{\text{input}}[b, pos] = \mathbf{e}[b, pos] + \mathbf{p}[pos]$$
+:::
+
+::: {#fig-embeddings-pos}
+![](../quarto/assets/images/diagrams/11_embeddings-diag-1.svg)
+
+**Figure 11.1: Combining Token and Positional Embeddings.** Discrete token IDs are gathered from the embedding table. Position vectors are added element-wise, creating position-aware semantic representations.
+:::
+
+---
+
+## Vaswani Sinusoidal Positional Encoding
+
+In *Attention Is All You Need* (2017), Vaswani et al. introduced **Sinusoidal Positional Encoding**, using sine and cosine waves of varying frequencies across the embedding dimensions:
+
+$$PE_{(pos, 2i)} = \sin\left(\frac{pos}{10000^{2i / D}}\right)$$
+
+$$PE_{(pos, 2i+1)} = \cos\left(\frac{pos}{10000^{2i / D}}\right)$$
+
+where $pos \in [0, S-1]$ is the token position and $i \in [0, D/2 - 1]$ indexes the embedding dimension.
+
+### Mathematical Properties of Sinusoidal Encodings
+
+1. **Unique Position Signatures**: Every position $pos$ receives a unique geometric coordinate in $\mathbb{R}^D$.
+2. **Relative Position Linearity**: For any fixed offset $k$, $PE_{pos+k}$ can be represented as a linear projection of $PE_{pos}$ via trigonometric angle-addition formulas:
+
+$$\sin(\omega (pos + k)) = \sin(\omega \cdot pos)\cos(\omega k) + \cos(\omega \cdot pos)\sin(\omega k)$$
+
+This allows the self-attention mechanism to learn relative distances between tokens purely through linear projections.
+
+```python
+# Listing 11.2: Sinusoidal Positional Encoding in TinyTorch
+def create_sinusoidal_embeddings(max_len: int, d_model: int) -> np.ndarray:
+    """
+    Generate fixed sinusoidal positional encoding matrix of shape (max_len, d_model).
+    """
+    pe = np.zeros((max_len, d_model), dtype=np.float32)
+    position = np.arange(0, max_len, dtype=np.float32)[:, np.newaxis]
+
+    # Division term: 10000^(2i / d_model)
+    div_term = np.exp(np.arange(0, d_model, 2, dtype=np.float32) * -(np.log(10000.0) / d_model))
+
+    # Apply sin to even indices, cos to odd indices
+    pe[:, 0::2] = np.sin(position * div_term)
+    pe[:, 1::2] = np.cos(position * div_term)
+
+    return pe
+```
+
+---
+
+## Learned Positional Embeddings (GPT-Style)
+
+While sinusoidal encodings are fixed and non-trainable, autoregressive models (such as GPT-2, GPT-3, and BERT) frequently use **Learned Positional Embeddings**.
+
+A learned positional embedding layer is simply a second `Embedding` table of shape $(S_{\text{max}}, D)$. During training, the framework optimizes position representations alongside token weights via backpropagation:
+
+```python
+# Listing 11.3: Complete GPT-Style Position-Aware Embedding Layer
+class GPTEmbedding(Layer):
+    """
+    Combines learned token embeddings and learned positional embeddings.
+    """
+
+    def __init__(self, vocab_size: int, max_seq_len: int, d_model: int) -> None:
+        self.token_embed = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+        self.pos_embed = Embedding(num_embeddings=max_seq_len, embedding_dim=d_model)
+        self.d_model = d_model
+
+    def forward(self, input_ids: Tensor) -> Tensor:
+        B, S = input_ids.shape
+
+        # 1. Lookup token embeddings: (B, S, D)
+        tok_vecs = self.token_embed(input_ids)
+
+        # 2. Generate position indices: [0, 1, 2, ..., S-1]
+        pos_indices = Tensor(np.arange(S, dtype=np.int32)[np.newaxis, :])  # Shape: (1, S)
+
+        # 3. Lookup position embeddings: (1, S, D)
+        pos_vecs = self.pos_embed(pos_indices)
+
+        # 4. Element-wise addition (broadcasting batch dimension)
+        return Tensor(tok_vecs.data + pos_vecs.data)
+
+    def parameters(self) -> List[Tensor]:
+        return self.token_embed.parameters() + self.pos_embed.parameters()
+```
+
+---
+
+::: {.callout-note}
+## PyTorch Systems Bridge: `torch.nn.Embedding`, Sparse Gradients, and `EmbeddingBag`
+
+In PyTorch, `torch.nn.Embedding` wraps high-performance CUDA memory gather kernels (`aten/src/ATen/native/cuda/Embedding.cu`):
+
+```python
+import torch
+import torch.nn as nn
+
+# Dense embedding lookup table
+embed = nn.Embedding(
+    num_embeddings=32000,
+    embedding_dim=4096,
+    padding_idx=0,      # Gradients for padding index are strictly zeroed
+    sparse=False        # If True, backward pass yields sparse torch.sparse_coo gradient
+)
+
+token_ids = torch.tensor([[101, 2054, 2003, 102], [101, 1037, 3899, 102]])
+vectors = embed(token_ids)  # Shape: (2, 4, 4096)
+```
+
+### Dense vs. Sparse Embedding Gradients
+When `sparse=False` (default), the backward pass allocates a full dense $(V, D)$ gradient tensor $\nabla_{\mathbf{W}}$. For $V = 1,000,000$ and $D = 4096$, this allocates $16.38\text{ GB}$ of VRAM just to store mostly zero gradients! Setting `sparse=True` returns a sparse coordinate (`torch.sparse_coo`) tensor that records only the updated row indices, combined with `torch.optim.SparseAdam` to update massive embedding tables in recommendation engines.[^embedding-sparse]
+
+In recommendation systems (such as Meta DLRM), PyTorch provides `nn.EmbeddingBag`, which fuses the integer table lookup and the sum/mean pooling into a single CUDA kernel, cutting DRAM bus roundtrips by over 80%.[^embedding-bag]
+:::
+
+[^embedding-sparse]: In CUDA, the dense backward kernel executes an `atomicAdd` across threads if multiple input tokens reference the same embedding index $t$, preventing race conditions during gradient accumulation.
+
+[^embedding-bag]: In the PyTorch C++ source (`aten/src/ATen/native/EmbeddingBag.cpp`), `EmbeddingBag` performs parallel reduction across row indices in GPU shared memory without allocating intermediate $(B, S, D)$ tensor buffers.
+
+## Systems Reality: Memory Bandwidth and the Backward Scatter-Add Hazard
+
+Embedding layers exhibit an extreme systems imbalance between the forward gather and the backward scatter:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Embedding Forward Gather vs. Backward Scatter-Add Pipeline             │
+├─────────────────────────────────────────────────────────────────────────┤
+│  FORWARD PASS: Strided Memory Gather (Zero FLOPs)                       │
+│  Indices [42, 108, 42] ──> Fetch Rows [42, 108, 42] into HBM            │
+│  • Latency: DRAM random-access latency (~100-200 ns)                    │
+│  • Memory Bandwidth: Uncoalesced reads across 128-byte cache lines      │
+├─────────────────────────────────────────────────────────────────────────┤
+│  BACKWARD PASS: Atomic Scatter-Add Write Conflict                       │
+│  dL/dOutput ──> Accumulate Gradients into Rows [42, 108, 42]            │
+│  • Write Hazard: Tokens 0 and 2 BOTH write to Row 42!                   │
+│  • Hardware Solution: GPU atomicAdd() locks memory bus lines, causing   │
+│    warp serialization when high-frequency stopwords dominate batches. │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+Because token lookups access non-contiguous memory rows across the table, GPU L2 caches experience high miss rates. In modern LLM architectures (e.g., LLaMA, Mistral), embedding tables are often tied with the final output linear projection head (`lm_head.weight = embed.weight`) to save hundreds of megabytes of GPU memory, while position representations have evolved from learned lookup tables to arithmetic **Rotary Position Embeddings (RoPE)** that require zero additional memory allocations.
+
+---
+
+## Summary
+
+In this chapter, we constructed the semantic and positional representation foundation of TinyTorch's NLP engine. We analyzed the discrete lookup table abstraction, proving how integer fancy indexing replaces expensive one-hot matrix multiplications with $O(1)$ memory gather operations.
+
+We solved the fundamental permutation invariance problem of self-attention by deriving and implementing both Vaswani sinusoidal positional encodings and GPT-style learned positional embeddings. Finally, we analyzed the memory bandwidth bottlenecks inherent in large embedding tables.
+
+::: {.callout-takeaways}
+## Chapter Takeaways
+
+- **Memory Gather vs. Matrix Multiply**: Embedding layers execute index-based row slicing rather than one-hot matrix multiplications, minimizing arithmetic overhead.
+- **Permutation Invariance**: Self-attention is order-agnostic; positional encodings are mandatory to distinguish word order in natural language.
+- **Sinusoidal Encodings**: Trigonometric functions across multiple frequencies provide relative distance linearity and infinite length extrapolation.
+- **Learned Positional Embeddings**: GPT architectures optimize a dedicated $(S_{\text{max}}, D)$ positional embedding table directly via gradient descent.
+- **Memory-Bound Bottlenecks**: Embedding lookups perform zero FLOPs and are strictly bounded by DRAM memory bandwidth and cache latency.
+:::
+
+::: {.callout-chapter-connection}
+## Chapter Connection: The Heart of the Transformer
+
+Now that our sequences are embedded into position-aware continuous matrices $(B, S, D)$, how do tokens dynamically interact with each other to capture context? In **Chapter 12 (Scaled Dot-Product Attention and Multi-Head Mechanisms)**, we build the core engine of modern deep learning: Multi-Head Self-Attention.
+:::

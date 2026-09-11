@@ -1,0 +1,76 @@
+schema_version: '1.0'
+id: mobile-202609-12d4
+track: mobile
+level: L4
+zone: optimization
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Apple Silicon Zero Copy Vision Pipeline CVPixelBuffer and IOSurface Alignment
+scenario: You are deploying a real-time 4K 60 FPS computer vision pipeline on an Apple Silicon device (M3/M4 Max with 400 GB/s Unified Memory and a 16-core Apple Neural Engine). The input video stream (3840x2160 BGRA, 8-bit per channel) arrives from the camera capture session. A naive Swift pipeline copies frame data from CPU host memory to a Metal GPU buffer for color conversion, and then copies the output into a CoreML tensor for Neural Engine inference. The device suffers from frame drops and thermal throttling under sustained load.
+question: What is the continuous memory bandwidth consumed by the naive copy-based pipeline versus a zero-copy CVPixelBuffer backed by IOSurface, and how does 64-byte hardware cache alignment eliminate thermal throttling?
+details:
+  realistic_solution: |
+    A single 4K frame at 3840x2160 in 32-bit BGRA (4 bytes/pixel) consumes:
+    3840 * 2160 * 4 bytes = 33,177,600 bytes = 31.64 MiB (33.18 MB).
+    At 60 FPS, the raw camera sensor ingestion rate is:
+    33.1776 MB * 60 = 1,990.66 MB/s = 1.991 GB/s.
+
+    In the naive copy pipeline:
+    1. Camera writes to CPU host buffer: 1.991 GB/s write.
+    2. CPU reads host buffer to copy to Metal GPU buffer: 1.991 GB/s read.
+    3. CPU writes to Metal GPU buffer: 1.991 GB/s write.
+    4. Metal GPU reads buffer for color conversion: 1.991 GB/s read.
+    5. Metal GPU writes converted tensor to intermediate buffer: 1.991 GB/s write.
+    6. CPU reads GPU buffer to copy into CoreML MLMultiArray: 1.991 GB/s read.
+    7. CPU writes into CoreML tensor: 1.991 GB/s write.
+    8. Apple Neural Engine (ANE) reads CoreML tensor for inference: 1.991 GB/s read.
+    Total continuous memory traffic: 8 * 1.991 GB/s = 15.925 GB/s.
+    This massive continuous traffic saturates the System-Level Cache (SLC), displaces on-chip neural weights, and triggers aggressive dynamic thermal throttling.
+
+    In the zero-copy IOSurface architecture:
+    1. A CVPixelBuffer pool is allocated backed by IOSurface with kCVPixelBufferMetalCompatibilityKey and 64-byte row alignment.
+    2. The camera DMA engine writes directly into the shared IOSurface: 1.991 GB/s write.
+    3. Metal accesses the pixel buffer directly via makeTexture(descriptor:iosurface:plane:) without copying.
+    4. CoreML binds the same CVPixelBuffer directly as a model input; the ANE DMA engine reads the surface directly: 1.991 GB/s read.
+    Total continuous memory traffic: 1 write + 1 read = 2 * 1.991 GB/s = 3.981 GB/s.
+    This achieves a 75% reduction in continuous DRAM traffic (saving 11.94 GB/s of bandwidth), completely preserving cache residency and keeping the device within its sustained thermal envelope.
+  common_mistake: |
+    **The Pitfall:** Assuming Unified Memory architecture on Apple Silicon automatically makes all memory operations zero-copy without explicit IOSurface backing.
+    **The Rationale:** While CPU, GPU, and ANE share the same physical DRAM chips, standard virtual memory allocations in Swift or C++ reside in private address spaces that require explicit copies or bridging to transfer ownership between frameworks.
+    **The Consequence:** Generating 15.9 GB/s of redundant memory traffic across Metal and CoreML, inducing severe frame drops and thermal throttling.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Resolution: 3840 x 2160, 4 bytes/pixel (BGRA8888).
+    - Framerate: 60 FPS.
+    - Naive pipeline passes: 8 memory transactions per frame.
+    - Zero-copy IOSurface passes: 2 memory transactions per frame.
+
+    **Calculations:**
+    - Frame size: 3840 * 2160 * 4 bytes = 33.1776 MB.
+    - Raw stream bandwidth: 33.1776 MB * 60 FPS = 1,990.66 MB/s = 1.991 GB/s.
+    - Naive continuous traffic: 8 * 1.99066 GB/s = 15.925 GB/s.
+    - Zero-copy continuous traffic: 2 * 1.99066 GB/s = 3.981 GB/s.
+    - Memory bandwidth reduction: (15.925 - 3.981) / 15.925 = 75.0% reduction.
+    - Bandwidth saved: 11.944 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth-Bound.** Zero-copy IOSurface binding slashes continuous DRAM traffic from 15.93 GB/s to 3.98 GB/s, eliminating SLC thrashing and thermal throttling in 4K60 vision pipelines.
+status: published
+provenance: human
+requires_explanation: true
+expected_time_minutes: 15
+validated: true
+validation_status: OK
+validation_date: '2026-09-04'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-09-04'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: verified
+  by: vj@eecs.harvard.edu
+  date: '2026-09-04'
+  notes: 'Apple Silicon IOSurface zero-copy vision pipeline math verification'

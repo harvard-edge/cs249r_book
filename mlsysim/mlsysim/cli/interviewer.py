@@ -73,7 +73,7 @@ FORMAT YOUR RESPONSE AS JSON:
 if __name__ == "__main__":
     # Test loading
     _repo_root = Path(__file__).resolve().parents[3]
-    corpus = InterviewCorpus(_repo_root / "interviews" / "corpus.json")
+    corpus = InterviewCorpus(_repo_root / "staffml" / "app" / "src" / "data" / "corpus.json")
     q = corpus.get_random(track="cloud", level="L4")
     print(f"Random Q: {q.title} ({q.level})")
     print(f"Scenario: {q.scenario}")

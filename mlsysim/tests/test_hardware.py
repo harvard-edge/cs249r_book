@@ -37,6 +37,10 @@ def test_tpuv4_is_not_alias_to_tpuv5p():
     assert Hardware.Cloud.TPUv4.compute.peak_flops == (275 * ureg.TFLOPs / ureg.second)
 
 
+def test_tpuv5p_vmem_capacity():
+    assert Hardware.Cloud.TPUv5p.memory.sram_capacity == (128 * ureg.MiB)
+
+
 def test_nvlink_on_cloud_gpus():
     """NVLink bandwidth lives on HardwareNode, not loose constants."""
     from mlsysim.core.units import GB, second
@@ -55,13 +59,13 @@ def test_lab_track_hardware_profiles():
 
     assert oura.name == "Oura Ring 4 (wearable reference profile)"
     assert oura.memory.sram_capacity.to("KiB").magnitude == pytest.approx(512)
-    assert oura.memory.flash_capacity.to("MB").magnitude == pytest.approx(2)
+    assert oura.memory.flash_capacity.to("MiB").magnitude == pytest.approx(2)
     assert oura.battery_capacity.to("Wh").magnitude == pytest.approx(0.06)
     assert oura.metadata.provenance.kind.value == "estimate"
 
     assert robotaxi.name == "RoboTaxi Reference Compute (NVIDIA DRIVE AGX Orin class)"
     assert robotaxi.compute.precision_flops["int8"].to("TOPS").magnitude == pytest.approx(254)
-    assert robotaxi.memory.capacity.to("GB").magnitude == pytest.approx(32)
+    assert robotaxi.memory.capacity.to("GiB").magnitude == pytest.approx(32)
     assert robotaxi.tdp.to("W").magnitude == pytest.approx(60)
     assert robotaxi.metadata.provenance.kind.value == "estimate"
 

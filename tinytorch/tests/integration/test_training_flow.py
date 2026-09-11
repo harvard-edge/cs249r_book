@@ -29,12 +29,9 @@ from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Enable autograd for all tests
-enable_autograd()
-
-
 class TestOptimzerActuallyUpdatesWeights:
     """
     Critical Test: Verify optimizer.step() actually changes weights.

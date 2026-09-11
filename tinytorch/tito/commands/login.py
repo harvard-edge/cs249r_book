@@ -109,9 +109,9 @@ class LoginCommand(BaseCommand):
 
         progress_file = self.config.project_root / ".tito" / "progress.json"
         try:
-            data = json.loads(progress_file.read_text()) if progress_file.exists() else {}
+            data = json.loads(progress_file.read_text(encoding='utf-8')) if progress_file.exists() else {}
             completed = data.get("completed_modules", [])
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             completed = []
 
         if not completed:

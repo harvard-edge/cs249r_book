@@ -22,7 +22,8 @@ def get_venv_path() -> Path:
 
     if Path(CONFIG_FILE).exists():
         try:
-            cfg = json.load(open(CONFIG_FILE))
+            with open(CONFIG_FILE, encoding='utf-8') as f:
+                cfg = json.load(f)
             return Path(cfg.get("venv_path", DEFAULT_VENV)).expanduser().resolve()
         except Exception:
             pass

@@ -1,0 +1,106 @@
+name: '🌐 Landing Site · 🔢 Refresh Stats'
+
+# =============================================================================
+# Refresh the published stats without rebuilding the site
+# =============================================================================
+#
+# The landing page prints its figures at build time, so without this they only
+# move when somebody deploys. The page also fetches /stats.json on load and
+# replaces those figures, which means refreshing this one file is enough to put
+# current numbers in front of every visitor.
+#
+# Rebuilding the whole site on a schedule would achieve the same thing at far
+# greater cost: a full Quarto render, a gh-pages replacement, and a zone-wide
+# Cloudflare purge, several times a day, to change six numbers.
+#
+# Writes ONLY gh-pages/stats.json. It deliberately does not commit to dev:
+# a scheduled bot commit on the working branch would leave every local
+# checkout behind on each run. The cache committed in dev stays the
+# build-time fallback and is refreshed whenever a human deploys.
+#
+# Secrets: GA4_SERVICE_ACCOUNT_JSON (readership), BUTTONDOWN_API_KEY
+#          (subscribers), GITHUB_TOKEN (stars and merged PRs, and the push).
+# Any missing secret degrades to the committed value rather than failing.
+# =============================================================================
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # every six hours, off the hour to avoid the rush
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages-deploy      # never race the publish workflow
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: '🔢 Refresh stats.json'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 📊 Install stats dependencies
+        run: pip install -r site/scripts/requirements.txt
+
+      - name: 🔢 Gather stats
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+          GA4_SERVICE_ACCOUNT_JSON: ${{ secrets.GA4_SERVICE_ACCOUNT_JSON }}
+          # This job publishes stats.json without committing its cache, so the
+          # committed file can be days behind the page. Reading the live figures
+          # back gives the high-water check in build_stats.py a baseline that is
+          # actually what visitors are seeing.
+          PUBLISHED_STATS_URL: https://mlsysbook.ai/stats.json
+        run: python3 site/scripts/build_stats.py
+
+      - name: 🚀 Publish stats.json to gh-pages
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json, pathlib
+          cache = json.loads(pathlib.Path("site/config/stats-cache.json").read_text())
+          pathlib.Path("stats.json").write_text(
+              json.dumps({"generated": cache.get("generated", ""),
+                          "display": cache.get("display", {})},
+                         indent=2, sort_keys=True) + "\n")
+          print(f"prepared stats.json with {len(cache.get('display', {}))} values")
+          PY
+
+          git clone --depth=1 --branch=gh-pages \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            gh-pages-repo
+
+          cp stats.json gh-pages-repo/stats.json
+          cd gh-pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage first: git diff compares tracked files only, so on the very
+          # first run, when gh-pages has no stats.json yet, an unstaged check
+          # reports "no change" and skips the publish this job exists to do.
+          git add stats.json
+          if git diff --cached --quiet -- stats.json; then
+            echo "🟡 No change in stats; nothing to publish"
+            exit 0
+          fi
+
+          git commit -m "🔢 Refresh site stats"
+          for i in 1 2 3; do
+            git push origin gh-pages && { echo "✅ Pushed on attempt $i"; exit 0; }
+            echo "🟡 Push failed, refetching and retrying"
+            git fetch origin gh-pages && git rebase origin/gh-pages
+          done
+          echo "❌ Could not push stats.json after 3 attempts"
+          exit 1

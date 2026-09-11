@@ -32,7 +32,7 @@ class TestCommandExecution:
             [sys.executable, '-m', 'tito.main'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         # Should exit successfully
@@ -48,7 +48,7 @@ class TestCommandExecution:
             [sys.executable, '-m', 'tito.main', '-h'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         assert result.returncode == 0
@@ -62,7 +62,7 @@ class TestCommandExecution:
             [sys.executable, '-m', 'tito.main', '--version'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         assert result.returncode == 0
@@ -78,7 +78,7 @@ class TestCommandExecution:
             [sys.executable, '-m', 'tito.main', command, '-h'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         # Help should always succeed
@@ -106,7 +106,7 @@ class TestCommandExecution:
             [sys.executable, '-m', 'tito.main', command, subcommand, '-h'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         # Subcommand help should work
@@ -130,7 +130,7 @@ class TestCommandGrouping:
             [sys.executable, '-m', 'tito.main'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         # Key student commands should be visible
@@ -147,7 +147,7 @@ class TestCommandGrouping:
             [sys.executable, '-m', 'tito.main', '-h'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         # Developer commands should be in help
@@ -172,7 +172,7 @@ class TestErrorMessages:
             [sys.executable, '-m', 'tito.main', 'nonexistent'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         # Should fail
@@ -189,7 +189,7 @@ class TestErrorMessages:
             [sys.executable, '-m', 'tito.main', 'module'],
             cwd=self.project_root,
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
 
         # Should show help or error

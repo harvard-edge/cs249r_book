@@ -745,7 +745,10 @@ class NBGraderCommand(BaseCommand):
 
     def _report(self, args: Namespace) -> int:
         """Export grades report."""
-        cmd = ["nbgrader", "export", "--course-dir", str(self.assignments_dir)]
+        # nbgrader's `export` app does not expose the `--course-dir` alias that
+        # generate_assignment/collect/autograde/feedback accept; it only honours
+        # the underlying CourseDirectory.root trait.
+        cmd = ["nbgrader", "export", f"--CourseDirectory.root={self.assignments_dir}"]
         if args.assignment:
             assignment = self._resolve_assignment_name(args.assignment) or args.assignment
             cmd.extend(["--assignment", assignment])
@@ -768,7 +771,7 @@ class NBGraderCommand(BaseCommand):
                 cwd=self.project_root,
                 check=False,
                 capture_output=capture_output,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         except FileNotFoundError as exc:
             return subprocess.CompletedProcess(cmd, 127, "", str(exc))

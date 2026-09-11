@@ -12,9 +12,6 @@
 #     name: python3
 # ---
 
-#| default_exp core.transformers
-#| export
-
 # %% [markdown]
 """
 # Module 13: Transformers - Complete Transformer Architecture
@@ -44,7 +41,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
+**Learning Side:** You work in `modules/13_transformers/transformers.ipynb`
 **Building Side:** Code exports to `tinytorch.core.transformers`
 
 ```python
@@ -59,77 +56,6 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
 - **Integration:** Works seamlessly with attention, embeddings, and tokenization for complete language models
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-
-from tinytorch.core.activations import GELU
-from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.autograd import Function
-from tinytorch.core.embeddings import EmbeddingLayer
-from tinytorch.core.layers import Linear
-
-# Import from previous modules - following proper dependency chain
-from tinytorch.core.tensor import Tensor
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
-
-def create_causal_mask(seq_len: int) -> Tensor:
-    """
-    Create a causal (autoregressive) attention mask.
-
-    This mask ensures that position i can only attend to positions j where j ≤ i.
-    Essential for autoregressive language models like GPT.
-
-    Args:
-        seq_len: Length of the sequence
-
-    Returns:
-        Tensor of shape (1, seq_len, seq_len) with:
-        - 1.0 for positions that CAN be attended to (lower triangle)
-        - 0.0 for positions that CANNOT be attended to (upper triangle)
-
-    Example:
-        For seq_len=4, creates:
-        [[1, 0, 0, 0],
-         [1, 1, 0, 0],
-         [1, 1, 1, 0],
-         [1, 1, 1, 1]]
-
-    Usage:
-        >>> from tinytorch.core.transformers import create_causal_mask
-        >>> mask = create_causal_mask(seq_len=10)
-        >>> output = attention(x, mask=mask)
-    """
-    # Lower triangular matrix: 1 = can attend, 0 = cannot attend
-    mask = np.tril(np.ones((seq_len, seq_len), dtype=np.float32))
-    return Tensor(mask[np.newaxis, :, :])  # Add batch dimension
-
-
-# %% [markdown]
-"""
-## 📦 Where This Code Lives in the Final Package
-
-**Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
-**Building Side:** Code exports to `tinytorch.core.transformers`
-
-```python
-# How to use this module:
-from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, MLP
-```
-
-**Why this matters:**
-- **Learning:** Complete transformer system showcasing how all components work together
-- **Production:** Matches PyTorch's transformer implementation with proper model organization
-- **Consistency:** All transformer components and generation logic in core.transformer
-- **Integration:** Demonstrates the power of modular design by combining all previous modules
-"""
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -141,8 +67,8 @@ from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, ML
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor` (Module 01: Tensor foundation)
-- `tinytorch.core.activations` (Module 03: GELU activation)
-- `tinytorch.core.layers` (Module 04: Linear layers)
+- `tinytorch.core.activations` (Module 02: GELU activation)
+- `tinytorch.core.layers` (Module 03: Linear layers)
 - `tinytorch.core.embeddings` (Module 11: Embedding layers)
 - `tinytorch.core.attention` (Module 12: MultiHeadAttention)
 
@@ -156,6 +82,24 @@ Tensor → Activations → Layers → Attention → Embeddings → Transformers
 Students completing this module will have built the complete
 transformer architecture that powers modern language models.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.transformers
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+
+# Import from previous modules - following the dependency chain
+from tinytorch.core.tensor import Tensor, Function
+from tinytorch.core.activations import GELU
+from tinytorch.core.layers import Linear
+from tinytorch.core.embeddings import EmbeddingLayer
+from tinytorch.core.attention import MultiHeadAttention
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -182,9 +126,9 @@ Before transformers, language models used RNNs or CNNs that processed text seque
 │  │  ┌─────────────┐       ┌─────────────────────────────┐    │  │
 │  │  │Token Embed  │   +   │ Positional Embedding        │    │  │
 │  │  │15496→[0.1,  │       │ pos_0→[0.05, -0.02, ...]    │    │  │
-│  │  │     0.3,..]│       │ pos_1→[0.12,  0.08, ...]     │    │  │
+│  │  │     0.3,..] │       │ pos_1→[0.12,  0.08, ...]    │    │  │
 │  │  │1917→[0.2,   │       │                             │    │  │
-│  │  │    -0.1,..]│       │                              │    │  │
+│  │  │    -0.1,..] │       │                             │    │  │
 │  │  └─────────────┘       └─────────────────────────────┘    │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                ↓                                │
@@ -446,9 +390,10 @@ Without normalization, deep networks suffer from "internal covariate shift" - th
 #| export
 
 
-class _LayerNormBackward(Function):
+class LayerNormFunction(Function):
     """
-    Gradient computation for the full layer normalization operation.
+    The layer normalization operation: forward normalizes across the last axis, backward
+    computes the gradients.
 
     Computes gradients for x, gamma, and beta in one pass.
     output = gamma * ((x - mean) / std) + beta
@@ -457,38 +402,63 @@ class _LayerNormBackward(Function):
         dx = (gamma/std) * (grad - mean(grad) - normalized * mean(grad * normalized))
     """
 
-    def __init__(self, x, gamma, beta, normalized_data, std_data):
-        """Initialize with forward pass values needed for gradient computation."""
-        super().__init__(x, gamma, beta)
-        self.normalized_data = normalized_data
-        self.std_data = std_data
+    def forward(self, x, gamma, beta):
+        """
+        Apply layer normalization to a NumPy array.
 
-    def apply(self, grad_output):
+        TODO: Implement the normalization formula
+
+        APPROACH:
+        1. Compute mean and variance across the last dimension
+        2. Normalize: (x - mean) / sqrt(variance + eps)
+        3. Keep the normalized values and std on self (backward needs them)
+        4. Apply learnable scale and shift: gamma * normalized + beta
+
+        MATHEMATICAL FORMULA:
+        y = (x - μ) / σ * γ + β
+        where μ = mean(x), σ = sqrt(var(x) + ε)
+
+        HINT: Use keepdims=True to maintain tensor dimensions for broadcasting
+        """
+        ### BEGIN SOLUTION
+        # Compute statistics across last dimension (features)
+        mean_data = np.mean(x, axis=-1, keepdims=True)
+        # Compute variance: E[(x - μ)²]
+        diff = x - mean_data
+        variance = np.mean(diff * diff, axis=-1, keepdims=True)
+        # Normalize: (x - mean) / sqrt(variance + eps)
+        self.std_data = np.sqrt(variance + self.eps)
+        self.normalized_data = diff / self.std_data
+        # Apply learnable transformation: gamma * normalized + beta
+        return gamma * self.normalized_data + beta
+        ### END SOLUTION
+
+
+    def backward(self, grad_output):
         """Compute gradients for LayerNorm (x, gamma, beta)."""
-        x, gamma, beta = self.saved_tensors
+        x, gamma, beta = self.inputs
 
         grad_x = grad_gamma = grad_beta = None
         normalized = self.normalized_data
         std_data = self.std_data
 
         # Gradient for beta: sum over all dims except last
-        if isinstance(beta, Tensor) and beta.requires_grad:
+        if beta.requires_grad:
             # Sum over batch and sequence dimensions
             grad_beta = grad_output.copy()
             while grad_beta.ndim > 1:
                 grad_beta = grad_beta.sum(axis=0)
 
         # Gradient for gamma: sum of (grad_output * normalized) over batch/seq dims
-        if isinstance(gamma, Tensor) and gamma.requires_grad:
+        if gamma.requires_grad:
             grad_gamma = (grad_output * normalized).copy()
             while grad_gamma.ndim > 1:
                 grad_gamma = grad_gamma.sum(axis=0)
 
         # Gradient for x: full LayerNorm backward formula
-        if isinstance(x, Tensor) and x.requires_grad:
+        if x.requires_grad:
             # grad flowing through gamma: grad_output * gamma
-            gamma_data = gamma.data if isinstance(gamma, Tensor) else gamma
-            grad_norm = grad_output * gamma_data
+            grad_norm = grad_output * gamma.data
 
             mean_grad = np.mean(grad_norm, axis=-1, keepdims=True)
             mean_grad_norm = np.mean(grad_norm * normalized, axis=-1, keepdims=True)
@@ -528,6 +498,8 @@ class LayerNorm:
         - eps prevents division by zero in variance calculation
         """
         ### BEGIN SOLUTION
+        if not isinstance(normalized_shape, (int, np.integer)) or normalized_shape <= 0:
+            raise ValueError("TinyTorch LayerNorm normalizes one positive final dimension")
         self.normalized_shape = normalized_shape
         self.eps = eps
 
@@ -540,44 +512,12 @@ class LayerNorm:
         """
         Apply layer normalization.
 
-        TODO: Implement layer normalization formula
-
-        APPROACH:
-        1. Compute mean and variance across the last dimension
-        2. Normalize: (x - mean) / sqrt(variance + eps)
-        3. Apply learnable scale and shift: gamma * normalized + beta
-
-        MATHEMATICAL FORMULA:
-        y = (x - μ) / σ * γ + β
-        where μ = mean(x), σ = sqrt(var(x) + ε)
-
-        HINT: Use keepdims=True to maintain tensor dimensions for broadcasting
+        The normalization itself lives in LayerNormFunction.forward above;
+        apply() records it so gamma and beta train.
         """
-        ### BEGIN SOLUTION
-        # Compute statistics across last dimension (features)
-        mean_data = np.mean(x.data, axis=-1, keepdims=True)
-
-        # Compute variance: E[(x - μ)²]
-        diff = x.data - mean_data
-        variance = np.mean(diff * diff, axis=-1, keepdims=True)
-
-        # Normalize: (x - mean) / sqrt(variance + eps)
-        std_data = np.sqrt(variance + self.eps)
-        normalized_data = diff / std_data
-
-        # Apply learnable transformation: gamma * normalized + beta
-        output_data = self.gamma.data * normalized_data + self.beta.data
-        output = Tensor(output_data)
-
-        # Attach gradient function for full LayerNorm backward
-        if x.requires_grad or self.gamma.requires_grad or self.beta.requires_grad:
-            output.requires_grad = True
-            output._grad_fn = _LayerNormBackward(
-                x, self.gamma, self.beta, normalized_data, std_data
-            )
-
-        return output
-        ### END SOLUTION
+        if not x.shape or x.shape[-1] != self.normalized_shape:
+            raise ValueError(f"LayerNorm expected final dimension {self.normalized_shape}, got {x.shape}")
+        return LayerNormFunction.apply(x, self.gamma, self.beta, eps=self.eps)
 
     def __call__(self, x):
         """Allows the layer norm to be called like a function."""
@@ -628,9 +568,8 @@ def test_unit_layer_norm():
 
     print("✅ LayerNorm works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_layer_norm()  # Moved after implementation
+    test_unit_layer_norm()
 
 # %% [markdown]
 """
@@ -684,7 +623,7 @@ Parameters:
 - Total MLP: ~2.1M parameters
 
 For comparison:
-- Attention (same embed_dim): ~1.5M parameters
+- Attention (same embed_dim): ~1.05M parameters
 - MLP has MORE parameters → more computational capacity
 ```
 
@@ -720,9 +659,12 @@ class MLP:
     This provides the non-linear transformation in each transformer block.
     """
 
-    def __init__(self, embed_dim, hidden_dim=None, dropout_prob=0.1):
+    def __init__(self, embed_dim, hidden_dim=None, dropout_prob=0.0):
         """
         Initialize MLP with two linear layers.
+
+        dropout_prob must be zero: this compact transformer omits dropout.
+        Module 03 provides a standalone Dropout exercise.
 
         TODO: Set up the feed-forward network layers
 
@@ -745,6 +687,10 @@ class MLP:
 
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
+        # Keep this teaching model deterministic; do not silently ignore dropout.
+        if dropout_prob != 0:
+            raise ValueError("TinyTorch MLP supports dropout_prob=0 only")
+        self.dropout_prob = dropout_prob
 
         # Two-layer feed-forward network
         self.linear1 = Linear(embed_dim, hidden_dim)
@@ -766,13 +712,13 @@ class MLP:
         COMPUTATION FLOW:
         x -> Linear -> GELU -> Linear -> output
 
-        HINT: GELU activation is implemented above as a function
+        HINT: self.gelu is the GELU you built in Module 02
         """
         ### BEGIN SOLUTION
         # First linear layer with expansion
         hidden = self.linear1.forward(x)
 
-        # GELU activation (YOUR activation from Module 03!)
+        # GELU activation (YOUR activation from Module 02!)
         hidden = self.gelu.forward(hidden)
 
         # Second linear layer back to original size
@@ -834,9 +780,8 @@ def test_unit_mlp():
 
     print("✅ MLP works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_mlp()  # Moved after implementation
+    test_unit_mlp()
 
 # %% [markdown]
 """
@@ -921,13 +866,11 @@ Think of the residual connections as a "stream" that carries information through
 ```
 Residual Stream Flow:
 
-Layer 1: [original embeddings] ─┐
-                                 ├─→ + attention info ─┐
-Attention adds information ──────┘                      │
-                                                        ├─→ + MLP info ─┐
-MLP adds information ───────────────────────────────────┘               │
-                                                                        │
-Layer 2: carries accumulated information ───────────────────────────────┘
+x (embeddings) ───┬─────────────────(+)──┬──────────────(+)──→ x₄ (to next block)
+                  │                  ↑   │               ↑
+                  └── LN → Attention ┘   └── LN → MLP ───┘
+
+Each branch reads the stream and adds its result back; nothing overwrites it.
 ```
 
 Each layer adds information to this stream rather than replacing it, creating a rich representation.
@@ -943,9 +886,11 @@ class TransformerBlock:
     Each block processes the input sequence and passes it to the next block.
     """
 
-    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.1):
+    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.0):
         """
         Initialize a complete transformer block.
+
+        dropout_prob must be zero; this compact block omits dropout.
 
         TODO: Set up all components of the transformer block
 
@@ -984,7 +929,7 @@ class TransformerBlock:
             hidden_dim = ff_dim
         else:
             hidden_dim = int(embed_dim * mlp_ratio)
-        self.mlp = MLP(embed_dim, hidden_dim)
+        self.mlp = MLP(embed_dim, hidden_dim, dropout_prob)
         ### END SOLUTION
 
     def forward(self, x, mask=None):
@@ -1043,6 +988,49 @@ class TransformerBlock:
 
 # %% [markdown]
 """
+### The Causal Mask
+
+GPT is autoregressive: position i may attend only to positions j ≤ i. The helper
+below encodes that rule in the binary convention Module 12's `_apply_mask`
+expects (1 = attend, 0 = block). `GPT.forward` builds one for every sequence.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "causal-mask", "solution": false}
+#| export
+def create_causal_mask(seq_len: int) -> Tensor:
+    """
+    Create a causal (autoregressive) attention mask.
+
+    This mask ensures that position i can only attend to positions j where j ≤ i.
+    Essential for autoregressive language models like GPT.
+
+    Args:
+        seq_len: Length of the sequence
+
+    Returns:
+        Tensor of shape (1, seq_len, seq_len) with:
+        - 1.0 for positions that CAN be attended to (lower triangle)
+        - 0.0 for positions that CANNOT be attended to (upper triangle)
+
+    Example:
+        For seq_len=4, creates:
+        [[1, 0, 0, 0],
+         [1, 1, 0, 0],
+         [1, 1, 1, 0],
+         [1, 1, 1, 1]]
+
+    Usage:
+        >>> from tinytorch.core.transformers import create_causal_mask
+        >>> mask = create_causal_mask(seq_len=10)
+        >>> output = attention(x, mask=mask)
+    """
+    # Lower triangular matrix: 1 = can attend, 0 = cannot attend
+    mask = np.tril(np.ones((seq_len, seq_len), dtype=np.float32))
+    return Tensor(mask[np.newaxis, :, :])  # Add batch dimension
+
+
+# %% [markdown]
+"""
 ### 🧪 Unit Test: Transformer Block
 
 This test validates our complete TransformerBlock implementation.
@@ -1070,10 +1058,28 @@ def test_unit_transformer_block():
     # Check shape preservation
     assert output.shape == (batch_size, seq_len, embed_dim)
 
-    # Test with causal mask (for autoregressive generation)
-    mask = Tensor(np.triu(np.ones((seq_len, seq_len)) * -np.inf, k=1))
+    # Test with causal mask (for autoregressive generation).
+    # Use create_causal_mask, which follows the convention _apply_mask expects
+    # in Module 12: a BINARY mask where 1 = attend and 0 = block, turned into an
+    # additive (1 - mask) * MASK_VALUE. Handing it a pre-built additive -inf mask
+    # instead flattens every allowed score to the same constant, so attention
+    # stops depending on Q.K at all -- and a shape-only assertion never notices.
+    mask = create_causal_mask(seq_len)
     masked_output = block.forward(x, mask)
     assert masked_output.shape == (batch_size, seq_len, embed_dim)
+
+    # Causality is the whole point of the mask, so assert it: changing the last
+    # token must not move any earlier position's output. The perturbation has to
+    # be non-uniform across the embedding, because LayerNorm subtracts the mean
+    # and would erase a constant shift before attention ever sees it.
+    x_perturbed = np.array(x.data, copy=True)
+    x_perturbed[:, -1, :] = rng.standard_normal(embed_dim) * 5
+    perturbed_output = block.forward(Tensor(x_perturbed), mask)
+    assert np.allclose(
+        np.asarray(masked_output.data)[:, :-1, :],
+        np.asarray(perturbed_output.data)[:, :-1, :],
+        atol=1e-5,
+    ), "Causal mask leaked a future token into an earlier position"
 
     # Test parameter counting
     params = block.parameters()
@@ -1086,9 +1092,8 @@ def test_unit_transformer_block():
 
     print("✅ TransformerBlock works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_transformer_block()  # Moved after implementation
+    test_unit_transformer_block()
 
 # %% [markdown]
 r"""
@@ -1213,7 +1218,7 @@ Probs: [0.09, 0.24, 0.67] → Weighted sampling
 
 Temperature = 2.0 (Creative):
 Scaled: [0.5, 1.0, 1.5] → Flatter distribution
-Probs: [0.18, 0.33, 0.49] → More random
+Probs: [0.19, 0.31, 0.51] → More random
 ```
 
 #### Model Scaling and Parameters
@@ -1222,8 +1227,8 @@ Probs: [0.18, 0.33, 0.49] → More random
 GPT Model Size Scaling:
 
 Tiny GPT (our implementation):
-- embed_dim: 64, layers: 2, heads: 4
-- Parameters: ~50K
+- vocab_size: 100, embed_dim: 64, layers: 2, heads: 4
+- Parameters: ~180K
 - Use case: Learning and experimentation
 
 GPT-2 Small:
@@ -1304,17 +1309,21 @@ class GPT:
         self.lm_head = Linear(embed_dim, vocab_size, bias=False)
         ### END SOLUTION
 
-    def forward(self, tokens):
+    def forward(self, tokens, start_pos=0):
         """
         Forward pass through GPT model.
+
+        start_pos is the position of the first token (0 for a whole sequence).
+        Module 18's KV cache will feed one token at a time and pass the number of
+        tokens already cached, so the embedding layer gives it the right position.
 
         TODO: Implement the complete GPT forward pass
 
         APPROACH:
-        1. Get token embeddings and positional embeddings
-        2. Add them together (broadcasting handles different shapes)
-        3. Pass through all transformer blocks sequentially
-        4. Apply final layer norm and language modeling head
+        1. Get token + positional embeddings from the embedding layer (pass start_pos)
+        2. Build the causal mask with _create_causal_mask(seq_len)
+        3. Pass x and the mask through all transformer blocks in order
+        4. Apply final layer norm and the language modeling head
 
         COMPUTATION FLOW:
         tokens → embed + pos_embed → blocks → ln_f → lm_head → logits
@@ -1323,13 +1332,13 @@ class GPT:
         For autoregressive generation, we need to prevent tokens from
         seeing future tokens. This is handled by the attention mask.
 
-        HINT: Create position indices as range(seq_len) for positional embedding
+        HINT: Pass start_pos to the embedding layer; it slices the positions from there
         """
         ### BEGIN SOLUTION
         batch_size, seq_len = tokens.shape
 
         # Pass tokens to embedding layer to get token embeddings and positional embeddings
-        x = self.embedding_layer.forward(tokens)
+        x = self.embedding_layer.forward(tokens, start_pos)
 
         # Create causal mask for autoregressive generation
         mask = self._create_causal_mask(seq_len)
@@ -1347,17 +1356,15 @@ class GPT:
         return logits
         ### END SOLUTION
 
-    def __call__(self, tokens):
+    def __call__(self, tokens, start_pos=0):
         """Allows the GPT model to be called like a function."""
-        return self.forward(tokens)
+        return self.forward(tokens, start_pos)
 
     def _create_causal_mask(self, seq_len):
         """Create causal mask to prevent attending to future positions."""
         ### BEGIN SOLUTION
-        # Lower triangular binary mask: 1=allow (past/present), 0=block (future)
-        # _apply_mask in module 12 expects this convention: adder = (1-mask)*MASK_VALUE
-        mask = np.tril(np.ones((seq_len, seq_len)))
-        return Tensor(mask)
+        # Same binary convention as create_causal_mask: 1 = attend, 0 = block
+        return create_causal_mask(seq_len)
         ### END SOLUTION
 
     def _sample_next_token(self, logits, temperature=1.0):
@@ -1367,9 +1374,10 @@ class GPT:
         TODO: Implement temperature-controlled token sampling
 
         APPROACH:
-        1. Scale logits by temperature (higher = more random)
-        2. Apply softmax to get probabilities (subtract max for numerical stability)
-        3. Sample one token index from the probability distribution
+        1. Reject negative/nonfinite temperatures; zero chooses the largest logit
+        2. Scale logits by positive temperature (higher = more random)
+        3. Apply softmax to get probabilities (subtract max for numerical stability)
+        4. Sample one token index from the probability distribution
 
         EXAMPLE:
         >>> logits = np.array([[1.0, 2.0, 3.0]])  # Raw model output
@@ -1380,6 +1388,10 @@ class GPT:
         """
         ### BEGIN SOLUTION
         # Apply temperature scaling
+        if not np.isfinite(temperature) or temperature < 0:
+            raise ValueError("temperature must be finite and nonnegative")
+        if temperature == 0:
+            return int(np.argmax(logits[0]))
         scaled_logits = logits / temperature
 
         # Convert to probabilities (softmax with numerical stability)
@@ -1398,7 +1410,8 @@ class GPT:
         TODO: Implement the autoregressive generation loop
 
         APPROACH:
-        1. Start with prompt tokens
+        1. Start with one nonempty prompt, shape (1, sequence); require a
+           nonnegative integer generation length that fits max_seq_len
         2. For each new position:
            - Run forward pass to get logits
            - Extract last-position logits (next token prediction)
@@ -1415,6 +1428,12 @@ class GPT:
         HINT: Use self._sample_next_token(last_logits, temperature) for sampling
         """
         ### BEGIN SOLUTION
+        if len(prompt_tokens.shape) != 2 or prompt_tokens.shape[0] != 1 or prompt_tokens.shape[1] == 0:
+            raise ValueError("generate expects one nonempty prompt with shape (1, sequence)")
+        if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be a nonnegative integer")
+        if prompt_tokens.shape[1] + max_new_tokens > self.max_seq_len:
+            raise ValueError("Prompt plus generated tokens exceeds max_seq_len")
         current_tokens = Tensor(prompt_tokens.data.copy())
 
         for _ in range(max_new_tokens):
@@ -1446,6 +1465,9 @@ class GPT:
         params.extend(self.lm_head.parameters())
 
         return params
+
+# Alias kept for tests written before the rename
+TinyGPT = GPT
 
 # %% [markdown]
 """
@@ -1499,9 +1521,8 @@ def test_unit_gpt():
 
     print("✅ GPT model works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
-    test_unit_gpt()  # Moved after implementation
+    test_unit_gpt()
 
 # %% [markdown]
 """
@@ -1566,7 +1587,6 @@ def test_unit_sample_next_token():
 
     print("✅ Token sampling works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_sample_next_token()
 
@@ -1609,7 +1629,7 @@ This integration demo will show:
 - **Temperature effects** on creativity
 """
 
-# %% nbgrader={"grade": false, "grade_id": "integration-demo", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "integration-demo", "solution": false}
 def demonstrate_transformer_integration():
     """
     Demonstrate complete transformer pipeline.
@@ -1667,8 +1687,6 @@ def demonstrate_transformer_integration():
 
     return model
 
-# demonstrate_transformer_integration()  # Moved to __main__ block below
-
 # %% [markdown]
 """
 ## 📊 Systems Analysis: Parameter Scaling and Memory
@@ -1680,15 +1698,17 @@ Transformer models scale dramatically with size, leading to both opportunities a
 One of the key discoveries in modern AI is that transformer performance follows predictable scaling laws:
 
 ```
-Scaling Laws Pattern:
-Performance ∝ Parameters^α × Data^β × Compute^γ
-
-where α ≈ 0.7, β ≈ 0.8, γ ≈ 0.5
+Scaling Laws Pattern (Kaplan et al., 2020):
+Loss ∝ N^-0.076   (N = parameters)
+Loss ∝ D^-0.095   (D = training tokens)
+Loss ∝ C^-0.050   (C = compute)
 
 This means:
-- 10× more parameters → ~5× better performance
-- 10× more data → ~6× better performance
-- 10× more compute → ~3× better performance
+- 10× more parameters → ~16% lower loss
+- 10× more data       → ~20% lower loss
+- 10× more compute    → ~11% lower loss
+
+Small exponents, but they hold across many orders of magnitude.
 ```
 
 ### Memory Scaling Analysis
@@ -1700,7 +1720,7 @@ Memory Scaling by Component:
 
 1. Parameter Memory (Linear with model size):
    - Embeddings: vocab_size × embed_dim
-   - Transformer blocks: ~4 × embed_dim²
+   - Transformer blocks: ~12 × embed_dim² each (4 for attention, 8 for the MLP)
    - Total: O(embed_dim²)
 
 2. Attention Memory (Quadratic with sequence length):
@@ -1721,7 +1741,7 @@ Memory Scaling by Component:
 │  ATTENTION MEMORY WALL: Why Long Context is Expensive           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  MEMORY USAGE BY SEQUENCE LENGTH (Quadratic Growth):            │
+│  MEMORY USAGE BY SEQUENCE LENGTH (float32, batch×heads = 4):    │
 │                                                                 │
 │  1K tokens:   [▓] 16 MB                ← Manageable             │
 │  2K tokens:   [▓▓▓▓] 64 MB             ← 4× memory (quadratic)  │
@@ -1748,7 +1768,7 @@ Memory Scaling by Component:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": false}
 def analyze_parameter_scaling():
     """📊 Analyze how parameter count scales with model dimensions."""
     print("📊 Analyzing Parameter Scaling in Transformers...")
@@ -1787,12 +1807,12 @@ def analyze_parameter_scaling():
         print()
 
     print("💡 Parameter scaling is roughly quadratic with embedding dimension")
-    print("🚀 Real GPT-3 has 175B parameters, requiring ~350GB memory!")
+    print("🚀 Real GPT-3 has 175B parameters, requiring ~700GB memory in float32 (~350GB in float16)!")
 
 if __name__ == "__main__":
     analyze_parameter_scaling()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-attention-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-attention-memory", "solution": false}
 def analyze_attention_memory():
     """📊 Analyze attention memory complexity with sequence length."""
     print("📊 Analyzing Attention Memory Complexity...")
@@ -1898,9 +1918,6 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 13")
 
-# Call the comprehensive test
-# test_module()  # Only run in __main__ block below
-
 # %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
@@ -2005,12 +2022,9 @@ def demo_transformers():
 if __name__ == "__main__":
     test_module()
     print("\n")
+    demonstrate_transformer_integration()
+    print("\n")
     demo_transformers()
-
-# %%
-#| export
-# Alias for backward compatibility with tests
-TinyGPT = GPT
 
 # %% [markdown]
 """
@@ -2025,6 +2039,16 @@ Congratulations! You've built the complete transformer architecture that powers 
 - Built full GPT model with embeddings, positional encoding, and autoregressive generation
 - Discovered attention memory scaling and parameter distribution patterns
 - All tests pass ✅ (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Attention memory scales quadratically**: the score matrix is seq_len^2 per
+  head, which is why context length is expensive and not merely inconvenient
+- **Parameters concentrate in the MLP**: the 4x expansion means the feed-forward
+  block holds roughly two thirds of a transformer block's weights
+- **Pre-norm is a systems decision**: normalizing before each sublayer keeps the
+  residual path clean, so gradients reach early layers without vanishing
+- **Generation is memory-bound, not compute-bound**: each new token re-reads the
+  entire model, which is the problem Module 18 exists to solve
 
 ### Ready for Next Steps
 Your transformer implementation is the capstone of the language modeling pipeline.

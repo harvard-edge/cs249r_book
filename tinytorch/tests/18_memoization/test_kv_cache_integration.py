@@ -16,15 +16,7 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.attention import MultiHeadAttention
 
-# Optional import - KV cache may not be implemented yet
-try:
-    from tinytorch.perf.memoization import KVCache, enable_kv_cache
-    HAS_KV_CACHE = True
-except ImportError:
-    pytest.skip(
-        "Module 18 KV cache package export is not available.",
-        allow_module_level=True,
-    )
+from tinytorch.perf.memoization import KVCache, enable_kv_cache
 
 
 class TestKVCacheIntegration:
@@ -32,9 +24,6 @@ class TestKVCacheIntegration:
 
     def test_cache_with_linear_projections(self):
         """Test that cache works with Linear layer projections (Q, K, V)."""
-        if not HAS_KV_CACHE:
-            assert True, "KV Cache module not implemented yet"
-            return
         print("\n🔬 Test: KV Cache with Linear Projections")
 
         # Setup: Small transformer config
@@ -107,9 +96,6 @@ class TestKVCacheIntegration:
 
     def test_cache_with_multi_layer_transformer(self):
         """Test cache with multiple transformer layers."""
-        if not HAS_KV_CACHE:
-            assert True, "KV Cache module not implemented yet"
-            return
         print("\n🔬 Test: Multi-Layer Transformer Caching")
 
         batch_size, seq_len = 1, 5
@@ -147,9 +133,6 @@ class TestKVCacheIntegration:
 
     def test_cache_reset_and_reuse(self):
         """Test cache can be reset and reused for multiple generations."""
-        if not HAS_KV_CACHE:
-            assert True, "KV Cache module not implemented yet"
-            return
         print("\n🔬 Test: Cache Reset and Reuse")
 
         batch_size, num_layers, num_heads, head_dim = 1, 2, 4, 16
@@ -197,9 +180,6 @@ class TestKVCacheIntegration:
 
     def test_cache_memory_tracking(self):
         """Test cache memory usage calculation."""
-        if not HAS_KV_CACHE:
-            assert True, "KV Cache module not implemented yet"
-            return
         print("\n🔬 Test: Cache Memory Tracking")
 
         configs = [
@@ -227,9 +207,6 @@ class TestKVCacheIntegration:
 
     def test_cache_with_batch_inference(self):
         """Test cache supports batch inference (multiple sequences)."""
-        if not HAS_KV_CACHE:
-            assert True, "KV Cache module not implemented yet"
-            return
         print("\n🔬 Test: Batch Inference")
 
         batch_size = 4  # Generate 4 sequences in parallel
@@ -261,9 +238,6 @@ class TestKVCacheIntegration:
 
     def test_cache_boundary_conditions(self):
         """Test cache handles boundary conditions correctly."""
-        if not HAS_KV_CACHE:
-            assert True, "KV Cache module not implemented yet"
-            return
         print("\n🔬 Test: Boundary Conditions")
 
         batch_size, max_seq_len = 1, 5
@@ -308,9 +282,6 @@ class TestKVCacheIntegration:
 
 def test_kv_cache_integration_with_attention():
     """Test KV cache integration with MultiHeadAttention."""
-    if not HAS_KV_CACHE:
-        assert True, "KV Cache module not implemented yet"
-        return
     print("\n" + "="*70)
     print("🧪 Integration Test: KV Cache with MultiHeadAttention")
     print("="*70)

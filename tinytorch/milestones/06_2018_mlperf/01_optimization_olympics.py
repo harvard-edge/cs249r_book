@@ -1,88 +1,16 @@
 #!/usr/bin/env python3
-"""
-The Optimization Olympics (2018) - MLPerf Benchmarking
-======================================================
+"""Milestone 06.1: compare optimization candidates against one trained baseline.
 
-📚 HISTORICAL CONTEXT:
-In 2018, MLPerf was launched to standardize ML benchmarking across hardware and
-software. The key insight: production ML isn't just about accuracy - efficiency
-matters equally. Can you maintain accuracy while reducing compute, memory, and
-latency? This is the core challenge of ML systems engineering.
+Train a small DigitMLP, then independently round and prune copies of its weights.
+Measure each candidate's accuracy and latency on the same workload. TinyTorch
+executes both candidates as dense float32 arrays: INT8 code storage is a modeled
+artifact size, and zero weights alone do not reduce allocated model memory.
 
-🎯 MILESTONE 06: THE OPTIMIZATION OLYMPICS
-This milestone is the CULMINATION of everything you've built. You'll take a
-trained model from earlier milestones and apply YOUR optimization tools to make
-it production-ready. Every technique uses YOUR implementations!
-
-✅ REQUIRED MODULES (Run after Module 19):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Module 01-03: Tensor, Activations, Layers - YOUR base model
-  Module 08: Training - YOUR trained model from earlier milestones
-  Module 14: Profiling - YOUR Profiler class
-  Module 15: Quantization - YOUR Quantizer class
-  Module 16: Compression - YOUR Compressor class
-  Module 17: Acceleration - YOUR vectorized operations
-  Module 18: Memoization - YOUR KVCache class
-  Module 19: Benchmarking - YOUR MLPerf class
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🏗️ THE OPTIMIZATION PIPELINE (Using YOUR APIs):
-    ┌─────────────────────────────────────────────────────────────────────────┐
-    │                      YOUR TRAINED MLP (from Milestone 03)               │
-    │                        Accurate but needs optimization                  │
-    └───────────────────────────────────┬─────────────────────────────────────┘
-                                        │
-    ┌───────────────────────────────────▼─────────────────────────────────────┐
-    │           STEP 1: PROFILE (using YOUR Profiler class)                   │
-    │                  Count parameters, measure latency, memory              │
-    └───────────────────────────────────┬─────────────────────────────────────┘
-                                        │
-    ┌───────────────────────────────────▼─────────────────────────────────────┐
-    │        STEP 2: QUANTIZE (using YOUR Quantizer class)                    │
-    │                   FP32 → INT8 (4× memory reduction)                     │
-    └───────────────────────────────────┬─────────────────────────────────────┘
-                                        │
-    ┌───────────────────────────────────▼─────────────────────────────────────┐
-    │        STEP 3: PRUNE (using YOUR Compressor class)                      │
-    │                Remove small weights (2-4× compression)                  │
-    └───────────────────────────────────┬─────────────────────────────────────┘
-                                        │
-    ┌───────────────────────────────────▼─────────────────────────────────────┐
-    │      STEP 4: BENCHMARK (using YOUR MLPerf class)                    │
-    │              Compare before vs after with scientific rigor              │
-    └─────────────────────────────────────────────────────────────────────────┘
-
-🔍 WHY OPTIMIZATION MATTERS - The Production Reality:
-
-    Development Model:                   Production Model:
-    ┌────────────────────┐              ┌────────────────────┐
-    │ FP32 Weights       │              │ INT8 Weights       │
-    │ 4 bytes/param      │  Quantize→   │ 1 byte/param       │
-    │ Full precision     │              │ 4× smaller!        │
-    └────────────────────┘              └────────────────────┘
-
-    Dense Weights:                       Pruned Weights:
-    ┌────────────────────┐              ┌────────────────────┐
-    │ [0.1, 0.0, 0.3]    │              │ [0.1, _, 0.3]      │
-    │ [0.0, 0.2, 0.0]    │   Prune→     │ [_, 0.2, _]        │
-    │ All weights stored │              │ Only non-zero!     │
-    └────────────────────┘              └────────────────────┘
-
-    Goal: Maintain accuracy while reducing size/latency!
-
-📊 EXPECTED RESULTS:
-
-    ┌──────────────────┬────────────────┬────────────────┬────────────────┐
-    │ Optimization     │ Size Reduction │ Speed Improvement│ Accuracy Loss │
-    ├──────────────────┼────────────────┼────────────────┼────────────────┤
-    │ Quantization     │ 4×             │ 1-2×           │ < 1%           │
-    │ Pruning          │ 2-4×           │ 1-3×           │ < 2%           │
-    │ Combined         │ 8-16×          │ 2-4×           │ < 3%           │
-    └──────────────────┴────────────────┴────────────────┴────────────────┘
-
-🔥 THIS IS ML SYSTEMS ENGINEERING:
-Not just training models, but making them deployable. This is what separates
-ML researchers from ML engineers. YOU now have the complete toolkit!
+The cache lifecycle and vectorized-matmul examples are separate mechanisms, not
+additional optimizations applied to this MLP. Part 06.2 measures equivalent GPT
+inference with and without a cache. These are classroom experiments inspired by
+MLPerf's measurement discipline, not official MLPerf submissions or guarantees
+of speed, compression, or preserved accuracy.
 """
 
 import sys
@@ -132,62 +60,17 @@ def load_tinydigits_arrays(project_root=None):
     )
 
 # =============================================================================
-# 🎯 YOUR TINYTORCH MODULES IN ACTION
-# =============================================================================
-#
-# This milestone showcases YOUR complete optimization toolkit:
-#
-# ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
-# │ What You Built      │ How It's Used Here             │ Systems Impact              │
-# ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
-# │ Module 01-03: Core  │ Base model from Milestone 03   │ The model to be optimized   │
-# │ Tensor, Layers, etc │ (MLP for digit classification) │                             │
-# │                     │                                │                             │
-# │ Module 14: Profiler │ Measures params, FLOPs, memory │ Understand BEFORE state     │
-# │ ★ OPTIMIZATION ★    │ latency, layer breakdown       │ to measure improvement      │
-# │                     │                                │                             │
-# │ Module 15: Quantizer│ FP32 → INT8 conversion         │ 4× memory reduction         │
-# │ ★ OPTIMIZATION ★    │ Per-tensor or per-channel      │ with minimal accuracy loss  │
-# │                     │                                │                             │
-# │ Module 16: Compressor│ Magnitude pruning + sparsity  │ 2-4× compression by         │
-# │ ★ OPTIMIZATION ★    │ representation                 │ removing small weights      │
-# │                     │                                │                             │
-# │ Module 17: Accel    │ Vectorized ops, fused kernels  │ Faster execution through    │
-# │ ★ OPTIMIZATION ★    │ for transformer models         │ autoregressive generation   │
-# │                     │                                │                             │
-# │ Module 18: KVCache  │ Caches attention computations  │ Faster inference for        │
-# │ ★ OPTIMIZATION ★    │ optimized implementations      │ hardware-aware code         │
-# │                     │                                │                             │
-# │ Module 19: MLPerf│ Scientific benchmarking       │ Rigorous before/after       │
-# │ ★ OPTIMIZATION ★    │ with statistical significance  │ comparison                  │
-# └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
-#
-# =============================================================================
-# 🆕 WHAT'S NEW SINCE MILESTONE 05 (Transformer)
-# =============================================================================
-#
-# ┌──────────────────────┬─────────────────────────┬────────────────────────────┐
-# │ Previous Milestones  │ This Milestone          │ Why It's Different         │
-# ├──────────────────────┼─────────────────────────┼────────────────────────────┤
-# │ Training models      │ Optimizing models       │ Making models deployable   │
-# │ Accuracy focus       │ Efficiency focus        │ Size, speed, AND accuracy  │
-# │ Development phase    │ Production phase        │ Real-world constraints     │
-# │ Build from scratch   │ Improve what exists     │ Engineering over research  │
-# │ Individual techniques│ Complete pipeline       │ End-to-end optimization    │
-# └──────────────────────┴─────────────────────────┴────────────────────────────┘
-#
-# THIS IS THE CULMINATION: Every module you've built comes together here!
-#
-# =============================================================================
-
-
-# =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 CONFIG = {
     'batch_size': 32,
-    'train_epochs': 10,
+    # 40 epochs over the full training set reaches roughly 87% on TinyDigits in
+    # about a second. The previous 10 epochs over the first 500 samples reached
+    # 36%, which made every accuracy delta in this script indistinguishable from
+    # noise: the whole point of the Olympics is what optimization costs a model
+    # that actually works.
+    'train_epochs': 40,
     'learning_rate': 0.01,
     'prune_sparsity': 0.5,
 }
@@ -225,14 +108,14 @@ def step_1_profile(model, X_test, y_test, Profiler, Tensor):
 
     # Count parameters
     param_count = profiler.count_parameters(model)
-    param_bytes = param_count * 4  # FP32 = 4 bytes
+    param_bytes = sum(param.data.nbytes for param in model.parameters())
 
     # Count FLOPs
     input_shape = (1, 64)
     flops = profiler.count_flops(model, input_shape)
 
     # Measure inference latency
-    sample_input = Tensor(rng.standard_normal((1, 64)).astype(np.float32))
+    sample_input = Tensor(X_test.data[:1])
     latency_ms = profiler.measure_latency(model, sample_input, warmup=3, iterations=10)
     throughput = 1000 / latency_ms if latency_ms > 0 else 0
 
@@ -253,7 +136,7 @@ def step_1_profile(model, X_test, y_test, Profiler, Tensor):
     table.add_row("", "", "")
     table.add_row("Accuracy", f"{baseline_acc:.1f}%", "Test set performance")
     table.add_row("Latency", f"{latency_ms:.3f} ms", "Per-sample inference")
-    table.add_row("Throughput", f"{throughput:.0f} samples/sec", "Inference speed")
+    table.add_row("Serial rate", f"{throughput:.0f} samples/sec", "Reciprocal of single-sample latency")
 
     console.print(table)
 
@@ -271,7 +154,7 @@ def step_1_profile(model, X_test, y_test, Profiler, Tensor):
 # STEP 2: QUANTIZE
 # =============================================================================
 
-def step_2_quantize(model, param_bytes, Quantizer):
+def step_2_quantize(model, param_bytes, baseline_acc, X_test, y_test, Quantizer, DigitMLP):
     """
     Step 2: Quantize the model with YOUR Quantizer.
 
@@ -280,10 +163,10 @@ def step_2_quantize(model, param_bytes, Quantizer):
         FP32 (32-bit) → INT8 (8-bit) = 4× smaller
 
         Before:  [0.123, -0.456, 0.789]  (4 bytes each)
-        After:   [31, -117, 202]         (1 byte each + scale)
+        After:   [31, -117, 127]         (1 byte each + scale)
 
     Trade-off: Memory savings vs potential accuracy loss.
-    Modern quantization typically loses <1% accuracy.
+    The measured accuracy change depends on the model and dataset.
 
     Returns:
         dict with quantization results
@@ -291,12 +174,29 @@ def step_2_quantize(model, param_bytes, Quantizer):
     console.print(Panel(
         "[bold yellow]🗜️ STEP 2: Quantize with YOUR Quantizer[/bold yellow]\n"
         "Using the quantization you built in Module 15\n"
-        "FP32 → INT8 = 4× smaller",
+        "Measure rounded-weight accuracy; packed INT8 storage is a separate artifact",
         border_style="yellow"
     ))
 
     quant_result = Quantizer.quantize_model(model)
     quant_size = int(param_bytes / quant_result['compression_ratio'])
+
+    # Measure what INT8 actually costs in accuracy. Quantizer.quantize_model
+    # returns the INT8 tensors and their scales but leaves the model untouched,
+    # so rebuild a copy from the dequantized weights and run the same test set
+    # through it. Reporting the baseline accuracy here instead, as this script
+    # used to, prints a number that was never measured.
+    quant_model = copy.deepcopy(model)
+    quant_params = [prm for lyr in quant_model.layers for prm in lyr.parameters()]
+    for idx, prm in enumerate(quant_params):
+        entry = quant_result['quantized_layers'][f'param_{idx}']
+        restored = Quantizer.dequantize_tensor(
+            entry['quantized'], entry['scale'], entry['zero_point']
+        )
+        prm.data = restored.data.reshape(entry['original_shape'])
+
+    outputs_quant = quant_model(X_test)
+    quant_acc = np.mean(np.argmax(outputs_quant.data, axis=1) == y_test) * 100
 
     # Display results
     table = Table(title="🗜️ After Quantization (YOUR Implementation)", box=box.ROUNDED)
@@ -306,7 +206,7 @@ def step_2_quantize(model, param_bytes, Quantizer):
     table.add_column("Change", style="bold")
 
     table.add_row(
-        "Size",
+        "Modeled packed size",
         f"{param_bytes:,} B",
         f"{quant_size:,} B",
         f"[green]{quant_result['compression_ratio']:.1f}× smaller[/green]"
@@ -315,7 +215,14 @@ def step_2_quantize(model, param_bytes, Quantizer):
         "Precision",
         "FP32 (32-bit)",
         "INT8 (8-bit)",
-        "[green]4× memory reduction[/green]"
+        "[dim]Execution remains float32[/dim]"
+    )
+    quant_acc_delta = quant_acc - baseline_acc
+    table.add_row(
+        "Accuracy",
+        f"{baseline_acc:.1f}%",
+        f"{quant_acc:.1f}%",
+        f"[{'green' if quant_acc_delta >= 0 else 'red'}]{quant_acc_delta:+.1f}%[/]"
     )
 
     console.print(table)
@@ -323,6 +230,9 @@ def step_2_quantize(model, param_bytes, Quantizer):
     return {
         'quant_result': quant_result,
         'quant_size': quant_size,
+        'quant_acc': quant_acc,
+        'model': quant_model,
+        'actual_bytes': sum(p.data.nbytes for p in quant_model.parameters()),
     }
 
 
@@ -343,7 +253,7 @@ def step_3_prune(model, baseline_acc, X_test, y_test, Compressor, DigitMLP):
         Removing them creates sparse, compressible models.
 
     Trade-off: Compression vs accuracy loss.
-    50% pruning typically loses <2% accuracy.
+    Measure the accuracy change rather than assuming a fixed tolerance.
 
     Returns:
         dict with pruning results
@@ -356,10 +266,7 @@ def step_3_prune(model, baseline_acc, X_test, y_test, Compressor, DigitMLP):
     ))
 
     # Create a copy for pruning
-    model_copy = DigitMLP()
-    for i, layer in enumerate(model.layers):
-        for j, param in enumerate(layer.parameters()):
-            model_copy.layers[i].parameters()[j].data = param.data.copy()
+    model_copy = copy.deepcopy(model)
 
     # Apply pruning
     sparsity_before = Compressor.measure_sparsity(model_copy)
@@ -398,6 +305,8 @@ def step_3_prune(model, baseline_acc, X_test, y_test, Compressor, DigitMLP):
         'sparsity_before': sparsity_before,
         'sparsity_after': sparsity_after,
         'pruned_acc': pruned_acc,
+        'model': model_copy,
+        'actual_bytes': sum(p.data.nbytes for p in model_copy.parameters()),
     }
 
 
@@ -406,66 +315,24 @@ def step_3_prune(model, baseline_acc, X_test, y_test, Compressor, DigitMLP):
 # =============================================================================
 
 def step_4_kv_cache(KVCache, MinimalTransformer):
-    """
-    Step 4: Demonstrate KV Cache with YOUR Module 18.
+    """Exercise cache writes, cursor advancement, reads, and reset (not timing)."""
+    from tinytorch.core.tensor import Tensor
 
-    KV Caching avoids recomputation in autoregressive generation:
-    ─────────────────────────────────────────────────────────────
-        Without cache: Each new token recomputes ALL K,V → O(n³)
-        With cache:    Reuse cached K,V, compute only new → O(n²)
-
-        Token 1: Compute K₁,V₁ → cache
-        Token 2: Use K₁,V₁ from cache + compute K₂,V₂ → cache
-        Token N: Use K₁..Kₙ₋₁,V₁..Vₙ₋₁ + compute Kₙ,Vₙ
-
-    Result: 6-10× speedup for generation!
-
-    Returns:
-        dict with KV cache stats (or None if unavailable)
-    """
-    console.print(Panel(
-        "[bold cyan]⚡ STEP 4: KV Cache with YOUR Module 18[/bold cyan]\n"
-        "Using KVCache for transformer generation speedup\n"
-        "Caches K,V to avoid recomputation during autoregressive generation",
-        border_style="cyan"
-    ))
-
-    try:
-        transformer = MinimalTransformer(vocab_size=27, embed_dim=32, num_heads=2, seq_len=8)
-
-        kv_cache = KVCache(
-            batch_size=1,
-            max_seq_len=8,
-            num_layers=1,
-            num_heads=2,
-            head_dim=16  # embed_dim / num_heads
-        )
-
-        cache_memory = (kv_cache.batch_size * kv_cache.max_seq_len *
-                       kv_cache.num_layers * kv_cache.num_heads *
-                       kv_cache.head_dim * 2 * 4)  # K+V, float32
-
-        table = Table(title="⚡ KV Cache Stats (YOUR Module 18)", box=box.ROUNDED)
-        table.add_column("Property", style="cyan")
-        table.add_column("Value", style="yellow")
-        table.add_column("Notes", style="dim")
-
-        table.add_row("Max Sequence", f"{kv_cache.max_seq_len}", "Tokens cacheable")
-        table.add_row("Num Layers", f"{kv_cache.num_layers}", "Transformer layers")
-        table.add_row("Num Heads", f"{kv_cache.num_heads}", "Attention heads")
-        table.add_row("Cache Memory", f"{cache_memory:,} bytes", "Pre-allocated K+V")
-        table.add_row("", "", "")
-        table.add_row("Speedup", "~N× (N=seq_len)", "Avoids recomputation")
-
-        console.print(table)
-        console.print("  [green]✓[/green] KV Cache ready for generation!")
-
-        return {'cache_memory': cache_memory, 'kv_cache': kv_cache}
-
-    except Exception as e:
-        console.print(f"  [yellow]⚠️ KV Cache demo skipped: {e}[/yellow]")
-        console.print()
-        return None
+    cache = KVCache(batch_size=1, max_seq_len=8, num_layers=1,
+                    num_heads=2, head_dim=16)
+    key = Tensor(rng.standard_normal((1, 2, 1, 16)))
+    value = Tensor(rng.standard_normal((1, 2, 1, 16)))
+    cache.update(0, key, value)
+    cache.advance()
+    stored_key, stored_value = cache.get(0)
+    np.testing.assert_array_equal(stored_key.data, key.data)
+    np.testing.assert_array_equal(stored_value.data, value.data)
+    cache_bytes = int(round(cache.get_memory_usage()['total_mb'] * 1024 * 1024))
+    cache.reset()
+    assert cache.seq_pos == 0
+    console.print(f"KV cache write/read/reset passed; allocated {cache_bytes:,} bytes.")
+    console.print("Part 06.2 checks cached logits and measures inference speed.")
+    return {'cache_memory': cache_bytes, 'kv_cache': cache}
 
 
 # =============================================================================
@@ -486,15 +353,15 @@ def step_5_accelerate(vectorized_matmul, Tensor):
         - SIMD instructions (process 4-8 floats at once)
         - Multi-threading (parallel computation)
 
-    Result: 10-100× speedup for matrix operations!
+    Both paths call NumPy BLAS; this checks numerical equivalence and overhead.
 
     Returns:
         dict with timing comparison
     """
     console.print(Panel(
         "[bold magenta]🚀 STEP 5: Acceleration with YOUR Module 17[/bold magenta]\n"
-        "Using vectorized operations for compute speedup\n"
-        "BLAS-optimized matmul and fused operations",
+        "Verify the vectorized operation and measure its overhead\n"
+        "Compare the wrapper against the same NumPy matrix multiplication",
         border_style="magenta"
     ))
 
@@ -503,16 +370,18 @@ def step_5_accelerate(vectorized_matmul, Tensor):
     B = Tensor(rng.standard_normal((128, 64)).astype(np.float32))
 
     # Time standard operation
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(100):
         C_standard = Tensor(np.dot(A.data, B.data))
-    standard_time = (time.time() - start) * 1000
+    standard_time = (time.perf_counter() - start) * 1000
 
     # Time vectorized operation
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(100):
         C_vectorized = vectorized_matmul(A, B)
-    vectorized_time = (time.time() - start) * 1000
+    vectorized_time = (time.perf_counter() - start) * 1000
+
+    np.testing.assert_allclose(C_vectorized.data, C_standard.data, rtol=1e-5, atol=1e-5)
 
     table = Table(title="🚀 Acceleration Results (YOUR Module 17)", box=box.ROUNDED)
     table.add_column("Operation", style="cyan")
@@ -536,7 +405,7 @@ def step_5_accelerate(vectorized_matmul, Tensor):
 # STEP 6: BENCHMARK
 # =============================================================================
 
-def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark):
+def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark, name="Baseline"):
     """
     Step 6: Benchmark with YOUR Modules 14 & 19.
 
@@ -563,6 +432,7 @@ def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark):
 
     console.print("  Running standardized benchmark with YOUR implementations...")
 
+    accuracy = float(np.mean(np.argmax(model(X_test).data, axis=1) == y_test) * 100)
     test_dataset = [(X_test, y_test)]
     benchmark = Benchmark(models=[model], datasets=test_dataset)
 
@@ -580,7 +450,7 @@ def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark):
 
     throughput = 1000 / mean_latency if mean_latency > 0 else 0
 
-    table = Table(title="🏁 Benchmark Results (YOUR Modules 14 & 19)", box=box.DOUBLE)
+    table = Table(title=f"🏁 {name}: measured candidate results", box=box.DOUBLE)
     table.add_column("Metric", style="cyan", width=18)
     table.add_column("Value", style="yellow", justify="right")
     table.add_column("Target", style="dim")
@@ -590,12 +460,13 @@ def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark):
     table.add_row("Latency (min/max)", f"{min_latency:.3f} / {max_latency:.3f} ms", "Tight range")
     table.add_row("P95 Latency", f"{p95_latency:.3f} ms", "< 2× mean")
     table.add_row("", "", "")
-    table.add_row("Throughput", f"{throughput:.0f} samples/sec", "Higher = better")
-    table.add_row("Accuracy", f"{baseline_acc:.1f}%", "> 80%")
+    table.add_row("Serial rate", f"{throughput:.0f} samples/sec", "Reciprocal of mean latency")
+    table.add_row("Accuracy", f"{accuracy:.1f}%", "Same held-out test set")
 
     console.print(table)
 
     return {
+        'accuracy': accuracy,
         'mean_latency': mean_latency,
         'std_latency': std_latency,
         'p95_latency': p95_latency,
@@ -615,124 +486,24 @@ def press_enter_to_continue() :
 # =============================================================================
 
 def print_final_results(baseline, quant, prune, profile_results):
-    """
-    Print the final optimization journey summary.
-
-    Shows the progression:
-    ──────────────────────
-        Baseline → Quantized → Pruned
-
-    With size, accuracy, and which module was used at each stage.
-    """
-    console.print("=" * 70)
-    console.print(Panel("[bold]🏆 OPTIMIZATION OLYMPICS RESULTS[/bold]", border_style="gold1"))
-    console.print()
-
-    param_bytes = baseline['param_bytes']
-    baseline_acc = baseline['baseline_acc']
-    quant_size = quant['quant_size']
-    quant_result = quant['quant_result']
-    pruned_acc = prune['pruned_acc']
-    sparsity_after = prune['sparsity_after']
-
-    table = Table(title="🎖️ Your Optimization Journey", box=box.DOUBLE)
-    table.add_column("Stage", style="cyan", width=25)
-    table.add_column("Size", style="yellow", justify="right")
-    table.add_column("Baseline Acc", style="dim", justify="right")
-    table.add_column("New Acc", style="green", justify="right")
-    table.add_column("Δ Accuracy", style="bold", justify="right")
-    table.add_column("YOUR Module", style="magenta")
-
-    quant_acc = baseline_acc
-    quant_delta = quant_acc - baseline_acc
-    prune_delta = pruned_acc - baseline_acc
-
-    table.add_row(
-        "📊 Baseline",
-        f"{param_bytes:,} B",
-        f"{baseline_acc:.1f}%",
-        f"{baseline_acc:.1f}%",
-        "—",
-        "Profiler (14)"
-    )
-    table.add_row(
-        "🗜️ + Quantization",
-        f"{quant_size:,} B",
-        f"{baseline_acc:.1f}%",
-        f"{quant_acc:.1f}%",
-        f"[green]{quant_delta:+.1f}%[/green]" if quant_delta >= 0 else f"[red]{quant_delta:+.1f}%[/red]",
-        "Quantization (15)"
-    )
-    table.add_row(
-        "✂️ + Pruning",
-        f"~{param_bytes//2:,} B**",
-        f"{baseline_acc:.1f}%",
-        f"{pruned_acc:.1f}%",
-        f"[green]{prune_delta:+.1f}%[/green]" if prune_delta >= 0 else f"[red]{prune_delta:+.1f}%[/red]",
-        "Compression (16)"
-    )
-
+    """Compare independent candidates; never imply they were combined."""
+    table = Table(title="Optimization Olympics: independent candidate measurements")
+    for heading in ['Candidate', 'Dense bytes', 'Accuracy', 'Latency (ms)']:
+        table.add_column(heading)
+    for name, size in [('Baseline', baseline['param_bytes']),
+                       ('Rounded weights', quant['actual_bytes']),
+                       ('Pruned weights', prune['actual_bytes'])]:
+        result = profile_results[name]
+        table.add_row(name, f"{size:,}", f"{result['accuracy']:.1f}%",
+                      f"{result['mean_latency']:.3f}")
     console.print(table)
-    console.print("[dim]** With sparse storage[/dim]")
-    console.print()
-
-    # Key insights
-    console.print(Panel(
-        "[bold green]🎓 KEY INSIGHTS[/bold green]\n\n"
-        f"✅ [cyan]YOUR Profiler (Module 14):[/cyan]\n"
-        f"   • Measured {baseline['param_count']:,} parameters, {baseline['flops']:,} FLOPs\n"
-        f"   • Found baseline latency: {baseline['latency_ms']:.3f}ms\n\n"
-        f"✅ [cyan]YOUR Quantization (Module 15):[/cyan]\n"
-        f"   • Achieved {quant_result['compression_ratio']:.1f}× compression\n"
-        f"   • FP32 → INT8 reduces memory 4×\n\n"
-        f"✅ [cyan]YOUR Compression (Module 16):[/cyan]\n"
-        f"   • Pruned to {sparsity_after:.0%} sparsity\n"
-        f"   • {abs(baseline_acc - pruned_acc):.1f}% accuracy impact\n\n"
-        f"✅ [cyan]YOUR KV Cache (Module 18):[/cyan]\n"
-        f"   • Pre-allocated cache for transformer generation\n"
-        f"   • ~N× speedup for sequence length N\n\n"
-        f"✅ [cyan]YOUR Acceleration (Module 17):[/cyan]\n"
-        f"   • BLAS-optimized matrix operations\n"
-        f"   • Vectorized compute kernels\n\n"
-        f"💡 [yellow]Challenge: Combine All Techniques![/yellow]\n"
-        f"   • Quantize + Prune + KV Cache = production-ready\n"
-        f"   • This is real ML systems engineering!",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
-
-    press_enter_to_continue()
-
-    # Success message
-    console.print(Panel(
-        "[bold green]🏆 MILESTONE COMPLETE![/bold green]\n\n"
-        "[green]You used YOUR implementations from:[/green]\n"
-        "  • Module 01-03: Tensor, Linear, ReLU\n"
-        "  • Module 14: Profiler\n"
-        "  • Module 15: Quantizer\n"
-        "  • Module 16: Compressor\n"
-        "  • Module 17: vectorized_matmul\n"
-        "  • Module 18: KVCache\n"
-        "  • Module 19: Benchmark\n\n"
-        "[bold]Everything you built... now works together![/bold]\n\n"
-        "[cyan]What you learned:[/cyan]\n"
-        "  ✅ Profile models systematically\n"
-        "  ✅ Quantize for memory efficiency\n"
-        "  ✅ Prune for sparse models\n"
-        "  ✅ Cache K,V for fast generation\n"
-        "  ✅ Accelerate with vectorized ops\n"
-        "  ✅ Benchmark with scientific rigor\n\n"
-        "[bold]You've learned ML Systems Engineering![/bold]",
-        title="🎯 Milestone 06 Complete",
-        border_style="bright_green",
-        box=box.DOUBLE,
-        padding=(1, 2)
-    ))
-
-    press_enter_to_continue()
-
+    console.print(f"Modeled INT8 codes (excluding metadata): {quant['quant_size']:,} bytes "
+                  f"({quant['quant_result']['compression_ratio']:.2f}× ratio).")
+    console.print(f"Pruned zero fraction: {prune['sparsity_after']:.1%}.")
+    console.print('Both candidate models still execute dense float32 operations. '
+                  'Packed storage and sparse execution require additional implementations.')
+    console.print('[bold green]MILESTONE 06 COMPLETE: candidates measured against the baseline.[/bold green]')
     return 0
-
 
 
 # =============================================================================
@@ -746,8 +517,8 @@ def main():
     Pipeline Structure:
     ───────────────────
     1. PROFILE   - Measure baseline (params, FLOPs, latency, accuracy)
-    2. QUANTIZE  - FP32 → INT8 (4× memory reduction)
-    3. PRUNE     - Remove small weights (2-4× compression)
+    2. QUANTIZE  - FP32 → rounded weights (modeled INT8 storage)
+    3. PRUNE     - Zero small weights (dense storage is unchanged)
     4. KV CACHE  - Cache K,V for fast generation
     5. ACCELERATE - Vectorized matrix operations
     6. BENCHMARK - Scientific performance measurement
@@ -767,7 +538,7 @@ def main():
         "[bold magenta]║[/bold magenta] meets efficiency            [bold magenta]║[/bold magenta]\n"
         "[bold magenta]║[/bold magenta]                             [bold magenta]║[/bold magenta]\n"
         "[bold magenta]║[/bold magenta] [cyan]Using YOUR implementations [/cyan] [bold magenta]║[/bold magenta]\n"
-        "[bold magenta]║[/bold magenta] [cyan]from every module!  [/cyan]        [bold magenta]║[/bold magenta]\n"
+        "[bold magenta]║[/bold magenta] [cyan]from the optimization modules  [/cyan]        [bold magenta]║[/bold magenta]\n"
         "[bold magenta]╚═════════════════════════════╝[/bold magenta]",
         border_style="bright_magenta"
     ))
@@ -793,14 +564,14 @@ def main():
         from tinytorch.perf.compression import Compressor
         console.print("  [green]✓[/green] Compressor (YOUR Module 16)")
 
-        from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
-        console.print("  [green]✓[/green] vectorized_matmul, fused_gelu (YOUR Module 17)")
+        from tinytorch.perf.acceleration import vectorized_matmul
+        console.print("  [green]✓[/green] vectorized_matmul (YOUR Module 17)")
 
         from tinytorch.perf.memoization import KVCache
         console.print("  [green]✓[/green] KVCache (YOUR Module 18)")
 
-        from tinytorch.perf.benchmarking import Benchmark, MLPerf
-        console.print("  [green]✓[/green] Benchmark, MLPerf (YOUR Module 19)")
+        from tinytorch.perf.benchmarking import Benchmark
+        console.print("  [green]✓[/green] Benchmark (YOUR Module 19)")
 
     except ImportError as e:
         console.print(Panel(
@@ -824,41 +595,9 @@ def main():
         border_style="cyan"
     ))
 
-    # Try to import from networks.py, fallback to inline definition
-    try:
-        sys.path.insert(0, str(Path(__file__).parent))
-        from networks import DigitMLP, MinimalTransformer
-        console.print("  [green]✓[/green] DigitMLP (from networks.py)")
-        console.print("  [green]✓[/green] MinimalTransformer (from networks.py)")
-    except ImportError:
-        console.print("  [yellow]⚠️ Using inline MLP definition[/yellow]")
-
-        class DigitMLP:
-            def __init__(self, input_size=64, hidden_size=32, num_classes=10):
-                self.fc1 = Linear(input_size, hidden_size)
-                self.relu = ReLU()
-                self.fc2 = Linear(hidden_size, num_classes)
-                self.layers = [self.fc1, self.fc2]
-                self.name = "DigitMLP"
-
-            def forward(self, x):
-                if len(x.shape) > 2:
-                    x = x.reshape(x.shape[0], -1)
-                x = self.fc1(x)
-                x = self.relu(x)
-                x = self.fc2(x)
-                return x
-
-            def __call__(self, x):
-                return self.forward(x)
-
-            def parameters(self):
-                params = []
-                for layer in self.layers:
-                    params.extend(layer.parameters())
-                return params
-
-        MinimalTransformer = None
+    # Reuse the milestone network; a broken import must fail visibly.
+    sys.path.insert(0, str(Path(__file__).parent))
+    from networks import DigitMLP, MinimalTransformer
 
     model = DigitMLP()
     console.print(f"\n  [bold green]Using: {model.name}[/bold green]")
@@ -888,7 +627,7 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # QUICK TRAINING
     # ─────────────────────────────────────────────────────────────────────────
-    console.print("\n[bold cyan]🏋️ Quick training (10 epochs)...[/bold cyan]")
+    console.print(f"\n[bold cyan]🏋️ Quick training ({CONFIG['train_epochs']} epochs)...[/bold cyan]")
 
     from tinytorch.core.optimizers import SGD
     from tinytorch.core.losses import CrossEntropyLoss
@@ -901,7 +640,7 @@ def main():
 
         for epoch in range(CONFIG['train_epochs']):
             batch_size = CONFIG['batch_size']
-            for i in range(0, min(500, len(y_train)), batch_size):
+            for i in range(0, len(y_train), batch_size):
                 batch_x = Tensor(X_train.data[i:i+batch_size])
                 batch_y = y_train[i:i+batch_size]
 
@@ -921,27 +660,26 @@ def main():
     # RUN OPTIMIZATION STEPS
     # ─────────────────────────────────────────────────────────────────────────
 
+    # Training registered gradients; inference measurement should not build tapes.
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+        parameter.grad = None
+
     # Step 1: Profile baseline
     baseline = step_1_profile(model, X_test, y_test, Profiler, Tensor)
     press_enter_to_continue()
 
     # Step 2: Quantize
-    quant = step_2_quantize(model, baseline['param_bytes'], Quantizer)
+    quant = step_2_quantize(model, baseline['param_bytes'], baseline['baseline_acc'],
+                            X_test, y_test, Quantizer, DigitMLP)
     press_enter_to_continue()
 
     # Step 3: Prune
     prune = step_3_prune(model, baseline['baseline_acc'], X_test, y_test, Compressor, DigitMLP)
     press_enter_to_continue()
 
-    # Step 4: KV Cache (transformers only)
-    if MinimalTransformer is not None:
-        step_4_kv_cache(KVCache, MinimalTransformer)
-    else:
-        console.print(Panel(
-            "[dim]⏭️ Step 4 (KV Cache) skipped - MinimalTransformer not available[/dim]",
-            border_style="dim"
-        ))
-        console.print()
+    # Step 4: Cache lifecycle (a separate mechanism from the MLP candidates).
+    step_4_kv_cache(KVCache, MinimalTransformer)
     press_enter_to_continue()
 
     # Step 5: Acceleration
@@ -949,13 +687,17 @@ def main():
     press_enter_to_continue()
 
     # Step 6: Benchmark
-    step_6_benchmark(model, X_test, y_test, baseline['baseline_acc'], Benchmark)
+    candidates = {'Baseline': model, 'Rounded weights': quant['model'],
+                  'Pruned weights': prune['model']}
+    measurements = {name: step_6_benchmark(candidate, X_test, y_test,
+                    baseline['baseline_acc'], Benchmark, name)
+                    for name, candidate in candidates.items()}
     press_enter_to_continue()
 
     # ─────────────────────────────────────────────────────────────────────────
     # FINAL RESULTS
     # ─────────────────────────────────────────────────────────────────────────
-    return print_final_results(baseline, quant, prune, baseline)
+    return print_final_results(baseline, quant, prune, measurements)
 
 
 if __name__ == "__main__":
