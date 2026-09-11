@@ -102,18 +102,16 @@ $$\mathcal{I}_{\text{decode}} = \frac{2 N_{\text{params}} B_{\text{dec}}}{2 N_{\
 For typical serving batch sizes ($B_{\text{dec}} \in [1, 64]$), the operational intensity $\mathcal{I}_{\text{decode}} \le 64\text{ FLOP/Byte}$, which is far below the machine knee of $295.2\text{ FLOP/Byte}$. Autoregressive decoding is severely **memory-bandwidth bound**. Over $80\text{--}90\%$ of peak Tensor Core capacity sits completely idle, waiting for the memory controllers to stream parameter weights across the HBM bus.
 
 #### Phase contention
-When a monolithic continuous batching engine attempts to schedule an incoming prefill request alongside active decode sequences in the same iteration, a destructive phenomenon known as **phase contention**\index{Phase contention} (or phase interference) occurs:
+When a monolithic continuous batching engine attempts to schedule an incoming prefill request alongside active decode sequences in the same iteration, a destructive phenomenon known as **phase contention**\index{Phase contention} (or phase interference) occurs (@tbl-vol3-scheduling-monolithic-batching):
 
-```
-Iteration Timeline: Monolithic Co-Located Continuous Batching
-Time (ms) 0           50          100         150         200         250
-Decode:   |--Tk 1--|--Tk 2--|...................................|--Tk 3--|
-                            ^                                   ^
-                            |=== MONOLITHIC PREFILL (64k) ======|
-                            |   Tensor Cores Monopolized        |
-                            |   Decode Iterations Stalled       |
-                            |   ITL Jitter = +200 ms Spike      |
-```
+| Timeline Window             | Decode Stream Status                   | Prefill Engine State                    | Hardware Resource Allocation           | Inter-Token Latency Impact                |
+|:----------------------------|:---------------------------------------|:----------------------------------------|:---------------------------------------|:------------------------------------------|
+| $0\text{--}50\text{ ms}$    | Emits Token 1                          | Idle (no prompt arriving)               | Memory-bandwidth bound (GEMV on HBM)   | Nominal ITL ($25\text{ ms}$)              |
+| $50\text{--}100\text{ ms}$  | Emits Token 2                          | Idle (no prompt arriving)               | Memory-bandwidth bound (GEMV on HBM)   | Nominal ITL ($25\text{ ms}$)              |
+| $100\text{--}250\text{ ms}$ | **Stalled / Blocked** (waiting on SMs) | **Monolithic 64k Prefill** forward pass | Compute-dense GEMM claims all SMs      | **Spike (+150--200 ms jitter violation)** |
+| $250\text{--}275\text{ ms}$ | Emits Token 3 (resumes after prefill)  | Completed (transitioned to decode)      | Returns to memory-bandwidth bound GEMV | Recovers nominal ITL                      |
+
+: **Monolithic Co-Located Batching Timeline and Phase Contention**: Execution breakdown illustrating the destruction of decode stream SLOs when a compute-dense 64k prefill monopolizes GPU streaming multiprocessors, stalling active decodes. {#tbl-vol3-scheduling-monolithic-batching tbl-colwidths="[18,22,22,22,16]"}
 
 The compute-dense GEMM kernel of the prefill request claims all available Streaming Multiprocessors (SMs) and thread blocks. The lightweight GEMV kernels of the decoding sequences are serialized or starved of memory issue slots. Because modern GPU hardware schedulers cannot preempt an active cooperative thread array (CTA) mid-kernel, the decoding sequences must pause until the entire prefill GEMM executes to completion. The result is an explosive spike in tail Inter-Token Latency.
 
@@ -132,16 +130,16 @@ In each serving iteration $t$, the scheduler constructs a **hybrid batch** compr
 The total token budget per iteration is constrained by a strict ceiling $T_{\text{budget}}$:
 $$N_{\text{iter}}(t) = B_{\text{dec}}(t) + C_{\text{eff}}(t) \le T_{\text{budget}}$$
 
-By fixing $T_{\text{budget}}$ such that the total execution time of the hybrid batch matches the target Service-Level Objective for Inter-Token Latency ($\Delta t_{\text{iter}} \le SLO_{\text{ITL}}$), the runtime guarantees bounded latency jitter for active decode streams while steadily advancing prefill computation.
+By fixing $T_{\text{budget}}$ such that the total execution time of the hybrid batch matches the target Service-Level Objective for Inter-Token Latency ($\Delta t_{\text{iter}} \le SLO_{\text{ITL}}$), the runtime guarantees bounded latency jitter for active decode streams while steadily advancing prefill computation (@tbl-vol3-scheduling-chunked-piggybacking).
 
-```
-Iteration Timeline: Chunked Prefill Piggybacking
-Time (ms) 0           25          50          75          100
-Batch:    | Chunk 1 | Chunk 2 | Chunk 3 | Chunk 4 |
-          | +Decodes| +Decodes| +Decodes| +Decodes|
-Decode:   |--Tk 1---|--Tk 2---|--Tk 3---|--Tk 4---| (Continuous, Stable ITL)
-Prefill:  [==25%===][==50%===][==75%===][==100%==] -> Prompt Ready for Generation
-```
+| Serving Iteration | Time Window                | Prefill Chunk Progress                       | Decode Batch Status                       | Iteration Compute Profile                                      | ITL SLA Compliance             |
+|:------------------|:---------------------------|:---------------------------------------------|:------------------------------------------|:---------------------------------------------------------------|:-------------------------------|
+| **Iteration 1**   | $0\text{--}25\text{ ms}$   | Chunk 1 ($25\%$ ingested, KV cached)         | Token 1 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+| **Iteration 2**   | $25\text{--}50\text{ ms}$  | Chunk 2 ($50\%$ ingested, cross-attend KV)   | Token 2 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+| **Iteration 3**   | $50\text{--}75\text{ ms}$  | Chunk 3 ($75\%$ ingested, cross-attend KV)   | Token 3 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+| **Iteration 4**   | $75\text{--}100\text{ ms}$ | Chunk 4 ($100\%$ complete, ready for decode) | Token 4 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+
+: **Chunked Prefill Piggybacking Timeline**: Iteration-level scheduling demonstrating smooth prefill ingestion interleaved with token generation, maintaining strict ITL upper bounds across consecutive forward passes. {#tbl-vol3-scheduling-chunked-piggybacking tbl-colwidths="[15,15,25,20,15,10]"}
 
 #### Attention computation across chunk boundaries
 Executing prefill in chunks requires careful handling of causal self-attention across chunk boundaries. When evaluating chunk $k$ spanning token indices $[(k-1)C, \, kC - 1]$:
@@ -174,7 +172,7 @@ $$C^* = \frac{\frac{2 N_{\text{params}}}{B_{\text{mem}}} P_{\text{peak}} - 2 N_{
 
 For realistic batch sizes $B_{\text{dec}} \ll \mathcal{I}_{\text{knee}}$, this derivation yields a remarkable architectural insight: **an accelerator can process hundreds of prefill tokens concurrently with ongoing decode passes without increasing iteration duration by even a single microsecond**. The prefill compute is entirely absorbed by the spare arithmetic capacity stranded by the memory-bandwidth-bound decode stream.
 
-Table 8.1 (@tbl-scheduling-batching-comparison) summarizes the trade-offs across batching architectures.
+@Tbl-scheduling-batching-comparison summarizes the trade-offs across batching architectures.
 
 | Dimension                     | Static Batching                      | Monolithic Continuous Batching    | Chunked Prefill Piggybacking              |
 |:------------------------------|:-------------------------------------|:----------------------------------|:------------------------------------------|
@@ -523,23 +521,18 @@ To prevent this catastrophic waste, modern agent serving runtimes must deploy **
 
 In @sec-vol3-virtual-memory, we established that modern inference engines manage context memory using virtual memory paging (PagedAttention [@kwon2023vllm]) and prefix caching structures such as **Radix Trees**\index{Radix Tree} (SGLang [@zheng2023sglang]).
 
-In a prefix-cached engine, tokens are grouped into fixed-size physical memory blocks (typically 16 or 32 tokens per block). The serving node maintains a Radix Tree (or Trie) in host DRAM, where each path from the root node to an internal node represents a unique token prefix, and the node holds pointers to the physical HBM blocks containing the computed Key and Value tensors for that prefix:
+In a prefix-cached engine, tokens are grouped into fixed-size physical memory blocks (typically 16 or 32 tokens per block). The serving node maintains a Radix Tree (or Trie) in host DRAM, where each path from the root node to an internal node represents a unique token prefix, and the node holds pointers to the physical HBM blocks containing the computed Key and Value tensors for that prefix (@tbl-vol3-scheduling-radix-prefix-tree):
 
-```
-Radix Prefix Tree Representation Across Swarm Requests
-                  [Root: Empty]
-                        |
-            [Base System Prompt: 16k tokens]
-            (HBM Blocks: #101 - #110)
-                        |
-            [Tool Schemas: 8k tokens]
-            (HBM Blocks: #201 - #205)
-                   /         \
-   [Repo Context A: 12k]    [Repo Context B: 12k]
-   (Blocks: #301 - #308)    (Blocks: #401 - #407)
-            /                       \
-   [Agent 1: Turn 1]       [Agent 2: Turn 1]
-```
+| Tree Level / Depth     | Logical Context Component      | Token Length                      | Cumulative Token Offset     | Physical HBM Allocation | Swarm Sharing Scope                        |
+|:-----------------------|:-------------------------------|:----------------------------------|:----------------------------|:------------------------|:-------------------------------------------|
+| **Level 0 (Root)**     | Empty Root Sentinel            | $0\text{ tokens}$                 | $0$                         | None (null pointer)     | Global cluster root                        |
+| **Level 1**            | Base System Prompt             | $16{,}384\text{ tokens}$          | $0\text{--}16{,}383$        | Blocks `#101`--`#110`   | Shared by all 40 swarm agents ($100\%$)    |
+| **Level 2**            | Tool Schema Definitions        | $8{,}192\text{ tokens}$           | $16{,}384\text{--}24{,}575$ | Blocks `#201`--`#205`   | Shared by all 40 swarm agents ($100\%$)    |
+| **Level 3 (Branch A)** | Repository Subsystem A Context | $12{,}288\text{ tokens}$          | $24{,}576\text{--}36{,}863$ | Blocks `#301`--`#308`   | Shared by Sub-team A (20 developer agents) |
+| **Level 3 (Branch B)** | Repository Subsystem B Context | $12{,}288\text{ tokens}$          | $24{,}576\text{--}36{,}863$ | Blocks `#401`--`#407`   | Shared by Sub-team B (20 developer agents) |
+| **Level 4 (Leaves)**   | User Instruction & Local Turns | Variable ($1\text{k--}4\text{k}$) | $36{,}864+$                 | Unshared dynamic blocks | Private to individual agent instance       |
+
+: **Radix Prefix Tree Hierarchy for Multi-Agent Swarm Workloads**: Logical prefix tree structure indexing shared token sequences to physical PagedAttention HBM blocks across collaborative agent trajectories. {#tbl-vol3-scheduling-radix-prefix-tree tbl-colwidths="[15,20,15,15,18,17]"}
 
 When a request arrives at a node whose Radix Tree already contains the prompt prefix:
 
@@ -554,7 +547,7 @@ However, single-node Radix caching is powerless if the global load balancer rout
 In a cache-aware cluster, the global routing layer maintains a **Global Prefix Directory**\index{Global Prefix Directory}. This directory tracks which worker nodes hold which prefix blocks in their local memory pools (@fig-vol3-scheduling-prefix-routing).
 
 ::: {#fig-vol3-scheduling-prefix-routing fig-env="figure" fig-pos="htb" fig-cap="**Cache-Aware Prefix Routing Architecture**: The global router evaluates incoming agent requests against a distributed prefix index. Requests sharing common system prompts and tool schemas are steered to nodes with existing warm KV cache blocks, maximizing cache hit rates while balancing compute load. Source: Author design." fig-alt="Flowchart showing Cache-Aware Prefix Routing: An incoming request prompt is fingerprinted. The router queries its Global Radix Directory to find nodes with matching prefixes. It computes a joint affinity-load score and dispatches the request to the optimal worker node."}
-![](images/svg/trajectory_scheduling_architecture.svg)
+![](images/svg/cache_aware_prefix_routing.svg)
 :::
 
 #### Prefix fingerprinting and chunk hashing
@@ -725,7 +718,7 @@ where:
 - $\mathcal{V}_{\text{clock}}$: Lamport vector clock guaranteeing causal ordering across asynchronous tool returns.
 :::
 
-Table 8.2 (@tbl-vol3-pcb-vs-acb) details the structural duality between classical POSIX processes and agent trajectories.
+@Tbl-vol3-pcb-vs-acb details the structural duality between classical POSIX processes and agent trajectories.
 
 | Architectural Dimension | Classical POSIX PCB                          | Agent Control Block (ACB)                                        |
 |:------------------------|:---------------------------------------------|:-----------------------------------------------------------------|
@@ -835,14 +828,18 @@ subject to cluster capacity constraints $\sum_i N_i \mathbf{c}_i \le \mathbf{R}$
 
 DRF guarantees four essential systems properties: **Sharing Incentive** (no tenant is worse off than under uniform partitioning $1/n$), **Strategy-Proofness** (no tenant can game the system by misrepresenting its demands), **Envy-Freeness** (no tenant prefers another's allocation), and **Pareto Efficiency** (it is impossible to allocate more resources to an agent without reducing another's allocation).
 
-Table 8.3 (@tbl-drf-allocation-matrix) illustrates a numerical allocation across two competing agent classes on a cluster consisting of 8 H100 GPUs ($640\text{ GB}$ HBM, $8000\text{ TFLOPS}$) and $1024\text{ GB}$ host DRAM:
+@Tbl-drf-allocation-matrix illustrates a numerical allocation across two competing agent classes on a cluster consisting of 8 H100 GPUs ($640\text{ GB}$ HBM, $8000\text{ TFLOPS}$) and $1024\text{ GB}$ host DRAM, and @fig-vol3-scheduling-drf-allocation illustrates the multi-dimensional geometric balancing across coupled resources:
 
-| Agent Tenant Class          | Per-Agent Demand Vector $\mathbf{c}_i$                          | Dominant Resource | Dominant Share per Instance  | DRF Allocated Concurrency           |
-|:----------------------------|:----------------------------------------------------------------|:------------------|:-----------------------------|:------------------------------------|
-| **Class A: Coding Agents**  | $[15\text{ GB HBM}, \, 40\text{ TFLOPS}, \, 32\text{ GB DRAM}]$ | Host DRAM         | $\frac{32}{1024} = 3.125\%$  | **20 instances** ($s_A^* = 62.5\%$) |
-| **Class B: Reasoning Bots** | $[4\text{ GB HBM}, \, 250\text{ TFLOPS}, \, 8\text{ GB DRAM}]$  | Compute (TFLOPS)  | $\frac{250}{8000} = 3.125\%$ | **20 instances** ($s_B^* = 62.5\%$) |
+| Agent Tenant Class          | Per-Agent Demand Vector $\mathbf{c}_i$                      | Dominant Resource | Dominant Share per Instance  | DRF Allocated Concurrency           |
+|:----------------------------|:------------------------------------------------------------|:------------------|:-----------------------------|:------------------------------------|
+| **Class A: Coding Agents**  | $[15\text{ GB HBM}, \, 40\text{ TF}, \, 32\text{ GB DRAM}]$ | Host DRAM         | $\frac{32}{1024} = 3.125\%$  | **20 instances** ($s_A^* = 62.5\%$) |
+| **Class B: Reasoning Bots** | $[4\text{ GB HBM}, \, 250\text{ TF}, \, 8\text{ GB DRAM}]$  | Compute (TFLOPS)  | $\frac{250}{8000} = 3.125\%$ | **20 instances** ($s_B^* = 62.5\%$) |
 
-: **Dominant Resource Fairness Multi-Resource Allocation**: Balancing high-memory coding agents against high-compute reasoning agents across heterogeneous hardware tiers. Dominant shares are equalized, maximizing aggregate cluster throughput. {#tbl-drf-allocation-matrix tbl-colwidths="[20,30,20,15,15]"}
+: **Dominant Resource Fairness Multi-Resource Allocation**: Balancing high-memory coding agents against high-compute reasoning agents across heterogeneous hardware tiers. Dominant shares are equalized, maximizing aggregate cluster throughput. {#tbl-drf-allocation-matrix tbl-colwidths="[18,32,18,16,16]"}
+
+::: {#fig-vol3-scheduling-drf-allocation fig-env="figure" fig-pos="htb" fig-cap="**Dominant Resource Fairness Across Coupled Agent Resources**: Max-min fair allocation across GPU Compute (TFLOPS), Accelerator Memory (KV Blocks), and External Tool API Leases. Equalizing dominant shares prevents single-tenant monopolization and maximizes aggregate cluster throughput. Source: Author design." fig-alt="Diagram showing Dominant Resource Fairness across coupled agent resources: Cluster Resource Pools on the left, Tenant Demand Profiles in the center, and DRF Equalization Engine on the right."}
+![](images/svg/drf_multi_resource_agent_allocation.svg)
+:::
 
 ### Preemption, reversibility boundaries, and coffman deadlock prevention
 
