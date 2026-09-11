@@ -36,7 +36,7 @@ In classical computer architecture, memory allocation pathologies arise when phy
 
 ### Mathematical derivation of footprint per token
 
-Consider a transformer model characterized by the following structural hyperparameters:
+Consider a transformer model characterized by structural hyperparameters:
 
 - $n_{\text{layers}}$: total number of transformer layers ($L$).
 - $d_{\text{model}}$: hidden state dimensionality.
@@ -45,29 +45,28 @@ Consider a transformer model characterized by the following structural hyperpara
 - $n_{\text{kv\_heads}}$: number of Key and Value attention heads ($H_{\text{KV}}$).
 - $b$: storage precision in bytes per element (e.g., $b = 2$ for FP16/BF16, $b = 1$ for FP8, $b = 0.5$ for INT4).
 
-During autoregressive generation, at each layer $l \in [1, n_{\text{layers}}]$, the model projects the hidden activation $\mathbf{x}_t \in \mathbb{R}^{d_{\text{model}}}$ of token $t$ into key and value representations:
+During autoregressive generation, at each layer $l \in [1, n_{\text{layers}}]$, the execution pipeline projects the hidden activation $\mathbf{x}_t \in \mathbb{R}^{d_{\text{model}}}$ of incoming token $t$ into key and value representations $\mathbf{k}_t^{(l)} = \mathbf{x}_t \mathbf{W}_K^{(l)}$ and $\mathbf{v}_t^{(l)} = \mathbf{x}_t \mathbf{W}_V^{(l)}$, where $\mathbf{W}_K^{(l)}, \mathbf{W}_V^{(l)} \in \mathbb{R}^{d_{\text{model}} \times (n_{\text{kv\_heads}} \cdot d_{\text{head}})}$.
 
-$$\mathbf{k}_t^{(l)} = \mathbf{x}_t \mathbf{W}_K^{(l)}, \quad \mathbf{v}_t^{(l)} = \mathbf{x}_t \mathbf{W}_V^{(l)}$$
+For standard **Multi-Head Attention (MHA)**\index{Multi-Head Attention} [@vaswani2017], where the number of KV heads equals the number of Query heads ($n_{\text{kv\_heads}} = n_{\text{heads}}$), each token requires storing one Key vector and one Value vector of dimension $d_{\text{model}}$ across all layers. For an agent trajectory spanning an active context length of $S$ tokens, the cumulative KV cache memory footprint defined in @eq-vol3-virtualmem-mha-footprint scales with sequence length and model geometry:[^fn-virtualmem-mha-derivation]
 
-where $\mathbf{W}_K^{(l)}, \mathbf{W}_V^{(l)} \in \mathbb{R}^{d_{\text{model}} \times (n_{\text{kv\_heads}} \cdot d_{\text{head}})}$.
+$$M_{\text{KV, MHA}}(S) = 2 \cdot b \cdot n_{\text{layers}} \cdot d_{\text{model}} \cdot S \quad [\text{bytes}] {#eq-vol3-virtualmem-mha-footprint}$$
 
-For standard **Multi-Head Attention (MHA)**\index{Multi-Head Attention} [@vaswani2017], where the number of KV heads equals the number of Query heads ($n_{\text{kv\_heads}} = n_{\text{heads}}$), each token requires storing one Key vector and one Value vector of dimension $d_{\text{model}}$ per layer. The physical memory footprint consumed by a single token, denoted $S_{\text{token}}$, is derived as:
+To appreciate the physical scale of this footprint, consider a 70-billion parameter MHA foundation model ($n_{\text{layers}} = 80$, $d_{\text{model}} = 8192$) operating in 16-bit precision ($b = 2\text{ bytes}$). Storing the KV activations of a single token requires $S_{\text{token}} = 2 \times 2 \times 80 \times 8192 \approx 2.62\text{ MB/token}$. As detailed in @tbl-vol3-virtualmem-mha-sizing, scaling context depth across extended agent trajectories rapidly overwhelms physical accelerator memory:
 
-$$S_{\text{token, MHA}} = 2 \times b \times n_{\text{layers}} \times d_{\text{model}} \quad \left[\frac{\text{bytes}}{\text{token}}\right]$$
+| Context Horizon ($S$) | Tokens Stored | Per-Token Footprint | Total KV Footprint | Physical H100 GPU Allocation |
+| :--- | :--- | :--- | :--- | :--- |
+| **Prompt Init ($4\text{k}$)** | $4,000$ | $2.62\text{ MB}$ | $10.49\text{ GB}$ | $13.1\%$ of 1x H100 ($80\text{ GB}$) |
+| **Short Trajectory ($16\text{k}$)** | $16,000$ | $2.62\text{ MB}$ | $41.94\text{ GB}$ | $52.4\%$ of 1x H100 |
+| **Extended Agent ($64\text{k}$)** | $64,000$ | $2.62\text{ MB}$ | $167.77\text{ GB}$ | **$2.10\times$ full H100 GPUs** |
+| **Repository Horizon ($128\text{k}$)** | $128,000$ | $2.62\text{ MB}$ | $335.54\text{ GB}$ | **$4.19\times$ full H100 GPUs** |
 
-where the coefficient $2$ accounts for the dual Key and Value tensors. For an agent trajectory spanning an active context length of $S$ tokens, the cumulative KV cache memory footprint is:
+: **Multi-Head Attention (MHA) KV-Cache Footprint Scaling for a 70B Parameter Model**: Memory consumption across context lengths ($n_{\text{layers}}=80$, $d_{\text{model}}=8192$, FP16 precision). A single extended agent context completely overwhelms multi-GPU node memory without KV sharing. {#tbl-vol3-virtualmem-mha-sizing}
 
-$$M_{\text{KV, MHA}}(S) = S \cdot S_{\text{token, MHA}} = 2 \cdot b \cdot n_{\text{layers}} \cdot d_{\text{model}} \cdot S \quad [\text{bytes}]$$
+At $S = 64\text{,}000$ tokens, the volatile activation footprint of one agent ($167.77\text{ GB}$) exceeds the physical HBM capacity of two entire $80\text{ GB}$ NVIDIA H100 GPUs before allocating a single parameter weight or intermediate scratchpad buffer.
 
-To appreciate the scale of this footprint, consider a 70-billion parameter MHA foundation model with $n_{\text{layers}} = 80$, $d_{\text{model}} = 8192$, operating in 16-bit precision ($b = 2$ bytes). Storing the KV activations of a single token requires:
+> **The Systems Rule of Thumb (The MHA Memory Wall):** Under Multi-Head Attention, activation memory scales directly with the full hidden dimension ($d_{\text{model}}$), yielding an unsustainable $2.62\text{ MB/token}$ for 70B models. Uncompressed MHA cannot support long-horizon autonomous agents on production clusters; serving runtimes require architectural KV head reduction (GQA/MQA/MLA) or physical block paging to prevent single-agent contexts from causing cluster-wide out-of-memory faults.
 
-$$S_{\text{token}} = 2 \times 2 \times 80 \times 8192 = 2\text{,}621\text{,}440\text{ bytes} \approx 2.62\text{ MB/token}$$
-
-A single autonomous coding agent operating across a 64,000-token context window ($S = 64\text{,}000$) consumes:
-
-$$M_{\text{KV}} = 64\text{,}000 \times 2.621\text{ MB} \approx 167.77\text{ GB}$$
-
-This volatile KV cache footprint exceeds the physical memory capacity of two entire $80\text{ GB}$ NVIDIA H100 GPUs before a single parameter weight or intermediate activation buffer is allocated.
+[^fn-virtualmem-mha-derivation]: Storing Key and Value states requires 2 tensors per layer. In $b$-byte precision across $n_{\text{layers}}$ layers with hidden size $d_{\text{model}}$, the byte footprint per token is $S_{\text{token}} = 2 \cdot b \cdot n_{\text{layers}} \cdot d_{\text{model}}$. For an active sequence of $S$ tokens, multiplying $S \cdot S_{\text{token}}$ yields total byte occupancy.
 
 ### Attention geometries: MHA, MQA, GQA, and MLA
 
@@ -116,13 +115,11 @@ where $N$ is the number of active sequences, $S_i$ is the actual token length of
 
 ### Trajectory prompt anatomy and monotonic prefix expansion
 
-The memory fragmentation crisis is intensely exacerbated by the operational mechanics of autonomous agent control loops. Unlike conversational chatbots that exchange brief, self-contained text messages, an autonomous software agent executes a stateful perception-action trajectory over dozens or hundreds of discrete environment steps:
+The memory fragmentation crisis is intensely exacerbated by the operational mechanics of autonomous agent control loops. Unlike conversational chatbots that exchange brief, self-contained text messages, an autonomous software agent executes a stateful perception-action trajectory ($s_0 \xrightarrow{\pi_\theta} a_0 \xrightarrow{\mathcal{E}} o_1 \longrightarrow \dots \longrightarrow s_t$) over dozens or hundreds of discrete environment steps.
 
-$$s_0 \xrightarrow{\pi_\theta} a_0 \xrightarrow{\mathcal{E}} o_1 \longrightarrow s_1 \xrightarrow{\pi_\theta} a_1 \xrightarrow{\mathcal{E}} o_2 \longrightarrow \dots \longrightarrow s_t$$
+At step $t$, the full prompt sequence submitted to the foundation model, denoted $X^{(t)}$ in @eq-vol3-virtualmem-prompt-anatomy, is structured as an append-only token sequence:
 
-At step $t$, the full prompt sequence submitted to the foundation model, denoted $X^{(t)}$, is structured as an append-only token sequence:
-
-$$X^{(t)} = \left[ \mathbf{x}_{\text{sys}}, \, \mathbf{x}_{\text{tools}}, \, \mathbf{x}_{\text{env}}, \, \mathbf{x}_{\text{history}}^{(1:t-1)}, \, \mathbf{x}_{\text{action}}^{(t-1)}, \, \mathbf{x}_{\text{obs}}^{(t)} \right]$$
+$$X^{(t)} = \left[ \mathbf{x}_{\text{sys}}, \, \mathbf{x}_{\text{tools}}, \, \mathbf{x}_{\text{env}}, \, \mathbf{x}_{\text{history}}^{(1:t-1)}, \, \mathbf{x}_{\text{action}}^{(t-1)}, \, \mathbf{x}_{\text{obs}}^{(t)} \right] {#eq-vol3-virtualmem-prompt-anatomy}$$
 
 | Segment                                                                               | Semantic Role                                               |       Token Length ($S$)       |       Mutation Cadence      |   Cache Invalidation Risk   |
 |:--------------------------------------------------------------------------------------|:------------------------------------------------------------|:------------------------------:|:---------------------------:|:---------------------------:|
@@ -140,41 +137,42 @@ As formalized in @tbl-vol3-vm-prompt-anatomy, the token sequence $X^{(t)}$ exhib
 ![](images/svg/prompt_anatomy_locality.svg)
 :::
 
-In his classical formulation of memory locality, Peter Denning established that software programs exhibit temporal and spatial access concentrations [@denning1970]. In agentic machine learning systems, context memory access patterns manifest as an extreme physical property: **Trajectory Prefix Locality**\index{Trajectory Prefix Locality}.
+In his classical formulation of memory locality, Peter Denning established that software programs exhibit temporal and spatial access concentrations [@denning1970]. In agentic machine learning systems, context memory access patterns manifest as an extreme physical property: **Trajectory Prefix Locality**\index{Trajectory Prefix Locality}.[^fn-virtualmem-prefix-locality]
 
 ::: {#pri-trajectory-prefix-locality .callout-principle title="Trajectory prefix locality invariant"}
-For any autonomous agent executing an append-only perception-action trajectory of horizon $T$, the prefix sharing ratio $\rho(t, t+1)$ between consecutive execution turns $t$ and $t+1$:
+For any autonomous agent executing an append-only perception-action trajectory of horizon $T$, the prefix sharing ratio $\rho(t, t+1)$ defined in @eq-vol3-virtualmem-prefix-locality between consecutive execution turns $t$ and $t+1$ asymptotically approaches unity as trajectory history accumulates:
 
-$$\rho(t, t+1) = \frac{|X^{(t)} \cap X^{(t+1)}|}{|X^{(t+1)}|} = \frac{|X^{(t)}|}{|X^{(t)}| + |\Delta \mathbf{x}^{(t+1)}|}$$
-
-approaches unity as the trajectory horizon $t$ expands:
-
-$$\lim_{t \to \infty} \rho(t, t+1) = 1.0$$
+$$\rho(t, t+1) = \frac{|X^{(t)}|}{|X^{(t)}| + |\Delta \mathbf{x}^{(t+1)}|} \xrightarrow[t \to \infty]{} 1.0 {#eq-vol3-virtualmem-prefix-locality}$$
 :::
+
+> **The Systems Rule of Thumb (The 95% Prefix Locality Invariant):** In multi-turn agent execution, consecutive turns share over $95\%$ of their prompt tokens ($|X^{(t)}| \gg |\Delta \mathbf{x}^{(t+1)}|$). Any inference serving engine that treats consecutive agent turns as stateless invocations wastes more than $90\%$ of its arithmetic throughput recomputing identical Key-Value activations. Serving schedulers must maintain stateful session affinity to exploit this physical prefix invariance.
+
+[^fn-virtualmem-prefix-locality]: Because the sequence is append-only, the common prefix length is $|X^{(t)} \cap X^{(t+1)}| = |X^{(t)}|$, while the denominator expands by the turn increment $|X^{(t+1)}| = |X^{(t)}| + |\Delta \mathbf{x}^{(t+1)}|$.
 
 ### The computational disaster of stateless serving
 
 When an autonomous agent interacts with a conventional stateless serving endpoint, the serving runtime treats every turn $t$ as an independent, isolated transaction. Because the endpoint does not preserve state between calls, the inference engine must execute a complete **prompt prefill**\index{Prompt prefill} forward pass over the entire token sequence $X^{(t)}$ before emitting the first generated token.
 
-For a transformer model containing $P$ active parameters, computing the prefill pass over an input sequence of length $S = |X^{(t)}|$ requires an arithmetic operation count scaling as:
+For a transformer model containing $P$ active parameters, computing the prefill pass over an input sequence of length $S = |X^{(t)}|$ requires an arithmetic operation count defined in @eq-vol3-virtualmem-prefill-flops:
 
-$$\text{FLOPs}_{\text{prefill}}(S) \approx 2 P S + 4 n_{\text{layers}} d_{\text{model}} S^2$$
+$$\text{FLOPs}_{\text{prefill}}(S) \approx 2 P S + 4 n_{\text{layers}} d_{\text{model}} S^2 {#eq-vol3-virtualmem-prefill-flops}$$
 
 where the quadratic term $4 n_{\text{layers}} d_{\text{model}} S^2$ accounts for the full self-attention matrix multiplications ($\mathbf{Q}\mathbf{K}^T$ and $\mathbf{A}\mathbf{V}$).
 
-If an agent executes a trajectory of $T$ turns, where turn 1 begins with a root prompt of length $S_1 = L_{\text{root}}$ (system instructions, tool schemas, environment map), and each subsequent turn appends an average observation delta of $\Delta S$ tokens, the cumulative tokens ingested by a stateless serving engine across the trajectory is:
+If an agent executes a trajectory of $T$ turns, where turn 1 begins with a root prompt of length $S_1 = L_{\text{root}}$ (system instructions, tool schemas, environment map), and each subsequent turn appends an average observation delta of $\Delta S$ tokens, the cumulative tokens ingested by a stateless serving engine across the trajectory defined in @eq-vol3-virtualmem-stateless-turn-expansion scales quadratically as $\mathcal{O}(T \cdot L_{\text{root}} + T^2 \Delta S)$ with interaction depth:[^fn-virtualmem-stateless-summation]
 
-$$S_{\text{stateless}}(T) = \sum_{t=1}^{T} \left( L_{\text{root}} + (t-1)\Delta S \right) = T \cdot L_{\text{root}} + \frac{T(T-1)}{2} \Delta S = \mathcal{O}(T \cdot L_{\text{root}} + T^2 \Delta S)$$
+$$S_{\text{stateless}}(T) = T \cdot L_{\text{root}} + \frac{T(T-1)}{2} \Delta S {#eq-vol3-virtualmem-stateless-turn-expansion}$$
 
-The cumulative arithmetic work expended by the cluster scales **quadratically** with the trajectory horizon $T$. For a 20-turn agent session ($T = 20$) with $L_{\text{root}} = 16\text{,}000$ and $\Delta S = 800$, stateless serving forces the accelerator to process:
+The cumulative arithmetic work expended by the cluster scales quadratically with the trajectory horizon $T$. As summarized in @tbl-vol3-virtualmem-stateless-tax, for a 20-turn agent session ($T = 20$) with $L_{\text{root}} = 16\text{,}000$ and $\Delta S = 800$, stateless serving forces the accelerator to process $S_{\text{stateless}} = 472\text{,}000$ tokens, whereas the unique trajectory content represents only the terminal length $S_{\text{terminal}} = 31\text{,}200$ tokens. Stateless serving forces the accelerator cluster to recompute $440\text{,}800$ redundant tokens—a staggering $93.4\%$ waste of compute capacity.
 
-$$S_{\text{stateless}} = 20 \times 16\text{,}000 + \frac{20 \times 19}{2} \times 800 = 320\text{,}000 + 152\text{,}000 = 472\text{,}000\text{ tokens}$$
+| Execution Metric | Turn 1 ($t=1$) | Turn 10 ($t=10$) | Turn 20 ($t=20$) | Cumulative (20 Turns) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Unique Context Tokens** | $16,000$ | $23,200$ | $31,200$ | $31,200$ (Terminal) |
+| **Stateless Prefill Tokens** | $16,000$ | $23,200$ | $31,200$ | **$472,000$ tokens** |
+| **Stateful (Cached) Tokens** | $16,000$ | $800$ | $800$ | **$31,200$ tokens** |
+| **Redundant Recomputation** | $0\%$ | $96.6\%$ | $97.4\%$ | **$93.4\%$ redundant** |
 
-In contrast, the actual information content produced across the trajectory represents only the terminal context length:
-
-$$S_{\text{terminal}} = 16\text{,}000 + (19 \times 800) = 31\text{,}200\text{ tokens}$$
-
-Stateless serving forces the accelerator cluster to recompute **$440\text{,}800$ redundant tokens**—a staggering **$93.4\%$ waste of compute capacity**.
+: **Compounding Recomputation Tax of Stateless Inference in Multi-Turn Agents**: Evaluated at $L_{\text{root}} = 16,000$ and $\Delta S = 800$ tokens/turn. Without prefix caching, $93.4\%$ of all processed tokens are redundant recomputations. {#tbl-vol3-virtualmem-stateless-tax}
 
 ```{python}
 #| echo: false
@@ -269,22 +267,15 @@ class VirtualMemoryTtftCollapse:
 **Evaluation:**
 
 1. *Stateless Execution (Zero Context Retention):*
-Total tokens prefilled:
-$$S_{\text{total}} = \sum_{t=1}^{20} [16\text{,}000 + 800(t-1)] = 472\text{,}000\text{ tokens}$$
-Cumulative prefill execution time:
-$$T_{\text{prefill, stateless}} = 472\text{,}000 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{132.16\text{ seconds}}$$
-At turn 20, the prompt length is $S_{20} = 16\text{,}000 + (19 \times 800) = 31\text{,}200$ tokens. The agent waits:
-$$\text{TTFT}_{\text{turn-20, stateless}} = 31\text{,}200 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{8.74\text{ seconds}}$$
+- Total tokens prefilled: $S_{\text{total}} = \sum_{t=1}^{20} [16\text{,}000 + 800(t-1)] = 472\text{,}000\text{ tokens}$.
+- Cumulative prefill execution time: $T_{\text{prefill, stateless}} = 472\text{,}000 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{132.16\text{ seconds}}$.
+- Turn-20 latency: With terminal prompt length $S_{20} = 16\text{,}000 + (19 \times 800) = 31\text{,}200$ tokens, the agent stalls waiting for first response: $\text{TTFT}_{\text{turn-20, stateless}} = 31\text{,}200 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{8.74\text{ seconds}}$.
 
 2. *Stateful Virtual Memory Execution (Prefix Caching):*
-Turn 1 executes a cold prefill over the root prompt:
-$$T_1 = 16\text{,}000 \times 2.8 \times 10^{-4}\text{ s} = 4.48\text{ seconds}$$
-For each subsequent turn $t \in [2, 20]$, the serving engine identifies the preceding sequence in the virtual memory cache ($100\%$ prefix hit), executing prefill *only* on the new delta $\Delta S = 800$ tokens:
-$$T_{2\dots 20} = 19 \times (800 \times 2.8 \times 10^{-4}\text{ s}) = 19 \times 0.224\text{ s} = 4.26\text{ seconds}$$
-Cumulative prefill execution time:
-$$T_{\text{prefill, cached}} = 4.48\text{ s} + 4.26\text{ s} = \mathbf{8.74\text{ seconds}}$$
-Per-turn TTFT for all subsequent turns $t \ge 2$:
-$$\text{TTFT}_{\text{turn-}t\text{, cached}} = 800 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{224\text{ milliseconds}}$$
+- Turn 1 cold prefill over root prompt: $T_1 = 16\text{,}000 \times 2.8 \times 10^{-4}\text{ s} = 4.48\text{ seconds}$.
+- Turns 2–20 incremental delta prefill: $T_{2\dots 20} = 19 \times (800 \times 2.8 \times 10^{-4}\text{ s}) = 4.26\text{ seconds}$.
+- Cumulative prefill execution time: $T_{\text{prefill, cached}} = 4.48\text{ s} + 4.26\text{ s} = \mathbf{8.74\text{ seconds}}$.
+- Per-turn interactive latency ($t \ge 2$): $\text{TTFT}_{\text{turn-}t\text{, cached}} = 800 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{224\text{ milliseconds}}$.
 
 3. *Comparative Performance Speedup:*
 - Trajectory prefill compute reduction: $\frac{132.16\text{ s}}{8.74\text{ s}} = \mathbf{15.1\times\text{ faster}}$.
@@ -296,6 +287,10 @@ $$\text{TTFT}_{\text{turn-}t\text{, cached}} = 800 \times 2.8 \times 10^{-4}\tex
 :::
 
 The arithmetic necessity of retaining the Key-Value cache reveals an inescapable hardware trade-off: an inference engine cannot eliminate redundant prefill without physically storing multi-gigabyte activation tensors across long temporal horizons. Solving this challenge without succumbing to the contiguous allocation fragmentation crisis requires virtualizing the memory addressing architecture.
+
+> **The Systems Rule of Thumb (The TTFT Collapse Invariant):** Multi-turn agents cannot tolerate stateless inference. When prompt history expands beyond $N \ge 10$ turns, stateless prefill causes interactive Time-to-First-Token to explode from sub-second responses into multi-second stalls ($> 8\text{ seconds}$), starving client runtimes and trapping Tensor Cores in quadratic recomputation loops. Serving engines must implement prefix block virtualization to collapse incremental TTFT down to the raw per-turn delta latency ($\tau_{\text{delta}} = \Delta S \cdot \tau_{\text{token}}$).
+
+[^fn-virtualmem-stateless-summation]: Summing across all $T$ turns gives $\sum_{t=1}^T [L_{\text{root}} + (t-1)\Delta S] = T \cdot L_{\text{root}} + \Delta S \sum_{t=1}^T (t-1) = T \cdot L_{\text{root}} + \Delta S \frac{T(T-1)}{2}$.
 
 ## PagedAttention: Virtual Memory for KV Caches {#sec-vol3-virtualmem-pagedattention}
 
