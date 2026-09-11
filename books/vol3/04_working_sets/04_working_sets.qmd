@@ -67,23 +67,18 @@ $$
 
 where $P_{\text{peak}}$ is the peak dense tensor throughput of the accelerator (e.g., $989 \times 10^{12}$ FLOPs/s in 16-bit precision for an NVIDIA H100 SXM5) and $\eta_{\text{compute}} \in [0.45, 0.65]$ is the realized hardware compute efficiency. For an agent ingesting a 128k-token trajectory on a 70B model ($L = 80, d_{\text{model}} = 8{,}192, d_{\text{ff}} = 28{,}672$), @eq-autoregressive-prefill-flops evaluates to approximately $1.15 \times 10^{17}$ FLOPs. At 50 percent realized efficiency, prefill alone requires 38.8 seconds of sustained GPU compute before the agent can emit its first reasoning token.
 
-```
-Quadratic Prefill vs. Linear Decode Regimes:
-┌────────────────────────────────────────────────────────────────────────┐
-│ PREFILL REGIME (Prompt Ingestion)                                      │
-│ • Compute-Bound: Arithmetic Intensity >> 100 FLOPs/Byte                │
-│ • Scaled by Matrix-Matrix Tensor Cores (GEMM)                          │
-│ • Complexity: O(N^2) FLOPs, TTFT grows from 0.4s to 40s+               │
-└────────────────────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼ Token-by-Token Handoff
-┌────────────────────────────────────────────────────────────────────────┐
-│ DECODE REGIME (Token Generation)                                       │
-│ • Memory-Bandwidth Bound: Arithmetic Intensity ≈ 1-2 FLOPs/Byte        │
-│ • Constrained by HBM Streaming Bus (GEMV)                              │
-│ • KV Cache footprint scales as O(N), reading entire cache every token  │
-└────────────────────────────────────────────────────────────────────────┘
-```
+@Tbl-vol3-workingsets-regimes contrasts the execution physics between prompt prefill and autoregressive token decode.
+
+| Operational Dimension           | Prefill Regime (Prompt Ingestion)                           | Decode Regime (Token Generation)                              |
+|:--------------------------------|:------------------------------------------------------------|:--------------------------------------------------------------|
+| **Computational Complexity**    | $\mathcal{O}(N^2)$ FLOPs (quadratic attention)              | $\mathcal{O}(N)$ FLOPs per emitted token                      |
+| **Primary Hardware Bottleneck** | Compute-bound (Tensor Core matrix units)                    | Memory-bandwidth bound (HBM streaming bus)                    |
+| **Linear Algebra Kernel**       | Matrix-Matrix Multiplication (GEMM)                         | Matrix-Vector Multiplication (GEMV)                           |
+| **Arithmetic Intensity**        | High ($\mathcal{I} \gg 100\text{ FLOPs/byte}$)              | Low ($\mathcal{I} \approx 1\text{ to } 2\text{ FLOPs/byte}$)  |
+| **Latency Characteristic**      | Time-To-First-Token (TTFT, $0.4\text{ s} \to 40\text{+ s}$) | Inter-Token Latency (ITL, $15\text{ to } 40\text{ ms/token}$) |
+| **Memory Footprint**            | Peak transient activations during GEMM                      | Persistent linear growth $M_{\text{KV}} \propto N$ in HBM     |
+
+: **Prefill vs. Decode Operational Regimes**: Fundamental computational and hardware differences between prompt ingestion and autoregressive token generation. {#tbl-vol3-workingsets-regimes tbl-colwidths="[25, 37, 38]"}
 
 Once the prefill phase completes, execution transitions into autoregressive decoding. The model generates one token at a time, where generating token $t+1$ depends on the activations of tokens $1, \ldots, t$. To prevent recomputing the Key and Value states of all prior tokens at every forward pass, the runtime caches their representations in accelerator HBM.
 
@@ -164,20 +159,6 @@ W(t, \Delta t) = \{ r_\tau \in S \mid t - \Delta t < \tau \le t \},
 $$
 
 where $S$ is the virtual address space and $r_\tau$ is the page reference at step $\tau$. If the physical memory allocated to the process is smaller than $|W(t, \Delta t)|$, the operating system encounters **thrashing**: physical page frames are continuously evicted and re-faulted from backing disk, causing system throughput to collapse toward zero while CPU utilization is consumed entirely by I/O wait.
-
-```
-Classical OS Virtual Memory vs. Neural Agent Working Sets:
-┌────────────────────────────────────────┬────────────────────────────────────────┐
-│ CLASSICAL VIRTUAL MEMORY (OS)          │ NEURAL AGENT CONTEXT (ML SYSTEMS)      │
-├────────────────────────────────────────┼────────────────────────────────────────┤
-│ Virtual Address Space S                │ Complete Trajectory History τ          │
-│ Physical RAM (Resident Set Size)       │ Accelerator HBM Allocation (KV Cache)  │
-│ Page References (Instructions/Data)    │ Query-to-Key Attention Weights         │
-│ Working Set W(t, Δt)                   │ Active Attention Working Set W_ε(t)    │
-│ Page Fault to Disk                     │ Context Recall / External Retrieval    │
-│ Thrashing (Disk Swapping Paralysis)    │ Neural Thrashing (Dispersion / OOM)    │
-└────────────────────────────────────────┴────────────────────────────────────────┘
-```
 
 This fundamental systems abstraction maps directly onto agentic machine learning runtimes (@tbl-vol3-classical-vs-neural). In an autonomous agent, the **cumulative trajectory history** $\tau = (x_0, a_0, o_0, a_1, o_1, \ldots, a_t, o_t)$—comprising initial system prompts $x_0$, tool invocations $a_i$, environment observations $o_i$, and intermediate reflections—represents the unbounded virtual address space. The accelerator's allocated KV cache represents physical RAM ($C_{\text{HBM}}$).
 
@@ -286,19 +267,17 @@ When target facts are placed at varying relative depths within a prompt, retriev
 2. **Extreme Suffix (90 to 100 percent depth):** Models achieve high retrieval accuracy ($>90\%$). Recent tokens benefit from immediate proximity to the generating query position.
 3. **The Middle Distance (20 to 80 percent depth):** Retrieval accuracy drops dramatically, frequently falling below $30\%$—even when the total context length is well within the model's nominal architectural limit.
 
-```
-Retrieval Accuracy vs. Token Position Depth (The U-Curve):
-100% ────┐                                                 ┌────
-         │                                                 │
- 75%     │                                                 │
-         │                                                 │
- 50%      \                                               /
-           \                                             /
- 25%        \───────────────────────────────────────────/
-  0% ┌───────────┬───────────┬───────────┬───────────┬───────────┐
-     0% (Start) 20%         40%         60%         80%  100% (End)
-               Relative Position Depth in Context Window
-```
+@Tbl-vol3-workingsets-lost-in-middle summarizes the empirical retrieval accuracy and attention allocation across context depth intervals.
+
+| Context Depth Regime       | Relative Token Interval | Typical Fact Retrieval Accuracy | Attention Allocation Mechanics                        | Dominant Systems Consequence                         |
+|:---------------------------|:-----------------------:|:-------------------------------:|:------------------------------------------------------|:-----------------------------------------------------|
+| **Extreme Prefix** (Start) |       $0\% - 10\%$      |             $> 95\%$            | Initial attention sinks; primary semantic anchors     | Static prompt & task spec well preserved             |
+| **Early Middle**           |      $10\% - 30\%$      |          $40\% - 65\%$          | Rotary phase dispersion begins                        | Transient instructions at risk                       |
+| **Deep Middle** (Valley)   |      $30\% - 70\%$      |             $< 30\%$            | Maximal RoPE phase decay; lowest attention entropy    | Critical historical context / tool outputs forgotten |
+| **Late Middle**            |      $70\% - 90\%$      |          $50\% - 75\%$          | Recency bias begins to recover signal                 | Intermediate reflections partially retained          |
+| **Extreme Suffix** (End)   |      $90\% - 100\%$     |             $> 90\%$            | Strong local causal attention; minimal token distance | Immediate tool observations strongly attended        |
+
+: **Empirical Retrieval Accuracy across Context Window Depth**: The U-shaped retrieval degradation profile ("Lost in the Middle", @liu2024lost) resulting from RoPE distance attenuation and attention sink concentration. {#tbl-vol3-workingsets-lost-in-middle tbl-colwidths="[20, 15, 15, 25, 25]"}
 
 The primary mathematical driver of this U-shaped degradation in modern architectures is the interaction between **Rotary Position Embeddings (RoPE)** and query-key distance decay (@su2024).
 
@@ -344,15 +323,11 @@ The softmax normalization forces the attention weights across all active keys $\
 
 In many transformer layers, specific attention heads perform operations where no historical token is semantically relevant to predicting the next token (for example, when emitting formatting whitespace, punctuation, or resolving purely local feed-forward transformations). Nevertheless, the attention head is mathematically forced by @eq-softmax-attention to allocate 100 percent of its probability budget across the available keys.
 
-During pretraining, language models resolve this architectural constraint by designating the initial tokens of the sequence ($t \in \{0, 1, 2, 3\}$) as a dedicated **attention sink**—functioning as an electrical ground that absorbs surplus probability mass (@xiao2024streamingllm). Because the initial tokens (e.g., `<s>`, system prompt delimiters) appear in every training example and are followed by hundreds of context tokens, the optimizer learns to adjust their Key projections to provide stable, non-interfering targets for surplus attention:
+During pretraining, language models resolve this architectural constraint by designating the initial tokens of the sequence ($t \in \{0, 1, 2, 3\}$) as a dedicated **attention sink**—functioning as an electrical ground that absorbs surplus probability mass (@xiao2024streamingllm). Because the initial tokens (e.g., `<s>`, system prompt delimiters) appear in every training example and are followed by hundreds of context tokens, the optimizer learns to adjust their Key projections to provide stable, non-interfering targets for surplus attention. In a typical generation step with query $\mathbf{q}_t$:
 
-```
-Query q_t ──► [ Attention Dot Product ]
-                    │
-                    ├──► Position 0..3 (Initial Sinks): [ 62% Probability Mass ] (Grounds Surplus)
-                    ├──► Position 4..t-W (Middle Context): [ 8% Probability Mass ]
-                    └──► Position t-W..t (Recent Window): [ 30% Probability Mass ] (Active Semantics)
-```
+* **Positions $0 \le i \le 3$ (Initial Sinks):** Absorb $50\%$ to $80\%$ of total probability mass, serving as an electrical ground for heads performing no-op or purely local transformations.
+* **Positions $4 \le i \le t - W$ (Middle Context):** Receive dispersed residual attention (typically $<10\%$ aggregate probability mass) unless matched by an exact keyword or key-value retrieval.
+* **Positions $t - W \le i \le t$ (Recent Window):** Absorb the remaining $20\%$ to $40\%$ of probability mass, driving active local syntax and immediate token-to-token transition logic.
 
 Even when the semantic query has zero informational connection to the beginning of the prompt, downstream heads reliably dump 50 to 80 percent of their attention mass onto positions $0 \le i \le 3$.
 
@@ -430,24 +405,18 @@ With the advent of deliberate reasoning models (such as DeepSeek-R1, OpenAI o1, 
 
 Treating these in-flight deliberative tokens as permanent trajectory state is an architectural defect. Reasoning tokens represent **ephemeral registers**: scratchpad calculations whose operational utility expires the instant a verified tool action is produced. Persisting 6,000 reasoning tokens across 30 turns introduces 180,000 tokens of historical bloat, exhausting GPU HBM and diluting attention without providing any informational value to subsequent turns.
 
-To eliminate this bloat, agent runtimes implement a **Two-Phase Commit for Reasoning Context**:
+To eliminate this bloat, agent runtimes implement a **Two-Phase Commit for Reasoning Context** (@tbl-vol3-workingsets-2pc).
 
-```
-TWO-PHASE COMMIT FOR EPHEMERAL SCRATCHPADS:
-Phase 1: Deliberation (Transient Allocation in Ephemeral Buffer)
-┌───────────────────────────┬───────────────────────────────┬───────────────────────────────┐
-│ System Prompts & History  │ Active Action Proposal        │ Ephemeral CoT Reasoning       │
-│ (Pinned in Active HBM)    │ a_t ~ π_θ(· | s_t)            │ z_t ∈ B_scratchpad (Transient)│
-└───────────────────────────┴───────────────────────────────┴───────────────────────────────┘
-                                           │
-                                           ▼ Action Execution & Verification in Sandbox
-Phase 2: Commit (State Mutation & Scratchpad Eviction)
-┌───────────────────────────┬───────────────────────────────┬───────────────────────────────┐
-│ System Prompts & History  │ Verified Action Committed     │ Environment Observation       │
-│ (Pinned in Active HBM)    │ a_t (Canonical Patch)         │ o_t (Test Suite Output)       │
-└───────────────────────────┴───────────────────────────────┴───────────────────────────────┘
-  [ Ephemeral CoT Reasoning z_t Purged from Persistent KV Cache — 85% Token Reduction ]
-```
+| Execution Phase                      | Context Buffer Segment                                                            | Memory Residency & Lifecycle                             | Systems Action                                                |
+|:-------------------------------------|:----------------------------------------------------------------------------------|:---------------------------------------------------------|:--------------------------------------------------------------|
+| **Phase 1: Deliberation** (Proposal) | System prompt, immutable task spec, and historical trace $\tau_{t-1}$             | **Pinned in HBM**: Permanent KV cache allocations        | Read-only prefix sharing across rollouts                      |
+|                                      | Active action proposal $a_t \sim \pi_\theta(\cdot \mid s_t)$                      | **Active Decode**: In-flight token generation            | Emitted into sandbox execution queue                          |
+|                                      | Ephemeral reasoning scratchpad $\mathbf{z}_t \in \mathcal{B}_{\text{scratchpad}}$ | **Transient Allocation**: Ephemeral buffer pool          | Held in temporary KV slots during deliberation                |
+| **Phase 2: Commit** (State Mutation) | Verified action committed $a_t$ (e.g., canonical patch)                           | **Appended to Trajectory**: Promoted to persistent state | Sealed in context trace $\tau_t$ upon sandbox validation      |
+|                                      | Environment observation $o_t$ (e.g., test suite output)                           | **Appended to Trajectory**: Fresh observation context    | Captured from sandbox stdout/stderr and exit codes            |
+|                                      | Ephemeral reasoning scratchpad $\mathbf{z}_t$                                     | **Forcefully Evicted**: Memory pages reclaimed           | Deallocated from KV cache, eliminating 75% to 90% token bloat |
+
+: **Two-Phase Commit Context Protocol**: Memory lifecycle and buffer layout transitions across deliberation and action commit phases. {#tbl-vol3-workingsets-2pc tbl-colwidths="[20, 28, 26, 26]"}
 
 1. **Phase 1: Deliberation (Transient Allocation):** The model samples candidate reasoning tokens $\mathbf{z}_t$ and a candidate tool action $a_t$ into an ephemeral buffer:
    $$\mathbf{z}_t, a_t \sim \pi_\theta\left( \cdot \;\middle|\; x_0, \tau_{t-1} \right).$$
@@ -662,26 +631,13 @@ $$
 T_{\text{step}}(B, N) = \max\left( \frac{B \cdot F_{\text{decode}}(N)}{P_{\text{peak}} \cdot \eta_{\text{compute}}}, \;\; \frac{M_{\text{weights}} + B \cdot M_{\text{KV}}(N)}{B_{\text{mem}}} \right).
 $$ {#eq-roofline-serving}
 
-```
-Accelerator Roofline: Decode Latency vs. KV Cache Compression:
-Achieved TFLOP/s
-  ▲
-  │                       COMPUTE CEILING (P_peak)
-  │                   ┌────────────────────────────────────────
-  │                  /
-  │                 /  MLA / Pruned Attention Regime:
-  │                /   • Higher arithmetic intensity (I ≈ 3.6 FLOP/B)
-  │               /    • 4x to 8x higher concurrent streams before bus saturation
-  │              /
-  │             /  Standard MHA / Unpruned GQA Regime:
-  │            /   • Low arithmetic intensity (I ≈ 0.8 to 2.4 FLOP/B)
-  │           /    • Severe memory bandwidth bottleneck
-  │          /
-  └─────────┴────────────────────────────────────────────────► Arithmetic Intensity (FLOPs/Byte)
-            I_MHA     I_GQA   I_MLA
-```
+As formalized in @eq-roofline-serving and @tbl-vol3-attention-architectures, autoregressive decoding operates firmly along the memory-bandwidth-slanted slope of the Roofline model, well below the accelerator's compute ceiling $P_{\text{peak}}$. In this regime, achieved compute throughput is bounded strictly by the product of memory bus bandwidth $B_{\text{mem}}$ and arithmetic intensity $\mathcal{I}_{\text{decode}}$:
 
-Because autoregressive decoding operates in the memory-bandwidth-bound regime, the right-hand term in @eq-roofline-serving dominates. Compressing the KV cache via GQA, MLA, or structured head pruning directly reduces $M_{\text{KV}}(N)$:
+$$
+P_{\text{achieved}} = B_{\text{mem}} \cdot \mathcal{I}_{\text{decode}} \ll P_{\text{peak}}.
+$$
+
+Standard Multi-Head Attention languishes at $\mathcal{I}_{\text{MHA}} \approx 0.8\text{ FLOP/byte}$, leaving modern matrix tensor cores over $98\%$ idle during single-stream token generation. By collapsing Key-Value heads, Grouped-Query Attention raises operational intensity to $\mathcal{I}_{\text{GQA}} \approx 2.4\text{ FLOP/byte}$, while Multi-Head Latent Attention reaches $\mathcal{I}_{\text{MLA}} \approx 3.6\text{ FLOP/byte}$. Because autoregressive decoding operates in the memory-bandwidth-bound regime, the right-hand term in @eq-roofline-serving dominates. Compressing the KV cache via GQA, MLA, or structured head pruning directly reduces $M_{\text{KV}}(N)$:
 
 1. **Inter-Token Latency (ITL) Reduction:** When $B \cdot M_{\text{KV}}(N)$ is comparable to or larger than $M_{\text{weights}}$, cutting $M_{\text{KV}}(N)$ by $4.7\times$ (via MLA) directly reduces memory bus streaming time, decreasing per-token latency by up to 50 percent.
 2. **Concurrency Expansion:** The maximum concurrent agent batch size $B_{\max}$ supported within physical memory capacity $C_{\text{HBM}}$ scales inversely with $M_{\text{KV}}(N)$:
@@ -760,15 +716,15 @@ Managing the context window of an autonomous agent is a fundamental systems engi
 
 @Tbl-vol3-workingsets-synthesis synthesizes the complete context memory architecture established across this chapter:
 
-| Architectural Subsystem      | Governing Formulation / Mechanism                                                                              | Primary Hardware / Systems Bottleneck                   | Dominant Failure Mode                         | Production Systems Mitigation                                          |                                            |                                                |
-|:-----------------------------|:---------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------|:----------------------------------------------|:-----------------------------------------------------------------------|--------------------------------------------|------------------------------------------------|
-| **Prefill Compute Engine**   | $F_{\text{prefill}} \approx 4 L N^2 d_{\text{model}}$ (@eq-autoregressive-prefill-flops)                       | Accelerator tensor core peak FLOPs ($P_{\text{peak}}$)  | TTFT latency explosion (seconds to minutes)   | FlashAttention-2 tiling; chunked prefill scheduling                    |                                            |                                                |
-| **Decode Streaming Bus**     | $T_{\text{decode}} = \frac{M_{\text{weights}} + M_{\text{KV}}}{B_{\text{mem}}}$ (@eq-decode-latency-bandwidth) | Accelerator HBM memory bus bandwidth ($B_{\text{mem}}$) | Inter-token generation throughput collapse    | GQA, MLA, and structured head pruning                                  |                                            |                                                |
-| **KV Cache Memory Pool**     | $M_{\text{KV}} = 2 L H_{\text{KV}} d_h N b_{\text{elem}}$ (@eq-kv-cache-footprint)                             | Accelerator physical HBM capacity ($C_{\text{HBM}}$)    | Out-Of-Memory (OOM) aborts; cluster crash     | PagedAttention virtual memory; H2O eviction                            |                                            |                                                |
-| **Softmax Normalization**    | $\alpha_{t, i} = \frac{\exp(z_{t, i})}{\sum \exp(z_{t, j})}$ (@eq-softmax-attention)                           | Numerical instability; no-op attention absence          | Perplexity explosion upon token 0 eviction    | Pinned initial attention sinks ($S \ge 4$)                             |                                            |                                                |
-| **Long-Range Association**   | $\langle \mathbf{q}_m, \mathbf{k}_n \rangle \propto \frac{1}{                                                  | m-n                                                     | ^\gamma}$ (@eq-rope-decay)                    | RoPE rotational phase destructive decay                                | "Lost-in-the-Middle" cognitive degradation | Heavy-Hitter retention (H2O); AST code pruning |
-| **Deliberative Reasoning**   | Ephemeral scratchpad allocation $\mathbf{z}_t \sim \pi_\theta$                                                 | Exponential trajectory accumulation                     | Severe KV cache bloat from reasoning tokens   | Two-Phase Commit: purge scratchpad post-action                         |                                            |                                                |
-| **Long-Horizon Persistence** | Data Processing Inequality: $I(X; \hat{S}_k) \le I(X; Y)$                                                      | Lossy semantic compression channel                      | Semantic drift; constraint erosion; livelocks | Invariant Enclosure ($\mathcal{I}_{\text{immutable}}$) + State Ledgers |                                            |                                                |
+| Architectural Subsystem      | Governing Formulation / Mechanism                                                                              | Primary Hardware / Systems Bottleneck                   | Dominant Failure Mode                         | Production Systems Mitigation                                          |
+|:-----------------------------|:---------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------|:----------------------------------------------|:-----------------------------------------------------------------------|
+| **Prefill Compute Engine**   | $F_{\text{prefill}} \approx 4 L N^2 d_{\text{model}}$ (@eq-autoregressive-prefill-flops)                       | Accelerator tensor core peak FLOPs ($P_{\text{peak}}$)  | TTFT latency explosion (seconds to minutes)   | FlashAttention-2 tiling; chunked prefill scheduling                    |
+| **Decode Streaming Bus**     | $T_{\text{decode}} = \frac{M_{\text{weights}} + M_{\text{KV}}}{B_{\text{mem}}}$ (@eq-decode-latency-bandwidth) | Accelerator HBM memory bus bandwidth ($B_{\text{mem}}$) | Inter-token generation throughput collapse    | GQA, MLA, and structured head pruning                                  |
+| **KV Cache Memory Pool**     | $M_{\text{KV}} = 2 L H_{\text{KV}} d_h N b_{\text{elem}}$ (@eq-kv-cache-footprint)                             | Accelerator physical HBM capacity ($C_{\text{HBM}}$)    | Out-Of-Memory (OOM) aborts; cluster crash     | PagedAttention virtual memory; H2O eviction                            |
+| **Softmax Normalization**    | $\alpha_{t, i} = \frac{\exp(z_{t, i})}{\sum \exp(z_{t, j})}$ (@eq-softmax-attention)                           | Numerical instability; no-op attention absence          | Perplexity explosion upon token 0 eviction    | Pinned initial attention sinks ($S \ge 4$)                             |
+| **Long-Range Association**   | $\langle \mathbf{q}_m, \mathbf{k}_n \rangle \propto \frac{1}{\lvert m-n \rvert^\gamma}$ (@eq-rope-decay)       | RoPE rotational phase destructive decay                 | "Lost-in-the-Middle" cognitive degradation    | Heavy-Hitter retention (H2O); AST code pruning                         |
+| **Deliberative Reasoning**   | Ephemeral scratchpad allocation $\mathbf{z}_t \sim \pi_\theta$                                                 | Exponential trajectory accumulation                     | Severe KV cache bloat from reasoning tokens   | Two-Phase Commit: purge scratchpad post-action                         |
+| **Long-Horizon Persistence** | Data Processing Inequality: $I(X; \hat{S}_k) \le I(X; Y)$                                                      | Lossy semantic compression channel                      | Semantic drift; constraint erosion; livelocks | Invariant Enclosure ($\mathcal{I}_{\text{immutable}}$) + State Ledgers |
 
 : **Architectural Synthesis of Context Working Set Systems**: Subsystems, governing formulations, hardware bottlenecks, failure modes, and mitigations. {#tbl-vol3-workingsets-synthesis tbl-colwidths="[18, 22, 20, 20, 20]"}
 
