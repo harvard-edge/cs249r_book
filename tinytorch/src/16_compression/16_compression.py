@@ -59,6 +59,36 @@ from tinytorch.perf.compression import (
 - **Integration:** Works seamlessly with models and quantization for complete optimization pipeline
 """
 
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-15 must be completed. This module uses Tensor (01), Linear and Sequential (03), ReLU (02), log-softmax (04), autograd (06), SGD (07), and the Profiler (14). Quantization (15) is not called here; Milestone 06 stacks the two.
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `copy` (for model duplication during compression)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class)
+- `tinytorch.core.layers` (Linear, Sequential)
+- `tinytorch.core.activations` (ReLU)
+- `tinytorch.core.losses` (log_softmax)
+- `tinytorch.core.autograd` (gradient tracking)
+- `tinytorch.core.optimizers` (SGD for the training test)
+- `tinytorch.perf.profiling` (Profiler)
+
+**Dependency Flow**:
+```
+Module 14 (Profiling) → Module 15 (Quantization) → Module 16 (Compression)
+       ↓                        ↓                         ↓
+  Measure size           Reduce precision           Remove weights
+```
+
+Students completing this module will have built compression techniques
+that integrate with profiling and quantization for complete model optimization.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp perf.compression
 #| export
@@ -72,37 +102,12 @@ from typing import Dict, Any
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear, Sequential
 from tinytorch.core.activations import ReLU
+from tinytorch.core.losses import log_softmax
+import tinytorch.core.autograd  # Module 06: record gradients for student training
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
-# %% [markdown]
-"""
-## 📋 Module Dependencies
-
-**Prerequisites**: Modules 01-15 must be completed. This module uses Tensor (01), Linear and Sequential (03), ReLU (02), and the Profiler (14). Quantization (15) is not called here; Milestone 06 stacks the two.
-
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `copy` (for model duplication during compression)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor class)
-- `tinytorch.core.layers` (Linear, Sequential)
-- `tinytorch.core.activations` (ReLU)
-- `tinytorch.perf.profiling` (Profiler)
-
-**Dependency Flow**:
-```
-Module 14 (Profiling) → Module 15 (Quantization) → Module 16 (Compression)
-       ↓                        ↓                         ↓
-  Measure size           Reduce precision           Remove weights
-```
-
-Students completing this module will have built compression techniques
-that integrate with profiling and quantization for complete model optimization.
-"""
 
 # %% [markdown]
 """
@@ -504,8 +509,8 @@ def magnitude_prune(model, sparsity=0.9):
     APPROACH:
     1. Collect all weights from the model
     2. Calculate absolute values to get magnitudes
-    3. Find threshold at desired sparsity percentile
-    4. Set weights below threshold to zero (in-place)
+    3. Rank magnitudes and select floor(sparsity * weight_count) entries
+    4. Zero those entries in-place; stable ordering breaks magnitude ties
 
     EXAMPLE:
     >>> # Create model with explicit layer composition
@@ -519,33 +524,28 @@ def magnitude_prune(model, sparsity=0.9):
     Achieved 80.0% sparsity
 
     HINTS:
-    - Use np.percentile() to find threshold
+    - Use np.argsort(..., kind="stable") to rank even equal magnitudes
     - Modify model parameters in-place
     - Consider only weight matrices, not biases
     """
     ### BEGIN SOLUTION
-    # Collect all weights (excluding biases)
-    all_weights = []
-    weight_params = []
-
-    for param in model.parameters():
-        # Skip biases (typically 1D)
-        if len(param.shape) > 1:
-            all_weights.extend(param.data.flatten())
-            weight_params.append(param)
-
-    if not all_weights:
+    if not np.isfinite(sparsity) or not 0 <= sparsity <= 1:
+        raise ValueError("sparsity must be between 0 and 1")
+    weight_params = [p for p in model.parameters() if p.ndim > 1]
+    if not weight_params:
         return model
 
-    # Calculate magnitude threshold
-    magnitudes = np.abs(all_weights)
-    threshold = np.percentile(magnitudes, sparsity * 100)
-
-    # Apply pruning to each weight parameter
+    # Rank globally, including existing zeros. Selecting by index also handles
+    # tied magnitudes and the endpoints 0% and 100% exactly.
+    magnitudes = np.concatenate([np.abs(p.data).ravel() for p in weight_params])
+    prune_count = int(sparsity * magnitudes.size)
+    prune_mask = np.zeros(magnitudes.size, dtype=bool)
+    prune_mask[np.argsort(magnitudes, kind="stable")[:prune_count]] = True
+    offset = 0
     for param in weight_params:
-        mask = np.abs(param.data) >= threshold
-        param.data = param.data * mask
-
+        mask = prune_mask[offset:offset + param.size].reshape(param.shape)
+        param.data[mask] = 0
+        offset += param.size
     return model
     ### END SOLUTION
 
@@ -704,6 +704,8 @@ def structured_prune(model, prune_ratio=0.5):
     - Set entire channels to zero: weight[:, prune_indices] = 0
     """
     ### BEGIN SOLUTION
+    if not np.isfinite(prune_ratio) or not 0 <= prune_ratio <= 1:
+        raise ValueError("prune_ratio must be between 0 and 1")
     # Prune the hidden Linear layers. The last Linear is the head: its output
     # channels are the classes, so zeroing them removes classes, not neurons.
     # A model with a single Linear has nothing else to prune and is pruned as is.
@@ -722,7 +724,7 @@ def structured_prune(model, prune_ratio=0.5):
 
         if num_to_prune > 0:
             # Get indices of channels to prune (smallest norms)
-            prune_indices = np.argpartition(channel_norms, num_to_prune)[:num_to_prune]
+            prune_indices = np.argsort(channel_norms, kind="stable")[:num_to_prune]
 
             # Zero out entire channels
             weight[:, prune_indices] = 0
@@ -886,6 +888,8 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     - Return U[:,:k], S[:k], V[:k,:] for reconstruction
     """
     ### BEGIN SOLUTION
+    if not np.isfinite(rank_ratio) or not 0 < rank_ratio <= 1:
+        raise ValueError("rank_ratio must be in (0, 1]")
     m, n = weight_matrix.shape
 
     # Perform SVD
@@ -1023,7 +1027,7 @@ Combined Loss Function:
 L_total = α × L_soft + (1-α) × L_hard
 
 Where:
-    L_soft = KL_divergence(Student_soft, Teacher_soft)
+    L_soft = KL_divergence(Teacher_soft, Student_soft)
              │
              └─ Measures how well student mimics teacher
 
@@ -1042,6 +1046,14 @@ Temperature T:
 • T = 3-5: Good balance (typical range)
 • T = 10+: Very soft (may lose information)
 ```
+
+Both terms average over samples, so duplicating a batch leaves the loss and
+the balance set by α unchanged. The teacher supplies fixed targets; only the
+student's log-probabilities retain a gradient path. We reuse Module 04's stable
+`log_softmax` and Module 06's autograd instead of extracting the student's NumPy
+array. The returned scalar Tensor can then drive the same backward-and-step
+cycle used for ordinary training. This version keeps the unscaled KL objective;
+it omits the optional T² multiplier discussed in the analysis below.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "distillation", "solution": true}
@@ -1089,61 +1101,73 @@ class KnowledgeDistillation:
             alpha: Weight for soft target loss (1-alpha for hard targets)
         """
         ### BEGIN SOLUTION
+        if not np.isfinite(temperature) or temperature <= 0:
+            raise ValueError("temperature must be finite and positive")
+        if not np.isfinite(alpha) or not 0 <= alpha <= 1:
+            raise ValueError("alpha must be between 0 and 1")
         self.teacher_model = teacher_model
         self.student_model = student_model
         self.temperature = temperature
         self.alpha = alpha
         ### END SOLUTION
 
-    def distillation_loss(self, student_logits, teacher_logits, true_labels):
+    def distillation_loss(self, student_logits: Tensor, teacher_logits: Tensor, true_labels) -> Tensor:
         """
-        Calculate combined distillation loss.
+        Calculate a differentiable, batch-mean distillation loss.
 
         TODO: Implement knowledge distillation loss function
 
         APPROACH:
-        1. Calculate hard target loss (student vs true labels)
-        2. Calculate soft target loss (student vs teacher, with temperature)
-        3. Combine losses: alpha * soft_loss + (1-alpha) * hard_loss
+        1. Validate class IDs or target probabilities for each sample
+        2. Compute student log-probabilities with log_softmax, preserving autograd
+        3. Compute detached teacher probabilities and batch-mean KL(teacher || student)
+        4. Compute the batch-mean hard loss and combine using alpha
 
         EXAMPLE:
         >>> kd = KnowledgeDistillation(teacher, student)
         >>> loss = kd.distillation_loss(student_out, teacher_out, labels)
-        >>> print(f"Distillation loss: {loss:.4f}")
+        >>> loss.backward()  # Gradients flow to the student, not the teacher
+        >>> print(f"Distillation loss: {loss.data:.4f}")
 
         HINTS:
         - Use temperature to soften distributions: logits/temperature
-        - Soft targets use KL divergence or cross-entropy
-        - Hard targets use standard classification loss
+        - Wrap teacher_logits.data in a fresh Tensor to treat it as a constant
+        - Sum over classes, then mean over samples for both loss terms
+        - Class IDs may be NumPy integers or integer-valued Tensor data
         """
         ### BEGIN SOLUTION
-        # Extract numpy arrays from Tensors
-        # student_logits and teacher_logits are always Tensors from forward passes
-        student_logits = student_logits.data
-        teacher_logits = teacher_logits.data
+        if student_logits.ndim != 2 or student_logits.shape != teacher_logits.shape:
+            raise ValueError("Student and teacher logits must have matching (batch, classes) shapes")
+        batch_size, num_classes = student_logits.shape
+        if batch_size == 0 or num_classes == 0:
+            raise ValueError("Distillation needs at least one sample and one class")
+        labels = true_labels.data if isinstance(true_labels, Tensor) else np.asarray(true_labels)
+        if labels.shape == (batch_size,):
+            if (not np.all(np.isfinite(labels)) or np.any(labels != np.floor(labels))
+                    or np.any(labels < 0) or np.any(labels >= num_classes)):
+                raise ValueError("Class labels must be integer IDs in [0, num_classes)")
+            labels = labels.astype(np.intp)
+        elif labels.shape == student_logits.shape:
+            if (not np.all(np.isfinite(labels)) or np.any(labels < 0)
+                    or not np.allclose(labels.sum(axis=1), 1.0)):
+                raise ValueError("Target probabilities must be nonnegative and sum to one per sample")
+        else:
+            raise ValueError("Labels must have shape (batch,) or (batch, classes)")
 
-        # true_labels might be numpy array or Tensor
-        if isinstance(true_labels, Tensor):
-            true_labels = true_labels.data
+        # Only the student side is differentiable. The teacher's log-probabilities
+        # are constants even when its forward pass was recorded by autograd.
+        student_log_probs = log_softmax(student_logits / self.temperature)
+        teacher_log_probs = log_softmax(Tensor(teacher_logits.data) / self.temperature)
+        teacher_probs = Tensor(np.exp(teacher_log_probs.data))
+        soft_loss = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(axis=-1).mean()
 
-        # Soften distributions with temperature
-        student_soft = self._softmax(student_logits / self.temperature)
-        teacher_soft = self._softmax(teacher_logits / self.temperature)
+        hard_log_probs = log_softmax(student_logits)
+        if labels.ndim == 1:
+            hard_loss = hard_log_probs[np.arange(batch_size), labels].mean() * -1.0
+        else:
+            hard_loss = (Tensor(labels) * hard_log_probs).sum(axis=-1).mean() * -1.0
 
-        # Soft target loss: KL(teacher || student), the teacher's distribution
-        # is the reference the student is pulled toward (Hinton et al., 2015)
-        soft_loss = self._kl_divergence(teacher_soft, student_soft)
-
-        # Hard target loss (cross-entropy)
-        student_hard = self._softmax(student_logits)
-        hard_loss = self._cross_entropy(student_hard, true_labels)
-
-        # Combined loss
-        # Note: Standard knowledge distillation (Hinton 2015) scales soft loss by T².
-        # This simplified version omits T² scaling for educational clarity.
-        total_loss = self.alpha * soft_loss + (1 - self.alpha) * hard_loss
-
-        return total_loss
+        return self.alpha * soft_loss + (1 - self.alpha) * hard_loss
         ### END SOLUTION
 
     def _softmax(self, logits):
@@ -1153,10 +1177,10 @@ class KnowledgeDistillation:
 
     def _kl_divergence(self, p, q):
         """Compute KL divergence between distributions."""
-        return np.sum(p * np.log((p + 1e-8) / (q + 1e-8)))
+        return np.mean(np.sum(p * np.log((p + 1e-8) / (q + 1e-8)), axis=-1))
 
     def _cross_entropy(self, predictions, labels):
-        """Compute cross-entropy loss."""
+        """Compute a NumPy batch-mean cross-entropy for the analysis table."""
         # Simple implementation for integer labels
         if labels.ndim == 1:
             return -np.mean(np.log(predictions[np.arange(len(labels)), labels] + 1e-8))
@@ -1169,9 +1193,9 @@ class KnowledgeDistillation:
 
 This test validates teacher-student knowledge transfer with temperature scaling.
 
-**What we're testing**: Distillation loss combining soft and hard targets
+**What we're testing**: A differentiable loss combining soft and hard targets
 **Why it matters**: Enables training small models with teacher knowledge
-**Expected**: Valid loss computation for teacher-student training
+**Expected**: Student parameters receive gradients; teacher parameters do not
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-distillation", "locked": true, "points": 15}
@@ -1188,6 +1212,11 @@ def test_unit_knowledge_distillation():
     student_l1 = Linear(10, 5)
     student = Sequential(student_l1)  # Direct connection, no hidden layer
 
+    # As in Module 07, construct the optimizer before the first forward pass:
+    # registering parameters marks them requires_grad=True.
+    from tinytorch.core.optimizers import SGD
+    optimizer = SGD(student.parameters(), lr=0.1)
+
     # Initialize knowledge distillation with temperature scaling
     kd = KnowledgeDistillation(teacher, student, temperature=3.0, alpha=0.7)
 
@@ -1203,9 +1232,21 @@ def test_unit_knowledge_distillation():
     loss = kd.distillation_loss(student_output, teacher_output, true_labels)
 
     # Verify loss is reasonable
-    assert isinstance(loss, (float, np.floating)), f"Loss should be float, got {type(loss)}"
-    assert loss > 0, f"Loss should be positive, got {loss}"
-    assert not np.isnan(loss), "Loss should not be NaN"
+    assert isinstance(loss, Tensor), f"Loss must preserve autograd, got {type(loss)}"
+    assert np.isfinite(loss.data), "Loss should be finite"
+    loss.backward()
+    assert all(p.grad is not None for p in student.parameters()), "Student needs gradients"
+    assert all(p.grad is None for p in teacher.parameters()), "Teacher must remain fixed"
+
+    # The loss must drive learning, not merely print a plausible scalar.
+    initial = float(loss.data)
+    for _ in range(10):
+        optimizer.zero_grad()
+        loss = kd.distillation_loss(student(input_data), teacher_output, Tensor(true_labels))
+        loss.backward()
+        optimizer.step()
+    final = kd.distillation_loss(student(input_data), teacher_output, true_labels)
+    assert float(final.data) < initial, "Training should reduce the fixed-batch distillation loss"
 
     print("✅ knowledge_distillation works correctly!")
 
@@ -1292,22 +1333,31 @@ def compress_model(model, compression_config):
     APPROACH:
     1. Apply magnitude pruning if specified
     2. Apply structured pruning if specified
-    3. Apply low-rank approximation if specified
-    4. Return compression statistics
+    3. Return compression statistics
+    Low-rank factors require rebuilding layers; use low_rank_approximate separately.
 
     EXAMPLE:
     >>> config = {
     ...     'magnitude_prune': 0.8,
-    ...     'structured_prune': 0.3,
-    ...     'low_rank': 0.5
+    ...     'structured_prune': 0.3
     ... }
     >>> stats = compress_model(model, config)
-    >>> print(f"Final sparsity: {stats['sparsity']:.1f}%")
+    >>> print(f"Final sparsity: {stats['final_sparsity']:.1f}%")
     Final sparsity: 85.0%
 
     HINT: Apply techniques sequentially and measure results
     """
     ### BEGIN SOLUTION
+    # Validate before modifying any weights; unsupported work must not be
+    # recorded as successfully applied.
+    if 'low_rank' in compression_config:
+        raise ValueError("Use low_rank_approximate() and rebuild the layer from its factors")
+    unknown = set(compression_config) - {'magnitude_prune', 'structured_prune'}
+    if unknown:
+        raise ValueError(f"Unknown compression techniques: {sorted(unknown)}")
+    for ratio in compression_config.values():
+        if not np.isfinite(ratio) or not 0 <= ratio <= 1:
+            raise ValueError("Pruning ratios must be between 0 and 1")
     original_params = sum(p.size for p in model.parameters())
     original_sparsity = measure_sparsity(model)
 
@@ -1328,13 +1378,6 @@ def compress_model(model, compression_config):
         ratio = compression_config['structured_prune']
         structured_prune(model, prune_ratio=ratio)
         stats['applied_techniques'].append(f'structured_prune_{ratio}')
-
-    # Low-rank factorization replaces W (m×n) with U (m×k) and V (k×n), which changes
-    # the layer's shape. Sequential cannot express that here, so the pipeline records
-    # the request; use low_rank_approximate() directly when you rebuild the layer.
-    if 'low_rank' in compression_config:
-        ratio = compression_config['low_rank']
-        stats['applied_techniques'].append(f'low_rank_{ratio}')
 
     # Final measurements
     final_sparsity = measure_sparsity(model)
@@ -1447,24 +1490,17 @@ class Compressor:
         Returns:
             Compressed model with sparsity stats (fractions 0-1)
         """
-        stats = {
-            'original_sparsity': Compressor.measure_sparsity(model)
-        }
-
-        # Apply magnitude pruning
-        if 'magnitude_sparsity' in compression_config:
-            model = Compressor.magnitude_prune(
-                model, compression_config['magnitude_sparsity']
-            )
-
-        # Apply structured pruning
-        if 'structured_prune_ratio' in compression_config:
-            model = Compressor.structured_prune(
-                model, compression_config['structured_prune_ratio']
-            )
-
-        stats['final_sparsity'] = Compressor.measure_sparsity(model)
-        stats['compression_ratio'] = 1.0 / (1.0 - stats['final_sparsity']) if stats['final_sparsity'] < 1.0 else float('inf')
+        key_map = {'magnitude_sparsity': 'magnitude_prune',
+                   'structured_prune_ratio': 'structured_prune'}
+        unknown = set(compression_config) - key_map.keys()
+        if unknown:
+            raise ValueError(f"Unknown compression settings: {sorted(unknown)}")
+        report = compress_model(model, {key_map[k]: v for k, v in compression_config.items()})
+        stats = {'original_sparsity': report['original_sparsity'] / 100.0,
+                 'final_sparsity': report['final_sparsity'] / 100.0}
+        # An ideal nonzero-weight ratio, not actual dense-array byte savings.
+        stats['compression_ratio'] = (1.0 / (1.0 - stats['final_sparsity'])
+                                      if stats['final_sparsity'] < 1.0 else float('inf'))
 
         return model, stats
 
@@ -1644,7 +1680,7 @@ def analyze_distillation_effectiveness():
                                  kd._softmax(student_logits.data / temperature))
         hard = kd._cross_entropy(kd._softmax(student_logits.data), labels)
         combined = kd.distillation_loss(student_logits, teacher_logits, labels)
-        print(f"{temperature:<12.1f} {soft:<12.4f} {hard:<12.4f} {combined:.4f}")
+        print(f"{temperature:<12.1f} {soft:<12.4f} {hard:<12.4f} {combined.data:.4f}")
 
     print("\n💡 Knowledge Distillation Insights:")
     print("   • Higher temperature flattens both distributions, so the KL term shrinks;")

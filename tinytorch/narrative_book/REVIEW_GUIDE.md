@@ -1,98 +1,61 @@
 # Reviewer & Practitioner Guide: TinyTorch
 
 **TinyTorch: The xv6 of Machine Learning Systems**
-*Prof. Vijay Janapa Reddi — Harvard University*
-*Machine Learning Systems Laboratory ([mlsysbook.ai](https://mlsysbook.ai))*
 
----
+Prof. Vijay Janapa Reddi — Harvard University
 
-## 1. Executive Summary & Pedagogical Vision
+## Purpose of the Commentary
 
-Modern deep learning education suffers from a profound abstraction crisis. Students and engineers write `import torch` and invoke billion-parameter models, yet have little visibility into memory layouts, reverse-mode automatic differentiation DAGs, cache hierarchies, GPU SRAM tiling, or kernel fusion.
+A reader should be able to follow a computation from its entry point through the TinyTorch functions that implement it, explain the state those functions read or change, and predict the result for a small input. The xv6 analogy describes this relationship between a working reference and its commentary. It does not imply equivalent implementation languages, hardware control, or production coverage.
 
-In 2006, MIT created **xv6**—a clean, 9,000-line re-implementation of Sixth Edition Unix for teaching operating systems from first principles. Students who built xv6 did not just understand system calls; they understood page tables, interrupt handlers, trap frames, and lock contention.
+TinyTorch implements framework mechanisms in Python using NumPy for array storage and numerical operations. The current `src/` files contain complete instructor solutions, inline tests, and demonstrations. The narrative book explains those solutions; generated notebooks support execution and experiments. Reviewing solution stripping or assignment-completion enforcement is separate from reviewing the correctness and teachability of this reference.
 
-**TinyTorch is the xv6 of Machine Learning Systems.**
+## Reading Flows and Evidence
 
-TinyTorch strips away the millions of lines of historical boilerplate in PyTorch and CPython to expose the core mathematical and architectural mechanics of modern AI engines in pure, transparent Python and C++. Every abstraction is built from scratch:
+The book follows the source module order, with milestones that test composition. Each flow should begin with a concrete computation and finish with a contract the next flow can use.
 
-```
-Part I: The Core Engine
-  Tensors -> Activations -> Layers -> Losses -> DataLoader -> Autograd -> Optimizers -> Training
-Part II: Deep Architectures
-  Convolutions -> Tokenization -> Embeddings -> Multi-Head Attention -> Transformers
-Part III: Systems & Acceleration
-  Profiling -> INT8 Quantization -> Compression -> SRAM Acceleration -> KV-Cache -> Capstone
-Part IV: Extensions & Future Frontiers
-  OpenAI Triton -> PyTorch 2.0 TorchInductor -> Hardware Accelerators (TPU / Apple ANE)
-```
+| Flow | Chapters | Execution path to follow | Evidence of understanding |
+| :--- | :--- | :--- | :--- |
+| Forward computation | 01–05 | Tensor operation → activation → layer → loss, with batches supplied by a dataset and loader | Trace values and shapes; distinguish parameters from activations and array storage from Tensor wrappers. |
+| Learning | 06–08, Milestone I | Recorded operation → backward traversal → parameter gradients → optimizer update | Explain broadcast reduction, graph lifetime, gradient accumulation, and normalization by the actual sample count. |
+| Vision | 09 | Image batch → convolution → pooling and normalization → loss | Trace one window and the contributions to its gradients; explain shared parameters. |
+| Language | 10–13, Milestone II | Text → token IDs → embeddings → attention → transformer outputs | Keep token, batch, head, and feature axes distinct; trace a causal attention computation before generation. |
+| Measurement and optimization | 14–17 | Baseline measurement → one transformation → correctness comparison → measurement | Separate elapsed time from analytical counts and distinguish an algorithmic demonstration from a changed storage or hardware execution format. |
+| Reuse and evaluation | 18–21, Milestone III | Cache update → cached attention → controlled comparison → integrated evaluation | Identify cached state, reset and capacity behavior; explain remaining context-dependent work and verify the metric used to claim an improvement. |
 
----
+The local trace and the integrated workload answer different questions. The trace explains the mechanism; the workload tests whether it honors the interfaces on both sides. Neither a passing assertion nor a plausible explanation alone is sufficient evidence for both.
 
-## 2. Target Readers & Course Adoptions
+## Implementation Boundaries to Preserve
 
-This monograph is designed for:
-1. **Undergraduate and Graduate Students** taking Machine Learning Systems, Deep Learning Systems, High-Performance Computing, or Applied AI courses.
-2. **AI Infrastructure Engineers & Systems Programmers** seeking to master framework internals, compiler graph IRs, and memory-bound accelerator dynamics.
-3. **Open-Source Contributors & Framework Hackers** wishing to write custom PyTorch C++ extensions or OpenAI Triton kernels.
+The production bridge can discuss alternatives beyond TinyTorch, provided it identifies them as alternatives. Review claims against these boundaries before checking their style:
 
----
+- TinyTorch's Tensor constructor creates float32 NumPy array storage. A NumPy view inside an operation does not imply that the returned Tensor shares that storage. Zero-copy view claims require evidence from the complete wrapping path.
+- The reference DataLoader forms batches synchronously. Worker processes, asynchronous prefetch queues, pinned memory, and device transfers belong to production comparisons.
+- Reference convolution exposes sliding-window loops. `im2col` and hardware-specific convolution kernels are alternatives, not the implementation of its forward path.
+- Quantization demonstrates integer codes, scale and zero point, calibration, and reconstruction. Tensor storage remains float32; modeled INT8 storage savings are not measurements of a packed integer Tensor or an integer matrix-multiplication kernel.
+- Compression includes pruning, low-rank factorization, and knowledge distillation. Low-rank factorization is not an implemented LoRA training system. A student distillation loss must remain differentiable while teacher outputs remain fixed.
+- NumPy fusion and tiling experiments do not establish register residency, SRAM placement, GPU synchronization, or a universal speedup. Timing claims need the measured workload and comparison conditions.
+- The KV cache stores earlier keys and values in preallocated capacity with a tracked position. It is not a ring-buffer implementation. Reusing projections does not remove attention over the growing prefix or guarantee constant decoding latency.
+- Benchmarking and the capstone provide educational comparisons. They do not certify MLPerf compliance, and separately measured speedups do not establish the performance of their composition.
 
-## 3. Chapter-by-Chapter Discussion & Highlights
+Chapter 21 extends the discussion to production tools and hardware. Its examples must remain visibly outside the NumPy reference implementation and must not become undeclared prerequisites for earlier chapters.
 
-### Part I: The Core Engine
-* **Chapter 1 (Tensors)**: Flat memory arrays, strides, row-major layout, zero-copy views, transpose mechanics, and stride-0 broadcasting.
-  * *Discussion Question*: Why does transposing a matrix cost $O(1)$ time in memory metadata but potentially degrade matrix multiplication throughput by $10\times$ due to CPU cache line misses?
-* **Chapter 2 (Activations)**: Associative linear collapse proof, Sigmoid/Tanh vanishing gradients ($0.25$ derivative ceiling), ReLU, and GELU.
-  * *Discussion Question*: Why is GELU preferred over ReLU in large language models despite being computationally more expensive?
-* **Chapter 3 (Layers)**: Kaiming He variance preservation derivation ($\text{Var}(w)=2/D_{\text{in}}$), inverted dropout ($1/(1-p)$ scaling), and modular parameter management.
-* **Chapter 4 (Losses)**: Numerical stability, IEEE 754 float32 overflow, Log-Sum-Exp shift-invariance derivation ($c = \max(z)$), and fused Cross-Entropy.
-* **Chapter 5 (DataLoader)**: I/O starvation bottlenecks, asynchronous producer-consumer prefetching queues, POSIX shared memory, and DMA page-locking.
-* **Chapter 6 (Autograd)**: Failure of numerical differentiation ($O(N)$ passes), dynamic tape recording, reverse topological sort, multivariate Vector-Jacobian Products (VJPs), and in-place gradient accumulation.
-* **Chapter 7 (Optimizers)**: Ill-conditioned ravines, condition numbers ($\kappa$), heavy-ball momentum, Adam bias correction, and AdamW decoupled weight decay.
-* **Chapter 8 (Training & Serialization)**: Rigid 5-step state machine (`zero_grad -> forward -> loss -> backward -> step`), global gradient norm clipping ($\|\mathbf{g}\|_{\text{global}}$), cosine annealing, and atomic POSIX `os.replace()` checkpointing.
-* **Milestone 1**: 1958 Rosenblatt Perceptron to 1969 Minsky XOR crisis to 1986 Rumelhart MLP on TinyDigits.
+## Review Procedure
 
-### Part II: Deep Architectures
-* **Chapter 9 (Convolutions)**: Spatial locality, weight sharing, translational equivariance, $O(N)$ nested loops crisis, `im2col` GEMM unrolling, and cuDNN implicit GEMM.
-* **Chapter 10 (Tokenization)**: Shannon information entropy, Byte-Pair Encoding (BPE) priority merge ranks, and UTF-8 byte-fallback safety.
-* **Chapter 11 (Embeddings)**: High-dimensional orthogonality crisis, zero-compute DRAM row pointer gathering, Vaswani sinusoidal encodings, and Rotary Positional Embeddings (RoPE).
-* **Chapter 12 (Attention)**: Quadratic sequential bottleneck, dot-product variance explosion ($\text{Var}(QK^T)=d_k$), $1/\sqrt{d_k}$ variance restoration, causal lower-triangular masking ($-\infty$), and FlashAttention-2 SRAM tiling.
-* **Chapter 13 (Transformers)**: Post-LN gradient vanishing ($O(1/L)$) vs Pre-LN residual superhighways, LayerNorm channel stabilization, $4\times$ MLP expansion, and complete `TinyGPT`.
-* **Milestone 2**: Autoregressive text generation, temperature sampling ($T$), top-$k$ probability truncation, and language modeling.
+Choose one execution path before reading a chapter in detail. The following sequence tests whether the explanation can guide a reader through the code:
 
-### Part III: Systems & Acceleration
-* **Chapter 14 (Profiling)**: Williams Roofline Model ($I = \text{FLOPs}/\text{Byte}$), hardware ridge point ($I_{\text{ridge}} = P_{\text{peak}}/B_{\text{peak}}$), memory bandwidth stalls, and flame graphs.
-* **Chapter 15 (Quantization)**: 4-byte float DRAM tax, symmetric uniform affine INT8 scaling ($S = \max(|X|)/127$), integer accumulators, and DP4A hardware instructions.
-* **Chapter 16 (Compression)**: Unstructured sparsity index indirection tax, structured channel pruning, Low-Rank SVD decomposition ($W \approx W_A W_B$), and LoRA adapter fine-tuning.
-* **Chapter 17 (Acceleration & Fusion)**: Memory hierarchy latency gap (SRAM 1ns vs DRAM 200ns), intermediate roundtrip tax, Fused Bias+GELU register residency, and Cache-Tiled GEMM ($64\times 64$).
-* **Chapter 18 (Memoization & KV-Cache)**: Quadratic $O(S^2)$ token recomputation tax, pre-allocated static `KVCache` ring buffers, $O(1)$ constant decode latency, and vLLM PagedAttention.
-* **Chapter 19 (Benchmarking)**: Cold cache misses, asynchronous GPU queue illusions, warmup stabilization, device synchronization barriers, $P_{50}/P_{95}/P_{99}$ percentiles, and MLPerf compliance.
-* **Chapter 20 (Capstone & Amdahl's Law)**: Cumulative Multiplier Stack ($2.0\times \times 1.5\times \times 1.3\times \times 4.2\times = 16.38\times$ speedup).
-* **Milestone 3**: The Torch Olympics — multi-metric evaluation across Accuracy, Memory footprint, and Latency.
+1. Identify the caller and the source symbol that receives control. Check that all prerequisites for understanding this call have already been explained or are deferred explicitly.
+2. Record input and output shapes, persistent state, and state that belongs only to this call. Follow the actual dispatch and helper calls rather than inferring behavior from a familiar API name.
+3. State the invariant and work through the chapter's small trace independently. Check intermediate values, reduction axes, mutation, and graph connectivity where relevant.
+4. Find a test that would fail if the invariant were violated. Check a meaningful boundary case, such as a shared graph, an unequal final batch, a constant quantization range, or cache exhaustion.
+5. Read the production bridge after the reference path. Verify that it explains the constraint driving a different design and distinguishes measured results, estimates, and hypothetical examples.
 
-### Part IV: Extensions & Future Frontiers
-* **Chapter 21 (Extensions & Future Frontiers)**: OpenAI Triton block-level GPU programming, PyTorch 2.0 TorchInductor AOT graph compilation, Google TPU systolic arrays, Apple Neural Engine unified memory, and the final systems engineer's epilogue.
+Record findings with the chapter and source location, the disputed claim, a concrete consequence for the reader, and a proposed correction. Numerical or execution claims should include a small reproducer or a supporting test. Editorial suggestions should name the comprehension problem they solve.
 
----
+## Validation and Source Authority
 
-## 4. Reviewer Feedback Rubric
+Registered book listings are extracted from source symbols through `tools/listings.py` and `tools/listings.yml` in the narrative-book directory. Run `python3 tools/listings.py --check` there to detect drift. A successful listing check establishes agreement for registered excerpts; surrounding explanations and worked traces still require review.
 
-When evaluating the monograph, we invite your feedback on four core criteria:
+From the TinyTorch package root, in its development environment, `python3 tools/check_reference.py` checks targeted regressions against a temporary source-built package. After regenerating the instructor exports with `python3 -m tito.main dev export --all`, `python3 tools/release_check.py` checks structure, tests, and notebook execution in progressive isolation. Regenerating exports replaces generated notebook content, so use a reference checkout for this workflow.
 
-1. **Conceptual & Physical Intuition (Weight: 30%)**:
-   * Does every chapter explain *why* the mathematical or architectural choice exists from a systems/physics perspective before presenting the equations?
-2. **Mathematical & Systems Rigor (Weight: 25%)**:
-   * Are the derivations (e.g., Kaiming He variance conservation, Log-Sum-Exp shift invariance, Roofline arithmetic intensity) accurate, clear, and pedagogical?
-3. **Hardware Fidelity & Real-World Alignment (Weight: 25%)**:
-   * Are the hardware details (SRAM/DRAM latencies, PCIe bandwidth, tensor cores, cache line alignment) true to production computing systems?
-4. **Pedagogical Flow & Reader Engagement (Weight: 20%)**:
-   * Does the narrative maintain momentum without syllabus boilerplate or repetitive bulleted lists?
-
----
-
-## 5. Submitting Feedback & Contributions
-
-- **Online Discussions**: Open a topic on [github.com/harvard-edge/cs249r_book/discussions](https://github.com/harvard-edge/cs249r_book/discussions).
-- **Errata & Code Contributions**: Submit a Pull Request targeting the `dev` branch.
-- **Course Adoptions & Inquiries**: Contact Prof. Vijay Janapa Reddi at `vjr@seas.harvard.edu`.
+Report the checks run and their results alongside any remaining uncertainty. A complete instructor reference provides a stable object to study, but a green suite does not justify claims about untested inputs, unimplemented hardware behavior, or learning outcomes that have not been evaluated with students.

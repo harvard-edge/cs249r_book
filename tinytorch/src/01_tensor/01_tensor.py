@@ -54,17 +54,6 @@ from tinytorch.core.tensor import Tensor   # every later module starts here
 - **Integration:** Foundation that every other module will build upon
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.tensor
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -89,6 +78,17 @@ Module 01 (Tensor) → All Other Modules
 Students completing this module will have built the foundation
 that every other TinyTorch component depends on.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.tensor
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -313,10 +313,24 @@ Tensor wraps with: shape=(2,3), size=6, dtype=float32
 **Why This Approach?**
 - **Performance**: NumPy's C implementations are highly optimized
 - **Compatibility**: Easy integration with scientific Python ecosystem
-- **Memory Discipline**: One copy per operation. `Function.apply` wraps every result in a fresh Tensor, so no two Tensors ever share a buffer and no operation can corrupt its inputs
+- **Memory Discipline**: `Function.apply` wraps each result in a fresh Tensor with independent storage. Operations leave their inputs unchanged; direct writes through `.data` or `.numpy()` remain the caller's responsibility
 - **Familiar Surface**: The method names match PyTorch's, so what you learn here transfers
 
-**Three of the methods below come before the sections that explain them.** The class is one cell, so you will write `reshape`, `transpose`, and `_validate_matmul_shapes` now, before the Matrix Multiplication section (which motivates the shape check) and the Shape Manipulation section (which explains reshape and transpose). Each APPROACH block is written to be enough on its own; if you want the why first, read those two sections and come back.
+The complete class stays together so its public interface is visible in one
+place. Follow the path from `__init__` to an arithmetic method such as `__add__`,
+then to `Function.apply`. The operation classes after the Tensor definition
+provide the numerical work, and their adjacent tests check each operation.
+
+Three shape rules explain the methods in the class before we inspect them.
+`reshape` changes the grouping of elements without changing their count:
+six values can become a `(2, 3)` matrix, but not a `(2, 4)` matrix. `transpose`
+swaps axes: a `(2, 3)` matrix becomes `(3, 2)`, with entry `(i, j)` moving to
+`(j, i)`. Matrix multiplication contracts the shared dimension:
+`(2, 3) @ (3, 4)` produces `(2, 4)`, whereas `(2, 3) @ (2, 4)` is invalid.
+`_validate_matmul_shapes` checks that contract before NumPy performs the work.
+The later operation sections extend these examples to batched inputs and test
+the rules individually. Utility methods such as `__repr__` help inspect results;
+they can be read after the numerical path is clear.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tensor-class", "solution": true}
@@ -408,7 +422,7 @@ class Tensor:
         return Copy.apply(self)
 
     def view(self, *shape):
-        """Alias for reshape, matching PyTorch's Tensor.view() for contiguous tensors."""
+        """Reshape alias with independent storage; unlike PyTorch's view(), this copies."""
         return self.reshape(*shape)
 
     def masked_fill(self, mask, value):
@@ -632,9 +646,10 @@ class Tensor:
         """Transpose tensor dimensions.
 
         Transposing swaps two axes: a (2, 3) matrix becomes (3, 2), with
-        element [i, j] moving to [j, i]. The data does not move; only the order
-        in which the axes are read changes, and Permute does that reordering
-        from an axes list such as (1, 0). Your job here is to build that list.
+        element [i, j] moving to [j, i]. Permute asks NumPy to reorder axes
+        using a list such as (1, 0). NumPy can represent this as a view, but
+        Function.apply wraps it in a new Tensor with its own copied storage.
+        Your job here is to build the axes list.
 
         TODO: Swap tensor dimensions (default: swap last two dimensions).
 
@@ -1366,8 +1381,8 @@ Memory Layout (unchanged):
 Before: [1][2][3][4][5][6]
 After:  [1][2][3][4][5][6]  ← Same memory, different interpretation
 
-Key Insight: NumPy's reshape is O(1) -- it hands back a view over the same
-buffer. Our Tensor re-wraps that result with np.array(), which copies, so
+Key Insight: NumPy can reshape this contiguous array in O(1) by returning a
+view (other layouts may require a copy). Our Tensor wraps the result with np.array(), so
 TinyTorch's reshape is O(N). The layout reasoning is unchanged; the copy is
 the price of every Tensor owning its buffer outright.
 
@@ -1393,7 +1408,7 @@ Result:  [[1, 4],        (shape: (3, 2))
 
 Memory Layout (unchanged; strides swapped):
 Before: [1][2][3][4][5][6]   read row-by-row  (row stride 3, col stride 1)
-After:  [1][2][3][4][5][6]   read column-by-column (row stride 1, col stride 2)
+After:  [1][2][3][4][5][6]   read column-by-column (row stride 1, col stride 3)
         ↑ the bytes never move; only the strides do, so walking a row of the
           transposed view now jumps through memory — cache-unfriendly
 
@@ -1414,21 +1429,23 @@ Common Linear Algebra Usage:
 ### Performance Implications
 
 ```
-Operation Performance (for 1000×1000 matrix):
-┌─────────────────┬──────────────┬─────────────────────┬─────────────────┐
-│ Operation       │ Time         │ Memory Access       │ Cache Behavior  │
-├─────────────────┼──────────────┼─────────────────────┼─────────────────┤
-│ reshape()       │ ~0.001 ms    │ No data copy        │ No cache impact │
-│ transpose()     │ ~0.001 ms    │ Non-contiguous view │ Poor locality   │
-└─────────────────┴──────────────┴─────────────────────┴─────────────────┘
+Storage cost for N elements:
+┌─────────────────┬──────────────────────────┬──────────────────────────┐
+│ Operation       │ NumPy array behavior     │ TinyTorch Tensor result  │
+├─────────────────┼──────────────────────────┼──────────────────────────┤
+│ reshape()       │ View when layout allows  │ Copies N values          │
+│ transpose()     │ View with swapped strides│ Copies N values          │
+└─────────────────┴──────────────────────────┴──────────────────────────┘
 
-Both calls are free: they only change how the same bytes are indexed. The bill
-arrives later. Reading a transposed matrix walks memory column by column, so
-consecutive elements land in different cache lines, and whatever consumes the
-transposed view runs slower even though transpose() itself did no work.
+A view changes metadata without moving values. TinyTorch chooses independent
+storage instead, so both operations incur a copy. Layout still matters when
+reading the result: strided access can use cache lines less efficiently.
 ```
 
-This is why frameworks like PyTorch often use "lazy" transpose operations that defer the actual data movement until necessary.
+Measure the operation and its consumer separately. A cheap view can lead to a
+more expensive subsequent computation; a copy can cost time now and improve a
+later access pattern. The result depends on layout, kernel, and hardware.
+
 """
 
 
@@ -1494,10 +1511,12 @@ class Copy(Function):
         """
         Copy the array into contiguous memory.
 
-        TODO: Return np.ascontiguousarray(a).
+        TODO: Return np.ascontiguousarray(a), preserving the original shape.
+
+        HINT: NumPy promotes a scalar to shape (1,); reshape back to a.shape.
         """
         ### BEGIN SOLUTION
-        return np.ascontiguousarray(a)
+        return np.ascontiguousarray(a).reshape(a.shape)
         ### END SOLUTION
 
 
@@ -1508,13 +1527,14 @@ class MaskedFill(Function):
         """
         Fill the positions where self.mask is True with self.value.
 
-        TODO: Copy the array, write self.value at self.mask, return the copy.
+        TODO: Copy the array, broadcast the mask to its shape, and fill masked positions.
 
-        HINT: Copy first. The input array belongs to another Tensor.
+        HINT: Copy first. Boolean indexing needs a full-size mask; use
+        np.broadcast_to(self.mask, a.shape) to expand a shared attention mask.
         """
         ### BEGIN SOLUTION
         result = a.copy()
-        result[self.mask] = self.value
+        result[np.broadcast_to(self.mask, a.shape)] = self.value
         return result
         ### END SOLUTION
 
@@ -1585,6 +1605,10 @@ def test_unit_shape_manipulation():
                     f"got {swapped.data[k,j,i]}"
                 )
 
+    scalar = Tensor(3.0)
+    assert scalar.contiguous().shape == (), "Contiguous must preserve scalar rank"
+    assert scalar.transpose().shape == (), "Scalar transpose must preserve rank"
+
     # Test contiguous returns a copy with same data
     contig = matrix.contiguous()
     assert np.array_equal(contig.data, matrix.data)
@@ -1594,6 +1618,12 @@ def test_unit_shape_manipulation():
     batch_images = Tensor(rng.random((2, 3, 4)))  # (batch=2, height=3, width=4)
     flattened = batch_images.reshape(2, -1)  # (batch=2, features=12)
     assert flattened.shape == (2, 12)
+
+    # A shared feature mask broadcasts across rows (later used by attention).
+    masked = matrix.masked_fill(np.array([False, True, False]), -1)
+    assert np.array_equal(masked.data, [[1, -1, 3], [4, -1, 6]])
+    assert np.array_equal(matrix.data, [[1, 2, 3], [4, 5, 6]])
+    assert not np.shares_memory(matrix.data, transposed.data), "Transpose owns copied storage"
 
     print("✅ Shape manipulation works correctly!")
 
@@ -1933,19 +1963,19 @@ def analyze_memory_layout():
     print("\n" + "=" * 60)
     print("📊 PERFORMANCE IMPACT:")
     print(f"   Slowdown factor: {slowdown:.2f}× ({col_time/row_time:.1f}× slower)")
-    print(f"   Cache misses cause {(slowdown-1)*100:.0f}% performance loss")
+    print("   This timing ratio includes loop and reduction overhead; it does not count cache misses")
 
     # Educational insights
     print("\n💡 KEY INSIGHTS:")
     print("   1. Memory layout matters: Row-major (C-style) storage is sequential")
     print("   2. Cache lines are ~64 bytes: Row access loads nearby elements \"for free\"")
-    print("   3. Column access misses cache: Must reload from DRAM every time")
+    print("   3. Strided column access can use cache lines less efficiently")
     print(f"   4. This is O(n) algorithm but {slowdown:.1f}× different wall-clock time!")
 
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
     print("   • Image processing libraries use specific memory formats for cache efficiency")
     print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
-    print(f"   • Walking columns costs {slowdown:.1f}× more than walking rows; a transposed view pays this on every read")
+    print(f"   • This run's column/row time ratio is {slowdown:.1f}×; other kernels may behave differently")
     print("   • Hardware-optimized libraries leverage memory layout for better performance")
 
     print("\n" + "=" * 60)

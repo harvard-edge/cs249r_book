@@ -1,8 +1,8 @@
-# Milestone I: From Perceptrons to Rumelhart's MLP {#sec-milestone-1}
+# Milestone I: From Perceptrons to Rumelhart's MLP {#sec-milestone-1 .unnumbered}
 
-Chapter 8 closed the loop. You now own every piece a framework needs in order to learn from data: tensors, activations, layers, losses, a data loader, an autograd tape, optimizers, and the five-step loop that orders them. Each piece has passed its own tests. None of them has yet been asked to learn anything.
+Chapter 8 closed the loop. You now own every piece a framework needs in order to learn from data: tensors, activations, layers, losses, a data loader, an autograd tape, optimizers, and the five-step loop that orders them. The earlier chapters checked local rules and small training traces. This milestone checks whether those rules compose across two trainable layers and continue to work over repeated updates.
 
-This milestone asks the question a practitioner asks of any new framework before trusting it. Does it actually train? We answer with two problems that sit far apart in history and close together in code. The first is XOR, a four-row truth table that a single-layer perceptron provably cannot learn, which Minsky and Papert used in 1969 to argue neural networks into their first winter. The second is TinyDigits, a small set of 8 by 8 handwritten digits, the kind of task the 1986 backpropagation paper by Rumelhart, Hinton, and Williams showed a hidden layer could handle. If the engine learns XOR, gradients are flowing through a hidden layer correctly. If it learns digits, modules 01 through 08 work together on real data.
+This milestone asks the question a practitioner asks of any new framework before trusting it. Does it actually train? We answer with two problems that sit far apart in history and close together in code. The first is XOR, a four-row truth table that a single-layer perceptron provably cannot learn, which Minsky and Papert used in 1969 to argue neural networks into their first winter. The second is TinyDigits, a small set of 8 by 8 handwritten digits, the kind of task the 1986 backpropagation paper by Rumelhart, Hinton, and Williams showed a hidden layer could handle. Learning XOR provides an integration check on hidden-layer training; it does not prove every backward rule correct. Learning digits also exercises batching and multiclass loss. The small traces from earlier chapters remain necessary because a training run can improve despite a numerically incorrect gradient.
 
 ![From the 1958 perceptron's single decision line to the 1986 two-layer network that folds the XOR corners apart](assets/images/diagrams/milestone_01-diag-1.svg){#fig-milestone1-history}
 
@@ -79,7 +79,7 @@ Minsky and Papert knew that a hidden layer could represent XOR. Their objection 
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Milestone I is three scripts: `milestones/02_1969_xor/01_xor_crisis.py`, `milestones/02_1969_xor/02_xor_solved.py`, and `milestones/03_1986_mlp/01_rumelhart_tinydigits.py`. They import the NumPy-backed modules 01 through 08 that students build in the TinyTorch course (`src/01_tensor` through `src/08_training`), so they run only inside a TinyTorch checkout after those modules have been exported into the `tinytorch` package. The listings in this chapter are excerpts of those scripts with the progress bars and panels removed; they are not standalone, because every class they use was built in Chapters 1 through 8.
+Milestone I is three scripts: `milestones/02_1969_xor/01_xor_crisis.py`, `milestones/02_1969_xor/02_xor_solved.py`, and `milestones/03_1986_mlp/01_rumelhart_tinydigits.py`. They import the NumPy-backed modules 01 through 08 that students build in the TinyTorch course (`src/01_tensor` through `src/08_training`), so they run only inside a TinyTorch checkout after those modules have been exported into the `tinytorch` package. The listings adapt those scripts into short experiments, omitting terminal decoration and, where stated, simplifying their return values. They require the exported TinyTorch package and should run in order from the `tinytorch/` project directory. The framework classes themselves are the implementations studied in Chapters 1 through 8.
 :::
 
 ### The XOR network and its data
@@ -123,9 +123,9 @@ The model is seventeen numbers: a 2 by 4 weight matrix and 4 biases in the hidde
 
 ### The loop
 
-A framework needs one more thing before it can learn, and it is not a class. It is an order. Forward, loss, backward, step, clear, and Chapter 8 spent a chapter on why that order matters. The step that is easiest to drop is the clear. Chapter 6's `backward()` adds into `.grad` rather than assigning to it, so if the gradients are not cleared between one backward pass and the next, epoch two trains on the sum of two epochs' gradients, epoch three on three, and the effective learning rate climbs every step. Nothing raises an error. The loss just stops falling, or blows up.
+The first call inside the loop is `model(X)`, but recording has already been enabled by constructing `SGD(model.parameters(), lr=lr)`. The optimizer holds the four original parameter tensors and marks them `requires_grad=True` before the model runs. Forward, loss, backward, step, and clear then follow the cycle from Chapter 8. The step that is easiest to drop is the clear. Chapter 6's `backward()` adds into `.grad` rather than assigning to it, so if the gradients are not cleared between one backward pass and the next, epoch two trains on the sum of two epochs' gradients, epoch three on three, and the effective learning rate climbs every step. Nothing raises an error. The loss just stops falling, or blows up.
 
-The training function below is Chapter 8's five steps written out by hand. The milestone scripts do not use the `Trainer` class; they show the loop in the open so that there is nothing between you and the mechanism.
+The training function below writes that cycle directly. It returns the model for the next experiment; the full milestone script returns a history dictionary for its display. The XOR class exposes `__call__`, which this loop uses. `Trainer._forward` instead calls a model's `forward` method, so handing this exact class to `Trainer` would require providing that method. The manual loop makes this interface boundary visible.
 
 ```python
 def train_network(model, X, y, epochs=500, lr=0.5):
@@ -149,7 +149,7 @@ X, y = generate_xor_data(100)
 model = train_network(XORNetwork(hidden_size=4), X, y)
 ```
 
-Two things to notice. First, `zero_grad()` comes last rather than first. That is Chapter 8's cycle rotated by one step, and what matters is that the gradients are cleared between one `backward()` and the next; PyTorch loops usually put `optimizer.zero_grad()` first, and both orders are correct. Second, the script reseeds the random number generator that `Linear` uses for its initial weights.[^fn-seed-xor-init] This is the slack from the previous subsection running out. With only four hidden units, some random starts put a unit permanently on the dead side of its ReLU, and the network settles at 75% accuracy with one corner stuck near probability 0.5. That is the dying ReLU failure from Chapter 2 showing up in the smallest network that can exhibit it. The seed 1986 is a start I checked; the script tells you to rerun with another if you land on the plateau.
+The trailing `zero_grad()` is valid here because the freshly constructed parameters begin with `grad=None`, and every iteration clears after its update. Calling this function on a model with existing gradients would require clearing before the first forward pass as well. The printed predictions and loss belong to the forward pass before the update; measuring the updated model would require another forward pass. The script also reseeds the random number generator that `Linear` uses for its initial weights.[^fn-seed-xor-init] This is the slack from the previous subsection running out. With only four hidden units, some random starts put a unit permanently on the dead side of its ReLU, and the network settles at 75% accuracy with one corner stuck near probability 0.5. That is the dying ReLU failure from Chapter 2 showing up in the smallest network that can exhibit it. The seed 1986 is a start I checked; the script tells you to rerun with another if you land on the plateau.
 
 [^fn-seed-xor-init]: **Seed**: the starting value of a pseudo-random number generator. Two runs with the same seed draw the same sequence of "random" numbers, which makes a training run reproducible; two runs with different seeds start from different initial weights and can end in different places.
 
@@ -214,7 +214,7 @@ for epoch in range(20):
     print(f"epoch {epoch + 1:2d}  test accuracy {evaluate_accuracy(model, test_images, test_labels):.1f}%")
 ```
 
-Two details in the listing are worth a second look. `DigitMLP.__call__` reshapes an (N, 8, 8) batch to (N, 64) before the first `Linear`, and on a contiguous array that reshape is a view, no copy, the same stride bookkeeping as Chapter 1. And `parameters()` is hand-written again, four tensors in a list, because the model is a plain class. In PyTorch the same script is an `nn.Flatten` in front of two `nn.Linear` layers inside an `nn.Sequential`, with an `nn.CrossEntropyLoss` and a `DataLoader` that look exactly like the ones here.
+Two details in the listing are worth a second look. `DigitMLP.__call__` reshapes an (N, 8, 8) batch to (N, 64) before the first `Linear`, and on a contiguous array that reshape is a view, no copy, the same stride bookkeeping as Chapter 1. `parameters()` again returns the four original parameter tensors because the model is a plain class. Flattening through `.data` creates a new Tensor and detaches the image input from any earlier graph. That is acceptable for fixed dataset images here; placing the same reconstruction between trainable layers would cut off gradients to the earlier layer. Tensor.reshape from Chapter 6 is the path that preserves a differentiable connection. In PyTorch the same script is an `nn.Flatten` in front of two `nn.Linear` layers inside an `nn.Sequential`, with an `nn.CrossEntropyLoss` and a `DataLoader` that look exactly like the ones here.
 
 The napkin math says how small this still is. The model's $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$ parameters are about 9.6 KB in float32. The entire training set is $150 \times 64$ floats, about 38 KB. I ran the script four times. The untrained model scored 17% on the test images, training crossed 100% on both the training and test sets by epoch 5, and the loss was near 0.016 at epoch 20. The script's own docstring predicts 75 to 85%, which was written for a harder split; with 47 test images, 100% means the network makes fewer than one error in 47, not that digit recognition is solved. The point is not the number. The point is that every module, from the strided tensor to the shuffled loader to the tape, cooperated on data it had never seen.
 
@@ -247,6 +247,28 @@ for (x1, x2), t in zip(corners, targets):
 : The hand-built two-unit network on the four XOR corners. The two positive rows collapse onto the same hidden point. {#tbl-xor-numerical-trace tbl-colwidths="[18,10,26,22,24]"}
 
 Read down the hidden column. Rows two and three are identical after the ReLU, and row four is the only one where $h_2$ is nonzero, so the output neuron only has to subtract it away. Every number is exact, which is what makes this a good first check when your own `Linear` and `ReLU` produce something surprising.
+
+The hand-built fold establishes representational capacity. A separate one-example backward trace establishes how a hidden weight receives credit. Set both hidden activations to one, give their output weights opposite signs, and use the positive XOR input `(1, 0)`. The output score is zero, the sigmoid returns one half, and binary cross-entropy with target one sends a gradient of minus one half to that score.
+
+```python
+trace_model = XORNetwork(hidden_size=2)
+trace_model.hidden.weight.data[:] = [[1.0, 1.0], [1.0, 1.0]]
+trace_model.hidden.bias.data[:] = 0.0
+trace_model.output.weight.data[:] = [[1.0], [-1.0]]
+trace_model.output.bias.data[:] = 0.0
+optimizer = SGD(trace_model.parameters(), lr=0.1)
+optimizer.zero_grad()
+loss = BinaryCrossEntropyLoss()(trace_model(Tensor([[1.0, 0.0]])), Tensor([[1.0]]))
+loss.backward()
+print(trace_model.output.weight.grad)      # [[-0.5], [-0.5]]
+print(trace_model.hidden.weight.grad)      # [[-0.5, 0.5], [0.0, 0.0]]
+optimizer.step()
+print(trace_model.hidden.weight.data)      # [[1.05, 0.95], [1.0, 1.0]]
+```
+
+The output matmul multiplies the incoming minus one half by its saved weights, producing hidden gradients minus one half and plus one half. Both ReLU inputs were positive, so both gradients pass through. The hidden matmul forms the outer product with the saved input `(1, 0)`: the first row changes and the second row receives zero. The hidden layer needed no target of its own. Its derivative came from the exact route by which it influenced the one supervised output.
+
+The signs also explain the update. Increasing the first hidden activation raises the output through its positive weight; decreasing the second raises the output through its negative weight. SGD makes both changes. This is a check on graph composition and parameter identity, independent of whether a long run happens to reach a high accuracy.
 
 The trained four-unit network finds a fold of its own, and it is worth seeing that gradient descent did not need our hand-picked one. The values below come from my seeded run above, read out by feeding the four exact corners through the trained layers.
 

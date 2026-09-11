@@ -85,13 +85,15 @@ import argparse
 import time
 
 # Add project root to path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(project_root)
+# The package and milestone utilities live in separate parent directories.
+milestones_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(milestones_root))
+sys.path.append(milestones_root)
 
 # Import TinyTorch components YOU BUILT!
-from tinytorch.core.tensor import Tensor              # Module 02: YOU built this!
-from tinytorch.core.layers import Linear             # Module 04: YOU built this!
-from tinytorch.core.activations import ReLU, Softmax  # Module 03: YOU built this!
+from tinytorch.core.tensor import Tensor              # Module 01: YOU built this!
+from tinytorch.core.layers import Linear             # Module 03: YOU built this!
+from tinytorch.core.activations import ReLU         # Module 02: YOU built this!
 from tinytorch.core.spatial import Conv2d, MaxPool2d, BatchNorm2d  # Module 09: YOU built this!
 from tinytorch.core.losses import CrossEntropyLoss    # Module 04: YOU built this!
 from tinytorch.core.optimizers import Adam            # Module 07: YOUR optimizer!
@@ -243,12 +245,12 @@ class CIFARCNN:
         self.pool = MaxPool2d(kernel_size=2, stride=2)  # Module 09: YOUR pooling!
 
         # Activation functions
-        self.relu = ReLU()  # Module 03: YOUR activation!
+        self.relu = ReLU()  # Module 02: YOUR activation!
 
         # Dense classification head
         # After conv1(32→30)→pool(15)→conv2(13)→pool(6): 64*6*6 = 2304 features
-        self.fc1 = Linear(64 * 6 * 6, 256)  # Module 04: YOUR Linear!
-        self.fc2 = Linear(256, 10)          # Module 04: YOUR Linear!
+        self.fc1 = Linear(64 * 6 * 6, 256)  # Module 03: YOUR Linear!
+        self.fc2 = Linear(256, 10)          # Module 03: YOUR Linear!
 
         # Training mode flag
         self._training = True
@@ -286,20 +288,20 @@ class CIFARCNN:
         # First conv block: Conv → BatchNorm → ReLU → Pool (modern pattern)
         x = self.conv1(x)           # Module 09: YOUR Conv2d!
         x = self.bn1(x)             # Module 09: YOUR BatchNorm! Normalizes activations
-        x = self.relu(x)            # Module 03: YOUR ReLU!
+        x = self.relu(x)            # Module 02: YOUR ReLU!
         x = self.pool(x)            # Module 09: YOUR MaxPool2d!
 
         # Second conv block: Same modern pattern
         x = self.conv2(x)           # Module 09: YOUR Conv2d!
         x = self.bn2(x)             # Module 09: YOUR BatchNorm!
-        x = self.relu(x)            # Module 03: YOUR ReLU!
+        x = self.relu(x)            # Module 02: YOUR ReLU!
         x = self.pool(x)            # Module 09: YOUR MaxPool2d!
 
         # Flatten and classify
         x = flatten(x)              # Module 09: YOUR spatial→dense bridge!
-        x = self.fc1(x)             # Module 04: YOUR Linear!
-        x = self.relu(x)            # Module 03: YOUR ReLU!
-        x = self.fc2(x)             # Module 04: YOUR classification!
+        x = self.fc1(x)             # Module 03: YOUR Linear!
+        x = self.relu(x)            # Module 02: YOUR ReLU!
+        x = self.fc2(x)             # Module 03: YOUR classification!
 
         return x
 
@@ -365,13 +367,13 @@ def visualize_dataloader(train_size, test_size, batch_size):
     print("              |")
     print("              v Fed to YOUR CNN one batch at a time")
     print("              |")
-    print(f"  Memory: Only {batch_size} images loaded at once (not {train_size:,}!)")
+    print(f"  Compute: Process {batch_size} images at a time; the dataset stays in memory.")
     print()
     print("  Why This Matters:")
-    mem_all = train_size * 32 * 32 * 3 / (1024 * 1024)
-    mem_batch = batch_size * 32 * 32 * 3 / (1024 * 1024)
-    print(f"    * Without batching: {train_size:,} x 32x32x3 = {mem_all:.1f} MB in memory")
-    print(f"    * With YOUR DataLoader: {batch_size} x 32x32x3 = {mem_batch:.2f} MB per batch")
+    mem_all = train_size * 32 * 32 * 3 * 4 / (1024 * 1024)
+    mem_batch = batch_size * 32 * 32 * 3 * 4 / (1024 * 1024)
+    print(f"    * Resident float32 dataset: {mem_all:.1f} MiB ({train_size:,} images)")
+    print(f"    * Additional float32 batch: {mem_batch:.2f} MiB ({batch_size} images)")
     print(f"    * Shuffling: Prevents model from memorizing order")
     print("=" * 70)
 
@@ -425,6 +427,7 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
     print(f"   YOUR DataLoader (Module 05) handles batching!")
     print(f"   YOUR BatchNorm (Module 09) uses batch statistics!")
     print(f"   YOUR Adam optimizer (Module 07)!")
+    print("   Demo limit: at most 100 training batches per epoch.")
 
     # Set model to training mode - BatchNorm uses batch statistics
     model.train()
@@ -438,7 +441,6 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
         epoch_loss = 0
         correct = 0
         total = 0
-        batch_count = 0
 
         # Use YOUR DataLoader to iterate through batches!
         for batch_idx, (batch_data, batch_labels) in enumerate(train_loader):
@@ -468,8 +470,7 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
             correct += np.sum(predictions == batch_labels.data.flatten())
             total += len(batch_labels.data)
 
-            epoch_loss += loss_value
-            batch_count += 1
+            epoch_loss += loss_value * batch_data.shape[0]
 
             # Progress
             if (batch_idx + 1) % 20 == 0:
@@ -479,7 +480,7 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
 
         # Epoch summary
         epoch_acc = 100 * correct / total
-        avg_loss = epoch_loss / max(1, batch_count)
+        avg_loss = epoch_loss / total
         print(f"   → Epoch Complete: Loss = {avg_loss:.4f}, "
               f"Accuracy = {epoch_acc:.1f}% (YOUR CNN + DataLoader!)")
 
@@ -511,7 +512,7 @@ def test_cifar_cnn(model, test_loader, class_names):
 
         outputs = model(batch_data)
 
-        outputs_np = np.array(outputs.data.data if hasattr(outputs.data, 'data') else outputs.data)
+        outputs_np = np.asarray(outputs.data)
         predictions = np.argmax(outputs_np, axis=1)
         batch_y = batch_labels.data.flatten()
         correct += np.sum(predictions == batch_y)
@@ -527,6 +528,7 @@ def test_cifar_cnn(model, test_loader, class_names):
     # Results
     accuracy = 100 * correct / total
     print(f"\n   📊 Overall Test Accuracy: {accuracy:.2f}%")
+    print(f"   Evaluated {total} examples (demo limit: 20 batches).")
 
     # Per-class performance
     print("\n   Per-Class Performance (YOUR CNN's understanding):")
@@ -569,29 +571,22 @@ def analyze_cnn_systems(model, batch_size=32):
     print(f"   • Total parameters: {model.total_params:,}")
 
     print(f"\n   Computational Complexity:")
-    print(f"   • Conv1: 32×30×30×(3×3×3) = 777,600 ops")
-    print(f"   • Conv2: 64×13×13×(3×3×32) = 3,093,504 ops")
-    print(f"   • Dense: 2,304×256 + 256×10 = 592,384 ops")
-    print(f"   • Total: ~4.5M ops per image")
+    print(f"   • Conv1: 32×30×30×(3×3×3) = 777,600 MACs")
+    print(f"   • Conv2: 64×13×13×(3×3×32) = 3,115,008 MACs")
+    print(f"   • Dense: 2,304×256 + 256×10 = 592,384 MACs")
+    print(f"   • Total: ~4.5M multiply-accumulates per image (~9M FLOPs)")
 
-    # Memory profiling table - quantitative systems thinking
-    params_mem = model.total_params * 4 / 1024  # KB
-    activations_mem = 500  # Peak activations ~500KB per image
-    batch_mem = batch_size * 32 * 32 * 3 * 4 / 1024  # Input batch in KB
-    total_mem = params_mem + activations_mem + batch_mem
-
-    print(f"\n   🧮 MEMORY PROFILING - Where YOUR RAM Goes:")
-    print(f"   ┌────────────────────────┬──────────────┬─────────────┐")
-    print(f"   │ Component              │ Memory (KB)  │ Percentage  │")
-    print(f"   ├────────────────────────┼──────────────┼─────────────┤")
-    print(f"   │ Parameters (weights)   │ {params_mem:10.1f}   │ {100*params_mem/total_mem:5.1f}%      │")
-    print(f"   │ Activations (forward)  │ {activations_mem:10.1f}   │ {100*activations_mem/total_mem:5.1f}%      │")
-    print(f"   │ Batch data ({batch_size} imgs)   │ {batch_mem:10.1f}   │ {100*batch_mem/total_mem:5.1f}%      │")
-    print(f"   ├────────────────────────┼──────────────┼─────────────┤")
-    print(f"   │ TOTAL per batch        │ {total_mem:10.1f}   │ 100.0%      │")
-    print(f"   └────────────────────────┴──────────────┴─────────────┘")
-    print(f"\n   💡 KEY INSIGHT: Activations dominate! This is why gradient checkpointing")
-    print(f"      trades compute (recompute activations) for memory (don't store them).")
+    # Count specific float32 buffers; this is not an allocator measurement.
+    params_mem = sum(p.data.nbytes for p in model.parameters()) / 1024
+    batch_mem = batch_size * 32 * 32 * 3 * 4 / 1024
+    feature_mem = batch_size * 32 * 30 * 30 * 4 / 1024
+    print("\n   MEMORY ESTIMATES (KiB, float32):")
+    print(f"   Parameters: {params_mem:.1f}")
+    print(f"   Input batch: {batch_mem:.1f}")
+    print(f"   One conv1 output: {feature_mem:.1f}")
+    print("   These are individual buffers, not peak training memory.")
+    print("   Training also keeps gradients, optimizer state, and saved activations.")
+    print("   Activation storage grows with batch size; parameter storage does not.")
 
     print(f"\n   🏛️ CNN Evolution:")
     print(f"   • 1989: LeCun's CNN for handwritten digits")
@@ -640,6 +635,27 @@ def main():
     class_names = ['plane', 'car', 'bird', 'cat', 'deer',
                    'dog', 'frog', 'horse', 'ship', 'truck']
 
+    # Architecture checks use synthetic data and need no download.
+    if args.test_only:
+        model = CIFARCNN()
+        print("\n🧪 ARCHITECTURE TEST MODE")
+        # Create minimal test data for fast architecture validation
+        print("   Using minimal dataset for optimization testing framework...")
+        test_data_mini = rng.standard_normal((2, 3, 32, 32)).astype(np.float32)  # Just 2 samples
+        test_labels_mini = np.array([0, 1], dtype=np.int64)  # 2 labels
+
+        # Create minimal dataset and dataloader
+        mini_dataset = CIFARDataset(test_data_mini, test_labels_mini)
+        mini_loader = DataLoader(mini_dataset, batch_size=1, shuffle=False)  # Batch size 1
+
+        # Test with single sample from minimal DataLoader
+        for batch_data, batch_labels in mini_loader:
+            test_output = model(batch_data)
+            print(f"✅ Forward pass successful! Shape: {test_output.data.shape}")
+            print("✅ YOUR CNN + DataLoader work together!")
+            break
+        return
+
     # Step 1: Load CIFAR-10
     print("\n📥 Loading CIFAR-10 dataset...")
     data_manager = DatasetManager()
@@ -674,25 +690,6 @@ def main():
     # Step 3: Build CNN
     model = CIFARCNN()
 
-    if args.test_only:
-        print("\n🧪 ARCHITECTURE TEST MODE")
-        # Create minimal test data for fast architecture validation
-        print("   Using minimal dataset for optimization testing framework...")
-        test_data_mini = rng.standard_normal((2, 3, 32, 32)).astype(np.float32)  # Just 2 samples
-        test_labels_mini = np.array([0, 1], dtype=np.int64)  # 2 labels
-
-        # Create minimal dataset and dataloader
-        mini_dataset = CIFARDataset(test_data_mini, test_labels_mini)
-        mini_loader = DataLoader(mini_dataset, batch_size=1, shuffle=False)  # Batch size 1
-
-        # Test with single sample from minimal DataLoader
-        for batch_data, batch_labels in mini_loader:
-            test_output = model(batch_data)
-            print(f"✅ Forward pass successful! Shape: {test_output.data.shape}")
-            print("✅ YOUR CNN + DataLoader work together!")
-            break
-        return
-
     # Step 4: Train using YOUR DataLoader
     start_time = time.time()
     model = train_cifar_cnn(model, train_loader, epochs=args.epochs)
@@ -705,7 +702,8 @@ def main():
     analyze_cnn_systems(model, batch_size=args.batch_size)
 
     print(f"\n⏱️  Training time: {train_time:.1f} seconds")
-    print(f"   Images/sec: {len(train_dataset) * args.epochs / train_time:.0f}")
+    processed_per_epoch = min(len(train_dataset), 100 * args.batch_size)
+    print(f"   Images/sec: {processed_per_epoch * args.epochs / train_time:.0f}")
 
     print("\n✅ SUCCESS! CIFAR-10 CNN Milestone Complete!")
     print("\n🎓 What YOU Accomplished:")

@@ -58,28 +58,6 @@ from tinytorch.core.autograd import method_of, no_grad
 Let's get started!
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.autograd
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-from typing import Optional, List, Tuple
-import sys
-import os
-
-from tinytorch.core.tensor import (
-    Tensor, Function,
-    Add, Sub, Mul, Div, MatMul,
-    Reshape, Permute, Copy, Slice, MaskedFill,
-    Sum, Mean, Max,
-)
-from tinytorch.core.activations import SigmoidFunction, ReLUFunction, TanhFunction, GELUFunction, SoftmaxFunction
-from tinytorch.core.losses import LogSoftmax, MSEFunction, BinaryCrossEntropyFunction, CrossEntropyFunction
-
-# Constants for numerical differentiation
-EPSILON = 1e-7  # Small perturbation for numerical gradient computation
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -111,6 +89,28 @@ This module completes the operation classes built in Modules 01, 02, and 04
 with their `backward()` halves and gives the Tensor class its `backward()` method. Everything downstream that trains -- optimizers,
 training loops, transformers -- depends on the graph this module builds.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.autograd
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+from typing import Optional, List, Tuple
+import sys
+import os
+
+from tinytorch.core.tensor import (
+    Tensor, Function,
+    Add, Sub, Mul, Div, MatMul,
+    Reshape, Permute, Copy, Slice, MaskedFill,
+    Sum, Mean, Max,
+)
+from tinytorch.core.activations import SigmoidFunction, ReLUFunction, TanhFunction, GELUFunction, SoftmaxFunction
+from tinytorch.core.losses import LogSoftmax, MSEFunction, BinaryCrossEntropyFunction, CrossEntropyFunction
+
+# Constants for numerical differentiation
+EPSILON = 1e-7  # Small perturbation for numerical gradient computation
 
 # %% [markdown]
 """
@@ -580,14 +580,16 @@ def backward(self, grad_output):
 
     APPROACH:
     1. Extract input tensors from self.inputs
-    2. Initialize grad_a and grad_b to None
+    2. Initialize gradients to None; promote a left vector to a row and a right
+       vector to a column, restoring these axes on grad_output as well
     3. For first input (a): if it requires gradients:
        - Set grad_a = grad_output
        - Use _reduce_broadcast_grad() to handle shape mismatch if needed
     4. For second input (b): if it requires gradients:
        - Set grad_b = grad_output
        - Use _reduce_broadcast_grad() to handle shape mismatch if needed
-    5. Return tuple (grad_a, grad_b)
+    5. Remove any promoted vector axes and return (grad_a, grad_b). The engine
+       sums broadcast batch dimensions back to each input shape.
 
     EXAMPLE (Same Shape):
     >>> a = Tensor([1, 2, 3], requires_grad=True)
@@ -943,14 +945,16 @@ def backward(self, grad_output):
 
     APPROACH:
     1. Extract input tensors a, b from self.inputs
-    2. Initialize grad_a and grad_b to None
+    2. Initialize gradients to None; promote a left vector to a row and a right
+       vector to a column, restoring these axes on grad_output as well
     3. For first input (a):
-       - Transpose b: use np.swapaxes(b.data, -2, -1) for batched tensors
+       - Transpose b: use np.swapaxes(b_matrix, -2, -1) for batched tensors
        - Compute grad_a = grad_output @ b_T using np.matmul
     4. For second input (b):
-       - Transpose a: use np.swapaxes(a.data, -2, -1) for batched tensors
+       - Transpose a: use np.swapaxes(a_matrix, -2, -1) for batched tensors
        - Compute grad_b = a_T @ grad_output using np.matmul
-    5. Return tuple (grad_a, grad_b)
+    5. Remove any promoted vector axes and return (grad_a, grad_b). The engine
+       sums broadcast batch dimensions back to each input shape.
 
     EXAMPLE:
     >>> A = Tensor([[1, 2]], requires_grad=True)  # (1, 2)
@@ -970,27 +974,26 @@ def backward(self, grad_output):
     a, b = self.inputs
     grad_a = grad_b = None
 
-    # Gradient for first input: grad_output @ b.T
-    if isinstance(a, Tensor) and a.requires_grad:
-        if b.data.ndim >= 2:
-            # Batched: transpose only the last two dims
-            b_T = np.swapaxes(b.data, -2, -1)
-            grad_a = np.matmul(grad_output, b_T)
-        else:
-            # 1D b: A(m,k) @ b(k,) -> out(m,)
-            # grad_A = outer(grad_output, b): (m,) x (k,) -> (m, k)
-            grad_a = np.outer(grad_output, b.data)
+    # A vector behaves as a one-row left matrix or a one-column right matrix.
+    # Restore those dimensions on the output gradient before applying the same
+    # two matrix rules; remove them again before returning each input gradient.
+    a_vector, b_vector = a.data.ndim == 1, b.data.ndim == 1
+    a_matrix = a.data[np.newaxis, :] if a_vector else a.data
+    b_matrix = b.data[:, np.newaxis] if b_vector else b.data
+    matrix_grad = grad_output
+    if b_vector:
+        matrix_grad = np.expand_dims(matrix_grad, -1)
+    if a_vector:
+        matrix_grad = np.expand_dims(matrix_grad, -2)
 
-    # Gradient for second input: a.T @ grad_output
-    if isinstance(b, Tensor) and b.requires_grad:
-        if a.data.ndim >= 2:
-            # Batched: transpose only the last two dims
-            a_T = np.swapaxes(a.data, -2, -1)
-            grad_b = np.matmul(a_T, grad_output)
-        else:
-            # 1D a: a(k,) @ B(k,n) -> out(n,)
-            # grad_B = outer(a, grad_output): (k,) x (n,) -> (k, n)
-            grad_b = np.outer(a.data, grad_output)
+    if a.requires_grad:
+        grad_a = np.matmul(matrix_grad, np.swapaxes(b_matrix, -2, -1))
+        if a_vector:
+            grad_a = np.squeeze(grad_a, axis=-2)
+    if b.requires_grad:
+        grad_b = np.matmul(np.swapaxes(a_matrix, -2, -1), matrix_grad)
+        if b_vector:
+            grad_b = np.squeeze(grad_b, axis=-1)
 
     return grad_a, grad_b
     ### END SOLUTION
@@ -2900,8 +2903,9 @@ def backward(self, gradient=None, retain_graph=False):
             scalar output and uses ones_like as the seed.
         retain_graph: If False (default), releases the computation graph after
             backward to free memory. Set True if you need to call backward()
-            multiple times on the same graph (e.g., for higher-order gradients).
-            Matches PyTorch's retain_graph parameter.
+            multiple times on the same graph. Otherwise, recompute the forward
+            pass before using an intermediate again. Retaining this graph does
+            not provide higher-order derivatives; backward uses NumPy arrays.
 
     **Example:**
     ```python
@@ -2934,11 +2938,11 @@ def backward(self, gradient=None, retain_graph=False):
 
     if isinstance(gradient, Tensor):
         gradient = gradient.data
-
-    if self._grad_fn is None and getattr(self, "_graph_released", False):
-        raise RuntimeError(
-            "Trying to backward through the graph a second time. The graph was released "
-            "after the first backward(); pass retain_graph=True to keep it."
+    gradient = np.asarray(gradient)
+    if gradient.shape != self.shape:
+        raise ValueError(
+            f"backward gradient shape {gradient.shape} must match output shape {self.shape}. "
+            "Supply one gradient value per output element."
         )
 
     # ---- Step 1: topological sort -------------------------------------
@@ -2957,12 +2961,20 @@ def backward(self, gradient=None, retain_graph=False):
             continue
         if id(tensor) in seen:
             continue
+        # Check every intermediate before changing any gradients. A released
+        # intermediate has no grad_fn, but it is not a new leaf: stopping there
+        # would silently lose the gradient to the original inputs.
+        if getattr(tensor, "_graph_released", False):
+            raise RuntimeError(
+                "Trying to backward through a graph that was released. "
+                "Recompute the forward pass, or use retain_graph=True on the earlier backward()."
+            )
         seen.add(id(tensor))
         stack.append((tensor, True))
         fn = tensor._grad_fn
         if fn is not None:
             for parent in fn.inputs:
-                if isinstance(parent, Tensor):
+                if isinstance(parent, Tensor) and parent.requires_grad:
                     stack.append((parent, False))
     topo_order.reverse()
 
@@ -3121,6 +3133,28 @@ def test_unit_reused_tensor_gradients():
     h.backward()
     assert np.allclose(W3.grad, 2 ** 8), f"Expected 2^8 = 256, got {W3.grad}"
     print("   ✅ eight reuse levels: gradient is 2^8, computed in one pass")
+
+    # Across separate backward calls, retaining the graph is an explicit choice.
+    leaf = Tensor([2.0], requires_grad=True)
+    shared = leaf * 2
+    (shared * 3).sum().backward(retain_graph=True)
+    (shared * 4).sum().backward()
+    assert np.allclose(leaf.grad, [14.0]), "Both retained branches must reach the leaf"
+    try:
+        (shared * 5).sum().backward()
+    except RuntimeError as error:
+        assert "released" in str(error)
+    else:
+        raise AssertionError("A released intermediate must not silently stop gradient flow")
+    assert np.allclose(leaf.grad, [14.0]), "Rejected backward must leave gradients unchanged"
+
+    vector = Tensor([1.0, 2.0], requires_grad=True)
+    try:
+        vector.backward(np.ones((3, 2)))
+    except ValueError as error:
+        assert "shape" in str(error)
+    else:
+        raise AssertionError("The incoming gradient must match the output shape")
 
     print("✅ Reused-tensor gradients work correctly!")
 

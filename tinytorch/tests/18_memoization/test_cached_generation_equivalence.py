@@ -38,3 +38,17 @@ def test_cached_generation_matches_uncached(num_layers):
         disable_kv_cache(model)
     assert not any(isinstance(b.attention, CachedAttention) for b in model.blocks)
     assert np.allclose(model.forward(Tensor(np.array([tokens]))).data[0], full), "disable must restore the model"
+
+
+def test_generation_at_context_boundary_avoids_unused_final_forward():
+    from tinytorch.perf.memoization import _cached_generate
+    model = GPT(vocab_size=12, embed_dim=16, num_layers=1, num_heads=2, max_seq_len=3)
+    expected = model.generate(Tensor([[1, 2]]), 1, temperature=0).data[0, -1]
+    cache = enable_kv_cache(model)
+    assert _cached_generate(model, [1, 2], 1, 0, cache) == [expected]
+    assert cache.seq_pos == 2
+    assert _cached_generate(model, [1], 0, 0, cache) == []
+    assert cache.seq_pos == 0
+    for prompt, count, temperature in [([], 1, 1), ([1], -1, 1), ([1], 1, -1), ([1, 2, 3], 2, 1)]:
+        with pytest.raises(ValueError):
+            _cached_generate(model, prompt, count, temperature, cache)

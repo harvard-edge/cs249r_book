@@ -446,3 +446,14 @@ class TestActivationComposition:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.parametrize("shape", [(), (5,), (1, 5)])
+def test_sigmoid_stable_for_extreme_finite_inputs(shape):
+    values = np.array([-1000, -1, 0, 1, 1000], dtype=np.float32)
+    values = np.array(-1000, dtype=np.float32) if shape == () else values.reshape(shape)
+    with np.errstate(over="raise", invalid="raise"):
+        output = Sigmoid()(Tensor(values))
+    assert np.all(np.isfinite(output.data))
+    expected = np.array(0) if shape == () else np.array([0, 0.26894142, 0.5, 0.73105858, 1]).reshape(shape)
+    np.testing.assert_allclose(output.data, expected, atol=1e-7)

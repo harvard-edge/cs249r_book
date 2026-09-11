@@ -19,15 +19,15 @@ from __future__ import annotations
 import argparse
 import ast
 import importlib
-import io
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
-import contextlib
 import collections
+import shutil
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
@@ -102,6 +102,24 @@ def g_module_set():
     if len(targets) != 20:
         errs.append(f"expected 20 '#| default_exp' directives, found {len(targets)}")
     return errs
+
+
+@gate("structure: imports follow dependencies and precede introduction")
+def g_imports_position():
+    # 2026-09-11: heading-only spine checks missed imports before prerequisites.
+    errors = []
+    for _, name, path in module_files():
+        source_cells = cells(path.read_text())
+        dependencies = [i for i, (_, body) in enumerate(source_cells)
+                        if '## 📋 Module Dependencies' in body]
+        imports = [i for i, (_, body) in enumerate(source_cells)
+                   if re.search(r'^#\| default_exp ', body, re.M)]
+        introduction = [i for i, (_, body) in enumerate(source_cells)
+                        if '## 💡 Introduction' in body]
+        if (len(dependencies) != 1 or len(imports) != 1 or len(introduction) != 1
+                or not dependencies[0] < imports[0] < introduction[0]):
+            errors.append(f"{name}: place imports after Dependencies and before Introduction")
+    return errors
 
 
 SPINE = ["🔗 Prerequisites & Progress", "🎯 Learning Objectives",
@@ -597,6 +615,23 @@ def g_bare_except():
     return errs
 
 
+@gate("tests: exceptions cannot turn missing implementations into a pass")
+def g_no_false_success_handlers():
+    # 2026-09-11: progressive tests caught ImportError/TypeError then asserted True.
+    errors = []
+    for path in sorted(TESTS.rglob('test_*.py')):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            for statement in ast.walk(node):
+                if (isinstance(statement, ast.Assert)
+                        and isinstance(statement.test, ast.Constant)
+                        and statement.test.value is True):
+                    errors.append(f"{path.relative_to(ROOT)}:{statement.lineno}: exception becomes success")
+    return errors
+
+
 @gate("tests: no graded cell swallows its own failure")
 def g_graded_except():
     """A handler that only passes (or only prints) inside a locked graded cell
@@ -696,18 +731,71 @@ def g_collect():
 
 
 # ============================== SLOW GATES ==================================
+def notebook_paths():
+    """Canonical notebook names from the numbered source modules."""
+    return [MODULES / name / f"{name.split('_', 1)[1]}.ipynb"
+            for _, name, _ in module_files()]
+
+
+@gate("package: every source module has exactly its expected notebook")
+def g_notebook_set():
+    # 2026-09-11: an empty modules/ directory previously passed the journey gate.
+    expected = set(notebook_paths())
+    if not expected:
+        return ["no source modules found; cannot validate notebook inventory"]
+    actual = set(MODULES.glob("*/*.ipynb"))
+    return ([f"missing notebook: {p.relative_to(MODULES)}" for p in sorted(expected - actual)]
+            + [f"unexpected notebook: {p.relative_to(MODULES)}" for p in sorted(actual - expected)])
+
+
+@gate("reference: source-built numerical and training regressions")
+def g_reference_regressions():
+    # 2026-09-11: green reference notebooks missed graph-lifetime, accumulation,
+    # fractional-constant, and distillation-training defects. Build from source
+    # in a temporary package so stale local exports cannot make this check pass.
+    p = subprocess.run([sys.executable, str(ROOT / "tools" / "check_reference.py")],
+                       capture_output=True, text=True, cwd=ROOT)
+    if p.returncode:
+        return (p.stdout + p.stderr).splitlines()[-20:] or [f"reference check exited {p.returncode}"]
+    return []
+
+
 @gate("student journey: all 20 notebooks run end-to-end as __main__", slow=True)
 def g_journey():
-    errs = []
-    for path in sorted(MODULES.glob("*/*.ipynb")):
-        src = "\n".join("".join(c["source"]) for c in json.load(open(path))["cells"]
-                        if c["cell_type"] == "code")
-        buf = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-                exec(compile(src, str(path), "exec"), {"__name__": "__main__"})
-        except Exception as e:
-            errs.append(f"{path.parent.name}: {type(e).__name__}: {str(e)[:70]}")
+    errs = g_notebook_set()
+    if errs:
+        return errs
+    from nbdev.export import nb_export
+
+    # 2026-09-11: each notebook gets a new interpreter and only earlier exports.
+    # Reusing the release-check process hid dependencies on later modules and
+    # leaked monkey-patched classes and RNG state between notebooks.
+    runner = (
+        "import json,sys; from pathlib import Path; "
+        "p=Path(sys.argv[1]); nb=json.loads(p.read_text(encoding='utf-8')); "
+        "code='\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type']=='code'); "
+        "exec(compile(code,str(p),'exec'),{'__name__':'__main__'})"
+    )
+    with tempfile.TemporaryDirectory(prefix="tinytorch-progression-") as tmp:
+        package = pathlib.Path(tmp) / "tinytorch"
+        for subdir in ("", "core", "perf"):
+            target = package / subdir
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "tinytorch" / subdir / "__init__.py", target / "__init__.py")
+        env = os.environ.copy()
+        env.update(PYTHONPATH=tmp, MPLBACKEND="Agg", TINYTORCH_QUIET="1")
+        for path in notebook_paths():
+            print(f"          Running {path.parent.name} with earlier modules only", flush=True)
+            try:
+                p = subprocess.run([sys.executable, "-c", runner, str(path)], cwd=tmp,
+                                   env=env, capture_output=True, text=True, timeout=300)
+                if p.returncode:
+                    errs.append(f"{path.parent.name}: " + (p.stderr or p.stdout)[-1500:])
+                    break
+                nb_export(str(path), lib_path=str(package))
+            except subprocess.TimeoutExpired:
+                errs.append(f"{path.parent.name}: notebook exceeded 300 seconds")
+                break
     return errs
 
 
@@ -716,6 +804,9 @@ def g_pytest():
     p = subprocess.run([sys.executable, "-m", "pytest", "-q", str(TESTS),
                         "--ignore", str(TESTS / "environment")],
                        capture_output=True, text=True, cwd=ROOT)
+    for line in p.stdout.splitlines():
+        if re.search(r"\d+ passed|\d+ failed|\d+ skipped", line) and " in " in line:
+            print(f"          {line}", flush=True)
     if p.returncode != 0:
         return [l for l in (p.stdout + p.stderr).splitlines()
                 if l.startswith(("FAILED", "ERROR"))][:15] or ["pytest exited non-zero"]

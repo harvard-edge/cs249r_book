@@ -1,4 +1,4 @@
-# Milestone II: Training TinyGPT and Generating Text {#sec-milestone-2}
+# Milestone II: Training TinyGPT and Generating Text {#sec-milestone-2 .unnumbered}
 
 Chapter 13 ended with `TinyGPT.forward`, which takes a sequence of token IDs and returns one row of logits per position. That is a model that can score continuations, not one that writes them, and nothing in Chapters 9 through 13 said where its training labels come from. This milestone answers the question a practitioner asks the first time they finish a model definition: how do I train this thing on plain text, and how do I get text back out of it?
 
@@ -44,7 +44,7 @@ Here $x_t$ is the token at position $t$ and $P(x_t \mid x_1, \dots, x_{t-1})$ is
 
 ### The generation loop
 
-Generation reuses the same forward pass with no labels. Encode the prompt into token IDs. Run the model. Take the last row of logits, the prediction for the token after the prompt. Choose a token from it. Append that token to the sequence and run the model again on the longer sequence. Stop after a fixed number of tokens or when the model emits an end-of-sequence token. That is the whole model of generation; what it costs per iteration is a question for the code.
+Generation reuses the same forward pass with no labels. Encode the prompt into token IDs. Run the model. Take the last row of logits, the prediction for the token after the prompt. Choose a token from it. Append that token to the sequence and run the model again on the longer sequence. The loop below stops after a fixed number of tokens. Stopping on an end-of-sequence token would require reserving and training such a token, then testing for its ID in the loop; this small corpus does neither. That is the whole model of generation; what it costs per iteration is a question for the code.
 
 ### Temperature
 
@@ -69,7 +69,7 @@ Since $\exp(-\infty) = 0$, the discarded tokens have exactly zero probability af
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-Module 13 (`src/13_transformers/13_transformers.py`) is the transformer students build in the TinyTorch course, and its `GPT` class, which this book calls `TinyGPT`, carries a `generate` method and a `_sample_next_token` helper. Both are quoted below, and both sample with temperature only, with no top-$k$ and no cropping of the context. The course's integration script for this part of the book, `milestones/05_2017_transformer/01_vaswani_attention.py`, trains a small transformer on sequence reversal and copying tasks rather than on free text, and its training step is quoted from the script. The sampler, the generation loop, the window builder, and the training run are book code, labelled as such; they call the real `TinyGPT`, `BPETokenizer`, `CrossEntropyLoss`, and `AdamW`, and the training run was measured.
+Module 13 (`src/13_transformers/13_transformers.py`) is the transformer students build in the TinyTorch course, and its `GPT` class, which this book calls `TinyGPT`, carries a `generate` method and a `_sample_next_token` helper. Both are quoted below, and both sample with temperature only, with no top-$k$ and no cropping of the context. The course's integration script for this part of the book, `milestones/05_2017_transformer/01_vaswani_attention.py`, trains a small transformer on sequence reversal and copying tasks rather than on free text, and its training step is quoted from the script. The sampler, the generation loop, the window builder, and the training run are book code, labeled as such. They call the real `TinyGPT`, `BPETokenizer`, `CrossEntropyLoss`, and `AdamW`; the course script tests a different task and does not validate this text-generation loop.
 :::
 
 ### Picking one token
@@ -86,18 +86,30 @@ import numpy as np
 def sample_next_token(logits, temperature=1.0, top_k=None, rng=None):
     """Pick one token ID from a vector of logits."""
     rng = rng or np.random.default_rng()
-    z = np.asarray(logits, dtype=np.float64) / max(temperature, 1e-5)
+    z = np.asarray(logits, dtype=np.float64)
+    if z.ndim != 1 or len(z) == 0 or not np.isfinite(z).all():
+        raise ValueError("logits must be a nonempty, finite vector")
+    if not np.isfinite(temperature) or temperature < 0:
+        raise ValueError("temperature must be finite and nonnegative")
+    if top_k is not None and (not isinstance(top_k, (int, np.integer)) or top_k <= 0):
+        raise ValueError("top_k must be a positive integer or None")
+    if temperature == 0:
+        return int(np.argmax(z))
+    z = (z - np.max(z)) / temperature
 
-    if top_k is not None and 0 < top_k < len(z):
+    if top_k is not None and top_k < len(z):
         kth_largest = np.partition(z, -top_k)[-top_k]   # the k-th biggest value
         z = np.where(z < kth_largest, -np.inf, z)        # drop everything below it
 
     z = z - np.max(z)                                    # shift so exp cannot overflow
-    probs = np.exp(z) / np.sum(np.exp(z))
+    exp_z = np.exp(z)
+    probs = exp_z / exp_z.sum()
     return int(rng.choice(len(probs), p=probs))
 ```
 
-This is book code, and it is the module's sampler with two additions. Two lines do the work. `np.partition(z, -top_k)[-top_k]` finds the $k$-th largest value in one pass over the vector (about 47 microseconds on the same 50,257 entries, a 30-fold gap over the sort), and the `np.where` sends everything below it to $-\infty$, which is the equation from The Idea written out. The cast to float64 on the first line moves the overflow cliff from 88.7 to about 709 but does not remove it; the subtraction of `np.max(z)` does, by making the largest exponent $\exp(0) = 1$, so nothing overflows however cold the temperature gets. That is also what makes the `max(temperature, 1e-5)` floor safe: a caller can pass `temperature=0` to ask for greedy decoding, the logits are divided by $10^{-5}$ instead of by zero, and the shift keeps the enormous result finite. Hugging Face's `TemperatureLogitsWarper` and `TopKLogitsWarper` are these same lines with a class around each. The module's own sampler is the same softmax without the additions.
+The sampler separates the discrete zero-temperature case from the probability calculation. At zero it returns `argmax` exactly; at a positive temperature it subtracts the maximum before division, so the largest scaled logit is zero. Negative values may underflow after exponentiation, but no positive exponent can overflow. The vector must contain finite scores and the temperature must be finite and nonnegative. These are caller-visible conditions rather than silent substitutions.
+
+`np.partition(z, -top_k)[-top_k]` finds the cutoff without fully sorting the vocabulary. `np.where` discards every score below that cutoff before the shifted softmax and random draw. Ties at the cutoff survive, so this implementation may retain more than $k$ tokens; with distinct logits it retains exactly $k$. The module's own sampler implements the positive-temperature softmax and draw without these additional checks or the top-$k$ filter.
 
 {{< include _listings/milestone_02/GPT_sample_next_token.qmd >}}
 
@@ -112,13 +124,24 @@ The loop is also more expensive than it looks, and I want the number in front of
 This listing depends on `TinyGPT` from Chapter 13 and `BPETokenizer` from Chapter 10, so it does not run on its own.
 
 ```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.tokenization import BPETokenizer
+from tinytorch.core.transformers import TinyGPT
+from tinytorch.core.losses import CrossEntropyLoss
+from tinytorch.core.optimizers import AdamW
+import tinytorch.core.autograd
+
 def generate_text(model, tokenizer, prompt, max_new_tokens=50,
                   temperature=0.8, top_k=40, max_context=32, rng=None):
     """Autoregressively extend a prompt, one token per forward pass."""
     token_ids = tokenizer.encode(prompt)
+    if not token_ids:
+        raise ValueError("prompt must encode to at least one token")
+    if not 0 < max_context <= model.max_seq_len:
+        raise ValueError("max_context must fit the model's position table")
 
     for _ in range(max_new_tokens):
-        context = token_ids[-max_context:]                   # the model's positional table has this many rows
+        context = token_ids[-max_context:]                   # at most this many position rows will be read
         logits = model.forward(Tensor(np.array([context])))  # [1, S, V]
         last_row = logits.data[0, -1, :]                     # prediction for the next token
         token_ids.append(sample_next_token(last_row, temperature, top_k, rng))
@@ -126,11 +149,11 @@ def generate_text(model, tokenizer, prompt, max_new_tokens=50,
     return tokenizer.decode(token_ids)
 ```
 
-Notice what the loop does not do. It never looks at any logit row except the last one, even though the model computed all $S$ rows; that waste is the 430-row number above. It re-encodes nothing; token IDs accumulate as integers and are decoded once at the end. And it crops the context to `max_context`, which must equal the `max_seq_len` the model was built with, because the positional table has exactly that many rows. Hugging Face's `generate` is this loop with the sampler's knobs as keyword arguments and the cache of Chapter 18 already inside it. The module's loop is the same shape without the two guards.
+Notice what the loop does not do. It never looks at any logit row except the last one, even though the model computed all $S$ rows; that waste is the 430-row number above. It re-encodes nothing; token IDs accumulate as integers and are decoded once at the end. And it crops the context to `max_context`, which must be positive and no larger than the model's `max_seq_len`. Cropping forgets tokens outside the window and restarts the retained context at position zero. That is an explicit bounded-context policy, not the same computation as attention over an arbitrarily long history. Hugging Face's `generate` is this loop with the sampler's knobs as keyword arguments and the cache of Chapter 18 already inside it. The module's loop is the same shape without the two guards.
 
 {{< include _listings/milestone_02/GPT_generate.qmd >}}
 
-It takes and returns a `Tensor` of token IDs, so the caller does the encoding and decoding. It feeds the whole history every step with no crop, so a prompt plus `max_new_tokens` longer than `max_seq_len` is an index error in the position table. And it concatenates a fresh array each step, the allocation Chapter 18 removes. `generate_text` is this loop with the crop, the top-$k$, and the tokenizer at both ends.
+It takes and returns a `Tensor` of token IDs, so the caller does the encoding and decoding. It feeds the whole history every step with no crop, so every context actually passed to `forward` must fit `max_seq_len`. The final returned sequence can contain one extra token because that last sampled token is not processed again. `generate` rejects an empty prompt, invalid sampling arguments, or a requested run whose forward contexts exceed capacity before entering the loop. Each iteration also concatenates a fresh ID array; caching attention state in Chapter 18 addresses the repeated model computation, a separate cost from managing this ID history. `generate_text` is this loop with the crop, the top-$k$, and the tokenizer at both ends.
 
 ### Building the training pairs
 
@@ -157,7 +180,7 @@ Each chunk is one token longer than the window so that the input and target over
 
 Now the Part I loop gets a language model in the middle. Every piece is already built: `BPETokenizer` (Chapter 10) turns the corpus into one token stream, `make_windows` turns the stream into pairs, `TinyGPT` (Chapter 13) turns a batch of windows into $[B, S, V]$ logits, and `CrossEntropyLoss` (Chapter 4) and `AdamW` (Chapter 7) do what they did in Milestone I. The listing is not standalone for that reason.
 
-One seam does not fit. Chapter 4's `CrossEntropyLoss` takes a matrix of $[N, C]$ logits and a vector of $N$ integer labels, and the model hands back a three-dimensional block. The obvious repair is a Python loop over positions that calls the loss once per position and adds the results. With $B = 16$ and $S = 32$ that is 512 loss calls per step, each building its own softmax and its own slice of the autograd graph, for a quantity that is one mean over 512 numbers. The better repair uses the fact from the previous subsection: every position is its own prediction problem, so there is no reason the loss should know which positions came from which window. Reshape $[B, S, V]$ to $[B \cdot S, V]$ and $[B, S]$ to $[B \cdot S]$, and one loss call scores all 512 predictions. The reshape is a view of the contiguous logits buffer (Chapter 1), so it moves nothing.
+One seam does not fit. Chapter 4's `CrossEntropyLoss` takes a matrix of $[N, C]$ logits and a vector of $N$ integer labels, and the model hands back a three-dimensional block. The obvious repair is a Python loop over positions that calls the loss once per position and adds the results. With $B = 16$ and $S = 32$ that is 512 loss calls per step, each building its own softmax and its own slice of the autograd graph, for a quantity that is one mean over 512 numbers. The better repair uses the fact from the previous subsection: every position is its own prediction problem, so there is no reason the loss should know which positions came from which window. Reshape $[B, S, V]$ to $[B \cdot S, V]$ and $[B, S]$ to $[B \cdot S]$, and one loss call scores all 512 predictions. TinyTorch's `Tensor.reshape` copies into a new owned buffer, as Chapter 1 explained, but preserves the operation in the autograd graph. The benefit here is one loss call with the right batch interpretation, not a claim of zero data movement.
 
 ```python
 corpus = [
@@ -207,6 +230,8 @@ One number is worth knowing before the run starts. A model that has learned noth
 The course's integration script for these modules, `01_vaswani_attention.py`, does not train on prose. It builds an `AttentionTransformer` from the Module 11 through 13 pieces (a Post-LN block with a ReLU feed-forward layer and no causal mask, since its tasks need every position to see every other) and puts the attention mechanism through three tests: reverse a six-letter sequence, copy it, and do either depending on a prefix token. Its pass thresholds are 95 percent sequence accuracy on reversal, 95 percent on copying, and 90 percent on the mixed task. Its training step, quoted from the script, is the same reshape this chapter just used, with the sequence accuracy counted beside the loss and Chapter 5's `DataLoader` handing out the batches.
 
 {{< include _listings/milestone_02/train_epoch.qmd >}}
+
+The script builds its optimizer list from each component's `parameters()`, including the learned positional table. That table can now both receive gradients and be updated, unlike Chapter 11's intentional fixed sinusoidal table. Checking this registration boundary matters even when a task score passes: a model can learn through its other weights while an omitted component remains unchanged.
 
 The `np.argmax` that scores each batch is worth a pause, because it is the argmax that The Problem warned against, and here it is exactly right. Reversal has one correct output, so the argmax is the answer and sampling would only add errors. Temperature and top-$k$ exist for open-ended generation, where many continuations are acceptable and the goal is to pick a good one, not the one.
 
@@ -269,7 +294,7 @@ Position 2 of window 0 holds token 9, and its target is 4, the token that follow
 
 ## From TinyTorch to Production
 
-The loop in this chapter is, step for step, what a production server does. What differs is what each step costs, and the difference splits inference into two regimes that production systems treat separately.
+The loop in this chapter recomputes the entire retained context at each step. A server can instead retain attention keys and values from earlier steps, the mechanism developed in Chapter 18. Only after introducing that cache can later model calls process a single new token while still attending to the past. The table below describes this cached execution, not `generate_text` as written.
 
 | | Prefill (the prompt) | Decode (each new token) |
 | :--- | :--- | :--- |
@@ -280,7 +305,7 @@ The loop in this chapter is, step for step, what a production server does. What 
 
 : The two phases of generation and why they stress different parts of the hardware. {#tbl-m2-inference-regimes tbl-colwidths="[30,35,35]"}
 
-During **prefill**, the prompt's $S$ tokens go through the model in one pass, and every weight matrix is multiplied against $S$ rows at once. Each weight loaded from memory participates in $2S$ floating-point operations, so the arithmetic units stay busy. During **decode**, the loop above runs the model on a context whose new content is a single token. Every weight in the model must still be read from memory, but each one now does two operations against a single row before it is discarded. This is the memory-bound regime that Chapters 1 and 2 named, and it is where a generating model spends almost all of its time.
+During **prefill**, the prompt's $S$ tokens go through the model in one pass, and every weight matrix is multiplied against $S$ rows at once. Each weight loaded from memory participates in $2S$ floating-point operations, so the arithmetic units stay busy. During cached **decode**, the projections for new content process a single row while attention reads stored keys and values. At batch size one, each matrix weight then performs little arithmetic per use. The current loop processes many rows again, so its arithmetic and memory costs differ. Whether a measured run is limited by bandwidth or arithmetic also depends on sequence length, batch size, and implementation; Chapter 14 introduces measurement before Chapter 18 changes the execution.
 
 ::: {#nbk-m2-autoregressive-memory-bandwidth .callout-notebook title="Napkin math: the decode ceiling for a 7-billion-parameter model"}
 Take a 7B-parameter model stored in 16-bit floats (2 bytes per parameter), served one request at a time, on a GPU whose vendor peak figures are 312 TFLOP/s of 16-bit arithmetic and 2 TB/s of memory bandwidth (NVIDIA's published A100 numbers).
@@ -293,7 +318,7 @@ Take a 7B-parameter model stored in 16-bit floats (2 bytes per parameter), serve
 These are peak-spec estimates, not measurements, and real systems land below the ceiling. The shape of the conclusion survives any reasonable correction. At batch size one, more than 99 percent of the arithmetic hardware is idle, waiting on weights.
 :::
 
-Production systems attack this from three directions, and each one is a change to the loop rather than to the math. The first is batching. If 32 requests are decoding at once, each weight read from memory serves 32 rows instead of one, and the arithmetic per byte rises 32-fold for free. Servers such as vLLM and TensorRT-LLM run **continuous batching**, which slips a new request into the running batch the moment another finishes rather than waiting for a whole batch to complete. Caching attacks the work the loop repeats. Each iteration of `generate_text` recomputes attention keys and values for every past token; Chapter 18 builds the KV cache that stores them, and vLLM's PagedAttention manages that cache in fixed-size blocks the way an operating system manages memory pages, so thousands of concurrent sequences can share one pool without fragmenting it. **Speculative decoding** comes at the idle arithmetic from the other side. It uses a small draft model to propose several tokens cheaply and then runs the large model once, prefill-style, over all of them, accepting each proposed token with a probability chosen so that the final distribution equals what the large model alone would have produced. It trades an idle arithmetic unit for fewer trips through memory.
+Production systems attack this from three directions, and each one is a change to the loop rather than to the math. The first is batching. If 32 requests are decoding at once, each weight read from memory serves 32 rows instead of one, and the weight-multiply arithmetic per byte rises, at the cost of holding more request state and coordinating their execution. Servers such as vLLM and TensorRT-LLM run **continuous batching**, which slips a new request into the running batch the moment another finishes rather than waiting for a whole batch to complete. Caching attacks the work the loop repeats. Each iteration of `generate_text` recomputes attention keys and values for every past token; Chapter 18 builds the KV cache that stores them, and vLLM's PagedAttention manages that cache in fixed-size blocks the way an operating system manages memory pages, so thousands of concurrent sequences can share one pool without fragmenting it. **Speculative decoding** comes at the idle arithmetic from the other side. It uses a small draft model to propose several tokens cheaply and then runs the large model once, prefill-style, over all of them, accepting each proposed token with a probability chosen so that the final distribution equals what the large model alone would have produced. It trades an idle arithmetic unit for fewer trips through memory.
 
 What carries over unchanged is the sampler. PyTorch's `torch.softmax(logits / T, dim=-1)` is the temperature step of this chapter, and Hugging Face's `generate(temperature=0.8, top_k=40)` runs the exact arithmetic of `sample_next_token` on the last row of logits. Production adds two more knobs of the same kind: top-$p$ sampling,[^fn-top-p-nucleus-bridge] which keeps the smallest set of tokens whose probabilities sum to $p$ rather than a fixed count, and a repetition penalty that scales down the logits of tokens already in the context. Both are a few lines in the same place `top_k` lives.
 
@@ -307,14 +332,14 @@ A practitioner now has a vocabulary for what they will see in a serving dashboar
 
 ## Summary
 
-This milestone turned the `TinyGPT` of Chapter 13 into a system that trains on plain text and writes text back. Training needs no labels beyond the text itself, because the target at every position is the next token, and one forward pass over a window of $S$ tokens yields $S$ training examples that the causal mask keeps honest. Generation is a loop that runs the model, reads the last row of logits, samples one token, and appends it. Inside that loop, temperature divides the logits to sharpen or flatten the distribution, and top-$k$ sets the tail to exactly zero; greedy decoding is the zero-temperature limit and fails on open-ended text by repeating itself. The invariant to carry forward is that every generated token costs a full forward pass over the whole context, and in that pass every weight in the model is read from memory to do almost no arithmetic. Chapter 14 takes for granted that `TinyGPT` trains and generates text, and asks why each generated token is so slow.
+This milestone turned the `TinyGPT` of Chapter 13 into a system that trains on plain text and writes text back. Training needs no labels beyond the text itself, because the target at every position is the next token, and one forward pass over a window of $S$ tokens yields $S$ training examples that the causal mask keeps honest. Generation is a loop that runs the model, reads the last row of logits, samples one token, and appends it. Inside that loop, temperature divides the logits to sharpen or flatten the distribution, and top-$k$ sets the tail to exactly zero; greedy decoding is the zero-temperature limit and fails on open-ended text by repeating itself. The invariant of this implementation is that each sampled token is appended as an ID and every subsequent forward pass recomputes the retained context. Its cost grows with the number of context rows; cached one-row decoding is a later implementation. Chapter 14 takes for granted that `TinyGPT` trains and generates text, and asks why each generated token is so slow.
 
 ---
 
 ## Exercises
 
-1. Run `shaped_probs` from the worked trace at $T = 0.1$ and $T = 10$ on the same logits and confirm the two limits: the first column should be within 0.01 percent of $[100, 0, 0, 0, 0]$ and the second within a percentage point of uniform. At what $T$ does token A first drop below 50 percent?
+1. Run `shaped_probs` from the worked trace at $T = 0.1$ and $T = 10$ on the same logits and confirm the two limits: the first column should be within 0.01 percent of $[100, 0, 0, 0, 0]$ and the second flatter than the $T = 1$ distribution. Continue increasing $T$ until every probability is within one percentage point of uniform. At what $T$ does token A first drop below 50 percent?
 
 2. `sample_next_token` applies temperature before top-$k$. Swap the order in a copy of the function and show, on the logits from @tbl-sampling-shaping-trace, that the returned probabilities are identical for every $(T, k)$ pair. Then explain in one sentence why the two orders could differ if `top_k` selected by probability threshold rather than by count.
 
-3. Modify `make_windows` to stride by `seq_len` instead of by one, so that windows do not overlap. For a stream of 1,000 tokens and `seq_len=32`, how many training windows does each version produce, and how many times does each token appear as a target under each? Which version does a production data loader use, and what does it lose?
+3. Modify `make_windows` to stride by `seq_len` instead of by one, so that windows do not overlap. For a stream of 1,000 tokens and `seq_len=32`, how many training windows does each version produce, and how many times does each token appear as a target under each? Compare both with sampling windows at random offsets from one stored token stream. Which scheme allocates duplicated token arrays, and how does each choose which contexts receive training?

@@ -4,27 +4,22 @@ def magnitude_prune(model, sparsity=0.9):
     """
     Remove weights with smallest magnitudes to achieve target sparsity.
     """
-    # Collect all weights (excluding biases)
-    all_weights = []
-    weight_params = []
-
-    for param in model.parameters():
-        # Skip biases (typically 1D)
-        if len(param.shape) > 1:
-            all_weights.extend(param.data.flatten())
-            weight_params.append(param)
-
-    if not all_weights:
+    if not np.isfinite(sparsity) or not 0 <= sparsity <= 1:
+        raise ValueError("sparsity must be between 0 and 1")
+    weight_params = [p for p in model.parameters() if p.ndim > 1]
+    if not weight_params:
         return model
 
-    # Calculate magnitude threshold
-    magnitudes = np.abs(all_weights)
-    threshold = np.percentile(magnitudes, sparsity * 100)
-
-    # Apply pruning to each weight parameter
+    # Rank globally, including existing zeros. Selecting by index also handles
+    # tied magnitudes and the endpoints 0% and 100% exactly.
+    magnitudes = np.concatenate([np.abs(p.data).ravel() for p in weight_params])
+    prune_count = int(sparsity * magnitudes.size)
+    prune_mask = np.zeros(magnitudes.size, dtype=bool)
+    prune_mask[np.argsort(magnitudes, kind="stable")[:prune_count]] = True
+    offset = 0
     for param in weight_params:
-        mask = np.abs(param.data) >= threshold
-        param.data = param.data * mask
-
+        mask = prune_mask[offset:offset + param.size].reshape(param.shape)
+        param.data[mask] = 0
+        offset += param.size
     return model
 ```

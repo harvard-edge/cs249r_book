@@ -141,11 +141,11 @@ MILESTONE_SCRIPTS = {
             {
                 "name": "Generation Speedup",
                 "script": "milestones/06_2018_mlperf/02_generation_speedup.py",
-                "description": "KV Caching for 10x faster Transformer",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 18]  # Full training + Embeddings + Attention + Profiler + Memoization (18)
+                "description": "Verify cached GPT outputs and measure inference speed",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 18]  # GPT and its prerequisites + Memoization
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"
@@ -185,7 +185,7 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
     ],
     "06": [
         "Every line of code: YOUR implementations",
-        "Every byte saved: YOUR quantization and compression",
+        "Every candidate measured: YOUR quantization and compression",
         "Every gradient: YOUR autograd",
     ],
 }

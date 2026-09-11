@@ -43,7 +43,8 @@ def test_mlperf_full_requirements_match_all_default_parts():
     })
 
     assert _required_modules_for(milestone) == part_union
-    assert {11, 12}.issubset(set(milestone["required_modules"]))
+    assert {11, 12, 13}.issubset(set(milestone["required_modules"]))
+    assert {11, 12, 13, 18}.issubset(set(milestone["scripts"][1]["required_modules"]))
 
 
 def test_export_validator_rejects_silent_none_exports(monkeypatch):
@@ -151,7 +152,7 @@ def test_generation_speedup_import_error_lists_actual_requirements():
         / "02_generation_speedup.py"
     ).read_text(encoding="utf-8")
 
-    assert "modules 01-08, 11, 12, 14, and 18" in text
+    assert "modules 01-08, 11-13, and 18" in text
     assert "modules 11-17" not in text
 
 
