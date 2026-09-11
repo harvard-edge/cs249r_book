@@ -8,8 +8,8 @@ if a spec changes in the registry, re-running this script updates every
 chapter that plots it, so the volumes cannot disagree with each other.
 
 Consumers (one CSV written per chapter that plots the series):
-    vol2/conclusion, vol2/inference, vol2/performance_engineering,
-    vol2/compute_infrastructure, vol4/placement
+    vol2/17_conclusion, vol2/10_inference, vol2/09_performance_engineering,
+    vol2/02_compute_infrastructure, vol4/placement
 
 Usage:  python3 generate_accelerator_series.py
 """
@@ -32,10 +32,10 @@ from mlsysim.hardware.registry import CloudHardware  # noqa: E402
 SERIES = ["V100", "A100", "H100", "B200"]
 
 CONSUMERS = {
-    "vol2/conclusion": "gpu_memory_wall.csv",
-    "vol2/inference": "gpu_memory_wall.csv",
-    "vol2/performance_engineering": "memory_wall_trend.csv",
-    "vol2/compute_infrastructure": "gpu_scaling_trends.csv",
+    "vol2/17_conclusion": "gpu_memory_wall.csv",
+    "vol2/10_inference": "gpu_memory_wall.csv",
+    "vol2/09_performance_engineering": "memory_wall_trend.csv",
+    "vol2/02_compute_infrastructure": "gpu_scaling_trends.csv",
     "vol4/placement": "gpu_memory_wall.csv",
 }
 
