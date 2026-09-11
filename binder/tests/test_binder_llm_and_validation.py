@@ -114,3 +114,18 @@ def test_maintain_volume_bib_rejects_unsupported_volumes():
     cmd = object.__new__(MaintenanceCommand)
     assert cmd._maintain_volume_bib("vol1") is False
     assert cmd._maintain_volume_bib("vol2") is False
+
+
+def test_volume_bibliographies_preserves_missing_dedicated_bib():
+    """Ensure dedicated bibliographies for vol3/vol4 are preserved even when missing."""
+    from binder.cli.checks.case_study_provenance import collect
+    with TemporaryDirectory() as tmp:
+        p = Path(tmp)
+        (p / "books/vol4").mkdir(parents=True)
+        (p / "books/references.bib").write_text("@article{example2020,\n title={Example}\n}\n", encoding="utf-8")
+        (p / "books/vol4/test.qmd").write_text("::: {.callout-case-study}\n@ example\nSource @example2020\nProvenance: example\n:::\n", encoding="utf-8")
+        checked, findings = collect(repo=p)
+        assert checked == 0
+        assert len(findings) == 1
+        assert findings[0].code == "missing-bibliography"
+        assert findings[0].file.endswith("references-vol4.bib")
