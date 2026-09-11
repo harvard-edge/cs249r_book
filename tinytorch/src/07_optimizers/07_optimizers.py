@@ -55,28 +55,6 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 - **Integration:** Reads the gradients Module 06 writes into `param.grad`
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.optimizers
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-from typing import List, Optional, Dict
-
-from tinytorch.core.tensor import Tensor
-# Importing Module 06 completes every Tensor operation with its backward half,
-# which is what puts a gradient into param.grad for an optimizer to read.
-import tinytorch.core.autograd
-from tinytorch.core.autograd import method_of  # attach a method to a class, as in Module 06
-
-# Constants for optimizer defaults
-DEFAULT_LEARNING_RATE_SGD = 0.01  # Default learning rate for SGD
-DEFAULT_LEARNING_RATE_ADAM = 0.001  # Default learning rate for Adam/AdamW
-DEFAULT_BETA1 = 0.9  # First moment decay rate for Adam
-DEFAULT_BETA2 = 0.999  # Second moment decay rate for Adam
-DEFAULT_EPS = 1e-8  # Small epsilon for numerical stability in Adam
-DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -104,6 +82,28 @@ Module 01 (Tensor) → Module 06 (Autograd) → Module 07 (Optimizers) → Modul
 Optimizers are the step that turns gradients into learning. Module 08 will wire
 them into a full training loop.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.optimizers
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+from typing import List, Optional, Dict
+
+from tinytorch.core.tensor import Tensor
+# Importing Module 06 completes every Tensor operation with its backward half,
+# which is what puts a gradient into param.grad for an optimizer to read.
+import tinytorch.core.autograd
+from tinytorch.core.autograd import method_of  # attach a method to a class, as in Module 06
+
+# Constants for optimizer defaults
+DEFAULT_LEARNING_RATE_SGD = 0.01  # Default learning rate for SGD
+DEFAULT_LEARNING_RATE_ADAM = 0.001  # Default learning rate for Adam/AdamW
+DEFAULT_BETA1 = 0.9  # First moment decay rate for Adam
+DEFAULT_BETA2 = 0.999  # Second moment decay rate for Adam
+DEFAULT_EPS = 1e-8  # Small epsilon for numerical stability in Adam
+DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 
 # %% [markdown]
 r"""
@@ -282,12 +282,10 @@ class Optimizer:
           Only set grad when the attribute is missing.
         """
         ### BEGIN SOLUTION
-        # Validate and store parameters
-        if not isinstance(params, list):
-            params = list(params)
-
-        # Store parameters
-        self.params = params
+        # Own the list so later caller edits cannot misalign parameters and state.
+        self.params = list(params)
+        if len({id(param) for param in self.params}) != len(self.params):
+            raise ValueError("Optimizer parameters must not contain duplicates")
 
         # Every parameter must take part in autograd. Do NOT reset param.grad:
         # a caller may have run backward() before building the optimizer.
@@ -673,9 +671,7 @@ class SGD(Optimizer):
                 f"      assert len(saved_state) == len(optimizer.params)"
             )
 
-        for i, buf in enumerate(state):
-            if buf is not None:
-                self.momentum_buffers[i] = buf.copy()
+        self.momentum_buffers = [None if buf is None else buf.copy() for buf in state]
 
     def step(self):
         """
@@ -902,6 +898,7 @@ class Adam(Optimizer):
 
         # Initialize moment buffers (created lazily)
         self.m_buffers = [None for _ in self.params]  # First moment (mean)
+        self.update_counts = [0 for _ in self.params]  # Age of each parameter's moments
         self.v_buffers = [None for _ in self.params]  # Second moment (variance)
         ### END SOLUTION
 
@@ -943,7 +940,7 @@ def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
     1. Initialize m and v buffers to zeros if this is the first call
     2. Update first moment: m = beta1 * m + (1 - beta1) * grad
     3. Update second moment: v = beta2 * v + (1 - beta2) * grad^2
-    4. Compute bias corrections using step_count
+    4. Compute bias corrections using this parameter's update count
     5. Return bias-corrected m_hat and v_hat
 
     EXAMPLE:
@@ -952,7 +949,7 @@ def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
     >>> # v_hat ≈ grad^2 (after bias correction at step 1)
 
     HINTS:
-    - Use self.step_count (already incremented before this call)
+    - Increment self.update_counts[i] here: only a parameter with a gradient ages
     - Bias correction denominators: (1 - beta^t) approach 1 as t grows
     """
     ### BEGIN SOLUTION
@@ -967,9 +964,11 @@ def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
     # Update biased second moment estimate
     self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
 
-    # Compute bias correction
-    bias_correction1 = 1 - self.beta1 ** self.step_count
-    bias_correction2 = 1 - self.beta2 ** self.step_count
+    # A parameter with grad=None skipped this update. Its moments are younger
+    # than the optimizer's global step count, so correct using their own age.
+    self.update_counts[i] += 1
+    bias_correction1 = 1 - self.beta1 ** self.update_counts[i]
+    bias_correction2 = 1 - self.beta2 ** self.update_counts[i]
 
     # Compute bias-corrected moments
     m_hat = self.m_buffers[i] / bias_correction1
@@ -1001,7 +1000,7 @@ def test_unit_adam_update_moments():
 
     grad = np.array([0.1, 0.2])
 
-    # Simulate step 1 (step_count must be set before calling _update_moments)
+    # Simulate the optimizer's first call; the helper tracks this parameter's age
     optimizer.step_count = 1
 
     m_hat, v_hat = optimizer._update_moments(0, grad)
@@ -1064,7 +1063,7 @@ def step(self):
     TODO: Implement Adam parameter update using _extract_gradient and _update_moments
 
     APPROACH:
-    1. Increment step_count (needed for bias correction)
+    1. Increment the global step_count (each moment helper tracks its own age)
     2. For each parameter with gradients:
        a. Extract gradient with self._extract_gradient(param)
        b. Apply weight decay to gradient if specified
@@ -1075,12 +1074,12 @@ def step(self):
     - θ_t = θ_{t-1} - lr * m̂_t / (√v̂_t + ε)
 
     HINTS:
-    - Increment step_count FIRST (before the loop)
+    - step_count counts optimizer calls; update_counts counts each parameter's updates
     - _update_moments returns (m_hat, v_hat) tuple
     - Weight decay modifies grad_data before moment update
     """
     ### BEGIN SOLUTION
-    # Increment step counter first (needed for bias correction)
+    # Count optimizer calls; each parameter separately counts its moment updates.
     self.step_count += 1
 
     for i, param in enumerate(self.params):
@@ -1219,13 +1218,13 @@ AdamW's approach (correct):
 1. m = β₁ * m + (1-β₁) * pure_gradient  ← NO weight decay here
 2. v = β₂ * v + (1-β₂) * pure_gradient²
 3. step = m / √v
-4. parameter = parameter - learning_rate * step           ← gradient update
-5. parameter = parameter * (1 - lr * weight_decay)       ← separate decay
+4. parameter = parameter * (1 - lr * weight_decay)       ← decay old weight
+5. parameter = parameter - learning_rate * step           ← gradient update
 
 Result: Consistent regularization independent of gradient magnitudes!
 ```
 
-Note: Step 5 uses the "decoupled" form where weight decay is scaled by the
+Note: Step 4 uses the "decoupled" form where weight decay is scaled by the
 learning rate (`1 - lr * weight_decay`), not the simpler `(1 - weight_decay)`.
 This ensures the regularization strength scales consistently with the gradient
 update step size.
@@ -1287,6 +1286,7 @@ class AdamW(Optimizer):
 
         # Initialize moment buffers (same as Adam)
         self.m_buffers = [None for _ in self.params]
+        self.update_counts = [0 for _ in self.params]  # Age of each parameter's moments
         self.v_buffers = [None for _ in self.params]
         ### END SOLUTION
 
@@ -1307,8 +1307,8 @@ AdamW flow:
                         │
                    (m_hat, v_hat)
                         │
+    param *= (1 - lr * weight_decay)              ← decay old weight
     param -= lr * m_hat / (√v_hat + ε)           ← gradient update
-    param *= (1 - lr * weight_decay)              ← separate decay step
 ```
 """
 
@@ -1329,7 +1329,7 @@ def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
     1. Initialize m and v buffers to zeros if this is the first call
     2. Update first moment: m = beta1 * m + (1 - beta1) * grad
     3. Update second moment: v = beta2 * v + (1 - beta2) * grad^2
-    4. Compute bias corrections using step_count
+    4. Compute bias corrections using this parameter's update count
     5. Return bias-corrected m_hat and v_hat
 
     EXAMPLE:
@@ -1349,9 +1349,11 @@ def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
     # Update biased second moment estimate
     self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
 
-    # Compute bias correction
-    bias_correction1 = 1 - self.beta1 ** self.step_count
-    bias_correction2 = 1 - self.beta2 ** self.step_count
+    # A parameter with grad=None skipped this update. Its moments are younger
+    # than the optimizer's global step count, so correct using their own age.
+    self.update_counts[i] += 1
+    bias_correction1 = 1 - self.beta1 ** self.update_counts[i]
+    bias_correction2 = 1 - self.beta2 ** self.update_counts[i]
 
     # Compute bias-corrected moments
     m_hat = self.m_buffers[i] / bias_correction1
@@ -1422,7 +1424,7 @@ if __name__ == "__main__":
 ### AdamW Step: Decoupled Weight Decay Composition
 
 AdamW's `step()` composes the same helpers as Adam, but with one critical
-difference: weight decay is applied **after** the gradient update, directly
+difference: weight decay is applied **before** the gradient update, directly
 to the parameter values, rather than being mixed into the gradient.
 
 ```
@@ -1431,8 +1433,8 @@ For each parameter:
                                                │
                    _update_moments(i, grad) ──→ (m_hat, v_hat)
                                                      │
+                   param.data *= (1 - lr * weight_decay)      ← decay old weight
                    param.data -= lr * m_hat / (√v_hat + ε)   ← gradient step
-                   param.data *= (1 - lr * weight_decay)      ← separate decay
 ```
 """
 
@@ -1446,16 +1448,16 @@ def step(self):
     TODO: Implement AdamW parameter update using _extract_gradient and _update_moments
 
     APPROACH:
-    1. Increment step_count (needed for bias correction)
+    1. Increment the global step_count (each moment helper tracks its own age)
     2. For each parameter with gradients:
        a. Extract gradient with self._extract_gradient(param)
        b. Update moments with self._update_moments(i, grad_data) -- pure gradient
-       c. Apply gradient update: param -= lr * m_hat / (sqrt(v_hat) + eps)
-       d. Apply weight decay separately: param *= (1 - lr * weight_decay)
+       c. Decay the old weight: param *= (1 - lr * weight_decay)
+       d. Apply gradient update: param -= lr * m_hat / (sqrt(v_hat) + eps)
 
     KEY DIFFERENCE from Adam:
     - NO weight decay added to gradient before moment update
-    - Weight decay applied directly to parameter AFTER gradient update
+    - Weight decay applied to the old parameter BEFORE gradient update
 
     HINTS:
     - Do NOT modify grad_data with weight decay (that is Adam's coupled form)
@@ -1475,12 +1477,12 @@ def step(self):
         # Update moments using PURE gradients (no weight decay mixed in)
         m_hat, v_hat = self._update_moments(i, grad_data)
 
-        # Apply gradient-based update
-        param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
-
-        # Apply decoupled weight decay (separate from gradient update)
+        # Decay the old weight, not the adaptive update we are about to add.
         if self.weight_decay != 0:
             param.data = param.data * (1 - self.lr * self.weight_decay)
+
+        # Apply gradient-based update independently of decay.
+        param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
     ### END SOLUTION
 
 
@@ -1553,6 +1555,13 @@ def test_unit_adamw_optimizer():
 
     # Should be very similar (within numerical precision)
     assert np.allclose(param1.data, param2.data, rtol=1e-10)
+
+    # Decay acts on the old weight, independently of the adaptive step.
+    p = Tensor([2.0])
+    exact = AdamW([p], lr=0.1, betas=(0.0, 0.0), weight_decay=0.5)
+    p.grad = np.array([1.0], dtype=np.float32)
+    exact.step()
+    assert np.allclose(p.data, [1.8], atol=1e-7), "Decay must not shrink the new gradient update"
 
     print("✅ AdamW optimizer works correctly!")
 

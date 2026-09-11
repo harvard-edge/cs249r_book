@@ -55,29 +55,6 @@ from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 - **Integration:** Works seamlessly with existing layers for complete CNN architectures
 """
 
-# %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": false}
-#| default_exp core.spatial
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-import time
-
-from tinytorch.core.tensor import Tensor, Function
-from tinytorch.core.activations import ReLU
-from tinytorch.core.layers import Linear
-import tinytorch.core.autograd  # completes every operation with its backward half
-
-# Constants for convolution defaults
-DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
-DEFAULT_STRIDE = 1  # Default stride for convolutions
-DEFAULT_PADDING = 0  # Default padding for convolutions
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -105,6 +82,29 @@ Training Pipeline (Modules 01-08) → Spatial Operations (Module 09) → CNNs (M
 Students completing this module will have built the spatial processing
 foundation that powers computer vision applications.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "spatial-setup", "solution": false}
+#| default_exp core.spatial
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+import time
+
+from tinytorch.core.tensor import Tensor, Function
+from tinytorch.core.activations import ReLU
+from tinytorch.core.layers import Linear
+import tinytorch.core.autograd  # completes every operation with its backward half
+
+# Constants for convolution defaults
+DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
+DEFAULT_STRIDE = 1  # Default stride for convolutions
+DEFAULT_PADDING = 0  # Default padding for convolutions
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -798,9 +798,11 @@ class Conv2d:
         validate_4d_input(x, "Conv2d")
 
         batch_size, in_channels, in_height, in_width = x.shape
-
-        # Step 2: Compute output dimensions
+        if in_channels != self.in_channels:
+            raise ValueError(f"Conv2d expected {self.in_channels} input channels, got {in_channels}")
         out_height, out_width = self._compute_output_shape(in_height, in_width)
+        if out_height <= 0 or out_width <= 0:
+            raise ValueError("Conv2d kernel must fit within the padded input")
 
         # Steps 3-5: pad, convolve, add bias. The operation runs the helpers
         # (via `layer=self`) and Module 06's apply() records it for backward.

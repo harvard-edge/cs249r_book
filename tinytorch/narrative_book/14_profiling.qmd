@@ -34,7 +34,7 @@ print(f"2 rows:  {time_ms(2):.2f} ms")
 print(f"16 rows: {time_ms(16):.2f} ms")
 ```
 
-On my laptop (an Apple M5 Max running NumPy 2.5 with Apple's Accelerate library), one run printed `1.50 ms` and `1.50 ms`. Eight times the FLOPs, and the clock did not move. Your numbers will differ, but the shape will not. The weight matrix is far larger than any cache, and on most machines the two calls take about the same time.
+On my laptop (an Apple M5 Max running NumPy 2.5 with Apple's Accelerate library), one run printed `1.50 ms` and `1.50 ms`. Eight times the FLOPs, and the clock did not move. This recorded run illustrates the pattern the experiment is designed to test. Results depend on cache capacity, threading, and the matrix-multiply routine selected for each shape; another machine need not produce a flat pair of timings.
 
 The FLOP count was not wrong. It was measuring the wrong thing. Both calls have to pull the same 64 MB weight matrix out of memory, and on my machine that transfer, not the arithmetic, is what the millisecond and a half is spent on. The sixteen-row call does its extra multiplications in the shadow of a memory transfer that was going to happen anyway. Any optimization that only trims arithmetic here, however clever, saves nothing. Counting FLOPs without counting bytes is the trap this chapter exists to remove.
 
@@ -66,7 +66,7 @@ Plotted against $I$ on log axes, as in @fig-roofline-model, the right-hand side 
 
 $$I_{\text{ridge}} = \frac{P_{\text{peak}}}{B_{\text{peak}}}$$
 
-An operation whose intensity sits left of the ridge is **memory bound**. It cannot run faster than $I \times B_{\text{peak}}$, no matter how fast the arithmetic units are; the only lever is moving fewer bytes. An operation right of the ridge is **compute bound**. Its bytes arrive faster than it can use them, and the lever is arithmetic: fewer FLOPs, or a faster way to do them. The model has no third case. Suppose a machine does 1,000 GFLOP/s and moves 50 GB/s; its ridge is 20 FLOPs per byte. An operation at 0.5 FLOPs per byte on that machine can reach at most 25 GFLOP/s, one fortieth of what the silicon can do. The rest of the chip idles, waiting for bytes.
+An operation whose intensity sits left of the ridge is **memory bound**. It cannot run faster than $I \times B_{\text{peak}}$, no matter how fast the arithmetic units are; the only lever is moving fewer bytes. An operation right of the ridge is **compute bound**. Its bytes arrive faster than it can use them, and the lever is arithmetic: fewer FLOPs, or a faster way to do them. The two-ceiling model omits overhead such as Python dispatch and kernel launches; a small operation can spend most of its time there even when neither ceiling is reached. Suppose a machine does 1,000 GFLOP/s and moves 50 GB/s; its ridge is 20 FLOPs per byte. An operation at 0.5 FLOPs per byte on that machine can reach at most 25 GFLOP/s, one fortieth of what the silicon can do. The rest of the chip idles, waiting for bytes.
 
 ### Why a Linear layer's intensity is its row count
 
@@ -90,7 +90,7 @@ The machine's two ceilings can be measured with the same timer, without a datash
 The listings in this chapter are extracted from Module 14 (`src/14_profiling/14_profiling.py`), which the package exports as `tinytorch.perf.profiling`. Its `Profiler` counts parameters and FLOPs from layer shapes, tracks peak memory during a forward pass with `tracemalloc`, times with warmup and a median, and classifies a bottleneck with a bandwidth-versus-throughput heuristic. The one piece of code below that is not in the module is the short `Roofline` class at the end of this section, which holds a machine's two measured ceilings; the module classifies against a fixed ridge instead, and the text says where the two differ.
 :::
 
-The profiler is a handful of short pieces: two counters, a timer, a memory probe, and a few lines that combine them into a verdict. Each piece works on any model built from the book's layers, because it only asks for what Chapter 3's `Layer` already provides: a `parameters()` list and a `forward` method. Each piece also exists for a reason the previous sections set up, and I want that reason on the page before the code every time. The code takes a minute to read; the reason is what you will carry to a real framework.
+Begin at `Profiler.profile_forward_pass(model, input_tensor)`, the entry point that joins the counters to execution. It reads the parameter count and a per-sample FLOP estimate, probes memory using a separate dummy input, then times repeated calls on the supplied input. The returned dictionary mixes those sources, so reading it requires keeping their meanings separate. We follow each helper below, then return to the entry point to check how it combines a per-sample count with a whole-batch time.
 
 ### Counting parameters and bytes
 
@@ -104,7 +104,7 @@ The three branches are three ways a model can present itself. A `Sequential` is 
 
 {{< include _listings/14_profiling/Profiler_calculate_parameter_memory.qmd >}}
 
-Two conventions are baked into that line and both matter later. Every parameter in TinyTorch is a float32, so the module multiplies by a constant `BYTES_PER_FLOAT32` of 4 rather than asking each array for its `nbytes`; that is correct for all of Parts I and II and stops being correct in Chapter 15, where a weight stored as int8 costs a quarter as much, and the honest count becomes `p.data.nbytes`. And `MB_TO_BYTES` is $1024 \times 1024$, so the module's megabyte is what a memory chip calls one; TinyGPT's 4,328,448 bytes print as 4.13 MB, not 4.33. To a first approximation this parameter memory is also the byte count $Q$ for a forward pass. Every weight has to be read from memory once per pass, and for a small-row pass the weights dwarf the activations.
+The byte calculation assumes float32 storage and multiplies the element count by `BYTES_PER_FLOAT32`, which is four. That remains the physical dtype of TinyTorch's simulated quantized tensors in Chapter 15; their separate analytical INT8 report describes a proposed packed representation. A container that really stores several dtypes would instead sum each array's `nbytes`. The module divides by `MB_TO_BYTES = 1024 * 1024`, so its `memory_mb` fields use binary scaling: TinyGPT's 4,328,448 parameter bytes print as 4.13. Parameter storage can approximate traffic for a dense layer whose weights must all be fetched, but it does not count how many times a pass reads each byte or whether a cache serves those reads.
 
 ### Counting FLOPs
 
@@ -142,11 +142,11 @@ So the timer follows two rules, and they are the two rules the experiment in The
 
 ### Memory during a pass
 
-The parameter bytes are the floor on $Q$, not all of it. A forward pass allocates activations, and for a long prompt they are not small; the 64-token prompt through TinyGPT allocates more than half again the weight bytes on the way through. A framework wants to see that number, both because it is the rest of $Q$ and because it is what decides whether a batch fits in memory. The module measures it rather than deriving it, by asking Python's allocator what the high-water mark was while `forward` ran.
+A forward pass can allocate many temporaries even when its parameter arrays already exist. `measure_memory` asks how much allocation occurs while a dummy forward pass runs. This is a different question from how many bytes cross the memory bus. An array reused many times contributes once to live storage and many times to traffic; an embedding table may occupy memory while a lookup touches only one row.
 
 {{< include _listings/14_profiling/Profiler_measure_memory.qmd >}}
 
-`tracemalloc` records every allocation Python makes, including NumPy's, so the peak minus the baseline is the most memory the pass held at once. The dummy input is built to suit the model: a token model, recognized by its `vocab_size`, gets integer ids, and everything else gets floats. The activation estimate, twice the input's bytes, is deliberately rough; it stands for the input and one output the same size, and the peak is what the module trusts. The efficiency is the fraction of the peak that was weights and input rather than intermediate results. In the trace, a one-token decode through TinyGPT peaks at exactly its parameter memory and a 64-token prompt at 6.56 MB, so the intermediates cost 2.4 MB, which is where Chapter 17's fusion will look for savings.
+Read the lifecycle in order. `tracemalloc.start()` begins tracking allocations, the code records a baseline, constructs a dummy input, and executes `model.forward(dummy_input)`. The measured peak covers allocations visible to Python's tracing machinery during that interval; it is neither total process memory nor a hardware traffic counter. Parameters allocated before tracing are absent from that increment. The final `max` therefore prevents the reported peak from falling below counted parameter storage plus an activation estimate of twice the input bytes. A peak equal to that floor tells us the floor won, not that the pass allocated no intermediates. `memory_efficiency` compares the same estimated useful storage with this combined peak. The report is useful for comparisons under the same assumptions, but none of these fields measures DRAM bytes.
 
 ### The roofline and the profiler
 
@@ -156,7 +156,7 @@ What a framework needs, then, is the two counts and the time turned into rates, 
 
 {{< include _listings/14_profiling/compute_derived_metrics.qmd >}}
 
-The first rate is achieved FLOP/s, the second is the peak memory divided by the time, which is bytes per second on the assumption that everything the pass held was moved once. The `theoretical_peak_gflops` of 100 is a placeholder for a laptop-class CPU, and the efficiency it produces is only meaningful once you replace it with a number you measured, which the trace does. The verdict comes from comparing the two rates.
+The first rate divides estimated batch FLOPs by measured batch time. The second divides reported peak storage by that time and names the result `memory_bandwidth_mbs`. It is a storage-over-time proxy, not observed bandwidth. Its interpretation assumes that the live bytes stand in for bytes transferred once, an assumption that reuse, temporary arrays, and caches can violate. The `theoretical_peak_gflops` default of 100 is also a model input, not a measured property of the current machine. We can use the helper to learn the arithmetic of a diagnosis, but the roofline experiment below supplies its own traffic model and effective ceilings.
 
 {{< include _listings/14_profiling/analyze_bottleneck.qmd >}}
 
@@ -164,7 +164,9 @@ Read the inequality in units. Megabytes per second exceeds a hundred times gigaf
 
 {{< include _listings/14_profiling/Profiler_profile_forward_pass.qmd >}}
 
-One call returns the parameter count, the FLOPs, the memory figures, the median latency, the two rates, and the verdict, which is what the trace runs on TinyGPT. The one thing missing is the number Nsight Compute leads with: the fastest time the machine could have delivered, so that the gap to the measured time says how far the implementation is from what the hardware permits. That takes the two measured ceilings, and fifteen lines hold them. This class is not in Module 14; it is the version of `_analyze_bottleneck` you build once you have measured your machine.
+The key join occurs at `batch_flops = flops * batch_size`. `count_flops` reports one sample, whereas `measure_latency` times the whole input tensor. Omitting the multiplier makes a larger batch appear artificially inefficient. For `Linear(3, 2)` and an input of shape `(4, 3)`, the parameter count is eight including bias, the per-sample matrix-product count is twelve, and `batch_flops` is forty-eight. A GPT sample is a whole sequence, so its sequence-length cost is already inside `flops`; only the outer batch dimension is multiplied here. The entry point also chooses five warmup calls and twenty timed calls rather than the timer's defaults.
+
+The returned fields retain those distinctions instead of collapsing them into one score. `profile_backward_pass`, despite its name, estimates backward cost from the forward report; it does not execute `backward()`. For the roofline calculation below we need explicit compute and bandwidth ceilings. The following book-only class holds those assumptions and applies the bound from The Idea.
 
 ```python
 class Roofline:
@@ -289,7 +291,7 @@ for rows in (1, 2, 8, 16, 64, 256, 1024):
           f"GFLOP/s={flops / 1e9 / (ms / 1e3):6.0f}  GB/s={nbytes / 1e9 / (ms / 1e3):5.1f}")
 ```
 
-One run on the same laptop as before printed the following. Two repeats of the sweep agreed to within a few percent at every row.
+The following table preserves an illustrative run reported in the September 2026 draft, using the machine and software named in its caption. It is a worked example of interpreting a sweep, not a performance expectation for the current reader's machine. Rerunning the script supplies the local measurements needed for an optimization decision.
 
 | Rows | Intensity (FLOPs/byte) | p50 (ms) | Achieved GFLOP/s | Achieved GB/s |
 | ---: | ---: | ---: | ---: | ---: |
@@ -325,7 +327,7 @@ print(f"{prompt['latency_ms']:.2f} ms  {prompt['gflops_per_second']:.1f} GFLOP/s
 1.60 ms  78.4 GFLOP/s  4101 MB/s  peak 6.56 MB  compute
 ```
 
-The decode step is memory bound by any test. The prompt is the interesting row. By the module's fixed ridge of 10 it is compute bound, at 78 GFLOP/s against 4 GB/s, or 19 FLOPs per byte of peak memory. Against the ridge this machine just measured, 37, the same pass is memory bound, and the hand count's 27.4 says the same. Both verdicts are correct for the ridge they assume, which is the point of measuring one.
+The module labels the one-token pass `memory` and the prompt `compute`. Those labels follow its fixed threshold and its peak-storage proxy; they are not measurements of the hardware bottleneck. The hand-derived traffic estimate gives prompt intensity 27.4, which falls below the example machine's effective ridge of 37. The disagreement identifies assumptions to inspect: the byte estimate, the applicable library ceiling, and overhead outside the arithmetic. Changing a threshold alone cannot establish which resource limited this execution.
 
 ```python
 laptop = Roofline(peak_gflops=1700, bandwidth_gbs=46)
@@ -338,7 +340,7 @@ memory-bound memory-bound
 0.094 ms  0.100 ms
 ```
 
-Decoding at 0.42 FLOPs per byte is ninety times left of the ridge. The bound for one decode step is $4.3\text{ MB} / 46\text{ GB/s} \approx 0.094$ ms; the arithmetic would need $1.83\text{ MFLOP} / 1.7\text{ TFLOP/s} \approx 0.001$ ms. The step measured 0.40 ms, four times its bound, and the 64-token prompt measured 1.6 ms against a bound of 0.1 ms. Neither gap is the silicon. A pass through TinyGPT builds about 140 of Chapter 6's operation objects, each wrapping one NumPy call, and each costs microseconds of Python before any bytes move; that overhead, not bandwidth, is what a NumPy framework pays, and Chapter 17 is where it gets attacked. What the roofline says survives the overhead. Every optimization in the next four chapters that works on this model works by lowering the bound's first term.
+Under the assumed dense-weight traffic model, decoding at 0.42 FLOPs per byte lies far left of the example ridge. The reported times exceed the corresponding roofline estimates, leaving room for costs the two-term model omits. TinyTorch dispatches NumPy operations through Python, and its temporary allocations and library calls can contribute to that gap. The roofline alone cannot assign the excess time to one cause; an operator-level measurement is needed. For the next chapters, the useful result is a testable hypothesis: reducing weight traffic should help when those transfers dominate, while fusion can target the allocations and dispatch between operations.
 
 ---
 
@@ -355,7 +357,7 @@ What carries over unchanged is the whole model. The time bound is a maximum of t
 | | TinyTorch `Profiler` | `torch.profiler` and Nsight Compute |
 | :--- | :--- | :--- |
 | FLOPs | Formula from layer shapes | Counted per operator (`FlopCounterMode`) or from hardware counters |
-| Bytes | Parameter bytes plus the allocator's peak during the pass | Measured DRAM traffic, cache hits excluded |
+| Bytes | Counted storage, estimated activations, and a traced allocation peak; no traffic counter | Measured DRAM traffic, cache hits excluded |
 | Time | `perf_counter` around `forward`, median of many calls | GPU-side events; CPU and GPU timelines aligned |
 | Regime | Achieved rates against a fixed ridge of 10 FLOPs per byte | Achieved bandwidth and throughput against measured peaks |
 

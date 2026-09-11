@@ -1,6 +1,6 @@
 # Model Compression: Pruning, Low-Rank SVD, and Distillation {#sec-compression}
 
-After Chapter 15, every weight in the model costs one byte instead of four, and the question there was about the number stored in each cell. The matrices themselves have not changed shape. A $4096 \times 4096$ layer still has 16.8 million cells, and every one of them is read and multiplied on every forward pass, whether or not the value in it matters.
+Chapter 15 mapped each weight onto an integer grid and calculated the storage a packed INT8 representation would need. TinyTorch still holds those codes in float32 arrays, and the matrices themselves have not changed shape. A $4096 \times 4096$ layer still has 16.8 million cells, and every one of them is read and multiplied on every forward pass, whether or not the value in it matters.
 
 This chapter asks the question a practitioner asks after noticing that most trained weights are tiny. If I set the small ones to zero, or throw whole rows away, or replace the matrix with something smaller that behaves almost the same, does the model get faster, and what do I lose? The answer has a trap in it. Zeros do not make a matrix smaller. Only changing its shape does.
 
@@ -14,7 +14,7 @@ We build three tools that change the shape, or explain why a popular one does no
 
 Trained weight matrices are full of small numbers. In 1989, LeCun, Denker, and Solla showed with *Optimal Brain Damage* that most of the weights in a trained network can be removed with little change in accuracy, and later work found that 80 percent or more can go. The obvious move is to find the smallest 80 percent of the entries in $W$ and set them to zero.
 
-Do that to a $4096 \times 4096$ layer and then look at what the computer sees. The array still has 16.8 million cells. In FP32 it still occupies 67.1 MB, and after Chapter 15's INT8 conversion it still occupies 16.8 MB. A zero takes the same number of bytes as any other value. The forward pass $Y = XW$ still performs $2 \times 4096 \times 4096 \approx 33.5$ million multiply-adds per token, because the multiply loop does not check for zeros before it multiplies. Nothing about the shape changed, so nothing about the cost changed.
+Do that to a $4096 \times 4096$ layer and then look at what the computer sees. The array still has 16.8 million cells. In FP32 it still occupies 67.1 MB, and a packed INT8 representation would still occupy 16.8 MB. A zero takes the same number of bytes as any other value. The forward pass $Y = XW$ still performs $2 \times 4096 \times 4096 \approx 33.5$ million multiply-adds per token, because the multiply loop does not check for zeros before it multiplies. Nothing about the shape changed, so nothing about the cost changed.
 
 ```python
 import numpy as np
@@ -45,7 +45,7 @@ Magnitude pruning picks a threshold $\theta$ and replaces every weight with
 
 $$W_{\text{sparse}} = W \odot M, \qquad M_{i,j} = \begin{cases} 1 & |W_{i,j}| \ge \theta \\ 0 & |W_{i,j}| < \theta \end{cases}$$
 
-where $\odot$ multiplies element by element and $M$ is the binary mask. Choosing $\theta$ as the 80th percentile of $|W|$ zeros 80 percent of the entries. On its own it does not change the shape, so it does not change the cost. We build it anyway, and the first listing in The Code says what it is good for.
+where $\odot$ multiplies element by element and $M$ is the binary mask. A percentile threshold can miss the intended count when magnitudes tie. The module instead ranks entries and selects the requested number, with a stable tie order. On its own it does not change the shape, so it does not change the cost. We build it anyway, and the first listing in The Code says what it is good for.
 
 ### Structured pruning: delete whole neurons
 
@@ -79,13 +79,13 @@ where $\|\cdot\|_F$ is the Frobenius norm.[^fn-frobenius-svd-error] You can read
 
 ### Distillation: teaching the small model from the large one
 
-Pruning and factorization both approximate the original weights, and the approximation costs accuracy. The usual repair is to train the smaller model for a while afterward, and the most effective way to train it is **knowledge distillation** (Hinton, Vinyals, and Dean, 2015). Instead of training the small *student* only on the true labels, you also train it to match the full output distribution of the large *teacher*.
+Pruning and factorization both approximate the original weights, and the approximation costs accuracy. The usual repair is to train the smaller model for a while afterward, and one way to guide that training is **knowledge distillation** (Hinton, Vinyals, and Dean, 2015). Instead of training the small *student* only on the true labels, you also train it to match the full output distribution of the large *teacher*.
 
 The loss has two parts. The hard part is the ordinary cross-entropy from Chapter 4 between the student's prediction and the true label. The soft part compares the student's and teacher's softmax outputs after both sets of logits are divided by a **temperature** $T > 1$, which flattens the distributions so the small probabilities become visible. The comparison is the Kullback-Leibler divergence, $\sum_k p_k \log (p_k / q_k)$, which is zero when the two distributions agree and grows as they separate. A weight $\alpha$ mixes the two:
 
 $$\mathcal{L} = \alpha \, \mathrm{KL}\!\left(p_{\text{teacher}}^{(T)} \,\|\, p_{\text{student}}^{(T)}\right) + (1 - \alpha)\, \mathrm{CE}\!\left(p_{\text{student}}, y\right)$$
 
-with $T = 3$ and $\alpha = 0.7$ as typical defaults. Everything else about training is exactly Chapter 8.
+Module 16 defaults to $T = 3$ and $\alpha = 0.7$. Both terms average over examples after summing over classes, so duplicating a batch leaves the objective unchanged. The soft term here omits the optional temperature-squared multiplier; changing temperature therefore changes both the target distribution and its gradient scale. The training loop still uses Chapter 8's forward, backward, and update sequence, with the teacher held fixed.
 
 ---
 
@@ -103,15 +103,15 @@ Every compression claim starts with a number. A paper reports that a model is 80
 
 The obvious count divides zeros by all parameters, biases included. Chapter 3's `Linear` initializes its biases to zero, so on a fresh two-layer model with 64 inputs, 128 hidden units, and 10 outputs, that count reports 1.4 percent sparsity, 138 zeros out of 9,610 parameters, before anything has been pruned. The number is small, it is wrong, and it sits under every comparison you make afterward. The obvious pruning pass has a subtler flaw. It thresholds each layer on its own, which forces exactly 80 percent out of every layer whether that layer's weights are uniformly tiny or uniformly large.
 
-So the module counts weight matrices only, and it prunes with a single threshold computed across all of them, so that a layer whose weights are small gives up more of them than a layer whose weights are large.
+The module counts weight matrices only and ranks their entries together, so that a layer whose weights are small gives up more of them than a layer whose weights are large.
 
 {{< include _listings/16_compression/measure_sparsity.qmd >}}
 
-The `len(param.shape) > 1` test is the whole bias exclusion, and the result is a percentage, not a fraction; on the fresh model above it reports `0.0`. Pruning gathers the same matrices, finds one threshold across all of them, and masks each in place.
+The `len(param.shape) > 1` test is the whole bias exclusion, and the result is a percentage, not a fraction; on the fresh model above it reports `0.0`. Pruning gathers the same matrices, selects the smallest `int(sparsity * count)` entries globally, and zeros those entries in place.
 
 {{< include _listings/16_compression/magnitude_prune.qmd >}}
 
-Notice that the loop ends by multiplying by a mask. The array it writes back has the same shape and the same `nbytes` as the one it read. On the two-layer model above, `magnitude_prune(model, 0.8)` leaves `measure_sparsity` reporting `79.99` and not one byte has left memory. The global threshold shows in how the loss is shared. The first layer, whose 64-input weights are larger under Chapter 3's LeCun initialization, loses 78 percent of its entries; the second, with 128 inputs and smaller weights, loses 91 percent. The function is a diagnostic, and it is the first step of the 2:4 pattern in the bridge, but it is not a speedup. PyTorch's `prune.l1_unstructured` is the same mask under a different name.
+Notice that the loop ends by assigning zero through a mask. The array it writes back has the same shape and the same `nbytes` as the one it read. On the two-layer model above, `magnitude_prune(model, 0.8)` leaves `measure_sparsity` reporting `79.99` and not one byte has left memory. The global ranking shows in how the removals are shared. The first layer, whose 64-input weights are larger under Chapter 3's LeCun initialization, loses 78 percent of its entries; the second, with 128 inputs and smaller weights, loses 91 percent. The function is a diagnostic, and it is the first step of the 2:4 pattern in the bridge, but it is not a speedup. PyTorch's `prune.l1_unstructured` is the same mask under a different name.
 
 ### Structured pruning: deleting neurons across a layer pair
 
@@ -120,6 +120,8 @@ Take the MLP from Chapter 13 at a production width, $D = 4096$. Its two matrices
 Zeroing their weights is `magnitude_prune` again, with the zeros arranged in whole columns instead of scattered. That is what the module's `structured_prune` does, and it does it on purpose, so that `measure_sparsity` can see its work and so that the next step, the shape change, is a separate decision.
 
 {{< include _listings/16_compression/structured_prune.qmd >}}
+
+For a multilayer model, the routine selects hidden linear layers and preserves the final class head. It zeroes selected columns and their biases without changing shapes. The separate `compress_model` convenience path rejects low-rank replacement because that structural transformation is not implemented there; the factorization below remains explicit book code.
 
 It scores each output unit of a `Linear` by the L2 norm of its column, uses `argpartition` to find the `num_to_prune` smallest without sorting the rest, and zeros those columns and their bias entries. Two things to know before you call it. The arrays keep their shape, so both matrices in the MLP above still have 67.1 million cells and the multiply still reads every one; and it prunes the hidden layers only. The last `Linear` in a model is the head, whose output channels are the classes, so zeroing its columns would remove classes rather than neurons, and the function leaves it alone; a model with a single `Linear` has nothing else to prune and is pruned as it is.
 
@@ -132,11 +134,11 @@ def prune_neurons(first: Linear, second: Linear, keep: int):
     scores = np.sum(np.abs(w1), axis=0)                # L1 norm of each column
     survivors = np.sort(np.argsort(scores)[-keep:])    # top-`keep`, in order
 
-    new_first = Linear(first.in_features, keep)
+    new_first = Linear(first.in_features, keep, bias=first.bias is not None)
     new_first.weight = Tensor(w1[:, survivors].copy(), requires_grad=True)
     if first.bias is not None:
         new_first.bias = Tensor(first.bias.data[survivors].copy(), requires_grad=True)
-    new_second = Linear(keep, second.out_features)
+    new_second = Linear(keep, second.out_features, bias=second.bias is not None)
     new_second.weight = Tensor(w2[survivors, :].copy(), requires_grad=True)
     new_second.bias = second.bias                       # outputs are untouched
     return new_first, new_second
@@ -181,7 +183,7 @@ Because Chapter 3's weight is inputs by outputs, the first factor is the one the
 
 ### The distillation loss
 
-Every tool above makes the model worse at the moment it runs. The pruned pair in the worked trace moves its output by $0.1$ on a single input; a $4096 \times 4096$ layer cut to rank 256 loses whatever sits in singular values 257 through 4096. The accuracy comes back through training, and the question is what to train on.
+Each approximation above can alter the model's predictions. The pruned pair in the worked trace moves its output by $0.1$ on a single input; a $4096 \times 4096$ layer cut to rank 256 loses whatever sits in singular values 257 through 4096. Recovery training can reduce that error, and the question is what objective to train on.
 
 Fine-tuning the small model on the labels alone hands it one number per example, the index of the correct class. The large model knows more than that. Show it a picture and its logits might be $[6, 2, 0]$ for cat, dog, and car, which softmax turns into $0.98$, $0.018$, and $0.002$. The ranking of the wrong answers, dog far ahead of car, is information the label throws away, and at $T = 1$ it is nearly invisible anyway. Divide the logits by $T = 3$ first and the same three become $0.715$, $0.188$, and $0.097$, a distribution a student can actually be trained to match.
 
@@ -189,11 +191,54 @@ So the loss has a soft term and a hard term. The soft term is the KL divergence 
 
 {{< include _listings/16_compression/KnowledgeDistillation.qmd >}}
 
-Read the argument order of `_kl_divergence` carefully, because it is the easiest thing to get backwards. The first argument is the reference distribution, the one under the sum, and it is the teacher's; the loss is $\mathrm{KL}(p_{\text{teacher}} \,\|\, p_{\text{student}})$, which is zero when the student matches and grows fastest where the teacher puts probability the student does not. The `1e-8` inside the logarithms guards against a zero probability, and it means the soft term with identical logits is a hair above zero rather than exactly zero. With teacher and student both at $[6, 2, 0]$ and label 0 the loss is $0.0062$, which is $0.3$ times the cross-entropy of $0.0206$ and nothing else, the sanity check I run first on any distillation code. The soft term is summed over the batch and the hard term is averaged. Hinton's paper also multiplies the soft term by $T^2$ so that its gradient magnitude does not shrink as $T$ grows; the module omits that factor, and says so in its comment. The loss is a plain function of logits, so training with it is the Chapter 8 loop with this method in place of cross-entropy. In PyTorch the same two terms are `F.kl_div` on log-softmaxed logits plus `F.cross_entropy`.
+Follow `distillation_loss` from its arguments to its return value. The two logit tensors must have matching `(batch, classes)` shapes. A label vector may arrive as a NumPy integer array or as a `Tensor`, whose storage converts even class IDs to float32. The method checks that each ID is finite, integral, and in range before converting it to an indexing dtype. A matrix of target probabilities takes the other branch, which checks nonnegative entries and a unit row sum. These checks distinguish a malformed target from a model that merely predicts the wrong class.
+
+The next lines establish which model learns. `log_softmax(student_logits / self.temperature)` uses the operations from Chapters 4 and 6 and retains a path back to the student. `Tensor(teacher_logits.data)` constructs a new leaf without gradient tracking, so the teacher distribution becomes a constant even if its forward pass recorded a graph. Multiplying that constant distribution by `teacher_log_probs - student_log_probs` implements KL in the teacher-to-student direction. The class sum produces one loss per example; the final mean produces one scalar for the batch. The hard term follows the same reduction convention at temperature one. Taking `.data` from the student at this point would leave the numerical loss looking reasonable while disconnecting the computation that trains it.
+
+The method returns a scalar `Tensor`, ready for `backward()`. Its stable `log_softmax` path does not use the NumPy `_kl_divergence` and `_cross_entropy` helpers beneath it; those helpers support the module's analysis table. With identical teacher and student logits, the soft term is zero and only the hard term remains. Duplicating every example leaves both terms unchanged. The trace below checks these invariants before using the objective in a training step.
 
 ---
 
 ## A Worked Trace
+
+### Following one distillation update
+
+Use one input, two output classes, and explicitly chosen weights so that the trace has no random initialization hidden in it. The student begins with equal logits and therefore assigns each class probability one half. The teacher favors class zero, which also matches the label. Constructing the optimizer before the first student forward pass matters in TinyTorch: the optimizer enables gradient tracking on the student's parameters, and Chapter 6 records dependencies when the forward operations run.
+
+```python
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+from tinytorch.core.optimizers import SGD
+from tinytorch.perf.compression import KnowledgeDistillation
+
+teacher = Linear(1, 2, bias=False)
+student = Linear(1, 2, bias=False)
+teacher.weight.data[:] = [[2.0, 0.0]]
+student.weight.data[:] = [[0.0, 0.0]]
+optimizer = SGD(student.parameters(), lr=0.1)
+kd = KnowledgeDistillation(teacher, student, temperature=2.0, alpha=0.5)
+x, labels = Tensor([[1.0]]), Tensor([0])
+teacher_logits = teacher(x)
+teacher_before = teacher.weight.data.copy()
+
+optimizer.zero_grad()
+loss = kd.distillation_loss(student(x), teacher_logits, labels)
+before = float(loss.data)
+loss.backward()
+print(np.round(student.weight.grad, 6))  # [[-0.307765  0.307765]]
+assert teacher.weight.grad is None
+optimizer.step()
+after = kd.distillation_loss(student(x), teacher_logits, labels)
+assert float(after.data) < before
+assert np.array_equal(teacher.weight.data, teacher_before)
+
+pair = Tensor([[1.0], [1.0]])
+duplicated = kd.distillation_loss(student(pair), teacher(pair), Tensor([0, 0]))
+assert np.isclose(duplicated.data, after.data)
+```
+
+The teacher's softened probability for class zero is approximately `0.731059`; the student's is `0.5`. The soft contribution to the first logit's gradient is `0.5 * (0.5 - 0.731059) / 2`, and the hard contribution is `0.5 * (0.5 - 1)`. Their sum is `-0.307765`, the value printed by `backward()`. Subtracting that gradient raises the first student weight and lowers the second, while the teacher stays unchanged. The division by temperature comes from differentiating the softened logits; the batch mean would supply another division for a larger batch. No temperature-squared multiplier cancels either effect in this implementation.
 
 ### Deleting one neuron
 
@@ -289,7 +334,7 @@ Low-rank factorization reached production from a different direction. Compressin
 
 Distillation carries over almost unchanged. DistilBERT was trained with a loss of the same shape as `KnowledgeDistillation.distillation_loss`, and the temperature-scaled softmax is the standard form. Modern usage adds the $T^2$ factor the listing omits, sometimes matches intermediate activations as well as the final logits, and increasingly uses a large model to *generate* training data for a small one, which is distillation with the soft targets replaced by sampled text.
 
-What should you now expect in your own work? First, when a compression method claims a speedup, check whether the tensor shapes changed or whether a mask was applied. Only a shape change, or a hardware-recognized pattern like 2:4, will show up in latency. Second, before factorizing a layer, compute its singular values and see where they fall off; Eckart-Young tells you the error for every $r$ at once, before you commit to any. Third, budget for recovery training. Every method in this chapter degrades the model at the moment it is applied, and the accuracy comes back through fine-tuning or distillation, not through a better pruning score.
+What should you now expect in your own work? First, when a compression method claims a speedup, check whether the tensor shapes changed or whether a mask was applied. Only a shape change, or a hardware-recognized pattern like 2:4, will show up in latency. Second, before factorizing a layer, compute its singular values and see where they fall off; Eckart-Young tells you the error for every $r$ at once, before you commit to any. Third, budget for recovery training. An approximation can degrade accuracy, and fine-tuning or distillation may recover it; the result must be measured rather than assumed.
 
 | | Unstructured pruning | 2:4 sparsity | Structured pruning | Low-rank / LoRA |
 | :--- | :--- | :--- | :--- | :--- |

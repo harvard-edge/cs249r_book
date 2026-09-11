@@ -56,6 +56,33 @@ from tinytorch.core.training import Trainer, CosineSchedule, clip_grad_norm
 - **Integration:** Works seamlessly with optimizers and losses for complete learning pipelines
 """
 
+# %% [markdown]
+"""
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-07 must be working
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `pickle` (for checkpoint serialization)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` - Tensor class from Module 01
+- `tinytorch.core.layers` - Linear layer from Module 03
+- `tinytorch.core.losses` - Loss functions from Module 04
+- `tinytorch.core.autograd` - Gradient tracking from Module 06
+- `tinytorch.core.optimizers` - SGD, AdamW from Module 07
+
+**Dependency Flow**:
+```
+Tensor → Layers → Losses → Autograd → Optimizers → Training
+(01)     (03)     (04)     (06)       (07)         (08)
+```
+
+Students completing this module will have built a complete training
+infrastructure that orchestrates all previous components.
+"""
+
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
 #| default_exp core.training
 #| export
@@ -85,33 +112,6 @@ from tinytorch.core.autograd import no_grad
 DEFAULT_MAX_LR = 0.1  # Default maximum learning rate for cosine schedule
 DEFAULT_MIN_LR = 0.01  # Default minimum learning rate for cosine schedule
 DEFAULT_TOTAL_EPOCHS = 100  # Default total epochs for learning rate schedule
-
-# %% [markdown]
-"""
-## 📋 Module Dependencies
-
-**Prerequisites**: Modules 01-07 must be working
-
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `pickle` (for checkpoint serialization)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` - Tensor class from Module 01
-- `tinytorch.core.layers` - Linear layer from Module 03
-- `tinytorch.core.losses` - Loss functions from Module 04
-- `tinytorch.core.autograd` - Gradient tracking from Module 06
-- `tinytorch.core.optimizers` - SGD, AdamW from Module 07
-
-**Dependency Flow**:
-```
-Tensor → Layers → Losses → Autograd → Optimizers → Training
-(01)     (03)     (04)     (06)       (07)         (08)
-```
-
-Students completing this module will have built a complete training
-infrastructure that orchestrates all previous components.
-"""
 
 # %% [markdown]
 """
@@ -381,6 +381,9 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
     - Modify gradients in-place for efficiency
     """
     ### BEGIN SOLUTION
+    if not np.isfinite(max_norm) or max_norm < 0:
+        raise ValueError("max_norm must be finite and nonnegative")
+    parameters = list(parameters)
     if not parameters:
         return 0.0
 
@@ -394,7 +397,9 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
             else:
                 # grad set by hand as a Tensor; take its array
                 grad_data = param.grad.data
-            total_norm += np.sum(grad_data ** 2)
+            # Accumulate in float64 so large finite float32 gradients do not
+            # overflow when squared and incorrectly get clipped to zero.
+            total_norm += np.sum(grad_data.astype(np.float64) ** 2)
 
     total_norm = np.sqrt(total_norm)
 
@@ -527,14 +532,24 @@ class Trainer:
 
     def _set_model_state(self, state):
         """Restore model parameters from checkpoint."""
-        for i, param in enumerate(self.model.parameters()):
-            if i in state:
-                param.data = state[i].copy()
+        parameters = list(self.model.parameters())
+        if set(state) != set(range(len(parameters))):
+            raise ValueError("Checkpoint parameter count does not match model")
+        if any(state[i].shape != param.shape for i, param in enumerate(parameters)):
+            raise ValueError("Checkpoint parameter shapes do not match model")
+        for i, param in enumerate(parameters):
+            param.data = state[i].copy()
 
     def _get_optimizer_state(self):
         """Extract optimizer state for checkpointing."""
         state = {}
-        state['lr'] = self.optimizer.lr
+        # Moment estimates and their age must resume together. Hyperparameters
+        # also belong to the saved run, not the freshly constructed optimizer.
+        for name in ('lr', 'step_count', 'momentum', 'beta1', 'beta2', 'eps', 'weight_decay'):
+            if hasattr(self.optimizer, name):
+                state[name] = getattr(self.optimizer, name)
+        if hasattr(self.optimizer, 'update_counts'):
+            state['update_counts'] = self.optimizer.update_counts.copy()
         if hasattr(self.optimizer, 'has_momentum') and self.optimizer.has_momentum():
             momentum_state = self.optimizer.get_momentum_state()
             if momentum_state is not None:
@@ -543,8 +558,11 @@ class Trainer:
 
     def _set_optimizer_state(self, state):
         """Restore optimizer state from checkpoint."""
-        if 'lr' in state:
-            self.optimizer.lr = state['lr']
+        for name in ('lr', 'step_count', 'momentum', 'beta1', 'beta2', 'eps', 'weight_decay'):
+            if name in state and hasattr(self.optimizer, name):
+                setattr(self.optimizer, name, state[name])
+        if 'update_counts' in state and hasattr(self.optimizer, 'update_counts'):
+            self.optimizer.update_counts = state['update_counts'].copy()
         if 'momentum_buffers' in state:
             if hasattr(self.optimizer, 'has_momentum') and self.optimizer.has_momentum():
                 self.optimizer.set_momentum_state(state['momentum_buffers'])
@@ -1145,14 +1163,14 @@ def trainer_evaluate(self, dataloader):
         dataloader: Iterable yielding (inputs, targets) batches
 
     Returns:
-        Tuple of (average_loss, accuracy)
+        Tuple of (sample-weighted average loss, accuracy)
 
     TODO: Implement evaluation loop (forward pass only, no gradient updates)
 
     APPROACH:
     1. Set model.training = False and self.training_mode = False
     2. For each batch: forward pass only through self._forward (flag off, so Dropout is the identity),
-       inside no_grad() so no graph is recorded; accumulate loss
+       inside no_grad() so no graph is recorded; accumulate loss times sample count
     3. For classification: compute accuracy from argmax predictions
     4. Record average loss in self.history['eval_loss']
     5. Return (avg_loss, accuracy)
@@ -1173,7 +1191,7 @@ def trainer_evaluate(self, dataloader):
     total_loss = 0.0
     correct = 0
     total = 0
-    num_batches = 0
+    total_samples = 0
 
     for inputs, targets in dataloader:
         # Forward pass only, with the training flag off and no graph recorded
@@ -1181,8 +1199,9 @@ def trainer_evaluate(self, dataloader):
             outputs = self._forward(inputs)
             loss = self.loss_fn.forward(outputs, targets)
 
-        total_loss += loss.data
-        num_batches += 1
+        batch_size = inputs.shape[0]
+        total_loss += float(loss.data) * batch_size
+        total_samples += batch_size
 
         # Calculate accuracy (for classification only).
         # outputs.data.shape[-1] > 1 distinguishes true multi-class (C logits)
@@ -1196,7 +1215,7 @@ def trainer_evaluate(self, dataloader):
                 correct += np.sum(predictions == np.argmax(targets.data, axis=1))
             total += len(predictions)
 
-    avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
+    avg_loss = total_loss / total_samples if total_samples > 0 else 0.0
     accuracy = correct / total if total > 0 else 0.0
 
     self.history['eval_loss'].append(avg_loss)
@@ -1310,7 +1329,7 @@ Checkpoint Contents:
 #| export
 def trainer_save_checkpoint(self, path: str):
     """
-    Save complete training state for resumption.
+    Save parameters, optimizer, scheduler, and epoch history for resumption.
 
     Args:
         path: File path to save checkpoint (.pkl)
@@ -1436,9 +1455,12 @@ if __name__ == "__main__":
 """
 ### Trainer.load_checkpoint: Resuming Training
 
-Loading a checkpoint restores the exact training state so you can continue
-where you left off. This means restoring epoch count, optimizer state
-(including momentum buffers), and the full training history.
+Loading restores parameters, epoch count, optimizer state (including moment
+ages and hyperparameters), scheduler settings, and training history. With the
+same next batch, deterministic models take the same next update. This small
+checkpoint format does not save random-generator state, a partially accumulated
+batch window, or nonparameter model buffers introduced in later modules. Save
+between epochs; stochastic runs need those additional states for exact replay.
 
 ```
 Load Flow:
@@ -1484,6 +1506,7 @@ def trainer_load_checkpoint(self, path: str):
     self.step = checkpoint['step']
     self.history = checkpoint['history']
     self.training_mode = checkpoint['training_mode']
+    self.model.training = self.training_mode
 
     # Restore states
     if 'model_state' in checkpoint:

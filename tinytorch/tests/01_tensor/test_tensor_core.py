@@ -200,10 +200,7 @@ class TestTensorOperations:
         t2 = Tensor([[5, 6], [7, 8]])  # 2×2
 
         # Matrix multiplication using @ operator
-        if hasattr(t1, '__matmul__'):
-            result = t1 @ t2
-        else:
-            result = Tensor(t1.data @ t2.data)
+        result = t1 @ t2
 
         # Manual calculation:
         # [1*5+2*7, 1*6+2*8]   = [19, 22]
@@ -289,12 +286,9 @@ class TestTensorMemory:
 
         # Modifying original shouldn't affect t2
         original_data[0] = 999
-        if not np.shares_memory(t2.data, original_data):
-            assert t2.data[0] == 1, (
-                "Tensor should not share memory with input!\n"
-                "Modifying the original array changed the tensor.\n"
-                "This can cause hard-to-debug issues."
-            )
+        assert not np.shares_memory(t1.data, original_data)
+        assert t1.data[0] == 1, "Constructor must copy the input array"
+        assert t2.data[0] == 1
 
     def test_tensor_memory_efficiency(self):
         """
@@ -340,18 +334,9 @@ class TestTensorReshaping:
         """
         t = Tensor(np.arange(12))  # [0, 1, 2, ..., 11]
 
-        if hasattr(t, 'reshape'):
-            reshaped = t.reshape(3, 4)
-            assert reshaped.shape == (3, 4), (
-                f"Reshape failed.\n"
-                f"  Original: {t.shape} (12 elements)\n"
-                f"  Requested: (3, 4) (12 elements)\n"
-                f"  Got: {reshaped.shape}"
-            )
-            assert reshaped.data.size == 12
-        else:
-            reshaped_data = t.data.reshape(3, 4)
-            assert reshaped_data.shape == (3, 4)
+        reshaped = t.reshape(3, 4)
+        assert reshaped.shape == (3, 4)
+        np.testing.assert_array_equal(reshaped.data, np.arange(12).reshape(3, 4))
 
     def test_tensor_flatten(self):
         """
@@ -361,21 +346,13 @@ class TestTensorReshaping:
         - Conv layers (4D) to Dense layers (2D)
         - Image data to classification heads
 
-        STUDENT LEARNING: flatten() is shorthand for reshape(-1)
+        STUDENT LEARNING: reshape(-1) flattens every axis into one vector
         """
         t = Tensor(rng.standard_normal((2, 3, 4)))  # 2×3×4 = 24 elements
 
-        if hasattr(t, 'flatten'):
-            flat = t.flatten()
-            assert flat.shape == (24,), (
-                f"Flatten failed.\n"
-                f"  Original: {t.shape} = {2*3*4} elements\n"
-                f"  Expected: (24,)\n"
-                f"  Got: {flat.shape}"
-            )
-        else:
-            flat_data = t.data.flatten()
-            assert flat_data.shape == (24,)
+        flat = t.reshape(-1)
+        assert flat.shape == (24,)
+        np.testing.assert_array_equal(flat.data, t.data.ravel())
 
     def test_tensor_transpose(self):
         """
@@ -391,20 +368,9 @@ class TestTensorReshaping:
         """
         t = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3
 
-        if hasattr(t, 'T') or hasattr(t, 'transpose'):
-            transposed = t.T if hasattr(t, 'T') else t.transpose()
-
-            assert transposed.shape == (3, 2), (
-                f"Transpose failed.\n"
-                f"  Original: {t.shape}\n"
-                f"  Expected: (3, 2)\n"
-                f"  Got: {transposed.shape}"
-            )
-            expected = np.array([[1, 4], [2, 5], [3, 6]])
-            assert np.array_equal(transposed.data, expected)
-        else:
-            transposed_data = t.data.T
-            assert transposed_data.shape == (3, 2)
+        transposed = t.transpose()
+        assert transposed.shape == (3, 2)
+        np.testing.assert_array_equal(transposed.data, [[1, 4], [2, 5], [3, 6]])
 
 
 class TestTensorBroadcasting:
@@ -571,3 +537,30 @@ class TestTensorPyTorchCompat:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.parametrize("mask", [np.array([False, True, False]), np.array([[False, True, False]])])
+def test_masked_fill_broadcasts_shared_mask(mask):
+    """One feature mask applies to every batch row without changing the input."""
+    tensor = Tensor([[1, 2, 3], [4, 5, 6]])
+    masked = tensor.masked_fill(mask, -1)
+    np.testing.assert_array_equal(masked.data, [[1, -1, 3], [4, -1, 6]])
+    np.testing.assert_array_equal(tensor.data, [[1, 2, 3], [4, 5, 6]])
+    assert not np.shares_memory(masked.data, tensor.data)
+
+
+def test_transpose_has_independent_storage():
+    tensor = Tensor([[1, 2, 3], [4, 5, 6]])
+    transposed = tensor.transpose()
+    assert not np.shares_memory(tensor.data, transposed.data)
+    transposed.data[0, 0] = 99
+    assert tensor.data[0, 0] == 1
+
+
+@pytest.mark.parametrize("operation", ["contiguous", "transpose"])
+def test_scalar_copy_operations_preserve_rank(operation):
+    tensor = Tensor(3.0)
+    result = getattr(tensor, operation)()
+    assert result.shape == ()
+    assert result.data == 3.0
+    assert not np.shares_memory(result.data, tensor.data)

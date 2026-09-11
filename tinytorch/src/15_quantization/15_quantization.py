@@ -56,29 +56,6 @@ from tinytorch.perf.quantization import quantize_int8, QuantizedLinear, quantize
 - **Integration:** Works seamlessly with existing models for complete optimization pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp perf.quantization
-#| export
-import numpy as np
-rng = np.random.default_rng(7)
-from typing import Tuple, Dict, List, Optional, Any
-
-# Import dependencies from other modules
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear, Sequential
-from tinytorch.core.activations import ReLU
-
-# Constants for INT8 quantization
-INT8_MIN_VALUE = -128
-INT8_MAX_VALUE = 127
-INT8_RANGE = 256  # Number of possible INT8 values (from -128 to 127 inclusive)
-EPSILON = 1e-8  # Stabilize relative-error measurements near zero variance
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-BYTES_PER_INT8 = 1  # INT8 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -105,6 +82,29 @@ Module 14 (Profiling) ───────────────────�
 Students completing this module will have built a complete
 quantization system and measured its 4x reduction in weight storage.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp perf.quantization
+#| export
+import numpy as np
+rng = np.random.default_rng(7)
+from typing import Tuple, Dict, List, Optional, Any
+
+# Import dependencies from other modules
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear, Sequential
+from tinytorch.core.activations import ReLU
+
+# Constants for INT8 quantization
+INT8_MIN_VALUE = -128
+INT8_MAX_VALUE = 127
+INT8_RANGE = 256  # Number of possible INT8 values (from -128 to 127 inclusive)
+EPSILON = 1e-8  # Stabilize relative-error measurements near zero variance
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+BYTES_PER_INT8 = 1  # INT8 size in bytes
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -502,6 +502,8 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     """
     ### BEGIN SOLUTION
     data = tensor.data
+    if data.size == 0 or not np.all(np.isfinite(data)):
+        raise ValueError("Quantization requires nonempty finite values")
 
     # Step 1: Find dynamic range
     min_val = float(np.min(data))
@@ -855,7 +857,7 @@ Creation Time:                       Runtime:
 
 **Memory Layout:**
 
-Regular Linear layers store weights in FP32 (4 bytes each), while QuantizedLinear stores them in INT8 (1 byte each) plus a small overhead for quantization parameters (scales and zero points). This achieves approximately 4× memory reduction with minimal overhead.
+Regular Linear layers store weights in FP32 (4 bytes each). QuantizedLinear simulates INT8 codes in float32 arrays; its memory report models packed one-byte codes plus scale and zero-point metadata. The approximately 4× saving belongs to that packed representation, not to these NumPy arrays.
 
 **Production vs Educational Trade-off:**
 - **Our approach:** Dequantize → FP32 computation (easier to understand)
@@ -949,6 +951,8 @@ class QuantizedLinear:
             all_values.extend(inp.data.flatten())
 
         all_values = np.array(all_values)
+        if all_values.size == 0 or not np.all(np.isfinite(all_values)):
+            raise ValueError("Calibration requires nonempty finite samples")
 
         # Calculate input quantization parameters, widening the range to
         # straddle zero exactly as quantize_int8 does (post-ReLU inputs are
@@ -1031,7 +1035,7 @@ class QuantizedLinear:
         return params
 
     def memory_usage(self) -> Dict[str, float]:
-        """Calculate memory usage in bytes."""
+        """Model packed INT8 bytes, including metadata; not actual NumPy storage."""
         ### BEGIN SOLUTION
         # Original FP32 usage
         original_weight_bytes = self.original_layer.weight.data.size * BYTES_PER_FLOAT32
@@ -1047,7 +1051,8 @@ class QuantizedLinear:
 
         # Overhead for the quantization parameters (a scale and a zero point):
         # a few bytes, negligible next to the arrays
-        overhead_bytes = BYTES_PER_FLOAT32 * 2
+        # Each quantized array needs its own float32 scale and integer zero point.
+        overhead_bytes = BYTES_PER_FLOAT32 * 2 * (1 + int(self.q_bias is not None))
 
         quantized_total = quantized_weight_bytes + quantized_bias_bytes + overhead_bytes
         original_total = original_weight_bytes + original_bias_bytes
@@ -1102,8 +1107,9 @@ def test_unit_quantized_linear():
     print(f"  Original bytes: {memory_info['original_bytes']}")
     print(f"  Quantized bytes: {memory_info['quantized_bytes']}")
 
-    # The compression should be close to 4× (allowing for quantization parameter overhead)
-    assert memory_info['compression_ratio'] > 2.5, f"Should achieve ~4× compression, got {memory_info['compression_ratio']:.2f}×"
+    # Tiny layers expose metadata overhead: 15 codes plus two scale/zero-point pairs.
+    assert memory_info['quantized_bytes'] == 15 + 16
+    assert np.isclose(memory_info['compression_ratio'], 60 / 31)
 
     print(f"  Memory reduction: {memory_info['compression_ratio']:.1f}x")
     print("✅ QuantizedLinear works correctly!")
@@ -1838,10 +1844,11 @@ class Quantizer:
     @staticmethod
     def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, Any]:
         """
-        Quantize all Linear layers in a model and return stats.
+        Return quantized parameter artifacts and modeled packed storage statistics.
 
-        Unlike the standalone quantize_model() which modifies in-place,
-        this returns a dictionary with quantization info for benchmarking.
+        This does not replace layers or produce an executable model. Use the
+        standalone quantize_model() for that. calibration_data is retained for
+        API compatibility; this parameter-only report does not calibrate activations.
 
         Returns:
             Dict with quantized_layers, original_size_mb, quantized_size_mb, compression_ratio
@@ -2299,12 +2306,12 @@ def demo_quantization():
     error = np.mean(np.abs(weights.data - restored.data))
 
     print(f"Original FP32: {original_bytes:,} bytes")
-    print(f"Quantized INT8: {quantized_bytes:,} bytes")
-    print(f"Compression: {original_bytes / quantized_bytes:.0f}x smaller!")
+    print(f"Modeled packed INT8: {quantized_bytes:,} bytes")
+    print(f"Packed storage model: {original_bytes / quantized_bytes:.0f}x smaller (actual Tensor codes remain float32)")
     print(f"INT8 range: [{q_weights.data.min()}, {q_weights.data.max()}]")
     print(f"Restoration error: {error:.6f}")
 
-    print("\n✨ Same values, 4x less memory!")
+    print("\n✨ Rounded values with a modeled 4x reduction in packed code storage!")
 
 # %%
 if __name__ == "__main__":

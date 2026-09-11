@@ -4,7 +4,7 @@ The introduction described TinyTorch as a small framework you can read in full, 
 
 The practical question is one that every PyTorch user meets sooner or later. Why is `x.T` instantaneous on a matrix with a billion entries, and why does the very next line sometimes fail with `view size is not compatible with input tensor's size and stride`, insisting that you call `.contiguous()` first? The answer is a single small data structure, the strided tensor. This chapter reads it off Module 01's `Tensor`, which wraps a NumPy array, and writes out in a few short functions the stride arithmetic that NumPy performs underneath.
 
-By the end you will know what a `Tensor` holds, one flat buffer of 32-bit floats plus the shape and strides that read it, and why every operation on it is a small class with a `forward` method. You will also know how a transpose and a broadcast can leave the buffer alone, and where the deferred copy back to plain row order is finally paid. Every later chapter builds on this `Tensor`.
+We will follow two levels of the implementation. NumPy describes arrays with shapes and strides; its views can reinterpret existing storage. TinyTorch wraps those arrays in `Tensor` objects, and its constructor copies into a fresh float32 buffer. The distinction matters: `np.transpose(x.data)` shares storage with `x`, while `x.transpose()` does not. By tracing an addition and a transpose through `Function.apply`, we can identify both the arithmetic and the point where ownership changes. Every later chapter uses this same boundary.
 
 ![The Multi-Dimensional Tensor Abstraction: Flat 1D Memory Buffers Interpreted Through Coordinate Strides and Shape Descriptors](assets/images/diagrams/01_tensor-diag-1.svg){#fig-tensor-strides}
 
@@ -40,8 +40,8 @@ The two costs share one cause. A list of lists makes the *shape* part of the sto
 | :--- | :--- | :--- |
 | Where the numbers live | Scattered `float` objects, reached through two layers of pointers | One flat buffer, values side by side |
 | Bytes per number | About 32 (24-byte object plus an 8-byte pointer) | 4 |
-| Cost of a transpose | A copy of every element | A change to two small tuples |
-| Cost of adding a vector to every row | A copy of the vector per row, or a Python loop | No copy; the vector is reread through a zero stride |
+| Cost of a transpose | A copy of every element | NumPy changes metadata; the `Tensor` wrapper then copies the values |
+| Cost of adding a vector to every row | A copy of the vector per row, or a Python loop | Broadcast reads avoid duplicating the vector; the result still allocates |
 
 : What changes when the shape is separated from the storage. {#tbl-memory-comparison tbl-colwidths="[28,36,36]"}
 
@@ -71,7 +71,7 @@ With strides in hand, locating any coordinate $(i_0, i_1, \dots, i_{N-1})$ in th
 
 $$\text{index} = \text{offset} + \sum_{k=0}^{N-1} i_k \times S_k$$
 
-This single equation is the whole mechanism. Everything else in the chapter is a consequence of choosing shape, strides, and offset cleverly while leaving the buffer alone.
+This equation describes an array view. We first use it to explain what NumPy can do without moving values, then follow the module's wrapper to see when TinyTorch copies those values. Shape describes the logical coordinates; strides describe their physical layout. Neither alone tells us whether another object shares the storage.
 
 ### Transposition is a swap
 
@@ -85,15 +85,11 @@ $$\text{index} = i \times 0 + j \times 1 = j$$
 
 and the row index $i$ has no effect on where we read. Every row maps onto the same $D$ values. The vector now *behaves* as a $(B, D)$ matrix at zero extra memory, and it did so through the same equation that handles every other tensor. NumPy and PyTorch call this **broadcasting**.
 
-Notice the systemic contract this creates for the rest of the framework. If forward execution reads the same storage multiple times by setting a stride to zero, backward automatic differentiation (Chapter 6) cannot simply pass gradients back one-to-one. By the multivariable chain rule, whenever a single stored value feeds multiple computational paths, its total derivative is the sum of the derivatives along all those paths:
-
-$$\frac{\partial \mathcal{L}}{\partial w} = \sum_{i} \frac{\partial \mathcal{L}}{\partial y_i} \frac{\partial y_i}{\partial w}.$$
-
-Because a zero stride causes one physical element to be read $B$ times, the backward engine is mathematically obligated to sum, that is, to reduce, the incoming gradients along every dimension that was broadcast. The forward zero-stride view directly mandates the `_reduce_broadcast_grad` backward reduction. Which situation in a framework needs a vector to pose as a matrix, and what the pose saves, is the job of the `Add` listing in the next section.
+For the forward pass, the contract is simple: compatible dimensions either agree or one of them is 1, and each output coordinate reads the corresponding value from each operand. The `Add` listing below relies on this rule when it adds one bias vector to several rows. A later consequence, developed in @sec-autograd, is that contributions from those rows must be summed when computing the bias's gradient; no backward machinery is needed to use broadcasting here.
 
 ### Contiguity is a property you can check
 
-After a transpose or a broadcast, the buffer is unchanged but the view no longer walks it in plain row order. The strides of a transposed matrix run $(1, 3)$ instead of $(3, 1)$; a broadcast view has a zero where a real stride should be. We call a tensor **contiguous** when its strides are exactly the ones the stride formula would have produced for its shape, and non-contiguous otherwise. Non-contiguous views are correct for every read and write, so within TinyTorch you can mostly ignore the distinction. It exists because sooner or later something asks for the plain row-order buffer back, and the `contiguous()` listing is where that request gets paid.
+After a transpose or a broadcast, the buffer is unchanged but the view no longer walks it in plain row order. The strides of a transposed matrix run $(1, 3)$ instead of $(3, 1)$; a broadcast view has a zero where a real stride should be. We call a tensor **contiguous** when its strides are exactly the ones the stride formula would have produced for its shape, and non-contiguous otherwise. NumPy can read these layouts through their strides. Writes need more care: a broadcast view can map several coordinates to one location, and `np.broadcast_to` returns a read-only view. TinyTorch avoids sharing the returned tensor with its input by copying at construction. Its `contiguous()` method additionally requests row-major layout, which is a separate property from owning the buffer.
 
 ---
 
@@ -111,9 +107,9 @@ Here is the constructor, which is the whole of what a `Tensor` holds.
 
 {{< include _listings/01_tensors/Tensor_init.qmd >}}
 
-The line that does the work is the `np.array` call. It takes whatever it is given, a nested list, a scalar, another array, and lays the values out as one contiguous run of 32-bit floats, so the nine numbers from the opening now take 36 bytes and sit side by side. The shape, size, and dtype lines are conveniences that copy fields the array already carries. The four lines after them are the reason the class exists at all rather than a bare array. A tensor needs room for a gradient, and for a record of the operation that produced it, and Module 06 fills those in; until then they are `None` and `False` and cost nothing. The strides and the offset are not stored on the `Tensor` because the array already has them, and `A.data.strides` will print them, in bytes rather than elements, in the worked trace.
+The line that does the work is the `np.array` call. It takes a nested list, scalar, or array and copies its values into a float32 array, so the nine numbers from the opening now take 36 bytes and sit side by side. The shape, size, and dtype lines are conveniences that copy fields the array already carries. The four lines after them are the reason the class exists at all rather than a bare array. A tensor needs room for a gradient, and for a record of the operation that produced it, and Module 06 fills those in; until then they are bookkeeping fields that the forward computation does not use. The strides and the offset are not stored on the `Tensor` because the array already has them, and `A.data.strides` will print them, in bytes rather than elements, in the worked trace.
 
-One property of the constructor matters more than it looks. It always copies. Whatever array it is handed, `np.array` allocates a fresh buffer for the result, so every `Tensor` owns its own memory and no two tensors ever alias. That is a deliberate simplification that keeps the rest of the framework, and especially the autograd engine of Chapter 6, free of aliasing questions, and the transpose listing below is where it costs something.
+One property of the constructor matters more than it looks. It always copies. Whatever array it is handed, `np.array` allocates a fresh buffer for the result, so separately constructed tensors own separate buffers. Returning an existing tensor, or assigning to the public `.data` attribute, is outside that constructor guarantee. That is a deliberate simplification that keeps the rest of the framework, and especially the autograd engine of Chapter 6, free of aliasing questions, and the transpose listing below is where it costs something.
 
 ### What the array is doing: a model of strides
 
@@ -157,11 +153,11 @@ def broadcast_to(shape, strides, target):
     return tuple(target), tuple(out)
 ```
 
-Notice that `physical_index` never looks at the data and never asks what kind of view it is serving; the strides carry that information, so a transposed or broadcast view takes the same path as a fresh one. Notice also that `transpose` and `broadcast_to` allocate nothing. The $4 \text{ MB}$ that a naive framework would spend copying a bias into 256 rows is simply gone, because a stride of zero makes every row read the same 16 KB. NumPy stores exactly these tuples, with one cosmetic difference. It reports strides in bytes, so a $(2, 3)$ array of 32-bit floats shows `(12, 4)` where the model says $(3, 1)$, and its transpose shows `(4, 12)`. A view is contiguous when its strides are the ones `contiguous_strides` would produce for its shape; NumPy exposes that check as `flags["C_CONTIGUOUS"]`, and `np.ascontiguousarray` is the copy that restores row order when something needs it. Both appear in the module code below.
+Notice that `physical_index` never looks at the data and never asks what kind of view it is serving; the strides carry that information, so a transposed or broadcast view takes the same path as a fresh one. The model allocates metadata, but neither `transpose` nor `broadcast_to` allocates a new data buffer. The $4 \text{ MB}$ that a naive framework would spend copying a bias into 256 rows is simply gone, because a stride of zero makes every row read the same 16 KB. NumPy stores exactly these tuples, with one cosmetic difference. It reports strides in bytes, so a $(2, 3)$ array of 32-bit floats shows `(12, 4)` where the model says $(3, 1)$, and its transpose shows `(4, 12)`. A view is contiguous when its strides are the ones `contiguous_strides` would produce for its shape; NumPy exposes that check as `flags["C_CONTIGUOUS"]`, and `np.ascontiguousarray` is the copy that restores row order when something needs it. Both appear in the module code below.
 
 ### Operations as objects
 
-The naive way to give `Tensor` a `+` is to write the arithmetic inside `__add__`. Module 01 does something that looks roundabout, and the reason is five chapters away. Every operation is a class, an *operation object*, with a `forward` method that computes the result from raw arrays, and a `backward` method that Module 06 fills in. The class is the record of what happened. When Chapter 6 needs to know which operation produced a tensor and from which inputs, the object is already there to say so. Here is the base class, from Module 01.
+The naive way to give `Tensor` a `+` is to write the arithmetic inside `__add__`. Module 01 does something that looks roundabout, and the reason is five chapters away. Every operation is a class, an *operation object*, with a `forward` method that computes the result from raw arrays, and a `backward` method that Module 06 fills in. The object brings the operation and its inputs together during the call. The current `apply` does not attach it to the returned tensor; @sec-autograd will add that recording step. For now, the useful structure is a single place to unwrap inputs, run array arithmetic, and wrap the output. Here is the base class, from Module 01.
 
 {{< include _listings/01_tensors/Function.qmd >}}
 
@@ -179,13 +175,13 @@ The whole of addition is `a + b` on two arrays, and the reason that line is enou
 
 ### Matrix multiplication
 
-The other operation a linear layer needs is the matrix multiply, and Module 01 writes it as the textbook triple loop on purpose.
+The other operation a linear layer needs is matrix multiplication. For two matrices, Module 01 makes the output-row and output-column loops explicit and delegates each inner dot product to NumPy.
 
 {{< include _listings/01_tensors/MatMul.qmd >}}
 
 Each output entry is one dot product of a row of `a` with a column of `b`. Read the inner call closely. `a[i, :]` is a row, contiguous in memory, and `b[:, j]` is a column, which on a row-major array is a strided view that skips a whole row between consecutive elements. Here that view costs nothing beyond the Python loop, because NumPy resolves the strides for us. On real hardware, walking down a column is the case the production section comes back to, and it is why a $1024 \times 1024$ multiply that ignores layout can run at a fraction of the speed of one that respects it. Shapes were validated by `Tensor.matmul` before `apply` was called, which is why `forward` does not check them again.
 
-### Transpose and the deferred copy
+### Transpose, ownership, and row order
 
 Transposes are everywhere in a framework. PyTorch's `nn.Linear` stores its weight as $(\text{out}, \text{in})$ and computes $\mathbf{x}\mathbf{W}^T$ on every forward pass, the backward pass multiplies by the transpose of whatever the forward pass used, and multi-head attention (Chapter 12) splits and merges its heads with a reshape and a transpose on every call. `Tensor.transpose` works out which axes to swap, defaulting to the last two, and hands the permutation to an operation object.
 
@@ -195,13 +191,15 @@ Transposes are everywhere in a framework. PyTorch's `nn.Linear` stores its weigh
 
 `np.transpose` is the model's `transpose` function. It returns a view with the shape and stride entries swapped and the buffer untouched, and the worked trace confirms that the view shares memory with the original. Then `apply` wraps that view in a new `Tensor`, and the constructor copies. So a TinyTorch transpose does allocate, which PyTorch's does not, and that is the price of the no-aliasing rule from the constructor. The copy is not a plain row-major one, though. `np.array` preserves the layout of what it is given, so the new buffer holds the transposed values in column order with strides `(4, 12)`, and the result is a tensor that owns its memory and is still not contiguous.
 
-That is where the deferred copy is finally paid. In a real framework the request for row order comes from the code that does the arithmetic. A BLAS matrix multiply, a NumPy reduction, a CUDA kernel, each wants a pointer to a run of memory laid out the way the stride formula says, and the `view size is not compatible` error at the top of this chapter is PyTorch telling you the buffer is not in that order and that `view()` will not copy it for you. Module 01 answers the request with one more operation object.
+The constructor has already paid for an independent buffer, but that buffer is still in column-major order. `contiguous()` answers a different request: arrange the same logical values in row-major order. Some consumers can use arbitrary strides, and matrix libraries can often accept a transpose directly; others require a particular layout. Copying for ownership and copying for layout therefore belong on separate lines of the cost ledger.
 
 {{< include _listings/01_tensors/Tensor_contiguous.qmd >}}
 
 {{< include _listings/01_tensors/Copy.qmd >}}
 
-`np.ascontiguousarray` walks every element through the old strides and writes it in row order, the model's contiguity check followed by the copy. It is the one operation in this section whose cost grows with the number of elements, and everything the views deferred is paid here. Notice that neither listing needs a special case for transposed versus broadcast input; the strides in the array do the unscrambling. The module exposes the same surface for the rest of the book, `reshape`, `permute`, indexing through `Slice`, and reductions such as `sum` and `mean`, and every one of them is another small class with a `forward` that is one NumPy call. They add nothing to the stride story, so the chapter stops here.
+`Copy.forward` calls `np.ascontiguousarray`. For a non-contiguous input, that call writes the values into row-major order; for an already contiguous input, NumPy can return the same array. In both cases, `Function.apply` then constructs a `Tensor`, which copies again. Thus `Tensor.contiguous()` always returns a separate tensor, even when no layout conversion was needed. The method is intentionally simple, but it is not a no-cost check.
+
+The other shape operations follow the same path. `reshape` checks the requested element count and calls `Reshape.apply`; indexing calls `Slice.apply`; both wrap their array result in a new tensor. TinyTorch's `view` is an alias for `reshape`, so it does not promise the storage sharing that a production `view` API may promise. These methods preserve values and change their organization, while arithmetic such as `Add` changes values. Following each method to `apply` makes that distinction visible without reading the whole class at once.
 
 ---
 
@@ -270,7 +268,7 @@ The bias trace is the stride-0 mechanism in the open. After padding, the vector 
 
 : Stride-0 broadcast of a length-3 vector to shape $(2, 3)$. Six coordinates, three slots, no copy. {#tbl-stride0-trace tbl-colwidths="[25,35,20,20]"}
 
-The `A + b` line is that view consumed by `Add.forward`, and the result `[[11, 22, 33], [14, 25, 36]]` shows each row receiving the same bias. The matrix product multiplies $\mathbf{A}$ by its own transpose, $\begin{bmatrix} 14 & 32 \\ 32 & 77 \end{bmatrix}$, with `MatMul.forward` reading its right operand through the transposed strides and never noticing. The last two lines are the module's own transpose rather than the raw view. `A.transpose()` owns a separate buffer, so `shares_memory` is false, but that buffer keeps the transposed strides `(4, 12)` and is not contiguous, and it takes `contiguous()` to produce the row-order `(8, 4)` layout. That pair of lines is the deferred copy, first deferred and then paid, in two calls.
+The `A + b` line is that view consumed by `Add.forward`, and the result `[[11, 22, 33], [14, 25, 36]]` shows each row receiving the same bias. The matrix product multiplies $\mathbf{A}$ by its own transpose, $\begin{bmatrix} 14 & 32 \\ 32 & 77 \end{bmatrix}$, with `MatMul.forward` reading its right operand through the transposed strides and never noticing. The last two lines are the module's own transpose rather than the raw view. `A.transpose()` owns a separate buffer, so `shares_memory` is false, but that buffer keeps the transposed strides `(4, 12)` and is not contiguous, and it takes `contiguous()` to produce the row-order `(8, 4)` layout. The first call copies for ownership; the second requests row order and wraps that result in another owned buffer.
 
 ---
 
@@ -294,7 +292,7 @@ The same boundary appears on the GPU with one extra step. The storage lives in V
 
 [^fn-vram-storage-home]: **VRAM** (video RAM): the memory soldered onto a GPU board, separate from the CPU's system memory. An A100 has 80 GB of it, and every tensor a GPU computes on must first be copied there over a link roughly 20 times slower than the GPU's own memory, so frameworks go to some length to keep tensors resident and avoid copies once they arrive.
 
-PyTorch exposes the distinction in two pairs of methods. `view()` promises never to copy and raises the error quoted at the top of this chapter when the requested shape cannot be expressed as new strides over the existing buffer; `reshape()` tries a view first and silently falls back to `contiguous()`. Likewise `expand()` builds a stride-0 view, while `repeat()` allocates and fills the repeats. The cheap member of each pair is exactly the operation this chapter implemented.
+PyTorch exposes the distinction in two pairs of methods. `view()` promises never to copy and raises the error quoted at the top of this chapter when the requested shape cannot be expressed as new strides over the existing buffer; `reshape()` tries a view first and silently falls back to `contiguous()`. Likewise `expand()` builds a stride-0 view, while `repeat()` allocates and fills the repeats. The stride model explains the cheap member of each pair. TinyTorch retains the value semantics but copies at the wrapper boundary; its `view()` does not carry PyTorch's no-copy promise.
 
 | Operation | TinyTorch (Module 01) | PyTorch |
 | :--- | :--- | :--- |
@@ -313,7 +311,7 @@ What should a practitioner now expect? When an operation fails with the `view` e
 
 ## Summary
 
-Module 01's `Tensor` keeps its numbers in one flat NumPy buffer that a shape, a strides tuple, and an offset interpret. One equation, $\text{index} = \text{offset} + \sum_k i_k S_k$, resolves every coordinate. Transposing swaps two strides, broadcasting sets a stride to zero, and neither touches the buffer; `contiguous()` is where that deferred copy is finally paid, and it is the only operation here whose cost grows with the data. Every operation is an object whose `forward` is one NumPy call, a shape that Chapter 6 fills in with a `backward`. The invariant to carry forward is that a tensor is a *view* of storage, so several views can describe one buffer and a write through any of them is visible through all, which is exactly why TinyTorch's constructor copies and PyTorch's does not. Production frameworks keep exactly this design and add a boundary at which contiguous memory is demanded by the hardware libraries underneath. Chapter 2 takes the strided `Tensor`, its broadcasting `+`, and `matmul` for granted and asks what goes wrong when you stack several linear layers with nothing between them.
+Module 01 gives later code two contracts. A `Tensor` holds float32 data with a definite shape, and each operation reaches NumPy through `Function.apply`. NumPy's strides explain how transpose and broadcast views read existing storage; the wrapper explains why TinyTorch's returned tensors generally own fresh storage instead. The worked trace separates those questions with `data.strides` and `np.shares_memory`. This distinction lets us reason about a result's values, layout, and copying independently. The next step in @sec-activations uses the same operation boundary to transform each value without changing its shape.
 
 ---
 

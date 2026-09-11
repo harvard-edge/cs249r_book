@@ -31,6 +31,7 @@ nineteen without relearning it.
 | Gate | What it enforces |
 |---|---|
 | 20 modules, numbered 1–20, each with an export target | No gaps, and every module declares `#\| default_exp` |
+| Imports after Dependencies, before Introduction | Setup cannot execute before its prerequisite explanation (2026-09-11 audit gate) |
 | The 13-section spine, in order | 🔗 Prerequisites → 🎯 Learning Objectives → 📦 Where This Code Lives → 📋 Module Dependencies → 💡 Introduction → 📐 Foundations → 🏗️ Implementation → 🔧 Integration → 📊 Systems Analysis → 🧪 Module Integration Test → 🤔 Reflection Questions → ⭐ Aha Moment → 🚀 MODULE SUMMARY |
 | No duplicate `##` headings | Two identical headings are indistinguishable in the Colab table of contents |
 | Subtitled headings use `: ` | 154 used a colon, 26 used a dash |
@@ -51,7 +52,7 @@ misuse inside a section is still a human review item.
 | `solution: true` implies `BEGIN/END SOLUTION` | 56 cells were marked as exercises with nothing to fill in — imports, setup, demos. They survived only because `ClearSolutions.enforce_metadata = False` |
 | `grade_id` unique within a module | Duplicates make nbgrader's mapping ambiguous |
 
-Current counts: **147 exercises, 185 graded tests, 67 given cells.**
+Current counts: **150 exercises, 189 graded tests, 72 given cells.** (2026-09-11; unchanged by the source audit.)
 
 ### Pedagogy — the notebook must read
 
@@ -84,10 +85,11 @@ Current counts: **147 exercises, 185 graded tests, 67 given cells.**
 | Gate | What it enforces |
 |---|---|
 | No test signals failure with a bare `return` | pytest discards the value. **Thirteen tests could not fail; six were actually failing** |
+| No exception handler asserts success | Missing implementations or incompatible APIs must not become `assert True` (2026-09-11 audit gate) |
 | No bare `except:` | Six swallowed real failures. The worst skipped the gradient update entirely, turning "the network never trained" into a pass |
 | No graded cell swallows its own failure | A handler whose body is only a `pass` or a `print` makes the points unreachable. Module 19's ten-point plotting test caught every exception and passed, so the method could draw nothing and still score full marks. The expected-raise idiom is exempt |
 | Every test file imports and collects | Catches a stale import before the suite runs |
-| Source-built reference regressions | Exports all instructor solutions from `src/` into a temporary package and checks graph lifetime, accumulation, quantization, and distillation; stale local exports cannot hide failures |
+| Source-built reference regressions | Exports all instructor solutions from `src/` into a temporary package and checks graph lifetime, gradients, loss/shape boundaries, optimizer/checkpoint state, profiling, pruning, quantization, distillation, and cached generation; stale local exports cannot hide failures |
 | Notebook inventory | Requires exactly the 20 notebooks corresponding to the sources before attempting the journey |
 
 ### Slow gates
@@ -162,8 +164,9 @@ All three must agree.
 3. **Grading weights.** Points per exercise currently spans 4.3 (module 06, 21
    exercises for 91 points) to 90 (module 01, one exercise). Module totals span
    54 to 220. Deliberate authorial decision, not yet normalized.
-4. **The 251 hand-copied Python blocks in the published chapters**, which nothing
-   keeps in sync with `src/`.
+4. **Book-authored examples and explanatory claims.** Symbol-derived narrative
+   listings are synchronized by `narrative_book/tools/listings.py --check`; that
+   does not validate surrounding prose, figures, or separately authored examples.
 
 ---
 

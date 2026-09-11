@@ -13,16 +13,15 @@ Using YOUR Tiny🔥Torch implementations, you'll build a perceptron with RANDOM 
 This milestone shows you WHY training is essential - the model won't work without it!
 
 ⚠️ IMPORTANT: This is NOT the trained version!
-- You've completed Modules 01-04 (Tensor, Activations, Layers, Losses)
-- You HAVEN'T learned training yet (Modules 05-07: Autograd, Optimizers, Training)
+- You've completed Modules 01-03 (Tensor, Activations, Layers, Losses)
+- You HAVEN'T learned training yet (Modules 06-08: Autograd, Optimizers, Training)
 - This milestone demonstrates the PROBLEM that training will solve
 
-✅ REQUIRED MODULES (Run after Module 04):
+✅ REQUIRED MODULES (Run after Module 03):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure (gradients dormant for now)
   Module 02 (Activations)   : YOUR sigmoid activation function
   Module 03 (Layers)        : YOUR Linear layer with RANDOM weights
-  Module 04 (Losses)        : YOUR loss functions (for measuring failure)
   Data Generation           : Directly generated within this script
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -82,6 +81,7 @@ This milestone shows you WHY training is essential - the model won't work withou
 """
 
 import sys
+from pathlib import Path
 import os
 import numpy as np
 # Unseeded RNG: each run draws different cluster points so the demo lives up
@@ -91,7 +91,7 @@ import argparse
 
 # Add project root to path for correct tinytorch imports
 # This allows the script to be run from the root of the project
-sys.path.insert(0, os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Import TinyTorch components YOU BUILT!
 from tinytorch.core.tensor import Tensor        # Module 01: YOU built this!
@@ -273,7 +273,7 @@ def main():
         "  • Each run gives [yellow]DIFFERENT[/yellow] results (no seed!)\n\n"
         "[bold cyan]The Key Lesson:[/bold cyan]\n"
         "  Building the model is easy. Making it [bold]LEARN[/bold] is hard.\n"
-        "  That's why you need Modules 04-07: Losses, Autograd, Optimizers, Training!"
+        "  That's why you need Modules 04-08: Losses, Autograd, Optimizers, Training!"
     )
     console.print(Panel(intro, title="[bold cyan]📖 Introduction[/bold cyan]", border_style="cyan"))
     press_enter_to_continue()
@@ -298,7 +298,7 @@ def main():
 
     # Step 2: Create the Perceptron model with YOUR components
     console.print("[bold]🧠 Step 2: Building Model[/bold]")
-    console.print("   [yellow]⚠️  No training yet - you haven't learned Modules 05-07![/yellow]")
+    console.print("   [yellow]⚠️  No training yet - you haven't learned Modules 06-08![/yellow]")
     console.print("   🧠 Assembling perceptron with YOUR Tiny🔥Torch modules...")
 
     # Locally rebind the layers module's RNG to an unseeded one so this demo's
@@ -384,7 +384,7 @@ def main():
         f"  {decision_eq}\n\n"
         f"[bold]Decision Line:[/bold]\n"
         f"  {boundary_eq}\n"
-        f"  [dim](Everything above line → Class 1, below → Class 0)[/dim]"
+        f"  [dim](Class 1 where z > 0; Class 0 where z ≤ 0)[/dim]"
     )
     console.print(Panel(weights_content, title="[yellow]🔧 Model Parameters[/yellow]", border_style="yellow"))
     press_enter_to_continue()

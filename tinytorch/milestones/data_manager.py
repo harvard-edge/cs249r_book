@@ -65,7 +65,7 @@ class DatasetManager:
         self.auto_confirm = auto_confirm
 
         # Create data directory if it doesn't exist
-        self.data_dir.mkdir(exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def check_disk_space(self, required_mb):
         """Check if sufficient disk space is available.
@@ -266,10 +266,10 @@ class DatasetManager:
 
         # Create two clusters
         cluster1 = rng.normal([2, 2], 0.5, (num_samples//2, 2))
-        cluster2 = rng.normal([-2, -2], 0.5, (num_samples//2, 2))
+        cluster2 = rng.normal([-2, -2], 0.5, (num_samples - num_samples//2, 2))
 
         X = np.vstack([cluster1, cluster2]).astype(np.float32)
-        y = np.hstack([np.ones(num_samples//2), np.zeros(num_samples//2)]).astype(np.int64)
+        y = np.hstack([np.ones(num_samples//2), np.zeros(num_samples - num_samples//2)]).astype(np.int64)
 
         # Shuffle
         indices = rng.permutation(num_samples)

@@ -4,8 +4,20 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     """
     Run autoregressive generation using the KV cache.
     """
+    if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be a nonnegative integer")
+    if not np.isfinite(temperature) or temperature < 0:
+        raise ValueError("temperature must be finite and nonnegative")
+    if len(prompt_tokens) == 0:
+        raise ValueError("prompt_tokens must contain at least one token")
+    # The last sampled token is returned, not fed back into the model.
+    if len(prompt_tokens) + max_new_tokens > cache.max_seq_len:
+        raise ValueError("Prompt and generation exceed cache capacity")
     generated = []
     cache.reset()   # a fresh sequence: the cursor back to slot 0, no rows from the last request
+
+    if max_new_tokens == 0:
+        return generated
 
     # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
     # Each token goes through the CachedAttention stand-ins, which write its
@@ -21,16 +33,18 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     last_logits = logits.data[0, -1, :]  # (vocab_size,)
 
     # Phase 2: GENERATE - one token at a time using cache
-    for _ in range(max_new_tokens):
-        # Temperature-scaled sampling
-        scaled_logits = last_logits / max(temperature, 1e-8)
-        max_logit = np.max(scaled_logits)
-        exp_logits = np.exp(scaled_logits - max_logit)
-        probs = exp_logits / np.sum(exp_logits)
-
-        # Sample next token
-        next_token = int(rng.choice(len(probs), p=probs))
+    for step in range(max_new_tokens):
+        # Zero temperature means greedy decoding, including tied logits.
+        if temperature == 0:
+            next_token = int(np.argmax(last_logits))
+        else:
+            scaled_logits = last_logits / temperature
+            exp_logits = np.exp(scaled_logits - np.max(scaled_logits))
+            probs = exp_logits / np.sum(exp_logits)
+            next_token = int(rng.choice(len(probs), p=probs))
         generated.append(next_token)
+        if step == max_new_tokens - 1:
+            break
 
         # Feed single token through model (cache handles history)
         token_tensor = Tensor(np.array([[next_token]]))  # (1, 1)

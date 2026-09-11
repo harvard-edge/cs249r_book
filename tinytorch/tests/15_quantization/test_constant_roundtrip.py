@@ -32,3 +32,19 @@ def test_calibration_preserves_small_nonzero_activation_range():
     codes = np.clip(np.round(values / layer.input_scale + layer.input_zero_point), -128, 127)
     restored = (codes - layer.input_zero_point) * layer.input_scale
     np.testing.assert_allclose(restored, values, atol=layer.input_scale)
+
+
+@pytest.mark.parametrize('values', [[], [np.nan], [np.inf], [-np.inf, 1.]])
+def test_nonfinite_or_empty_values_are_rejected(values):
+    with pytest.raises(ValueError):
+        quantize_int8(Tensor(values))
+
+
+def test_each_quantized_array_has_metadata_and_codes_remain_float32():
+    from tinytorch.core.layers import Linear
+    from tinytorch.perf.quantization import QuantizedLinear
+    layer = QuantizedLinear(Linear(4, 3))
+    assert layer.memory_usage()['quantized_bytes'] == 15 + 16
+    assert sum(p.data.nbytes for p in layer.parameters()) == 15 * 4
+    with pytest.raises(ValueError):
+        layer.calibrate([])

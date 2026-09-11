@@ -1,128 +1,59 @@
-# Milestone 06: MLPerf - The Optimization Era (2018)
+# Milestone 06: Optimization and measurement
 
-## Historical Context
+Compare a trained model with changed versions of itself, and measure a cache
+without changing the computation. These are classroom experiments inspired by
+MLPerf's measurement discipline, not official MLPerf submissions.
 
-As ML models grew larger and deployment became critical, the community needed **systematic optimization methodologies**. MLCommons' MLPerf (2018) established standardized benchmarking and optimization workflows, shifting the focus from "can we build it?" to "can we deploy it efficiently?"
+## Part 1: Model compression
 
-This milestone teaches **production optimization** - the systematic process of profiling, compressing, and accelerating models for real-world deployment.
+`01_optimization_olympics.py` trains DigitMLP on TinyDigits, profiles the baseline,
+and creates two independent candidates: rounded weights and pruned weights.
+Each candidate runs on the same held-out data and receives its own accuracy and
+latency measurements. The original model remains intact.
 
-## What You're Building
+Both candidates still execute dense float32 operations. The report distinguishes
+actual parameter-array bytes from modeled packed INT8 code size. Zeroing weights
+does not shrink their arrays. Better accuracy, smaller resident storage, and a
+speedup are outcomes to measure, not benefits the script assumes.
 
-A complete MLPerf-style optimization pipeline that takes YOUR networks from previous milestones and makes them production-ready!
+Separate cache-lifecycle and matrix-multiplication checks exercise Modules 18
+and 17. They are not additional transformations of the MLP.
 
-## Required Modules
+Required modules: 01–08 and 14–19.
 
-<table width="100%">
-  <thead>
-<tr>
-<th width="25%"><b>Module</b></th>
-<th width="25%">Component</th>
-<th width="50%">What It Provides</th>
-</tr>
-</thead>
-<tbody>
-<tr><td><b>Module 01-08</b></td><td>Foundation + Training</td><td>YOUR tensors, layers, losses, data loading, autograd, optimizers, and training loop</td></tr>
-<tr><td><b>Module 11-12</b></td><td>Embeddings + Attention</td><td>YOUR transformer components for generation speedup</td></tr>
-<tr><td><b>Module 14</b></td><td>Profiling</td><td>YOUR profiler for measurement</td></tr>
-<tr><td><b>Module 15</b></td><td>Quantization</td><td>YOUR INT8/FP16 implementations</td></tr>
-<tr><td><b>Module 16</b></td><td>Compression</td><td>YOUR pruning techniques</td></tr>
-<tr><td><b>Module 17</b></td><td>Acceleration</td><td>YOUR vectorized operations</td></tr>
-<tr><td><b>Module 18</b></td><td>Memoization</td><td>YOUR KV cache for generation</td></tr>
-<tr><td><b>Module 19</b></td><td>Benchmarking</td><td>YOUR standardized benchmark reports</td></tr>
-</tbody>
-</table>
+## Part 2: Cached inference
 
-## Milestone Structure
+`02_generation_speedup.py` uses the GPT from Module 13 and the cache from Module
+18. It replays one fixed token sequence with the same model weights: first by
+recomputing complete causal prefixes, then by processing one token at a time.
+Both paths run embedding, attention, feed-forward layers, and output projection.
 
-This milestone has **two scripts**, each covering different optimization techniques:
+The script checks logits at every position before comparing median timings from
+repeated replays. Each cached replay resets its state and advances the cursor
+once per token. Speedup depends on machine and sequence length; a small workload
+may become slower. This untrained-model microbenchmark tests inference mechanics,
+not language quality.
 
-### 01_optimization_olympics.py
-**Purpose:** Optimize static models (MLP, CNN)
+Required modules: 01–08, 11–13, and 18.
 
-Uses YOUR implementations:
-- **Module 14 (Profiling)**: Measure parameters, latency, size
-- **Module 15 (Quantization)**: FP32 → INT8 (4× compression)
-- **Module 16 (Compression)**: Pruning (remove weights)
+## Run
 
-Networks from:
-- DigitMLP (Milestone 03)
-- SimpleCNN (Milestone 04)
+From the TinyTorch project root:
 
-### 02_generation_speedup.py
-**Purpose:** Speed up Transformer generation
-
-Uses YOUR implementations:
-- **Module 11 (Embeddings)**: Token embeddings
-- **Module 12 (Attention)**: Multi-head attention
-- **Module 14 (Profiling)**: Measure speedup
-- **Module 18 (KV Cache)**: Cache K,V for 6-10× speedup
-
-Networks from:
-- MinimalTransformer (Milestone 05)
-
-## Expected Results
-
-### Static Model Optimization (01)
-<table width="100%">
-  <thead>
-<tr>
-<th width="25%"><b>Optimization</b></th>
-<th width="15%">Size</th>
-<th width="20%">Accuracy</th>
-<th width="40%">Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr><td><b>Baseline</b></td><td>100%</td><td>85-90%</td><td>Full precision</td></tr>
-<tr><td><b>+ Quantization</b></td><td>25%</td><td>84-89%</td><td>INT8 weights</td></tr>
-<tr><td><b>+ Pruning</b></td><td>12.5%</td><td>82-87%</td><td>50% weights removed</td></tr>
-</tbody>
-</table>
-
-### Generation Speedup (02)
-<table width="100%">
-  <thead>
-<tr>
-<th width="40%"><b>Mode</b></th>
-<th width="30%">Time/Token</th>
-<th width="30%">Speedup</th>
-</tr>
-</thead>
-<tbody>
-<tr><td><b>Without Cache</b></td><td>~10ms</td><td>1×</td></tr>
-<tr><td><b>With KV Cache</b></td><td>~1ms</td><td>6-10×</td></tr>
-</tbody>
-</table>
-
-## Running the Milestone
-
-```bash
-# Optimize MLP/CNN (profiling + quantization + pruning)
-python milestones/06_2018_mlperf/01_optimization_olympics.py
-
-# Speed up Transformer generation (KV caching)
-python milestones/06_2018_mlperf/02_generation_speedup.py
-```
-
-Or via tito:
 ```bash
 tito milestone run 06
-tito milestone run 06 --part 1  # Model compression
-tito milestone run 06 --part 2  # Generation speedup
+tito milestone run 06 --part 1
+tito milestone run 06 --part 2
 ```
 
-## Key Learning
+Or run the scripts directly with the environment's Python:
 
-Unlike earlier milestones where you "build and run," optimization requires:
-1. **Measure** (profile to find bottlenecks)
-2. **Optimize** (apply targeted techniques)
-3. **Validate** (check accuracy didn't degrade)
-4. **Repeat** (iterate until deployment targets met)
+```bash
+python3 milestones/06_2018_mlperf/01_optimization_olympics.py
+python3 milestones/06_2018_mlperf/02_generation_speedup.py
+```
 
-This is **ML systems engineering** - the skill that ships products!
-
-## Further Reading
-
-- **MLPerf**: https://mlcommons.org/en/inference-edge-11/
-- **Deep Compression** (Han et al., 2015): https://arxiv.org/abs/1510.00149
-- **Efficient Transformers Survey**: https://arxiv.org/abs/2009.06732
+A successful run means the experiments completed with their correctness checks.
+It does not certify a deployment target or guarantee a fixed compression/speed
+ratio. Inspect the measured candidate accuracy and the preserved-computation
+check before interpreting the performance numbers.

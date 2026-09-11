@@ -58,33 +58,6 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 - **Integration:** Works seamlessly with tensors and activations for complete neural networks
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.layers
-#| export
-
-import inspect
-import numpy as np
-# Module-level RNG is seeded so Linear weight init is deterministic by default.
-# This is what the integration test suite (and any cross-run reproducibility)
-# relies on. Demo scripts that want fresh weights every run rebind this name
-# to an unseeded RNG locally before constructing their model — see
-# milestones/01_1958_perceptron/01_rosenblatt_forward.py for the pattern.
-rng = np.random.default_rng(7)
-
-# Import from TinyTorch package (previous modules must be completed and exported)
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.activations import ReLU, Sigmoid
-
-# Constant for weight initialization
-# Note: True Xavier/Glorot uses sqrt(2/(fan_in+fan_out)), but we use the simpler
-# LeCun-style sqrt(1/fan_in) for pedagogical clarity. Both keep the output
-# variance of a layer close to its input variance.
-INIT_SCALE_FACTOR = 1.0  # LeCun-style initialization: sqrt(1/fan_in)
-
-# Constants for dropout
-DROPOUT_MIN_PROB = 0.0  # Minimum dropout probability (no dropout)
-DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -111,6 +84,33 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
 Students completing this module will have built the neural network
 layers that enable multi-layer architectures.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.layers
+#| export
+
+import inspect
+import numpy as np
+# Module-level RNG is seeded so Linear weight init is deterministic by default.
+# This is what the integration test suite (and any cross-run reproducibility)
+# relies on. Demo scripts that want fresh weights every run rebind this name
+# to an unseeded RNG locally before constructing their model — see
+# milestones/01_1958_perceptron/01_rosenblatt_forward.py for the pattern.
+rng = np.random.default_rng(7)
+
+# Import from TinyTorch package (previous modules must be completed and exported)
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.activations import ReLU, Sigmoid
+
+# Constant for weight initialization
+# Note: True Xavier/Glorot uses sqrt(2/(fan_in+fan_out)), but we use the simpler
+# LeCun-style sqrt(1/fan_in) for pedagogical clarity. Both keep the output
+# variance of a layer close to its input variance.
+INIT_SCALE_FACTOR = 1.0  # LeCun-style initialization: sqrt(1/fan_in)
+
+# Constants for dropout
+DROPOUT_MIN_PROB = 0.0  # Minimum dropout probability (no dropout)
+DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 
 # %% [markdown]
 """
@@ -754,7 +754,7 @@ class Dropout(Layer):
             return x
 
         if self.p == DROPOUT_MAX_PROB:
-            return Tensor(np.zeros_like(x.data))
+            return x * 0.0  # Keep the operation path; Module 06 will propagate zero gradients.
 
         mask = self._generate_dropout_mask(x.data.shape)
         return x * mask
@@ -951,10 +951,14 @@ class Sequential:
         return self.forward(x, training=training)
 
     def parameters(self):
-        """Collect all parameters from all layers."""
+        """Collect each parameter once, even when layers share a weight."""
         params = []
+        seen = set()
         for layer in self.layers:
-            params.extend(layer.parameters())
+            for param in layer.parameters():
+                if id(param) not in seen:
+                    params.append(param)
+                    seen.add(id(param))
         return params
 
     def __repr__(self):
@@ -1200,17 +1204,17 @@ def analyze_layer_performance():
     layer = Linear(784, 256)
 
     print("\nLinear Layer MACs Analysis:")
-    print("Batch Size → Matrix Multiply MACs → Bias Add MACs → Total MACs")
-    print("Note: FLOPs = 2 × MACs (one multiply + one add per MAC)")
+    print("Batch Size → Matrix Multiply MACs → Bias Adds → Estimated FLOPs")
+    print("Convention: 2 FLOPs per matrix MAC, 1 FLOP per bias addition")
 
     for batch_size in batch_sizes:
         # Matrix multiplication: (batch, in) @ (in, out) = batch * in * out MACs
-        matmul_flops = batch_size * 784 * 256
-        # Bias addition: batch * out MACs
-        bias_flops = batch_size * 256
-        total_flops = matmul_flops + bias_flops
+        matmul_macs = batch_size * 784 * 256
+        # Bias addition has no multiplication, so count one FLOP per output.
+        bias_adds = batch_size * 256
+        total_flops = 2 * matmul_macs + bias_adds
 
-        print(f"{batch_size:10d} → {matmul_flops:15,} → {bias_flops:13,} → {total_flops:11,}")
+        print(f"{batch_size:10d} → {matmul_macs:15,} → {bias_adds:13,} → {total_flops:11,}")
 
     # Add timing measurements
     print("\nLinear Layer Timing Analysis:")
@@ -1316,6 +1320,11 @@ def test_module():
     train_output = dropout_test.forward(test_x, training=True)
     infer_output = dropout_test.forward(test_x, training=False)
     assert np.array_equal(test_x.data, infer_output.data), "Inference mode should pass through unchanged"
+
+    # Reusing the same layer must collect its weights only once.
+    shared = Linear(2, 2)
+    shared_model = Sequential(shared, ReLU(), Sequential(shared))
+    assert shared_model.parameters() == [shared.weight, shared.bias]
 
     print("✅ Multi-layer network integration works!")
 

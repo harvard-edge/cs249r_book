@@ -55,27 +55,6 @@ from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinu
 - **Integration:** Works seamlessly with tokenizers for complete text processing pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.embeddings
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-import math
-from typing import List, Optional, Tuple
-
-# Import from previous modules - following dependency chain
-from tinytorch.core.tensor import Tensor
-
-# Module 06: Function base class and autograd, so embedding lookups record their backward pass
-from tinytorch.core.tensor import Function
-import tinytorch.core.autograd  # completes every operation with its backward half
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -100,6 +79,27 @@ Module 01 (Tensor) + Module 06 (Autograd) → Module 11 (Embeddings)
 Students completing this module will have built the embedding system
 that converts discrete tokens into continuous representations for transformers.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.embeddings
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+import math
+from typing import List, Optional, Tuple
+
+# Import from previous modules - following dependency chain
+from tinytorch.core.tensor import Tensor
+
+# Module 06: Function base class and autograd, so embedding lookups record their backward pass
+from tinytorch.core.tensor import Function
+import tinytorch.core.autograd  # completes every operation with its backward half
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -452,6 +452,9 @@ class Embedding:
         """
         ### BEGIN SOLUTION
         # Handle input validation
+        # Tensor stores float32, but token IDs must still be finite integers.
+        if not np.all(np.isfinite(indices.data)) or np.any(indices.data != np.floor(indices.data)):
+            raise ValueError("Embedding token IDs must be finite integers")
         if np.any(indices.data >= self.vocab_size) or np.any(indices.data < 0):
             min_idx = int(np.min(indices.data))
             max_idx = int(np.max(indices.data))
@@ -747,7 +750,8 @@ class PositionalEncoding:
             )
 
         batch_size, seq_len, embed_dim = x.shape
-
+        if not isinstance(start_pos, (int, np.integer)) or start_pos < 0:
+            raise ValueError("start_pos must be a nonnegative integer")
         if start_pos + seq_len > self.max_seq_len:
             raise ValueError(
                 f"Sequence runs past the maximum: positions {start_pos}..{start_pos + seq_len - 1} with max_seq_len={self.max_seq_len}\n"
@@ -1498,6 +1502,10 @@ def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
     elif self.pos_encoding_type == 'sinusoidal':
         # Use fixed sinusoidal encoding (not learnable)
         batch_size, seq_len, embed_dim = token_embeds.shape
+        if not isinstance(start_pos, (int, np.integer)) or start_pos < 0:
+            raise ValueError("start_pos must be a nonnegative integer")
+        if start_pos + seq_len > self.max_seq_len:
+            raise ValueError("Sequence runs past the sinusoidal position table")
         pos_embeddings = self.pos_encoding[start_pos:start_pos + seq_len]  # Slice using Tensor slicing
 
         # Reshape to add batch dimension

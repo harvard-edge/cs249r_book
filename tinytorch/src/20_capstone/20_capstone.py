@@ -95,6 +95,27 @@ Modules 01-13 → Modules 14-18 → Module 19 → Module 20 (Capstone)
 Students completing this module will demonstrate their complete framework's capabilities through reproducible benchmarking and professional submission generation.
 """
 
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp olympics
+#| export
+import numpy as np
+import time
+import json
+from pathlib import Path
+from typing import Dict, List, Optional, Any
+import platform
+import sys
+
+# TinyTorch modules the capstone builds on
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+from tinytorch.core.activations import ReLU
+from tinytorch.perf.benchmarking import precise_timer  # Module 19's timing context manager
+
+# One generator for the two example workflows below. The unit tests seed their
+# own generators so a test's numbers never depend on which cells ran before it.
+rng = np.random.default_rng(7)
+
 # %% [markdown]
 """
 ## 💡 Introduction: From Framework to Reproducible Results
@@ -144,27 +165,6 @@ This module shows you how to:
 
 Let's build the benchmarking and submission system.
 """
-
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp olympics
-#| export
-import numpy as np
-import time
-import json
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-import platform
-import sys
-
-# TinyTorch modules the capstone builds on
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
-from tinytorch.core.activations import ReLU
-from tinytorch.perf.benchmarking import precise_timer  # Module 19's timing context manager
-
-# One generator for the two example workflows below. The unit tests seed their
-# own generators so a test's numbers never depend on which cells ran before it.
-rng = np.random.default_rng(7)
 
 # %% [markdown]
 """
@@ -589,6 +589,13 @@ class BenchmarkReport:
         5. Throughput - Samples per second when the whole test batch goes through
            one forward call, timed separately from latency (see Foundations)
         """
+        if X_test.shape[0] == 0:
+            raise ValueError("X_test must contain at least one sample")
+        y_test = np.asarray(y_test)
+        if y_test.shape != (X_test.shape[0],):
+            raise ValueError("y_test must contain one class index per sample")
+        if num_runs <= 0:
+            raise ValueError("num_runs must be positive")
         # Count parameters and stored size (see measure_memory)
         param_count = model.count_parameters()
         model_size_mb = self.measure_memory(model)
@@ -669,6 +676,8 @@ class BenchmarkReport:
         - Use X_batch[:1] so each call sees exactly one sample
         """
         ### BEGIN SOLUTION
+        if num_runs <= 0 or X_batch.shape[0] == 0:
+            raise ValueError("Latency measurement needs samples and positive num_runs")
         for _ in range(min(5, num_runs)):
             _ = model.forward(X_batch[:1])
         latencies = []
@@ -686,9 +695,8 @@ class BenchmarkReport:
         TODO: Calculate model size in MB
 
         APPROACH:
-        1. If the model reports its own storage via size_bytes() (a quantized or
-           pruned model does), trust it
-        2. Otherwise count parameters and multiply by 4 bytes (FP32)
+        1. If the model reports its array storage via size_bytes(), use it
+        2. Otherwise sum parameter array nbytes (zeros still occupy storage)
         3. Convert to MB (divide by 1024*1024)
 
         HINTS:
@@ -699,8 +707,7 @@ class BenchmarkReport:
         ### BEGIN SOLUTION
         if hasattr(model, 'size_bytes'):
             return model.size_bytes() / (1024 * 1024)
-        param_count = model.count_parameters()
-        return (param_count * 4) / (1024 * 1024)
+        return sum(param.data.nbytes for param in model.parameters()) / (1024 * 1024)
         ### END SOLUTION
 
 # %% [markdown]
@@ -1139,23 +1146,24 @@ def validate_submission_schema(submission: Dict[str, Any]) -> bool:
     assert isinstance(submission['system_info'], dict), "System info should be dict"
     assert isinstance(submission['baseline'], dict), "Baseline should be dict"
 
-    # Check baseline structure
-    baseline = submission['baseline']
-    assert 'model_name' in baseline, "Baseline missing model_name"
-    assert 'metrics' in baseline, "Baseline missing metrics"
-
-    # Check metrics structure and types
-    metrics = baseline['metrics']
+    # Apply the same contract to every reported model, including optimizations.
     required_metrics = ['parameter_count', 'model_size_mb', 'accuracy', 'latency_ms_mean']
-    for metric in required_metrics:
-        if metric not in metrics:
-            raise AssertionError(f"Missing metric in baseline: {metric}")
-
-    # Check metric value ranges
-    assert 0 <= metrics['accuracy'] <= 1, "Accuracy must be in [0, 1]"
-    assert metrics['parameter_count'] > 0, "Parameter count must be positive"
-    assert metrics['model_size_mb'] > 0, "Model size must be positive"
-    assert metrics['latency_ms_mean'] > 0, "Latency must be positive"
+    for section in ('baseline', 'optimized'):
+        if section not in submission:
+            continue
+        report = submission[section]
+        assert isinstance(report, dict), f"{section} should be a dict"
+        assert isinstance(report.get('model_name'), str), f"{section} missing model_name"
+        assert isinstance(report.get('metrics'), dict), f"{section} missing metrics"
+        metrics = report['metrics']
+        for metric in required_metrics:
+            assert metric in metrics, f"Missing metric in {section}: {metric}"
+            value = metrics[metric]
+            assert isinstance(value, (int, float)) and np.isfinite(value), f"{section}.{metric} must be finite"
+        assert 0 <= metrics['accuracy'] <= 1, "Accuracy must be in [0, 1]"
+        assert metrics['parameter_count'] > 0, "Parameter count must be positive"
+        assert metrics['model_size_mb'] > 0, "Model size must be positive"
+        assert metrics['latency_ms_mean'] > 0, "Latency must be positive"
 
     # Check system info
     system_info = submission['system_info']
@@ -1586,8 +1594,14 @@ def run_optimization_workflow_example():
     optimized_model.fc1 = QuantizedLinear(optimized_model.fc1)  # INT8 weights, FP32 arithmetic
     optimized_model.fc2 = QuantizedLinear(optimized_model.fc2)
     # A deployment stores one INT8 byte per surviving weight; BenchmarkReport.measure_memory uses this
-    optimized_model.size_bytes = lambda: nonzero_params
-    print(f"  Kept {nonzero_params:,} of {baseline_model.count_parameters():,} parameters, stored as INT8")
+    # QuantizedLinear retains both FP32 reference weights and FP32 tensors of
+    # rounded values. Count those actual arrays; pruning does not pack zeros.
+    def stored_bytes():
+        return sum(p.data.nbytes
+                   for layer in (optimized_model.fc1, optimized_model.fc2)
+                   for p in layer.parameters() + layer.original_layer.parameters())
+    optimized_model.size_bytes = stored_bytes
+    print(f"  Kept {nonzero_params:,} of {baseline_model.count_parameters():,} nonzero parameters before simulated quantization")
 
     optimized_report = BenchmarkReport(model_name="optimized_mlp")
     optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=50)

@@ -74,6 +74,7 @@ proved that YOUR autograd can train hidden layers to learn useful features.
 """
 
 import sys
+from pathlib import Path
 import os
 import numpy as np
 rng = np.random.default_rng(7)
@@ -85,7 +86,7 @@ from rich.text import Text
 from rich import box
 
 # Add project root to path
-sys.path.insert(0, os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Seed will be set before training to guarantee 100% convergence
 
@@ -118,7 +119,7 @@ console = Console()
 # │ Module 06: Autograd │ .backward() computes gradients │ Gradients flow through      │
 # │                     │ for BOTH layers automatically  │ hidden layer to inputs!     │
 # │                     │                                │                             │
-# │ Module 06: SGD      │ Updates 13 parameters          │ Adjusts weights to minimize │
+# │ Module 07: SGD      │ Updates 17 parameters          │ Adjusts weights to minimize │
 # │                     │ (2×4 + 4 + 4×1 + 1)            │ loss function               │
 # └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
 #
@@ -131,7 +132,7 @@ console = Console()
 # │ Single Linear layer          │ + Hidden Linear layer (2→4)                  │
 # │ Only Sigmoid activation      │ + ReLU activation (non-linearity!)           │
 # │ No training (random weights) │ + YOUR Autograd trains the hidden layer      │
-# │ No optimizer                 │ + YOUR SGD updates 13 parameters             │
+# │ No optimizer                 │ + YOUR SGD updates 17 parameters             │
 # │ Max 75% accuracy             │ + 95-100% accuracy (problem SOLVED!)         │
 # └──────────────────────────────┴──────────────────────────────────────────────┘
 #
@@ -143,7 +144,9 @@ console = Console()
 # ============================================================================
 
 def generate_xor_data(n_samples=100):
-    """Generate XOR dataset with slight noise."""
+    """Generate balanced XOR cases with slight noise."""
+    if n_samples < 4 or n_samples % 4:
+        raise ValueError("n_samples must be a positive multiple of four")
     # Generate each XOR case with repetition
     samples_per_case = n_samples // 4
 
@@ -308,9 +311,9 @@ def evaluate_and_celebrate(model, X, y, history):
 
     # Get metrics
     initial_loss = history["loss"][0]
-    final_loss = history["loss"][-1]
+    final_loss = float(BinaryCrossEntropyLoss()(predictions, y).data)
     initial_acc = history["accuracy"][0]
-    final_acc = history["accuracy"][-1]
+    final_acc = final_accuracy
 
     console.print("[bold]📊 The Results:[/bold]\n")
 
@@ -556,6 +559,7 @@ def main():
         ))
 
     press_enter_to_continue()
+    return 0 if final_acc >= XOR_CONVERGENCE_THRESHOLD else 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

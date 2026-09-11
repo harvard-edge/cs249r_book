@@ -233,13 +233,10 @@ class SigmoidFunction(Function):
         TODO: Implement sigmoid function
 
         APPROACH:
-        1. For x >= 0 use 1 / (1 + exp(-x)); the exponent is <= 0, so it cannot overflow
-        2. For x < 0 use exp(x) / (1 + exp(x)); same value, exponent again <= 0
-        3. Pick the branch per element with np.where(x >= 0, branch_a, branch_b)
-        4. np.where computes both branches for every element, so wrap the whole
-           thing in np.errstate(over="ignore", invalid="ignore") to silence the
-           discarded branch
-        5. Return result as a NumPy array
+        1. Compute z = exp(-abs(x)); its exponent is always <= 0, so it cannot overflow
+        2. For x >= 0 use 1 / (1 + z)
+        3. For x < 0 use z / (1 + z), the equivalent formula on the negative side
+        4. Pick the branch per element with np.where(x >= 0, branch_a, branch_b)
 
         EXAMPLE:
         >>> sigmoid = Sigmoid()
@@ -253,16 +250,9 @@ class SigmoidFunction(Function):
         set to raise on overflow, so the naive form fails it
         """
         ### BEGIN SOLUTION
-        # Numerically stable sigmoid. Each branch keeps its exponent <= 0, so the
-        # selected value never overflows for large |x|. np.where still evaluates
-        # both branches, so errstate silences what happens in the discarded one:
-        # "over" for exp(1000) = inf, and "invalid" for inf / (1 + inf) = NaN.
-        with np.errstate(over="ignore", invalid="ignore"):
-            result = np.where(
-                x >= 0,
-                1.0 / (1.0 + np.exp(-x)),
-                np.exp(x) / (1.0 + np.exp(x)),
-            )
+        # Both branches use the same bounded exponential, so neither overflows.
+        z = np.exp(-np.abs(x))
+        result = np.where(x >= 0, 1.0 / (1.0 + z), z / (1.0 + z))
         return result
         ### END SOLUTION
 

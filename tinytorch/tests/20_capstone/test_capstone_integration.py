@@ -109,3 +109,42 @@ if __name__ == "__main__":
     test_submission_is_json_serialisable_and_carries_provenance()
     test_improvements_are_computed_from_the_two_reports()
     print("✅ Capstone integration tests passed")
+
+
+def test_report_rejects_broadcast_labels_and_empty_runs():
+    import pytest
+    X, y = _data(3)
+    report = BenchmarkReport()
+    with pytest.raises(ValueError, match='one class index'):
+        report.benchmark_model(SimpleMLP(), X, y[:, None], num_runs=1)
+    with pytest.raises(ValueError, match='positive'):
+        report.benchmark_model(SimpleMLP(), X, y, num_runs=0)
+
+
+def test_optimization_demo_reports_actual_dense_storage(tmp_path, monkeypatch):
+    import runpy
+    from pathlib import Path
+    # This demonstration intentionally stays in the notebook, not the package.
+    source = Path(__file__).resolve().parents[2] / "src/20_capstone/20_capstone.py"
+    notebook = runpy.run_path(str(source))
+    monkeypatch.chdir(tmp_path)
+    submission = notebook["run_optimization_workflow_example"]()
+    # The teaching quantizer retains reference and rounded arrays, both FP32.
+    baseline = submission['baseline']['metrics']['model_size_mb']
+    optimized = submission['optimized']['metrics']['model_size_mb']
+    assert optimized == 2 * baseline
+    assert submission['improvements']['compression_ratio'] == 0.5
+
+
+def test_schema_checks_optimized_metrics_and_finite_values():
+    import pytest
+    from tinytorch.olympics import validate_submission_schema
+    X, y = _data(2)
+    baseline = BenchmarkReport('baseline')
+    baseline.benchmark_model(SimpleMLP(), X, y, num_runs=1)
+    optimized = BenchmarkReport('optimized')
+    optimized.benchmark_model(SimpleMLP(), X, y, num_runs=1)
+    submission = generate_submission(baseline, optimized)
+    submission['optimized']['metrics']['latency_ms_mean'] = float('inf')
+    with pytest.raises(AssertionError, match='finite'):
+        validate_submission_schema(submission)

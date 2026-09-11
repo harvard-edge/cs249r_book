@@ -56,24 +56,6 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
 - **Integration:** Works seamlessly with attention, embeddings, and tokenization for complete language models
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.transformers
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-
-# Import from previous modules - following the dependency chain
-from tinytorch.core.tensor import Tensor, Function
-from tinytorch.core.activations import GELU
-from tinytorch.core.layers import Linear
-from tinytorch.core.embeddings import EmbeddingLayer
-from tinytorch.core.attention import MultiHeadAttention
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -100,6 +82,24 @@ Tensor → Activations → Layers → Attention → Embeddings → Transformers
 Students completing this module will have built the complete
 transformer architecture that powers modern language models.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.transformers
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+
+# Import from previous modules - following the dependency chain
+from tinytorch.core.tensor import Tensor, Function
+from tinytorch.core.activations import GELU
+from tinytorch.core.layers import Linear
+from tinytorch.core.embeddings import EmbeddingLayer
+from tinytorch.core.attention import MultiHeadAttention
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -498,6 +498,8 @@ class LayerNorm:
         - eps prevents division by zero in variance calculation
         """
         ### BEGIN SOLUTION
+        if not isinstance(normalized_shape, (int, np.integer)) or normalized_shape <= 0:
+            raise ValueError("TinyTorch LayerNorm normalizes one positive final dimension")
         self.normalized_shape = normalized_shape
         self.eps = eps
 
@@ -513,6 +515,8 @@ class LayerNorm:
         The normalization itself lives in LayerNormFunction.forward above;
         apply() records it so gamma and beta train.
         """
+        if not x.shape or x.shape[-1] != self.normalized_shape:
+            raise ValueError(f"LayerNorm expected final dimension {self.normalized_shape}, got {x.shape}")
         return LayerNormFunction.apply(x, self.gamma, self.beta, eps=self.eps)
 
     def __call__(self, x):
@@ -655,9 +659,12 @@ class MLP:
     This provides the non-linear transformation in each transformer block.
     """
 
-    def __init__(self, embed_dim, hidden_dim=None, dropout_prob=0.1):
+    def __init__(self, embed_dim, hidden_dim=None, dropout_prob=0.0):
         """
         Initialize MLP with two linear layers.
+
+        dropout_prob must be zero: this compact transformer omits dropout.
+        Module 03 provides a standalone Dropout exercise.
 
         TODO: Set up the feed-forward network layers
 
@@ -680,7 +687,9 @@ class MLP:
 
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
-        # Kept for API parity with PyTorch; TinyTorch's MLP applies no dropout
+        # Keep this teaching model deterministic; do not silently ignore dropout.
+        if dropout_prob != 0:
+            raise ValueError("TinyTorch MLP supports dropout_prob=0 only")
         self.dropout_prob = dropout_prob
 
         # Two-layer feed-forward network
@@ -877,9 +886,11 @@ class TransformerBlock:
     Each block processes the input sequence and passes it to the next block.
     """
 
-    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.1):
+    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.0):
         """
         Initialize a complete transformer block.
+
+        dropout_prob must be zero; this compact block omits dropout.
 
         TODO: Set up all components of the transformer block
 
@@ -1363,9 +1374,10 @@ class GPT:
         TODO: Implement temperature-controlled token sampling
 
         APPROACH:
-        1. Scale logits by temperature (higher = more random)
-        2. Apply softmax to get probabilities (subtract max for numerical stability)
-        3. Sample one token index from the probability distribution
+        1. Reject negative/nonfinite temperatures; zero chooses the largest logit
+        2. Scale logits by positive temperature (higher = more random)
+        3. Apply softmax to get probabilities (subtract max for numerical stability)
+        4. Sample one token index from the probability distribution
 
         EXAMPLE:
         >>> logits = np.array([[1.0, 2.0, 3.0]])  # Raw model output
@@ -1376,6 +1388,10 @@ class GPT:
         """
         ### BEGIN SOLUTION
         # Apply temperature scaling
+        if not np.isfinite(temperature) or temperature < 0:
+            raise ValueError("temperature must be finite and nonnegative")
+        if temperature == 0:
+            return int(np.argmax(logits[0]))
         scaled_logits = logits / temperature
 
         # Convert to probabilities (softmax with numerical stability)
@@ -1394,7 +1410,8 @@ class GPT:
         TODO: Implement the autoregressive generation loop
 
         APPROACH:
-        1. Start with prompt tokens
+        1. Start with one nonempty prompt, shape (1, sequence); require a
+           nonnegative integer generation length that fits max_seq_len
         2. For each new position:
            - Run forward pass to get logits
            - Extract last-position logits (next token prediction)
@@ -1411,6 +1428,12 @@ class GPT:
         HINT: Use self._sample_next_token(last_logits, temperature) for sampling
         """
         ### BEGIN SOLUTION
+        if len(prompt_tokens.shape) != 2 or prompt_tokens.shape[0] != 1 or prompt_tokens.shape[1] == 0:
+            raise ValueError("generate expects one nonempty prompt with shape (1, sequence)")
+        if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be a nonnegative integer")
+        if prompt_tokens.shape[1] + max_new_tokens > self.max_seq_len:
+            raise ValueError("Prompt plus generated tokens exceeds max_seq_len")
         current_tokens = Tensor(prompt_tokens.data.copy())
 
         for _ in range(max_new_tokens):

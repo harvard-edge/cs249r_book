@@ -91,3 +91,9 @@ if __name__ == "__main__":
     test_tiled_matmul_handles_a_partial_final_tile()
     test_fusion_does_not_change_the_activation()
     print("✅ Acceleration integration tests passed")
+
+
+def test_tiling_rejects_noninteger_block_size():
+    import pytest
+    with pytest.raises(ValueError):
+        tiled_matmul(Tensor([[1.]]), Tensor([[2.]]), tile_size=1.5)

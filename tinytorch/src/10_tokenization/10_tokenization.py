@@ -55,15 +55,6 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 - **Integration:** Works seamlessly with embeddings and data loading for complete NLP pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.tokenization
-#| export
-
-from collections import Counter
-from typing import Dict, List, Optional, Set, Tuple
-
-import numpy as np
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -90,6 +81,15 @@ Module 10 (Tokenization) → Module 11 (Embeddings)
 Students completing this module will have built the text processing foundation
 that enables all NLP tasks in TinyTorch.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.tokenization
+#| export
+
+from collections import Counter
+from typing import Dict, List, Optional, Set, Tuple
+
+import numpy as np
 
 # %% [markdown]
 """
@@ -1440,12 +1440,14 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     - Truncate from the end if too long: tokens[:max_length]
     """
     ### BEGIN SOLUTION
+    if max_length is not None and (not isinstance(max_length, int) or max_length < 0):
+        raise ValueError("max_length must be a nonnegative integer or None")
     tokenized = []
     for text in texts:
         tokens = tokenizer.encode(text)
 
         # Apply length limit
-        if max_length and len(tokens) > max_length:
+        if max_length is not None and len(tokens) > max_length:
             tokens = tokens[:max_length]
 
         tokenized.append(tokens)

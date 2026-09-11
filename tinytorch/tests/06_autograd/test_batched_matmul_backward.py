@@ -146,3 +146,32 @@ def run_all_tests():
 if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)
+
+
+import pytest
+
+
+@pytest.mark.parametrize('a_shape,b_shape', [
+    ((3,), (3,)), ((3,), (3, 2)), ((2, 3), (3,)),
+    ((3,), (2, 3, 2)), ((2, 2, 3), (3,)),
+    ((1, 2, 3), (4, 3, 2)), ((2, 1, 2, 3), (1, 3, 3, 2)),
+])
+def test_matmul_vector_and_broadcast_gradients_match_finite_difference(a_shape, b_shape):
+    local_rng = np.random.default_rng(83)
+    a_data = local_rng.normal(size=a_shape).astype(np.float32)
+    b_data = local_rng.normal(size=b_shape).astype(np.float32)
+    upstream = local_rng.normal(size=np.matmul(a_data, b_data).shape).astype(np.float32)
+    a, b = Tensor(a_data, requires_grad=True), Tensor(b_data, requires_grad=True)
+    (a @ b).backward(upstream)
+    for which, value, actual in [(0, a_data, a.grad), (1, b_data, b.grad)]:
+        numerical = np.zeros_like(value)
+        for index in np.ndindex(value.shape):
+            plus, minus = value.copy(), value.copy()
+            plus[index] += 1e-3
+            minus[index] -= 1e-3
+            if which == 0:
+                difference = np.matmul(plus, b_data) - np.matmul(minus, b_data)
+            else:
+                difference = np.matmul(a_data, plus) - np.matmul(a_data, minus)
+            numerical[index] = np.sum(difference * upstream) / 2e-3
+        np.testing.assert_allclose(actual, numerical, atol=2e-3, rtol=2e-3)

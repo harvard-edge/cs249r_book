@@ -2,9 +2,9 @@
 
 After Chapter 5 the forward path is complete. The loader hands the model a batch, the layers of Chapter 3 turn it into predictions, and the loss of Chapter 4 collapses those predictions into one number. That number tells us how wrong the model is, but not which of its weights to move, or by how much. The question this chapter answers is the one every practitioner eventually asks: when I call `loss.backward()`, how does the framework produce the gradient of that single number with respect to every weight in the model, and why does it cost about as much as one more forward pass rather than thousands of them?
 
-The answer is bookkeeping, not calculus. While the forward pass runs, every operation leaves a small record behind: which tensors it read, and how to turn a gradient at its output into gradients at its inputs. The backward pass reads those records in reverse. Each record only knows the derivative of its own operation, yet chaining them produces the exact derivative of the whole model. Everything else in the chapter follows from three ideas: each operation owns one local derivative rule, the records must be replayed in the right order, and a tensor that was used twice receives the sum of two contributions.
+The chain rule supplies the calculus; the framework supplies the bookkeeping. While the forward pass runs, every operation leaves a small record behind: which tensors it read, and how to turn a gradient at its output into gradients at its inputs. The backward pass reads those records in reverse. Each record only knows the derivative of its own operation, yet chaining them produces the exact derivative of the whole model. Everything else in the chapter follows from three ideas: each operation owns one local derivative rule, the records must be replayed in the right order, and a tensor that was used twice receives the sum of two contributions.
 
-We build the whole mechanism in about eighty lines. A `Tensor` gains three fields, four operations learn to leave records, and a `backward()` method walks those records in the reverse of the order that @fig-autograd-dag draws for the forward pass.
+The reading path follows one call to `loss.backward()`. First `Function.apply` records operations during forward execution. The local rules translate an output gradient into input gradients, and `Tensor.backward` orders those rules and accumulates their results. The worked trace uses matmul, ReLU, and sum; the module applies the same contract to the other operations from Chapters 1–4. @fig-autograd-dag shows the two directions through this shared structure.
 
 ![Autograd in two passes: the forward pass records each operation as a node with its inputs; the backward pass visits the nodes in reverse order and accumulates gradients.](assets/images/diagrams/06_autograd-diag-1.svg){#fig-autograd-dag}
 
@@ -40,7 +40,7 @@ print(numeric)
 
 Two things are wrong with this, and both get worse as the model grows. The first is cost. Estimating four derivatives took five forward passes, one per weight plus a baseline. A model with $N$ weights needs $N + 1$ forward passes for a single gradient, and training needs a fresh gradient at every step. As napkin math, a model with $10^8$ weights whose forward pass takes 10 ms would spend $10^8 \times 10 \text{ ms} = 10^6$ seconds, about twelve days, computing one gradient. Training runs hundreds of thousands of steps.
 
-The second is precision. The printed answer is already off in the fourth decimal place, and shrinking `eps` does not fix it. The numerator subtracts two losses that differ only slightly, and float32 keeps about seven significant digits, so the subtraction throws most of them away.[^fn-cancellation-finite-difference] Choose `eps` too large and the estimate is biased; choose it too small and it is noise. There is no good value.
+The second is precision. The printed answer is already off in the fourth decimal place, and shrinking `eps` does not fix it. The numerator subtracts two losses that differ only slightly, and float32 keeps about seven significant digits, so the subtraction throws most of them away.[^fn-cancellation-finite-difference] Choose `eps` too large and the estimate is biased; choose it too small and it is noise. The useful range depends on the scale of the inputs and the precision. Finite differences remain valuable as an independent check on a small derivative rule, but this sensitivity and the repeated forward passes make them unsuitable as the training engine.
 
 [^fn-cancellation-finite-difference]: **Catastrophic cancellation**: subtracting two nearly equal floating-point numbers discards the leading digits they share, leaving only the few that differ. With `eps = 1e-5` and losses near 3.0, the two float32 losses agree in their first six digits, so the difference has at most one reliable digit before it is divided by `eps`.
 
@@ -70,7 +70,7 @@ A shape check is the fastest way to trust this. $G$ is $M \times N$ and $B^T$ is
 
 During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.
 
-The order matters. A tensor's backward rule turns the gradient at that tensor into gradients at its parents, so the rule must not run until the gradient at that tensor is complete. If the tensor feeds two later operations, both of them must have reported back first. The ordering that guarantees this is a **topological order**: every tensor appears after everything computed from it. A depth-first walk from the loss that lists each tensor only after all of its parents produces the opposite order (parents first), and reversing that list gives us the one we want.
+The order matters. A tensor's backward rule turns the gradient at that tensor into gradients at its parents, so the rule must not run until the gradient at that tensor is complete. If the tensor feeds two later operations, both of them must have reported back first. The backward traversal therefore needs the reverse of a **topological order**: consumers precede the tensors they read. A depth-first walk from the loss that lists each tensor only after all of its parents produces the opposite order (parents first), and reversing that list gives us the one we want.
 
 ### Used twice means add
 
@@ -96,7 +96,7 @@ Chapter 1 left three fields on every `Tensor` with nothing to do: `requires_grad
 
 ### An operation that remembers its inputs
 
-Chapter 7's optimizer will call `loss.backward()` at every training step and expect, when it returns, that every weight in the model holds its gradient. For a two-layer MLP that is four tensors. For the transformer of Chapter 13 it is well over a hundred, spread across layers that were written at different times for different reasons. Something has to connect the one scalar at the end of the forward pass to every one of them.
+The training loop will call `loss.backward()` before Chapter 7's optimizer reads the parameter gradients. For a two-layer MLP that is four tensors. For the transformer of Chapter 13 it is well over a hundred, spread across layers that were written at different times for different reasons. Something has to connect the one scalar at the end of the forward pass to every one of them.
 
 The way frameworks did this before autograd was to hand-write a backward function for the whole network, one that mirrored the forward pass line by line. It worked until the model changed. Add a layer, or add an `if` that skips a block for some inputs, and the backward function is wrong until somebody rewrites it, and nothing tells you it is wrong. The finite-difference route from The Problem avoids that fragility, but at $N + 1$ forward passes per step it is not a training method.
 
@@ -140,7 +140,7 @@ Nobody builds it, and the matmul rule from The Idea is why nobody has to. $G B^T
 
 {{< include _listings/06_autograd/MatMul_backward.qmd >}}
 
-The two-dimensional case is the two-line formula from The Idea, and the shapes work out for the same reason. The branches around it are there because the real module has to serve Chapter 12, where attention multiplies batches of matrices at once; `np.swapaxes` transposes only the last two axes so the batch axis is left alone, and the `np.outer` cases cover a plain vector on either side.
+The two-dimensional case is the two-line formula from The Idea, and the shapes work out for the same reason. The branches around it are there because the real module has to serve Chapter 12, where attention multiplies batches of matrices at once; `np.swapaxes` transposes only the last two axes so the batch axis is left alone, and vector operands are temporarily promoted to row or column matrices. Removing those added axes afterward lets the same matrix rule cover vector and batched cases without flattening a batch into one outer product.
 
 ReLU and sum are simpler, and they are here because the worked trace needs them. ReLU because Chapter 2's activations sit between every pair of layers, and sum because a loss has to end in a scalar for `backward()` to have a place to start. Notice what each rule reads from its node, because that is exactly what has to stay in memory until backward runs: matmul read both operands, ReLU reads its input, and sum reads only its input's shape.
 
@@ -154,17 +154,23 @@ The ReLU mask is the derivative of $\max(0, z)$ evaluated at the forward input. 
 
 The records are in place. What is left is the call the training loop of Chapter 8 will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
 
-The naive walk is recursion. Start at the loss, run its rule, recurse into its inputs, run theirs. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. The moment a tensor feeds two operations, say `h = relu(x)` used in two branches of the loss, the recursion reaches `h` through the first branch and runs `h`'s rule while its gradient holds only that branch's contribution, pushing a partial gradient into `x`. Whatever the second branch adds afterward arrives too late. No error, a wrong number, and a model that trains a little worse than it should.
+A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. The moment a tensor feeds two operations, say `h = relu(x)` used in two branches of the loss, the recursion reaches `h` through the first branch and runs `h`'s rule while its gradient holds only that branch's contribution, pushing a partial gradient into `x`. When the second branch arrives, the visited set suppresses another traversal of `h`, so its contribution never reaches `x`. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
 
 The fix is to run no rule until every consumer of its tensor has reported. A topological order guarantees exactly that, and a depth-first walk hands us one for free. So `backward()` does four things: sorts the graph, seeds the gradient at the loss, walks the order once, and releases the graph.
 
 {{< include _listings/06_autograd/Tensor_backward.qmd >}}
 
+Before step 1 changes any gradients, the method checks the external seed. A one-element output may omit the seed; `ones_like` then gives it exactly the output shape. An explicit seed must have that same shape, even when NumPy could broadcast it. For an output of shape `(2, 3)`, a seed of shape `(3,)` is rejected: the caller must specify the contribution of each of the six output elements. This entry contract differs from `_reduce_broadcast_grad`, which reverses broadcasting performed by a known forward operation. Silently broadcasting an external seed would invent a caller intent that no operation recorded.
+
 Step 1 is the depth-first walk. It uses an explicit stack rather than recursion because a transformer's graph is thousands of operations deep and Python's recursion limit is about a thousand; each tensor is pushed twice, once to expand its inputs and once, after them, to be appended, so `topo_order` lists inputs before the tensors computed from them and reversing it puts the loss first and the leaves last. The `seen` set, keyed by `id()` because tensors are not hashable, places a tensor that is reachable by two paths exactly once.
 
-Step 3 is where "used twice means add" lives. `pending` holds, for each tensor, the gradient accumulated so far from the consumers already visited. A tensor is only taken from `pending` when the walk reaches it, and by the order's guarantee every consumer has already added its share, so the `+` on the second-to-last line is the accumulation and the value is complete. Each node's `backward` returns one gradient per input, in the order the inputs were given, and the walker reduces each one to its input's shape before handing it on. Nothing in the loop knows what any operation does. It only knows the order.
+Step 3 maintains two distinct kinds of gradient state. The local `pending` dictionary starts fresh on every backward call; a tensor's `.grad` may already contain contributions from an earlier call. The rule receives the current call's `grad` from `pending`, never the historical total in `.grad`. Replaying a retained graph therefore adds a new derivative to the leaf without sending the old derivative through the graph a second time.
 
-Step 4 releases the graph. Every node holds its inputs, which is what makes the intermediate activations of the forward pass stay in memory, so a training loop that never released them would grow by one graph per step. It is done once, after the whole walk, because releasing a node as soon as its rule ran would drop the second contribution the order exists to collect. Calling `backward()` again on a released graph raises, which is the same error PyTorch gives and the reason `retain_graph=True` exists. PyTorch's engine enforces the same invariant with a per-node dependency count instead of a sorted list, and the production bridge says why.
+Step 3 is also where "used twice means add" lives. `pending` holds, for each tensor, the gradient accumulated so far from the consumers already visited. A tensor is only taken from `pending` when the walk reaches it, and by the order's guarantee every consumer has already added its share, so the `+` on the second-to-last line is the accumulation and the value is complete. Each node's `backward` returns one gradient per input, in the order the inputs were given, and the walker reduces each one to its input's shape before handing it on. Nothing in the loop knows what any operation does. It only knows the order.
+
+Step 4 severs the `_grad_fn` links after the walk and marks tensors that had a producing operation with `_graph_released`. The marker distinguishes a consumed intermediate from an original leaf. Both now have no `_grad_fn`, but only the leaf is a valid stopping point for a later backward pass. Step 1 checks the marker on every reachable differentiable tensor before step 3 mutates any gradient. A new loss built from an old intermediate therefore raises instead of silently stopping short of its original inputs.
+
+Passing `retain_graph=True` on the earlier call preserves the links so another backward call can traverse them. It does not make the derivatives differentiable: these rules compute NumPy arrays, so retaining the graph does not implement higher-order derivatives. For ordinary training, the next forward pass builds a new graph from the updated parameters. Retention is needed only when more than one backward traversal must use the same forward computation.
 
 ---
 
@@ -226,7 +232,24 @@ x = Tensor([[1.0, 2.0]], requires_grad=True)
 print(x.grad)          # [[2. 2.]]
 ```
 
-Replace the `+` in the `pending` update inside `backward` with an assignment and this prints `[[1. 1.]]`, with no error to tell you it is wrong.
+Replace the `+` in the `pending` update inside `backward` with an assignment and this prints `[[1. 1.]]`, with no error to tell us it is wrong. A shared intermediate adds a second obligation: its local rule must propagate the combined gradient once. The following trace checks both accumulation across branches and reuse across calls.
+
+```python
+x = Tensor([2.0], requires_grad=True)
+h = x * 2
+left, right = (h * 3).sum(), (h * 4).sum()
+left.backward(retain_graph=True)
+print(x.grad)                       # [6.]
+right.backward()
+print(x.grad)                       # [14.], six from left plus eight from right
+
+try:
+    (h * 5).sum().backward()         # new root, but h's graph was released
+except RuntimeError:
+    print(x.grad)                   # [14.], validation preceded accumulation
+```
+
+On the first call, `h` receives three and sends six to `x`. On the second, its fresh `pending` entry receives four and sends eight, even though `h.grad` also retains the earlier three. The second call releases `h`'s producing operation. The third call reaches that marked intermediate during graph validation and stops before changing `x.grad`. Recomputing `h = x * 2` creates a usable graph; clearing `x.grad` alone does not restore the old one.
 
 ---
 
@@ -236,7 +259,7 @@ PyTorch's autograd is the same three ideas implemented in C++, in `torch/csrc/au
 
 [^fn-stream-backward]: **Stream**: a queue of GPU work that executes in order, with different streams free to overlap. PyTorch's backward engine records which stream each forward operation used and runs its backward rule on the same one, so two independent branches of a model can differentiate concurrently.
 
-The memory cost that The Idea described is the constraint that shapes the production engine. Every saved forward tensor is held until its node runs, so peak training memory is the forward pass plus the graph, and PyTorch frees the graph at the end of `backward()` unless you pass `retain_graph=True`. Step 4 of our `backward()` does the same, setting each `_grad_fn` to `None` once the walk completes. As napkin math for the scale involved, one activation tensor for a batch of 16 sequences of 2048 tokens with a hidden size of 4096, stored in 16-bit floats, is $16 \times 2048 \times 4096 \times 2$ bytes, about 268 MB. A transformer layer saves several such tensors, some of them wider than the hidden size, and a model has tens of layers, so the saved activations reach tens of gigabytes while the parameters of the same model may be a fraction of that. Inference peaks at roughly one layer's worth. When the graph does not fit, the standard remedy is gradient checkpointing,[^fn-checkpointing-activation-memory] which trades memory for a second forward pass.
+The memory cost that The Idea described is the constraint that shapes the production engine. Saved forward tensors remain reachable through their nodes, so training memory includes activations as well as graph records, and PyTorch frees the graph at the end of `backward()` unless you pass `retain_graph=True`. Step 4 of our `backward()` does the same, setting each `_grad_fn` to `None` once the walk completes. As napkin math for the scale involved, one activation tensor for a batch of 16 sequences of 2048 tokens with a hidden size of 4096, stored in 16-bit floats, is $16 \times 2048 \times 4096 \times 2$ bytes, about 268 MB. A transformer layer saves several such tensors, some of them wider than the hidden size, and a model has tens of layers, so the saved activations reach tens of gigabytes while the parameters of the same model may be a fraction of that. Inference peaks at roughly one layer's worth. When the graph does not fit, the standard remedy is gradient checkpointing,[^fn-checkpointing-activation-memory] which trades memory for a second forward pass.
 
 [^fn-checkpointing-activation-memory]: **Gradient checkpointing** (also called activation rematerialization): save the forward tensors at only a few layers, and recompute the others from those checkpoints when the backward pass needs them. It removes most of the saved-activation memory at the cost of roughly one extra forward pass, about a third more compute for a step whose backward already costs twice its forward.
 
@@ -256,6 +279,6 @@ The reader now has an autograd engine: an `apply` that records, on every result,
 
 ## Exercises
 
-1. **A new rule.** Add an `Exp` operation with `forward` returning `np.exp(a)` and a `backward` that uses the saved output, since $\partial e^{a} / \partial a = e^{a}$, then give `Tensor` an `exp()` method that calls `Exp.apply`. Check it on `L = x.exp().sum()`, whose gradient should be $e^{\mathbf{x}}$, and on `L = (x.exp() * x.exp()).sum()`, where the same node's output is used twice.
-2. **Why the order matters.** Replace the topological sort in `backward()` with naive recursion that runs each node's rule and immediately recurses into its inputs. Build a graph in which a tensor that is itself the output of an operation, such as `h = ReLU()(x)`, feeds two different operations (for example `L = (h @ W).sum() + (h + h).sum()`) and show that the naive version gives the wrong gradient for `x`. Explain, in terms of when `h`'s pending gradient is read, why.
+1. **A new rule.** Add an `Exp` operation with `forward` returning `np.exp(a)` and a `backward` that uses the saved output, since $\partial e^{a} / \partial a = e^{a}$, then give `Tensor` an `exp()` method that calls `Exp.apply`. Check it on `L = x.exp().sum()`, whose gradient should be $e^{\mathbf{x}}$, and on `y = x.exp(); L = (y * y).sum()`, where the same node's output is used twice.
+2. **Why the order matters.** Replace the topological sort in `backward()` with a visit-once recursion that runs each node's rule and immediately recurses into its inputs. Build a graph in which a tensor that is itself the output of an operation, such as `h = ReLU()(x)`, feeds two different operations (for example `L = (h @ W).sum() + (h + h).sum()`) and show that the naive version gives the wrong gradient for `x`. Explain, in terms of when `h`'s pending gradient is read, why.
 3. **Gradient checking.** Write a function that compares `W.grad` from `backward()` against the finite-difference estimate from The Problem for a random $\mathbf{x}$ and $\mathbf{W}$. Run it in float32 and float64 for `eps` in $\{10^{-1}, 10^{-2}, \dots, 10^{-6}\}$, and plot the error. Explain why the float32 curve turns back up.

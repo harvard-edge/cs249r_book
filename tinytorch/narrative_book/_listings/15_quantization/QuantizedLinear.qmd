@@ -34,6 +34,8 @@ class QuantizedLinear:
             all_values.extend(inp.data.flatten())
 
         all_values = np.array(all_values)
+        if all_values.size == 0 or not np.all(np.isfinite(all_values)):
+            raise ValueError("Calibration requires nonempty finite samples")
 
         # Calculate input quantization parameters, widening the range to
         # straddle zero exactly as quantize_int8 does (post-ReLU inputs are
@@ -86,7 +88,7 @@ class QuantizedLinear:
         ...
 
     def memory_usage(self) -> Dict[str, float]:
-        """Calculate memory usage in bytes."""
+        """Model packed INT8 bytes, including metadata; not actual NumPy storage."""
         # Original FP32 usage
         original_weight_bytes = self.original_layer.weight.data.size * BYTES_PER_FLOAT32
         original_bias_bytes = 0
@@ -101,7 +103,8 @@ class QuantizedLinear:
 
         # Overhead for the quantization parameters (a scale and a zero point):
         # a few bytes, negligible next to the arrays
-        overhead_bytes = BYTES_PER_FLOAT32 * 2
+        # Each quantized array needs its own float32 scale and integer zero point.
+        overhead_bytes = BYTES_PER_FLOAT32 * 2 * (1 + int(self.q_bias is not None))
 
         quantized_total = quantized_weight_bytes + quantized_bias_bytes + overhead_bytes
         original_total = original_weight_bytes + original_bias_bytes

@@ -104,6 +104,24 @@ def g_module_set():
     return errs
 
 
+@gate("structure: imports follow dependencies and precede introduction")
+def g_imports_position():
+    # 2026-09-11: heading-only spine checks missed imports before prerequisites.
+    errors = []
+    for _, name, path in module_files():
+        source_cells = cells(path.read_text())
+        dependencies = [i for i, (_, body) in enumerate(source_cells)
+                        if '## 📋 Module Dependencies' in body]
+        imports = [i for i, (_, body) in enumerate(source_cells)
+                   if re.search(r'^#\| default_exp ', body, re.M)]
+        introduction = [i for i, (_, body) in enumerate(source_cells)
+                        if '## 💡 Introduction' in body]
+        if (len(dependencies) != 1 or len(imports) != 1 or len(introduction) != 1
+                or not dependencies[0] < imports[0] < introduction[0]):
+            errors.append(f"{name}: place imports after Dependencies and before Introduction")
+    return errors
+
+
 SPINE = ["🔗 Prerequisites & Progress", "🎯 Learning Objectives",
          "📦 Where This Code Lives", "📋 Module Dependencies",
          "💡 Introduction", "📐 Foundations", "🏗️", "🔧 Integration",
@@ -595,6 +613,23 @@ def g_bare_except():
             if re.match(r"\s*except:\s*$", line):
                 errs.append(f"{f.relative_to(ROOT)}:{i}")
     return errs
+
+
+@gate("tests: exceptions cannot turn missing implementations into a pass")
+def g_no_false_success_handlers():
+    # 2026-09-11: progressive tests caught ImportError/TypeError then asserted True.
+    errors = []
+    for path in sorted(TESTS.rglob('test_*.py')):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            for statement in ast.walk(node):
+                if (isinstance(statement, ast.Assert)
+                        and isinstance(statement.test, ast.Constant)
+                        and statement.test.value is True):
+                    errors.append(f"{path.relative_to(ROOT)}:{statement.lineno}: exception becomes success")
+    return errors
 
 
 @gate("tests: no graded cell swallows its own failure")

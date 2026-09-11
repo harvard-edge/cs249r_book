@@ -13,6 +13,20 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 REGRESSIONS = (
+    # 2026-09-11: audit cases run against fresh source exports, not stale packages.
+    "01_tensor/test_tensor_core.py",
+    "04_losses/test_losses_core.py",
+    "05_dataloader/test_batch_contract.py",
+    "06_autograd/test_batched_matmul_backward.py",
+    "07_optimizers/test_state_restore.py",
+    "08_training/test_checkpoint_continuation.py",
+    "09_convolutions/test_spatial_contracts.py",
+    "11_embeddings/test_embedding_contracts.py",
+    "12_attention/test_attention_contracts.py",
+    "13_transformers/test_transformer_contracts.py",
+    "14_profiling/test_profile_accounting.py",
+    "16_compression/test_pruning_contracts.py",
+    "18_memoization/test_cached_generation_equivalence.py",
     "06_autograd/test_graph_lifetime.py",
     "08_training/test_accumulation_windows.py",
     "15_quantization/test_constant_roundtrip.py",

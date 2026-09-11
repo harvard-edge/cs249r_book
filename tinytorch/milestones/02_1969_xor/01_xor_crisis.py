@@ -73,6 +73,7 @@ The secret? Multi-layer networks can learn NON-LINEAR decision boundaries.
 """
 
 import sys
+from pathlib import Path
 import os
 import numpy as np
 rng = np.random.default_rng(7)
@@ -82,7 +83,7 @@ from rich.panel import Panel
 from rich import box
 
 # Add project root to path
-sys.path.insert(0, os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Import TinyTorch components YOU BUILT!
 # Only needs Modules 01-03 (no training required)
@@ -153,8 +154,8 @@ class SingleLayerPerceptron:
     def set_weights(self, w1, w2, b):
         """Manually set weights to test different configurations."""
         # Weight shape is (in_features, out_features) = (2, 1)
-        self.linear.weight.data = np.array([[w1], [w2]])
-        self.linear.bias.data = np.array([b])
+        self.linear.weight.data[...] = [[w1], [w2]]
+        self.linear.bias.data[...] = b
 
     def __call__(self, x):
         """Forward pass: Input -> Linear -> Sigmoid -> Output"""
@@ -164,7 +165,7 @@ class SingleLayerPerceptron:
         """Return current weights."""
         # Weight shape is (2, 1), flatten to get [w1, w2]
         w = self.linear.weight.data.flatten()
-        b = float(self.linear.bias.data.item() if hasattr(self.linear.bias.data, 'item') else self.linear.bias.data[0])
+        b = float(self.linear.bias.data.item())
         return w[0], w[1], b
 
 
@@ -181,7 +182,7 @@ def describe_decision_boundary(w1, w2, b):
     """Describe what the decision boundary looks like."""
     if abs(w2) < 0.001:
         if abs(w1) < 0.001:
-            return "Horizontal line (degenerate)"
+            return "Constant prediction (both input weights are zero)"
         return f"Vertical line at x1 = {-b/w1:.2f}"
 
     slope = -w1/w2

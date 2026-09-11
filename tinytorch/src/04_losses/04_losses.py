@@ -428,9 +428,10 @@ class MSEFunction(Function):
         TODO: Implement MSE loss calculation
 
         APPROACH:
-        1. Compute difference: predictions - targets
-        2. Square the differences: diff²
-        3. Take mean across all elements
+        1. Require matching, nonempty shapes: each prediction has one target
+        2. Compute difference: predictions - targets
+        3. Square the differences: diff²
+        4. Take mean across all elements
 
         EXAMPLE:
         >>> loss_fn = MSELoss()
@@ -446,6 +447,9 @@ class MSEFunction(Function):
         - Use np.mean() to average over all elements
         """
         ### BEGIN SOLUTION
+        if predictions.shape != targets.shape or predictions.size == 0:
+            raise ValueError("MSELoss requires matching, nonempty prediction and target shapes")
+
         # Step 1: Compute element-wise difference
         diff = predictions - targets
 
@@ -513,6 +517,12 @@ def test_unit_mse_loss():
     random_target = Tensor(rng.standard_normal(10))
     random_loss = loss_fn.forward(random_pred, random_target)
     assert random_loss.data >= 0, f"MSE loss should be non-negative, got {random_loss.data}"
+
+    # Broadcasting would compare each prediction with every target by mistake.
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([[1.0], [2.0]]), Tensor([1.0, 2.0]))
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([]), Tensor([]))
 
     print("✅ MSELoss works correctly!")
 
@@ -619,9 +629,9 @@ class CrossEntropyFunction(Function):
         TODO: Implement cross-entropy loss with numerical stability
 
         APPROACH:
-        1. Compute log-softmax of logits (numerically stable)
-        2. Check every target index is a real class, 0 <= t < num_classes,
-        and raise ValueError if any is not
+        1. Require nonempty logits (batch, classes) and targets (batch,)
+        2. Check targets are finite integers with 0 <= t < num_classes,
+           then compute log-softmax of logits (numerically stable)
         3. Select log-probabilities for correct classes
         4. Return negative mean of selected log-probabilities
 
@@ -634,7 +644,7 @@ class CrossEntropyFunction(Function):
 
         HINTS:
         - Use LogSoftmax().forward(logits) for numerical stability (the array-level log-softmax you wrote above)
-        - targets.astype(int) ensures integer indices
+        - Tensor stores float32; validate whole-number labels before targets.astype(int)
         - num_classes is logits.shape[-1]; validate before indexing, because
         NumPy would let a negative target silently select the wrong class
         and would raise a bare IndexError for one that is too large
@@ -642,21 +652,23 @@ class CrossEntropyFunction(Function):
         - Return negative mean: -np.mean(selected_log_probs)
         """
         ### BEGIN SOLUTION
-        # Step 1: Compute log-softmax for numerical stability
-        log_probs = LogSoftmax().forward(logits)
+        if logits.ndim != 2 or logits.size == 0 or targets.shape != (logits.shape[0],):
+            raise ValueError("CrossEntropyLoss requires nonempty logits (batch, classes) and targets (batch,)")
+        if not np.all(np.isfinite(targets)) or np.any(targets != np.floor(targets)):
+            raise ValueError("CrossEntropyLoss targets must be finite integer class indices")
 
-        # Step 2: Select log-probabilities for correct classes
-        batch_size = logits.shape[0]
-        num_classes = logits.shape[-1]
-        target_indices = targets.astype(int)
-
-        out_of_range = (target_indices < 0) | (target_indices >= num_classes)
+        batch_size, num_classes = logits.shape
+        out_of_range = (targets < 0) | (targets >= num_classes)
         if np.any(out_of_range):
-            bad_values = np.unique(target_indices[out_of_range])
+            bad_values = np.unique(targets[out_of_range])
             raise ValueError(
                 f"CrossEntropyLoss target index out of range: {bad_values.tolist()}\n"
                 f"  Valid range for {num_classes} classes is [0, {num_classes - 1}]"
             )
+
+        # Validate before casting: conversion would silently truncate fractional labels.
+        target_indices = targets.astype(int)
+        log_probs = LogSoftmax().forward(logits)
 
         # Select correct class log-probabilities using advanced indexing
         selected_log_probs = log_probs[np.arange(batch_size), target_indices]
@@ -727,6 +739,10 @@ def test_unit_cross_entropy_loss():
     large_loss = loss_fn.forward(large_logits, large_targets)
     assert not np.isnan(large_loss.data), "Loss should not be NaN with large logits"
     assert not np.isinf(large_loss.data), "Loss should not be infinite with large logits"
+
+    for invalid_targets in ([0.5, 1], [-1, 1], [[0], [1]]):
+        with np.testing.assert_raises(ValueError):
+            loss_fn(uniform_logits, Tensor(invalid_targets))
 
     print("✅ CrossEntropyLoss works correctly!")
 
@@ -849,9 +865,10 @@ class BinaryCrossEntropyFunction(Function):
         TODO: Implement binary cross-entropy with numerical stability
 
         APPROACH:
-        1. Clamp predictions to avoid log(0) and log(1)
-        2. Compute: -(targets * log(predictions) + (1-targets) * log(1-predictions))
-        3. Return mean across all samples
+        1. Require matching, nonempty shapes and probabilities/targets in [0, 1]
+        2. Clamp predictions to keep both logarithms finite
+        3. Compute: -(targets * log(predictions) + (1-targets) * log(1-predictions))
+        4. Return mean across all elements
 
         EXAMPLE:
         >>> loss_fn = BinaryCrossEntropyLoss()
@@ -866,6 +883,12 @@ class BinaryCrossEntropyFunction(Function):
         - Use np.mean() to average over all samples
         """
         ### BEGIN SOLUTION
+        if predictions.shape != targets.shape or predictions.size == 0:
+            raise ValueError("BinaryCrossEntropyLoss requires matching, nonempty prediction and target shapes")
+        for values in (predictions, targets):
+            if not np.all(np.isfinite(values)) or np.any((values < 0) | (values > 1)):
+                raise ValueError("BinaryCrossEntropyLoss predictions and targets must be finite values in [0, 1]")
+
         # Step 1: Clamp predictions to avoid numerical issues with log(0) and log(1)
         eps = EPSILON
         clamped_preds = np.clip(predictions, eps, 1 - eps)
@@ -943,6 +966,11 @@ def test_unit_binary_cross_entropy_loss():
     boundary_loss = loss_fn.forward(boundary_predictions, boundary_targets)
     assert not np.isnan(boundary_loss.data), "Loss should not be NaN at boundaries"
     assert not np.isinf(boundary_loss.data), "Loss should not be infinite at boundaries"
+
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([[0.2], [0.8]]), Tensor([0.0, 1.0]))
+    with np.testing.assert_raises(ValueError):
+        loss_fn(Tensor([1.2]), Tensor([1.0]))
 
     print("✅ BinaryCrossEntropyLoss works correctly!")
 
@@ -1205,7 +1233,7 @@ def analyze_numerical_stability():
 
     print(f"\n💡 Key Insight: Log-sum-exp trick prevents overflow")
     print("   Without it: exp(700) would cause overflow in standard softmax")
-    print("   With it: We can handle arbitrarily large logits safely")
+    print("   With it: These finite float32 logits avoid exponential overflow")
 
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-loss-memory", "solution": false}
@@ -1215,7 +1243,7 @@ def analyze_loss_memory():
 
     Understanding memory helps with batch size decisions.
     """
-    print("\n📊 Analysis: Loss Function Memory Usage...")
+    print("\n📊 Analysis: Selected Loss Buffers (Estimate)...")
 
     batch_sizes = [32, 128, 512, 1024]
     num_classes = 1000  # Like ImageNet
@@ -1250,8 +1278,9 @@ def analyze_loss_memory():
     print(f"\n💡 Memory Insights:")
     print("   - CrossEntropy dominates due to large vocabulary (num_classes)")
     print("   - Memory scales linearly with batch size")
-    print("   - Intermediate activations (softmax) double CE memory")
-    print(f"   - For batch=1024, CE needs {ce_memory:.1f}MB just for loss computation")
+    print("   - The estimate includes one CE intermediate buffer")
+    print("   - Temporary arrays and allocator overhead are omitted; this is not measured peak memory")
+    print(f"   - For batch=1024, the selected CE buffers total {ce_memory:.1f}MB")
 
 if __name__ == "__main__":
     analyze_numerical_stability()
@@ -1433,11 +1462,6 @@ def test_module():
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 04")
-
-
-# %%
-if __name__ == "__main__":
-    test_module()
 
 
 # %% [markdown]

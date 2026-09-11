@@ -16,8 +16,7 @@
 """
 # Module 18: Memoization - Computational Reuse for Inference
 
-Welcome to Module 18! You'll implement memoization, a fundamental optimization pattern. We'll apply it to transformers through KV caching, which removes 10-15x of the
-arithmetic in typical text generation.
+Welcome to Module 18! You'll implement memoization, a fundamental optimization pattern. We'll apply it to transformers through KV caching, which avoids recomputing earlier tokens during text generation.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete transformer architecture (Module 13) and profiling tools (Module 14)
@@ -36,7 +35,7 @@ By the end of this module, you will:
 2. Apply memoization to transformers through KV caching
 3. Implement KVCache with efficient memory management and O(1) updates
 4. Build cache-aware attention that reuses previously computed keys and values
-5. Measure the operation-count reduction (10-15x) and understand memory trade-offs
+5. Compare operation counts with measured speedup and understand memory trade-offs
 
 Let's make inference blazingly fast through computational reuse!
 
@@ -56,22 +55,6 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 - **Consistency:** All generation optimizations in perf.memoization
 - **Integration:** Works seamlessly with transformers for complete inference optimization
 """
-
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp perf.memoization
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-import time
-from typing import Tuple, Optional, Dict, List
-
-# Import TinyTorch components from previous modules
-from tinytorch.core.tensor import Tensor
-
-# Internal constants for memory calculations (not exported)
-_BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-_MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -97,6 +80,22 @@ Module 01 (Tensor) → Module 12 (Attention) → Module 13 (Transformers) → Mo
 Students completing this module will have built efficient caching
 that makes production LLM serving economically viable.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp perf.memoization
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+import time
+from typing import Tuple, Optional, Dict, List
+
+# Import TinyTorch components from previous modules
+from tinytorch.core.tensor import Tensor
+
+# Internal constants for memory calculations (not exported)
+_BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+_MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -182,7 +181,7 @@ def profile_naive_generation():
     print("   • First compute: Calculate and store K,V")
     print("   • Later steps: Reuse stored K,V")
     print("   • Complexity: O(n²) → O(n)")
-    print("   • Attention ops saved: (n+1)/2 for n generated tokens (≈50× at n=100)\n")
+    print("   • K,V projection ratio: (n+1)/2 for n generated tokens (≈50× at n=100)\n")
 
 if __name__ == "__main__":
     profile_naive_generation()
@@ -235,7 +234,9 @@ This inefficiency makes production LLM serving economically impossible without o
 - **Mobile deployment**: On-device generation would drain batteries instantly
 - **API serving**: Server costs would be 10x+ higher
 
-**The Solution**: Cache key-value pairs after computing them once, transforming O(n²) into O(n).
+**The Solution**: Cache key-value pairs after computing them once. Across n steps,
+K,V projection work falls from O(n²) to O(n). Attention is different: each new
+query still reads all prior keys and values, so total score work remains O(n²).
 """
 
 # %% [markdown]
@@ -291,7 +292,7 @@ Attention: Q₃ × cached[K₁, K₂, K₃] × cached[V₁, V₂, V₃]
 
 ```
 Traditional Approach:
-Memory: O(1)          (no storage needed)
+Extra persistent KV storage: none (temporary attention arrays still allocate)
 Compute: O(n²)        (recompute everything)
 
 Cached Approach:
@@ -317,7 +318,7 @@ Our KVCache needs to efficiently handle:
 1. **Multi-layer storage**: Each transformer layer needs its own K,V cache
 2. **Multi-head attention**: Each attention head has separate K,V pairs
 3. **Batch processing**: Support multiple sequences simultaneously (batch inference)
-4. **Dynamic updates**: Efficiently append new tokens without copying data
+4. **Dynamic updates**: Write new tokens into reserved slots without reallocating the history
 5. **Memory management**: Pre-allocate space to avoid dynamic resizing overhead
 
 ### Cache Architecture Visualization
@@ -391,7 +392,7 @@ class KVCache:
     ⚠️  IMPORTANT: INFERENCE-ONLY (No Gradient Tracking)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     KV caching is designed ONLY for inference (generation), NOT training.
-    - During generation: No gradients computed (model.eval() mode)
+    - During generation: Cache operations detach values; eval() alone does not disable gradients
     - Cache operations use .data (no gradient tracking)
     - This is correct and intentional for maximum speed
     - DO NOT use caching during training (use standard forward pass)
@@ -399,7 +400,7 @@ class KVCache:
     Architecture:
     - Pre-allocates cache tensors with maximum sequence length
     - Tracks current sequence position for efficient O(1) updates
-    - Provides update() method to append new K,V pairs without copying
+    - Provides update() method to append new K,V pairs without reallocating storage
     - Provides get() method to retrieve cached values for attention
     - Handles multiple layers and attention heads properly
 
@@ -412,8 +413,8 @@ class KVCache:
     ```
 
     Performance:
-    - Update: O(1) - just index assignment
-    - Get: O(1) - just slicing (no data copy)
+    - Update: constant in context length; copies one token across all heads
+    - Get: O(context length) - Tensor construction copies the sliced prefix
     - Memory: O(num_layers × batch × heads × max_seq × head_dim)
     """
 
@@ -452,6 +453,11 @@ class KVCache:
         - Pre-allocation avoids dynamic resizing overhead during generation
         """
         ### BEGIN SOLUTION
+        for name, value in (("batch_size", batch_size), ("max_seq_len", max_seq_len),
+                            ("num_layers", num_layers), ("num_heads", num_heads),
+                            ("head_dim", head_dim)):
+            if not isinstance(value, (int, np.integer)) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.num_layers = num_layers
@@ -477,7 +483,7 @@ class KVCache:
         """
         Update cache with new key-value pairs for given layer.
 
-        TODO: Efficiently append new K,V to cache without data copying
+        TODO: Efficiently append new K,V to cache without reallocating the cache
 
         APPROACH:
         1. Validate layer_idx is in range [0, num_layers-1]
@@ -520,7 +526,7 @@ class KVCache:
             ValueError: If layer_idx is out of range or sequence is full
         """
         ### BEGIN SOLUTION
-        if layer_idx >= self.num_layers:
+        if not isinstance(layer_idx, (int, np.integer)) or not 0 <= layer_idx < self.num_layers:
             raise ValueError(
                 f"Invalid layer index for cache update\n"
                 f"  ❌ layer_idx={layer_idx} is out of range [0, {self.num_layers - 1}]\n"
@@ -535,6 +541,10 @@ class KVCache:
                 f"  💡 The cache was pre-allocated for {self.max_seq_len} tokens maximum. Autoregressive generation cannot exceed this limit.\n"
                 f"  🔧 Either: (1) call cache.reset() to start a new sequence, or (2) create a larger cache with max_seq_len > {self.max_seq_len}"
             )
+
+        expected_shape = (self.batch_size, self.num_heads, 1, self.head_dim)
+        if key.shape != expected_shape or value.shape != expected_shape:
+            raise ValueError(f"Cache update requires key and value shape {expected_shape}")
 
         # Get cache for this layer
         key_cache, value_cache = self.caches[layer_idx]
@@ -563,7 +573,8 @@ class KVCache:
         6. Wrap sliced data in new Tensor objects and return
 
         Returns only the valid portion of the cache (up to current seq_pos).
-        This is O(1) because we're just slicing NumPy arrays (view, not copy).
+        The NumPy slice is a view, but wrapping it in Tensor copies the prefix.
+        Retrieval therefore grows with the number of cached tokens.
 
         IMPORTANT: Returns Tensors without gradient tracking since caching
         is inference-only. The returned tensors can be used in attention
@@ -596,7 +607,7 @@ class KVCache:
             ValueError: If layer_idx is out of range
         """
         ### BEGIN SOLUTION
-        if layer_idx >= self.num_layers:
+        if not isinstance(layer_idx, (int, np.integer)) or not 0 <= layer_idx < self.num_layers:
             raise ValueError(
                 f"Invalid layer index for cache retrieval\n"
                 f"  ❌ layer_idx={layer_idx} is out of range [0, {self.num_layers - 1}]\n"
@@ -626,6 +637,8 @@ class KVCache:
         Call this after all layers have processed the current token and
         updated their caches. This moves the write pointer forward.
         """
+        if self.seq_pos >= self.max_seq_len:
+            raise ValueError("Cannot advance: KV cache is full")
         self.seq_pos += 1
 
     def reset(self) -> None:
@@ -834,7 +847,7 @@ To use KV caching in your transformer generation:
 ### Performance Expectations
 
 ```
-Attention work avoided, by generation length:
+K,V projection work avoided, starting from one token:
 ┌───────────┬───────────────┬───────────────┬──────────┐
 │ Seq Len   │ No Cache (ops)│ Cached (ops)  │ Ratio    │
 ├───────────┼───────────────┼───────────────┼──────────┤
@@ -844,10 +857,11 @@ Attention work avoided, by generation length:
 │ 100 tokens│    O(n²)=5050 │      O(n)=100 │  50.5x   │
 └───────────┴───────────────┴───────────────┴──────────┘
 
-These are ATTENTION OPERATION COUNTS (n(n+1)/2 vs n), not wall-clock
-measurements. Real end-to-end speedup is lower -- the MLP layers, sampling,
-and memory traffic do not shrink, and cache lookups add their own cost.
-Operation count is the ceiling; measured throughput is always below it.
+These counts describe K,V projections (n(n+1)/2 vs n), not all attention
+operations or wall-clock time. Attention still scores every cached key for
+each new query. Full-sequence forwards score t² pairs at context t, while
+a cached forward scores t pairs. Timing also includes the MLP, sampling,
+prefix copies, and Python overhead; this table does not predict speedup.
 
 Key Insight: The ratio grows with sequence length!
 Why? Longer sequences = more redundant computation without cache.
@@ -861,7 +875,7 @@ Why? Longer sequences = more redundant computation without cache.
 - For GPT-3 (96 layers, 96 heads, seq_len=2048, head_dim=128): ~18 GB per sequence
 
 **Trade-off Analysis:**
-- **(n+1)/2 fewer attention operations** for n generated tokens (25× at 50, 100× at 200)
+- **(n+1)/2 fewer K,V projections** for n generated tokens (25× at 50, 100× at 200)
 - **Memory cost grows with context**: 2 × layers × heads × seq_len × head_dim × 4 bytes per sequence
 - **Enables real-time interaction** that's impossible without caching
 
@@ -1016,6 +1030,8 @@ def _create_cache_storage(model):
             )
 
     # Calculate head dimension
+    if model.num_heads <= 0:
+        raise ValueError("num_heads must be positive")
     head_dim = model.embed_dim // model.num_heads
     if model.embed_dim % model.num_heads != 0:
         raise ValueError(
@@ -1251,12 +1267,12 @@ Step 0 (prefill): Process prompt tokens one at a time
 Step 1: Generate token_4
   → input: just [token_4] (length 1!)
   → attention uses cached K,V + new K,V
-  → O(1) new computation per layer
+  → One new K,V projection; attention reads the growing prefix
 
 Step 2: Generate token_5
   → input: just [token_5] (length 1!)
   → cache grows: K,V for tokens 1-4
-  → O(1) new computation per layer
+  → One new K,V projection; attention reads the growing prefix
 
   ...continues until max_new_tokens reached
 ```
@@ -1278,7 +1294,8 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
        b. The CachedAttention stand-ins write each token's K,V into the cache
        c. Advance cache position after each token
        d. Sample next token from logits with temperature scaling
-    4. Return list of generated token indices
+    4. Return list of generated token indices; do not forward the last sampled
+       token because no later prediction needs its logits
 
     EXAMPLE:
     >>> generated = _cached_generate(model, prompt=[0, 1, 2],
@@ -1306,8 +1323,20 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
         List of generated token IDs (integers)
     """
     ### BEGIN SOLUTION
+    if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be a nonnegative integer")
+    if not np.isfinite(temperature) or temperature < 0:
+        raise ValueError("temperature must be finite and nonnegative")
+    if len(prompt_tokens) == 0:
+        raise ValueError("prompt_tokens must contain at least one token")
+    # The last sampled token is returned, not fed back into the model.
+    if len(prompt_tokens) + max_new_tokens > cache.max_seq_len:
+        raise ValueError("Prompt and generation exceed cache capacity")
     generated = []
     cache.reset()   # a fresh sequence: the cursor back to slot 0, no rows from the last request
+
+    if max_new_tokens == 0:
+        return generated
 
     # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
     # Each token goes through the CachedAttention stand-ins, which write its
@@ -1323,16 +1352,18 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     last_logits = logits.data[0, -1, :]  # (vocab_size,)
 
     # Phase 2: GENERATE - one token at a time using cache
-    for _ in range(max_new_tokens):
-        # Temperature-scaled sampling
-        scaled_logits = last_logits / max(temperature, 1e-8)
-        max_logit = np.max(scaled_logits)
-        exp_logits = np.exp(scaled_logits - max_logit)
-        probs = exp_logits / np.sum(exp_logits)
-
-        # Sample next token
-        next_token = int(rng.choice(len(probs), p=probs))
+    for step in range(max_new_tokens):
+        # Zero temperature means greedy decoding, including tied logits.
+        if temperature == 0:
+            next_token = int(np.argmax(last_logits))
+        else:
+            scaled_logits = last_logits / temperature
+            exp_logits = np.exp(scaled_logits - np.max(scaled_logits))
+            probs = exp_logits / np.sum(exp_logits)
+            next_token = int(rng.choice(len(probs), p=probs))
         generated.append(next_token)
+        if step == max_new_tokens - 1:
+            break
 
         # Feed single token through model (cache handles history)
         token_tensor = Tensor(np.array([[next_token]]))  # (1, 1)
@@ -1392,8 +1423,8 @@ def test_unit_cached_generate():
         assert 0 <= token < vocab_size, f"Token {token} out of vocab range [0, {vocab_size})"
 
     # Test 3: Cache position advanced correctly
-    # prompt (3 tokens) + generated (5 tokens) = 8 advances
-    expected_pos = len(prompt) + max_new
+    # The final sampled token needs no forward pass: 3 + 5 - 1 = 7 advances.
+    expected_pos = len(prompt) + max_new - 1
     assert cache.seq_pos == expected_pos, f"Expected cache pos={expected_pos}, got {cache.seq_pos}"
 
     # Test 4: Generate with low temperature (more deterministic)
@@ -1681,7 +1712,7 @@ def analyze_kvcache_speedup():
     Demonstrates:
         - Naive approach: attention over the whole context for every new token
         - Cached approach: one token of new work per step
-        - Measured wall-clock speedup on a tiny GPT, next to the (n+1)/2 ops ratio
+        - Measured wall-clock speedup on a tiny GPT, next to the attention score-pair ratio
 
     Key Insight:
         Speedup is SUPER-LINEAR with generation length because:
@@ -1721,7 +1752,10 @@ def analyze_kvcache_speedup():
         time_with = (time.perf_counter() - start) * 1000
 
         measured = time_without / max(time_with, 1e-6)
-        ops_ratio = (gen_length + 1) / 2  # n(n+1)/2 attention rows vs n
+        contexts = np.arange(len(prompt), len(prompt) + gen_length)
+        # Full forwards score t² query/key pairs; cached forwards score t.
+        # Token-by-token prefill also scores 1 + ... + (prompt_len - 1) pairs.
+        ops_ratio = np.sum(contexts ** 2) / (np.sum(contexts) + sum(range(len(prompt))))
 
         print(f"{gen_length:17d} | {time_without:10.1f} ms | {time_with:8.1f} ms | {measured:6.1f}× | {ops_ratio:6.1f}×")
 
@@ -1729,8 +1763,8 @@ def analyze_kvcache_speedup():
     print()
     print("💡 Key Insights:")
     print("   • Speedup grows with generation length (longer = better ROI)")
-    print("   • The attention-ops ratio (n+1)/2 is the ceiling; the MLP, sampling, and")
-    print("     Python overhead do not shrink, so the measured speedup sits below it")
+    print("   • The score-pair ratio is an operation count, not a wall-clock ceiling;")
+    print("     projections, the MLP, prefix copies, and Python overhead also affect timing")
     print()
     print("🚀 Production Reality:")
     print("   • Every production LLM server caches K/V; without it, per-token cost")
@@ -1909,7 +1943,8 @@ ChatGPT serves millions of users. Each user's conversation needs its own KV cach
 K,V values for all previous tokens at each step. With KV caching, you compute once and reuse!
 This is why ChatGPT responds so fast—it's not recomputing everything every token.
 
-This optimization turns O(n²) generation into O(n), enabling practical LLM deployment.
+At context length n, caching reduces attention work per new token from O(n²) to O(n).
+Total attention work across n generated tokens still grows as O(n²).
 """
 
 # %%
@@ -1965,7 +2000,7 @@ Congratulations! You've built the optimization that makes production language mo
 ### Systems Insights Discovered
 - **Recomputation Elimination**: Caching K/V eliminates O(n²) redundant work per token
 - **Memory-Speed Trade-off**: Cache memory grows with context length; it buys away the O(n²) recomputation
-- **Scaling Benefits**: Longer generation = better cache return on investment ((n+1)/2 in attention ops, ~50× at 100 tokens)
+- **Scaling Benefits**: Longer generation = better cache return on investment ((n+1)/2 in K,V projections, ~50× at 100 tokens)
 - **Production Critical**: This single optimization makes ChatGPT-scale inference possible
 - **Non-Invasive Design**: Add capabilities forward without breaking existing modules
 
@@ -1973,13 +2008,13 @@ Congratulations! You've built the optimization that makes production language mo
 
 Without KV caching:
 - Every new token recomputes attention over the whole context, so per-token cost grows with n
-- Total attention work for n tokens: n(n+1)/2
+- Total attention score work for n tokens: sum of t² over t=1..n, or O(n³)
 - User experience: responses slow down as the conversation gets longer
 
 With KV caching:
 - Each new token computes its own K, V once and reads the rest from the cache
-- Total attention work: n (the measured speedup is in the table above)
-- User experience: steady, real-time interaction
+- Total attention score work: sum of t over t=1..n, or O(n²)
+- Per-token attention still reads a growing prefix; caching reduces its cost, not its growth
 
 This optimization is THE technique that transformed language models from research demonstrations into products serving millions of users daily.
 

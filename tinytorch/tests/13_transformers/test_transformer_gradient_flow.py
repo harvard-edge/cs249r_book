@@ -221,7 +221,7 @@ def test_attention_mask_gradient_flow():
         param.requires_grad = True
 
     # Create causal mask
-    mask = Tensor(-1e9 * np.triu(np.ones((seq_len, seq_len)), k=1))
+    mask = Tensor(np.tril(np.ones((seq_len, seq_len))))
 
     # Forward pass
     x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))

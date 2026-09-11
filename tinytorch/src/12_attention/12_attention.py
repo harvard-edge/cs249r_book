@@ -56,22 +56,6 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 - **Integration:** Works seamlessly with embeddings for complete sequence processing pipelines
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.attention
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-import math
-import time
-from typing import Optional, Tuple, List
-
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
-from tinytorch.core.activations import Softmax
-
-MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0 after softmax)
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -103,6 +87,22 @@ all operations             transformer models
 Students completing this module will have built the attention mechanism
 that powers GPT, BERT, and all modern transformer architectures.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.attention
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+import math
+import time
+from typing import Optional, Tuple, List
+
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+from tinytorch.core.activations import Softmax
+
+MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0 after softmax)
 
 # %% [markdown]
 """
@@ -451,6 +451,10 @@ def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
     HINT: mask=0 means "block this position", mask=1 means "allow"
     """
     ### BEGIN SOLUTION
+    if np.any((mask.data != 0) & (mask.data != 1)):
+        raise ValueError("Attention mask must contain only 0 (blocked) or 1 (allowed)")
+    if np.any(np.sum(mask.data, axis=-1) == 0):
+        raise ValueError("Each query must have at least one allowed key")
     adder = (Tensor(np.ones_like(mask.data)) - mask) * MASK_VALUE
     return scores + adder
     ### END SOLUTION
@@ -526,7 +530,8 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
     APPROACH:
     1. Call _compute_attention_scores(Q, K) for raw similarity
     2. Call _scale_scores(scores, Q.shape[-1]) for numerical stability
-    3. If mask provided, call _apply_mask(scores, mask)
+    3. If mask provided, call _apply_mask(scores, mask); use binary entries
+       and at least one allowed key per query
     4. Apply Softmax to get probability weights
     5. Multiply weights @ V for attended values
 
@@ -741,12 +746,16 @@ class MultiHeadAttention:
         - Each projection maps embed_dim → embed_dim
         """
         ### BEGIN SOLUTION
+        if not isinstance(embed_dim, (int, np.integer)) or embed_dim <= 0:
+            raise ValueError("embed_dim must be a positive integer")
+        if not isinstance(num_heads, (int, np.integer)) or num_heads <= 0:
+            raise ValueError("num_heads must be a positive integer")
         if embed_dim % num_heads != 0:
             raise ValueError(
                 f"Multi-head attention dimension mismatch\n"
                 f"  ❌ embed_dim={embed_dim} is not divisible by num_heads={num_heads} (remainder={embed_dim % num_heads})\n"
                 f"  💡 Multi-head attention splits embed_dim equally among heads, so embed_dim must be a multiple of num_heads\n"
-                f"  🔧 Try: embed_dim={num_heads * (embed_dim // num_heads + 1)} (next valid size) or num_heads={embed_dim // (embed_dim // num_heads)} (fewer heads)"
+                f"  🔧 Try: embed_dim={num_heads * (embed_dim // num_heads + 1)} (next valid size) or num_heads=1"
             )
 
         self.embed_dim = embed_dim

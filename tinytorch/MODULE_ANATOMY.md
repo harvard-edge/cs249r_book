@@ -289,11 +289,19 @@ are not relitigated one module at a time.
   (Module 07). A subclass would be shorter and worse to teach; the book records
   the same choice.
 
+- **Dependencies before imports.** The 2026-09-11 source audit found that heading
+  checks could pass while setup code still ran before its dependency explanation.
+  A separate release gate now enforces the imports cell position. Stable grading
+  identifiers are retained, including historical setup-cell names.
+- **Missing code is a failure.** Progressive tests must fail when a required
+  implementation is missing or has the wrong API; an exception handler cannot
+  replace that failure with `assert True`. A release gate checks this pattern.
+
 ## 10. Checking a module
 
 ```bash
 python3 -m tito.main dev export --all         # regenerate reference notebooks and exports
-python3 tools/release_check.py --fast          # 31 gates, under a minute
+python3 tools/release_check.py --fast          # 33 gates (two slow gates omitted)
 python3 tests/validate_nbgrader_config.py      # expect Passed: 20, Failed: 0
 python3 narrative_book/tools/listings.py --check
 python3 tools/release_check.py                 # adds the notebook run and full pytest

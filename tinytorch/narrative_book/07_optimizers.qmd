@@ -2,7 +2,7 @@
 
 After Chapter 6, one call to `loss.backward()` leaves every parameter holding its gradient in `.grad`. That gradient says which way the loss rises fastest at the current weights, and nothing more. The question this chapter answers is the one a practitioner asks right after that call: given the gradient, how far should each weight move, and should every weight move by the same rule?
 
-The obvious answer, subtract a small multiple of the gradient, is where all of deep learning starts, and it is also where most training runs go wrong. A step that is safe for the steep directions of the loss is far too small for the flat ones. We fix that twice over. Momentum lets gradients that keep pointing the same way build up speed. Adam gives every parameter its own step size. Then we repair a bug in how Adam handles weight decay, which is the entire difference between `Adam` and `AdamW` in every framework you will use.
+The obvious answer, subtract a small multiple of the gradient, is where all of deep learning starts, and it is also where most training runs go wrong. A step that is safe for the steep directions of the loss is far too small for the flat ones. We fix that twice over. Momentum lets gradients that keep pointing the same way build up speed. Adam gives every parameter its own step size. AdamW separates weight shrinkage from this adaptive scaling. Comparing the two update paths reveals why the same `weight_decay` value can mean different things under Adam and AdamW.
 
 ![Three optimizers on the same ravine-shaped loss. Plain gradient descent zigzags across the steep walls, momentum damps the zigzag and speeds up along the floor, and AdamW scales each direction separately.](assets/images/diagrams/07_optimizers-diag-1.svg){#fig-optimizers-landscape}
 
@@ -80,15 +80,15 @@ with $\epsilon$ a tiny constant, $10^{-8}$ by default, that prevents division by
 
 The thing to see in that formula is the ratio. For a parameter whose gradient is steady, $\hat{m} \approx g$ and $\sqrt{\hat{v}} \approx |g|$, so the ratio is about $\pm 1$ and the parameter moves by about $\eta$ per step regardless of how large its gradient is. On the ravine, $x$ and $y$ move at the same speed even though their gradients differ by a factor of 100. Steep walls and flat floor get equal treatment. The price is two extra numbers per parameter, $m$ and $v$, kept alive between steps.
 
-### Weight decay, and the bug Adam had
+### Weight decay and adaptive scaling
 
-**Weight decay** is the most common regularizer in deep learning. After each step, shrink every weight slightly toward zero,
+**Weight decay** is the most common regularizer in deep learning. During each update, shrink the old weight slightly toward zero,
 
 $$\theta \leftarrow (1 - \eta\lambda)\, \theta,$$
 
 so a weight stays large only if the gradient keeps pushing it there. The rate $\lambda$ is small, $0.01$ by default. For plain gradient descent this shrink is identical to adding $\lambda\theta$ to the gradient, because $\eta(g + \lambda\theta) = \eta g + \eta\lambda\theta$. The added term is the gradient of $\tfrac{\lambda}{2}\|\theta\|^2$, so this form is called an **L2 penalty**, and since the two were the same for SGD, frameworks implemented the L2 form.
 
-Under Adam they are not the same. The added $\lambda\theta$ passes through the division by $\sqrt{\hat{v}}$ along with everything else. A parameter with large gradients has a large $\hat{v}$, and its decay is divided away. A parameter with small gradients has its decay amplified. The regularizer ends up weakest exactly where the weights are most active. Loshchilov and Hutter pointed this out in 2017 and proposed the fix that is now standard. Keep the L2 term out of $m$ and $v$ entirely, and apply the shrink to $\theta$ directly after the adaptive step:
+Under Adam they are not the same. The added $\lambda\theta$ passes through the division by $\sqrt{\hat{v}}$ along with everything else. A parameter with large gradients has a large $\hat{v}$, and its decay is divided away. A parameter with small gradients has its decay amplified. The regularizer ends up weakest exactly where the weights are most active. Loshchilov and Hutter pointed this out in 2017 and proposed the fix that is now standard. Keep the L2 term out of $m$ and $v$ entirely, and apply the shrink to $\theta$ before subtracting the adaptive update:
 
 $$\theta \leftarrow (1 - \eta\lambda)\, \theta - \eta\, \frac{\hat{m}}{\sqrt{\hat{v}} + \epsilon}.$$
 
@@ -106,13 +106,36 @@ The listings in this section are extracted from Module 07 (`src/07_optimizers/07
 
 Every training loop in the rest of this book, and every one you will write in PyTorch, makes the same three calls per batch, `zero_grad()`, then `backward()`, then `step()`. The loop does not know which update rule is inside `step()`, and swapping SGD for AdamW should be a one-line change. That is what the base class is for. It owns the parameter list and the two calls, and leaves the rule to each subclass.
 
-The clearing call deserves more thought than it looks. Chapter 6's `backward()` accumulates into `.grad` by design, `x.grad += contribution`, so if nothing clears it, the second batch's gradient lands on top of the first and the step is silently wrong. The obvious fix is to write zeros into every gradient, and that works, but it touches every parameter once to zero it and once more when `backward()` adds to it. For a 7-billion-parameter model that is 28 GB of writes per step carrying no information. The trick is to set the gradient to `None`. `backward()` copies the incoming gradient when `grad` is `None` and adds to it otherwise, so the first write of the next batch is the initialization, and clearing costs nothing.
+Clearing must remove the previous objective's gradient without removing the optimizer's history. Chapter 6's `backward()` accumulates into `.grad` by design, `x.grad += contribution`, so if nothing clears it, the second batch's gradient lands on top of the first and the step is silently wrong. The obvious fix is to write zeros into every gradient, and that works, but it touches every parameter once to zero it and once more when `backward()` adds to it. For a 7-billion-parameter model that is 28 GB of writes per step carrying no information. The trick is to set the gradient to `None`. `backward()` copies the incoming gradient when `grad` is `None` and adds to it otherwise, so clearing drops a reference instead of filling the gradient array. TinyTorch still allocates a zero buffer when backward first reaches that parameter, then adds the contribution; the saving here is the clearing pass, not every initialization write.
 
 The constructor takes the parameters to manage and marks them as needing gradients, which is the moment a layer's weights become trainable; Chapter 3 left them unflagged on purpose. `zero_grad()` clears the gradients. `step()` is left for each subclass to define.
 
 {{< include _listings/07_optimizers/Optimizer.qmd >}}
 
-Notice the `step_count` field. Nothing in `SGD` needs it, but AdamW's bias correction has to know how many steps have been taken, and the count belongs with the parameters it describes. One helper is attached to the base class from its own cell. Chapter 6's `backward()` leaves `grad` as a bare array, but a gradient can also be assigned by hand as a `Tensor`, as the worked trace does, so every optimizer reads gradients through a helper that accepts either.
+Construction must happen before the forward pass that will be differentiated. `Optimizer.__init__` stores references to the original parameter tensors and sets their `requires_grad` flags. `Function.apply` reads those flags while each operation executes; setting them after the loss has already been computed cannot reconstruct missing records. The optimizer does not discover parameters by traversing the graph, either. A weight omitted from `parameters()` will not be updated, even if a separate path computed its gradient.
+
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.optimizers import SGD
+import tinytorch.core.autograd
+
+w = Tensor([1.0])
+old_loss = (w * w).sum()             # no input requests recording yet
+opt = SGD([w], lr=0.1)              # marks this same w as trainable
+old_loss.backward()
+print(w.grad)                       # None: the old forward recorded no graph
+
+opt.zero_grad()
+loss = (w * w).sum()                # recompute after enabling recording
+loss.backward()
+print(w.grad)                       # [2.]
+opt.step()
+print(w.data)                       # [0.8]
+```
+
+The final assignment inside `step()` changes the array on `w`, while the model and optimizer still refer to the same `Tensor` object. Constructing a new parameter tensor and leaving the optimizer's list unchanged would break that connection. Parameter identity, gradient lifetime, and optimizer state together determine whether the next forward pass observes the update.
+
+The optimizer keeps a global `step_count` for calls to `step()`, while Adam and AdamW keep `update_counts` beside their moment buffers. Each parameter ages only when it has a gradient and its moments are updated. A parameter skipped with `grad=None` therefore uses the right bias correction when it next participates. These counters survive gradient clearing along with the moments. One helper is attached to the base class from its own cell. Chapter 6 leaves gradients as arrays, while manually assigned gradients may be tensors, so the helper accepts either representation.
 
 {{< include _listings/07_optimizers/extract_gradient.qmd >}}
 
@@ -136,7 +159,7 @@ AdamW is the optimizer under nearly every transformer and language model trained
 
 So let each parameter measure its own gradient scale and divide by it. Two running averages per parameter, $m$ for the direction and $v$ for the square, and the step is $\eta$ times their ratio, which is about $\pm 1$ for a steady gradient. Every parameter then moves by about $\eta$ per step whatever its gradient's size. On the ravine that means $x$ and $y$ move at the same speed. At $\eta = 0.1$, five times the ceiling plain descent had and well past momentum's, both are at $0.003$ after 100 steps on my machine. The price is two arrays per parameter instead of momentum's one.
 
-Weight decay needs the same care. Fold $\lambda\theta$ into the gradient as `SGD` does and it goes through the division by $\sqrt{\hat{v}}$ along with everything else, so the decay is diluted exactly where gradients are busy. The answer is to keep the decay out of the moments entirely and apply it as a separate multiply on the weights after the adaptive step. That is the whole of the W. The class keeps two buffers per parameter, and its two methods, written in their own cells and attached to the class, split the moment bookkeeping from the update so that `step()` reads as the three lines of the rule.
+Weight decay needs the same care. Fold $\lambda\theta$ into the gradient as `SGD` does and it goes through the division by $\sqrt{\hat{v}}$ along with everything else, so the decay is diluted exactly where gradients are busy. The answer is to keep the decay out of the moments entirely and apply it as a separate multiply on the old weights before the adaptive step. That is the whole of the W. The class keeps two buffers per parameter, and its two methods, written in their own cells and attached to the class, split the moment bookkeeping from the update so that `step()` reads as the three lines of the rule.
 
 {{< include _listings/07_optimizers/AdamW_init.qmd >}}
 
@@ -144,11 +167,11 @@ Weight decay needs the same care. Fold $\lambda\theta$ into the gradient as `SGD
 
 {{< include _listings/07_optimizers/AdamW_step.qmd >}}
 
-Three details of `step()` are deliberate. `step_count` is incremented before the loop, not after it as in `SGD`, because the bias correction divides by $1 - \beta^t$ and at $t = 0$ that is a division by zero. The gradient handed to `_update_moments` is the raw gradient, with no weight decay mixed in, so $m$ and $v$ never see the L2 term. The decay is a separate multiply on `param.data` after the adaptive step, exactly the decoupled formula. The bias-corrected values are computed fresh each step and discarded; only the raw `m_buffers` and `v_buffers` are stored, which PyTorch calls `exp_avg` and `exp_avg_sq`.
+Three details of `step()` are deliberate. The per-parameter update count advances before bias correction, which divides by $1 - \beta^t$ and would divide by zero at $t = 0$. The gradient handed to `_update_moments` is the raw gradient, with no weight decay mixed in, so $m$ and $v$ never see the L2 term. The decay is a separate multiply on `param.data` before the adaptive step, exactly the decoupled formula. The bias-corrected values are computed fresh each step and discarded; only the raw `m_buffers` and `v_buffers` are stored, which PyTorch calls `exp_avg` and `exp_avg_sq`.
 
 ### The original Adam, for contrast
 
-The original Adam is still in every framework as `torch.optim.Adam`, and plenty of training configs still hand it a nonzero `weight_decay`. You need to be able to see the difference in code, because it is two lines, and because the size of the bug is not obvious from the formula. Check it on one weight whose gradients have been large.
+The original Adam is still in every framework as `torch.optim.Adam`, and plenty of training configs still hand it a nonzero `weight_decay`. You need to be able to see the difference in code, because it is two lines, and because the effect of coupling depends on the accumulated moments. Check it on one weight whose gradients have been large.
 
 ```python
 import math
@@ -165,11 +188,11 @@ print(f"shrinkage from decay, Adam+L2: {decay_adam:.6f}")
 print(f"shrinkage from decay, AdamW:   {decay_adamw:.6f}")
 ```
 
-Adam with L2 shrinks the weight by $0.00001$; AdamW shrinks it by $0.0001$. The factor of ten between them is exactly $\sqrt{\hat{v}}$. Set $\hat{v}$ to $10{,}000$ and the gap becomes a factor of a hundred. Here is Module 07's `Adam.step`, the method that does it. It folds the decay into the gradient before the moments, and it has no separate shrink step.
+Holding the normalization fixed in this arithmetic example gives a decay contribution of $0.00001$ through the normalized path and $0.0001$ through direct shrinkage. This is an illustration of the scaling, not a simulation of an Adam step. In the actual coupled update the decay term also changes both running moments, so its cumulative effect cannot be isolated by this division alone. Here is Module 07's `Adam.step`, the method that does it. It folds the decay into the gradient before the moments, and it has no separate shrink step.
 
 {{< include _listings/07_optimizers/Adam_step.qmd >}}
 
-With `weight_decay=0.0` the two optimizers are identical, and their `_update_moments` methods are the same code. With any nonzero decay, `Adam` feeds $\lambda\theta$ into $v$, and the dilution above follows. Module 07 keeps `Adam` and `AdamW` as two separate classes with the moment code repeated rather than a subclass pair, so that a student building either one sees the whole rule in one place.
+With `weight_decay=0.0` the two optimizers are identical, and their `_update_moments` methods are the same code. With nonzero decay, `Adam` feeds $\lambda\theta$ into both moment updates, whereas `AdamW` keeps the moment estimates independent of decay. Module 07 keeps `Adam` and `AdamW` as two separate classes with the moment code repeated rather than a subclass pair, so that a student building either one sees the whole rule in one place.
 
 ---
 
@@ -207,7 +230,7 @@ The trace makes two points. The raw moments start tiny, $m_1 = 0.05$ against a g
 
 ## From TinyTorch to Production
 
-PyTorch's `torch.optim.AdamW` keeps exactly the state this chapter keeps: for every parameter, a running mean (`exp_avg`), a running mean of squares (`exp_avg_sq`), and a step count. The default hyperparameters match too, $\eta = 10^{-3}$, $\beta = (0.9, 0.999)$, $\epsilon = 10^{-8}$, $\lambda = 0.01$. `torch.optim.SGD` uses the same momentum recurrence as our `SGD`, $v \leftarrow \beta v + g$, rather than the textbook variant that scales $g$ by $1 - \beta$. And `torch.optim.Adam` with a nonzero `weight_decay` is our `Adam` class, the coupled L2 form; the bug this chapter fixed is still available under the original name, which is why the choice between the two matters in every training config. Since PyTorch 2.0, `optimizer.zero_grad()` sets gradients to `None` by default, for the same reasons our version does.
+PyTorch's `torch.optim.AdamW` keeps exactly the state this chapter keeps: for every parameter, a running mean (`exp_avg`), a running mean of squares (`exp_avg_sq`), and a step count. The default hyperparameters match too, $\eta = 10^{-3}$, $\beta = (0.9, 0.999)$, $\epsilon = 10^{-8}$, $\lambda = 0.01$. `torch.optim.SGD` uses the same momentum recurrence as our `SGD`, $v \leftarrow \beta v + g$, rather than the textbook variant that scales $g$ by $1 - \beta$. And `torch.optim.Adam` with a nonzero `weight_decay` is our `Adam` class, the coupled L2 form; the coupled alternative remains available under the original name, which is why the choice between the two matters in every training config. Since PyTorch 2.0, `optimizer.zero_grad()` sets gradients to `None` by default, for the same reasons our version does.
 
 What forces production to differ is not the math but the memory the math needs. Per parameter, AdamW holds the weight, its gradient, $m$, and $v$. In 32-bit floats that is 16 bytes per parameter, all of it resident in accelerator memory before a single activation is stored. Mixed-precision training[^fn-mixed-precision-optimizer-state] does not reduce this. The weights and gradients drop to 2 bytes each, but a 4-byte master copy of the weights must be kept for the update to accumulate correctly, and $m$ and $v$ stay at 4 bytes, so the total is still 16 bytes. Optimizer state, not the model, is often what decides whether a training run fits on one device. ZeRO[^fn-zero-optimizer-sharding] and similar schemes exist to split $m$ and $v$ across many devices for exactly this reason.
 
@@ -221,7 +244,7 @@ What carries over unchanged is everything the reader has to reason about. The st
 
 | | TinyTorch listing | PyTorch |
 | :--- | :--- | :--- |
-| State per parameter | `m_buffers`, `v_buffers`, one `step_count` | `exp_avg`, `exp_avg_sq`, per-parameter `step` |
+| State per parameter | `m_buffers`, `v_buffers`, per-parameter `update_counts` | `exp_avg`, `exp_avg_sq`, per-parameter `step` |
 | Storage | NumPy arrays in host memory | tensors in accelerator memory |
 | Update loop | one NumPy pass per line of the rule | per tensor, or one fused kernel |
 | Coupled vs. decoupled decay | `Adam` vs. `AdamW` classes | `torch.optim.Adam` vs. `torch.optim.AdamW` |

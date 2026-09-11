@@ -43,7 +43,7 @@ class TestModule01StillWorking:
             assert t2.shape == (2, 2), "Module 01: Numpy integration broken"
 
         except ImportError:
-            assert True, "Module 01: Tensor not implemented yet"
+            raise
 
 
 class TestModule02ActivationsCore:
@@ -63,7 +63,7 @@ class TestModule02ActivationsCore:
             assert np.array_equal(output.data, expected), "ReLU activation failed"
 
         except ImportError:
-            assert True, "Module 02: Activations not implemented yet"
+            raise
 
     def test_sigmoid_activation(self):
         """Test Sigmoid activation function."""
@@ -82,7 +82,7 @@ class TestModule02ActivationsCore:
             assert np.all(output.data > 0) and np.all(output.data < 1), "Sigmoid range failed"
 
         except ImportError:
-            assert True, "Module 02: Sigmoid not implemented yet"
+            raise
 
 
 class TestProgressiveStackIntegration:
@@ -110,7 +110,7 @@ class TestProgressiveStackIntegration:
             assert np.all(output.data >= 0) and np.all(output.data <= 1), "Pipeline output invalid"
 
         except ImportError:
-            assert True, "Progressive stack not fully implemented yet"
+            raise
 
     def test_activation_chaining(self):
         """Test multiple activations can be chained."""
@@ -132,7 +132,7 @@ class TestProgressiveStackIntegration:
             assert output.shape == x.shape, "Activation chaining broken"
 
         except ImportError:
-            assert True, "Activation chaining not implemented yet"
+            raise
 
 
 class TestNonLinearityCapability:
@@ -163,7 +163,7 @@ class TestNonLinearityCapability:
             assert np.all(nonlinear_output >= 0), "ReLU non-linearity not working"
 
         except ImportError:
-            assert True, "Nonlinearity testing not ready yet"
+            raise
 
 
 class TestXORProblemReadiness:
@@ -191,7 +191,7 @@ class TestXORProblemReadiness:
             assert output.shape == X.shape, "XOR components not ready"
 
         except ImportError:
-            assert True, "XOR components not implemented yet"
+            raise
 
     def test_activation_expressiveness(self):
         """Test activations provide sufficient expressiveness."""
@@ -219,7 +219,7 @@ class TestXORProblemReadiness:
                 assert y.shape == x.shape, "Pattern transformation failed"
 
         except ImportError:
-            assert True, "Activation expressiveness testing not ready"
+            raise
 
 
 class TestRegressionPrevention:
@@ -243,11 +243,7 @@ class TestRegressionPrevention:
             assert t.shape == (3,), "Module 01: Basic tensor broken"
 
         except ImportError:
-            # If not implemented, that's fine
-            # But numpy should still work
-            import numpy as np
-            arr = np.array([1, 2, 3])
-            assert arr.shape == (3,), "Module 01: Numpy foundation broken"
+            raise
 
     def test_progressive_stability(self):
         """Test the progressive stack is stable."""
@@ -263,7 +259,7 @@ class TestRegressionPrevention:
             t = Tensor([1])
             assert t.shape == (1,), "Tensor level broken"
         except ImportError:
-            pass  # Not implemented yet
+            raise
 
         # Activation level (if available)
         try:
@@ -271,4 +267,4 @@ class TestRegressionPrevention:
             relu = ReLU()
             assert callable(relu), "Activation level broken"
         except ImportError:
-            pass  # Not implemented yet
+            raise

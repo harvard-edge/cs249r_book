@@ -58,23 +58,6 @@ from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
 - **Integration:** Works seamlessly with training loops to create complete ML systems
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
-#| default_exp core.dataloader
-#| export
-
-# Essential imports for data loading
-import random
-import sys
-import time
-from abc import ABC, abstractmethod
-from typing import Iterator, List, Tuple
-
-import numpy as np
-rng = np.random.default_rng(7)
-
-# Import real Tensor class from tinytorch package
-from tinytorch.core.tensor import Tensor
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -100,6 +83,23 @@ Module 01 (Tensor) → Module 05 (DataLoader)
 Students completing this module will have built the data loading
 infrastructure that powers all training in TinyTorch.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.dataloader
+#| export
+
+# Essential imports for data loading
+import random
+import sys
+import time
+from abc import ABC, abstractmethod
+from typing import Iterator, List, Tuple
+
+import numpy as np
+rng = np.random.default_rng(7)
+
+# Import real Tensor class from tinytorch package
+from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
@@ -128,9 +128,12 @@ Raw Data Storage          Dataset Interface         DataLoader Batching         
 
 **Batch Processing (DataLoader)**: GPUs are parallel machines - they're much faster processing 32 images simultaneously than 1 image 32 times.
 
-**Memory Efficiency**: Loading all 50,000 images into memory would require ~150GB. Instead, we load only the current batch (~150MB).
+**Memory Efficiency**: A file-backed Dataset can read samples on demand. Our
+TensorDataset instead holds all source tensors in memory; DataLoader adds one
+batch at a time. Sample extraction and collation copy values, so batching does
+not make the source dataset disappear or provide zero-copy access.
 
-**Training Variety**: Shuffling ensures the model sees different combinations each epoch, preventing memorization.
+**Training Variety**: Shuffling changes sample order and batch composition each epoch. It reduces order effects but does not by itself prevent overfitting.
 
 """
 
@@ -625,6 +628,8 @@ class DataLoader:
             shuffle: Whether to shuffle data each epoch
         """
         ### BEGIN SOLUTION
+        if isinstance(batch_size, bool) or not isinstance(batch_size, (int, np.integer)) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -1429,6 +1434,13 @@ def test_unit_dataloader():
 
     assert shuffle_features == expected_features, "Shuffle should preserve all data"
     assert no_shuffle_features == expected_features, "No shuffle should preserve all data"
+
+    for invalid_size in (0, -1, 1.5, True):
+        try:
+            DataLoader(dataset, batch_size=invalid_size)
+            assert False, "Invalid batch size must fail at construction"
+        except ValueError:
+            pass
 
     print("✅ DataLoader works correctly!")
 
