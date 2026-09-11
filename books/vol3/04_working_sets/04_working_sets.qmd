@@ -59,15 +59,9 @@ $$ {#eq-autoregressive-prefill-flops}
 
 In @eq-autoregressive-prefill-flops, the first term scales linearly with sequence length $N$ and represents the projection matrices ($\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V, \mathbf{W}_O$) and the two-layer feed-forward block ($\mathbf{W}_1, \mathbf{W}_2, \mathbf{W}_3$). The second term, $4 L N^2 d_{\text{model}}$, scales quadratically with $N$ and represents the pairwise attention score computation.
 
-For short sequences ($N \le 2{,}048$), the linear term dominates. However, as agent trajectories accumulate multi-turn tool outputs and reach long contexts ($N \ge 65{,}536$), the quadratic term overtakes the linear projections. While memory-efficient attention algorithms such as FlashAttention-2 (@dao2023flashattention2) eliminate the materialization of the $N \times N$ attention matrix in HBM by tiling the computation across on-chip SRAM, they do not reduce the underlying arithmetic operation count. The physical execution time of prefill remains fundamentally quadratic in $N$:
+For short sequences ($N \le 2{,}048$), the linear term dominates. However, as agent trajectories accumulate multi-turn tool outputs and reach long contexts ($N \ge 65{,}536$), the quadratic term overtakes the linear projections. While memory-efficient attention algorithms such as FlashAttention-2 (@dao2023flashattention2) eliminate the materialization of the $N \times N$ attention matrix in HBM by tiling the computation across on-chip SRAM, they do not reduce the underlying arithmetic operation count. The physical execution time of prefill remains fundamentally quadratic in $N$: $T_{\text{prefill}}(N) \approx F_{\text{prefill}}(N) / (P_{\text{peak}} \cdot \eta_{\text{compute}})$, where $P_{\text{peak}}$ is the peak dense tensor throughput of the accelerator (e.g., $989 \times 10^{12}\text{ FLOPs/s}$ in 16-bit precision for an NVIDIA H100 SXM5) and $\eta_{\text{compute}} \in [0.45, 0.65]$ is the realized hardware compute efficiency.[^fn-workingsets-prefill-flops] For an agent ingesting a 128k-token trajectory on a 70B model ($L = 80, d_{\text{model}} = 8{,}192, d_{\text{ff}} = 28{,}672$), @eq-autoregressive-prefill-flops evaluates to approximately $1.15 \times 10^{17}$ FLOPs. At 50 percent realized efficiency, prefill alone requires 38.8 seconds of sustained GPU compute before the agent can emit its first reasoning token.
 
-$$
-T_{\text{prefill}}(N) \approx \frac{F_{\text{prefill}}(N)}{P_{\text{peak}} \cdot \eta_{\text{compute}}},
-$$
-
-where $P_{\text{peak}}$ is the peak dense tensor throughput of the accelerator (e.g., $989 \times 10^{12}$ FLOPs/s in 16-bit precision for an NVIDIA H100 SXM5) and $\eta_{\text{compute}} \in [0.45, 0.65]$ is the realized hardware compute efficiency. For an agent ingesting a 128k-token trajectory on a 70B model ($L = 80, d_{\text{model}} = 8{,}192, d_{\text{ff}} = 28{,}672$), @eq-autoregressive-prefill-flops evaluates to approximately $1.15 \times 10^{17}$ FLOPs. At 50 percent realized efficiency, prefill alone requires 38.8 seconds of sustained GPU compute before the agent can emit its first reasoning token.
-
-@Tbl-vol3-workingsets-regimes contrasts the execution physics between prompt prefill and autoregressive token decode.
+@tbl-vol3-workingsets-regimes contrasts the execution physics between prompt prefill and autoregressive token decode.
 
 | Operational Dimension           | Prefill Regime (Prompt Ingestion)                           | Decode Regime (Token Generation)                              |
 |:--------------------------------|:------------------------------------------------------------|:--------------------------------------------------------------|
@@ -90,63 +84,39 @@ $$ {#eq-kv-cache-footprint}
 
 where $b_{\text{elem}}$ is the byte width per element ($b_{\text{elem}} = 2$ for FP16/BF16, $b_{\text{elem}} = 1$ for FP8).
 
-Consider a representative frontier agent policy: Llama-3-70B, which uses Grouped-Query Attention (GQA, @ainslie2023gqa) with $L = 80$, $H_Q = 64$, $H_{\text{KV}} = 8$, $d_h = 128$, and BF16 precision ($b_{\text{elem}} = 2$). Evaluating @eq-kv-cache-footprint yields:
+Consider a representative frontier agent policy: Llama-3-70B, which uses Grouped-Query Attention (GQA, @ainslie2023gqa) with $L = 80$, $H_Q = 64$, $H_{\text{KV}} = 8$, $d_h = 128$, and BF16 precision ($b_{\text{elem}} = 2$). Evaluating @eq-kv-cache-footprint yields a per-token cache footprint of $M_{\text{KV, token}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 2 = 327{,}680\text{ bytes} \approx 320\text{ KB/token}$. At a context length of $N = 131{,}072$ tokens (128k), resident KV cache alone consumes $M_{\text{KV}}(131{,}072) = 131{,}072 \times 320\text{ KB} \approx 42.95\text{ GB}$.
 
-$$
-M_{\text{KV, token}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ bytes} \approx 320\text{KB/token}.
-$$
+Because the model weights in 16-bit precision occupy approximately 140 GB, serving this model requires at least two 80 GB GPUs (160 GB total HBM). A single 128k agent stream consumes over 53 percent of the remaining free memory across both GPUs. If four concurrent agent tasks are executed in parallel across the node, aggregate KV cache demand reaches $171.8\text{ GB}$, exceeding physical accelerator capacity and triggering catastrophic out-of-memory aborts (@kwon2023vllm).
 
-At a context length of $N = 131{,}072$ tokens (128k), the KV cache consumes:
+[^fn-workingsets-prefill-flops]: In standard transformer blocks, linear projections require $8 L N d_{\text{model}}^2$ FLOPs for attention ($\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V, \mathbf{W}_O$) and $4 L N d_{\text{model}} d_{\text{ff}}$ FLOPs for SwiGLU FFN layers, while causal attention contributes $4 L N^2 d_{\text{model}}$ FLOPs.
 
-$$
-M_{\text{KV}}(131{,}072) = 131{,}072 \times 327{,}680\text{ bytes} \approx 42.95\text{ GB}.
-$$
-
-Because the model weights in 16-bit precision occupy approximately 140 GB, serving this model requires at least two 80 GB GPUs (160 GB total HBM). A single 128k agent stream consumes over 53 percent of the remaining free memory across both GPUs. If four concurrent agent tasks are executed in parallel across the node, aggregate KV cache demand reaches $171.8\text{ GB}$, exceeding the physical capacity of the accelerators and triggering catastrophic out-of-memory aborts (@kwon2023vllm).
+> **The Systems Rule of Thumb (The Quadratic TTFT Wall):** Because prefill execution scales quadratically with sequence length ($F_{\text{prefill}} \propto N^2$) while decode capacity scales linearly ($M_{\text{KV}} \propto N$), unconstrained trajectory accumulation triggers severe Time-to-First-Token explosions (exceeding 38 seconds for 128k tokens on 70B models). Serving runtimes must enforce active context budgeting or radix prefix caching to prevent extended agent trajectories from stalling cluster compute.
 
 ### The decode memory-bandwidth wall
 
 Beyond physical capacity exhaustion, linear KV cache expansion degrades decoding throughput by saturating the accelerator memory bus (@pope2023efficiently). In the autoregressive decode phase, the query sequence length is exactly 1 ($Q \in \mathbb{R}^{1 \times d_{\text{model}}}$). The attention sublayer performs a matrix-vector product between the single query vector and the accumulated Key and Value tensors.
 
-Generating a single token requires reading the entire model weight tensor $\mathbf{W}$ and the entire resident KV cache tensor $\mathcal{K}, \mathcal{V}$ from accelerator HBM into on-chip SRAM registers:
+Generating a single token requires streaming the entire model weight tensor $M_{\text{weights}}$ and the entire resident KV cache $M_{\text{KV}}(N)$ from accelerator HBM into on-chip SRAM registers. The arithmetic intensity $\mathcal{I}_{\text{decode}}$ of this operation—defined as the ratio of floating-point operations executed to bytes transferred across the memory bus—is governed by @eq-decode-arithmetic-intensity:
 
 $$
-B_{\text{decode}}(N) = M_{\text{weights}} + M_{\text{KV}}(N).
-$$
-
-The computation performed during this decode step consists of matrix-vector multiplications across all layers:
-
-$$
-F_{\text{decode}}(N) \approx 2 P + 4 L H_Q d_h N,
-$$
-
-where $P$ is the total active parameter count of the model ($P \approx 70 \times 10^9$). The arithmetic intensity $\mathcal{I}_{\text{decode}}$ of this operation—defined as the ratio of floating-point operations executed to bytes transferred across the memory bus—is:
-
-$$
-\mathcal{I}_{\text{decode}}(N) = \frac{F_{\text{decode}}(N)}{B_{\text{decode}}(N)} = \frac{2 P + 4 L H_Q d_h N}{M_{\text{weights}} + 2 L H_{\text{KV}} d_h N b_{\text{elem}}}.
+\mathcal{I}_{\text{decode}}(N) = \frac{F_{\text{decode}}(N)}{B_{\text{decode}}(N)}
 $$ {#eq-decode-arithmetic-intensity}
 
-For a batch size of 1, because $P \gg 2 L H_Q d_h N$ for all practical context lengths ($N \le 10^6$), @eq-decode-arithmetic-intensity collapses to:
-
-$$
-\mathcal{I}_{\text{decode}} \approx \frac{2 P}{P \cdot b_{\text{elem}} + M_{\text{KV}}(N)} \approx \frac{2}{b_{\text{elem}}} \approx 1\text{ FLOP/Byte}.
-$$
+where $F_{\text{decode}}(N)$ is the per-step decode FLOPs and $B_{\text{decode}}(N)$ is the total bytes transferred across the memory bus.[^fn-workingsets-decode-intensity] For a batch size of 1 with 16-bit weights ($b_{\text{elem}} = 2$), because parameter weights dominate computation ($P \gg 2 L H_Q d_h N$), @eq-decode-arithmetic-intensity collapses to $\mathcal{I}_{\text{decode}} \approx 2 / b_{\text{elem}} \approx 1\text{ FLOP/Byte}$.
 
 On an NVIDIA H100 SXM5 accelerator with a peak memory bandwidth of $B_{\text{mem}} = 3.35\text{ TB/s}$, the maximum sustainable floating-point throughput at an arithmetic intensity of $1\text{ FLOP/Byte}$ is exactly $3.35\text{ TFLOP/s}$—less than 0.35 percent of the accelerator's $989\text{ TFLOP/s}$ peak compute capability. Autoregressive decoding is unconditionally bound by memory bandwidth.
 
-The time required to generate a single token $T_{\text{decode}}$ as a function of sequence length $N$ is governed by the memory bus streaming latency:
+The time required to generate a single token $T_{\text{decode}}$ as a function of sequence length $N$ is governed by the memory bus streaming latency in @eq-decode-latency-bandwidth:
 
 $$
 T_{\text{decode}}(N) = \frac{M_{\text{weights}} + M_{\text{KV}}(N)}{B_{\text{mem}}}.
 $$ {#eq-decode-latency-bandwidth}
 
-As an agent trajectory accumulates tokens, $M_{\text{KV}}(N)$ expands monotonically. When $M_{\text{KV}}(N)$ approaches or exceeds $M_{\text{weights}}$, the time required to emit each individual token doubles, halving interactive token generation velocity:
+As an agent trajectory accumulates tokens, $M_{\text{KV}}(N)$ expands monotonically. When $M_{\text{KV}}(N)$ approaches $M_{\text{weights}}$, the time required to emit each individual token doubles, halving interactive token generation velocity ($\text{Throughput} = 1 / T_{\text{decode}}(N)$). In multi-tenant environments, every unpruned token in an agent's history directly steals memory bus cycles from all co-scheduled inference streams.
 
-$$
-\text{Throughput}(N) = \frac{1}{T_{\text{decode}}(N)} = \frac{B_{\text{mem}}}{M_{\text{weights}} + 2 L H_{\text{KV}} d_h N b_{\text{elem}}}.
-$$
+> **The Systems Rule of Thumb (The Single-Batch Memory Wall):** At batch size $B=1$, single-token generation latency is strictly memory-bus bound ($T_{\text{decode}} \approx (M_{\text{weights}} + M_{\text{KV}}) / B_{\text{mem}}$), leaving over 99.6 percent of GPU compute capability idle. As an agent's context expands past $M_{\text{KV}} \approx M_{\text{weights}}$, token generation velocity halves. Systems architects must batch concurrent agent rollouts or prune inactive history to amortize parameter streaming overhead.
 
-In multi-tenant or concurrent agent environments, this memory bandwidth wall creates severe performance degradation: every additional unpruned token in an agent's history directly steals memory bus cycles from all co-scheduled inference streams.
+[^fn-workingsets-decode-intensity]: Total decode FLOPs per step equal $F_{\text{decode}}(N) = 2 P + 4 L H_Q d_h N$. Total memory bytes streamed from HBM equal $B_{\text{decode}}(N) = M_{\text{weights}} + 2 L H_{\text{KV}} d_h N b_{\text{elem}}$. Substituting parameters yields $\mathcal{I}_{\text{decode}} \approx 2 P / (P \cdot b_{\text{elem}} + M_{\text{KV}}(N))$.
 
 ### Adapting Denning's working set model to token contexts
 
