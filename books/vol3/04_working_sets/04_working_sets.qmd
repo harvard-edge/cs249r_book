@@ -35,7 +35,7 @@ Modern foundation models boast nominal context windows reaching millions of toke
 
 In October 2023, an automated debugging agent deployed on an enterprise Kubernetes cluster was tasked with resolving a build regression in a distributed C++ database engine. On turn 4 of its investigation, the agent executed a verbose build command (`ninja -v -j32`), which encountered a template instantiation cascade that emitted 65,000 lines of compiler diagnostics directly into standard error. The agent's runtime harness naively appended the resulting 112,000 tokens of raw compiler logs directly into the prompt context buffer.
 
-On turn 5, when the runtime invoked the underlying 70-billion parameter neural policy to propose the next corrective edit, the inference server suffered a catastrophic operational fault. The Time-to-First-Token (TTFT) exploded from a normal baseline of 420 milliseconds to 38.4 seconds, during which all tensor cores on the dual-NVIDIA H100 GPU node ran at 100 percent duty cycle executing the prompt prefill phase. Immediately following the prefill phase, the server attempted to allocate the Key-Value (KV) cache for the expanded sequence, demanding 36.7 gigabytes of High-Bandwidth Memory (HBM3) for that single stream alone. The host runtime suffered an out-of-memory (OOM) panic, terminated the agent process, dropped all co-scheduled user sessions on the cluster, and left the production repository in an uncommitted, corrupted state.
+On turn 5, when the runtime invoked the underlying 70-billion parameter large language model (LLM) policy to propose the next corrective edit, the inference server suffered a catastrophic operational fault. The Time-to-First-Token (TTFT) exploded from a normal baseline of 420 milliseconds to 38.4 seconds, during which all tensor cores on the dual-NVIDIA H100 GPU node ran at 100 percent duty cycle executing the prompt prefill phase. Immediately following the prefill phase, the server attempted to allocate the Key-Value (KV) cache for the expanded sequence, demanding 36.7 gigabytes of High-Bandwidth Memory (HBM3) for that single stream alone. The host runtime suffered an out-of-memory (OOM) panic, terminated the agent process, dropped all co-scheduled user sessions on the cluster, and left the production repository in an uncommitted, corrupted state.
 
 The engineering post-mortem revealed that of the 112,000 compiler log tokens ingested, fewer than 180 tokens—specifically, the terminal file path, line number, and mismatch signature—contained any actionable diagnostic value. The remaining 99.8 percent of the tokens were computationally inert, yet they imposed a devastating hardware tax. To prevent such systems failures, systems architects must formalize the physical limits governing context expansion and decouple nominal context capacity from active memory residency.
 
@@ -61,7 +61,7 @@ In @eq-autoregressive-prefill-flops, the first term scales linearly with sequenc
 
 For short sequences ($N \le 2{,}048$), the linear term dominates. However, as agent trajectories accumulate multi-turn tool outputs and reach long contexts ($N \ge 65{,}536$), the quadratic term overtakes the linear projections. While memory-efficient attention algorithms such as FlashAttention-2 (@dao2023flashattention2) eliminate the materialization of the $N \times N$ attention matrix in HBM by tiling the computation across on-chip SRAM, they do not reduce the underlying arithmetic operation count. The physical execution time of prefill remains fundamentally quadratic in $N$: $T_{\text{prefill}}(N) \approx F_{\text{prefill}}(N) / (P_{\text{peak}} \cdot \eta_{\text{compute}})$, where $P_{\text{peak}}$ is the peak dense tensor throughput of the accelerator (e.g., $989 \times 10^{12}\text{ FLOPs/s}$ in 16-bit precision for an NVIDIA H100 SXM5) and $\eta_{\text{compute}} \in [0.45, 0.65]$ is the realized hardware compute efficiency.[^fn-workingsets-prefill-flops] For an agent ingesting a 128k-token trajectory on a 70B model ($L = 80, d_{\text{model}} = 8{,}192, d_{\text{ff}} = 28{,}672$), @eq-autoregressive-prefill-flops evaluates to approximately $1.15 \times 10^{17}$ FLOPs. At 50 percent realized efficiency, prefill alone requires 38.8 seconds of sustained GPU compute before the agent can emit its first reasoning token.
 
-@tbl-vol3-workingsets-regimes contrasts the execution physics between prompt prefill and autoregressive token decode.
+@Tbl-vol3-workingsets-regimes contrasts the execution physics between prompt prefill and autoregressive token decode.
 
 | Operational Dimension           | Prefill Regime (Prompt Ingestion)                           | Decode Regime (Token Generation)                              |
 |:--------------------------------|:------------------------------------------------------------|:--------------------------------------------------------------|
@@ -114,7 +114,7 @@ $$ {#eq-decode-latency-bandwidth}
 
 As an agent trajectory accumulates tokens, $M_{\text{KV}}(N)$ expands monotonically. When $M_{\text{KV}}(N)$ approaches $M_{\text{weights}}$, the time required to emit each individual token doubles, halving interactive token generation velocity ($\text{Throughput} = 1 / T_{\text{decode}}(N)$). In multi-tenant environments, every unpruned token in an agent's history directly steals memory bus cycles from all co-scheduled inference streams.
 
-> **The Systems Rule of Thumb (The Single-Batch Memory Wall):** At batch size $B=1$, single-token generation latency is strictly memory-bus bound ($T_{\text{decode}} \approx (M_{\text{weights}} + M_{\text{KV}}) / B_{\text{mem}}$), leaving over 99.6 percent of GPU compute capability idle. As an agent's context expands past $M_{\text{KV}} \approx M_{\text{weights}}$, token generation velocity halves. Systems architects must batch concurrent agent rollouts or prune inactive history to amortize parameter streaming overhead.
+> **The Systems Rule of Thumb (The Single-Batch Memory Bottleneck):** At batch size $B=1$, single-token generation latency is strictly memory-bus bound ($T_{\text{decode}} \approx (M_{\text{weights}} + M_{\text{KV}}) / B_{\text{mem}}$), leaving over 99.6 percent of GPU compute capability idle. As an agent's context expands past $M_{\text{KV}} \approx M_{\text{weights}}$, token generation velocity halves. Systems architects must batch concurrent agent rollouts or prune inactive history to amortize parameter streaming overhead.
 
 [^fn-workingsets-decode-intensity]: Total decode FLOPs per step equal $F_{\text{decode}}(N) = 2 P + 4 L H_Q d_h N$. Total memory bytes streamed from HBM equal $B_{\text{decode}}(N) = M_{\text{weights}} + 2 L H_{\text{KV}} d_h N b_{\text{elem}}$. Substituting parameters yields $\mathcal{I}_{\text{decode}} \approx 2 P / (P \cdot b_{\text{elem}} + M_{\text{KV}}(N))$.
 
@@ -213,7 +213,7 @@ When target facts are placed at varying relative depths within a prompt, retriev
 2. **Extreme Suffix (90 to 100 percent depth):** Models achieve high retrieval accuracy ($>90\%$). Recent tokens benefit from immediate proximity to the generating query position.
 3. **The Middle Distance (20 to 80 percent depth):** Retrieval accuracy drops dramatically, frequently falling below $30\%$—even when the total context length is well within the model's nominal architectural limit.
 
-@tbl-vol3-workingsets-lost-in-middle summarizes the empirical retrieval accuracy and attention allocation across context depth intervals.
+@Tbl-vol3-workingsets-lost-in-middle summarizes the empirical retrieval accuracy and attention allocation across context depth intervals.
 
 | Context Depth Regime       | Relative Token Interval | Typical Fact Retrieval Accuracy | Attention Allocation Mechanics                        | Dominant Systems Consequence                         |
 |:---------------------------|:-----------------------:|:-------------------------------:|:------------------------------------------------------|:-----------------------------------------------------|
@@ -304,7 +304,7 @@ To resolve the dual challenge of physical memory saturation and information loss
 
 ### The token eviction landscape
 
-Token eviction policies operate at the inference engine level, pruning Key and Value vectors directly from accelerator HBM without modifying the user-visible prompt text. @tbl-vol3-eviction-mechanics contrasts the primary eviction and sparsification topologies deployed in production serving engines.
+Token eviction policies operate at the inference engine level, pruning Key and Value vectors directly from accelerator HBM without modifying the user-visible prompt text. @Tbl-vol3-eviction-mechanics contrasts the primary eviction and sparsification topologies deployed in production serving engines.
 
 | Policy Topology                          | Retention Mechanism                                  | Memory Bound ($M_{\text{KV}}$) |           Perplexity Stability          |         Task Horizon Preservation         |      Implementation Complexity       |
 |:-----------------------------------------|:-----------------------------------------------------|:------------------------------:|:---------------------------------------:|:-----------------------------------------:|:------------------------------------:|
@@ -519,73 +519,51 @@ While post-hoc head pruning optimizes existing pretrained weights, architectural
 Introduced by @shazeer2019fast, MQA collapses all $H_Q$ query heads to share a single key head and a single value head ($H_{\text{KV}} = 1$). This slashes the KV cache memory footprint by a factor of $H_Q$ (typically $32\times$ to $64\times$). However, MQA can degrade task performance on complex, multi-hop reasoning benchmarks, as query heads are forced to attend over an identical geometric projection of context history.
 
 #### Grouped-query attention (GQA)
-Introduced by @ainslie2023gqa, GQA generalizes MQA by grouping $H_Q$ query heads into $G$ groups ($G \in \{4, 8\}$), where each group shares a single Key and Value head:
-
-$$
-H_{\text{KV}} = G = \frac{H_Q}{K},
-$$
-
-where $K$ is the grouping factor. GQA achieves a Pareto-optimal compromise: it delivers an $8\times$ reduction in KV cache size compared to MHA, while matching MHA reasoning accuracy across virtually all agentic benchmarks. GQA has become the de facto standard for frontier open-weights models, including Llama-3 and Mistral.
+Introduced by @ainslie2023gqa, GQA generalizes MQA by grouping $H_Q$ query heads into $G = H_Q / K$ groups ($G \in \{4, 8\}$), where each group shares a single Key and Value head ($H_{\text{KV}} = G$, with grouping factor $K$). GQA achieves a Pareto-optimal compromise: it delivers an $8\times$ reduction in KV cache size compared to MHA, while matching MHA reasoning accuracy across virtually all agentic benchmarks. GQA has become the de facto standard for frontier open-weights models, including Llama-3 and Mistral.
 
 #### Multi-head latent attention (MLA)
 Pioneered in DeepSeek-V2 and DeepSeek-V3 (@deepseek2024v3), **Multi-Head Latent Attention (MLA)** introduces low-rank projection directly into the Key-Value cache.
 
-Instead of caching high-dimensional key and value vectors for each attention head, MLA projects the input activation $\mathbf{x}_t \in \mathbb{R}^{d_{\text{model}}}$ into a compact compressed latent vector $\mathbf{c}_t^{KV} \in \mathbb{R}^{d_c}$, where $d_c \ll H_Q d_h$:
+Instead of caching high-dimensional key and value vectors for each attention head, MLA projects the input activation $\mathbf{x}_t \in \mathbb{R}^{d_{\text{model}}}$ into a compact compressed latent vector $\mathbf{c}_t^{KV} = \mathbf{x}_t \mathbf{W}_{DKV} \in \mathbb{R}^{d_c}$, where $d_c \ll H_Q d_h$. During decode, the model caches only the compressed latent vector $\mathbf{c}_t^{KV}$ and a low-dimensional decoupled rotary key vector $\mathbf{k}_t^R \in \mathbb{R}^{d_h^R}$, with total sequence memory footprint governed by @eq-vol3-workingsets-mla-footprint:
 
 $$
-\mathbf{c}_t^{KV} = \mathbf{x}_t \mathbf{W}_{DKV}, \quad \mathbf{W}_{DKV} \in \mathbb{R}^{d_{\text{model}} \times d_c}.
-$$
+M_{\text{KV, MLA}}(N) = L \cdot \left( d_c + d_h^R \right) \cdot N \cdot b_{\text{elem}}
+$$ {#eq-vol3-workingsets-mla-footprint}
 
-During decode, the model caches only the compressed latent vector $\mathbf{c}_t^{KV}$ and a low-dimensional decoupled rotary key vector $\mathbf{k}_t^R \in \mathbb{R}^{d_h^R}$:
+where $b_{\text{elem}}$ is precision bytes per value.[^fn-workingsets-mla-projection] For a model with $L = 60$, $d_c = 512$, $d_h^R = 64$, and BF16 precision ($b_{\text{elem}} = 2$), MLA requires $M_{\text{KV, MLA, token}} = 60 \times (512 + 64) \times 2 = 69{,}120\text{ bytes} \approx 67.5\text{ KB/token}$.
 
-$$
-M_{\text{KV, MLA}}(N) = L \cdot \left( d_c + d_h^R \right) \cdot N \cdot b_{\text{elem}}.
-$$
-
-For a model with $L = 60$, $d_c = 512$, $d_h^R = 64$, and BF16 precision ($b_{\text{elem}} = 2$), MLA requires:
-
-$$
-M_{\text{KV, MLA, token}} = 60 \times (512 + 64) \times 2 = 69{,}120\text{ bytes} \approx 67.5\text{KB/token}.
-$$
-
-Compared to a standard MHA architecture ($2.56\text{MB/token}$), MLA slashes the resident KV cache memory footprint by **$38\times$**, and compared to an $8\times$ GQA architecture ($320\text{KB/token}$), MLA slashes memory demand by **$4.74\times$**. During generation, the key and value states are dynamically projected out of the latent vector on-chip within SRAM registers:
-
-$$
-\mathbf{K}_t = \mathbf{c}_t^{KV} \mathbf{W}_{UK}, \quad \mathbf{V}_t = \mathbf{c}_t^{KV} \mathbf{W}_{UV}.
-$$
+Compared to standard MHA ($2.56\text{ MB/token}$), MLA slashes resident KV cache memory footprint by **$38\times$**, and compared to an $8\times$ GQA architecture ($320\text{ KB/token}$), MLA slashes memory demand by **$4.74\times$**. During generation, key and value states are dynamically projected out of the latent vector on-chip within SRAM registers ($\mathbf{K}_t = \mathbf{c}_t^{KV} \mathbf{W}_{UK}, \mathbf{V}_t = \mathbf{c}_t^{KV} \mathbf{W}_{UV}$).
 
 Because on-chip tensor core compute is abundant while HBM bus bandwidth is severely constrained, MLA trades cheap SRAM arithmetic for scarce memory bandwidth, achieving substantial throughput and concurrency improvements for long-horizon agent trajectories.
 
-### Hardware Roofline analysis of compressed attention
+> **The Systems Rule of Thumb (The Architectural KV Compression Boundary):** Standard Multi-Head Attention (MHA) cannot sustain multi-turn agent concurrency on accelerator hardware due to memory bus exhaustion. While GQA provides an $8\times$ memory reduction with zero accuracy degradation, Multi-Head Latent Attention (MLA) slashes KV cache footprint by $38\times$ relative to MHA ($4.74\times$ over GQA) by trading cheap on-chip SRAM arithmetic for constrained HBM bandwidth. For long-horizon agent runtimes, native latent attention maximizes cluster concurrency and throughput.
 
-The systems impact of these compressed attention mechanisms is formalized through the **Accelerator Roofline Model** (@williams2009).
+[^fn-workingsets-mla-projection]: MLA avoids materializing high-dimensional heads in HBM by caching low-rank latent $\mathbf{c}_t^{KV} \in \mathbb{R}^{d_c}$ and decoupled rotary key $\mathbf{k}_t^R \in \mathbb{R}^{d_h^R}$. During decode, up-projection into head dimensions occurs in fast SRAM registers, fusing dequantization with Tensor Core GEMV execution.
 
-On an accelerator with peak floating-point throughput $P_{\text{peak}}$ and memory bandwidth $B_{\text{mem}}$, the maximum achievable operational throughput $P_{\text{achieved}}$ is bounded by the minimum of the compute ceiling and the memory bandwidth ceiling:
+#### Hardware Roofline analysis of compressed attention
 
-$$
-P_{\text{achieved}} = \min\left( P_{\text{peak}}, \;\; \mathcal{I} \cdot B_{\text{mem}} \right).
-$$
+The systems impact of these compressed attention mechanisms is formalized through the **Accelerator Roofline Model** (@williams2009). On an accelerator with peak floating-point throughput $P_{\text{peak}}$ and memory bandwidth $B_{\text{mem}}$, operational throughput is bounded by the minimum of the compute ceiling and the memory streaming ceiling: $P_{\text{achieved}} = \min(P_{\text{peak}}, \mathcal{I} \cdot B_{\text{mem}})$.
 
-The step latency for generating a token under batch size $B$ across sequence length $N$ is:
+The step latency for generating a token under batch size $B$ across sequence length $N$ is governed by the two competing hardware regimes in @eq-roofline-serving:
 
 $$
-T_{\text{step}}(B, N) = \max\left( \frac{B \cdot F_{\text{decode}}(N)}{P_{\text{peak}} \cdot \eta_{\text{compute}}}, \;\; \frac{M_{\text{weights}} + B \cdot M_{\text{KV}}(N)}{B_{\text{mem}}} \right).
+T_{\text{step}}(B, N) = \max\left( \frac{B \cdot F_{\text{decode}}(N)}{P_{\text{peak}} \cdot \eta_{\text{compute}}}, \;\; \frac{M_{\text{weights}} + B \cdot M_{\text{KV}}(N)}{B_{\text{mem}}} \right)
 $$ {#eq-roofline-serving}
 
-As formalized in @eq-roofline-serving and @tbl-vol3-attention-architectures, autoregressive decoding operates firmly along the memory-bandwidth-slanted slope of the Roofline model, well below the accelerator's compute ceiling $P_{\text{peak}}$. In this regime, achieved compute throughput is bounded strictly by the product of memory bus bandwidth $B_{\text{mem}}$ and arithmetic intensity $\mathcal{I}_{\text{decode}}$:
+where $\eta_{\text{compute}} \in [0.45, 0.65]$ is the realized hardware compute efficiency.[^fn-workingsets-roofline-knee]
 
-$$
-P_{\text{achieved}} = B_{\text{mem}} \cdot \mathcal{I}_{\text{decode}} \ll P_{\text{peak}}.
-$$
+As formalized in @eq-roofline-serving and @tbl-vol3-attention-architectures, autoregressive decoding operates firmly along the memory-bandwidth-slanted slope of the Roofline model, well below the accelerator's compute ceiling $P_{\text{peak}}$. In this regime, achieved compute throughput is bounded strictly by the product of memory bus bandwidth and operational intensity: $P_{\text{achieved}} = B_{\text{mem}} \cdot \mathcal{I}_{\text{decode}} \ll P_{\text{peak}}$.
 
-Standard Multi-Head Attention languishes at $\mathcal{I}_{\text{MHA}} \approx 0.8\text{ FLOP/byte}$, leaving modern matrix tensor cores over $98\%$ idle during single-stream token generation. By collapsing Key-Value heads, Grouped-Query Attention raises operational intensity to $\mathcal{I}_{\text{GQA}} \approx 2.4\text{ FLOP/byte}$, while Multi-Head Latent Attention reaches $\mathcal{I}_{\text{MLA}} \approx 3.6\text{ FLOP/byte}$. Because autoregressive decoding operates in the memory-bandwidth-bound regime, the right-hand term in @eq-roofline-serving dominates. Compressing the KV cache via GQA, MLA, or structured head pruning directly reduces $M_{\text{KV}}(N)$:
+Standard Multi-Head Attention languishes at $\mathcal{I}_{\text{MHA}} \approx 0.8\text{ FLOP/byte}$, leaving modern matrix tensor cores over 98 percent idle during single-stream token generation. By collapsing Key-Value heads, Grouped-Query Attention raises operational intensity to $\mathcal{I}_{\text{GQA}} \approx 2.4\text{ FLOP/byte}$, while Multi-Head Latent Attention reaches $\mathcal{I}_{\text{MLA}} \approx 3.6\text{ FLOP/byte}$. Because autoregressive decoding operates in the memory-bandwidth-bound regime, the right-hand memory term in @eq-roofline-serving dominates. Compressing the KV cache via GQA, MLA, or structured head pruning directly reduces $M_{\text{KV}}(N)$:
 
 1. **Inter-Token Latency (ITL) Reduction:** When $B \cdot M_{\text{KV}}(N)$ is comparable to or larger than $M_{\text{weights}}$, cutting $M_{\text{KV}}(N)$ by $4.7\times$ (via MLA) directly reduces memory bus streaming time, decreasing per-token latency by up to 50 percent.
-2. **Concurrency Expansion:** The maximum concurrent agent batch size $B_{\max}$ supported within physical memory capacity $C_{\text{HBM}}$ scales inversely with $M_{\text{KV}}(N)$:
-   $$B_{\max}(N) = \left\lfloor \frac{C_{\text{HBM}} - M_{\text{weights}}}{M_{\text{KV}}(N)} \right\rfloor.$$
-   On an 80 GB accelerator serving a 128k context, transitioning from GQA to MLA increases maximum concurrent agent trajectories from 3 to 9 streams per node—a $3\times$ increase in cluster density.
+2. **Concurrency Expansion:** The maximum concurrent agent batch size $B_{\max} = \lfloor (C_{\text{HBM}} - M_{\text{weights}}) / M_{\text{KV}}(N) \rfloor$ supported within physical memory capacity $C_{\text{HBM}}$ scales inversely with per-token footprint. On an 80 GB accelerator serving a 128k context, transitioning from GQA to MLA increases maximum concurrent agent trajectories from 3 to 9 streams per node—a $3\times$ expansion in cluster density.
 
 By combining token-level working set eviction ($N$-dimension) with head pruning and latent KV compression ($H, L$-dimensions), systems engineers transform the context memory hierarchy from an unmanaged, bottlenecked liability into a bounded, high-throughput computational substrate.
+
+> **The Systems Rule of Thumb (The Roofline Concurrency Multiplier):** Because autoregressive token decode is memory-bus bound, batch concurrency is limited by physical memory headroom: $B_{\max} = \lfloor (C_{\text{HBM}} - M_{\text{weights}}) / M_{\text{KV}}(N) \rfloor$. Compressing the KV cache via MLA or structured head pruning reduces per-token memory footprint by $3\times$ to $5\times$, directly multiplying concurrent agent serving density on fixed accelerator capital equipment without provisioning additional GPUs.
+
+[^fn-workingsets-roofline-knee]: The compute-memory boundary (Roofline knee) occurs when batch size satisfies $B^* = M_{\text{weights}} / [B_{\text{mem}} \cdot (F_{\text{decode}} / (P_{\text{peak}} \cdot \eta)) - M_{\text{KV}}]$. For uncompressed MHA on long contexts ($N > 32\text{k}$), memory capacity $C_{\text{HBM}}$ is exhausted before reaching $B^*$.
 
 <!-- ======================================================================= -->
 <!-- SECTION: FALLACIES AND PITFALLS                                         -->
