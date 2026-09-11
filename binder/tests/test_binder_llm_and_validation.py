@@ -1,3 +1,14 @@
+"""Regression tests for binder LLM ergonomics and validation scoping.
+
+Guards against regressions in:
+- Pure, unwrapped JSON build summaries (--json) with stderr logging separation.
+- Structured JSON error responses on argument and execution failures.
+- Multi-flag volume preservation (--vol1 --vol2).
+- Single-file index scanning without false positives on cross-chapter references.
+- Content-tree validation scoping against single-volume and repository checkouts.
+- Dedicated volume bibliography preservation in case-study provenance and maintenance.
+"""
+
 import io
 import json
 from pathlib import Path
@@ -159,7 +170,6 @@ def test_build_json_emits_json_on_chapters_with_all():
 
 def test_maintain_volume_bib_resolves_script_independently_of_cwd(monkeypatch):
     """Ensure bibliography maintenance finds the script regardless of current directory."""
-    from binder.cli.commands.maintenance import MaintenanceCommand
     books_dir = Path("books")
     if books_dir.is_dir():
         monkeypatch.chdir(books_dir)

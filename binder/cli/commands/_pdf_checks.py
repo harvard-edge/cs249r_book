@@ -29,7 +29,20 @@ from typing import Optional
 
 class _PdfVolumeMap(dict):
     """Dictionary that dynamically resolves PDF artifact filenames for arbitrary volumes."""
+
     def __getitem__(self, volume: str) -> str:
+        """Resolve PDF artifact filename for volume key.
+
+        Returns explicit dictionary mapping if present; otherwise dynamically formats
+        numeric volumes (e.g. 'vol5' -> 'Machine-Learning-Systems-Vol5.pdf') or capitalized
+        fallbacks.
+
+        Args:
+            volume: Volume identifier string.
+
+        Returns:
+            PDF filename string.
+        """
         if volume in self:
             return super().__getitem__(volume)
         if volume.startswith("vol") and volume[3:].isdigit():
@@ -37,6 +50,15 @@ class _PdfVolumeMap(dict):
         return f"{volume.capitalize()}.pdf"
 
     def get(self, volume: str, default: Optional[str] = None) -> str:
+        """Resolve PDF artifact filename for volume key with dynamic fallback.
+
+        Args:
+            volume: Volume identifier string.
+            default: Optional default (unused; falls back dynamically).
+
+        Returns:
+            PDF filename string.
+        """
         return self[volume]
 
 PDF_BY_VOLUME = _PdfVolumeMap({

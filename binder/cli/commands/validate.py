@@ -9515,6 +9515,24 @@ class ValidateCommand:
         vol4: bool = False,
         tinytorch: bool = False,
     ) -> List[str]:
+        """Resolve the target volumes to verify for PDF artifact checks.
+
+        Preserves all explicitly requested volume flags. If no explicit flags were
+        provided, checks whether `root` points directly to a single volume directory,
+        defaulting to ["vol1", "vol2"] when running at whole-repository scope.
+
+        Args:
+            root: Root path provided to validation runner.
+            quarto_dir: Books/Quarto directory path.
+            vol1: True if Volume I explicitly requested.
+            vol2: True if Volume II explicitly requested.
+            vol3: True if Volume III explicitly requested.
+            vol4: True if Volume IV explicitly requested.
+            tinytorch: True if TinyTorch volume explicitly requested.
+
+        Returns:
+            List of volume identifier strings to check.
+        """
         volumes: List[str] = []
         if vol1:
             volumes.append("vol1")
@@ -9828,7 +9846,20 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_content_tree(self, root: Path) -> ValidationRunResult:
-        """Ensure book volumes have the expected release-time structure."""
+        """Ensure book volumes have the expected release-time structure and frontmatter.
+
+        Verifies that target volumes carry required structural elements (such as
+        ``frontmatter/`` and ``frontmatter/notation.qmd``). Automatically adapts
+        between individual volume scope (when run against a volume directory) and
+        full project scope (discovering all volume folders under ``books/``). If run
+        outside a volume directory or collection, safely returns a no-op result.
+
+        Args:
+            root: Scoping path (file, volume directory, or repository root).
+
+        Returns:
+            ValidationRunResult containing any discovered structural issues.
+        """
         t0 = time.time()
         if not root.is_dir():
             return ValidationRunResult(
@@ -12840,9 +12871,25 @@ class ValidateCommand:
         *,
         vol1: bool = False,
         vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
         log_path: Optional[str] = None,
     ) -> ValidationRunResult:
-        """Scan PDF text for UserWarning strings (post-build audit)."""
+        """Scan PDF text for UserWarning strings (post-build audit).
+
+        Args:
+            root: Scoping path.
+            vol1: True if Volume I explicitly requested.
+            vol2: True if Volume II explicitly requested.
+            vol3: True if Volume III explicitly requested.
+            vol4: True if Volume IV explicitly requested.
+            tinytorch: True if TinyTorch volume explicitly requested.
+            log_path: Optional path to LaTeX build log.
+
+        Returns:
+            ValidationRunResult containing any detected UserWarning issues.
+        """
         t0 = time.time()
         repo_root = Path(__file__).resolve().parents[3]
         quarto_dir = repo_root  / "books"

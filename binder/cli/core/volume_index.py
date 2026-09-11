@@ -9,7 +9,25 @@ import shutil
 
 
 def volume_index_source(book_dir: Path, volume: str, format_type: str) -> Path:
-    """Select the homepage for HTML and the preface for PDF/EPUB."""
+    """Resolve the canonical entry point file for a volume and build format.
+
+    Selects the homepage for HTML and the preface or landing file for PDF/EPUB.
+    Checks for legacy root-level ``index-{volume}.qmd`` first; if absent,
+    resolves dynamically from within the volume directory:
+    - HTML: ``{volume}/index.qmd`` (falling back to ``{volume}/frontmatter/about.qmd``).
+    - PDF/EPUB: ``{volume}/frontmatter/about.qmd`` (falling back to ``{volume}/index.qmd``).
+
+    Args:
+        book_dir: Path to the books root directory.
+        volume: Volume identifier (e.g., "vol1", "vol4", "tinytorch").
+        format_type: Build format ("html", "pdf", or "epub").
+
+    Returns:
+        Path to the resolved canonical source file.
+
+    Raises:
+        ValueError: If format_type is not one of {"html", "pdf", "epub"}.
+    """
     if format_type not in {"html", "pdf", "epub"}:
         raise ValueError(f"Unsupported format: {format_type}")
     book_dir = Path(book_dir)
@@ -39,7 +57,23 @@ def volume_index_source(book_dir: Path, volume: str, format_type: str) -> Path:
 
 
 def write_volume_index(book_dir: Path, volume: str, format_type: str) -> Path:
-    """Refresh the ignored build copy without writing through an old symlink."""
+    """Refresh the root ``index.qmd`` copy without writing through an existing symlink.
+
+    Finds the canonical index source via ``volume_index_source``, ensures any
+    stale symlink at ``book_dir / "index.qmd"`` is removed, and copies the source
+    file to ``book_dir / "index.qmd"``.
+
+    Args:
+        book_dir: Path to the books root directory.
+        volume: Volume identifier (e.g., "vol1", "vol4", "tinytorch").
+        format_type: Build format ("html", "pdf", or "epub").
+
+    Returns:
+        Path to the source file that was copied into ``index.qmd``.
+
+    Raises:
+        FileNotFoundError: If the resolved source file does not exist on disk.
+    """
     source = volume_index_source(book_dir, volume, format_type)
     if not source.is_file():
         raise FileNotFoundError(f"Volume entry point not found: {source}")
@@ -51,6 +85,7 @@ def write_volume_index(book_dir: Path, volume: str, format_type: str) -> Path:
 
 
 def main() -> None:
+    """CLI entry point for standalone index synchronization."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--book-dir", type=Path, default=Path.cwd())
     parser.add_argument("--volume", required=True, help="Volume name (e.g. vol1, vol2, vol4, etc.)")
