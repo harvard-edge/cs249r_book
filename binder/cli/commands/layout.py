@@ -624,6 +624,9 @@ class LayoutCommand:
             "--vol2", dest="volume", action="store_const", const="vol2",
             help="Check Volume II.",
         )
+        pvol.add_argument("--vol3", dest="volume", action="store_const", const="vol3", help="Check Volume III.")
+        pvol.add_argument("--vol4", dest="volume", action="store_const", const="vol4", help="Check Volume IV.")
+        purpose.add_argument("--chapter", help="Check only this configured chapter (filename or fuzzy title); required for a selective proof.")
 
         if not args:
             parser.print_help()
@@ -719,7 +722,7 @@ class LayoutCommand:
                 dpi=max(36, opts.dpi),
             )
         if opts.subcommand == "purpose":
-            return self._purpose(Path(opts.pdf), opts.volume)
+            return self._purpose(Path(opts.pdf), opts.volume, chapter=opts.chapter)
 
         parser.print_help()
         return False
@@ -728,15 +731,16 @@ class LayoutCommand:
     # purpose-overflow
     # ------------------------------------------------------------------
 
-    def _purpose(self, pdf_path: Path, volume: str) -> bool:
+    def _purpose(self, pdf_path: Path, volume: str, *, chapter: Optional[str] = None) -> bool:
         """Gate: no chapter's Purpose section may overflow past its opener page."""
         from ._pdf_checks import scan_purpose_overflow
 
-        issues = scan_purpose_overflow(pdf_path, volume, self._repo_root())
+        issues = scan_purpose_overflow(pdf_path, volume, self._repo_root(), chapter=chapter)
         if issues:
             for issue in issues:
-                console.print(f"[red]Purpose overflow:[/red] {issue.message}")
+                console.print(f"[red]{issue.code}:[/red] {issue.message}")
             return False
+        console.print(f"[green]✓ Opener text fits its chapter title page ({chapter or volume}).[/green]")
         return True
 
     # ------------------------------------------------------------------
@@ -2930,8 +2934,9 @@ class LayoutCommand:
     # outline + page labels
     # ------------------------------------------------------------------
 
+    @staticmethod
     def _load_chapter_map(
-        self, pdf_path: Path
+        pdf_path: Path
     ) -> Tuple[List[Tuple[int, str]], List[str]]:
         """Return (chapter_starts, labels).
 
@@ -3016,7 +3021,9 @@ class LayoutCommand:
         if volume and (contents / volume).is_dir():
             vol_dirs = [contents / volume]
         else:
-            vol_dirs = sorted(contents.glob("vol*"))
+            # Generated proofs such as vol4-preface-check.tex also match
+            # vol*. Only actual volume directories belong in this scan.
+            vol_dirs = [path for path in sorted(contents.glob("vol[1-4]")) if path.is_dir()]
         out: Dict[str, Path] = {}
         for vol_dir in vol_dirs:
             for chapter_dir in sorted(vol_dir.iterdir()):
@@ -3055,11 +3062,12 @@ class LayoutCommand:
 
     @staticmethod
     def _volume_from_pdf_path(pdf_path: Path) -> Optional[str]:
-        haystack = " ".join([Path(pdf_path).name, *Path(pdf_path).parts]).lower()
-        if "vol1" in haystack:
-            return "vol1"
-        if "vol2" in haystack:
-            return "vol2"
+        # Prefer the artifact/nearest output directory over a worktree name
+        # that may mention a different volume (2026-09-11).
+        for component in reversed(Path(pdf_path).parts):
+            match = re.search(r"(?:^|[^a-z0-9])vol([1-4])(?:$|[^a-z0-9])", component.lower())
+            if match:
+                return f"vol{match.group(1)}"
         return None
 
     @staticmethod

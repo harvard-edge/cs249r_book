@@ -258,6 +258,60 @@ cd book
 ./binder/binder fix repo-health    # Repo diagnostics
 ```
 
+### Iterate on one chapter
+
+From the repository root, select a volume and a chapter filename or readable
+title. The same command supports `--vol1`, `--vol2`, `--vol3`, and `--vol4`:
+
+```bash
+./binder/binder build pdf "causal boundary" --vol4 --skip-validate -v
+./binder/binder build pdf 02_body --vol4 --skip-validate
+./binder/binder build pdf "Preface" --vol4 --skip-validate
+./binder/binder build html "causal boundary" --vol4
+./binder/binder list --vol4
+./binder/binder layout purpose books/_build/pdf-vol4/chapters/01_boundary/01_boundary.pdf --vol4 --chapter "causal boundary"
+```
+
+Names match exact filenames first, then titles, unique partial names, and close
+typos. Ambiguous queries list the matching paths and stop; they never choose an
+arbitrary chapter. Use commas to select several chapters, or a volume-prefixed
+path such as `vol4/01_boundary/01_boundary.qmd`.
+
+Each selective build renders the generated `index.qmd` plus the selected
+chapter(s). Quarto may also report processing the root `404.qmd` as book-project
+housekeeping; it is not included in the PDF's chapter content. For Volume IV PDF/EPUB, the index comes from
+`books/vol4/frontmatter/about.qmd`; selecting the preface itself renders it only
+once. Canonical volume configs are unchanged, and previous generated entry
+points are restored when the command finishes or is interrupted.
+
+Outputs are isolated under
+`books/_build/<format>-<volume>/chapters/<chapter>/`, for example
+`books/_build/pdf-vol4/chapters/01_boundary/01_boundary.pdf`. A selective build
+does not overwrite the full-volume PDF. Run builds sequentially within a
+checkout because Quarto uses a shared active config and index.
+
+Isolated chapters have local numbering and may have unresolved references to
+omitted chapters. `--skip-validate` supports these layout iterations; finish
+with `./binder/binder build pdf --vol4` to verify the complete volume with its
+canonical numbering and references. For isolated proofs mapped to a trusted
+full-book AUX file, use `binder layout chapter` instead.
+
+The existing opener-fit gate supports all four volumes and both titled Purpose
+sections and untitled opening hooks. It checks every prose paragraph and any
+callout before the first pagebreak against the chapter's actual PDF title page.
+It reports missing chapters or unmatched source/PDF text as failures. Use
+`--chapter` for a selective proof; omitting it requires all canonical main
+chapters to be present:
+
+```bash
+./binder/binder layout purpose books/_build/pdf-vol4/Machine-Learning-Systems-Vol4.pdf --vol4
+# Equivalent check against the standard full-volume output path:
+./binder/binder check pdf --vol4 --scope purpose-overflow
+```
+
+This text-fit gate complements visual inspection of the cover figure, margin
+content, and learning-objectives page; it does not inspect figure geometry.
+
 ---
 
 ## Directory Structure

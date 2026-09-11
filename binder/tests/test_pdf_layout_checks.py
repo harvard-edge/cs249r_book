@@ -1192,3 +1192,33 @@ def test_log_discovered_when_pdf_absent(tmp_path):
     log = tmp_path / "Machine-Learning-Systems-Vol1.log"
     log.write_text("ok", encoding="utf-8")
     assert default_log_path(tmp_path, "vol1") == log
+
+
+def test_source_map_ignores_volume_prefixed_generated_files(tmp_path):
+    books = tmp_path / 'books'
+    chapter = books / 'vol4/01_boundary/01_boundary.qmd'
+    chapter.parent.mkdir(parents=True)
+    chapter.write_text('# The Causal Boundary\n')
+    for name in ('vol4-preface-check.tex', 'vol3.pdf', 'vol2'):
+        (books / name).write_text('Generated artifact must not be traversed as a directory.\n')
+    unrelated = books / 'vol4-notes/01_boundary'
+    unrelated.mkdir(parents=True)
+    (unrelated / '01_boundary.qmd').write_text('# Unrelated notes\n')
+    # An unscoped PDF exercises fallback discovery; all artifacts are retained.
+    result = LayoutCommand(None, None)._build_source_map(books / '_build/proof.pdf')
+    assert result == {'The Causal Boundary': Path('books/vol4/01_boundary/01_boundary.qmd')}
+    assert (books / 'vol4-preface-check.tex').is_file()
+
+
+def test_source_map_recognizes_vol3_and_vol4_and_nearest_volume(tmp_path):
+    books = tmp_path / 'books'
+    for volume in ('vol3', 'vol4'):
+        chapter = books / volume / 'introduction/introduction.qmd'
+        chapter.parent.mkdir(parents=True)
+        chapter.write_text('# Introduction\n')
+    for volume in ('vol3', 'vol4'):
+        result = LayoutCommand(None, None)._build_source_map(
+            books / f'_build/pdf-{volume}/Machine-Learning-Systems-{volume}.pdf')
+        assert result['Introduction'] == Path(f'books/{volume}/introduction/introduction.qmd')
+    assert LayoutCommand._volume_from_pdf_path(
+        Path('/tmp/MLSysBook-vol1/books/_build/pdf-vol4/01_boundary.pdf')) == 'vol4'

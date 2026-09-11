@@ -98,7 +98,7 @@ class BuildCommand:
                       "[dim]# build anyway (not recommended)[/dim]")
         return False
 
-    def _postflight_epub_validation(self, skip: bool = False) -> bool:
+    def _postflight_epub_validation(self, skip: bool = False, output_dir: Optional[Path] = None) -> bool:
         """Run smoke + epubcheck against the built EPUB(s) after render.
 
         Returns True if validation passed (or was skipped), False on a
@@ -134,7 +134,7 @@ class BuildCommand:
             return True
 
         repo_root = self.config_manager.root_dir
-        epubs = _discover_built_epubs(repo_root)
+        epubs = sorted(output_dir.glob("*.epub")) if output_dir is not None else _discover_built_epubs(repo_root)
         if not epubs:
             console.print("[dim]ⓘ No EPUB artifacts found under _build/epub-vol*/; skipping post-build validation.[/dim]")
             return True
@@ -420,13 +420,9 @@ class BuildCommand:
         # Track if config has been restored to avoid double restoration
         self._config_restored = False
 
-        # Setup signal handler to restore config on Ctrl+C
+        # Unwind through _run_command so the renderer stops before finally
+        # restores shared files (2026-09-11).
         def signal_handler(signum, frame):
-            if not self._config_restored and format_type in ["pdf", "epub"]:
-                console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
-                self._restore_config(config_file)
-                self._config_restored = True
-                console.print("[green]✅ Config restored[/green]")
             sys.exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -469,7 +465,7 @@ class BuildCommand:
 
             return success
         finally:
-            # Always restore config for PDF/EPUB builds (unless already restored by signal handler)
+            # Renderer cleanup completes before control reaches this block.
             if format_type in ["pdf", "epub"] and not self._config_restored:
                 self._restore_config(config_file)
 
@@ -488,6 +484,20 @@ class BuildCommand:
         """
         # Expand patterns like appendix* / re:^appendix_
         chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names)
+
+        # A volume-prefixed target uses the same isolated path as --volN.
+        # Unprefixed names that resolve uniquely within one volume do as well.
+        try:
+            resolved = self.chapter_discovery.validate_chapters(chapter_names)
+            volumes = {self.chapter_discovery._get_volume_from_path(path) for path in resolved}
+            if len(volumes) == 1 and None not in volumes:
+                volume = next(iter(volumes))
+                return self.build_chapters_with_volume(
+                    [path.relative_to(self.config_manager.book_dir).as_posix() for path in resolved],
+                    format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+        except Exception as error:
+            console.print(f"[red]Build failed: {error}[/red]")
+            return False
 
         console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type})[/dim]")
         console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
@@ -533,13 +543,9 @@ class BuildCommand:
             # Track if config has been restored to avoid double restoration
             self._config_restored = False
 
-            # Setup signal handler to restore config on Ctrl+C
+            # Let renderer cleanup finish before the finally block restores
+            # the shared configuration (2026-09-11).
             def signal_handler(signum, frame):
-                if not self._config_restored:
-                    console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
-                    self._restore_config(config_file)
-                    self._config_restored = True
-                    console.print("[green]✅ Config restored[/green]")
                 sys.exit(0)
 
             signal.signal(signal.SIGINT, signal_handler)
@@ -574,7 +580,7 @@ class BuildCommand:
             console.print(f"[red]❌ Build error: {e}[/red]")
             return False
         finally:
-            # Always restore config (unless already restored by signal handler)
+            # Renderer cleanup completes before control reaches this block.
             try:
                 if not self._config_restored:
                     self._restore_config(config_file)
@@ -582,136 +588,119 @@ class BuildCommand:
                 pass
 
     def build_chapters_with_volume(self, chapter_names: List[str], format_type: str, volume: str, skip_hygiene: bool = False, skip_validate: bool = False) -> bool:
-        """Build specific chapters using volume-specific configuration.
+        """Build index plus selected chapters in an isolated output directory.
 
-        Args:
-            chapter_names: List of chapter names to build
-            format_type: Format to build ('html', 'pdf', 'epub')
-            volume: Volume config to use ('vol1' or 'vol2')
-            skip_hygiene: EPUB-only; skip the pre-render hygiene check.
-            skip_validate: Skip post-render validation (EPUB smoke/epubcheck;
-                PDF unresolved-ref scan).
-
-        Returns:
-            True if build and post-build validation succeeded, False otherwise
+        Only generated entry points change during rendering. Canonical volume
+        configs remain untouched, and previous entry points are restored even
+        if rendering fails or is interrupted (2026-09-11).
         """
-        # Expand patterns like appendix* / re:^appendix_ within the requested volume
-        chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names, volume=volume)
+        import yaml
+        from ..core.config import ACTIVE_CONFIG_MARKER, get_output_file
+        from ..core.volume_index import volume_index_source
+        from ..core.discovery import VOLUME_DIRS
 
-        volume_name = "Volume I" if volume == "vol1" else "Volume II"
-        console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type}, {volume_name} config)[/dim]")
-        console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
-
-        if format_type == "epub":
-            if not self._preflight_epub_hygiene(skip=skip_hygiene):
-                return False
-
+        snapshots = {}
+        handlers = {}
         try:
-            # Auto-prefix chapter names with volume to disambiguate
-            prefixed_chapters = []
-            for ch in chapter_names:
-                # Normalize: strip .qmd extension so find_chapter_file gets a stem
-                ch = ch.removesuffix(".qmd")
-                # Only prefix if not already prefixed
-                if not ch.startswith(f"{volume}/"):
-                    prefixed_chapters.append(f"{volume}/{ch}")
-                else:
-                    prefixed_chapters.append(ch)
+            if volume not in VOLUME_DIRS or format_type not in {"html", "pdf", "epub"}:
+                raise ValueError(f"Unsupported volume/format: {volume}/{format_type}")
+            chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names, volume=volume)
+            prefixed = []
+            for name in chapter_names:
+                specified, _ = self.chapter_discovery._parse_chapter_spec(name)
+                if specified and specified != volume:
+                    raise ValueError(f"Chapter {name!r} is outside selected {volume}")
+                prefixed.append(name if specified else f"{volume}/{name}")
+            chapter_files = list(dict.fromkeys(self.chapter_discovery.validate_chapters(prefixed)))
+            if not chapter_files:
+                raise ValueError("Select at least one chapter")
 
-            # Validate chapters exist
-            chapter_files = self.chapter_discovery.validate_chapters(prefixed_chapters)
-
-            # Show files that will be built
-            console.print("[dim]📄 Files to be rendered:[/dim]")
-            console.print(f"[dim]  • index.qmd[/dim]")
-            for chapter_file in chapter_files:
-                rel_path = chapter_file.relative_to(self.config_manager.book_dir)
-                console.print(f"[dim]  • {rel_path}[/dim]")
-
-            # Setup volume-specific configuration
-            config_file = self.config_manager.get_config_file(format_type, volume)
-
-            if not config_file.exists():
-                console.print(f"[yellow]⚠️ Volume config not found: {config_file}[/yellow]")
-                console.print(f"[yellow]Falling back to default config...[/yellow]")
-                return self.build_chapters(chapter_names, format_type)
-
-            format_args = {
-                "html": "html",
-                "pdf": "titlepage-pdf",
-                "epub": "epub"
-            }
-
-            if format_type not in format_args:
-                raise ValueError(f"Unknown format type: {format_type}")
-
-            format_arg = format_args[format_type]
-
-            # Create volume-specific build directory
-            output_dir = self.config_manager.get_output_dir(format_type, volume)
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Write the volume's _quarto.yml and index.qmd
-            config_name = self.config_manager.activate_config(format_type, volume)
-            console.print(f"[dim]🔗 Linked _quarto.yml → {config_name}[/dim]")
-
-            # Set up fast build mode for the target chapters
-            self._setup_fast_build_mode(config_file, chapter_files)
-
-            # Track if config has been restored to avoid double restoration
-            self._config_restored = False
-
-            # Setup signal handler to restore config on Ctrl+C
-            def signal_handler(signum, frame):
-                if not self._config_restored:
-                    console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
-                    self._restore_config(config_file)
-                    self._config_restored = True
-                    console.print("[green]✅ Config restored[/green]")
-                sys.exit(0)
-
-            signal.signal(signal.SIGINT, signal_handler)
-            signal.signal(signal.SIGTERM, signal_handler)
-
-            # Build with project.render configuration
-            console.print("[yellow]🔨 Building with fast build configuration...[/yellow]")
-
-            render_cmd = ["quarto", "render", f"--to={format_arg}"]
-            cmd_str = " ".join(render_cmd)
-            console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
-
-            # Execute build
-            success = self._run_command(
-                render_cmd,
-                cwd=self.config_manager.book_dir,
-                description=f"Building {len(chapter_names)} chapters ({format_type}, {volume_name})"
-            )
-
-            if success:
-                console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
-                self._open_output(output_dir, format_type)
-                if format_type == "epub":
-                    if not self._postflight_epub_validation(skip=skip_validate):
-                        return False
+            # Do not fall back to another volume when this manifest is missing.
+            books = self.config_manager.book_dir
+            config_file = books / "config" / f"_quarto-{format_type}-{volume}.yml"
+            config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+            index_source = volume_index_source(books, volume, format_type)
+            if not index_source.is_file():
+                raise FileNotFoundError(f"Volume entry point not found: {index_source}")
+            selected = [p.relative_to(books).as_posix() for p in chapter_files
+                        if p.resolve() != index_source.resolve()]
+            files = ["index.qmd", *selected]
+            slug = "--".join(p.stem for p in chapter_files)
+            output_dir = self.config_manager.get_output_dir(format_type, volume) / "chapters" / slug
+            config.setdefault("project", {})["output-dir"] = output_dir.relative_to(books).as_posix()
+            if format_type == "html":
+                config["project"]["render"] = files
             else:
-                console.print("[red]❌ Build failed[/red]")
+                config.setdefault("book", {})["chapters"] = files
+                config["book"].pop("appendices", None)
+                config["book"]["output-file"] = slug
+                # The canonical volume config can carry a render list as well.
+                config["project"].pop("render", None)
 
-            return success
+            if format_type == "epub" and not self._preflight_epub_hygiene(skip=skip_hygiene):
+                return False
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for path in (self.config_manager.active_config, self.config_manager.active_index):
+                snapshots[path] = (os.readlink(path), None) if path.is_symlink() else (
+                    None, path.read_bytes() if path.exists() else None)
 
-        except Exception as e:
-            console.print(f"[red]❌ Build failed: {e}[/red]")
-            import traceback
-            traceback.print_exc()
+            def interrupted(signum, frame):
+                raise KeyboardInterrupt(f"Build interrupted by signal {signum}")
+
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                handlers[sig] = signal.getsignal(sig)
+                signal.signal(sig, interrupted)
+            self.config_manager.activate_config(format_type, volume)
+            header = (f"{ACTIVE_CONFIG_MARKER}{config_file.relative_to(books).as_posix()}\n"
+                      "# Temporary selective build; canonical config is unchanged.\n")
+            self.config_manager.active_config.write_text(
+                header + yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")
+            console.print(f"[green]Building {volume} ({format_type}):[/green]")
+            for path in files:
+                console.print(f"  {path}")
+            target = {"html": "html", "pdf": "titlepage-pdf", "epub": "epub"}[format_type]
+            success = self._run_command(
+                ["quarto", "render", f"--to={target}"], cwd=books,
+                description=f"Building {volume}: {', '.join(p.stem for p in chapter_files)}")
+            if not success:
+                return False
+            artifact = get_output_file(output_dir, format_type)
+            if artifact is None:
+                console.print(f"[red]Build produced no {format_type} artifact in {output_dir}[/red]")
+                return False
+            console.print(f"[green]Build complete: {artifact}[/green]")
+            self._open_output(output_dir, format_type)
+            if format_type == "epub":
+                return self._postflight_epub_validation(skip=skip_validate, output_dir=output_dir)
+            if format_type == "pdf" and not skip_validate:
+                from ._pdf_checks import verify_pdf, format_failure_report
+                issues = verify_pdf(artifact, log_path=getattr(self, "_last_build_log", None))
+                if issues:
+                    console.print(format_failure_report("Chapter PDF", artifact, issues), markup=False)
+                    console.print("[yellow]References to omitted chapters may be unresolved in this isolated build. "
+                                  "Use --skip-validate for layout iteration; validate the full volume before release.[/yellow]")
+                    return False
+            return True
+        except KeyboardInterrupt:
+            console.print("[yellow]Build interrupted; restoring generated entry points.[/yellow]")
+            return False
+        except Exception as error:
+            console.print(f"[red]Build failed: {error}[/red]")
             return False
         finally:
-            # Restore configuration
-            try:
-                if not self._config_restored:
-                    console.print("[yellow]🛡️ Restoring config...[/yellow]")
-                    self._restore_config(config_file)
-                    console.print("[green]✅ Configuration restored successfully[/green]")
-            except:
-                pass
+            for path, (link, content) in snapshots.items():
+                if path.is_symlink():
+                    path.unlink()
+                if link is not None:
+                    if path.exists():
+                        path.unlink()
+                    path.symlink_to(link)
+                elif content is not None:
+                    path.write_bytes(content)
+                elif path.exists():
+                    path.unlink()
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
 
     def build_volume(
         self,
@@ -802,12 +791,8 @@ class BuildCommand:
                 console.print("[green]✅ Print-mark setting restored[/green]")
 
         def signal_handler(signum, frame):
-            if not self._config_restored and format_type in ("pdf", "epub"):
-                console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
-                self._restore_config(config_file)
-                self._config_restored = True
-                console.print("[green]✅ Config restored[/green]")
-            restore_print_marks_header()
+            # Shared config/header restoration belongs in finally, after
+            # _run_command has stopped the renderer (2026-09-11).
             sys.exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -985,6 +970,22 @@ class BuildCommand:
         else:
             env["PYTHONPATH"] = local_pythonpath
 
+        process = None
+
+        def stop_renderer():
+            # On POSIX, stop Quarto's process group (including TeX children)
+            # before restoring the shared active config/index (2026-09-11).
+            # Windows uses Popen's parent-process termination fallback.
+            if process is not None and process.poll() is None:
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                except ProcessLookupError:
+                    pass  # Renderer exited between poll and termination.
+                process.wait()
+
         try:
             if self.verbose:
                 # Verbose mode: stream output in real-time and save for analysis
@@ -996,7 +997,8 @@ class BuildCommand:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
-                    bufsize=1
+                    bufsize=1,
+                    start_new_session=True,
                 )
 
                 lines_buf: list[str] = []
@@ -1029,14 +1031,17 @@ class BuildCommand:
                 ) as progress:
                     task = progress.add_task(description, total=None)
 
-                    result = subprocess.run(
+                    process = subprocess.Popen(
                         cmd,
                         cwd=cwd,
                         env=env,
-                        capture_output=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         text=True,
-                        timeout=1800  # 30 minute timeout
+                        start_new_session=True,
                     )
+                    stdout, stderr = process.communicate(timeout=1800)
+                    result = subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
 
                     progress.update(task, completed=True)
 
@@ -1057,9 +1062,14 @@ class BuildCommand:
                     return False
 
         except subprocess.TimeoutExpired:
+            stop_renderer()
             console.print("[red]❌ Build timed out after 30 minutes[/red]")
             return False
+        except (KeyboardInterrupt, SystemExit):
+            stop_renderer()
+            raise
         except Exception as e:
+            stop_renderer()
             console.print(f"[red]❌ Command execution error: {e}[/red]")
             return False
 

@@ -1084,7 +1084,7 @@ class ValidateCommand:
                 results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False), log_path=getattr(ns, 'pdf_log', None)))
             elif method_name == "_run_pdf_numbering":
                 results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False)))
-            elif method_name == "_run_pdf_table_spacing":
+            elif method_name in ("_run_pdf_table_spacing", "_run_pdf_purpose_overflow"):
                 results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, vol3=getattr(ns, 'vol3', False), vol4=getattr(ns, 'vol4', False), tinytorch=getattr(ns, 'tinytorch', False)))
             else:
                 results.append(method(root))
@@ -9661,6 +9661,9 @@ class ValidateCommand:
         *,
         vol1: bool = False,
         vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
     ) -> ValidationRunResult:
         """Check that chapter Purpose sections fit on their opener page in the built PDF."""
         from cli.commands._pdf_checks import default_pdf_path, scan_purpose_overflow

@@ -776,84 +776,152 @@ def scan_pdf_numbering(pdf_path: Path) -> list[PdfIssue]:
     ]
 
 
-def scan_purpose_overflow(pdf_path: Path, volume: str, repo_root: Path) -> list[PdfIssue]:
-    """Check that every chapter's Purpose fits on its opener page in the built PDF."""
+def _purpose_normalize(text: str) -> str:
+    """Normalize source/PDF typography while retaining anchor word order."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", text)
+    text = re.sub(r"(?<=\w)[-\u00ad\u2010\u2011]\s*(?=\w)", "", text)
+    text = re.sub(r"`\{python\}[^`]*`", " ", text)
+    text = re.sub(r"\\index\{[^}]*\}", "", text)
+    text = re.sub(r"\[\^[^]]+\]|\[@[^]]+\]", "", text)
+    text = re.sub(r"[@](?:sec|fig|tbl|eq)-[\w.-]+", " ", text)
+    return " ".join(re.findall(r"[^\W_]+", text.casefold(), re.UNICODE))
+
+
+def _purpose_source_anchors(text: str) -> list[tuple[str, str]]:
+    """Extract the hook and paragraph tails, including opener callout text.
+
+    Supports the titled Purpose section in Volumes I–III and the untitled
+    italic hook in Volume IV. A pagebreak, learning objectives, or next H2
+    ends the opener; code, div syntax, images, and raw layout commands do not
+    become prose anchors (2026-09-11).
+    """
+    purpose = re.search(r"^## Purpose[^\n]*\n", text, re.MULTILINE)
+    opening = text[purpose.end():] if purpose else text
+    next_section = re.search(r"^## +", opening, re.MULTILINE)
+    if next_section:
+        opening = opening[:next_section.start()]
+    hook = re.search(r"^([*_])([^\n]+)\1[ \t]*$", opening, re.MULTILINE)
+    if not hook:
+        return []
+    body = opening[hook.end():]
+    boundary = re.search(
+        r"\{\{<\s*pagebreak\s*>\}\}|\\(?:newpage|clearpage|cleardoublepage)\b|"
+        r"^:{3,}.*\.callout-learning-objectives", body, re.MULTILINE)
+    if boundary:
+        body = body[:boundary.start()]
+    body = re.sub(r"<!--[\s\S]*?-->", "", body)
+    body = re.sub(r"^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[^\n]*$", "", body, flags=re.MULTILINE)
+    # Preserve blank lines so separate paragraphs and callouts get their own
+    # anchors. A missing intermediate paragraph must not produce a false pass.
+    prose = "\n".join(line for line in body.splitlines()
+                      if not line.lstrip().startswith(("\\", ":", "![", "{{<", "#")))
+    anchors = [("hook", _purpose_normalize(hook.group(2)))]
+    for number, paragraph in enumerate(re.split(r"\n\s*\n", prose), 1):
+        normalized = _purpose_normalize(paragraph)
+        if len(normalized.split()) >= 4:
+            anchors.append((f"paragraph {number}", normalized))
+    return anchors if len(anchors) > 1 else []
+
+
+def _purpose_chapter_paths(repo_root: Path, volume: str) -> list[Path]:
+    """Return main chapter paths in the volume's canonical PDF order."""
+    import yaml
+
+    books = repo_root / "books"
+    config = yaml.safe_load((books / "config" / f"_quarto-pdf-{volume}.yml").read_text())
+
+    def paths(entries):
+        for entry in entries:
+            if isinstance(entry, str):
+                yield entry
+            elif isinstance(entry, dict):
+                if entry.get("file"):
+                    yield entry["file"]
+                yield from paths(entry.get("chapters", []))
+
+    return list(dict.fromkeys(books / name for name in paths(config.get("book", {}).get("chapters", []))
+                             if Path(name).parts[0] == volume and
+                             not {"frontmatter", "backmatter", "parts", "shared"}.intersection(Path(name).parts)
+                             and Path(name).stem not in {"index", "references"}))
+
+
+def scan_purpose_overflow(
+    pdf_path: Path, volume: str, repo_root: Path, *, chapter: str | None = None,
+) -> list[PdfIssue]:
+    """Require every expected opener's hook and prose to end on its title page.
+
+    ``chapter`` explicitly scopes a selective proof. Without it, all canonical
+    main chapters are required; missing chapters and unmatched source anchors
+    fail closed rather than silently passing an incomplete/stale PDF.
+    """
     if not pdf_path.is_file():
         return [PdfIssue(code="missing-pdf", message=f"PDF not found: {pdf_path}")]
     if shutil.which("pdftotext") is None:
-        return [
-            PdfIssue(
-                code="pdftotext-missing",
-                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
-            )
-        ]
-
+        return [PdfIssue(code="pdftotext-missing", message="pdftotext not installed; install poppler")]
     try:
+        from ..core.discovery import ChapterDiscovery
+        from .layout import LayoutCommand
+
+        discovery = ChapterDiscovery(repo_root / "books")
+        expected = _purpose_chapter_paths(repo_root, volume)
+        if chapter:
+            prefix, _ = discovery._parse_chapter_spec(chapter)
+            if prefix and prefix != volume:
+                raise ValueError(f"Chapter {chapter!r} is outside {volume}")
+            chosen = discovery.find_chapter_file(chapter if prefix else f"{volume}/{chapter}", allow_fuzzy=True)
+            if chosen not in expected:
+                raise ValueError(f"Not a configured main chapter of {volume}: {chapter}")
+            expected = [chosen]
+        if not expected:
+            raise ValueError(f"No main chapters configured for {volume}")
         out = subprocess.run(["pdftotext", str(pdf_path), "-"], capture_output=True, text=True, check=True).stdout
-        pages = out.split("\f")
-    except Exception as e:
-        return [PdfIssue(code="pdftotext-error", message=f"Failed to extract PDF text: {e}")]
+        pages = [_purpose_normalize(page) for page in out.split("\f")]
+        starts, _ = LayoutCommand._load_chapter_map(pdf_path)
+        if not starts:
+            raise ValueError("PDF chapter bookmarks could not be read; opener pages cannot be verified")
+    except Exception as error:
+        return [PdfIssue(code="purpose-unverified", message=str(error))]
 
-    def _norm(s: str) -> str:
-        s = re.sub(r'`\{python\}[^`]*`', '', s)
-        s = re.sub(r'[‘’“”`]', "'", s)
-        s = re.sub(r'[\\*_$\[\]{}#@|]', '', s)
-        s = re.sub(r'[—–-]', ' ', s)
-        return re.sub(r'\s+', ' ', s).strip()
-
-    def _purpose_bits(qmd_path: Path):
-        try:
-            t = qmd_path.read_text(encoding="utf-8")
-        except Exception:
-            return None
-        m = re.search(r'## Purpose.*?\n(.*?)(?:::: \{\.content-visible|::: \{\.callout-learning|\n## )', t, re.S)
-        if not m:
-            return None
-        paras = [p.strip() for p in m.group(1).split("\n\n") if p.strip()]
-        hook = next((p for p in paras if p.startswith("_") and p.rstrip().endswith("_")), None)
-        prose = [p for p in paras if not p.startswith(("\\", "_", ":"))]
-        if not hook or not prose:
-            return None
-        return _norm(hook).split(), _norm(prose[-1]).split()
-
-    def _find_page(pages_list, words, head=True):
-        def squash(s):
-            return re.sub(r'\s+', ' ', re.sub(r"[‘’“”`—–-]", lambda m: "'" if m.group()[0] in "‘’“”`" else ' ', s)).strip().lower()
-        sp = [squash(pg) for pg in pages_list]
-        for n in (7, 6, 5, 4):
-            anchor = " ".join(words[:n] if head else words[-n:])
-            a = squash(anchor)
-            if not a:
+    def find_anchor(words, first, last, *, head=False):
+        tokens = words.split()
+        for count in (12, 10, 8, 6, 4):
+            if len(tokens) < count:
                 continue
-            for i, pg in enumerate(sp):
-                if a in pg:
-                    return i + 1
+            anchor = " ".join(tokens[:count] if head else tokens[-count:])
+            for page in range(first, min(last, len(pages)) + 1):
+                if anchor in pages[page - 1]:
+                    return page
         return None
 
     issues: list[PdfIssue] = []
-    contents_dir = repo_root  / "books" / volume
-    if not contents_dir.exists():
-        return issues
-
-    for qmd in sorted(contents_dir.glob("*/*.qmd")):
-        if qmd.name.startswith(("appendix_", "_")):
+    for qmd in expected:
+        if not qmd.is_file():
+            issues.append(PdfIssue(code="purpose-source-missing", message=f"Source not found: {qmd}"))
             continue
-        bits = _purpose_bits(qmd)
-        if not bits:
+        title = _purpose_normalize(discovery._chapter_title(qmd))
+        matching = [(page, name) for page, name in starts
+                    if _purpose_normalize(re.sub(r"^\d+[.\s]+", "", name)) == title]
+        if len(matching) != 1:
+            issues.append(PdfIssue(code="purpose-missing-chapter",
+                                   message=f"{qmd.name}: expected one chapter bookmark for {title!r}, found {len(matching)}"))
             continue
-        hook_words, para_words = bits
-        sp = _find_page(pages, hook_words, head=True)
-        ep = _find_page(pages, para_words, head=False)
-        if sp is None or ep is None:
+        opener = matching[0][0]
+        end = min((page - 1 for page, _ in starts if page > opener), default=len(pages))
+        anchors = _purpose_source_anchors(qmd.read_text(encoding="utf-8"))
+        if not anchors:
+            issues.append(PdfIssue(code="purpose-source-unrecognized",
+                                   message=f"{qmd.name}: cannot identify opener hook and prose in source"))
             continue
-        if ep > sp:
-            issues.append(
-                PdfIssue(
-                    code="purpose-overflow",
-                    message=f"{qmd.name}: Purpose starts p{sp}, ends p{ep} ({ep - sp} page overflow)",
-                    severity="error",
-                )
-            )
+        for label, words in anchors:
+            found = find_anchor(words, opener, end, head=label == "hook")
+            if found is None:
+                issues.append(PdfIssue(code="purpose-anchor-missing",
+                                       message=f"{qmd.name}: {label} anchor not found in PDF sheets {opener}–{end}; source/PDF may differ"))
+            elif found > opener:
+                issues.append(PdfIssue(code="purpose-overflow",
+                                       message=f"{qmd.name}: {label} reaches PDF sheet {found}, past opener sheet {opener}"))
     return issues
 
 

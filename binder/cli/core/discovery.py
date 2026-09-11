@@ -2,7 +2,7 @@
 File and chapter discovery for MLSysBook CLI.
 
 Handles finding chapter files, validating paths, and managing file operations.
-Supports volume-aware discovery for vol1 and vol2.
+Supports volume-aware discovery for vol1 through vol4.
 
 Single source of truth for chapter ordering: `get_chapters_from_config()` reads
 the PDF YAML config for a volume and returns the ordered list of testable chapter
@@ -19,7 +19,7 @@ from rich.console import Console
 console = Console()
 
 # Volume directories
-VOLUME_DIRS = ["vol1", "vol2"]
+VOLUME_DIRS = ["vol1", "vol2", "vol3", "vol4"]
 
 # Shared content directory (sibling to vol1/, vol2/ under contents/)
 SHARED_DIR = "shared"
@@ -129,13 +129,13 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
 
 
 class AmbiguousChapterError(Exception):
-    """Raised when a chapter name exists in multiple volumes."""
+    """Raised when a query identifies more than one chapter."""
 
     def __init__(self, chapter_name: str, locations: List[str]):
         self.chapter_name = chapter_name
         self.locations = locations
         super().__init__(
-            f"'{chapter_name}' exists in multiple volumes: {', '.join(locations)}"
+            f"'{chapter_name}' matches multiple chapters: {', '.join(locations)}"
         )
 
 
@@ -201,153 +201,86 @@ class ChapterDiscovery:
         return None, chapter_spec
 
     @staticmethod
-    def _match_score(query: str, candidate: str) -> int:
-        """Score how well a query matches a candidate chapter name.
+    def _normalized_name(value: str) -> str:
+        return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
 
-        Higher score = better match. Uses longest common substring length
-        as primary metric, with shorter candidate names preferred as tiebreaker.
-
-        Args:
-            query: The search term (e.g., 'dnn_')
-            candidate: The chapter file stem (e.g., 'nn_architectures')
-
-        Returns:
-            Match score (higher is better), 0 if no match
-        """
-        q = query.lower()
-        c = candidate.lower()
-
-        # Exact match gets highest score
-        if q == c:
-            return 10000
-
-        # Starts-with match gets high score, weighted by coverage
-        if c.startswith(q):
-            return 5000 + int(1000 * len(q) / len(c))
-
-        # Contains match gets medium score, weighted by coverage
-        if q in c:
-            return 2000 + int(1000 * len(q) / len(c))
-
-        # Partial overlap: find longest common substring
-        best = 0
-        for i in range(len(q)):
-            for j in range(i + 1, len(q) + 1):
-                sub = q[i:j]
-                if sub in c and len(sub) > best:
-                    best = len(sub)
-        if best >= 2:
-            return 500 + int(1000 * best / len(c))
-
-        return 0
+    @staticmethod
+    def _chapter_title(path: Path) -> str:
+        """Read the first H1 or YAML title without scanning the chapter body."""
+        with path.open(encoding="utf-8") as source:
+            opening = source.read(16384)
+        heading = re.search(r"^# +(.+?)\s*(?:\{[^}]*\})?\s*$", opening, re.MULTILINE)
+        if heading:
+            return heading.group(1)
+        if opening.startswith("---\n"):
+            import yaml
+            try:
+                metadata = yaml.safe_load(opening.split("---", 2)[1]) or {}
+                return str(metadata.get("title", ""))
+            except (ValueError, yaml.YAMLError):
+                pass
+        return ""
 
     def find_chapter_file(self, chapter_spec: str, allow_fuzzy: bool = False) -> Optional[Path]:
-        """Find a chapter file by name, using best-match scoring.
+        """Resolve a filename, relative path, or readable chapter title.
 
-        Supports volume-prefixed names (e.g., 'vol1/intro') for disambiguation.
-        Raises AmbiguousChapterError if chapter exists in multiple volumes
-        without a volume prefix.
-
-        Matching strategy (in order of priority):
-        1. Exact stem match (e.g., 'nn_computation' → nn_computation.qmd)
-        2. Best fuzzy match scored by: starts-with > contains > partial overlap,
-           with higher coverage (query length / candidate length) preferred.
-
-        Args:
-            chapter_spec: Chapter name to search for, optionally with volume prefix
-            allow_fuzzy: If True, allow fuzzy fallback for non-exact matches.
-
-        Returns:
-            Path to the chapter file if found, None otherwise
-
-        Raises:
-            AmbiguousChapterError: If chapter exists in multiple volumes without prefix
+        Explicit volume prefixes constrain every matching stage. Exact paths
+        and stems win, then normalized titles, unique substrings, and finally
+        conservative typo matching. Ambiguous queries always list candidates.
         """
-        if not self.contents_dir.exists():
-            console.print(f"[red]Contents directory not found: {self.contents_dir}[/red]")
+        from difflib import SequenceMatcher
+
+        volume, name = self._parse_chapter_spec(chapter_spec.strip())
+        name = name.removesuffix(".qmd")
+        search_dir = self.contents_dir / volume if volume else self.contents_dir
+        if not search_dir.is_dir():
+            return None
+        candidates = [p for p in sorted(search_dir.rglob("*.qmd"))
+                      if self._get_volume_from_path(p)]
+        shared_dir = self.contents_dir / SHARED_DIR
+        if shared_dir.is_dir():
+            candidates.extend(sorted(shared_dir.rglob("*.qmd")))
+
+        def choose(matches):
+            matches = list(dict.fromkeys(matches))
+            if len(matches) > 1:
+                raise AmbiguousChapterError(chapter_spec, [
+                    p.relative_to(self.contents_dir).as_posix().removesuffix(".qmd")
+                    for p in matches
+                ])
+            return matches[0] if matches else None
+
+        # Match relative paths literally; never interpret path traversal/globs.
+        if "/" in name:
+            matches = [p for p in candidates if
+                       p.relative_to(search_dir if volume and self._get_volume_from_path(p)
+                                     else self.contents_dir).as_posix().removesuffix(".qmd") == name]
+            return choose(matches)
+        exact = [p for p in candidates if p.stem.lower() == name.lower()]
+        if exact:
+            return choose(exact)
+        if not allow_fuzzy:
             return None
 
-        # Parse volume prefix if present
-        volume_filter, chapter_name = self._parse_chapter_spec(chapter_spec)
-
-        # Determine search directory
-        if volume_filter:
-            search_dir = self.contents_dir / volume_filter
-            if not search_dir.exists():
-                console.print(f"[red]Volume directory not found: {search_dir}[/red]")
-                return None
-        else:
-            search_dir = self.contents_dir
-
-        # Try exact match first
-        exact_matches = list(search_dir.rglob(f"{chapter_name}.qmd"))
-
-        # When a volume prefix was given, also search the shared directory so that
-        # files like contents/shared/notation.qmd are resolvable as "vol1/notation".
-        if volume_filter:
-            shared_dir = self.contents_dir / SHARED_DIR
-            if shared_dir.exists():
-                exact_matches += list(shared_dir.rglob(f"{chapter_name}.qmd"))
-
-        # Filter to actual chapter files (in volume directories, not frontmatter/backmatter)
-        chapter_matches = []
-        for match in exact_matches:
-            vol = self._get_volume_from_path(match)
-            is_shared = SHARED_DIR in match.relative_to(self.contents_dir).parts
-            if vol or volume_filter or is_shared:
-                chapter_matches.append(match)
-
-        if not chapter_matches and allow_fuzzy:
-            # No exact match — score all .qmd files and pick the best
-            all_qmd_files = list(search_dir.rglob("*.qmd"))
-
-            scored = []
-            for match in all_qmd_files:
-                vol = self._get_volume_from_path(match)
-                if not (vol or volume_filter):
-                    continue
-                score = self._match_score(chapter_name, match.stem)
-                if score > 0:
-                    scored.append((score, match))
-
-            if scored:
-                # Sort by score descending
-                scored.sort(key=lambda x: x[0], reverse=True)
-                best_score = scored[0][0]
-                # Reject weak fuzzy matches to avoid incorrect chapter resolution.
-                if best_score < 2000:
-                    return None
-                # Collect all matches with the same best score
-                chapter_matches = [m for s, m in scored if s == best_score]
-
-        if not chapter_matches:
+        query = self._normalized_name(name)
+        if not query:
             return None
-
-        if len(chapter_matches) == 1:
-            return chapter_matches[0]
-
-        # Multiple matches - check if they're in different volumes (ambiguous)
-        if not volume_filter:
-            volumes_found = {}
-            for match in chapter_matches:
-                vol = self._get_volume_from_path(match)
-                if vol:
-                    if vol not in volumes_found:
-                        volumes_found[vol] = match
-
-            if len(volumes_found) > 1:
-                # Ambiguous only when the matched chapter stem is actually the same
-                # in multiple volumes (e.g., vol1/introduction and vol2/introduction).
-                stems = {m.stem for m in volumes_found.values()}
-                if len(stems) == 1:
-                    stem = next(iter(stems))
-                    locations = [f"{vol}/{stem}" for vol in sorted(volumes_found.keys())]
-                    raise AmbiguousChapterError(stem, locations)
-                # Tied fuzzy matches with different stems are not reliable.
-                return None
-
-        # Return the first match
-        return chapter_matches[0]
+        names = {p: (self._normalized_name(p.stem),
+                     self._normalized_name(self._chapter_title(p))) for p in candidates}
+        exact = [p for p, aliases in names.items() if query in aliases]
+        if exact:
+            return choose(exact)
+        partial = [p for p, aliases in names.items() if any(query in alias for alias in aliases)]
+        if partial:
+            return choose(partial)
+        # A typo must resemble most of the name; a two-letter coincidence is
+        # insufficient. Close runners-up are shown instead of chosen by order.
+        scored = sorted(((max(SequenceMatcher(None, query, alias).ratio()
+                              for alias in aliases), p) for p, aliases in names.items()),
+                        key=lambda item: (-item[0], str(item[1])))
+        if not scored or scored[0][0] < 0.82:
+            return None
+        return choose([p for score, p in scored if score >= scored[0][0] - 0.08])
 
     def get_all_chapters(self, volume: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get all chapter files with metadata.
@@ -366,7 +299,7 @@ class ChapterDiscovery:
         # Determine search directory
         if volume:
             if volume not in VOLUME_DIRS:
-                console.print(f"[red]Invalid volume: {volume}. Use 'vol1' or 'vol2'[/red]")
+                console.print(f"[red]Invalid volume: {volume}. Use 'vol1', 'vol2', 'vol3', or 'vol4'[/red]")
                 return chapters
             search_dir = self.contents_dir / volume
         else:
@@ -449,13 +382,13 @@ class ChapterDiscovery:
         console.print(table)
 
         # Show volume summary
-        vol1_count = sum(1 for ch in chapters if ch["volume"] == "vol1")
-        vol2_count = sum(1 for ch in chapters if ch["volume"] == "vol2")
+        counts = ", ".join(f"{vol}: {sum(ch['volume'] == vol for ch in chapters)}"
+                           for vol in VOLUME_DIRS)
 
         if volume:
             console.print(f"\n[dim]Found {len(chapters)} chapters in {volume}[/dim]")
         else:
-            console.print(f"\n[dim]Found {len(chapters)} chapters (vol1: {vol1_count}, vol2: {vol2_count})[/dim]")
+            console.print(f"\n[dim]Found {len(chapters)} chapters ({counts})[/dim]")
 
     def validate_chapters(self, chapter_names: List[str]) -> List[Path]:
         """Validate a list of chapter names and return their paths.
@@ -476,8 +409,8 @@ class ChapterDiscovery:
             try:
                 chapter_file = self.find_chapter_file(chapter_name, allow_fuzzy=True)
             except AmbiguousChapterError as e:
-                console.print(f"[red]Ambiguous chapter: '{e.chapter_name}' exists in multiple volumes[/red]")
-                console.print("[yellow]Please specify the volume:[/yellow]")
+                console.print(f"[red]Ambiguous chapter: {e.chapter_name}[/red]")
+                console.print("[yellow]Use a more specific title or one of these paths:[/yellow]")
                 for loc in e.locations:
                     console.print(f"  - {loc}")
                 raise

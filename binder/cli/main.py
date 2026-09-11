@@ -238,9 +238,21 @@ class MLSysBookCLI:
         no_cover = False
         print_marks = False
         remaining = []
+        explicit_volumes = {
+            f"vol{number}" for number in range(1, 5)
+            if any(arg.lower() in (f"--vol{number}", f"-{number}") for arg in args)
+        }
+        if len(explicit_volumes) > 1:
+            raise ValueError("Select only one volume for a build")
 
         for arg in args:
             lower = arg.lower()
+            # With --volN, words such as "intro" and "physical" are chapter
+            # queries, not legacy aliases that silently select a whole book.
+            if explicit_volumes and lower in ("intro", "scaling", "agentic", "physical"):
+                remaining.append(arg)
+                continue
+            previous_volume = volume
             if lower in ("--vol1", "-1", "vol1", "v1", "intro"):
                 volume = "vol1"
             elif lower in ("--vol2", "-2", "vol2", "v2", "scaling"):
@@ -275,11 +287,13 @@ class MLSysBookCLI:
                 format_type = lower
             else:
                 remaining.append(arg)
+            if previous_volume and volume != previous_volume:
+                raise ValueError("Select only one volume for a build")
 
         if format_type is None:
             format_type = "html"
 
-        chapters_arg = remaining[0] if remaining else None
+        chapters_arg = " ".join(remaining) if remaining else None
         return (
             format_type,
             volume,
@@ -313,6 +327,7 @@ class MLSysBookCLI:
             console.print("[dim]  ./binder/binder build[/dim]")
             console.print("[dim]  ./binder/binder build pdf[/dim]")
             console.print("[dim]  ./binder/binder build pdf intro,training --vol1[/dim]")
+            console.print('[dim]  ./binder/binder build pdf "causal boundary" --vol4 --skip-validate  # isolated layout proof[/dim]')
             console.print("[dim]  ./binder/binder build html --all[/dim]")
             console.print("[dim]  ./binder/binder build epub --vol1[/dim]")
             console.print("[dim]  ./binder/binder build pdf --vol1 --layout       # render Vol I, then emit auto-layout plan[/dim]")
@@ -415,8 +430,6 @@ class MLSysBookCLI:
         if chapters_arg:
             chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
             console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
-            if format_type == "html":
-                return self.build_command.build_html_only(chapter_list)
             return self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
@@ -607,14 +620,12 @@ class MLSysBookCLI:
     def handle_list_command(self, args):
         """Handle list chapters command."""
         if args and args[0].lower() in ("help", "-h", "--help"):
-            console.print("Usage: ./binder/binder list [--vol1|--vol2]", markup=False)
+            console.print("Usage: ./binder/binder list [--vol1|--vol2|--vol3|--vol4]", markup=False)
             return True
         volume = None
         if len(args) > 0:
-            if args[0] == "--vol1":
-                volume = "vol1"
-            elif args[0] == "--vol2":
-                volume = "vol2"
+            if args[0] in ("--vol1", "--vol2", "--vol3", "--vol4"):
+                volume = args[0][2:]
 
         self.chapter_discovery.show_chapters(volume=volume)
         return True
