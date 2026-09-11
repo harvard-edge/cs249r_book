@@ -94,3 +94,29 @@ Opening prose receives the drop cap.
     assert r"\lettrine{O}{pening}" in latex
     assert r"\lettrine{F}{ront}" not in latex
     assert r"\lettrine{U}{nnumbered}" not in latex
+
+
+def test_unnumbered_h1_skips_dropcap_in_default_mode():
+    latex = _render(
+        """# Notation {.unnumbered}
+
+## Subsection
+
+Prose under unnumbered section.
+"""
+    )
+
+    assert r"\lettrine" not in latex
+
+
+def test_non_letter_initial_skips_dropcap():
+    latex = _render(
+        """# Chapter
+
+## Section
+
+"Quoted text" starts this section.
+"""
+    )
+
+    assert r"\lettrine" not in latex

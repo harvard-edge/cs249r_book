@@ -112,6 +112,12 @@ local function apply_lettrine(el)
   local first_char = text:sub(1, 1)
   local rest_of_first_word = text:sub(2)
 
+  -- Ensure first character is an alphabetic letter (skip punctuation, quotes, math symbols)
+  if not first_char:match("%a") then
+    debug("  -> first character is not a letter ('" .. first_char .. "'), skipping")
+    return nil
+  end
+
   debug("  -> APPLYING DROPCAP: '" .. first_char .. "' + '" .. rest_of_first_word .. "'")
 
   -- Build the lettrine command
@@ -180,7 +186,10 @@ local function process_blocks(blocks)
         debug("Found chapter: " .. chapter_name)
         local mode = chapter_mode(block)
         debug("Chapter dropcap mode: " .. mode)
-        if mode == "chapter-opening" then
+        if is_unnumbered(block) and mode == "numbered-section" then
+          debug("H1 is unnumbered and default mode: skipping")
+          state = "done"
+        elseif mode == "chapter-opening" then
           state = "looking_for_para"
         elseif mode == "disabled" then
           state = "done"
