@@ -39,21 +39,23 @@ done
 # ── Site map ──────────────────────────────────────────────────────────────────
 # Maps mlsysbook.ai/<key>/ to the dev site path <value>/.
 # Every subsite (including the volumes) is 1:1 — top-level on both targets.
-declare -A SUBSITES=(
-  [vol1]="vol1"
-  [vol2]="vol2"
-  [tinytorch]="tinytorch"
-  [physical]="physical"
-  [kits]="kits"
-  [labs]="labs"
-  [mlsysim]="mlsysim"
-  [slides]="slides"
-  [instructors]="instructors"
-  [interviews]="interviews"
-  [staffml]="staffml"
-  [newsletter]="newsletter"
-  [community]="community"
-  [about]="about"
+SUBSITES=(
+  vol1
+  vol2
+  vol3
+  vol4
+  tinytorch
+  physical
+  kits
+  labs
+  mlsysim
+  slides
+  instructors
+  interviews
+  staffml
+  newsletter
+  community
+  about
 )
 
 # ── Compute prefix ────────────────────────────────────────────────────────────
@@ -63,18 +65,15 @@ declare -A SUBSITES=(
 if [[ "$SUBSITE" == "root" ]]; then
   SUBSITE_DEPTH=0
 else
-  # Note: under `set -u`, indexing an associative array with a missing key
-  # triggers an unbound-variable error in some bash builds. Probe with the
-  # `key in array` test instead of parameter-expansion default.
   found=0
-  for k in "${!SUBSITES[@]}"; do
+  for k in "${SUBSITES[@]}"; do
     [[ "$k" == "$SUBSITE" ]] && { found=1; break; }
   done
   if [[ "$found" -eq 0 ]]; then
     echo "❌ Unknown subsite '$SUBSITE'. Add it to SUBSITES in rewrite-dev-urls.sh." >&2
     exit 1
   fi
-  SELF_DEV_PATH="${SUBSITES[$SUBSITE]}"
+  SELF_DEV_PATH="$SUBSITE"
   # Depth = number of path segments in the dev-side path (book/vol1 → 2).
   SUBSITE_DEPTH=$(awk -F/ '{print NF}' <<< "$SELF_DEV_PATH")
 fi
@@ -122,8 +121,8 @@ find "${FIND_ARGS[@]}" | while IFS= read -r f; do
     SELF_PREFIX="$(repeat_parent_prefix "$FILE_DEPTH")"
   fi
 
-  for key in "${!SUBSITES[@]}"; do
-    dev_path="${SUBSITES[$key]}"
+  for key in "${SUBSITES[@]}"; do
+    dev_path="$key"
 
     # Self-link match is by mlsysbook.ai key, not dev_path. Previously this
     # compared dev_path to SUBSITE which silently failed for nested subsites.
@@ -131,7 +130,7 @@ find "${FIND_ARGS[@]}" | while IFS= read -r f; do
       # Self-links: mlsysbook.ai/<key>/ → current subsite root from this file.
       replace_url "https://mlsysbook.ai/${key}/" "$SELF_PREFIX" "$f"
     else
-      if [[ "$LIVE_EXTERNALS" -eq 1 && "$key" != "vol1" && "$key" != "vol2" ]]; then
+      if [[ "$LIVE_EXTERNALS" -eq 1 && "$key" != "vol1" && "$key" != "vol2" && "$key" != "vol3" && "$key" != "vol4" ]]; then
         continue
       fi
       replace_url "https://mlsysbook.ai/${key}/" "${ROOT_PREFIX}${dev_path}/" "$f"
@@ -141,7 +140,7 @@ find "${FIND_ARGS[@]}" | while IFS= read -r f; do
   # The book's release-pill metadata uses a production-root absolute path.
   # GitHub Pages serves the dev site below /cs249r_book_dev/, so make that
   # manifest reference relative to the current volume page before deployment.
-  if [[ "$SUBSITE" == "vol1" || "$SUBSITE" == "vol2" ]]; then
+  if [[ "$SUBSITE" =~ ^vol[0-9]+$ || "$SUBSITE" == "tinytorch" ]]; then
     replace_url \
       "content=\"/${SUBSITE}/release-manifest.json\"" \
       "content=\"${SELF_PREFIX}release-manifest.json\"" \

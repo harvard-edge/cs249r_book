@@ -110,7 +110,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 
 ## Volume III: Agentic Machine Learning Systems (`vol3`)
 
-15 chapters. Reading order:
+21 chapters. Reading order:
 
 | # | Kind | Path |
 |---:|---|---|
@@ -122,25 +122,32 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | frontmatter | `frontmatter/notation.qmd` |
 | 1 | chapter | `introduction/introduction.qmd` |
 |  | part | `parts/foundations_principles.qmd` |
-| 2 | chapter | `execution_descriptors/execution_descriptors.qmd` |
-| 3 | chapter | `control_topologies/control_topologies.qmd` |
-|  | part | `parts/training_adaptation_principles.qmd` |
-| 4 | chapter | `trajectory_fine_tuning/trajectory_fine_tuning.qmd` |
-| 5 | chapter | `reinforcement_learning/reinforcement_learning.qmd` |
-| 6 | chapter | `test_time_search/test_time_search.qmd` |
+| 2 | chapter | `01_processor/01_processor.qmd` |
+| 3 | chapter | `02_deliberation/02_deliberation.qmd` |
 |  | part | `parts/serving_memory_principles.qmd` |
-| 7 | chapter | `context_working_sets/context_working_sets.qmd` |
-| 8 | chapter | `prefix_caching_paging/prefix_caching_paging.qmd` |
-| 9 | chapter | `trajectory_scheduling/trajectory_scheduling.qmd` |
+| 4 | chapter | `03_working_sets/03_working_sets.qmd` |
+| 5 | chapter | `04_virtual_memory/04_virtual_memory.qmd` |
+| 6 | chapter | `05_episodic_memory/05_episodic_memory.qmd` |
+| 7 | chapter | `06_checkpointing/06_checkpointing.qmd` |
+| 8 | chapter | `07_scheduling/07_scheduling.qmd` |
 |  | part | `parts/security_isolation_principles.qmd` |
-| 10 | chapter | `tool_interfaces/tool_interfaces.qmd` |
-| 11 | chapter | `sandboxing_isolation/sandboxing_isolation.qmd` |
-| 12 | chapter | `verification_recovery/verification_recovery.qmd` |
+| 9 | chapter | `08_actuation/08_actuation.qmd` |
+| 10 | chapter | `09_interrupts/09_interrupts.qmd` |
+| 11 | chapter | `10_virtualization/10_virtualization.qmd` |
+|  | part | `parts/training_adaptation_principles.qmd` |
+| 12 | chapter | `11_data_flywheel/11_data_flywheel.qmd` |
+| 13 | chapter | `12_sft/12_sft.qmd` |
+| 14 | chapter | `13_rlvr/13_rlvr.qmd` |
 |  | part | `parts/scale_operations_principles.qmd` |
-| 13 | chapter | `multi_agent_coordination/multi_agent_coordination.qmd` |
-| 14 | chapter | `telemetry_evaluation/telemetry_evaluation.qmd` |
-| 15 | chapter | `conclusion/conclusion.qmd` |
+| 15 | chapter | `14_multi_agent/14_multi_agent.qmd` |
+| 16 | chapter | `15_observability/15_observability.qmd` |
+| 17 | chapter | `16_tokenomics/16_tokenomics.qmd` |
+| 18 | chapter | `conclusion/conclusion.qmd` |
+| 19 | chapter | `appendices/app_a_reference_architecture.qmd` |
+| 20 | chapter | `appendices/app_b_tool_design.qmd` |
+| 21 | chapter | `appendices/app_c_failure_taxonomy.qmd` |
 |  | backmatter | `backmatter/appendix_math.qmd` |
+|  | backmatter | `backmatter/glossary/glossary.qmd` |
 
 ## Volume IV: Physical AI Systems (`vol4`)
 
@@ -150,38 +157,35 @@ and `binder/tests/test_content_structure.py` enforces it.
 |---:|---|---|
 |  | frontmatter | `frontmatter/dedication.qmd` |
 |  | frontmatter | `frontmatter/author_note.qmd` |
-|  | frontmatter | `frontmatter/about.qmd` |
 |  | frontmatter | `frontmatter/about_author.qmd` |
 |  | frontmatter | `frontmatter/prerequisites.qmd` |
 |  | frontmatter | `frontmatter/syllabus.qmd` |
 |  | frontmatter | `frontmatter/acknowledgements.qmd` |
 |  | frontmatter | `frontmatter/ai_use.qmd` |
 |  | frontmatter | `frontmatter/notation.qmd` |
-| 1 | chapter | `boundary/boundary.qmd` |
+| 1 | chapter | `01_boundary/01_boundary.qmd` |
 |  | part | `parts/anatomy_principles.qmd` |
-| 2 | chapter | `body/body.qmd` |
-| 3 | chapter | `nervous/nervous.qmd` |
-| 4 | chapter | `brain/brain.qmd` |
+| 2 | chapter | `02_body/02_body.qmd` |
+| 3 | chapter | `03_nervous/03_nervous.qmd` |
+| 4 | chapter | `04_brain/04_brain.qmd` |
 |  | part | `parts/teaching_principles.qmd` |
-| 5 | chapter | `data/data.qmd` |
-| 6 | chapter | `training/training.qmd` |
-| 7 | chapter | `evaluation/evaluation.qmd` |
+| 5 | chapter | `05_data/05_data.qmd` |
+| 6 | chapter | `06_training/06_training.qmd` |
+| 7 | chapter | `07_evaluation/07_evaluation.qmd` |
 |  | part | `parts/running_principles.qmd` |
-| 8 | chapter | `perception/perception.qmd` |
-| 9 | chapter | `memory/memory.qmd` |
-| 10 | chapter | `intent/intent.qmd` |
-| 11 | chapter | `planning/planning.qmd` |
-| 12 | chapter | `enforcement/enforcement.qmd` |
-| 13 | chapter | `placement/placement.qmd` |
+| 8 | chapter | `08_perception/08_perception.qmd` |
+| 9 | chapter | `09_memory/09_memory.qmd` |
+| 10 | chapter | `10_intent/10_intent.qmd` |
+| 11 | chapter | `11_planning/11_planning.qmd` |
+| 12 | chapter | `12_enforcement/12_enforcement.qmd` |
+| 13 | chapter | `13_placement/13_placement.qmd` |
 |  | part | `parts/governing_principles.qmd` |
-| 14 | chapter | `intervention/intervention.qmd` |
-| 15 | chapter | `verification/verification.qmd` |
-| 16 | chapter | `release/release.qmd` |
-| 17 | chapter | `frontier/frontier.qmd` |
+| 14 | chapter | `14_intervention/14_intervention.qmd` |
+| 15 | chapter | `15_verification/15_verification.qmd` |
+| 16 | chapter | `16_release/16_release.qmd` |
+| 17 | chapter | `17_frontier/17_frontier.qmd` |
 |  | backmatter | `backmatter/references.qmd` |
-|  | backmatter | `backmatter/appendix_math.qmd` |
-|  | backmatter | `backmatter/appendix_hardware.qmd` |
-|  | backmatter | `backmatter/appendix_heterogeneous_soc.qmd` |
-|  | backmatter | `backmatter/appendix_standards.qmd` |
-|  | backmatter | `backmatter/appendix_lexicon.qmd` |
+|  | backmatter | `backmatter/appendix_ml.qmd` |
+|  | backmatter | `backmatter/appendix_control.qmd` |
+|  | backmatter | `backmatter/appendix_systems.qmd` |
 |  | backmatter | `backmatter/glossary/glossary.qmd` |

@@ -155,7 +155,7 @@ def test_units_are_registered():
         if not isinstance(unit, type(ureg.byte)):  # pint.Unit
             FAILURES.append(f"  ✗ {name} is {type(unit).__name__}, not a registered pint Unit")
             ok = False
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 2. Data Unit Conversions ─────────────────────────────────────────
@@ -182,7 +182,7 @@ def test_data_units():
     ok &= check("2039 GB/s -> GB/s", (2039 * GB / second).to(GB / second).magnitude, 2039.0)
     ok &= check("1 TB/hr -> TB/hr", (1 * TB / hour).to(TB / hour).magnitude, 1.0)
     ok &= check("3.35 TB/s -> GB/s", (3.35 * TB / second).to(GB / second).magnitude, 3350.0)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 3. FLOP Unit Conversions ─────────────────────────────────────────
@@ -205,7 +205,7 @@ def test_flop_units():
     # Model FLOPs
     ok &= check("ResNet 8.2 GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 8.2)
     ok &= check("YOLOv8-nano 8.7 GFLOPs", YOLOV8_NANO_FLOPs.to(GFLOPs).magnitude, 8.7)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 4. Parameter Unit Conversions ────────────────────────────────────
@@ -215,7 +215,7 @@ def test_param_units():
     ok = True
     ok &= check("ResNet 25.6 Mparam", RESNET50_PARAMS.to(Mparam).magnitude, 25.6)
     ok &= check("GPT-3 175000 Mparam", GPT3_PARAMS.to(Mparam).magnitude, 175000.0)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 5. Network Unit Conversions ──────────────────────────────────────
@@ -225,7 +225,7 @@ def test_network_units():
     ok = True
     ok &= check("10 Gbps -> Gbps", Systems.Fabrics.Ethernet_10G.bandwidth.to(Gbps).magnitude, 10.0)
     ok &= check("10 Gbps -> GB/s", Systems.Fabrics.Ethernet_10G.bandwidth.to(GB / second).magnitude, 1.25)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 6. Memory Bandwidth Conversions ─────────────────────────────────
@@ -238,7 +238,7 @@ def test_memory_bandwidth():
     ok &= check("V100 900 GB/s", V100_MEM_BW.to(GB / second).magnitude, 900.0)
     ok &= check("H100 3350 GB/s", H100_MEM_BW.to(GB / second).magnitude, 3350.0)
     ok &= check("Mobile 51.2 GB/s", MOBILE_NPU_MEM_BW.to(GB / second).magnitude, 51.2)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 7. Memory Capacity Conversions ──────────────────────────────────
@@ -249,7 +249,7 @@ def test_memory_capacity():
     ok &= check("A100 80 GiB", A100_MEM_CAPACITY.to(GiB).magnitude, 80.0)
     ok &= check("V100 32 GiB", V100_MEM_CAPACITY.to(GiB).magnitude, 32.0)
     ok &= check("H100 80 GiB", H100_MEM_CAPACITY.to(GiB).magnitude, 80.0)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 8. Derived Calculation Sanity ────────────────────────────────────
@@ -283,7 +283,7 @@ def test_derived_values():
     ok &= check("A100 ResNet compute_ms small", result["compute_ms"], 0.026, tol=0.1)
     ok &= check("A100 ResNet memory_ms small", result["memory_ms"], 0.025, tol=0.1)
 
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 9. Sentinel: No Suspiciously Large Magnitudes ────────────────────
@@ -311,7 +311,7 @@ def test_no_large_raw_magnitudes():
                 f"  ✗ {label}: magnitude {value} exceeds {threshold} — likely raw base units!"
             )
             ok = False
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 10. Time Unit Conversions ──────────────────────────────────────────
@@ -325,7 +325,7 @@ def test_time_units():
     ok &= check("1 MS -> MS", (1 * MS).to(MS).magnitude, 1.0)
     ok &= check("1000 US -> MS", (1000 * US).to(MS).magnitude, 1.0)
     ok &= check("1000 NS -> US", (1000 * NS).to(US).magnitude, 1.0)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 11. Extended GPU Specs ───────────────────────────────────────────
@@ -368,7 +368,7 @@ def test_extended_gpu_specs():
     # T4
     ok &= check("T4 TDP", T4_TDP.to(watt).magnitude, 70.0)
 
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 12. Interconnect Conversions ─────────────────────────────────────
@@ -385,7 +385,7 @@ def test_interconnect_specs():
     ok &= check("IB NDR", INFINIBAND_NDR_BW.to(Gbps).magnitude, 400.0)
     ok &= check("100G net", Systems.Fabrics.Ethernet_100G.bandwidth.to(Gbps).magnitude, 100.0)
     ok &= check("100G -> GB/s", Systems.Fabrics.Ethernet_100G.bandwidth.to(GB / second).magnitude, 12.5)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 13. Energy Conversions ───────────────────────────────────────────
@@ -407,7 +407,7 @@ def test_energy_specs():
     ok &= check("DRAM >> compute", mem.DRAM.energy_per_access.magnitude / op.FlopFp32.energy.magnitude, 173.0, tol=0.05)
     ok &= check("L2 > L1 > reg",
                  mem.L2.energy_per_access.magnitude / mem.L1.energy_per_access.magnitude, 4.0)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 14. Model Spec Conversions ───────────────────────────────────────
@@ -421,7 +421,7 @@ def test_model_specs():
     ok &= check("Llama3-8B 8030 Mparam", LLAMA3_8B_PARAMS.to(Mparam).magnitude, 8030.0)
     ok &= check("BERT 22 GFLOPs", BERT_BASE_FLOPs.to(GFLOPs).magnitude, 22.0)
     ok &= check("MobileNetV2 0.6 GFLOPs", MOBILENETV2_FLOPs.to(GFLOPs).magnitude, 0.6)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 15. Ridge Point Derivations ──────────────────────────────────────
@@ -440,7 +440,7 @@ def test_ridge_points():
     ok &= check("V100 ridge ~139", ridge(V100_FLOPS_FP16_TENSOR, V100_MEM_BW), 139.0, tol=0.02)
     ok &= check("A100 ridge ~153", ridge(A100_FLOPS_FP16_TENSOR, A100_MEM_BW), 153.0, tol=0.02)
     ok &= check("H100 ridge ~295", ridge(H100_FLOPS_FP16_TENSOR, H100_MEM_BW), 295.0, tol=0.02)
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 16. Formula Helper Functions ─────────────────────────────────────
@@ -473,7 +473,7 @@ def test_formula_helpers():
         FAILURES.append(f"  ✗ fmt_sci() format: got '{result}', expected Unicode scientific notation (e.g., 4.10 × 10⁹)")
         ok = False
 
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 17. Robustness: Wrong-Unit HardwareNode ──────────────────────────
@@ -498,7 +498,7 @@ def test_hardware_wrong_unit_raises():
     except Exception as e:
         FAILURES.append(f"  ✗ HardwareNode construction failed unexpectedly: {e}")
         ok = False
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 18. Robustness: model_memory() Wrong Units ───────────────────────
@@ -513,7 +513,7 @@ def test_model_memory_wrong_units():
         ok = False
     except (pint.DimensionalityError, ValueError):
         pass  # Expected
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 19. Fleet Formulas: Quantity Inputs + Quantity Returns ────────────
@@ -558,7 +558,7 @@ def test_fleet_formulas_accept_quantities():
         FAILURES.append(f"  ✗ calc_mtbf_cluster must return Quantity[hour], got {mtbf.units}")
         ok = False
 
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # ── 20. Failure Probability: Mixed-Type Guard ─────────────────────────
@@ -578,7 +578,7 @@ def test_failure_probability_mixed_types():
         ok = False
     except TypeError:
         pass  # Expected
-    return ok
+    assert ok, f"Failures: {FAILURES}"
 
 
 # NOTE: tests for fmt_full() and fmt_split() were retired alongside the
@@ -618,8 +618,13 @@ if __name__ == "__main__":
     all_ok = True
     for name, fn in tests:
         FAILURES.clear()
-        result = fn()
-        status = "PASS" if result else "FAIL"
+        try:
+            fn()
+            status = "PASS"
+            result = True
+        except AssertionError:
+            status = "FAIL"
+            result = False
         print(f"[{status}] {name}")
         for f in FAILURES:
             print(f)

@@ -45,8 +45,11 @@ def _skip_file(path: Path, root: Path) -> bool:
 
 
 def _iter_qmd_files(root: Path) -> list[Path]:
-    contents = root  / "books"
-    if not contents.is_dir():
+    if (root / "books").is_dir():
+        contents = root / "books"
+    elif root.is_dir():
+        contents = root
+    else:
         return []
     return sorted(
         p for p in contents.rglob("*.qmd")

@@ -155,7 +155,6 @@ As structured in modern embodied artificial intelligence (@fig-vla-taxonomy and 
    Whether using autoregressive tokenization or continuous generative policies, the critical insight is that these decoders produce unprivileged proposals, not guaranteed truths. They output candidate trajectories that synthesize multi-modal constraints, but lack strict mathematical guarantees.
    * *Vision-Language-Navigation (VLN) Decoders:* On mobile robots (Class 1), the decoder emits navigation intents—either selecting nodes on a topological spatial graph, predicting metric waypoint offsets $(\Delta x, \Delta y)$, or outputting continuous forward velocity and yaw rate setpoints $(v_t, \omega_t)$ to guide the chassis along semantic frontiers (@fig-vln-navigation).
    * *Vision-Language-Action (VLA) Decoders:* On articulated manipulators (Class 2), the decoder predicts continuous end-effector or joint trajectory setpoints $\hat{\mathbf{a}}_t \in \mathbb{R}^{d_a}$ (comprising 3D Cartesian position deltas $\Delta \mathbf{p}$, rotation increments $\Delta \boldsymbol{\theta}$, and binary gripper states). To overcome the memory-wall bottleneck of single-step autoregression—where waiting to fetch neural network weights from memory for every individual micro-movement causes the physical robot arm to stutter—the decoder predicts continuous **action chunks**\index{Action Chunks} ($\hat{\mathbf{a}}_{t:t+H}$) spanning $H = 16\text{--}64$ future steps using diffusion policy heads or continuous spline generators. Physically, this is akin to planning a fluid, sweeping motion all at once rather than pausing to calculate each millimeter of the arc.
-
 4. **The Privilege Boundary (Isolation from Actuators):**
    Crucially, whether the model is a VLN mobility planner or a VLA manipulation policy, its output is strictly an **unprivileged candidate proposal**\index{Unprivileged Candidate Proposal} ($p_t$). Building on the causal boundary established in @sec-boundary-1-1, the foundation model operates in unprivileged user space—a restricted software sandbox—on the application processor (MPU) and possesses **zero direct hardware authority** to write pulse-width modulation (PWM) registers or physically switch current into the motor coils.
 
@@ -226,16 +225,16 @@ The intent layer cannot execute this directive in a single leap. Using embodied 
 
 Rather than commanding actuator voltages directly, the intent stage packages each subgoal into a formal, cryptographically bounded **intent lease**\index{Intent Lease} ($\mathcal{L}_{\text{intent}}$). An intent lease, structured according to the schema in @tbl-03-intent-lease-schema, specifies the active target entity, defines a bounded spatial corridor outside which motion is unauthorized, and establishes an explicit expiration timestamp ($t_{\text{expire}}$).
 
-| Field Name             | Type            | Unit                   | Description & Structural Invariants                                                                              |
-|:-----------------------|:----------------|:-----------------------|:-----------------------------------------------------------------------------------------------------------------|
-| `lease_id`             | `uint64_t`      | —                      | Monotonically increasing 64-bit sequence identifier                                                              |
-| `target_entity_id`     | `uint32_t`      | —                      | Hash of target entity in persistent spatial memory                                                               |
+| Field Name             | Type            | Unit                   | Description & Structural Invariants                                                                                                         |
+|:-----------------------|:----------------|:-----------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|
+| `lease_id`             | `uint64_t`      | —                      | Monotonically increasing 64-bit sequence identifier                                                                                         |
+| `target_entity_id`     | `uint32_t`      | —                      | Hash of target entity in persistent spatial memory                                                                                          |
 | `pose_target_se3`      | `float32[4][4]` | $\text{m}, \text{rad}$ | Valid $\text{SE}(3)$ pose matrix: $\mathbf{R} \in \text{SO}(3), \det(\mathbf{R})=1, \mathbf{p} \in \mathbb{R}^3$, bottom row $[0, 0, 0, 1]$ |
-| `spatial_corridor_box` | `float32[6]`    | $\text{m}$             | Authorized 3D bounding box $[\mathbf{p}_{\min}, \mathbf{p}_{\max}] \in \mathbb{R}^6$                             |
-| `t_generated_ns`       | `uint64_t`      | $\text{ns}$            | PTP monotonic hardware timestamp at deliberation completion                                                      |
-| `t_expire_ns`          | `uint64_t`      | $\text{ns}$            | Hard expiration timestamp; enforces $t_{\text{expire}} - t_{\text{gen}} \le \tau_{\text{valid}}$                 |
-| `max_permissible_jerk` | `float32`       | $\text{m/s}^3$         | Maximum allowable end-effector / joint jerk magnitude                                                            |
-| `hmac_signature`       | `uint8_t[32]`   | bytes                  | SHA-256 deliberation cryptographic contract signature                                                            |
+| `spatial_corridor_box` | `float32[6]`    | $\text{m}$             | Authorized 3D bounding box $[\mathbf{p}_{\min}, \mathbf{p}_{\max}] \in \mathbb{R}^6$                                                        |
+| `t_generated_ns`       | `uint64_t`      | $\text{ns}$            | PTP monotonic hardware timestamp at deliberation completion                                                                                 |
+| `t_expire_ns`          | `uint64_t`      | $\text{ns}$            | Hard expiration timestamp; enforces $t_{\text{expire}} - t_{\text{gen}} \le \tau_{\text{valid}}$                                            |
+| `max_permissible_jerk` | `float32`       | $\text{m/s}^3$         | Maximum allowable end-effector / joint jerk magnitude                                                                                       |
+| `hmac_signature`       | `uint8_t[32]`   | bytes                  | SHA-256 deliberation cryptographic contract signature                                                                                       |
 
 : **Intent Lease Contract Schema**: Binary layout of the intent lease payload ($\mathcal{L}_{\text{intent}}$). {#tbl-03-intent-lease-schema tbl-colwidths="[20,18,22,40]"}
 
@@ -345,35 +344,101 @@ The complete operational loop spanning intent reasoning, action chunk synthesis,
 \end{algorithm}
 ```
 
+```{python}
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt_params,
+    fmt_memory,
+    fmt_bandwidth,
+    fmt_latency,
+    fmt_time,
+    fmt_qty,
+    fmt_int,
+    fmt_display_math,
+    check,
+)
+
+class ActionChunkingLPDDR5:
+    """Memory wall and action chunking amortization on an embedded physical AI SoC."""
+
+    # LOAD
+    params = 7 * Bparam
+    bytes_per_param = 2 * (byte / param)
+    b_peak = 204.8 * (GB / second)
+    bus_efficiency = 0.70
+    chunk_horizon = 32
+
+    # EXECUTE
+    weight_mem = memory_from_params(params, bytes_per_param)
+    b_sustained = b_peak * bus_efficiency
+    t_stream = transfer_time(weight_mem, b_sustained).to(millisecond)
+    f_single = (1.0 / t_stream.to(second)).to(ureg.hertz)
+    tau_step = (t_stream / chunk_horizon).to(millisecond)
+    f_effective = (1.0 / tau_step.to(second)).to(ureg.hertz)
+
+    # GUARD
+    check(abs(weight_mem.to(GB).magnitude - 14.0) < 0.1, f"Unexpected weight footprint: {weight_mem}")
+    check(abs(b_sustained.to(GB / second).magnitude - 143.36) < 0.1, f"Unexpected sustained bandwidth: {b_sustained}")
+    check(abs(t_stream.to(millisecond).magnitude - 97.66) < 0.2, f"Unexpected streaming time: {t_stream}")
+    check(abs(f_single.magnitude - 10.24) < 0.1, f"Unexpected single frequency: {f_single}")
+    check(abs(tau_step.to(millisecond).magnitude - 3.05) < 0.1, f"Unexpected step latency: {tau_step}")
+    check(abs(f_effective.magnitude - 327.68) < 1.0, f"Unexpected effective frequency: {f_effective}")
+
+    # OUTPUT
+    params_str = fmt_params(params, precision=0)
+    weight_mem_str = fmt_memory(weight_mem, unit=GB, precision=0)
+    b_peak_str = fmt_bandwidth(b_peak, unit=GB / second, precision=1)
+    b_sustained_str = fmt_bandwidth(b_sustained, unit=GB / second, precision=1)
+    t_stream_ms_str = fmt_latency(t_stream, unit=millisecond, precision=1)
+    t_stream_s_str = fmt_time(t_stream.to(second), 'second', precision=4)
+    f_single_str = fmt_qty(f_single, ureg.hertz, precision=1)
+    chunk_horizon_str = fmt_int(chunk_horizon)
+    tau_step_str = fmt_latency(tau_step, unit=millisecond, precision=2)
+    f_effective_str = fmt_qty(f_effective, ureg.hertz, precision=1)
+
+    t_stream_display_math = fmt_display_math(rf"t_{{\text{{stream}}}} = \frac{{{weight_mem_str}}}{{{b_sustained_str}}} \approx {t_stream_ms_str}")
+    f_single_display_math = fmt_display_math(
+        rf"f_{{\text{{single}}}} = \frac{{1}}{{t_{{\text{{stream}}}}}} \approx \frac{{1}}{{{t_stream_s_str}}} \approx {f_single_str}"
+    )
+    tau_step_display_math = fmt_display_math(
+        rf"\tau_{{\text{{step}}}} = \frac{{t_{{\text{{stream}}}}}}{{H}} = \frac{{{t_stream_ms_str}}}{{{chunk_horizon_str}\text{{ steps}}}} \approx {tau_step_str}\text{{/step}}"
+    )
+    f_effective_display_math = fmt_display_math(
+        rf"f_{{\text{{effective}}}} = \frac{{1}}{{\tau_{{\text{{step}}}}}} \approx {f_effective_str}\text{{ (amortized)}}"
+    )
+```
+
 ::: {#nbk-brain-lpddr5-memory-wall-bottleneck-action-chunking .callout-notebook title="The LPDDR5 memory-wall bottleneck and action chunking speedup"}
 How does Action Chunking overcome the memory bus bottleneck on an embedded physical AI compute module?
 
 *1. The single-token memory bottleneck.*
-Consider a 7-billion parameter Vision-Language-Action (VLA) policy stored in 16-bit precision (FP16) on an embedded edge System-on-Chip (e.g., a canonical heterogeneous SoC with a 256-bit LPDDR5 interface):
+Consider a `{python} ActionChunkingLPDDR5.params_str` Vision-Language-Action (VLA) policy stored in 16-bit precision (FP16) on an embedded edge System-on-Chip (e.g., a canonical heterogeneous SoC with a 256-bit LPDDR5 interface):
 
-- Weight footprint: $M_{\text{weights}} = 7 \times 10^9 \text{ params} \times 2\text{ bytes} = 14.0\text{ GB}$.
-- Theoretical memory bandwidth: $B_{\text{peak}} = 204.8\text{ GB/s}$.
-- Realistic sustained DRAM bandwidth (accounting for $\sim 70\%$ bus scheduling efficiency and row-buffer turnaround delays, the physical time required to close one memory bank page and open another): $B_{\text{sustained}} \approx 143.4\text{ GB/s}$.
+- Weight footprint: $M_{\text{weights}} = 7 \times 10^9 \text{ params} \times 2\text{ bytes} \approx$ `{python} ActionChunkingLPDDR5.weight_mem_str`.
+- Theoretical memory bandwidth: $B_{\text{peak}} =$ `{python} ActionChunkingLPDDR5.b_peak_str`.
+- Realistic sustained DRAM bandwidth (accounting for $\sim 70\%$ bus scheduling efficiency and row-buffer turnaround delays, the physical time required to close one memory bank page and open another): $B_{\text{sustained}} \approx$ `{python} ActionChunkingLPDDR5.b_sustained_str`.
 
 Minimum streaming latency to fetch the weights from DRAM across the silicon bus once:
-$$t_{\text{stream}} = \frac{14.0\text{ GB}}{143.4\text{ GB/s}} \approx 97.6\text{ ms}$$
+`{python} ActionChunkingLPDDR5.t_stream_display_math`
 
 Maximum attainable control frequency for single-step autoregressive token generation:
-$$f_{\text{single}} = \frac{1}{t_{\text{stream}}} \approx \frac{1}{0.0976\text{ s}} \approx 10.2\text{ Hz}$$
+`{python} ActionChunkingLPDDR5.f_single_display_math`
 When accounting for vision transformer (ViT) image tokenization ($15\text{ ms}$) and KV-cache lookups, live single-step frequency drops to $1\text{--}5\text{ Hz}$. This is far too slow to stabilize a robotic limb or mobile chassis without severe mechanical stuttering.
 
 *2. The action chunking amortization.*
-Instead of predicting one action step per DRAM weight sweep, the policy generates an action chunk of $H = 32$ future time steps ($\Delta t = 20\text{ ms}$, spanning a $640\text{ ms}$ trajectory horizon) in a single neural forward pass.
+Instead of predicting one action step per DRAM weight sweep, the policy generates an action chunk of $H =$ `{python} ActionChunkingLPDDR5.chunk_horizon_str` future time steps ($\Delta t = 20\text{ ms}$, spanning a $640\text{ ms}$ trajectory horizon) in a single neural forward pass.
 
-- Number of weight memory sweeps: 1 sweep ($97.6\text{ ms}$).
+- Number of weight memory sweeps: 1 sweep (`{python} ActionChunkingLPDDR5.t_stream_ms_str`).
 - Parallel matrix multiplications across $H$ steps reuse weights resident in on-chip SRAM/caches, elevating arithmetic intensity from $I \approx 1.0\text{ FLOP/byte}$ to $I \ge 65\text{ FLOP/byte}$. This dataflow mirrors the microarchitectural evolution of dedicated neural accelerators, such as Google's Tensor Processing Units (TPUv1 through TPUv4) [@jouppi2017; @jouppi2023], which utilize 2D systolic arrays with stationary weight or output registers to stream operands directly between neighboring arithmetic processing elements (PEs), eliminating repetitive DRAM round-trips.
 - Amortized compute latency per control step:
-$$\tau_{\text{step}} = \frac{t_{\text{stream}}}{H} = \frac{97.6\text{ ms}}{32\text{ steps}} \approx 3.05\text{ ms/step}$$
+`{python} ActionChunkingLPDDR5.tau_step_display_math`
 
 *3. Physical AI systems impact.*
-By amortizing weight streaming across the temporal chunk horizon, the effective control generation rate climbs from $10.2\text{ Hz}$ to:
-$$f_{\text{effective}} = \frac{1}{\tau_{\text{step}}} \approx 328\text{ Hz (amortized)}$$
-The embedded compute module synthesizes a new 32-step chunk in the background (e.g., at $5\text{--}10\text{ Hz}$), providing a continuous stream of overlapping waypoints to the $1000\text{ Hz}$ spline interpolator while dedicated host CPU cores and real-time MCUs retain over $80\%$ spare execution margin for hard real-time safety monitoring and bus arbitration.
+By amortizing weight streaming across the temporal chunk horizon, the effective control generation rate climbs from `{python} ActionChunkingLPDDR5.f_single_str` to:
+`{python} ActionChunkingLPDDR5.f_effective_display_math`
+The embedded compute module synthesizes a new `{python} ActionChunkingLPDDR5.chunk_horizon_str`-step chunk in the background (e.g., at $5\text{--}10\text{ Hz}$), providing a continuous stream of overlapping waypoints to the $1000\text{ Hz}$ spline interpolator while dedicated host CPU cores and real-time MCUs retain over $80\%$ spare execution margin for hard real-time safety monitoring and bus arbitration.
 :::
 
 ::: {#psp-brain-embodied-cognition .callout-perspective title="Embodied cognition guidelines"}
@@ -423,25 +488,25 @@ As detailed in @tbl-03-calibration-degradation, under severe distribution shift,
 
 When an agent operates in ambiguous sensory environments, discrete classification heuristics can oscillate rapidly across consecutive time steps. In physical manipulation, perceptual chattering injects high-frequency direction reversals into trajectory planners, commanding violent, stuttering torque oscillations that physically tear gears apart because the heavy mechanical actuators cannot change direction as rapidly as the software changes its mind.[^fn-inc-uber-tempe]
 
-Building on the analysis of the Tempe collision established in @sec-tempe-crash, physical bodies cannot tolerate discrete cognitive chattering. Robust sensorimotor architectures must use continuous latent representations and multi-step action chunking to maintain kinodynamic trajectory smoothness across ambiguous perceptual states.
+Building on the analysis of the Tempe collision established in @sec-boundary-1-6, physical bodies cannot tolerate discrete cognitive chattering. Robust sensorimotor architectures must use continuous latent representations and multi-step action chunking to maintain kinodynamic trajectory smoothness across ambiguous perceptual states.
 
 ### Temporal expiration of intent {.unnumbered}
 
 Because physical reality is continuously dynamic, a cognitive thought is valid only for a finite duration ($\tau_{\text{valid}}$). If a high-level vision-language model requires $300\text{ ms}$ to deliberate, the physical state of moving obstacles, robotic arms, or chemical reactor valves has already evolved by the time the plan is ready. If downstream communication or execution is delayed, acting upon an expired intent lease means commanding the physical body based on an obsolete mental representation of the universe.
 
-::: {#ws-brain-williston-tesla .callout-war-story title="The Williston Tesla Autopilot collision (2016)"}
-**Context**: On May 7, 2016, near Williston, Florida, a Tesla Model S operating under Autopilot encountered a refrigerated tractor-semitrailer crossing an uncontrolled highway intersection. The vehicle's forward collision warning and automatic emergency braking functions relied on a radar and camera fusion system designed primarily to mitigate front-to-rear collisions, not crossing traffic or highway-speed impacts.
+::: {#ws-brain-drc-2015-deliberation-fall .callout-war-story title="The DARPA robotics challenge deliberation falls (2015)"}
+**Context**: During the 2015 DARPA Robotics Challenge Finals, 23 international robotics teams fielded full-scale humanoid robots to execute complex physical disaster-response tasks (valve turning, debris clearing, door opening) under degraded communication links [@krotkov2017darpa].
 
-**Failure mode**: The automation carried no representation of its own operational boundary, so the absence of a detection was indistinguishable from a clear road. Because the perception system held uninhibited authority over the vehicle's speed controller without independent geometric occupancy verification, the driving policy proceeded as though the path were clear. It maintained full cruise velocity ($74\text{ mph}$), commanding continuous torque to the drive inverters without initiating pre-collision braking or alerting the driver. The vehicle struck the semitrailer at full speed ($33\text{ m/s}$), resulting in a fatal collision where the trailer penetrated directly into the passenger cabin [@ntsb2017tesla] (see @fig-03-real-ntsb-williston-crash).
+**Mechanism**: High-level deliberate motion planners required hundreds of milliseconds to several seconds to compute whole-body inverse kinematics and trajectory optimization solutions. When foot placement or contact slipped, high-level planners stalled in compute cycles or emitted trajectory updates out of phase with physical pendulum dynamics ($\tau_{\text{fall}} \approx \sqrt{L/g} \approx 300\text{ ms}$). Because low-level motor controllers lacked autonomous balance reflexes and held stale joint setpoints, the control loops failed to catch the falling robots.
 
-**Systems lesson**: A learned component cannot certify its own perceptual truth, and it cannot report that the situation it is in was never inside its design envelope. Both failures are silent, and both present downstream as an empty obstacle list. Unvalidated perception proposals must never exercise uninhibited execution authority over vehicle kinetic energy ($E_k = \frac{1}{2} m v^2 \approx 1.14\text{ MJ}$) without independent, deterministic geometric boundary validation.
+**Impact**: Multiple humanoid platforms suffered catastrophic, unarrested falls onto asphalt and concrete—fracturing titanium limbs, severing pressurized hydraulic lines, and destroying mechanical actuators on live television.
+
+**Response**: Successful teams (such as Team KAIST's winning DRC-Hubo) enforced strict proposal-permission decoupling: low-level zero-moment point (ZMP) reflexes and dynamic balance loops ran deterministically at $1000\text{ Hz}$ on bare-metal controllers, treating high-level motion plans strictly as unprivileged candidate proposals that expired automatically if not continuously refreshed.
+
+**Systems lesson**: Deliberative cognition is orders of magnitude too slow to stabilize an underactuated physical body in real time. If high-level neural deliberation hangs, stalls, or exceeds its compute budget, the physical machine must not freeze in an open-loop posture or act on stale intent. The nervous system must enforce proposal-permission decoupling: deterministic reflex monitors running at high frequencies retain exclusive execution authority, revoking authority the instant a deliberative lease expires.
 :::
 
-::: {#fig-03-real-ntsb-williston-crash fig-env="figure" fig-pos="t" fig-cap="**The 2016 Williston Tesla Autopilot Collision (NTSB Accident Investigation)**: Official NTSB collision documentation showing the physical aftermath of unverified perception authority. Left: The refrigerated tractor-semitrailer, highlighting the lateral underride impact zone near the rear tandem axles. Right: The Tesla Model S, showing the sheared A-pillars, windshield, and roof structure resulting from underride penetration at $74\text{ mph}$ ($33\text{ m/s}$). The forward perception system failed to classify the crossing obstacle, and without an independent geometric boundary monitor, the driving policy maintained full cruise velocity into impact. (Source: National Transportation Safety Board / Florida Highway Patrol, Public Domain)." fig-alt="Official NTSB collision documentation showing the physical aftermath of unverified perception authority. Left: The refrigerated tractor-semitrailer, highlighting the lateral underride impact zone near the rear tandem axles. Right: The Tesla Model S, showing the sheared A-pillars, windshield, and roof structure resulting from underride penetration at 74 mph (33 m/s)."}
-![](images/png/fig03_real_ntsb_williston_crash.png){width="90%"}
-:::
-
-To prevent perceptual omissions from escalating into catastrophic physical collisions, the autonomy architecture must separate proposal generation from execution permission.[^fn-inc-tesla-williston]
+To prevent deliberative latency and stale proposals from escalating into catastrophic physical falls, the autonomy architecture must separate proposal generation from execution permission.[^fn-inc-drc-2015]
 
 ### The architectural resolution: The proposal–permission principle {.unnumbered}
 
@@ -470,6 +535,14 @@ The foundational trade-offs between these paradigms are synthesized in @tbl-03-c
 | **Failure Modes & Fallback**      | Boolean branch crashes; failure on uncataloged objects; rule exhaustion                            | Semantic hallucinations; out-of-distribution overconfidence; cognitive drift                                 | **Deterministic Fallback:** Rejection gates catch invalid proposals and safe-stop     |
 
 : **Master Comparison: Classical Analytical Methods vs. Learned Foundation Models in Physical AI**: Architectural trade-offs across generalizability, sensory robustness, verifiability, pacing, and fallback modes, highlighting the physical AI synthesis that partitions proposal capability from execution authority. {#tbl-03-classical-vs-learned tbl-colwidths="[20,26,26,28]"}
+
+::: {#capstone-brain-humanoid-crucible .callout-perspective title="The humanoid crucible: Deliberative latency versus the falling inverted pendulum"}
+The proposal–permission decoupling principle is nowhere more brutally tested than on a bipedal humanoid robot:
+
+* **The Inverted-Pendulum Time Constant:** An upright bipedal humanoid is an inherently unstable, underactuated dynamical system. Approximating its center-of-mass (CoM) dynamics as a linear inverted pendulum of height $z_c \approx 0.9\text{ m}$, the characteristic tipping time constant is $\tau_{\text{fall}} = \sqrt{z_c / g} \approx \sqrt{0.9 / 9.81} \approx 303\text{ ms}$. If an unexpected foot slippage or external shove occurs, the center of pressure leaves the support polygon, and the robot begins accelerating toward the ground under gravity. The nervous system has strictly under $200\text{ ms}$ to execute a dynamic recovery step or ankle-hip torque adjustment before the fall becomes kinematically unrecoverable.
+* **The Cognitive Latency Mismatch:** Meanwhile, high-capacity vision-language-action (VLA) foundation models require $200\text{--}800\text{ ms}$ to tokenize multi-camera images, run transformer autoregression, and emit a high-level task plan. If the robot's physical balance loop were synchronously coupled to cognitive inference, a single inference delay or GPU thermal throttle would freeze actuator setpoints, causing the robot to crash to the floor.
+* **Architectural Decoupling as an Invariant:** Consequently, the cognitive brain tier (System 2) must never write directly to joint motors. It outputs coarse semantic waypoints, footstep affordance regions, or 20 Hz action chunks into a shared lock-free ring buffer. Below this boundary, a dedicated 1 kHz whole-body reflex controller (System 1) continuously stabilizes floating-base centroidal momentum. If the cognitive brain stalls for 500 ms while hallucinating an object grasping path, the 1 kHz reflex controller automatically aborts forward stepping and settles the humanoid into a stable double-support stance without dropping a single control cycle.
+:::
 
 ## Fallacies and Pitfalls {#sec-brain-fallacies-pitfalls}
 
@@ -558,7 +631,7 @@ With the physical body, the real-time nervous system, and the cognitive brain no
 
 [^fn-inc-uber-tempe]: **Uber Tempe Accident**\index{Uber Tempe Accident}: As established in Chapter 1, the NTSB report [@ntsb2019uber] details how semantic classification toggling repeatedly reset tracking histories before impact, causing the catastrophic loss of the object's trajectory.
 
-[^fn-inc-tesla-williston]: **Tesla Williston Accident**\index{Tesla Williston Accident}: Building on the sensor limitations discussed in Chapter 1, the NTSB report [@ntsb2017tesla] details how the monocular vision system failed to distinguish the tractor-trailer from the brightly lit sky.
+[^fn-inc-drc-2015]: **DARPA Robotics Challenge Finals**\index{Incidents!DARPA Robotics Challenge}: The official analysis of robot falls and systems architectures across 23 international teams during the 2015 DRC Finals is documented in @krotkov2017darpa.
 
 [^fn-hw-safety-silicon]: **Safety Silicon**\index{Safety Silicon}: Dedicated hardware logic that bypasses the CPU entirely. If physical limits are violated, it immediately cuts power to the motors (forcing PWM control signals into an unpowered high-impedance "Hi-Z" state) in $<100\text{ ns}$, triggering a Safe Torque Off.
 

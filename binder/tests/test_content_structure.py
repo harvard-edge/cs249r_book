@@ -22,7 +22,7 @@ CONTENTS = QUARTO
 CONFIG = QUARTO / "config"
 
 VOLUMES = ("vol1", "vol2", "vol3", "vol4")
-RESERVED = {"frontmatter", "backmatter", "parts"}
+RESERVED = {"frontmatter", "backmatter", "parts", "appendices"}
 
 QMD_REF = re.compile(r"(?<![\w/.-])(?:vol[1-4]|shared)/[A-Za-z0-9_./-]+\.qmd")
 INCLUDE = re.compile(r"\{\{<\s*include\s+([^>}]+?)\s*>\}\}")
