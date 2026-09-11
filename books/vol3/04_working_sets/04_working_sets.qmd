@@ -304,7 +304,7 @@ To resolve the dual challenge of physical memory saturation and information loss
 
 ### The token eviction landscape
 
-Token eviction policies operate at the inference engine level, pruning Key and Value vectors directly from accelerator HBM without modifying the user-visible prompt text. @Tbl-vol3-eviction-mechanics contrasts the primary eviction and sparsification topologies deployed in production serving engines.
+Token eviction policies operate at the inference engine level, pruning Key and Value vectors directly from accelerator HBM without modifying the user-visible prompt text. @tbl-vol3-eviction-mechanics contrasts the primary eviction and sparsification topologies deployed in production serving engines.
 
 | Policy Topology                          | Retention Mechanism                                  | Memory Bound ($M_{\text{KV}}$) |           Perplexity Stability          |         Task Horizon Preservation         |      Implementation Complexity       |
 |:-----------------------------------------|:-----------------------------------------------------|:------------------------------:|:---------------------------------------:|:-----------------------------------------:|:------------------------------------:|
@@ -318,26 +318,27 @@ Token eviction policies operate at the inference engine level, pruning Key and V
 
 Among dynamic eviction algorithms, the **Heavy-Hitter Oracle (H2O)** (@zhang2023h2o) provides an optimal trade-off between memory footprint and multi-hop reasoning fidelity. H2O recognizes that intermediate tokens are not uniformly dispensable. In any task, specific tokens—such as function declarations, error line numbers, and variable assignments—consistently serve as keys for downstream queries.
 
-H2O tracks a running cumulative attention score for each token $i$ across all generating steps $\tau \le t$:
+H2O tracks a running cumulative attention score for each historical token $i$ across all generating steps $\tau \le t$ according to @eq-vol3-workingsets-h2o-score:
 
 $$
-s_i^{(t)} = \sum_{\tau=i}^t \sum_{\ell=1}^L \sum_{h=1}^H \alpha_{\ell, h, \tau, i}.
-$$
+s_i^{(t)} = \sum_{\tau=i}^t \bar{\alpha}_{\tau, i}
+$$ {#eq-vol3-workingsets-h2o-score}
 
-When the KV cache size approaches its allocated physical budget $C_{\text{budget}}$, H2O partitions the resident cache into three disjoint sets:
+where $\bar{\alpha}_{\tau, i} = \sum_{\ell=1}^L \sum_{h=1}^H \alpha_{\ell, h, \tau, i}$ is the total attention weight received by token $i$ across all layers and heads at step $\tau$.[^fn-workingsets-h2o-accumulation] When the KV cache approaches its allocated physical budget $C_{\text{budget}}$, H2O partitions resident memory into three disjoint sets:
 
-1. **Initial Sink Tokens ($\mathcal{S}$):** The first $S$ tokens ($S \in \{4, \ldots, 16\}$), pinned permanently in HBM to stabilize the softmax denominator:
-   $$\mathcal{S} = \{0, 1, \ldots, S-1\}.$$
-2. **Local Sliding Window ($\mathcal{W}$):** The most recent $W$ tokens, preserving local conversational syntax and immediate tool outputs:
-   $$\mathcal{W} = \{t - W + 1, \ldots, t\}.$$
-3. **Heavy-Hitter Tokens ($\mathcal{H}$):** The top-$k$ tokens from the intermediate history $\{S, \ldots, t - W\}$ ranked by their cumulative attention score $s_i^{(t)}$, where:
-   $$k = C_{\text{budget}} - |\mathcal{S}| - |\mathcal{W}|.$$
+1. **Initial Sink Tokens ($\mathcal{S} = \{0, 1, \ldots, S-1\}$):** The first $S$ tokens ($S \in \{4, \ldots, 16\}$), pinned permanently in HBM to stabilize the softmax denominator.
+2. **Local Sliding Window ($\mathcal{W} = \{t - W + 1, \ldots, t\}$):** The most recent $W$ tokens, preserving local conversational syntax and immediate tool outputs.
+3. **Heavy-Hitter Tokens ($\mathcal{H}$):** The top-$k$ tokens from intermediate history $\{S, \ldots, t - W\}$ ranked by cumulative attention score $s_i^{(t)}$, where $k = C_{\text{budget}} - |\mathcal{S}| - |\mathcal{W}|$.
 
 All intermediate tokens not belonging to $\mathcal{S} \cup \mathcal{W} \cup \mathcal{H}$ are evicted from HBM, and their cache blocks are reclaimed by the memory allocator. As shown in @fig-vol3-attention-sinks-eviction, retaining just 20 percent of intermediate tokens via heavy-hitter scoring preserves over 98 percent of multi-turn reasoning accuracy on agentic benchmarks while slashing decode memory bandwidth demand by $4\times$ (@zhang2023h2o).
 
 ::: {#fig-vol3-attention-sinks-eviction fig-env="figure" fig-pos="htb" fig-cap="**Dynamic KV Cache Sparsification and Eviction Topologies**: Dense unbounded attention retains all historical tokens in accelerator HBM, leading to memory exhaustion. StreamingLLM pins four initial sink tokens to prevent softmax denominator collapse while discarding intermediate tokens via a local rolling window. The Heavy-Hitter Oracle (H2O) retains initial sinks, the local window, and the top-k intermediate tokens ranked by cumulative attention mass, preserving critical reasoning state within bounded memory." fig-alt="Diagram of KV cache sparsification topologies comparing dense attention, StreamingLLM, and Heavy-Hitter Oracle."}
 ![](images/svg/attention_sinks_and_eviction.svg){width="100%"}
 :::
+
+> **The Systems Rule of Thumb (The Sink-Window-Heavy Invariant):** Never evict initial attention sinks ($S \ge 4$), as doing so triggers catastrophic perplexity explosions ($>10^3$). An optimal production KV cache eviction policy (such as H2O) partitions memory into initial sinks $\mathcal{S}$, a trailing sliding window $\mathcal{W}$, and heavy hitters $\mathcal{H}$, retaining just 20 percent of intermediate tokens to preserve 98 percent of multi-turn reasoning fidelity while slashing decode memory bus transfers by $4\times$.
+
+[^fn-workingsets-h2o-accumulation]: To minimize tracking overhead, H2O updates score accumulator $s_i^{(t)} \leftarrow s_i^{(t-1)} + \sum_{\ell, h} \alpha_{\ell, h, t, i}$ in place during the decode attention reduction without adding additional global memory traffic.
 
 ### Ephemeral scratchpads and the two-phase commit
 
