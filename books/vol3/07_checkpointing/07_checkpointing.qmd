@@ -28,7 +28,7 @@ Persistent execution state in an autonomous system must provide durability and c
 - **Design** asynchronous state suspension protocols that eliminate High-Bandwidth Memory (HBM) stranding during human oversight and long-latency external I/O blocks.
 :::
 
-## 7.1 The Irreversibility Dilemma: Why Rollbacks are Hard {#sec-vol3-checkpoint-irreversibility}
+## The Irreversibility Dilemma: Why Rollbacks Are Hard {#sec-vol3-checkpoint-irreversibility}
 
 Consider an autonomous infrastructure maintenance agent operating with root privileges across a hybrid cloud cluster. At 03:14 UTC, tasked with reclaiming unattached block storage volumes older than ninety days, the agent analyzes disk telemetry, synthesizes a deletion script, and issues a parallel batch of storage detachment commands. At step 42 of its 60-step trajectory, the host executing the agent policy encounters an uncorrectable double-bit DRAM ECC error, triggering an instantaneous kernel panic and process termination. When the cluster orchestrator detects the dropped heartbeat and reboots the agent container, what state does the agent inherit?
 
@@ -45,22 +45,11 @@ Traditional distributed systems engineering categorizes hardware and software an
 1. **Fail-Stop (Crash) Model**\index{Fail-Stop Model}: A faulty component halts execution abruptly, transitions to an inactive state, and ceases communication. The failure is detectable via heartbeat timeouts, nonzero exit codes, or severed TCP sockets. Recovery relies on idempotent retries, state machine replication, or spinning up cold spares.
 2. **Byzantine Fault Model**\index{Byzantine Fault Model}: A faulty node exhibits arbitrary, potentially malicious behavior, transmitting contradictory data to peers or corrupting message payloads. Classical Byzantine Fault Tolerance (BFT) guarantees consensus using redundant node quorums (requiring $3f + 1$ replicas to tolerate $f$ failures) paired with cryptographic signatures.
 
-Autonomous machine learning agents introduce a third, distinct failure category that invalidates the assumptions of both models: the **Fail-Plausible Fault Model**\index{Fail-Plausible Fault Model}.
+Autonomous machine learning agents introduce a third, distinct failure category that invalidates the assumptions of both models: the **Fail-Plausible Fault Model**\index{Fail-Plausible Fault Model}, illustrated in @fig-vol3-checkpoint-fault-models.
 
-```mermaid
-flowchart TD
-    subgraph Classical["Classical Fault Spectrum"]
-        FS["Fail-Stop (Crash)<br/>Process halts abruptly<br/>Exit code != 0, Socket drops<br/>Recovery: Idempotent restart"]
-        BFT["Byzantine Fault<br/>Arbitrary / Malicious corruption<br/>Contradictory state broadcasts<br/>Recovery: 3f+1 Quorum consensus"]
-    end
-
-    subgraph Agentic["Autonomous Agent Spectrum"]
-        FP["Fail-Plausible Defect<br/>Valid JSON / Typed Schema<br/>Authoritative reasoning trace<br/>Syntactically flawless execution<br/>Catastrophic semantic payload"]
-    end
-
-    FS -.->|"Breaks on hallucination"| FP
-    BFT -.->|"Quorums fail: Identical model weights emit identical errors"| FP
-```
+::: {#fig-vol3-checkpoint-fault-models fig-env="figure" fig-pos="htb" fig-cap="**The Fail-Plausible Fault Model**: Classical distributed systems tolerate fail-stop crashes via restart and Byzantine faults via quorum consensus ($3f+1$ replicas). Autonomous foundation model agents introduce fail-plausible defects: actions that strictly conform to syntactic schemas and emit coherent chain-of-thought rationale while executing catastrophic semantic payloads. Identical model weights produce correlated hallucinations, defeating quorum consensus. Source: Conceptualized by author based on @schneider1990state and @lamport1982byzantine." fig-alt="Taxonomy comparing classical fault models (fail-stop and Byzantine) against agentic fail-plausible defects where syntactically valid schemas conceal catastrophic semantic payloads."}
+![](images/svg/fault_models_fail_plausible.svg)
+:::
 
 In a fail-plausible defect, the stochastic processor (the transformer foundation model) generates an execution step that fulfills all structural, syntactic, and grammatical invariants of the runtime:
 
@@ -100,34 +89,13 @@ Because failure is statistically inevitable in extended trajectories, an agent r
 
 $$\forall s \in \mathcal{S}, \quad f^{-1}(f(s)) = s$$
 
-In an autonomous agent system, the global state space $\mathcal{S}$ is partitioned into two physically distinct domains separated by the **Reversibility Boundary**\index{Reversibility Boundary}:
+In an autonomous agent system, the global state space $\mathcal{S}$ is partitioned into two physically distinct domains separated by the **Reversibility Boundary**\index{Reversibility Boundary}, as schematized in @fig-vol3-checkpoint-reversibility-boundary:
 
 $$\mathcal{S} = \mathcal{S}_{\text{internal}} \times \mathcal{S}_{\text{external}}$$
 
-```mermaid
-flowchart LR
-    subgraph InternalDomain["Reversible Internal Domain (S_internal)"]
-        direction TB
-        Tokens["Context Token Buffers"]
-        KVCache["KV Activation Tensors"]
-        GitTree["Ephemeral Git Worktree"]
-        Overlay["OverlayFS UpperDir"]
-        Invertible["100% Invertible via git reset / unmount<br/>Latency: 1 - 10 ms<br/>Liability: Zero"]
-    end
-
-    Boundary[["=== THE REVERSIBILITY BOUNDARY ==="]]
-
-    subgraph ExternalDomain["Irreversible External Domain (S_external)"]
-        direction TB
-        Cloud["Cloud API (ec2:Terminate)"]
-        DB["Relational DB (DROP TABLE)"]
-        Net["Outbound Wire (SMTP / Stripe)"]
-        NonInvertible["Physically Non-Invertible<br/>Latency: 100 ms - 10 s<br/>Liability: High Operational Risk"]
-    end
-
-    InternalDomain --> Boundary
-    Boundary -->|"Requires: WAL Append + Idempotency Key + Human Gate"| ExternalDomain
-```
+::: {#fig-vol3-checkpoint-reversibility-boundary fig-env="figure" fig-pos="htb" fig-cap="**The Reversibility Boundary**: Partitioning of global agent state into an internal, zero-liability reversible domain (token context, KV cache, ephemeral OverlayFS UpperDir) and an external, high-liability irreversible actuation domain (cloud APIs, relational databases, network sockets). Mutations crossing the boundary mandate write-ahead logging, deterministic idempotency keys, and asynchronous oversight gates. Source: Conceptualized by author based on @gray1992 and @mohan1992aries." fig-alt="Architectural diagram showing the division of agent state into reversible internal domains and irreversible external actuation domains separated by the reversibility boundary."}
+![](images/svg/reversibility_boundary.svg)
+:::
 
 The operational characteristics of these two domains dictate how runtime state must be handled:
 
@@ -155,17 +123,17 @@ Why can we not simply wrap external tool invocations in a standard Two-Phase Com
 
 Applying 2PC across agentic actuation boundaries fails due to three fundamental systems bottlenecks:
 
-* **Absence of Prepare Interfaces in Heterogeneous APIs:** External SaaS providers, cloud hypervisors, and enterprise webhooks do not implement XA-compliant or 2PC prepare/commit interfaces. An API endpoint such as `POST /v1/charges` or `DELETE /v1/instances` executes mutations immediately upon request authorization. There is no provisional "prepare" state that reserves the state change while holding locks pending a secondary commit confirmation.
-* **Autoregressive Token Generation Latency:** In database systems, the duration between the prepare phase and the commit phase is measured in single-digit milliseconds. In an agent system, the duration between successive actions is governed by transformer autoregressive decoding. Decoding 512 tokens on an NVIDIA H100 GPU operating at $30\text{ ms}$ Time-to-First-Token (TTFT) and $8\text{ ms}$ per-token decode latency requires:
+1. **Absence of Prepare Interfaces in Heterogeneous APIs:** External SaaS providers, cloud hypervisors, and enterprise webhooks do not implement XA-compliant or 2PC prepare/commit interfaces. An API endpoint such as `POST /v1/charges` or `DELETE /v1/instances` executes mutations immediately upon request authorization. There is no provisional "prepare" state that reserves the state change while holding locks pending a secondary commit confirmation.
+2. **Autoregressive Token Generation Latency:** In database systems, the duration between the prepare phase and the commit phase is measured in single-digit milliseconds. In an agent system, the duration between successive actions is governed by transformer autoregressive decoding. Decoding 512 tokens on an NVIDIA H100 GPU operating at $30\text{ ms}$ Time-to-First-Token (TTFT) and $8\text{ ms}$ per-token decode latency requires:
 
-$$T_{\text{decode}} = 30\text{ ms} + (512 \times 8\text{ ms}) = 4{,}126\text{ ms} \approx 4.13\text{ s}$$
+   $$T_{\text{decode}} = 30\text{ ms} + (512 \times 8\text{ ms}) = 4{,}126\text{ ms} \approx 4.13\text{ s}$$
 
-Holding row locks on production databases or reserving cloud resources across a 4-second stochastic inference pause introduces catastrophic lock contention, stalls concurrent transactions, and rapidly causes connection pool exhaustion across upstream services.
-* **Non-Deterministic Policy Stalling:** If the model enters a degenerative repetition loop, triggers a safety filter, or encounters a network partition during decoding, the distributed lock remains pinned indefinitely, precipitating cluster-wide deadlocks.
+   Holding row locks on production databases or reserving cloud resources across a 4-second stochastic inference pause introduces catastrophic lock contention, stalls concurrent transactions, and rapidly causes connection pool exhaustion across upstream services.
+
+3. **Non-Deterministic Policy Stalling:** If the model enters a degenerative repetition loop, triggers a safety filter, or encounters a network partition during decoding, the distributed lock remains pinned indefinitely, precipitating cluster-wide deadlocks.
 
 These architectural divergences are formalized in @tbl-vol3-checkpointing-2pc-vs-sagas.
 
-:::
 | Systems Dimension       | Classical Two-Phase Commit (2PC)                    | Autonomous Agent Saga Architecture                              |
 |:------------------------|:----------------------------------------------------|:----------------------------------------------------------------|
 | **Atomicity Guarantee** | Strict ACID (All-or-Nothing via locks)              | Eventual Consistency (Compensating Actions)                     |
@@ -176,7 +144,6 @@ These architectural divergences are formalized in @tbl-vol3-checkpointing-2pc-vs
 | **Inference Coupling**  | High; GPU stalls hold database locks                | Zero; serving engine is decoupled from actuation                |
 
 : **Two-Phase Commit vs. Autonomous Agent Sagas**: Comparison of distributed transaction architectures across system invariants and failure models. {#tbl-vol3-checkpointing-2pc-vs-sagas tbl-colwidths="[25,35,40]"}
-:::
 
 ### Context poisoning and the failure of unverified retries
 
@@ -193,32 +160,26 @@ In an agentic system, this pattern induces severe **Context Poisoning**\index{Co
 
 $$\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left( \frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}} \right) \mathbf{V}$$
 
-When an agent's own flawed action, invalid assumptions, and resulting error traces are preserved in the active Key-Value (KV) cache, the self-attention mechanism assigns substantial probability mass to those historical tokens. The model exhibits strong **confirmation bias** and **recency bias**: rather than recognizing that its underlying hypothesis is invalid, it generates cosmetic permutations of the exact same broken command.
+When an agent's own flawed action, invalid assumptions, and resulting error traces are preserved in the active Key-Value (KV) cache, the self-attention mechanism assigns substantial probability mass to those historical tokens. The model exhibits strong **confirmation bias** and **recency bias**: rather than recognizing that its underlying hypothesis is invalid, it generates cosmetic permutations of the exact same broken command, as traced in @tbl-vol3-checkpointing-naive-retry-loop.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Runtime as Agent Runtime
-    participant Model as Foundation Model
-    participant KVCache as GPU KV Cache
-    participant Env as External Environment
+| Step | Phase         | Interacting Components    | Action and State Mutation                                   | Failure Mechanism / Consequence                                   |
+|:-----|:--------------|:--------------------------|:------------------------------------------------------------|:------------------------------------------------------------------|
+| 1    | Forward Pass  | Runtime $\to$ Model       | Sample action $a_t \sim \pi_\theta(a \mid s_t)$             | Flawed reasoning emitted due to epistemic limit                   |
+| 2    | KV Allocation | Model $\to$ KV Cache      | Allocate and append KV activation blocks for $a_t$          | Flawed token activations committed to accelerator HBM             |
+| 3    | Execution     | Runtime $\to$ Environment | Dispatch actuation across system boundary                   | Environment rejects mutation (raises exception $o_t$)             |
+| 4    | Poisoning     | Runtime $\to$ KV Cache    | Append raw error observation $o_t$ to context buffer        | Error tokens enter self-attention reception field                 |
+| 5    | Re-Prompt     | Runtime $\to$ Model       | Submit conversational prompt: *"Action failed, please fix"* | Recency bias dominates; self-attention attends to flawed $a_t$    |
+| 6    | Degeneration  | Model $\to$ Runtime       | Emit cosmetic permutation $a'_t$ with identical flaw        | Action fails identically; successive retry recovery drops $< 5\%$ |
 
-    Runtime->>Model: Forward pass (Generate step t)
-    Model->>KVCache: Allocate & append KV tokens for Action A_t
-    Model->>Runtime: Emit action A_t (Flawed logic)
-    Runtime->>Env: Execute A_t
-    Env-->>Runtime: Exception / Error Observation O_t
-    Note over Runtime,KVCache: NAIVE RETRY LOOP (CONTEXT POISONING)
-    Runtime->>KVCache: Append Error Observation O_t
-    Runtime->>Model: Re-prompt: "A_t failed with O_t, please fix"
-    Note over Model,KVCache: Self-attention attends heavily to flawed A_t in KV cache
-    Model->>Runtime: Emits cosmetic permutation A'_t (Same root defect)
-    Runtime->>Env: Execute A'_t -> Fails identically
-```
+: **Anatomy of Context Poisoning in Conversational Retry Loops**: Trace of accelerator memory allocation, prompt pollution, and semantic failure compounding under naive error appending. {#tbl-vol3-checkpointing-naive-retry-loop tbl-colwidths="[8,15,22,30,25]"}
 
 Empirical profiling reveals that under unverified conversational retries, the probability of successful error correction diminishes with each subsequent retry turn. By turn 4 of a poisoned retry loop, the agent burns tokens at the maximum context window rate while its probability of recovery drops below 5 percent.
 
-Deterministic recovery mandates that fail-plausible semantic errors are handled not by prompting the failing model to introspect, but by **external verifier oracles**\index{Verifier Oracles} (linters, type checkers, unit test runners, AST validators) that intercept execution, halt forward progress, prune poisoned tokens from the KV cache, and trigger deterministic rollback protocols.
+Deterministic recovery mandates that fail-plausible semantic errors are handled not by prompting the failing model to introspect, but by **external verifier oracles**\index{Verifier Oracles} (linters, type checkers, unit test runners, AST validators) that intercept execution, halt forward progress, prune poisoned tokens from the KV cache, and trigger deterministic rollback protocols, as structured in @fig-vol3-checkpoint-verification-pipeline.
+
+::: {#fig-vol3-checkpoint-verification-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Multi-Stage Deterministic Verification Pipeline**: Cascading deterministic verification gates filter model-generated candidate actions before state mutation. Candidate proposals from the stochastic model pass through AST syntax validation, static type analysis, security policy sandbox checks, and semantic unit tests. Failed gates halt forward execution and trigger automated rollbacks before reaching external infrastructure. Source: Conceptualized by author based on @saltzer2009 and @schneider1990state." fig-alt="Architecture diagram of multi-stage deterministic verification pipeline filtering candidate actions through syntax, type, security, and invariant gates before state mutation."}
+![](images/svg/verification_pipeline_gates.svg)
+:::
 
 ### The two generals' problem and cryptographic idempotency
 
@@ -245,27 +206,18 @@ To eliminate this ambiguity, every state-mutating actuation that crosses the Rev
 
 $$K_{\text{idempotency}}(t) = \text{HMAC-SHA256}\left( \text{SecretKey}, \tau_{\text{id}} \parallel t \parallel \text{Hash}(a_t) \right)$$
 
-When the remote infrastructure gateway receives an actuation request, it records $K_{\text{idempotency}}(t)$ in a transactional deduplication store (e.g., Redis or DynamoDB backed by a lease lock). If a retry arrives bearing an identical key, the gateway bypasses physical actuation and returns the cached result of the original execution.
+When the remote infrastructure gateway receives an actuation request, it records $K_{\text{idempotency}}(t)$ in a transactional deduplication store (e.g., Redis or DynamoDB backed by a lease lock). If a retry arrives bearing an identical key, the gateway bypasses physical actuation and returns the cached result of the original execution. The interaction flow resolving network timeouts is detailed in @tbl-vol3-checkpointing-idempotency-protocol.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Agent as Agent Runtime
-    participant Gateway as API Gateway (Deduplicator)
-    participant Engine as Actuation Engine
+| Protocol Phase      | Originator $\to$ Receiver | Message Payload / Invariants                                        | Deduplication Layer State                                 | Systems Guarantee                         |
+|:--------------------|:--------------------------|:--------------------------------------------------------------------|:----------------------------------------------------------|:------------------------------------------|
+| Initial Dispatch    | Agent $\to$ API Gateway   | `POST /provision` + $K_{\text{idempotency}} = \text{HMAC}(\tau, t)$ | Key miss; acquire distributed lease lock                  | Exactly-once execution initiated          |
+| Physical Execution  | API Gateway $\to$ Engine  | Allocate cluster resources (`4x H100`)                              | Record operation pending in transactional store           | Hardware resource allocated               |
+| Response Caching    | Engine $\to$ API Gateway  | Resource metadata (`Cluster ID: #9021`)                             | Persist return payload mapped to $K_{\text{idempotency}}$ | Result cached with configured TTL         |
+| Network Failure     | Gateway $\to$ Agent       | HTTP `200 OK` (dropped in transit / timeout)                        | Lease finalized; key retained in deduplication table      | Ambiguity introduced across network       |
+| Deterministic Retry | Agent $\to$ API Gateway   | `POST /provision` + identical $K_{\text{idempotency}}$              | Key hit; bypass actuation engine                          | Zero duplicate hardware allocation        |
+| Safe Hydration      | API Gateway $\to$ Agent   | Cached HTTP `200 OK` (`Cluster ID: #9021`)                          | Deduplication record refreshed                            | Agent recovers correct cluster identifier |
 
-    Agent->>Gateway: POST /provision [Idempotency-Key: HMAC(tau, step 4)]
-    Gateway->>Gateway: Check Key -> Not found (Acquire Lease)
-    Gateway->>Engine: Physically allocate 4x H100
-    Engine-->>Gateway: Allocated (Cluster ID: #9021)
-    Gateway->>Gateway: Persist response under Idempotency-Key
-    Gateway--xAgent: HTTP 200 OK (DROPPED BY NETWORK TIMEOUT)
-
-    Note over Agent: Timeout! Retry step 4 using deterministic key
-    Agent->>Gateway: POST /provision [Idempotency-Key: HMAC(tau, step 4)]
-    Gateway->>Gateway: Check Key -> Cache HIT!
-    Gateway-->>Agent: HTTP 200 OK (Cluster ID: #9021) [Zero duplicate allocation]
-```
+: **Deterministic Idempotency Protocol Across Network Partitions**: Resolution of the Two Generals' Problem using cryptographically bound HMAC keys and gateway-level deduplication. {#tbl-vol3-checkpointing-idempotency-protocol tbl-colwidths="[18,22,25,20,15]"}
 
 ### The human oversight latency tax
 
@@ -288,7 +240,7 @@ To survive the Human Oversight Latency Tax, the runtime must implement **Asynchr
 
 ---
 
-## 7.2 Differential State Snapshots and Copy-on-Write Memory {#sec-vol3-checkpoint-cow}
+## Differential State Snapshots and Copy-on-Write Memory {#sec-vol3-checkpoint-cow}
 
 To enable rapid recovery from infrastructure crashes and facilitate time-travel debugging without saturating storage buses, an agent runtime must capture consistent execution snapshots. A naive snapshotting approach that serializes the entire process memory space, filesystem tree, and raw GPU activation tensors at every turn triggers catastrophic I/O bottlenecks.
 
@@ -305,44 +257,25 @@ Resilient architectures decouple snapshot durability from physical memory duplic
 
 ### The Agent Control Block (ACB)
 
-In operating systems design, the Process Control Block (PCB) encapsulates the execution status, CPU registers, program counter, and file descriptor tables of an operating system thread [@saltzer2009]. In an autonomous machine learning system, the corresponding primitive is the **Agent Control Block (ACB)**\index{Agent Control Block}.
+In operating systems design, the Process Control Block (PCB) encapsulates the execution status, CPU registers, program counter, and file descriptor tables of an operating system thread [@saltzer2009]. In an autonomous machine learning system, the corresponding primitive is the **Agent Control Block (ACB)**\index{Agent Control Block}. The constituent subsystems and descriptors of the ACB are formalized in @tbl-vol3-checkpointing-acb-components.
 
-```mermaid
-classDiagram
-    class AgentControlBlock {
-        +UUID trajectory_id
-        +uint64_t step_index
-        +ExecutionState status
-        +ContextDescriptor context_regs
-        +KVPageTableDescriptor kv_descriptors
-        +CapabilityLeaseTable capability_leases
-        +PRNGState prng_seed_state
-        +AsyncIODescriptors inflight_io
-        +serialize_to_protobuf() bytes
-        +hydrate_from_wal(bytes payload)
-    }
+| Subsystem Descriptor    | Field Name            | Data Type               | Functional Systems Role                                              |
+|:------------------------|:----------------------|:------------------------|:---------------------------------------------------------------------|
+| **Causal Identity**     | `trajectory_id`       | `UUID` (128-bit)        | Globally unique identifier establishing trajectory causality         |
+|                         | `step_index`          | `uint64_t`              | Monotonically increasing logical execution turn counter $t$          |
+|                         | `status`              | `ExecutionState`        | Enum: `RUNNING`, `SUSPENDED`, `RECOVERING`, `COMPENSATING`           |
+| **Context Memory**      | `active_token_length` | `int32_t`               | Total sequence length currently indexed in prompt buffer             |
+|                         | `token_buffer_hash`   | `uint64_t`              | MurmurHash3 / xxHash64 verifying token sequence integrity            |
+|                         | `pinned_prefixes`     | `List[TokenChunk]`      | Immutable prefix chunks pinned for KV prefix-caching reuse           |
+| **KV Page Descriptors** | `physical_block_ids`  | `List[uint32_t]`        | Logical-to-physical block table mapping for PagedAttention           |
+|                         | `allocation_epoch`    | `uint32_t`              | Memory manager generation ID preventing stale page aliasing          |
+|                         | `compression_format`  | `uint16_t`              | Quantization mode (e.g., FP16, FP8 E4M3, INT4 KV-cache)              |
+| **Security Leases**     | `active_leases`       | `Dict[str, TokenLease]` | Ephemeral tool authorization credentials and access tokens           |
+|                         | `lease_expiry_epoch`  | `uint64_t`              | Unix microsecond deadline after which capability expires             |
+| **PRNG State**          | `prng_seed_state`     | `uint64_t[2]`           | SplitMix64 / Philox internal register state for sampling             |
+| **Inflight I/O**        | `inflight_io`         | `AsyncIODescriptors`    | Pending non-blocking sockets, active worker PIDs, and message queues |
 
-    class ContextDescriptor {
-        +int32_t active_token_length
-        +uint64_t token_buffer_hash
-        +List~TokenChunk~ pinned_prefixes
-    }
-
-    class KVPageTableDescriptor {
-        +List~uint32_t~ physical_block_ids
-        +uint32_t allocation_epoch
-        +uint16_t head_compression_format
-    }
-
-    class CapabilityLeaseTable {
-        +Dict~string, TokenLease~ active_leases
-        +uint64_t lease_expiry_epoch
-    }
-
-    AgentControlBlock *-- ContextDescriptor
-    AgentControlBlock *-- KVPageTableDescriptor
-    AgentControlBlock *-- CapabilityLeaseTable
-```
+: **Agent Control Block (ACB) Architecture**: Formal data fields and subsystem descriptors capturing the minimal sufficient state for process hydration. {#tbl-vol3-checkpointing-acb-components tbl-colwidths="[22,22,18,38]"}
 
 The ACB contains the minimal, sufficient set of deterministic parameters required to hydrate an identical agent execution instance onto a completely different physical node:
 
@@ -393,29 +326,14 @@ In an event-sourced architecture, state is not mutated in place. Instead, every 
 
 $$S_T = S_0 \oplus \Delta s_1 \oplus \Delta s_2 \oplus \dots \oplus \Delta s_T = S_0 \oplus \sum_{t=1}^T \Delta s_t$$
 
-where $\oplus$ represents the state application operator.
+where $\oplus$ represents the state application operator. The end-to-end write-ahead logging and hydration lifecycle is illustrated in @fig-vol3-checkpoint-wal-hydration.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Engine as Policy Engine
-    participant WAL as Append-Only Write-Ahead Log (NVMe)
-    participant CoW as CoW Storage Substrate
-    participant Tool as Tool Execution Sandbox
-
-    Engine->>Engine: Formulate Action a_t
-    Engine->>WAL: Append Transition Record: <t, a_t, Delta ACB>
-    WAL-->>Engine: fsync() Acknowledged (Durable on Disk)
-    Engine->>CoW: Commit UpperDir Filesystem Delta
-    Engine->>Tool: Dispatch Action across Reversibility Boundary
-    Tool-->>Engine: Return Observation o_t
-    Engine->>WAL: Append Observation Record: <t, o_t>
-    WAL-->>Engine: fsync() Acknowledged
-```
+::: {#fig-vol3-checkpoint-wal-hydration fig-env="figure" fig-pos="htb" fig-cap="**Durable Write-Ahead Log (WAL) and Instant Crash Hydration Architecture**: Append-only event-sourced stategraph enabling sub-50 ms node recovery without external tool re-execution. State transitions are committed to NVMe via `fsync()` before crossing the Reversibility Boundary. Upon node failure, replacement workers hydrate execution state directly from the event log tail without re-invoking external mutations. Source: Conceptualized by author based on @mohan1992aries." fig-alt="Architecture diagram showing append-only write-ahead logging on NVMe, durable state commits before tool dispatch, and post-crash state rehydration bypassing external re-execution."}
+![](images/svg/wal_event_sourcing_hydration.svg)
+:::
 
 The WAL enforces the fundamental durability contract: **No external actuation may be dispatched across the Reversibility Boundary until the transition record describing that actuation has been durably committed to non-volatile storage via `fsync()`**. The wire format for these records is structured in @tbl-vol3-checkpointing-wal-schema.
 
-:::
 | Field Offset | Field Name       | Data Type | Size (Bytes) | Functional Systems Semantics                                           |
 |:-------------|:-----------------|:----------|:-------------|:-----------------------------------------------------------------------|
 | `0x00`       | `magic_bytes`    | `uint32`  | 4            | Magic header (`0x4147454E` -> "AGEN") verifying log integrity          |
@@ -427,7 +345,6 @@ The WAL enforces the fundamental durability contract: **No external actuation ma
 | `0x1E`       | `payload`        | `bytes`   | $L$          | Serialized Protobuf containing $\Delta \text{ACB}_t$ and tool metadata |
 
 : **Agent Write-Ahead Log Schema**: Binary wire format and structural fields of append-only trajectory records. {#tbl-vol3-checkpointing-wal-schema tbl-colwidths="[12,20,15,13,40]"}
-:::
 
 ### Copy-on-write (CoW) memory primitives
 
@@ -445,33 +362,16 @@ Creating a checkpoint at step $t$ requires zero data copying of the base reposit
 
 #### Accelerator-side context virtualization: Paged attention forking
 
-At the accelerator memory layer, speculative tree search (e.g., Tree-of-Thoughts or Monte Carlo Tree Search, detailed in @sec-vol3-deliberation) requires branching multiple candidate trajectories from an identical parent prompt.
+At the accelerator memory layer, speculative tree search (e.g., Tree-of-Thoughts or Monte Carlo Tree Search, detailed in @sec-vol3-deliberation) requires branching multiple candidate trajectories from an identical parent prompt. The logical-to-physical mapping across speculative branches is illustrated in @tbl-vol3-checkpointing-cow-page-tables.
 
-```mermaid
-flowchart TD
-    subgraph PhysicalHBM["Physical Accelerator HBM Frames"]
-        F0["Block Frame #101<br/>System Prompt Tokens"]
-        F1["Block Frame #102<br/>User Instructions"]
-        F2["Block Frame #103<br/>Shared Turn 1 History"]
-        F3["Block Frame #204<br/>Branch A Unique Decode"]
-        F4["Block Frame #305<br/>Branch B Unique Decode"]
-    end
+| Logical Block Index | Trajectory Branch A (Mapping) | Trajectory Branch B (CoW Fork) | Physical Frame ID     | Frame Content & Sharing Semantics               | Reference Count |
+|:--------------------|:------------------------------|:-------------------------------|:----------------------|:------------------------------------------------|:----------------|
+| `Block 0`           | Mapped $\to$ `#101`           | Mapped $\to$ `#101`            | Frame `#101`          | Shared System Prompt tokens (Read-only)         | 2               |
+| `Block 1`           | Mapped $\to$ `#102`           | Mapped $\to$ `#102`            | Frame `#102`          | Shared Task Instructions (Read-only)            | 2               |
+| `Block 2`           | Mapped $\to$ `#103`           | Mapped $\to$ `#103`            | Frame `#103`          | Shared Turn 1 Reasoning History (Read-only)     | 2               |
+| `Block 3`           | Mapped $\to$ `#204`           | Mapped $\to$ `#305`            | Frame `#204` / `#305` | Private Speculative Decode (Allocated on Write) | 1 (per branch)  |
 
-    subgraph LogicalTables["Logical Virtual Block Tables"]
-        subgraph TableA["Agent Trajectory Branch A"]
-            LA0["Logical Block 0"] --> F0
-            LA1["Logical Block 1"] --> F1
-            LA2["Logical Block 2"] --> F2
-            LA3["Logical Block 3"] --> F3
-        end
-        subgraph TableB["Agent Trajectory Branch B (CoW Fork)"]
-            LB0["Logical Block 0"] --> F0
-            LB1["Logical Block 1"] --> F1
-            LB2["Logical Block 2"] --> F2
-            LB3["Logical Block 3"] --> F4
-        end
-    end
-```
+: **Copy-on-Write PagedAttention Block Table Mapping**: Logical-to-physical block table virtualization across speculative trajectory forks sharing prefix activations. {#tbl-vol3-checkpointing-cow-page-tables tbl-colwidths="[15,20,20,15,20,10]"}
 
 Let an initial trajectory share a prompt sequence of length $S_{\text{shared}}$ tokens. Rather than allocating independent physical memory for each of $B$ speculative branches, the PagedAttention memory manager sets the logical block pointers for all $B$ child trajectories to reference the *identical physical HBM frames* allocated to the parent, incrementing the reference counter of each shared block frame:
 
@@ -529,7 +429,7 @@ The runtime must commit a consistent state checkpoint approximately every 90 sec
 
 ---
 
-## 7.3 Saga Execution Orchestrations for External Tools {#sec-vol3-checkpoint-saga}
+## Saga Execution Orchestrations for External Tools {#sec-vol3-checkpoint-saga}
 
 When an agent executes an extended workflow that modifies external environments, how does the system recover if an unrecoverable failure occurs midway through the trajectory?
 
@@ -556,22 +456,11 @@ Each individual forward transaction $T_i$ commits its mutations locally and imme
 
 $$\mathcal{C} = \{ C_1, C_2, \dots, C_{n-1} \}$$
 
-```mermaid
-flowchart TD
-    subgraph ForwardPath["Forward Trajectory Path"]
-        T1["T1: Create Google Identity"] --> T2["T2: Provision GitHub Access"]
-        T2 --> T3["T3: Allocate AWS EC2 Instance"]
-        T3 --> T4["T4: Vendor Procurement Order"]
-    end
+The forward transaction sequence and compensating rollback orchestration are diagrammed in @fig-vol3-checkpoint-agent-saga.
 
-    T4 -.->|"FAILS: HTTP 402 Error"| Intercept{"Saga Coordinator<br/>Intercepts Fault"}
-
-    subgraph RollbackPath["Compensating Rollback Path"]
-        Intercept ==> C3["C3: Terminate AWS EC2 Instance"]
-        C3 ==> C2["C2: Revoke GitHub Seat & Teams"]
-        C2 ==> C1["C1: Deprovision Google Identity"]
-    end
-```
+::: {#fig-vol3-checkpoint-agent-saga fig-env="figure" fig-pos="htb" fig-cap="**Distributed Agent Sagas: Forward Execution and Backward Compensating Actions**: Deterministic forward recovery and reverse compensation restore consistency when heterogeneous tool steps fail. Forward transactions $T_1 \dots T_4$ execute sequentially, registering compensating closures $C_1 \dots C_3$. When $T_4$ fails with an unrecoverable fault, the saga coordinator executes compensating actions in reverse order ($C_3 \to C_2 \to C_1$), deallocating resources and restoring global consistency without stochastic re-inference. Source: Conceptualized by author based on @garciamolina1987sagas." fig-alt="Flowchart showing forward transaction steps registering compensating transactions, intercepted by a saga coordinator upon failure, and executing backward compensation in reverse chronological order."}
+![](images/svg/agent_saga_rollback.svg)
+:::
 
 A compensating transaction $C_i$ is a deterministic handler designed to semantically neutralize or invert the observable side effects of forward transaction $T_i$. The Saga Execution Coordinator enforces the following formal execution guarantees:
 
@@ -664,18 +553,11 @@ Certain real-world actuations lack a mathematical or operational inverse:
 * Truncating a database table without point-in-time recovery logs.
 * Dispatching an ACH or wire payment settlement.
 
-When a forward transaction lacking a compensating handler fails, backward compensation is impossible. In such scenarios, the runtime transitions from backward rollback to **Forward Counterfactual Remediation**\index{Forward Counterfactual Remediation} via the **Fork-on-Error Protocol**\index{Fork-on-Error Protocol}.
+When a forward transaction lacking a compensating handler fails, backward compensation is impossible. In such scenarios, the runtime transitions from backward rollback to **Forward Counterfactual Remediation**\index{Forward Counterfactual Remediation} via the **Fork-on-Error Protocol**\index{Fork-on-Error Protocol}, illustrated in @fig-vol3-checkpoint-fork-on-error.
 
-```mermaid
-flowchart TD
-    StepFail["Non-Invertible Step Fails<br/>(e.g., Table truncated, API timeout)"] --> Freeze["Freeze Tainted Environment<br/>Sever outbound write sockets"]
-    Freeze --> Quarantine["Context Quarantine<br/>Mark poisoned trajectory with IFC taint bit"]
-    Quarantine --> Fork["Fork Isolated Remediation Subagent<br/>Equipped with PITR logs & Restricted ABI"]
-    Fork --> Synthesize["Synthesize Forward Repair Patch<br/>Restore from backup / Re-synchronize state"]
-    Synthesize --> Verify{"Deterministic Verifier Oracle<br/>Asserts System Invariants"}
-    Verify -->|"Pass"| Splice["Splice Clean State into Primary Trajectory<br/>Clear taint bit; Resume forward execution"]
-    Verify -->|"Fail"| Escalate["Halt; Asynchronously Suspend State<br/>Escalate to Human Oversight Gate"]
-```
+::: {#fig-vol3-checkpoint-fork-on-error fig-env="figure" fig-pos="htb" fig-cap="**Fork-on-Error: Counterfactual Remediation for Non-Invertible Failures**: Bifurcating frozen tainted state from an isolated specialist subagent when inverse compensation is impossible ($C_i = \emptyset$). The primary trajectory is frozen and quarantined with an Information Flow Control (IFC) taint bit. A dedicated remediation subagent with point-in-time recovery logs synthesizes a forward repair patch, which is verified by an oracle before splicing back into the execution line. Source: Conceptualized by author based on @schneider1990state." fig-alt="Diagram showing fork-on-error protocol where a non-invertible step failure halts execution, freezes the tainted state, forks an isolated remediation subagent, and splices verified repairs into the main trajectory."}
+![](images/svg/fork_on_error_remediation.svg)
+:::
 
 The Fork-on-Error sequence operates under strict isolation:
 
@@ -687,7 +569,7 @@ The Fork-on-Error sequence operates under strict isolation:
 
 ---
 
-## 7.4 Deterministic Replay and Hardware Record/Replay {#sec-vol3-checkpoint-replay}
+## Deterministic Replay and Hardware Record/Replay {#sec-vol3-checkpoint-replay}
 
 Suppose an autonomous financial trading agent generates an illegal order at step 87 of a production run, violating an SEC regulatory constraint. The engineering team is summoned to diagnose the failure. They extract the initial prompt, seed the random number generator, load the exact model checkpoint, and re-execute the trajectory in a staging sandbox.
 
@@ -727,22 +609,16 @@ $$a + b = 1.0 \quad (\text{under BF16 rounding})$$
 
 $$(a + b) + c = 1.0 + (-1.0) = 0.0$$
 
-The two summation orders produce completely distinct floating-point results: $1.0 \times 2^{-8} \neq 0.0$.
+The two summation orders produce completely distinct floating-point results: $1.0 \times 2^{-8} \neq 0.0$. These sources of accelerator non-determinism are summarized in @tbl-vol3-checkpointing-hardware-nondeterminism.
 
-```mermaid
-flowchart TD
-    subgraph HardwareNonDeterminism["Sources of Hardware Non-Determinism"]
-        direction TB
-        FP["Floating-Point Non-Associativity<br/>(a + b) + c != a + (b + c)"]
-        Warp["Dynamic CUDA Warp Scheduling<br/>Thread arrival order varies per run"]
-        Atomic["Atomic Floating-Point Reductions<br/>atomicAdd() accumulates in random order"]
-        Flash["FlashAttention Tiling Boundaries<br/>Dynamic work-stealing across SMs"]
-    end
+| Hardware Mechanism               | Root Cause of Non-Determinism                  | Numerical / Architectural Consequence                      | Manifestation in Agent Inference                                          | Mitigation Strategy                                   |
+|:---------------------------------|:-----------------------------------------------|:-----------------------------------------------------------|:--------------------------------------------------------------------------|:------------------------------------------------------|
+| **Floating-Point Arithmetic**    | Non-associativity: $(a+b)+c \neq a+(b+c)$      | Rounding variances at unit-in-last-place (ULP)             | Logit variance $\lvert z_{v_1} - z_{v_2} \rvert \le \epsilon_{\text{fp}}$ | Replay captured token IDs; bypass re-inference        |
+| **Dynamic Warp Scheduling**      | Asynchronous thread dispatch across SMs        | Varying reduction tree order across warps                  | Run-to-run activation variance in FP16/BF16                               | Fixed warp dispatch grids; single-SM reductions       |
+| **Atomic Memory Reductions**     | Non-deterministic arrival in `atomicAdd()`     | Floating-point accumulation order permutations             | Logit flips under near-identical top-2 candidates                         | Deterministic reduction primitives (cub/thrust)       |
+| **FlashAttention Work-Stealing** | Dynamic SRAM block tiling across thread blocks | Thread block processing order fluctuates with clock jitter | Inter-token attention score drift across layers                           | Fixed tile sizing; deterministic FlashAttention flags |
 
-    HardwareNonDeterminism --> Divergence["Logit Divergence Margin: |z_i - z_j| < epsilon"]
-    Divergence --> ArgmaxFlip["Greedy Argmax Token Flip at Step t"]
-    ArgmaxFlip --> TrajectoryDivergence["Complete Trajectory Bifurcation by Step t+k"]
-```
+: **Sources of Hardware Non-Determinism on GPU Accelerators**: Microarchitectural causes of run-to-run numerical divergence and their manifestation in autoregressive decoding. {#tbl-vol3-checkpointing-hardware-nondeterminism tbl-colwidths="[20,22,23,20,15]"}
 
 On an NVIDIA H100 GPU containing 132 Streaming Multiprocessors (SMs) executing warp reductions at 3.35 TB/s of HBM bandwidth:
 
@@ -762,38 +638,28 @@ Because transformers operate autoregressively, conditioning every future token o
 
 ### The Record/Replay architecture and the replay invariant
 
-To achieve bit-accurate replayability despite hardware and environment non-determinism, the runtime implements a **Record/Replay Virtualization Layer**\index{Record/Replay Virtualization Layer}.
+To achieve bit-accurate replayability despite hardware and environment non-determinism, the runtime implements a **Record/Replay Virtualization Layer**\index{Record/Replay Virtualization Layer}. The operational invariants of each phase are contrasted in @tbl-vol3-checkpointing-record-replay-phases.
 
-```mermaid
-flowchart LR
-    subgraph RecordPhase["RECORD PHASE (Production Run)"]
-        direction TB
-        Agent1["Agent Policy Engine"] -->|"1. Emit Tool Call"| Interceptor1["I/O Virtualization Boundary"]
-        Interceptor1 -->|"2. Execute Mutating Call"| RealNet["External APIs / Cloud VMs"]
-        RealNet -->>|"3. Return Payload"| Interceptor1
-        Interceptor1 -->|"4. Commit Output to WAL"| WALFile[("Durable WAL Ledger")]
-        Interceptor1 -->>|"5. Return to Model"| Agent1
-    end
+| Systems Dimension        | Record Phase (Production Execution)                  | Replay Phase (Hydration / Time Travel)                             | Systems Invariant Enforced                                                        |
+|:-------------------------|:-----------------------------------------------------|:-------------------------------------------------------------------|:----------------------------------------------------------------------------------|
+| **Tool Execution**       | Dispatched to live external APIs and shell sandboxes | Network disabled; live tool dispatch strictly blocked              | Zero re-execution of mutating operations                                          |
+| **Observation Handling** | Received over wire; committed to WAL with CRC32      | Looked up in WAL ledger by $\tau_{\text{id}}$ and step counter $t$ | Identical observation injection: $o_t^{\text{replay}} \equiv o_t^{\text{record}}$ |
+| **Inference Path**       | Transformer forward pass over live KV cache          | Token IDs injected directly from Agent Control Block               | Bypasses floating-point non-determinism                                           |
+| **PRNG State**           | Captured from host and CUDA hardware PRNG registers  | Restored from logged 64-bit seed and step offset                   | Bit-accurate stochastic sampling recreation                                       |
+| **Filesystem State**     | OverlayFS UpperDir mutated and committed to log      | UpperDir delta extracted and remounted to base                     | Sub-10 ms workspace restoration                                                   |
 
-    subgraph ReplayPhase["REPLAY PHASE (Post-Mortem / Hydration)"]
-        direction TB
-        Agent2["Agent Policy Engine"] -->|"1. Emit Tool Call"| Interceptor2["I/O Virtualization Boundary"]
-        Interceptor2 -.->|"BLOCKED: Network Disabled"| DeadNet["External Network NIC"]
-        WALFile -.->|"2. Read Logged Output"| Interceptor2
-        Interceptor2 -->>|"3. Inject Recorded Payload"| Agent2
-    end
-```
+: **Operational Modes in Trajectory Record/Replay Virtualization**: Comparison of live execution capture versus deterministic post-mortem hydration mechanics. {#tbl-vol3-checkpointing-record-replay-phases tbl-colwidths="[18,27,27,28]"}
 
 The system operates across two operational modes:
 
-#### 1. Record mode (live execution)
+#### Record mode (live execution)
 
 During normal execution, the agent interacts with external environments through a virtualized I/O boundary. The runtime intercepts all non-deterministic inputs:
 
 * **PRNG Virtualization:** The runtime intercepts calls to random number generators, logging the active 64-bit seed and step offset before each decode turn.
 * **I/O Interception and Logging:** Every external tool call, HTTP response body, Unix exit code, standard output stream, and system timestamp is captured at the byte level and appended to the Write-Ahead Log alongside the initiating action $a_t$.
 
-#### 2. Replay mode (crash hydration and post-mortem debugging)
+#### Replay mode (crash hydration and post-mortem debugging)
 
 When hydrating an agent after a node crash or during post-mortem root cause analysis, the runtime enforces **The Replay Invariant**\index{Replay Invariant}:
 
@@ -808,25 +674,18 @@ Furthermore, to bypass accelerator floating-point non-determinism during replay,
 
 ### Time-travel debugging and trajectory forking
 
-With an append-only Write-Ahead Log and consistent ACB snapshots, engineering teams can perform **Time-Travel Debugging**\index{Time-Travel Debugging}.
+With an append-only Write-Ahead Log and consistent ACB snapshots, engineering teams can perform **Time-Travel Debugging**\index{Time-Travel Debugging}. The step progression of a counterfactual branch is detailed in @tbl-vol3-checkpointing-time-travel-forking.
 
-```mermaid
-gitGraph
-    commit id: "Turn 0: Init"
-    commit id: "Turn 1: Scan repo"
-    commit id: "Turn 2: Find bug"
-    commit id: "Turn 3: Apply patch"
-    commit id: "Turn 4: FAILS TEST"
+| Turn Index | Baseline Production Execution       | Counterfactual Branch ($\tau'$)               | Delta Mechanism     | Systems State Substrate                   |
+|:-----------|:------------------------------------|:----------------------------------------------|:--------------------|:------------------------------------------|
+| `Turn 0`   | Initialize Task & Environment       | -- (Shared Baseline)                          | Shared prefix block | Read-only LowerDir / Frame `#101`         |
+| `Turn 1`   | Scan repository codebase            | -- (Shared Baseline)                          | Shared prefix block | RefCount = 2                              |
+| `Turn 2`   | Identify root cause bug             | -- (Shared Baseline)                          | Shared prefix block | RefCount = 2                              |
+| `Turn 3`   | Apply code patch (fails test suite) | **Fork Point:** Injected alternative guidance | Prompt mutation     | CoW UpperDir split / New block allocation |
+| `Turn 4`   | Retry loop enters context poisoning | Synthesize alternate patch                    | Independent decode  | Isolated Frame `#204` vs `#305`           |
+| `Turn 5`   | **Halted:** Trajectory aborted      | **Unit tests pass successfully**              | Validated commit    | Clean state spliced into main line        |
 
-    branch counterfactual_branch
-    checkout counterfactual_branch
-    commit id: "Turn 3': Modified System Prompt"
-    commit id: "Turn 4': Alternative Patch"
-    commit id: "Turn 5': TESTS PASS"
-
-    checkout main
-    commit id: "Halted / Post-Mortem"
-```
+: **Trajectory Forking and Time-Travel Branch Navigation**: Step-level comparison of a poisoned production trajectory and an isolated counterfactual branch. {#tbl-vol3-checkpointing-time-travel-forking tbl-colwidths="[12,25,25,18,20]"}
 
 Time-travel debugging empowers developers to:
 
