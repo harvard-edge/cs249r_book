@@ -28,7 +28,7 @@ When an autonomous agent attempts to execute an action in the physical or digita
 * **Evaluate** dynamic tool discovery mechanisms, schema vector indexing, and tool-result memoization to minimize prompt token tax and maximize accelerator working-set capacity.
 :::
 
-## 9.1 The I/O Subsystem of Agentic Runtimes {#sec-vol3-actuation-io-subsystem}
+## The I/O Subsystem of Agentic Runtimes {#sec-vol3-actuation-io-subsystem}
 
 During an automated maintenance cycle on a multi-tenant cloud cluster, an autonomous systems administration agent was tasked with pruning transient build artifacts from a local directory. Instructed via a natural language prompt, the foundation model emitted what appeared to be a standard shell command. However, because an environment variable in the path failed to resolve inside the model's unconstrained text generation stream, the model emitted `rm -rf /` instead of `rm -rf ./tmp/build_artifacts`. The host runtime, configured to pipe model text outputs directly into an interactive bash subprocess, executed the string with root administrative privileges. Within seconds, the host container filesystem was unlinked, corrupting system libraries, terminating running tenant jobs, and forcing a complete node evacuation across the physical cluster rack.
 
@@ -58,7 +58,7 @@ To construct production-grade agentic systems, software engineers cannot rely on
 When an unprivileged application attempts to overwrite the kernel memory map on a modern operating system, the CPU hardware physically traps the instruction. The foundational breakthrough in operating system design occurred when hardware architectures separated unprivileged application execution from privileged kernel execution [@saltzer1975]. In classical computing architectures, the central processing unit enforces physical protection rings (e.g., Ring 3 for unprivileged user applications, Ring 0 for the supervisor kernel), as illustrated in @fig-vol3-actuation-syscall.
 
 ::: {#fig-vol3-actuation-syscall fig-env="figure" fig-pos="htb" fig-cap="**The AI System Call Privilege Boundary**: Complete mediation across hardware-style protection rings in an agent runtime. An untrusted, stochastic foundation model operating in user space (Ring 3) generates structured tool invocation tokens that trigger a supervisor trap across the actuation boundary. The deterministic supervisor runtime (Ring 0) intercepts the trap, validates JSON schemas, verifies cryptographic capability leases, and enforces idempotency locks before dispatching mutations to sandboxed execution environments. Source: Adapted from @saltzer1975." fig-alt="Privilege ring architecture diagram showing Ring 3 stochastic neural processor trapping across the actuation boundary into Ring 0 deterministic supervisor runtime, which mediates and dispatches to sandboxed microVMs."}
-![](/assets/images/svg/vol3/08_actuation_0.svg)
+![](images/svg/ai_system_call_privilege_boundary.svg){width=100%}
 :::
 
 An application running in Ring 3 cannot directly alter page tables, manipulate hardware device registers, or write raw sectors to non-volatile storage. When an unprivileged application requires a privileged operation (such as opening a network socket or writing to a disk file), it cannot simply jump to a kernel memory address. Instead, it must execute a hardware trap instruction (`SYSCALL`, `SYSENTER`, or software interrupt `INT 0x80`). This instruction halts user-space execution, transitions the CPU into supervisor mode (Ring 0), saves execution registers, and transfers control to a fixed, pre-registered kernel dispatch table. The kernel verifies the caller's identity, validates the memory pointers and parameters passed in registers, executes the physical hardware manipulation on the application's behalf, and returns the result across the privilege boundary back to Ring 3.
@@ -111,7 +111,7 @@ Even when using delimiter tokens, an autoregressive model sampling tokens uncons
 Instead of trusting probabilities, **Grammar-constrained decoding**\index{Grammar-constrained decoding} physically enforces 100 percent syntactic compliance directly inside the GPU sampling kernel [@willard2023outlines]. The runtime compiles the tool's JSON schema into a strict state machine ahead of time. During generation, a CUDA kernel [@nickolls2008] evaluates every token in the vocabulary against this state machine. Any token that would violate the schema is masked out—its probability is driven to zero before the model even makes its choice (@fig-vol3-actuation-grammar-decoding).
 
 ::: {#fig-vol3-actuation-grammar-decoding fig-env="figure" fig-pos="htb" fig-cap="**Grammar-Constrained Logit Decoding Pipeline at the GPU Tensor Layer**: Ahead-of-time compilation transforms tool ABI schemas into a Deterministic Finite Automaton (DFA) and a precomputed vocabulary bitmask tensor. During each autoregressive generation step on the GPU, a custom CUDA kernel applies elementwise logit masking ($z_{t, v}' = -\infty$) to disallowed tokens prior to softmax normalization. Syntactic validity is physically enforced at the tensor layer, guaranteeing zero runtime parsing failures with sub-millisecond masking overhead. Source: Synthesized from @willard2023outlines." fig-alt="Flowchart illustrating grammar-constrained logit decoding: AOT compilation from JSON schema to DFA bitmask, followed by GPU forward pass, logit masking kernel driving disallowed tokens to negative infinity, softmax normalization, and DFA state transition."}
-![](/assets/images/svg/vol3/08_actuation_2.svg)
+![](images/svg/grammar_constrained_decoding_fsm.svg){width=100%}
 :::
 
 Mathematically, let the model's forward pass at step $t$ produce an unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$, where $|\mathcal{V}|$ is the vocabulary size. Let the tool schema be represented by a Deterministic Finite Automaton (DFA) $\mathcal{D} = \langle Q, \Sigma, \delta, q_0, F \rangle$, where $Q$ is the finite set of parser states, $\Sigma$ is the alphabet of byte sequences or character tokens, $\delta: Q \times \Sigma \to Q$ is the transition function, $q_0 \in Q$ is the start state, and $F \subseteq Q$ is the set of accept states.
@@ -146,16 +146,14 @@ where $\tau_{\text{prefill}}$ is the prompt re-evaluation latency and $S_{\text{
 
 Once the system guarantees that token sequences compile deterministically into valid system calls, the next architectural challenge is structuring the wire protocol that connects the agent runtime to heterogeneous external services.
 
----
-
-## 9.2 Tool Protocols: MCP, Function Calling, and JSON-RPC {#sec-vol3-actuation-protocols}
+## Tool Protocols: MCP, Function Calling, and JSON-RPC {#sec-vol3-actuation-protocols}
 
 An enterprise software engineering agent was integrated into a production repository to automate continuous deployment and issue resolution. The agent was connected to 12 heterogeneous external tools: a local Git CLI wrapper, a Jira issue tracker REST endpoint, a Docker daemon socket, a PostgreSQL staging database, an AWS CloudWatch telemetry API, and various internal microservices. Because each integration was constructed using an ad-hoc, proprietary REST client library with hardcoded parameter parsing, the architecture suffered from catastrophic coupling. When the Jira platform deployed an unannounced minor API update that altered an optional issue status field from a plain string (`"status": "In Progress"`) to a nested JSON object (`"status": {"name": "In Progress", "id": 102}`), the unversioned custom tool wrapper crashed with an unhandled deserialization exception mid-trajectory. The agent, stranded midway through a production database migration without transactional coordination, left the cluster's database schema in a locked, corrupted state.
 
 This failure highlights the **$N \times M$ Integration Crisis**\index{$N \times M$ Integration Crisis} of agentic software architectures. If an engineering organization deploys $N$ distinct agent runtimes (code assistants, security analyzers, customer support bots, data extractors) and maintains $M$ distinct software tools (databases, source repositories, shells, cloud APIs), building bespoke point-to-point integration wrappers requires $N \times M$ independent adapters (@fig-vol3-actuation-mcp). Every schema modification, authentication rotation, or transport change on any tool forces code changes across all $N$ agents.
 
 ::: {#fig-vol3-actuation-mcp fig-env="figure" fig-pos="htb" fig-cap="**Architectural Topology and Transport Framing in Typed Wire Protocols**: Decoupled systems layout of the Model Context Protocol (MCP). The Host Application manages model inference and context state while maintaining an authoritative policy and mediation gateway. The Client Protocol layer marshals strongly typed JSON-RPC 2.0 envelopes across either local unbuffered standard I/O (`stdio` IPC) or remote HTTP Server-Sent Events (`SSE`) transports to isolated tool servers. Authorization and capability verification remain strictly confined to the host gateway. Source: Adapted from Anthropic [@anthropic2024mcp]." fig-alt="Architectural block diagram showing Host Application, Complete Mediation Gateway, Client Protocol Layer, stdio and SSE transport framing, and backend Tool Servers."}
-![](/assets/images/svg/vol3/08_actuation_1.svg)
+![](images/svg/mcp_protocol_architecture.svg){width=100%}
 :::
 
 ### The Model Context Protocol architecture
@@ -284,7 +282,7 @@ Empirical frontier software agents [@yang2024sweagent] converge on an optimal co
 
 By collapsing hundreds of shallow API wrappers into four deep modules, the agent runtime slashes its schema prefill tax from 35,000 tokens to under 1,200 tokens, maximizing accelerator throughput and preserving context memory for problem-solving.
 
-### Capability-based security and dennis & van horn architecture
+### Capability-based security and the dennis & van horn architecture
 
 Imagine an agent instructed to clean up temporary log files that instead formats the entire production database. Establishing a typed ABI ensures that its `rm` command or `DROP DATABASE` command is syntactically valid JSON. Syntactic validity says nothing about operational authority. A tool call formatted as a perfect JSON object can still execute `DROP DATABASE production;` or exfiltrate private cryptographic keys.
 
@@ -318,16 +316,14 @@ Authority narrows monotonically down the delegation tree. A parent agent cannot 
 $$\mathcal{K}_{\text{child}} \sqsubseteq \mathcal{K}_{\text{parent}} \iff \begin{cases} \mathcal{R}_{\text{child}} \subseteq \mathcal{R}_{\text{parent}} \\ \mathcal{O}_{\text{child}} \subseteq \mathcal{O}_{\text{parent}} \\ \mathcal{C}_{\text{child}} \supseteq \mathcal{C}_{\text{parent}} \\ t_{\text{expire}}^{\text{child}} \le t_{\text{expire}}^{\text{parent}} \end{cases}$$
 
 ::: {#fig-vol3-actuation-capability-attenuation fig-env="figure" fig-pos="htb" fig-cap="**Monotonic Capability Attenuation across Hierarchical Subagent Delegations**: Delegation tree enforcing the Dennis and Van Horn capability security model. Authority narrows monotonically ($\mathcal{K}_{\text{child}} \sqsubseteq \mathcal{K}_{\text{parent}}$) across operational rights, accessible filesystem URIs, execution timeouts, and token expenditure quotas. An indirect prompt injection compromising an unprivileged leaf subagent remains strictly contained within that leaf's attenuated lease, preventing privilege escalation to root capabilities. Source: Adapted from Dennis and Van Horn [@dennis1966]." fig-alt="Tree diagram showing monotonic capability attenuation from Root Orchestrator down to Research Subagent, Implementation Subagent, and Test Runner Subagent, highlighting URI restrictions, operation subsets, and blast radius boundaries."}
-![](/assets/images/svg/vol3/08_actuation_3.svg)
+![](images/svg/capability_attenuation_tree.svg){width=100%}
 :::
 
 Under this capability model, if a leaf Research Subagent parses a hostile document containing an indirect prompt injection, the blast radius is strictly confined to the leaf lease. Even if the subagent's stochastic reasoning is completely compromised, it cannot write to source files, execute arbitrary shell commands, access production databases, or extend its own lifetime.
 
 With the blast radius of compromised agents contained, the final challenge in actuation protocol design is handling the inevitable unreliability of the distributed networks over which these safe, authorized commands are transmitted.
 
----
-
-## 9.3 Idempotency, Side Effects, and Distributed Transactions {#sec-vol3-actuation-idempotency}
+## Idempotency, Side Effects, and Distributed Transactions {#sec-vol3-actuation-idempotency}
 
 An autonomous cloud infrastructure optimizer was tasked with terminating idle container instances during off-peak hours. The agent issued an HTTP `DELETE` call to an infrastructure orchestration API to deprovision a specific cluster node. At that exact instant, a transient network partition occurred between the agent host and the cloud provider's API gateway: the cloud provider successfully executed the node termination, but the HTTP `200 OK` response packet was dropped by a routing timeout. Receiving a connection reset observation, the stochastic agent encountered an ambiguous failure state. Guided by its trial-and-error reasoning policy, the agent interpreted the timeout as an execution failure and immediately re-emitted the deprovision request. However, because the target node identifier had already been deallocated, the API gateway dynamically resolved the target parameter against the next active instance in the pool, terminating a critical production database replica and triggering a major service outage.
 
@@ -373,7 +369,7 @@ $$\text{CanonicalJSON}\left(\{"b": 2, "a": 1\}\right) \equiv \text{CanonicalJSON
 When a mutating tool call arrives at the actuation gateway carrying trajectory nonce $\eta$, the gateway coordinates execution through an atomic, distributed state store (e.g., Redis [@carlson2013redis] or DynamoDB [@decandia2007dynamo]) coupled with a Write-Ahead Log (WAL) [@gray1978notes], as traced in @fig-vol3-actuation-idempotency-flow.
 
 ::: {#fig-vol3-actuation-idempotency-flow fig-env="figure" fig-pos="htb" fig-cap="**Distributed Idempotency Nonce and Replay Pipeline**: State machine and execution flow for idempotent tool invocation. Every mutating action is bound to a deterministic trajectory nonce $\eta$. The actuation gateway queries a distributed state store, branching into first-time execution (`NOT_FOUND`), active concurrency lock (`IN_FLIGHT`), or cached replay (`COMPLETED`). Completed mutations bypass sandbox environments entirely and return cached observations, reconciling stochastic agent retries with at-most-once physical execution. Source: Adapted from Gray [@gray1978notes]." fig-alt="Flowchart diagram illustrating the distributed idempotency nonce and replay pipeline: trajectory nonce computation, Redis state lookup, three-way branching for NOT_FOUND, IN_FLIGHT, and COMPLETED states, and sandbox execution bypass."}
-![](/assets/images/svg/vol3/08_actuation_4.svg)
+![](images/svg/idempotency_nonce_execution_flow.svg){width=100%}
 :::
 
 The actuation gateway evaluates the nonce against a three-state finite state machine:
@@ -444,9 +440,7 @@ In agent saga architecture, an uncompensable action is classified as a **Pivot T
 
 Once execution successfully passes the pivot step, backward recovery is abolished; the runtime must drive forward to completion.
 
----
-
-## 9.4 Dynamic Tool Discovery and Schema Selection {#sec-vol3-actuation-discovery}
+## Dynamic Tool Discovery and Schema Selection {#sec-vol3-actuation-discovery}
 
 An autonomous enterprise assistant was deployed across an organization's internal infrastructure, granted access to an internal API catalog encompassing 3,200 microservices across billing, inventory, customer support, and IT infrastructure. The engineers naively injected all 3,200 OpenAPI schema specifications into the model's system prompt. The resulting prompt prefill payload consumed 780,000 tokens—instantly triggering an Out-of-Memory (OOM) abort on an 80 GB HBM GPU serving node before the model generated a single token. Even when testing on specialized models with 1M+ context windows, the model suffered catastrophic attention dispersion: when asked to check a customer's shipping address, the model became confused among 40 different address-related tools, ultimately hallucinating parameters from an internal warehouse packaging API.
 
@@ -468,34 +462,7 @@ To support enterprise tool ecosystems containing thousands of endpoints, agent r
 Dynamic tool discovery transforms tool catalog management into a two-stage information retrieval and execution pipeline, separating catalog storage from runtime inference context (@fig-vol3-actuation-two-stage).
 
 ::: {#fig-vol3-actuation-two-stage fig-env="figure" fig-pos="htb" fig-cap="**Two-Stage Dynamic Tool Retrieval and Schema Binding Pipeline**: The complete catalog of $M$ tools resides in an offline vector registry. At each trajectory step, the agent's current deliberative state is embedded into a query vector $\mathbf{e}_q$. A sub-millisecond Maximum Inner Product Search (MIPS) retrieves the top-$K$ candidate tools ($K \ll M$). Only the active $K$ schemas are compiled into DFA bitmasks and bound into the prompt context for the forward pass, reducing prompt token tax by over 95 percent." fig-alt="Flowchart showing two-stage tool retrieval: Step 1 embeds agent state, queries vector database using MIPS to retrieve top-K tools, and Step 2 binds only those K tool schemas into the GPU prompt context and DFA logit mask."}
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      OFFLINE TOOL REGISTRY (M Tools)                    │
-│  [T_1: GitCommit] [T_2: DockerRun] [T_3: K8sDeploy] ... [T_3200: S3Put] │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │ Offline Embeddings
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     DENSE VECTOR INDEX (HNSW / ScaNN)                   │
-│         e_i = DenseEmbed(Name, Summary, Signature, ArgDescriptions)     │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-           Agent Trajectory State s_t │ (Query: "Rollback canary pod")
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│              STAGE 1: COARSE MAXIMUM INNER PRODUCT SEARCH               │
-│                  score(T_i, q) = cos(e_q, e_i)                          │
-│                  Select Top-K Candidates (K = 4 << 3200)                │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │ Retrieved Candidate Subset
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│              STAGE 2: JUST-IN-TIME SCHEMA BINDING & MASKING             │
-│   1. Inject only K schemas into prompt context (1,200 tokens)           │
-│   2. Compile K schemas into runtime DFA logit bitmask tensor            │
-│   3. Dispatch GPU Autoregressive Forward Pass                           │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![](images/svg/two_stage_tool_retrieval.svg){width=100%}
 :::
 
 The two-stage retrieval pipeline operates as follows:
@@ -604,27 +571,8 @@ $$\text{Observation}_{\text{cached}} = \text{Observation}_{\text{original}}$$
 Because the serialized context prefix remains invariant, the serving engine achieves a **100 percent KV-cache prefix hit** for the multi-thousand-token history up to that step. As demonstrated in @fig-vol3-actuation-prefix-synergy, this prefix reuse cuts Time-To-First-Token (TTFT) by $70\text{ to }90\%$ and slashes accelerator energy consumption, transforming what would be an expensive physical tool wait and prefill compute spike into an instantaneous memory lookup.
 
 ::: {#fig-vol3-actuation-prefix-synergy fig-env="figure" fig-pos="htb" fig-cap="**Synergistic Acceleration between Tool-Result Caching and Radix Prefix Caching**: When a deterministic tool invocation matches an existing content-addressed cache key, the actuation gateway avoids external sandbox execution. Because the returned observation text matches previous executions byte-for-byte, the serving engine's Radix KV-cache achieves a 100 percent prefix hit for the entire preceding trajectory context, eliminating the compute-bound prefill phase and reducing token generation latency from seconds to milliseconds." fig-alt="Diagram showing tool result caching leading directly to radix tree KV cache hit on GPU."}
-```
-Agent Step t: ToolCall("compile", {"sha": "9a4f2b"})
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│               ACTUATION GATEWAY CONTENT-ADDRESSED CACHE                 │
-│  Lookup: SHA256("compile" || "1.0" || '{"sha":"9a4f2b"}')               │
-│  Status: HIT! Return cached compiler output (1,400 tokens) in 0.8 ms     │
-└──────────────────────────────────────┬──────────────────────────────────┘
-                                       │
-                                       ▼ (Deterministic Observation Bytes)
-┌─────────────────────────────────────────────────────────────────────────┐
-│               GPU RADIX-TREE PROMPT PREFIX CACHE (vLLM / SGLang)        │
-│  Prefix: [System Prompt] + [Turn 1..t-1] + [Cached Observation]         │
-│  Result: 100% KV Cache Hit! Zero Prefill FLOPs Computed                 │
-│  Hardware Latency: Reduced from 450 ms (Compute) to 2 ms (Memory Read)  │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![](images/svg/tool_result_prefix_cache_synergy.svg){width=100%}
 :::
-
----
 
 ## Fallacies and Pitfalls {#sec-vol3-actuation-fallacies}
 
@@ -663,8 +611,6 @@ Instructing a model in its system prompt "Never write to files outside `/workspa
 
 Attempting to implement distributed Two-Phase Commit (2PC) across heterogeneous external tool APIs (e.g., Stripe, GitHub, Jira) causes catastrophic lock stranding. External APIs do not implement transaction coordinators or expose `PREPARE` and `ROLLBACK` hooks. Holding locks while awaiting foundation model inference loops or remote network packets exhausts connection pools and triggers widespread system deadlocks. Runtimes must implement the Saga pattern, pairing every forward mutating action with an explicit, compensating transaction.
 :::
-
----
 
 ## Summary {#sec-vol3-actuation-summary}
 
