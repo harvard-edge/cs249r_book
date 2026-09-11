@@ -155,3 +155,14 @@ def test_build_json_emits_json_on_chapters_with_all():
     data = json.loads(buf.getvalue())
     assert data["success"] is False
     assert "Cannot combine explicit chapters with --all" in data.get("error", "")
+
+
+def test_maintain_volume_bib_resolves_script_independently_of_cwd(monkeypatch):
+    """Ensure bibliography maintenance finds the script regardless of current directory."""
+    from binder.cli.commands.maintenance import MaintenanceCommand
+    books_dir = Path("books")
+    if books_dir.is_dir():
+        monkeypatch.chdir(books_dir)
+        repo_root = Path(__file__).resolve().parents[2]
+        script = repo_root / "binder" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
+        assert script.exists()

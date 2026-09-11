@@ -454,7 +454,8 @@ class MaintenanceCommand:
             return False
 
         import sys as _sys
-        script = self.config_manager.root_dir / "binder" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
+        repo_root = Path(__file__).resolve().parents[3]
+        script = repo_root / "binder" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
         if not script.exists():
             console.print(f"[red]❌ Script not found: {script}[/red]")
             return False
@@ -464,7 +465,7 @@ class MaintenanceCommand:
         action_name = "Checking" if check_only else "Synchronizing"
         disp_name = format_volume_display_name(volume)
         console.print(f"[blue]📚 {action_name} {disp_name} bibliography ({volume})...[/blue]")
-        res = subprocess.run(cmd, cwd=self.config_manager.root_dir, capture_output=True, text=True)
+        res = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
         if res.stdout:
             console.print(res.stdout.strip())
         if res.stderr:
