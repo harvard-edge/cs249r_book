@@ -310,29 +310,21 @@ In 2023, Kwon and colleagues adapted this foundational operating systems princip
 
 ### Virtual-to-physical block mapping
 
-Under PagedAttention, an agent's logical sequence of tokens $\mathbf{X} = (x_0, x_1, \dots, x_{S-1})$ is partitioned into a sequence of logical blocks of uniform capacity $B_{\text{block}}$ tokens (typically $B_{\text{block}} \in \{16, 32\}$):
+Under PagedAttention, an agent's logical sequence of tokens $\mathbf{X} = (x_0, x_1, \dots, x_{S-1})$ is partitioned into uniform logical blocks of capacity $B_{\text{block}}$ tokens (typically $B_{\text{block}} \in \{16, 32\}$). The serving engine maintains a host-managed **Block Table** (or Page Table) that maps each logical block index $j$ of request $\text{Request\_ID}$ to an arbitrary physical block $P \in \{0, 1, \dots, N_{\text{physical\_blocks}} - 1\}$ resident in accelerator HBM: $\mathcal{M}: (\text{Request\_ID}, \, j) \longrightarrow P$.
 
-$$\text{Logical Block } j = \left( x_{j \cdot B_{\text{block}}}, \, x_{j \cdot B_{\text{block}} + 1}, \, \dots, \, x_{(j+1) \cdot B_{\text{block}} - 1} \right)$$
+Each physical block allocates fixed, contiguous storage for exactly $B_{\text{block}}$ tokens across all layers and attention heads defined in @eq-vol3-virtualmem-block-tensor:
 
-The serving engine maintains a centralized, host-managed **Block Table** (or Page Table) that maps each logical block index $j$ of a given request to a physical block index $P$ resident in accelerator HBM:
+$$\mathcal{T}_{\text{block}} \in \mathbb{R}^{2 \times n_{\text{layers}} \times B_{\text{block}} \times n_{\text{kv\_heads}} \times d_{\text{head}}} {#eq-vol3-virtualmem-block-tensor}$$
 
-$$\mathcal{M}: (\text{Request\_ID}, \, j) \longrightarrow P \in \{0, 1, \dots, N_{\text{physical\_blocks}} - 1\}$$
+During kernel execution, the GPU thread blocks resolve the physical byte address $\mathcal{A}(i)$ for any logical token position $i$ using fast integer division and modulo arithmetic defined in @eq-vol3-virtualmem-address-translation:
 
-Each physical block in accelerator HBM allocates fixed, contiguous storage for exactly $B_{\text{block}}$ tokens across all layers and heads:
+$$\mathcal{A}(i) = \text{Base}\left(\mathcal{M}\left(\text{Request\_ID}, \, \left\lfloor \frac{i}{B_{\text{block}}} \right\rfloor\right)\right) + (i \bmod B_{\text{block}}) \cdot S_{\text{token\_layer}} {#eq-vol3-virtualmem-address-translation}$$
 
-$$\mathcal{T}_{\text{block}} \in \mathbb{R}^{2 \times n_{\text{layers}} \times B_{\text{block}} \times n_{\text{kv\_heads}} \times d_{\text{head}}}$$
+where the quotient $j = \lfloor i / B_{\text{block}} \rfloor$ indexes the logical block in the page table, the remainder $o = i \bmod B_{\text{block}}$ defines the intra-block token offset, and $S_{\text{token\_layer}} = 2 \cdot b \cdot n_{\text{kv\_heads}} \cdot d_{\text{head}}$ is the physical byte footprint of one token at that layer.
 
-When the attention kernel executes on the GPU, it computes the physical memory address for any arbitrary token at logical sequence position $i$ using integer arithmetic:
+During autoregressive decode, the engine writes newly generated Key and Value vectors into the active physical block at offset $o = i \bmod B_{\text{block}}$. Only when the block becomes completely saturated ($o = B_{\text{block}} - 1$) does the runtime claim a fresh block from its global free-block list, appending the physical pointer to the request's block table.
 
-$$\text{Logical Block Index: } j = \left\lfloor \frac{i}{B_{\text{block}}} \right\rfloor$$
-
-$$\text{Intra-Block Offset: } o = i \pmod{B_{\text{block}}}$$
-
-$$\text{Physical Address: } \mathcal{A}(i) = \text{Base}(\mathcal{M}(\text{Request\_ID}, j)) + o \cdot S_{\text{token\_layer}}$$
-
-where $S_{\text{token\_layer}} = 2 \cdot b \cdot n_{\text{kv\_heads}} \cdot d_{\text{head}}$ is the physical byte footprint of one token at a single transformer layer.
-
-During the autoregressive decode phase, the model emits one token at a time. The serving runtime appends the newly computed Key and Value vectors into the current physical block at offset $o = i \bmod B_{\text{block}}$. Only when the current block becomes completely saturated ($o = B_{\text{block}} - 1$) does the allocator allocate a fresh physical block from the global free-block pool, appending its physical identifier to the request's block table.
+> **The Systems Rule of Thumb (The Page Size Trade-off):** In PagedAttention runtimes, select block capacity $B_{\text{block}}$ based on the memory coalescing knee and sequence length distribution. Setting $B_{\text{block}} = 16$ or $32$ tokens achieves near-optimal trade-offs: it ensures memory transactions across the 128-byte HBM bus lines are fully coalesced during SRAM tile loads, while bounding stranded tail capacity to less than $B_{\text{block}} / 2$ tokens ($< 4\%$) per active sequence.
 
 ### Paged attention kernel execution
 
@@ -344,34 +336,28 @@ PagedAttention preserves this SRAM tiling efficiency while reading from physical
 ![](images/svg/paged_attention_virtual_memory.svg)
 :::
 
-Mathematically, during the autoregressive decode step for query vector $\mathbf{q}_i$, the attention weights $\alpha_{i, k}$ and output vector $\mathbf{o}_i$ are evaluated over historical tokens $k \in [0, i]$ as:
+Mathematically, during the autoregressive decode step for query vector $\mathbf{q}_i$, the kernel evaluates the attention reduction defined in @eq-vol3-virtualmem-paged-attention-kernel over all historical tokens $k \in [0, i]$:[^fn-virtualmem-online-softmax]
 
-$$\alpha_{i, k} = \frac{\exp\left( \frac{1}{\sqrt{d_h}} \mathbf{q}_i^T \mathbf{k}_k \right)}{\sum_{m=0}^{i} \exp\left( \frac{1}{\sqrt{d_h}} \mathbf{q}_i^T \mathbf{k}_m \right)}, \quad \mathbf{o}_i = \sum_{k=0}^{i} \alpha_{i, k} \mathbf{v}_k$$
+$$\mathbf{o}_i = \sum_{k=0}^{i} \text{Softmax}\left( \frac{1}{\sqrt{d_h}} \mathbf{q}_i^T \mathbf{k}_k \right) \mathbf{v}_k {#eq-vol3-virtualmem-paged-attention-kernel}$$
 
-In the PagedAttention CUDA/Triton kernel, the vectors $\mathbf{k}_k$ and $\mathbf{v}_k$ are retrieved via indirect block addressing:
-
-$$\mathbf{k}_k = \mathcal{K}\left[ \mathcal{M}\left(\left\lfloor \frac{k}{B_{\text{block}}} \right\rfloor\right), \, k \pmod{B_{\text{block}}} \right]$$
-
-$$\mathbf{v}_k = \mathcal{V}\left[ \mathcal{M}\left(\left\lfloor \frac{k}{B_{\text{block}}} \right\rfloor\right), \, k \pmod{B_{\text{block}}} \right]$$
+where the Key and Value vectors are retrieved dynamically through indirect block table addressing: $\mathbf{k}_k, \mathbf{v}_k = (\mathcal{K}, \mathcal{V})[\mathcal{M}(\lfloor k / B_{\text{block}} \rfloor), \, k \bmod B_{\text{block}}]$.
 
 The kernel assigns GPU thread warps to iterate over logical blocks. For each logical block $j$, the warp reads the physical block index $P = \mathcal{M}(j)$ from the block table resident in constant memory or L1 cache, issues coalesced global memory load instructions to fetch the $B_{\text{block}}$ Key vectors into SRAM, computes partial dot products $\mathbf{q}_i^T \mathbf{k}_k$, updates the online softmax normalizer using the FlashAttention rescaling trick [@dao2022], loads the corresponding Value vectors from physical block $P$, and accumulates the partial output tensor $\mathbf{o}_i$. Because block translation is fused directly into the SRAM inner loop, PagedAttention incurs less than **$1.5\%$ kernel runtime overhead** compared to an idealized contiguous attention kernel [@kwon2023vllm].
+
+> **The Systems Rule of Thumb (The Kernel Fusion Invariant):** Software address translation in GPU kernels is practically free when fused into register-level SRAM loops. Because the physical block index $P = \mathcal{M}(j)$ is loaded once per $B_{\text{block}}$ tokens into on-chip cache, indirect indexing amortizes across all intra-block warp instructions. Kernel developers must fuse block table indexing into the attention reduction loop rather than launching separate address-lookup kernels, bounding overhead to under $1.5\%$.
+
+[^fn-virtualmem-online-softmax]: To prevent numerical overflow without materializing the full $S \times S$ attention matrix in HBM, the kernel maintains running maximum $m_i$ and running sum $l_i$ in GPU thread registers, rescaling partial accumulators as each $B_{\text{block}}$ chunk is streamed into SRAM [@dao2022].
 
 ### Elimination of external fragmentation and bounding internal waste
 
 The shift to uniform block paging fundamentally alters the thermodynamics of accelerator memory:
 
-1. **Elimination of External Fragmentation:** Because all physical blocks share an identical fixed capacity $B_{\text{block}}$, any free block anywhere in HBM can satisfy any allocation request from any agent. Physical memory allocation is reduced to managing a simple $O(1)$ free-list stack or bitmask. Contiguous memory compaction pauses, memory-hole tracking, and allocation failures due to external fragmentation are mathematically eliminated:
-   $$\Phi_{\text{ext}} = 0$$
-2. **Bounding Internal Fragmentation:** Internal fragmentation is restricted strictly to the final, partially filled block of an active sequence. If an agent generates a sequence of length $S$, the number of fully saturated physical blocks is $\lfloor S / B_{\text{block}} \rfloor$, and the number of active tokens occupying the final block is:
-   $$S_{\text{tail}} = S \pmod{B_{\text{block}}}$$
-   If $S_{\text{tail}} > 0$, the final block reserves capacity for $B_{\text{block}}$ tokens but stores only $S_{\text{tail}}$, leaving $B_{\text{block}} - S_{\text{tail}}$ unused slots. Assuming that sequence lengths modulo $B_{\text{block}}$ are uniformly distributed over $[0, B_{\text{block}}-1]$, the expected internal waste per sequence is:
-   $$\mathbb{E}[\text{Waste}_{\text{internal}}] = \frac{B_{\text{block}} - 1}{2} \times S_{\text{token}}$$
+1. **Elimination of External Fragmentation:** Because all physical blocks share an identical fixed capacity $B_{\text{block}}$, any free block anywhere in HBM can satisfy any allocation request from any agent. Physical memory allocation is reduced to managing a simple $\mathcal{O}(1)$ free-list stack or bitmask. Contiguous memory compaction pauses, memory-hole tracking, and allocation failures due to external fragmentation are mathematically eliminated ($\Phi_{\text{ext}} = 0$).
+2. **Bounding Internal Fragmentation:** Internal fragmentation is restricted strictly to the final, partially filled block of an active sequence. If an agent generates a sequence of length $S$, the number of fully saturated physical blocks is $\lfloor S / B_{\text{block}} \rfloor$, and the number of active tokens occupying the final block is $S_{\text{tail}} = S \bmod B_{\text{block}}$. If $S_{\text{tail}} > 0$, the final block reserves capacity for $B_{\text{block}}$ tokens but stores only $S_{\text{tail}}$, leaving $B_{\text{block}} - S_{\text{tail}}$ unused slots. Assuming that sequence lengths modulo $B_{\text{block}}$ are uniformly distributed over $[0, B_{\text{block}}-1]$, the expected internal waste per sequence defined in @eq-vol3-virtualmem-internal-waste depends strictly on block capacity and per-token footprint:
 
-For Llama-3 70B ($S_{\text{token}} = 320\text{ KB}$) operating with block size $B_{\text{block}} = 16$, the expected internal waste per active agent sequence is:
+$$\mathbb{E}[\text{Waste}_{\text{internal}}] = \frac{B_{\text{block}} - 1}{2} \cdot S_{\text{token}} {#eq-vol3-virtualmem-internal-waste}$$
 
-$$\mathbb{E}[\text{Waste}] = \frac{16 - 1}{2} \times 320\text{ KB} = 7.5 \times 320\text{ KB} = 2.40\text{ MB}$$
-
-In a 32,000-token context ($M_{\text{KV}} \approx 10.49\text{ GB}$), this internal waste represents **less than $0.023\%$** of the allocated memory.
+For Llama-3 70B ($S_{\text{token}} = 320\text{ KB}$) operating with block size $B_{\text{block}} = 16$, evaluating @eq-vol3-virtualmem-internal-waste yields an expected internal waste of $\frac{15}{2} \times 320\text{ KB} = 2.40\text{ MB}$ per sequence. In a 32,000-token context ($M_{\text{KV}} \approx 10.49\text{ GB}$), this internal waste represents **less than $0.023\%$** of the allocated memory.
 
 | Block Size ($B_{\text{block}}$) | Block Footprint (Llama-3 70B BF16) | Expected Tail Waste Per Trajectory |          Global Memory Bus Coalescing          |   Host Page Table Overhead   | Optimal Deployment Regime       |
 |:-------------------------------:|:----------------------------------:|:----------------------------------:|:----------------------------------------------:|:----------------------------:|:--------------------------------|
@@ -384,22 +370,19 @@ In a 32,000-token context ($M_{\text{KV}} \approx 10.49\text{ GB}$), this intern
 
 As documented in @tbl-vol3-vm-block-size-tradeoffs, selecting $B_{\text{block}} = 16$ or $B_{\text{block}} = 32$ achieves an optimal balance between bus transaction alignment (matching the $128\text{B}$ and $256\text{B}$ memory transaction sectors of modern GPU memory controllers) and negligible tail waste.
 
+> **The Systems Rule of Thumb (The 96% Memory Utilization Boundary):** By eliminating external fragmentation ($\Phi_{\text{ext}} = 0$) and bounding internal tail waste to $\mathbb{E}[\text{Waste}] = \frac{B_{\text{block}} - 1}{2} S_{\text{token}}$, PagedAttention guarantees sustained accelerator memory utilization above $96\%$, compared to $30\text{--}40\%$ under contiguous allocation. Capacity planners can safely dimension agent batch concurrency against physical HBM limits without provisioning safety margins for unobserved worst-case sequence allocations.
+
 ### Copy-on-write (CoW) for speculative trajectories
 
 Beyond eliminating memory fragmentation, the decisive architectural capability unlocked by virtual memory paging is **zero-copy context branching** via **Copy-on-Write (CoW)**\index{Copy-on-Write (CoW)}.
 
 In deliberative agent architectures (@sec-vol3-deliberation), an agent does not execute in a purely linear chain. Instead, it regularly evaluates multiple speculative hypotheses in parallel via algorithms such as Tree-of-Thoughts (ToT) [@yao2023tree], Monte Carlo Tree Search (MCTS), or parallel beam rollouts. For example, a software debugging agent inspecting a complex failure might fork four parallel branches from an identical 48,000-token workspace context: Branch $A$ explores an in-place patch, Branch $B$ attempts a configuration rollback, Branch $C$ inserts diagnostic print assertions, and Branch $D$ executes an integration test suite.
 
-Under an unpaged, contiguous serving regime, evaluating four speculative branches from a 48,000-token context requires physically replicating the KV cache four times. For Llama-3 70B, this replication consumes:
-
-$$M_{\text{naive}} = 4 \times (48\text{,}000 \times 320\text{ KB}) = 4 \times 15.36\text{ GB} = 61.44\text{ GB}$$
-
-Duplicating these tensors burns tens of gigabytes of HBM write bandwidth and rapidly exhausts accelerator capacity, capping search breadth.
+Under an unpaged, contiguous serving regime, evaluating four speculative branches from a 48,000-token context requires physically replicating the KV cache four times. For Llama-3 70B, this replication consumes $M_{\text{naive}} = 4 \times (48\text{,}000 \times 320\text{ KB}) = 61.44\text{ GB}$ of scarce memory. Duplicating these tensors burns tens of gigabytes of HBM write bandwidth and rapidly exhausts accelerator capacity, capping search breadth.
 
 With PagedAttention, context branching executes with **zero memory replication**:
 
-1. **Physical Block Aliasing:** When Branches $A, B, C, D$ fork from the parent context, the runtime instantiates four distinct logical block tables. However, every entry in the child block tables points directly to the **identical physical block numbers** allocated to the parent. No activation data is copied. The serving engine increments an internal **reference counter** ($\text{ref\_count}$) associated with each physical block descriptor:
-   $$\text{ref\_count}(P) \leftarrow \text{ref\_count}(P) + 1$$
+1. **Physical Block Aliasing:** When Branches $A, B, C, D$ fork from the parent context, the runtime instantiates four distinct logical block tables. However, every entry in the child block tables points directly to the **identical physical block numbers** allocated to the parent. No activation data is copied. The serving engine increments an internal reference counter associated with each physical block descriptor: $\text{ref\_count}(P) \leftarrow \text{ref\_count}(P) + 1$.
 2. **Copy-on-Write Mutation:** The shared parent blocks are marked strictly read-only. When child Branch $A$ generates a new token, it attempts to write to its current physical block. If the current block is a shared parent block whose reference counter satisfies $\text{ref\_count}(P) > 1$, the allocator intercepts the write:
    - It allocates a single, fresh physical block $P_{\text{new}}$ from the free pool.
    - It copies only the $B_{\text{block}}$ tokens of the saturated block ($B_{\text{block}} \times S_{\text{token\_layer}} = 5.12\text{ MB}$).
@@ -408,9 +391,9 @@ With PagedAttention, context branching executes with **zero memory replication**
    - Subsequent tokens generated by Branch $A$ append directly into $P_{\text{new}}$ without further copying.
 
 ::: {#pri-virtual-context-invariant .callout-principle title="The virtual context invariant"}
-In any virtual context memory architecture deploying block-level paging, the physical memory consumed by $K$ divergent agent trajectories sharing an identical parent prefix of length $L_{\text{prefix}}$ and generating divergent rollouts of length $L_{\text{branch}}$ is strictly bounded by:
+In any virtual context memory architecture deploying block-level paging, the physical memory consumed by $K$ divergent agent trajectories sharing an identical parent prefix of length $L_{\text{prefix}}$ and generating divergent rollouts of length $L_{\text{branch}}$ is strictly bounded by @eq-vol3-virtualmem-cow-capacity:
 
-$$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}(L_{\text{branch}}) + \mathcal{O}(K \cdot B_{\text{block}} \cdot S_{\text{token}})$$
+$$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}(L_{\text{branch}}) + \mathcal{O}(K \cdot B_{\text{block}} \cdot S_{\text{token}}) {#eq-vol3-virtualmem-cow-capacity}$$
 
 as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in contiguous, unpaged architectures.
 :::
@@ -489,16 +472,13 @@ class SpeculativeBranchCapacity:
 **Math:**
 
 1. *Under Naive Contiguous Replication:*
-Each branch must allocate private memory for the entire cumulative sequence ($L_{\text{prefix}} + L_{\text{branch}} = 41\text{,}024$ tokens):
-$$M_{\text{per\_branch, naive}} = M_{\text{prefix}} + M_{\text{branch}} = 13.11\text{ GB} + 0.336\text{ GB} = 13.446\text{ GB}$$
-Maximum concurrent speculative branches:
-$$K_{\text{naive}} = \left\lfloor \frac{C_{\text{KV}}}{M_{\text{per\_branch, naive}}} \right\rfloor = \left\lfloor \frac{436\text{ GB}}{13.446\text{ GB}} \right\rfloor = \mathbf{32\text{ concurrent branches}}$$
+- Memory per branch: Each branch must allocate private memory for the entire cumulative sequence ($L_{\text{prefix}} + L_{\text{branch}} = 41\text{,}024$ tokens), consuming $M_{\text{per\_branch, naive}} = M_{\text{prefix}} + M_{\text{branch}} = 13.11\text{ GB} + 0.336\text{ GB} = 13.446\text{ GB}$.
+- Maximum concurrent branches: $K_{\text{naive}} = \lfloor C_{\text{KV}} / M_{\text{per\_branch, naive}} \rfloor = \lfloor 436\text{ GB} / 13.446\text{ GB} \rfloor = \mathbf{32\text{ concurrent branches}}$.
 
 2. *Under PagedAttention with Copy-on-Write (CoW):*
-The shared parent context of $40\text{,}000$ tokens is instantiated **exactly once** in physical HBM, consuming $M_{\text{prefix}} = 13.11\text{ GB}$. The remaining memory is allocated purely to the private divergent tokens of each branch:
-$$C_{\text{available\_branches}} = C_{\text{KV}} - M_{\text{prefix}} = 436\text{ GB} - 13.11\text{ GB} = 422.89\text{ GB}$$
-Maximum concurrent speculative branches (assuming block size $B_{\text{block}} = 16$):
-$$K_{\text{CoW}} = \left\lfloor \frac{422.89\text{ GB}}{M_{\text{branch}} + B_{\text{block}} \cdot S_{\text{token}}} \right\rfloor = \left\lfloor \frac{422.89\text{ GB}}{0.336\text{ GB} + 0.005\text{ GB}} \right\rfloor = \left\lfloor \frac{422.89}{0.341} \right\rfloor = \mathbf{1\text{,}240\text{ concurrent branches}}$$
+- The shared parent context of $40\text{,}000$ tokens is instantiated **exactly once** in physical HBM, consuming $M_{\text{prefix}} = 13.11\text{ GB}$. The remaining capacity ($C_{\text{available}} = 436\text{ GB} - 13.11\text{ GB} = 422.89\text{ GB}$) is dedicated exclusively to divergent branch tokens.
+- Factoring in tail allocation waste ($B_{\text{block}} \cdot S_{\text{token}} \approx 0.005\text{ GB}$), each branch consumes $0.336\text{ GB} + 0.005\text{ GB} = 0.341\text{ GB}$.
+- Maximum concurrent branches: $K_{\text{CoW}} = \lfloor 422.89\text{ GB} / 0.341\text{ GB} \rfloor = \mathbf{1\text{,}240\text{ concurrent branches}}$.
 
 **Result:** PagedAttention CoW expands the node's speculative search capacity from **$32$ to $1\text{,}240$ concurrent branches**—a **$38.75\times$ capacity expansion** on identical physical silicon.
 
@@ -507,6 +487,8 @@ $$K_{\text{CoW}} = \left\lfloor \frac{422.89\text{ GB}}{M_{\text{branch}} + B_{\
 :::
 
 PagedAttention resolves the physical memory addressing problem: it allows arbitrary non-contiguous physical blocks to back a logical sequence and enables zero-copy sharing across known, explicitly forked branches. However, PagedAttention assumes the serving system already knows which requests share memory. In an autonomous multi-agent swarm where dozens of heterogeneous agents submit requests asynchronously, the runtime requires a dynamic indexing data structure to discover, match, and reuse shared prefixes automatically.
+
+> **The Systems Rule of Thumb (The Test-Time Deliberation Multiplier):** Copy-on-Write transforms test-time search from a memory-prohibitive extravagance into a lightweight scheduling primitive. By isolating private memory allocation strictly to divergent branch steps ($L_{\text{branch}} \ll L_{\text{prefix}}$), CoW expands concurrent speculative search capacity by over $35\times$ on identical GPU hardware. Runtimes supporting Tree-of-Thoughts or Monte Carlo Tree Search must deploy physical block aliasing to prevent shared context replication from choking accelerator HBM.
 
 ## Memory Defragmentation, Page Tables, and Block Allocation {#sec-vol3-virtualmem-defrag}
 
@@ -567,16 +549,16 @@ If an agent returns for its next execution turn before memory pressure forces ev
 
 While Radix trees provide sub-millisecond prefix lookups on a single host machine, coordinating prefix caching across distributed multi-node clusters introduces serialization and synchronization bottlenecks. In distributed clusters, runtimes supplement tree indexing with **Content-Addressed Hash Chains**\index{Content-Addressed Hash Chains}.
 
-A token sequence partitioned into uniform blocks of size $B_{\text{block}}$ is mapped to a cryptographic or high-speed non-cryptographic rolling hash chain (e.g., xxHash64 or SHA-256):
+A token sequence partitioned into uniform blocks of size $B_{\text{block}}$ is mapped to a high-speed rolling hash chain (e.g., xxHash64 or MurmurHash3). For base block $k=0$, the seed hash incorporates the model identifier: $h_0 = \mathcal{H}(\text{Model\_ID} \,\|\, \mathbf{t}_{0 : B_{\text{block}}-1})$. For each subsequent block $k \ge 1$, the key chains recursively from the preceding block's digest as defined in @eq-vol3-virtualmem-content-hash-chain:
 
-$$h_0 = \mathcal{H}\left( \text{Model\_ID} \,\|\, \mathbf{t}_{0 : B_{\text{block}}-1} \right)$$
+$$h_k = \mathcal{H}\left( h_{k-1} \,\|\, \mathbf{t}_{k \cdot B_{\text{block}} : (k+1) \cdot B_{\text{block}} - 1} \right) {#eq-vol3-virtualmem-content-hash-chain}$$
 
-$$h_k = \mathcal{H}\left( h_{k-1} \,\|\, \mathbf{t}_{k \cdot B_{\text{block}} : (k+1) \cdot B_{\text{block}} - 1} \right) \quad \text{for } k \ge 1$$
-
-Because the hash of block $k$ depends strictly on $h_{k-1}$ and its own token payload, the hash chain guarantees:
+Because the hash of block $k$ depends strictly on preceding state $h_{k-1}$ and its own token payload, the hash chain guarantees:
 
 1. **Deterministic Content Addressing:** Any worker node in a distributed fleet can independently compute the exact hash key for any prefix block without consulting a centralized lock manager.
 2. **Distributed Cache Routing:** A cluster load balancer can hash the prompt's initial block keys and route the request to the specific GPU worker node that already hosts those physical blocks in HBM, maximizing cache hit rates across distributed multi-agent swarms.
+
+> **The Systems Rule of Thumb (Content-Addressed Routing):** For multi-node agent serving clusters, never route requests purely via round-robin or least-connections load balancing. Use content-addressed rolling hash keys ($h_k$) to implement prefix-aware affinity routing, pinning agents with shared system prompts or repository contexts to identical GPU worker nodes. Distributed hash routing transforms cross-node cache hit rates from near-zero to over $85\%$, avoiding petabytes of redundant prefill recomputation across the cluster.
 
 ### Chunked prefill and pipeline interference
 
