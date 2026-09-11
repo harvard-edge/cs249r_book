@@ -5033,12 +5033,10 @@ class ValidateCommand:
 
         # Load summaries
         summaries_keys: Set[str] = set()
-        possible_paths = [
-            self.config_manager.book_dir / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "vol1" / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "vol2" / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "vol3" / "parts" / "summaries.yml",
-            self.config_manager.book_dir / "vol4" / "parts" / "summaries.yml",
+        from cli.core.discovery import discover_volumes
+        possible_paths = [self.config_manager.book_dir / "parts" / "summaries.yml"] + [
+            self.config_manager.book_dir / vol / "parts" / "summaries.yml"
+            for vol in discover_volumes(self.config_manager.book_dir)
         ]
 
         try:
@@ -9507,6 +9505,33 @@ class ValidateCommand:
     # PDF: built-artifact verification (pdftotext cross-ref scan)
     # ------------------------------------------------------------------
 
+    def _resolve_pdf_volumes(
+        self,
+        root: Path,
+        quarto_dir: Path,
+        vol1: bool = False,
+        vol2: bool = False,
+        vol3: bool = False,
+        vol4: bool = False,
+        tinytorch: bool = False,
+    ) -> List[str]:
+        from cli.core.discovery import discover_volumes
+        all_vols = discover_volumes(quarto_dir)
+        if root and root.name in all_vols:
+            return [root.name]
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if vol3:
+            volumes.append("vol3")
+        if vol4:
+            volumes.append("vol4")
+        if tinytorch:
+            volumes.append("tinytorch")
+        return volumes if volumes else ["vol1", "vol2"]
+
     def _run_pdf_verify(
         self,
         root: Path,
@@ -9531,19 +9556,9 @@ class ValidateCommand:
         # beside the .tex, so log-based gates run without extra ceremony.
         log = Path(log_path) if log_path else None
 
-        volumes: List[str] = []
-        if vol1:
-            volumes.append("vol1")
-        if vol2:
-            volumes.append("vol2")
-        if vol3:
-            volumes.append("vol3")
-        if vol4:
-            volumes.append("vol4")
-        if tinytorch:
-            volumes.append("tinytorch")
-        if not volumes:
-            volumes = ["vol1", "vol2"]
+        volumes = self._resolve_pdf_volumes(
+            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
+        )
 
         issues: List[ValidationIssue] = []
         checked = 0
@@ -9589,19 +9604,9 @@ class ValidateCommand:
         repo_root = Path(__file__).resolve().parents[3]
         quarto_dir = repo_root  / "books"
 
-        volumes: List[str] = []
-        if vol1:
-            volumes.append("vol1")
-        if vol2:
-            volumes.append("vol2")
-        if vol3:
-            volumes.append("vol3")
-        if vol4:
-            volumes.append("vol4")
-        if tinytorch:
-            volumes.append("tinytorch")
-        if not volumes:
-            volumes = ["vol1", "vol2"]
+        volumes = self._resolve_pdf_volumes(
+            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
+        )
 
         issues: List[ValidationIssue] = []
         checked = 0
@@ -9644,19 +9649,9 @@ class ValidateCommand:
         repo_root = Path(__file__).resolve().parents[3]
         quarto_dir = repo_root  / "books"
 
-        volumes: List[str] = []
-        if vol1:
-            volumes.append("vol1")
-        if vol2:
-            volumes.append("vol2")
-        if vol3:
-            volumes.append("vol3")
-        if vol4:
-            volumes.append("vol4")
-        if tinytorch:
-            volumes.append("tinytorch")
-        if not volumes:
-            volumes = ["vol1", "vol2"]
+        volumes = self._resolve_pdf_volumes(
+            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
+        )
 
         issues: List[ValidationIssue] = []
         checked = 0
@@ -9700,19 +9695,9 @@ class ValidateCommand:
         repo_root = Path(__file__).resolve().parents[3]
         quarto_dir = repo_root  / "books"
 
-        volumes: List[str] = []
-        if vol1:
-            volumes.append("vol1")
-        if vol2:
-            volumes.append("vol2")
-        if vol3:
-            volumes.append("vol3")
-        if vol4:
-            volumes.append("vol4")
-        if tinytorch:
-            volumes.append("tinytorch")
-        if not volumes:
-            volumes = ["vol1", "vol2"]
+        volumes = self._resolve_pdf_volumes(
+            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
+        )
 
         issues: List[ValidationIssue] = []
         checked = 0
@@ -12843,19 +12828,9 @@ class ValidateCommand:
         quarto_dir = repo_root  / "books"
         issues: List[ValidationIssue] = []
 
-        volumes: List[str] = []
-        if vol1:
-            volumes.append("vol1")
-        if vol2:
-            volumes.append("vol2")
-        if vol3:
-            volumes.append("vol3")
-        if vol4:
-            volumes.append("vol4")
-        if tinytorch:
-            volumes.append("tinytorch")
-        if not volumes:
-            volumes = ["vol1", "vol2"]
+        volumes = self._resolve_pdf_volumes(
+            root, quarto_dir, vol1=vol1, vol2=vol2, vol3=vol3, vol4=vol4, tinytorch=tinytorch
+        )
 
         import shutil
         if shutil.which("pdftotext") is None:

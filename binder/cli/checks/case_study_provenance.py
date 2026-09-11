@@ -62,7 +62,18 @@ class Finding:
 
 def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
     """Each volume that carries case studies, and the bibliography its keys resolve against."""
-    return [(repo / "books" / "vol4", repo / "books" / "references-vol4.bib")]
+    books_dir = repo / "books" if (repo / "books").is_dir() else repo
+    pairs = []
+    for vol_dir in sorted(books_dir.glob("vol*")):
+        if not vol_dir.is_dir():
+            continue
+        vol_name = vol_dir.name
+        bib = books_dir / f"references-{vol_name}.bib"
+        if not bib.exists():
+            bib = books_dir / "references.bib"
+        if bib.exists():
+            pairs.append((vol_dir, bib))
+    return pairs or [(books_dir / "vol4", books_dir / "references-vol4.bib")]
 
 
 def bib_keys(path: Path) -> set[str]:

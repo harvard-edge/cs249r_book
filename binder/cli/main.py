@@ -8,6 +8,7 @@ and managing the Machine Learning Systems textbook.
 
 import re
 import sys
+import time
 from pathlib import Path
 from rich.console import Console
 from rich.markup import escape as _rich_escape
@@ -42,20 +43,15 @@ from cli.commands.release import ReleaseCommand
 console = Console()
 
 
+try:
+    from cli.core.discovery import format_volume_display_name
+except ImportError:
+    from core.discovery import format_volume_display_name
+
+
 def _cmd(text: str) -> str:
     """Escape command examples before rendering in Rich tables."""
     return _rich_escape(text)
-
-
-def format_volume_display_name(volume: str) -> str:
-    """Format volume identifier into human-friendly name."""
-    roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"}
-    if volume.startswith("vol") and volume[3:].isdigit():
-        num = int(volume[3:])
-        return f"Volume {roman_map.get(num, str(num))}"
-    if volume == "tinytorch":
-        return "TinyTorch"
-    return volume.capitalize()
 
 
 class MLSysBookCLI:
@@ -263,6 +259,7 @@ class MLSysBookCLI:
         if len(explicit_volumes) > 1:
             raise ValueError("Select only one volume for a build")
 
+        json_output = False
         for arg in args:
             lower = arg.lower()
             # With --volN, words such as "intro" and "physical" are chapter
@@ -310,6 +307,8 @@ class MLSysBookCLI:
                 no_cover = True
             elif lower == "--print-marks":
                 print_marks = True
+            elif lower == "--json":
+                pass
             elif format_type is None and lower in ("html", "pdf", "epub"):
                 format_type = lower
             else:
@@ -348,7 +347,7 @@ class MLSysBookCLI:
             return False
 
         if "-h" in args or "--help" in args:
-            console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks]", markup=False)
+            console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks] [--json]", markup=False)
             console.print("[dim]Build renders source artifacts. For PDF layout polish, add --layout to a full-volume PDF build.[/dim]")
             console.print("[dim]Examples:[/dim]")
             console.print("[dim]  ./binder/binder build[/dim]")
@@ -365,10 +364,12 @@ class MLSysBookCLI:
             console.print("[dim]  ./binder/binder build epub --vol1 --skip-hygiene    # bypass pre-render hygiene check[/dim]")
             console.print("[dim]  ./binder/binder build epub --vol1 --skip-validate   # bypass post-render validation[/dim]")
             console.print("[dim]  ./binder/binder build pdf --vol1                  # runs pdftotext cross-ref scan after render[/dim]")
+            console.print("[dim]  ./binder/binder build html intro --vol1 --json    # machine-readable build summary[/dim]")
             console.print("[dim]Layout rule: --layout is accepted only for `build pdf --vol1|--vol2`; it runs the same planner as `binder layout --vol1|--vol2 --no-build`.[/dim]")
             return True
 
         self.config_manager.show_active_config()
+        json_output = any(a.lower() == "--json" for a in args) if args else False
         (
             format_type,
             volume,
@@ -401,34 +402,29 @@ class MLSysBookCLI:
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
             console.print(
-                "[red]❌ `--no-cover` is supported for full-volume PDF builds only.[/red]"
-            )
-            console.print(
-                "[yellow]Use: ./binder/binder build pdf --vol1 --no-cover "
+                "[yellow]⚠️ `--no-cover` is honored only for full-volume PDF builds "
                 "(or --vol2, --vol3, --vol4).[/yellow]"
             )
-            return False
 
         if print_marks and (
             format_type != "pdf" or not volume or build_all or chapters_arg
         ):
             console.print(
-                "[red]❌ `--print-marks` is supported for full-volume PDF builds only.[/red]"
-            )
-            console.print(
-                "[yellow]Use: ./binder/binder build pdf --vol1 --print-marks "
+                "[yellow]⚠️ `--print-marks` is honored only for full-volume PDF builds "
                 "(or --vol2, --vol3, --vol4).[/yellow]"
             )
-            return False
+
+        t0 = time.time()
+        ok = False
 
         if build_all:
             if format_type == "html":
                 console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
-                return self.build_command.build_html_only()
-            console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-            return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-
-        if volume and not chapters_arg:
+                ok = self.build_command.build_html_only()
+            else:
+                console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+                ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+        elif volume and not chapters_arg:
             volume_name = format_volume_display_name(volume)
             console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
             ok = self.build_command.build_volume(
@@ -440,23 +436,36 @@ class MLSysBookCLI:
                 print_marks=print_marks,
             )
             if ok and layout_after:
-                return self.layout_command.run([f"--{volume}", "--no-build"])
-            return ok
-
-        if volume and chapters_arg:
+                ok = self.layout_command.run([f"--{volume}", "--no-build"])
+        elif volume and chapters_arg:
             chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
             console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
-            return self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
-
-        if chapters_arg:
+            ok = self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+        elif chapters_arg:
             chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
             console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
-            return self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+            ok = self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+        else:
+            console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+            if format_type == "html":
+                ok = self.build_command.build_full("html")
+            else:
+                ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
-        console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-        if format_type == "html":
-            return self.build_command.build_full("html")
-        return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+        if json_output:
+            import json as _json
+            result_payload = {
+                "success": bool(ok),
+                "format": format_type,
+                "volume": volume,
+                "all": build_all,
+                "chapters": [ch.strip() for ch in chapters_arg.split(",")] if chapters_arg else None,
+                "elapsed_seconds": round(time.time() - t0, 2),
+                "log_path": str(getattr(self.build_command, "_last_build_log", "")) or None,
+            }
+            console.print(_json.dumps(result_payload, indent=2))
+
+        return ok
 
     def handle_preview_command(self, args):
         """Handle preview command."""
