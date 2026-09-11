@@ -729,13 +729,27 @@ In Key-Value cache compression, these two formats map to fundamentally distinct 
 - **Value Activation Vectors ($\mathbf{V}$):** Value vectors represent the convex combinations accumulated during attention output projection: $\mathbf{o} = \sum \alpha_i \mathbf{v}_i$. The softmax attention weights $\alpha_i \in [0, 1]$ act as a convex normalizer, preventing extreme activation growth. Consequently, **Value vectors prefer FP8 E4M3**, where higher mantissa precision preserves semantic fidelity during weighted accumulation.
 - **Key Activation Vectors ($\mathbf{K}$):** Key vectors are multiplied directly by query vectors in the dot product $\mathbf{q}^T \mathbf{k}$. Furthermore, modern foundation models apply **Rotary Position Embeddings (RoPE)**\index{Rotary Position Embeddings (RoPE)} [@su2024] to Key vectors before caching. As sequence length $S$ expands to 128,000 tokens, RoPE rotation introduces high dynamic variance across head dimensions. Consequently, **Key vectors prefer FP8 E5M2**, where the 5-bit exponent prevents catastrophic exponent overflow and underflow across long context horizons.
 
-To compress tensors down to 4-bit precision (**INT4**), runtimes implement uniform affine quantization:
+The trade-offs across floating-point and integer quantization formats are summarized in @tbl-vol3-vm-quantization-tradeoffs.
 
-$$\hat{x} = \text{clip}\left( \left\lfloor \frac{x}{s} \right\rceil + z, \, -2^{b-1}, \, 2^{b-1} - 1 \right)$$
+| Format | Bits ($b$) | Encoding (Sign / Exp / Mantissa) | Dynamic Range | Primary KV Role | Compression Factor |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **FP16 / BF16** | 16 | $1 / 5 / 10$ (FP16) or $1 / 8 / 7$ (BF16) | $[-65504, 65504]$ | Baseline reference | $1.0\times$ (Uncompressed) |
+| **FP8 E4M3** | 8 | $1 / 4 / 3$ | $[-448, 448]$ | Value vectors ($\mathbf{V}$, convex sums) | $2.0\times$ ($50\%$ HBM savings) |
+| **FP8 E5M2** | 8 | $1 / 5 / 2$ | $[-57344, 57344]$ | Key vectors ($\mathbf{K}$, RoPE variance) | $2.0\times$ ($50\%$ HBM savings) |
+| **INT4 (Affine)**| 4 | Uniform integer with scale/zero | Dynamic ($s \cdot q$) | Token budget / cold tiers | $4.0\times$ ($75\%$ HBM savings) |
+: **KV Cache Precision Regimes and Hardware Trade-Offs**: Numerical formats supported on modern Tensor Cores and their operational assignments across Key and Value activation tensors. {#tbl-vol3-vm-quantization-tradeoffs}
 
-where $s$ is a floating-point scale factor and $z$ is an integer zero-point:
+To compress tensors down to 4-bit integer precision (**INT4**), runtimes implement uniform affine quantization governed by @eq-vol3-virtualmem-affine-quant:
 
-$$s = \frac{\max(\mathbf{x}) - \min(\mathbf{x})}{2^b - 1}, \quad z = \left\lfloor -\frac{\min(\mathbf{x})}{s} \right\rceil$$
+$$\hat{x} = \text{clip}\left( \left\lfloor \frac{x}{s} \right\rceil + z, \, -2^{b-1}, \, 2^{b-1} - 1 \right) {#eq-vol3-virtualmem-affine-quant}$$
+
+where $s$ is the per-channel or per-block floating-point scale factor and $z$ is the integer zero-point offset, defining the quantization resolution and memory cache capacity policy.[^fn-virtualmem-quant-params]
+
+::: {.callout-principle title="Systems Rule of Thumb: The Asymmetric FP8 Allocation Invariant"}
+Because Key activations accumulate high rotational variance from RoPE embeddings across long sequences ($S > 32\text{k}$) while Value activations undergo bounded convex normalization ($\sum \alpha_i = 1$), never apply identical FP8 formats across cache tensors. Assign **FP8 E5M2 to Keys** to prevent dynamic range underflow/overflow, and **FP8 E4M3 to Values** to maximize mantissa precision, achieving a deterministic $2\times$ HBM footprint reduction without accuracy degradation.
+:::
+
+[^fn-virtualmem-quant-params]: In uniform affine quantization, scale $s = (\max(\mathbf{x}) - \min(\mathbf{x})) / (2^b - 1)$ maps continuous dynamic range to discrete integer bins, while zero-point $z = \lfloor -\min(\mathbf{x}) / s \rceil$ aligns real zero with integer zero. Symmetric quantization fixes $z = 0$, simplifying kernel dequantization to fused multiply-add operations.
 
 ### Outlier channels and attention sinks
 
