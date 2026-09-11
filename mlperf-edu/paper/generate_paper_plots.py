@@ -100,31 +100,32 @@ def generate_plots(out_dir=None):
     fig, ax = plt.subplots(figsize=(6.5, 3.4))
 
     backend_data = [
-        ("ResNet8 (Vision)", 4.15, "Dense GEMM"),
-        ("EDM Diffusion (GenAI)", 3.86, "Dense GEMM"),
-        ("LLM Prefill (nanoGPT)", 3.54, "Dense GEMM"),
-        ("DistilBERT (NLP)", 2.78, "Dense GEMM"),
-        ("MiniLM-L6 (Retrieval)", 2.34, "Dense GEMM"),
-        ("Autoencoder (Audio)", 2.07, "Dense GEMM"),
-        ("DS-CNN (KWS)", 1.77, "Dense GEMM"),
-        ("MobileNetV2 (VWW)", 1.56, "Dense GEMM"),
-        ("NCF (Recommendation)", 1.30, "Memory-Bound"),
-        ("PatchTST (Time Series)", 1.07, "Sequential"),
-        ("LLM Decode (nanoGPT)", 1.01, "Memory-Bound"),
-        ("GCN (Graph ogbn-arxiv)", 0.99, "Sparse Scatter/Gather"),
-        ("Qwen3 (Function Calling)", 0.98, "Branch / AST Parsing"),
+        ("MobileNetV2 (VWW)", 207.35, "Vectorized Depthwise Conv"),
+        ("DS-CNN (Keyword Spotting)", 39.25, "Vectorized Convolutions"),
+        ("ResNet8 (Image Class.)", 9.45, "Dense Residual GEMM"),
+        ("MiniLM-L6 (Retrieval)", 4.88, "Cross-Encoder Transformer"),
+        ("DistilBERT (Text Class.)", 4.37, "Transformer Encoder"),
+        ("EDM Diffusion (GenAI)", 3.86, "Iterative Sampler"),
+        ("nanoGPT (Causal LM)", 3.54, "Autoregressive Decoder"),
+        ("GCN (Graph Node Class.)", 2.38, "Sparse Message Passing"),
+        ("Autoencoder (Anomaly)", 2.00, "Dense Linear Autoencoder"),
+        ("Code Generation (Qwen2.5)", 1.25, "Deep Autoregressive Decode"),
+        ("PatchTST (Time-Series)", 1.19, "Channel-Independent Patch"),
+        ("MiniGo (RL Search)", 1.02, "Tree Search"),
+        ("Qwen3 (Function Calling)", 0.98, "AST Branching Divergence"),
     ]
 
     names = [d[0] for d in backend_data]
     speedups = [d[1] for d in backend_data]
 
     y_pos = np.arange(len(names))
-    bar_colors = [COLOR_PRIMARY if s >= 1.5 else (COLOR_PASS if s >= 1.0 else COLOR_MISS) for s in speedups]
+    bar_colors = [COLOR_PRIMARY if s >= 2.0 else (COLOR_PASS if s >= 1.0 else COLOR_MISS) for s in speedups]
 
     bars = ax.barh(y_pos, speedups, align='center', color=bar_colors, edgecolor='black', linewidth=0.5, height=0.62)
     ax.set_yticks(y_pos)
     ax.set_yticklabels(names, fontsize=7.5)
     ax.invert_yaxis()
+    ax.set_xscale('log')
     ax.axvline(x=1.0, color='crimson', linestyle='--', linewidth=1.0, label='1.0x Parity (CPU = MPS)')
 
     for bar in bars:
@@ -133,15 +134,15 @@ def generate_plots(out_dir=None):
                     xytext=(4, 0), textcoords="offset points",
                     ha='left', va='center', fontsize=7, fontweight='bold')
 
-    ax.set_xlabel('Speedup Factor (MPS GPU / CPU Execution Time)')
-    ax.set_xlim(0, 4.8)
+    ax.set_xlabel('Measured Hardware Speedup Factor (MPS GPU / CPU Wall-Clock Time, Log Scale)')
+    ax.set_xlim(0.7, 350)
     ax.grid(True, axis='x', ls=":", alpha=0.4)
 
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor=COLOR_PRIMARY, edgecolor='black', label='Dense GEMM Acceleration (>1.5x)'),
-        Patch(facecolor=COLOR_PASS, edgecolor='black', label='Memory-Bound Parity (1.0x - 1.5x)'),
-        Patch(facecolor=COLOR_MISS, edgecolor='black', label='Kernel Launch Overhead (<1.0x)'),
+        Patch(facecolor=COLOR_PRIMARY, edgecolor='black', label='Hardware Accelerated (≥2.0x)'),
+        Patch(facecolor=COLOR_PASS, edgecolor='black', label='Memory-Bound Parity (1.0x - 2.0x)'),
+        Patch(facecolor=COLOR_MISS, edgecolor='black', label='Branch Divergence / Overhead (<1.0x)'),
     ]
     ax.legend(handles=legend_elements, loc='lower right', frameon=True, facecolor='white', framealpha=0.9, edgecolor='none')
 
@@ -342,33 +343,40 @@ def generate_plots(out_dir=None):
     # =========================================================================
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.5, 2.7))
 
-    precisions = ['FP32', 'FP16', 'INT8']
-    sizes_mb = [440, 220, 110]
-    latencies_ms = [5.63, 2.82, 1.48]
+    precisions = ['FP32 (MPS)', 'FP16 (MPS)', 'BF16 (MPS)', 'INT8 (CPU)']
+    sizes_mb = [260, 130, 130, 65]
+    latencies_s = [9.92, 2.96, 2.83, 82.18]
+    verdicts = ['Pass', 'Pass', 'Miss', 'Miss']
+    scores = ['91.06%', '91.06%', '90.83%', '90.02%']
 
     x_pos = np.arange(len(precisions))
 
     bars1 = ax1.bar(x_pos, sizes_mb, color=COLOR_PRIMARY, width=0.45, edgecolor='black', linewidth=0.5)
     ax1.set_xticks(x_pos)
-    ax1.set_xticklabels(precisions, fontsize=8, fontweight='bold')
+    ax1.set_xticklabels(['FP32\nMPS', 'FP16\nMPS', 'BF16\nMPS', 'INT8\nCPU'], fontsize=7.5, fontweight='bold')
     ax1.set_ylabel('Model Footprint (MB)')
-    ax1.set_title('Weight Memory Reduction', fontsize=8.5, fontweight='bold')
+    ax1.set_title('DistilBERT Weight Footprint', fontsize=8.5, fontweight='bold')
     ax1.grid(True, axis='y', ls=":", alpha=0.4)
     for bar in bars1:
         h = bar.get_height()
         ax1.annotate(f'{int(h)} MB', xy=(bar.get_x() + bar.get_width() / 2, h),
                      xytext=(0, 3), textcoords="offset points", ha='center', fontsize=6.8, fontweight='bold')
 
-    bars2 = ax2.bar(x_pos, latencies_ms, color=COLOR_PASS, width=0.45, edgecolor='black', linewidth=0.5)
+    colors2 = [COLOR_PASS if v == 'Pass' else COLOR_MISS for v in verdicts]
+    bars2 = ax2.bar(x_pos, latencies_s, color=colors2, width=0.45, edgecolor='black', linewidth=0.5)
     ax2.set_xticks(x_pos)
-    ax2.set_xticklabels(precisions, fontsize=8, fontweight='bold')
-    ax2.set_ylabel('Inference Latency (ms)')
-    ax2.set_title('Inference Speedup', fontsize=8.5, fontweight='bold')
+    ax2.set_xticklabels(['FP32\nMPS', 'FP16\nMPS', 'BF16\nMPS', 'INT8\nCPU'], fontsize=7.5, fontweight='bold')
+    ax2.set_ylabel('Wall-Clock Seconds (Log Scale)')
+    ax2.set_yscale('log')
+    ax2.set_ylim(1.5, 140)
+    ax2.set_title('Inference Time & Admission', fontsize=8.5, fontweight='bold')
     ax2.grid(True, axis='y', ls=":", alpha=0.4)
-    for bar in bars2:
+    for bar, score, v in zip(bars2, scores, verdicts):
         h = bar.get_height()
-        ax2.annotate(f'{h:.2f} ms', xy=(bar.get_x() + bar.get_width() / 2, h),
-                     xytext=(0, 3), textcoords="offset points", ha='center', fontsize=6.8, fontweight='bold')
+        tag = f'{h:.1f}s\n({score})\n[{v}]'
+        ax2.annotate(tag, xy=(bar.get_x() + bar.get_width() / 2, h),
+                     xytext=(0, 3), textcoords="offset points", ha='center', fontsize=6.2, fontweight='bold',
+                     color=COLOR_PASS if v == 'Pass' else COLOR_MISS)
 
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, 'fig_algo_lens.pdf'), dpi=300, metadata={'CreationDate': None})
