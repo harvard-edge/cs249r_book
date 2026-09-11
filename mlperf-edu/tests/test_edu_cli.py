@@ -126,7 +126,7 @@ def test_run_dashboard_stays_closed_by_default_and_can_be_opened():
     assert default_args.open_report is False
     assert enabled_args.open_report is True
     help_result = run_cli("run", "--help")
-    assert "Open the generated HTML dashboard." in help_result.stdout
+    assert "open the interactive html dashboard" in help_result.stdout.lower()
     assert "--no-open-report" in help_result.stdout
 
 
