@@ -122,13 +122,7 @@ As an agent trajectory accumulates tokens, $M_{\text{KV}}(N)$ expands monotonica
 
 In 1968, Peter J. Denning introduced the **Working Set Model** for program behavior in virtual memory operating systems (@denning1968; @denning1970). Denning observed that software execution does not access memory uniformly across its address space. Instead, programs exhibit pronounced temporal locality (recently accessed instructions and data will be accessed again soon) and spatial locality (instructions and data located near recently accessed addresses will be accessed soon).
 
-Denning formalized a process's working set $W(t, \Delta t)$ at virtual time $t$ with window parameter $\Delta t$ as the collection of memory pages referenced during the process-time interval $(t - \Delta t, t]$:
-
-$$
-W(t, \Delta t) = \{ r_\tau \in S \mid t - \Delta t < \tau \le t \},
-$$
-
-where $S$ is the virtual address space and $r_\tau$ is the page reference at step $\tau$. If the physical memory allocated to the process is smaller than $|W(t, \Delta t)|$, the operating system encounters **thrashing**: physical page frames are continuously evicted and re-faulted from backing disk, causing system throughput to collapse toward zero while CPU utilization is consumed entirely by I/O wait.
+Denning formalized a process's working set $W(t, \Delta t)$ at virtual time $t$ with window parameter $\Delta t$ as the collection of memory pages referenced during the process-time interval $(t - \Delta t, t]$: $W(t, \Delta t) = \{ r_\tau \in S \mid t - \Delta t < \tau \le t \}$, where $S$ is the virtual address space and $r_\tau$ is the page reference at step $\tau$. If the physical memory allocated to the process is smaller than $|W(t, \Delta t)|$, the operating system encounters **thrashing**: physical page frames are continuously evicted and re-faulted from backing disk, causing system throughput to collapse toward zero while CPU utilization is consumed entirely by I/O wait.
 
 This fundamental systems abstraction maps directly onto agentic machine learning runtimes (@tbl-vol3-classical-vs-neural). In an autonomous agent, the **cumulative trajectory history** $\tau = (x_0, a_0, o_0, a_1, o_1, \ldots, a_t, o_t)$—comprising initial system prompts $x_0$, tool invocations $a_i$, environment observations $o_i$, and intermediate reflections—represents the unbounded virtual address space. The accelerator's allocated KV cache represents physical RAM ($C_{\text{HBM}}$).
 
@@ -144,19 +138,13 @@ This fundamental systems abstraction maps directly onto agentic machine learning
 
 : **Classical OS Virtual Memory vs. Neural Context Architecture**: Structural and operational correspondence between operating system paging abstractions and transformer context management. {#tbl-vol3-classical-vs-neural tbl-colwidths="[28, 32, 40]"}
 
-In a neural context, "memory access" is defined by the self-attention mechanism. At step $t$, the query vector $\mathbf{q}_t$ of the current token computes an attention distribution across all preceding tokens $i \in \{1, \ldots, t\}$. We quantify the effective attention mass allocated to token $i$ across all $L$ layers and $H$ attention heads:
+In a neural context, "memory access" is defined by the self-attention mechanism. At step $t$, the query vector $\mathbf{q}_t$ of the current token computes an attention distribution across all preceding tokens $i \in \{1, \ldots, t\}$. We define the **Neural Token Working Set** $W_\epsilon(t)$ in @eq-vol3-workingsets-neural-set as the minimal token cardinality whose cumulative attention weight satisfies coverage threshold $\sum_{j \in \mathcal{S}} \bar{\alpha}_j^{(t)} \ge 1 - \epsilon$:
 
 $$
-\bar{\alpha}_i^{(t)} = \frac{1}{L \cdot H} \sum_{\ell=1}^L \sum_{h=1}^H \alpha_{\ell, h, t, i},
-$$
+W_\epsilon(t) = \arg\min_{\mathcal{S} \subseteq \{1, \ldots, t\}} |\mathcal{S}|
+$$ {#eq-vol3-workingsets-neural-set}
 
-where $\sum_{i=1}^t \bar{\alpha}_i^{(t)} = 1$. We define the **Neural Token Working Set** $W_\epsilon(t)$ as the minimal subset of historical tokens whose collective attention mass exceeds a coverage threshold $1 - \epsilon$:
-
-$$
-W_\epsilon(t) = \left\{ i \in \{1, \ldots, t\} \;\middle|\; i \in \arg\min_{\mathcal{S} \subseteq \{1, \dots, t\}} |\mathcal{S}| \quad \text{s.t.} \quad \sum_{j \in \mathcal{S}} \bar{\alpha}_j^{(t)} \ge 1 - \epsilon \right\},
-$$
-
-where $\epsilon \in (0, 0.1]$ is the information exclusion tolerance (typically $\epsilon = 0.05$).
+where $\epsilon \in (0, 0.1]$ is the information exclusion tolerance (typically $\epsilon = 0.05$) and $\bar{\alpha}_j^{(t)} = \frac{1}{L \cdot H} \sum_{\ell=1}^L \sum_{h=1}^H \alpha_{\ell, h, t, j}$ is the mean attention weight allocated to token $j$ averaged across all layers and heads.[^fn-workingsets-denning-analogy]
 
 Empirical measurements of transformer attention distributions during complex reasoning tasks—such as automated software engineering on SWE-bench (@jimenez2024swebench)—reveal extreme power-law (Zipfian) dynamics (@zipf1949human; @zhang2023h2o):
 
@@ -167,20 +155,18 @@ Empirical measurements of transformer attention distributions during complex rea
 ![](images/svg/context_working_set_dynamics.svg){width="100%"}
 :::
 
-As visualized in @fig-vol3-context-working-set-dynamics, treating context as an unmanaged append-only log forces the accelerator to retain 100 percent of historical tokens in HBM, even though the neural working set encompasses only a tiny fraction of the sequence. When the cumulative trajectory outgrows physical cache limits, the system encounters **Neural Thrashing**:
-
-$$
-|W_\epsilon(t)| > C_{\text{HBM}} \implies \text{Attention Dispersion and Cache Saturation}.
-$$
-
-In classical operating systems, thrashing wastes compute cycles moving pages across the slow PCIe/storage bus. In agentic neural systems, thrashing manifests as a dual failure:
+As visualized in @fig-vol3-context-working-set-dynamics, treating context as an unmanaged append-only log forces the accelerator to retain 100 percent of historical tokens in HBM, even though the neural working set encompasses only a tiny fraction of the sequence. When the cumulative trajectory outgrows physical cache limits ($|W_\epsilon(t)| > C_{\text{HBM}}$), the serving runtime encounters **Neural Thrashing**, manifesting as a dual systems failure:
 
 1. **Thermodynamic / Compute Waste:** The accelerator spends over 90 percent of its memory bus bandwidth streaming inert KV cache activations that contribute near-zero dot-product weight to the final logit predictions.
 2. **Cognitive Collapse:** Diluting the softmax denominator across thousands of irrelevant tokens spreads probability mass thinly across the sequence, reducing retrieval resolution and causing the model to miss critical constraints.
 
-::: {#pri-vol3-working-set-locality .callout-principle title="Denning's Principle of neural locality"}
+::: {#pri-vol3-working-set-locality .callout-principle title="Denning's principle of neural locality"}
 **Invariant:** An autonomous agent trajectory exhibits strong temporal and semantic locality. To compute an optimal next action $a_{t+1}$, the neural policy does not require uniform access to the entire trajectory history $\tau_t$, but rather a bounded working set of active tokens $W_\epsilon(t) \ll \tau_t$. Any token whose cumulative attention weight falls below the information threshold $\epsilon$ must be evicted or compacted from accelerator HBM.
 :::
+
+> **The Systems Rule of Thumb (The 90/10 Working Set Invariant):** In multi-turn agent execution, fewer than 10 percent of historical tokens capture over 85 percent of total attention mass ($|W_\epsilon(t)| \ll \tau_t$). Retaining the entire unpruned trajectory in accelerator HBM wastes over 90 percent of memory-bus bandwidth on inert activations. Serving runtimes must dynamically track token attention density to evict cold tokens before physical cache saturation triggers cognitive collapse.
+
+[^fn-workingsets-denning-analogy]: In Denning's discrete-reference framework, working set size $|W(t, \Delta t)|$ is bounded by observation window $\Delta t$. In transformer attention, the working set is continuous and dynamic, with token significance varying by layer and generation step.
 
 Understanding that an agent's active working set is a compact subset of its historical context establishes the theoretical motivation for dynamic memory governance. However, before designing eviction mechanisms, systems engineers must analyze how attention probability mass is distributed across long token sequences, and identify the mathematical drivers of context degradation.
 
@@ -199,33 +185,23 @@ This production failure highlights a critical discrepancy in modern ML systems: 
 
 ### Quantifying attention density and entropy
 
-To evaluate how effectively an attention head utilizes its context window, we formulate the **Attention Density** and **Attention Entropy** of query token $t$ across the sequence $i \in \{1, \ldots, t\}$. For head $h$ at layer $\ell$, the attention distribution $\boldsymbol{\alpha}_{t}^{(\ell, h)} \in \mathbb{R}^t$ forms a probability simplex:
+To evaluate how effectively an attention head utilizes its context window across accelerator memory, we formulate the **Attention Density** and **Attention Entropy** of query token $t$ across the sequence $i \in \{1, \ldots, t\}$. For head $h$ at layer $\ell$, the attention weights $\boldsymbol{\alpha}_{t}^{(\ell, h)} \in \mathbb{R}^t$ form a probability simplex ($\sum_{i=1}^t \alpha_{t, i}^{(\ell, h)} = 1, \alpha_{t, i}^{(\ell, h)} \ge 0$).
+
+We define the **Effective Context Utilization** $U_{\text{eff}}(t)$ of an attention layer in @eq-effective-context-utilization as the normalized inverse entropy ratio relative to maximum theoretical dispersion $H_{\max}(t) = \ln t$:
 
 $$
-\sum_{i=1}^t \alpha_{t, i}^{(\ell, h)} = 1, \quad \alpha_{t, i}^{(\ell, h)} \ge 0.
-$$
+U_{\text{eff}}(t) = 1 - \frac{1}{H \ln t} \sum_{h=1}^H H\left( \boldsymbol{\alpha}_t^{(\ell, h)} \right)
+$$ {#eq-effective-context-utilization}
 
-We quantify the dispersion of attention mass using the Shannon entropy of this distribution:
+where $H(\boldsymbol{\alpha}_t^{(\ell, h)}) = -\sum_{i=1}^t \alpha_{t, i}^{(\ell, h)} \ln \alpha_{t, i}^{(\ell, h)}$ is the Shannon entropy measuring attention dispersion across historical KV cache positions.[^fn-workingsets-entropy-dispersion]
 
-$$
-H\left( \boldsymbol{\alpha}_t^{(\ell, h)} \right) = -\sum_{i=1}^t \alpha_{t, i}^{(\ell, h)} \ln \alpha_{t, i}^{(\ell, h)}.
-$$
+When $U_{\text{eff}}(t) \to 0$, the attention distribution approaches a uniform distribution ($H \to \ln t$). The attention mechanism ceases to discriminate between relevant and irrelevant tokens, acting as an unweighted average filter that dilutes specialized representations into semantic noise while consuming full HBM memory streaming bandwidth. Conversely, when $U_{\text{eff}}(t)$ remains bounded away from zero, the attention head concentrates its probability mass on a sparse, informative subset of the context.
 
-The maximum possible entropy occurs when attention is uniformly distributed across the entire sequence:
+As sequence length $t$ increases from $1{,}000$ to $128{,}000$ tokens in unmanaged contexts, empirical measurements show that intermediate attention layers exhibit a monotonic drop in $U_{\text{eff}}(t)$. The denominator of the softmax function ($\sum_{j=1}^t \exp(z_{t, j})$) accumulates thousands of small positive exponentials from irrelevant tokens. Even when individual background tokens receive tiny dot-product values ($z_{t, j} \ll z_{t, \text{target}}$), the aggregate mass of $100{,}000$ background tokens can overwhelm the target token, causing the target's relative probability $\alpha_{t, \text{target}}$ to collapse below the threshold required to activate downstream feed-forward circuits, establishing a severe memory capacity and attention bottleneck.
 
-$$
-H_{\max}(t) = \ln t.
-$$
+> **The Systems Rule of Thumb (The Softmax Dispersion Floor):** In extended contexts ($t > 32\text{k}$), unmanaged background tokens dilute the softmax denominator, driving effective context utilization toward zero ($U_{\text{eff}}(t) \to 0$). When thousands of inert tokens accumulate, target retrieval degrades even on sub-100k prompts well below nominal architectural limits. Systems runtimes must enforce threshold-based token masking or semantic compaction to preserve sharp attention concentration.
 
-We define the **Effective Context Utilization** $U_{\text{eff}}(t)$ of an attention layer as the normalized inverse entropy ratio:
-
-$$
-U_{\text{eff}}(t) = 1 - \frac{1}{H_{\max}(t)} \cdot \left[ \frac{1}{H} \sum_{h=1}^H H\left( \boldsymbol{\alpha}_t^{(\ell, h)} \right) \right].
-$$
-
-When $U_{\text{eff}}(t) \to 0$, the attention distribution approaches a uniform distribution ($H \to \ln t$). The attention mechanism ceases to discriminate between relevant and irrelevant tokens, acting as an unweighted average filter that dilutes specialized representations into semantic noise. Conversely, when $U_{\text{eff}}(t)$ remains bounded away from zero, the attention head concentrates its probability mass on a sparse, informative subset of the context.
-
-As sequence length $t$ increases from $1{,}000$ to $128{,}000$ tokens in unmanaged contexts, empirical measurements show that intermediate attention layers exhibit a monotonic drop in $U_{\text{eff}}(t)$. The denominator of the softmax function ($\sum_{j=1}^t \exp(z_{t, j})$) accumulates thousands of small positive exponentials from irrelevant tokens. Even when individual background tokens receive tiny dot-product values ($z_{t, j} \ll z_{t, \text{target}}$), the aggregate mass of $100{,}000$ background tokens can overwhelm the target token, causing the target's relative probability $\alpha_{t, \text{target}}$ to collapse below the threshold required to activate downstream feed-forward circuits.
+[^fn-workingsets-entropy-dispersion]: In dense attention, maximum entropy $H_{\max}(t) = \ln t$ occurs under a uniform distribution where each token receives weight $1/t$. Realized entropy $H(\boldsymbol{\alpha})$ quantifies the effective number of tokens attending to the query, given by $N_{\text{eff}} = \exp(H(\boldsymbol{\alpha}))$.
 
 ### The lost-in-the-middle phenomenon
 
