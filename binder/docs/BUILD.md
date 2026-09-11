@@ -272,7 +272,7 @@ The book uses a **dual-configuration approach** that automatically switches betw
 - **`books/config/_quarto-pdf-volN.yml`** → Optimized for academic PDF (full citations, LaTeX rendering, book structure)
 - **`books/config/_quarto-epub-volN.yml`** → Optimized for EPUB (e-reader format, reflowable content)
 
-Quarto only reads `books/_quarto.yml`, so each build copies the chosen config there and copies the volume's `index-volN.qmd` to `books/index.qmd`. Both copies are generated and gitignored; edit `books/config/` and `books/index-volN.qmd` instead. The Binder CLI makes these copies for you, so **no manual file management is needed.**
+Quarto reads `books/_quarto.yml`, so each build copies the chosen config there and generates `books/index.qmd` from the volume's canonical source. For Volume IV, edit `books/vol4/index.qmd` for the HTML homepage and `books/vol4/frontmatter/about.qmd` for the PDF/EPUB preface. The HTML site renders that preface separately; PDF/EPUB include it once through the generated index. Volumes I–III retain `books/index-volN.qmd`. Both root build files are generated and gitignored. Binder and Linux/Windows CI use the same entry-point generator, so **no manual file management is needed.**
 
 ---
 

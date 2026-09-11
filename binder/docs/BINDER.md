@@ -688,7 +688,7 @@ The binder automatically manages Quarto configurations:
 - **`config/_quarto-epub-volN.yml`**: EPUB build configuration
 - **`_quarto.yml`**: Generated copy of the active configuration; its first line names the source file
 
-**Important**: Quarto only reads `_quarto.yml`, so the binder copies the chosen configuration there before each build, and copies the volume's `index-volN.qmd` to `index.qmd`. Both copies are regenerated on every build and gitignored. Edit the files in `config/` and `index-volN.qmd`, never the copies.
+**Important**: Binder copies the chosen configuration to `_quarto.yml` and generates `index.qmd` before each volume build. Volume IV sources live inside `vol4/`: `vol4/index.qmd` supplies the HTML homepage, and `vol4/frontmatter/about.qmd` supplies the PDF/EPUB preface. Volumes I–III retain `index-volN.qmd`. Both root copies are regenerated on every build and gitignored; edit the canonical sources, never the copies.
 
 Use `./binder/binder switch <format>` to change the active configuration.
 
