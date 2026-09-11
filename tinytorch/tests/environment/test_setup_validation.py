@@ -23,12 +23,18 @@ import pytest
 def _jupyter(*args):
     """Run jupyter from the interpreter running the tests, not from PATH.
 
-    These checks used a bare "jupyter", which resolves against PATH. Run the
-    suite with the project interpreter but without its bin directory on PATH,
-    which is what `.venv/bin/python -m pytest` does, and PATH finds some other
-    Python's jupyter instead. The subcommands then look missing on a machine
-    where they are installed correctly.
+    Prefers `python -m jupyter` so it uses the active test interpreter directly
+    and avoids rigid or stale shebang headers in venv/bin/ scripts.
     """
+    try:
+        res = subprocess.run(
+            [sys.executable, "-m", "jupyter"] + list(args),
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        if res.returncode == 0 or "No module named jupyter" not in res.stderr:
+            return res
+    except Exception:
+        pass
     exe = Path(sys.executable).parent / "jupyter"
     cmd = [str(exe)] if exe.exists() else ["jupyter"]
     return subprocess.run(cmd + list(args), capture_output=True,
