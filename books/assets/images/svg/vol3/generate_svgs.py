@@ -31,7 +31,7 @@ def write_svg_1():
     </defs>
 
     <!-- Section A -->
-    <rect x="20" y="20" width="860" height="180" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" rx="10" ry="10" />
+    <rect x="20" y="20" width="860" height="180" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" />
     <text x="40" y="45" class="title">A. Naive Synchronous Runtime (Memory Wall Antipattern)</text>
     
     <g transform="translate(40, 70)">
@@ -63,7 +63,7 @@ def write_svg_1():
     </g>
 
     <!-- Section B -->
-    <rect x="20" y="230" width="860" height="200" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" rx="10" ry="10" />
+    <rect x="20" y="230" width="860" height="200" fill="#F9FAFB" stroke="#E5E7EB" stroke-width="1" />
     <text x="40" y="255" class="title">B. Asynchronous Event-Driven Runtime (Hierarchical Memory Evacuation)</text>
     
     <g transform="translate(30, 280)">
@@ -122,7 +122,7 @@ def write_svg_2():
     </defs>
 
     <text x="450" y="30" class="title" text-anchor="middle">Agent Runtime Interrupt &amp; Trap Vector Space</text>
-    <rect x="20" y="45" width="860" height="535" fill="none" stroke="#E5E7EB" stroke-width="2" rx="12" ry="12" />
+    <rect x="20" y="45" width="860" height="535" fill="none" stroke="#E5E7EB" stroke-width="2" />
 
     <!-- Top Left: Asynchronous External IRQs -->
     <g transform="translate(40, 65)">

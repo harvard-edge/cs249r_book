@@ -36,7 +36,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 <text x="30" y="40" class="title">Panel A: Strict Physical Isolation Architecture</text>
 
 <!-- Application Processor -->
-<rect x="50" y="80" width="220" height="150" rx="8" class="box" />
+<rect x="50" y="80" width="220" height="150" class="box" />
 <text x="160" y="105" class="title" text-anchor="middle">Application Processor</text>
 <text x="160" y="130" class="text" text-anchor="middle">Untrusted User Space</text>
 <rect x="70" y="150" width="180" height="60" class="box" stroke-dasharray="4" />
@@ -51,7 +51,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 <path fill="none" d="M 430 160 L 480 160" class="line-dashed" marker-end="url(#arrowhead)" />
 
 <!-- Real-Time Microcontroller -->
-<rect x="490" y="80" width="220" height="160" rx="8" class="box-blue" />
+<rect x="490" y="80" width="220" height="160" class="box-blue" />
 <text x="600" y="105" class="title" text-anchor="middle" fill="#1F407A">Real-Time MCU</text>
 <text x="600" y="130" class="text" text-anchor="middle">Privileged Space</text>
 <rect x="510" y="145" width="180" height="80" class="box" />
@@ -82,7 +82,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" 
 <text x="30" y="370" class="title">Panel B: Unsafe Collapsed Architecture</text>
 
 <!-- Application Processor (Collapsed) -->
-<rect x="50" y="410" width="220" height="150" rx="8" class="box-red" />
+<rect x="50" y="410" width="220" height="150" class="box-red" />
 <text x="160" y="435" class="title" text-anchor="middle" fill="#A51C30">App Processor</text>
 <text x="160" y="460" class="text" text-anchor="middle">Unverified VLA Policy</text>
 <rect x="70" y="480" width="180" height="60" class="box" stroke-dasharray="4" />

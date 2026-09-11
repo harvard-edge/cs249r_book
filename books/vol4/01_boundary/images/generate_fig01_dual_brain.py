@@ -8,10 +8,7 @@ SVG_CONTENT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" 
     <marker id="arrow-up" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="-90">
         <path d="M 0 0 L 10 5 L 0 10 z" fill="#333333"/>
     </marker>
-    <filter id="drop-shadow" x="-5%" y="-5%" width="115%" height="115%">
-        <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.1"/>
-    </filter>
-</defs>
+    </defs>
 
 <rect width="100%" height="100%" fill="#ffffff" />
 
@@ -22,16 +19,16 @@ SVG_CONTENT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" 
 </g>
 
 <!-- TOP: Untrusted Proposal Engine -->
-<g id="untrusted_npu" filter="url(#drop-shadow)">
-    <rect x="100" y="50" width="600" height="250" rx="15" fill="#F0F4FA" stroke="#1F407A" stroke-width="3"/>
+<g id="untrusted_npu">
+    <rect x="100" y="50" width="600" height="250" fill="#F0F4FA" stroke="#1F407A" stroke-width="3"/>
     <text x="400" y="95" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#1F407A" text-anchor="middle">Untrusted Proposal Engine</text>
     <text x="400" y="125" font-family="Arial, sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">(Edge NPU / Linux / High-Level AI Planning)</text>
     
-    <rect x="150" y="155" width="220" height="110" rx="8" fill="#FFFFFF" stroke="#1F407A" stroke-width="2"/>
+    <rect x="150" y="155" width="220" height="110" fill="#FFFFFF" stroke="#1F407A" stroke-width="2"/>
     <text x="260" y="200" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#1F407A" text-anchor="middle">Neural Networks</text>
     <text x="260" y="225" font-family="Arial, sans-serif" font-size="14" fill="#555555" text-anchor="middle">Vision, Lidar, RL</text>
 
-    <rect x="430" y="155" width="220" height="110" rx="8" fill="#FFFFFF" stroke="#1F407A" stroke-width="2"/>
+    <rect x="430" y="155" width="220" height="110" fill="#FFFFFF" stroke="#1F407A" stroke-width="2"/>
     <text x="540" y="200" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#1F407A" text-anchor="middle">AI Planning</text>
     <text x="540" y="225" font-family="Arial, sans-serif" font-size="14" fill="#555555" text-anchor="middle">Trajectory, Strategy</text>
 </g>
@@ -45,15 +42,15 @@ SVG_CONTENT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" 
 <text x="560" y="325" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#333333" text-anchor="start">Telemetry / State</text>
 
 <!-- MIDDLE: Shared Memory Mailbox -->
-<g id="shared_mailbox" filter="url(#drop-shadow)">
-    <rect x="100" y="350" width="600" height="150" rx="15" fill="#F9F9F9" stroke="#666666" stroke-width="3" stroke-dasharray="8,8"/>
+<g id="shared_mailbox">
+    <rect x="100" y="350" width="600" height="150" fill="#F9F9F9" stroke="#666666" stroke-width="3" stroke-dasharray="8,8"/>
     <text x="400" y="385" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#333333" text-anchor="middle">Shared Memory Mailbox (IPC)</text>
     <text x="400" y="410" font-family="Arial, sans-serif" font-size="16" fill="#666666" text-anchor="middle">Hardware-Enforced Boundary</text>
 
-    <rect x="180" y="430" width="160" height="50" rx="6" fill="#FFFFFF" stroke="#666666" stroke-width="2"/>
+    <rect x="180" y="430" width="160" height="50" fill="#FFFFFF" stroke="#666666" stroke-width="2"/>
     <text x="260" y="460" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#333333" text-anchor="middle">Command Regs</text>
 
-    <rect x="460" y="430" width="160" height="50" rx="6" fill="#FFFFFF" stroke="#666666" stroke-width="2"/>
+    <rect x="460" y="430" width="160" height="50" fill="#FFFFFF" stroke="#666666" stroke-width="2"/>
     <text x="540" y="460" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#333333" text-anchor="middle">Status Regs</text>
 </g>
 
@@ -66,20 +63,20 @@ SVG_CONTENT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" 
 <text x="560" y="525" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#333333" text-anchor="start">Write Status</text>
 
 <!-- BOTTOM: Trusted Permission Authority -->
-<g id="trusted_mcu" filter="url(#drop-shadow)">
-    <rect x="100" y="550" width="600" height="250" rx="15" fill="#FFF0F0" stroke="#A51C30" stroke-width="3"/>
+<g id="trusted_mcu">
+    <rect x="100" y="550" width="600" height="250" fill="#FFF0F0" stroke="#A51C30" stroke-width="3"/>
     <text x="400" y="595" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#A51C30" text-anchor="middle">Trusted Permission Authority</text>
     <text x="400" y="625" font-family="Arial, sans-serif" font-size="16" fill="#A51C30" text-anchor="middle">(Real-Time Bare-Metal MCU / Safety Critical)</text>
 
-    <rect x="130" y="660" width="160" height="100" rx="8" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
+    <rect x="130" y="660" width="160" height="100" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
     <text x="210" y="705" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#A51C30" text-anchor="middle">Secure Boot</text>
     <text x="210" y="730" font-family="Arial, sans-serif" font-size="14" fill="#555555" text-anchor="middle">&amp; Cryptography</text>
 
-    <rect x="320" y="660" width="160" height="100" rx="8" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
+    <rect x="320" y="660" width="160" height="100" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
     <text x="400" y="705" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#A51C30" text-anchor="middle">Safety Check</text>
     <text x="400" y="730" font-family="Arial, sans-serif" font-size="14" fill="#555555" text-anchor="middle">Bounds, Kinematics</text>
 
-    <rect x="510" y="660" width="160" height="100" rx="8" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
+    <rect x="510" y="660" width="160" height="100" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
     <text x="590" y="705" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#A51C30" text-anchor="middle">Task Scheduler</text>
     <text x="590" y="730" font-family="Arial, sans-serif" font-size="14" fill="#555555" text-anchor="middle">RTOS / Loop</text>
 </g>
@@ -89,8 +86,8 @@ SVG_CONTENT = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" 
 <text x="410" y="825" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#333333" text-anchor="start">Verified Control Signals</text>
 
 <!-- BASE: Actuators -->
-<g id="physical_actuators" filter="url(#drop-shadow)">
-    <rect x="100" y="850" width="600" height="100" rx="15" fill="#E8F4EC" stroke="#2E7D32" stroke-width="3"/>
+<g id="physical_actuators">
+    <rect x="100" y="850" width="600" height="100" fill="#E8F4EC" stroke="#2E7D32" stroke-width="3"/>
     <text x="400" y="905" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#2E7D32" text-anchor="middle">Physical Motor Actuators</text>
 </g>
 

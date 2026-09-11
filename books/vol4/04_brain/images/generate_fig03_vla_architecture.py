@@ -26,13 +26,13 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     <g transform="translate(40, 80)">
         <text x="100" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Inputs</text>
         
-        <rect x="0" y="20" width="200" height="60" rx="4" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+        <rect x="0" y="20" width="200" height="60" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
         <text x="100" y="55" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Multi-view Cameras</text>
 
-        <rect x="0" y="100" width="200" height="60" rx="4" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+        <rect x="0" y="100" width="200" height="60" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
         <text x="100" y="135" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Language Instructions</text>
 
-        <rect x="0" y="180" width="200" height="60" rx="4" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+        <rect x="0" y="180" width="200" height="60" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
         <text x="100" y="215" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Proprioceptive State</text>
     </g>
 
@@ -40,11 +40,11 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     <g transform="translate(300, 80)">
         <text x="80" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Encoders</text>
         
-        <rect x="0" y="20" width="160" height="140" rx="4" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="0" y="20" width="160" height="140" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="80" y="90" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">Vision &amp; Lang</text>
         <text x="80" y="115" font-family="sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">Encoders</text>
 
-        <rect x="0" y="180" width="160" height="60" rx="4" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="0" y="180" width="160" height="60" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="80" y="215" font-family="sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">State Encoder</text>
     </g>
 
@@ -52,7 +52,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     <g transform="translate(520, 80)">
         <text x="80" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Backbone</text>
         
-        <rect x="0" y="20" width="160" height="220" rx="4" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="0" y="20" width="160" height="220" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="80" y="125" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">Transformer</text>
         <text x="80" y="150" font-family="sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">Backbone</text>
     </g>
@@ -61,11 +61,11 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     <g transform="translate(740, 80)">
         <text x="90" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#2D3748" text-anchor="middle">Unprivileged Decoders</text>
         
-        <rect x="10" y="20" width="160" height="100" rx="4" fill="#E2E8F0" stroke="#2D3748" stroke-width="2" stroke-dasharray="4"/>
+        <rect x="10" y="20" width="160" height="100" fill="#E2E8F0" stroke="#2D3748" stroke-width="2" stroke-dasharray="4"/>
         <text x="90" y="70" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Navigation</text>
         <text x="90" y="90" font-family="sans-serif" font-size="14" fill="#1F407A" text-anchor="middle">(Proposes)</text>
 
-        <rect x="10" y="140" width="160" height="100" rx="4" fill="#E2E8F0" stroke="#2D3748" stroke-width="2" stroke-dasharray="4"/>
+        <rect x="10" y="140" width="160" height="100" fill="#E2E8F0" stroke="#2D3748" stroke-width="2" stroke-dasharray="4"/>
         <text x="90" y="190" font-family="sans-serif" font-size="16" fill="#1F407A" text-anchor="middle">Manipulation</text>
         <text x="90" y="210" font-family="sans-serif" font-size="14" fill="#1F407A" text-anchor="middle">(Proposes)</text>
     </g>
@@ -74,11 +74,11 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     <g transform="translate(50, 390)">
         <text x="450" y="0" font-family="sans-serif" font-size="18" font-weight="bold" fill="#A51C30" text-anchor="middle">Real-time Execution (1000 Hz)</text>
         
-        <rect x="250" y="20" width="400" height="80" rx="4" fill="#ffffff" stroke="#A51C30" stroke-width="3"/>
+        <rect x="250" y="20" width="400" height="80" fill="#ffffff" stroke="#A51C30" stroke-width="3"/>
         <text x="450" y="55" font-family="sans-serif" font-size="18" font-weight="bold" fill="#A51C30" text-anchor="middle">Real-time Safety Monitors</text>
         <text x="450" y="80" font-family="sans-serif" font-size="14" fill="#2D3748" text-anchor="middle">Gates Execution / Prevents Unsafe Actions</text>
         
-        <rect x="750" y="20" width="160" height="80" rx="4" fill="#2D3748" stroke="#1F407A" stroke-width="2"/>
+        <rect x="750" y="20" width="160" height="80" fill="#2D3748" stroke="#1F407A" stroke-width="2"/>
         <text x="830" y="65" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">Actuators</text>
     </g>
 
@@ -103,7 +103,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
     <text x="750" y="440" font-family="sans-serif" font-size="12" font-weight="bold" fill="#A51C30" text-anchor="middle">Commands</text>
     
     <!-- Legend / Quote -->
-    <rect x="200" y="520" width="600" height="40" rx="4" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="1"/>
+    <rect x="200" y="520" width="600" height="40" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="1"/>
     <text x="500" y="545" font-family="sans-serif" font-size="14" font-style="italic" fill="#2D3748" text-anchor="middle">"Everything upstream of the monitors proposes, and nothing upstream of them commands."</text>
 
 </svg>"""

@@ -103,16 +103,16 @@ def generate_svg():
     # Valid (0 to 33ms)
     t_deg = 33
     x_deg, _ = get_xy(t_deg, 0)
-    svg.append(f'  <rect x="{x_origin}" y="{bar_y}" width="{x_deg-x_origin}" height="{bar_h}" fill="{c_valid}" rx="2"/>')
+    svg.append(f'  <rect x="{x_origin}" y="{bar_y}" width="{x_deg-x_origin}" height="{bar_h}" fill="{c_valid}"/>')
     svg.append(f'  <text x="{x_origin + (x_deg-x_origin)/2}" y="{bar_y+17}" font-size="12" fill="#FFFFFF" font-weight="bold" text-anchor="middle">VALID</text>')
     
     # Degraded (33ms to 66ms)
-    svg.append(f'  <rect x="{x_deg}" y="{bar_y}" width="{x_exp-x_deg}" height="{bar_h}" fill="{c_degraded}" rx="2"/>')
+    svg.append(f'  <rect x="{x_deg}" y="{bar_y}" width="{x_exp-x_deg}" height="{bar_h}" fill="{c_degraded}"/>')
     svg.append(f'  <text x="{x_deg + (x_exp-x_deg)/2}" y="{bar_y+17}" font-size="12" fill="#FFFFFF" font-weight="bold" text-anchor="middle">DEGRADED</text>')
     
     # Expired (66ms+)
     x_end = x_origin + plot_width
-    svg.append(f'  <rect x="{x_exp}" y="{bar_y}" width="{x_end-x_exp}" height="{bar_h}" fill="{c_red}" rx="2"/>')
+    svg.append(f'  <rect x="{x_exp}" y="{bar_y}" width="{x_end-x_exp}" height="{bar_h}" fill="{c_red}"/>')
     svg.append(f'  <text x="{x_exp + (x_end-x_exp)/2}" y="{bar_y+17}" font-size="12" fill="#FFFFFF" font-weight="bold" text-anchor="middle">EXPIRED (Safe Stop)</text>')
     
     svg.append('</svg>')

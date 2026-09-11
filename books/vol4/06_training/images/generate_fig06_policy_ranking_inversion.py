@@ -10,15 +10,15 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
     
     <!-- Group 1: Flow Regulation -->
     <g transform="translate(50, 60)">
-        <rect width="240" height="200" fill="#E2E8F0" rx="4" />
+        <rect width="240" height="200" fill="#E2E8F0" />
         <text x="120" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">1. Flow Regulation</text>
         <text x="120" y="50" font-family="sans-serif" font-size="12" fill="#2D3748" text-anchor="middle">Sanitize Recovery Runs</text>
         
-        <rect x="20" y="70" width="90" height="40" fill="#1F407A" rx="2" />
+        <rect x="20" y="70" width="90" height="40" fill="#1F407A" />
         <text x="65" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Train Metric:</text>
         <text x="65" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Val Loss: 0.011 (4x drop)</text>
         
-        <rect x="130" y="70" width="90" height="40" fill="#A51C30" rx="2" />
+        <rect x="130" y="70" width="90" height="40" fill="#A51C30" />
         <text x="175" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Hardware:</text>
         <text x="175" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Recovery: 0%</text>
         
@@ -30,15 +30,15 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
 
     <!-- Group 2: Surface Touchdown -->
     <g transform="translate(330, 60)">
-        <rect width="240" height="200" fill="#E2E8F0" rx="4" />
+        <rect width="240" height="200" fill="#E2E8F0" />
         <text x="120" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">2. Surface Touchdown</text>
         <text x="120" y="50" font-family="sans-serif" font-size="12" fill="#2D3748" text-anchor="middle">Unbraked Plunge</text>
         
-        <rect x="20" y="70" width="90" height="40" fill="#1F407A" rx="2" />
+        <rect x="20" y="70" width="90" height="40" fill="#1F407A" />
         <text x="65" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Train Metric:</text>
         <text x="65" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Sim Return: +28%</text>
         
-        <rect x="130" y="70" width="90" height="40" fill="#A51C30" rx="2" />
+        <rect x="130" y="70" width="90" height="40" fill="#A51C30" />
         <text x="175" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Hardware:</text>
         <text x="175" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Peak Force: 68N (Break)</text>
         
@@ -50,15 +50,15 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
     
     <!-- Group 3: Regime Transition -->
     <g transform="translate(610, 60)">
-        <rect width="240" height="200" fill="#E2E8F0" rx="4" />
+        <rect width="240" height="200" fill="#E2E8F0" />
         <text x="120" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">3. Regime Transition</text>
         <text x="120" y="50" font-family="sans-serif" font-size="12" fill="#2D3748" text-anchor="middle">Simulation RL</text>
         
-        <rect x="20" y="70" width="90" height="40" fill="#1F407A" rx="2" />
+        <rect x="20" y="70" width="90" height="40" fill="#1F407A" />
         <text x="65" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Train Metric:</text>
         <text x="65" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Sim Task: 100%</text>
         
-        <rect x="130" y="70" width="90" height="40" fill="#A51C30" rx="2" />
+        <rect x="130" y="70" width="90" height="40" fill="#A51C30" />
         <text x="175" y="90" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Hardware:</text>
         <text x="175" y="105" font-family="sans-serif" font-size="10" fill="white" text-anchor="middle">Chatter/Trip: 12%</text>
         

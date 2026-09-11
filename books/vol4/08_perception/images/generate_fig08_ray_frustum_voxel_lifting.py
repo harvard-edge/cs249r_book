@@ -120,13 +120,13 @@ def generate_ray_frustum():
     # Ellipsoids elongating with range. (Range is assumed along x axis here)
     # The farther, the more elongated. 
     # Wait, the drawing just shows the final output. We can draw the object and a large covariance ellipse.
-    svg += f'<ellipse cx="{unc_x}" cy="{unc_y}" rx="40" ry="15" fill="none" stroke="{c_red}" stroke-width="2" stroke-dasharray="2,2"/>\n'
+    svg += f'<ellipse cx="{unc_x}" cy="{unc_y}" fill="none" stroke="{c_red}" stroke-width="2" stroke-dasharray="2,2"/>\n'
     svg += f'<text x="{unc_x}" y="{unc_y + 35}" font-family="sans-serif" font-size="12" fill="{c_red}" text-anchor="middle">Elongated Covariance</text>\n'
     svg += f'<text x="{unc_x}" y="{unc_y + 50}" font-family="sans-serif" font-size="12" fill="{c_red}" text-anchor="middle">at Range</text>\n'
     
     # Equation
     eq_y = 350
-    svg += f'<rect x="150" y="{eq_y-40}" width="700" height="80" rx="4" fill="{c_white}" stroke="{c_gray_dark}" stroke-width="1" stroke-dasharray="4,4"/>\n'
+    svg += f'<rect x="150" y="{eq_y-40}" width="700" height="80" fill="{c_white}" stroke="{c_gray_dark}" stroke-width="1" stroke-dasharray="4,4"/>\n'
     svg += f'<text x="500" y="{eq_y-15}" font-family="sans-serif" font-weight="bold" font-size="14" fill="{c_gray_dark}" text-anchor="middle">Clearance Contract</text>\n'
     
     eq_text = 'Measurement must include: (1) Timestamp t<tspan baseline-shift="sub" font-size="10">0</tspan>, (2) Frame F<tspan baseline-shift="sub" font-size="10">sensor</tspan>, (3) Covariance &#931;<tspan baseline-shift="sub" font-size="10">z</tspan>'

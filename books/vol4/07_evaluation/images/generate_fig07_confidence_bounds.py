@@ -229,13 +229,13 @@ ax_table.text(0.04, rem_top, 'THE THREE ARCHITECTURAL REMEDIES FOR PHYSICAL AI',
 
 remedies = [
     ('1. Narrow Operational Domain (ODD)',
-     'Restrict machine to benign velocities and tight environmental bounds where modest sample counts (n = 50-200) provide defensible statistical coverage.',
+     'Restrict machine to benign velocities and tight environmental bounds where modest sample\ncounts (n = 50-200) provide defensible statistical coverage.',
      BRONZE),
     ('2. Parallel HIL / Fleet Testing',
-     'Distribute runs across multiple test bays; beware that shared batch tolerances, floor finishes, and weather induce common-mode spatial correlations.',
+     'Distribute runs across multiple test bays; beware that shared batch tolerances, floor\nfinishes, and weather induce common-mode spatial correlations.',
      PETROL),
     ('3. Enforce Deterministic Gate in Nervous System',
-     'Delegate safety invariants, CBFs, and emergency stops to trusted real-time MCU reflex loops (1 kHz), removing unachievable reliability claims from the learned Brain.',
+     'Delegate safety invariants, CBFs, and emergency stops to trusted real-time MCU reflex\nloops (1 kHz), removing unachievable reliability claims from the learned Brain.',
      CRIMSON)
 ]
 

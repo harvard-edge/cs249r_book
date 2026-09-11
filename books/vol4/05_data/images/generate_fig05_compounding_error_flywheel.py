@@ -34,7 +34,7 @@ def create_svg():
     </style>
 
     <!-- LEFT SIDE: Compounding Error Flywheel -->
-    <rect x="20" y="20" width="450" height="460" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2" rx="8" />
+    <rect x="20" y="20" width="450" height="460" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2" />
     <text x="245" y="50" class="title">BEHAVIORAL CLONING FLYWHEEL</text>
     
     <!-- Flywheel circle path -->
@@ -45,10 +45,10 @@ def create_svg():
     <text x="245" y="195" class="math-red" style="font-weight: bold; font-size: 20px;" text-anchor="middle">O(T² ε)</text>
     <text x="245" y="220" class="small-label" style="fill:#A51C30;">Quadratic Compounding</text>
     
-    <rect x="185" y="80" width="120" height="40" fill="#FFFFFF" stroke="#1F407A" stroke-width="2" rx="4" />
+    <rect x="185" y="80" width="120" height="40" fill="#FFFFFF" stroke="#1F407A" stroke-width="2" />
     <text x="245" y="105" class="box-text">Learned Policy</text>
     
-    <rect x="185" y="280" width="120" height="40" fill="#FFFFFF" stroke="#1F407A" stroke-width="2" rx="4" />
+    <rect x="185" y="280" width="120" height="40" fill="#FFFFFF" stroke="#1F407A" stroke-width="2" />
     <text x="245" y="305" class="box-text">Environment</text>
     
     <!-- Annotations for flywheel -->
@@ -62,13 +62,13 @@ def create_svg():
     <text x="100" y="250" class="small-label">Erroneous</text>
     <text x="100" y="265" class="small-label">Action a_t</text>
     
-    <rect x="80" y="360" width="330" height="90" fill="#FFFFFF" stroke="#CBD5E0" stroke-width="1" rx="4" />
+    <rect x="80" y="360" width="330" height="90" fill="#FFFFFF" stroke="#CBD5E0" stroke-width="1" />
     <text x="245" y="385" class="box-text" style="fill:#1F407A">DAgger / Corrective Aggregation</text>
     <text x="245" y="410" class="small-label">Expands dataset support to perturbed states</text>
     <text x="245" y="430" class="math" text-anchor="middle">Bounds error to O(T ε)</text>
 
     <!-- RIGHT SIDE: Intervention Phase Space -->
-    <rect x="490" y="20" width="490" height="460" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2" rx="8" />
+    <rect x="490" y="20" width="490" height="460" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2" />
     <text x="735" y="50" class="title">INTERVENTION EPISODE CURATION</text>
     
     <!-- Axes -->
@@ -116,12 +116,12 @@ def create_svg():
     <text x="860" y="375" class="label">t_rec</text>
     
     <!-- Ingest box -->
-    <rect x="750" y="390" width="110" height="30" fill="#C6F6D5" stroke="#38A169" stroke-width="1" rx="4" />
+    <rect x="750" y="390" width="110" height="30" fill="#C6F6D5" stroke="#38A169" stroke-width="1" />
     <text x="805" y="410" class="small-label" style="fill:#276749; font-weight:bold;">Ingest to CA</text>
     <path d="M 805 355 L 805 385" fill="none" stroke="#38A169" stroke-width="2" marker-end="url(#arrow-grey)" />
     
     <!-- Truncate Box -->
-    <rect x="585" y="390" width="80" height="30" fill="#FED7D7" stroke="#E53E3E" stroke-width="1" rx="4" />
+    <rect x="585" y="390" width="80" height="30" fill="#FED7D7" stroke="#E53E3E" stroke-width="1" />
     <text x="625" y="410" class="small-label" style="fill:#C53030; font-weight:bold;">Truncate</text>
     <path d="M 625 355 L 625 385" fill="none" stroke="#E53E3E" stroke-width="2" marker-end="url(#arrow-red)" />
 

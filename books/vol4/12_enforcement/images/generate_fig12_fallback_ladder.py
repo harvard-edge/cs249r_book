@@ -31,7 +31,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
 
   <!-- Rung 1 -->
   <g transform="translate(250, 80)">
-    <rect x="0" y="0" width="500" height="90" rx="8" fill="#E2E8F0" stroke="#1F407A" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="90" fill="#E2E8F0" stroke="#1F407A" stroke-width="2"/>
     <text x="20" y="30" class="rung-title" fill="#1F407A">Rung 1: Active QP Projection (SLS/SLF)</text>
     <text x="20" y="55" class="rung-text" fill="#2D3748">Sub-millisecond constraint projection. Keeps mission running.</text>
     <text x="20" y="75" class="rung-sub" fill="#2D3748">Substrate: Static MCU SRAM | Latency: &lt; 175 &#x03BC;s | Wear: Zero</text>
@@ -39,7 +39,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
 
   <!-- Rung 2 -->
   <g transform="translate(250, 190)">
-    <rect x="0" y="0" width="500" height="90" rx="8" fill="#FFFFFF" stroke="#1F407A" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="90" fill="#FFFFFF" stroke="#1F407A" stroke-width="2"/>
     <text x="20" y="30" class="rung-title" fill="#1F407A">Rung 2: Active Closed-Loop Hold (Category 2 / SS2)</text>
     <text x="20" y="55" class="rung-text" fill="#2D3748">Dissipates energy as Joule heating. Preserves context.</text>
     <text x="20" y="75" class="rung-sub" fill="#2D3748">Substrate: Real-time RTOS | Latency: 2-5 ms | Wear: Electrical</text>
@@ -47,7 +47,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
 
   <!-- Rung 3 -->
   <g transform="translate(250, 300)">
-    <rect x="0" y="0" width="500" height="90" rx="8" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="90" fill="#FFFFFF" stroke="#A51C30" stroke-width="2"/>
     <text x="20" y="30" class="rung-title" fill="#A51C30">Rung 3: Controlled Dynamic Stop (Category 1 / SS1)</text>
     <text x="20" y="55" class="rung-text" fill="#2D3748">Absorbs regenerative DC-bus energy. Task abort &amp; re-homing.</text>
     <text x="20" y="75" class="rung-sub" fill="#A51C30">Substrate: Safety MCU Firmware | Latency: 10-20 ms | Wear: Regen load</text>
@@ -55,7 +55,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
 
   <!-- Rung 4 -->
   <g transform="translate(250, 410)">
-    <rect x="0" y="0" width="500" height="90" rx="8" fill="#A51C30" stroke="#A51C30" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="90" fill="#A51C30" stroke="#A51C30" stroke-width="2"/>
     <text x="20" y="30" class="rung-title" fill="#FFFFFF">Rung 4: Hardware Safe Torque Off (Category 0 / STO)</text>
     <text x="20" y="55" class="rung-text" fill="#E2E8F0">Galvanic isolation &amp; mechanical friction brakes. Manual reset.</text>
     <text x="20" y="75" class="rung-sub" fill="#E2E8F0">Substrate: Hardware/Optical | Latency: &lt; 5 &#x03BC;s | Wear: Lining ablation</text>

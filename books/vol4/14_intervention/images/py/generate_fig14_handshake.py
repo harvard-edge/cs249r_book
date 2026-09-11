@@ -64,16 +64,16 @@ def draw_fsm_fig():
     
     # State boxes
     states = {
-        "Auto": {"pos": (fsm_x + 60, fsm_y + 60), "label": "Autonomous"},
-        "Pend": {"pos": (fsm_x + 240, fsm_y + 60), "label": "Handover-Pending"},
-        "Blend": {"pos": (fsm_x + 240, fsm_y + 160), "label": "Bumpless-Blend"},
-        "Manual": {"pos": (fsm_x + 240, fsm_y + 260), "label": "Human-Manual"},
-        "Degrad": {"pos": (fsm_x + 60, fsm_y + 260), "label": "Degraded-Fallback\n(Safe Stop)"}
+        "Auto": {"pos": (fsm_x + 40, fsm_y + 60), "label": "Autonomous"},
+        "Pend": {"pos": (fsm_x + 260, fsm_y + 60), "label": "Handover-Pending"},
+        "Blend": {"pos": (fsm_x + 260, fsm_y + 160), "label": "Bumpless-Blend"},
+        "Manual": {"pos": (fsm_x + 260, fsm_y + 260), "label": "Human-Manual"},
+        "Degrad": {"pos": (fsm_x + 40, fsm_y + 260), "label": "Degraded-Fallback\n(Safe Stop)"}
     }
     
     state_w, state_h = 130, 60
     
-    def draw_arrow(start, end, label, color=dark_grey, curve=False, cp_offset=(0,0)):
+    def draw_arrow(start, end, label, color=dark_grey, curve=False, cp_offset=(0,0), t_offset=(0,-10)):
         sx, sy = start
         ex, ey = end
         if not curve:
@@ -94,24 +94,29 @@ def draw_fsm_fig():
         mid_y = (sy + ey)/2 if not curve else sy + cp_offset[1]/2
         
         for i, l in enumerate(label.split('\n')):
-            dwg.add(dwg.text(l, insert=(mid_x, mid_y - 5 + i*15), font_family=font_family, font_size=10, fill=color, text_anchor="middle"))
+            dwg.add(dwg.text(l, insert=(mid_x + t_offset[0], mid_y + t_offset[1] + i*15), font_family=font_family, font_size=10, fill=color, text_anchor="middle", filter="url(#solid_bg)"))
+
+    # Create filter for background
+    filter = dwg.defs.add(dwg.filter(id="solid_bg", x="0", y="0", width="1", height="1"))
+    filter.feFlood(flood_color="#FFFFFF", result="bg")
+    filter.feMerge(["bg", "SourceGraphic"])
             
     # Transitions
     s_c = lambda k: (states[k]["pos"][0] + state_w/2, states[k]["pos"][1] + state_h/2)
-    draw_arrow(s_c("Auto"), s_c("Pend"), "Request", dark_blue)
-    draw_arrow(s_c("Pend"), s_c("Blend"), "ACK + Auth", dark_blue)
-    draw_arrow(s_c("Blend"), s_c("Manual"), "Commit\nα=1.0", dark_blue)
+    draw_arrow(s_c("Auto"), s_c("Pend"), "Request", dark_blue, t_offset=(0, -8))
+    draw_arrow(s_c("Pend"), s_c("Blend"), "ACK + Auth", dark_blue, t_offset=(30, 0))
+    draw_arrow(s_c("Blend"), s_c("Manual"), "Commit\nα=1.0", dark_blue, t_offset=(30, -5))
     
     # Timeouts / Fallbacks
     draw_arrow((states["Pend"]["pos"][0], states["Pend"]["pos"][1]+state_h/2), 
                (states["Degrad"]["pos"][0]+state_w/2, states["Degrad"]["pos"][1]), 
-               "Timeout\n500ms", deep_red)
+               "Timeout\n500ms", deep_red, t_offset=(20, -10))
     draw_arrow((states["Manual"]["pos"][0], states["Manual"]["pos"][1]+state_h/2), 
                (states["Degrad"]["pos"][0]+state_w, states["Degrad"]["pos"][1]+state_h/2), 
-               "Lease Expire", deep_red)
+               "Lease Expire", deep_red, t_offset=(0, -8))
     draw_arrow((states["Auto"]["pos"][0]+state_w/2, states["Auto"]["pos"][1]+state_h), 
                (states["Degrad"]["pos"][0]+state_w/2, states["Degrad"]["pos"][1]), 
-               "Critical\nFault", deep_red)
+               "Critical\nFault", deep_red, t_offset=(-30, -10))
                
     # Draw boxes over arrows
     for k, v in states.items():

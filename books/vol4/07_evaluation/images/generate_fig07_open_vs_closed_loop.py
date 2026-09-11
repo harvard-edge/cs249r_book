@@ -92,12 +92,13 @@ card_ol = patches.FancyBboxPatch((7.6, -0.12), 2.25, 0.22,
                                  boxstyle='round,pad=0.02',
                                  facecolor=NAVY_TINT, edgecolor=NAVY, lw=1.2, zorder=7)
 ax_open.add_patch(card_ol)
-ax_open.text(7.75, 0.03, 'OFFLINE METRIC RESULT', fontsize=8.2, fontweight='bold', color=NAVY)
-ax_open.text(7.75, -0.025, r'• Heading Bias $\epsilon_\theta = +1.0^\circ$ ($0.0175\,\mathrm{rad}$)', fontsize=7.6, color=DARK)
-ax_open.text(7.75, -0.075, r'• $\mathrm{MSE} = 3.05 \times 10^{-4}\,\mathrm{rad}^2$ ($\mathbf{99.7\%}$ Accuracy)', fontsize=7.6, fontweight='bold', color=PETROL)
+ax_open.text(7.75, 0.03, 'OFFLINE METRIC RESULT', fontsize=8.2, fontweight='bold', color=NAVY, zorder=10)
+ax_open.text(7.75, -0.025, r'• Heading Bias $\epsilon_\theta = +1.0^\circ$ ($0.0175\,\mathrm{rad}$)', fontsize=7.6, color=DARK, zorder=10)
+ax_open.text(7.75, -0.075, r'• $\mathrm{MSE} = 3.05 \times 10^{-4}\,\mathrm{rad}^2$ ($\mathbf{99.7\%}$ Accuracy)', fontsize=7.6, fontweight='bold', color=PETROL, zorder=10)
 
 ax_open.text(0.3, -0.10, r'At each step $t$: input is reset to expert state $s_t^*$; predicted action $\hat{a}_t$ is discarded without physical execution.',
-             fontsize=8.0, color=SLATE, style='italic')
+             fontsize=8.0, color=SLATE, style='italic', zorder=10)
+
 
 ax_open.set_xlim(-0.2, 10.2)
 ax_open.set_ylim(-0.20, 0.20)
@@ -193,8 +194,8 @@ cols = [
      'Closed Loop: Endogenous state ($s_{t+1} = f(s_t, a_t)$)',
      NAVY),
     ('2. Error Propagation',
-     'Open Loop: Memoryless, zeroed at every step\n'
-     'Closed Loop: Compounding: $y(t) = \int v \sin(\theta) dt$',
+     r'Open Loop: Memoryless, zeroed at every step' + '\n' +
+     r'Closed Loop: Compounding: $y(t) = \int v \sin(\theta) dt$',
      BRONZE),
     ('3. State Support',
      'Open Loop: Evaluates only on expert trajectories\n'

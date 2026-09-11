@@ -35,12 +35,12 @@ def build_svg():
     ET.SubElement(svg, 'text', x="20", y="30", class_="title").text = "(a) On-Chip Memory Bus & Cache Contention"
     
     # NPU
-    ET.SubElement(svg, 'rect', x="20", y="60", width="160", height="60", rx="4", class_="box-light-blue")
+    ET.SubElement(svg, 'rect', x="20", y="60", width="160", height="60",, class_="box-light-blue")
     ET.SubElement(svg, 'text', x="100", y="85", class_="title", text_anchor="middle").text = "Proposal NPU"
     ET.SubElement(svg, 'text', x="100", y="105", class_="small", text_anchor="middle").text = "Streams 256 kB bursts"
     
     # MCU
-    ET.SubElement(svg, 'rect', x="20", y="150", width="160", height="60", rx="4", class_="box-light-red")
+    ET.SubElement(svg, 'rect', x="20", y="150", width="160", height="60",, class_="box-light-red")
     ET.SubElement(svg, 'text', x="100", y="175", class_="title", text_anchor="middle").text = "Real-Time MCU"
     ET.SubElement(svg, 'text', x="100", y="195", class_="small", text_anchor="middle").text = "Sensor read (5.0 µs)"
     
@@ -49,7 +49,7 @@ def build_svg():
     ET.SubElement(svg, 'path', d="M180 180 L230 180", class_="line", marker_end="url(#arrow)")
     
     # Shared Interconnect & Queue
-    ET.SubElement(svg, 'rect', x="240", y="50", width="160", height="170", rx="4", class_="box")
+    ET.SubElement(svg, 'rect', x="240", y="50", width="160", height="170",, class_="box")
     ET.SubElement(svg, 'text', x="320", y="75", class_="title", text_anchor="middle").text = "DRAM Queue"
     
     # Queue Items
@@ -110,7 +110,7 @@ def build_svg():
     ET.SubElement(svg, 'text', x="660", y="280", class_="warn").text = "ΔV = 138 mV Droop (16.2% collapse)"
     
     # Consequence Box
-    ET.SubElement(svg, 'rect', x="580", y="310", width="340", height="70", rx="4", class_="box-light-red")
+    ET.SubElement(svg, 'rect', x="580", y="310", width="340", height="70",, class_="box-light-red")
     ET.SubElement(svg, 'text', x="750", y="340", class_="warn", text_anchor="middle").text = "Gate Delay Stretch: +38%"
     ET.SubElement(svg, 'text', x="750", y="360", class_="warn", text_anchor="middle").text = "Emergency Clock Halving (1.2 GHz → 600 MHz)"
     

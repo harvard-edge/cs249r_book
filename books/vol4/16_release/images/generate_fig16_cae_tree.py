@@ -41,8 +41,8 @@ def create_svg():
 
     def box(x, y, w, h, title, lines, fill=c_light_grey, stroke=c_dark_grey, title_fill=c_blue, text_class="box-text", title_class="claim-title", title_bg=c_blue, stroke_width=2):
         res = f"""
-    <rect x="{x}" y="{y}" width="{w}" height="{h}" rx="4" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width}"/>
-    <rect x="{x}" y="{y}" width="{w}" height="24" rx="4" fill="{title_bg}" />
+    <rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width}"/>
+    <rect x="{x}" y="{y}" width="{w}" height="24" fill="{title_bg}" />
     <path d="M {x} {y+20} L {x+w} {y+20} L {x+w} {y+24} L {x} {y+24} Z" fill="{title_bg}" />
     <text x="{x+10}" y="{y+16}" class="{title_class}">{title}</text>
 """

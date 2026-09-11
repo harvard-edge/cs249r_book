@@ -6,7 +6,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
 
     <!-- Graph A: Trajectory -->
     <g transform="translate(50, 60)">
-        <rect width="380" height="200" fill="#E2E8F0" rx="4" />
+        <rect width="380" height="200" fill="#E2E8F0" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(a) State-Space Trajectory</text>
         
         <!-- Axes -->
@@ -30,7 +30,7 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300">
 
     <!-- Graph B: Cumulative Error -->
     <g transform="translate(470, 60)">
-        <rect width="380" height="200" fill="#E2E8F0" rx="4" />
+        <rect width="380" height="200" fill="#E2E8F0" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(b) Cumulative Error Scaling</text>
         
         <!-- Axes -->

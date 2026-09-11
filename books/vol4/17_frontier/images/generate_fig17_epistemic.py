@@ -24,7 +24,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
 
     <!-- Panel 1: Observational Indistinguishability -->
     <g transform="translate(50, 80)">
-        <rect width="420" height="220" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2" rx="4"/>
+        <rect width="420" height="220" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2"/>
         <text x="210" y="30" font-size="16" font-weight="bold" fill="#1F407A" text-anchor="middle">1. Observational Indistinguishability</text>
         
         <!-- Timeline -->
@@ -39,7 +39,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
         <path d="M 120 145 C 150 145, 170 145, 200 145" stroke="#A51C30" stroke-width="2" fill="none"/>
         
         <!-- Identical Telemetry -->
-        <rect x="110" y="115" width="80" height="40" fill="#E2E8F0" opacity="0.5" rx="2"/>
+        <rect x="110" y="115" width="80" height="40" fill="#E2E8F0" opacity="0.5"/>
         <text x="150" y="180" font-size="12" fill="#2D3748" text-anchor="middle">yA(t) \u2261 yB(t)</text>
         <text x="150" y="195" font-size="12" fill="#2D3748" text-anchor="middle">(Identical Telemetry)</text>
 
@@ -59,7 +59,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
 
     <!-- Panel 2: Astronomical Exposure Wall -->
     <g transform="translate(530, 80)">
-        <rect width="420" height="220" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2" rx="4"/>
+        <rect width="420" height="220" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2"/>
         <text x="210" y="30" font-size="16" font-weight="bold" fill="#1F407A" text-anchor="middle">2. Astronomical Exposure Wall</text>
         
         <!-- Axes -->
@@ -88,7 +88,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
 
     <!-- Panel 3: Residual-Claims Register -->
     <g transform="translate(50, 320)">
-        <rect width="900" height="240" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2" rx="4"/>
+        <rect width="900" height="240" fill="#F7FAFC" stroke="#E2E8F0" stroke-width="2"/>
         <text x="450" y="30" font-size="16" font-weight="bold" fill="#1F407A" text-anchor="middle">3. The Residual-Claims Register</text>
         
         <rect x="50" y="60" width="800" height="140" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
@@ -103,7 +103,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
         <!-- Row 1 -->
         <text x="150" y="115" font-size="12" fill="#2D3748" text-anchor="middle">Friction coeff \u03bc</text>
         <text x="350" y="115" font-size="12" fill="#A51C30" text-anchor="middle">Kinematic brake distance \u003e buffer</text>
-        <rect x="470" y="100" width="220" height="22" fill="#1F407A" rx="2"/>
+        <rect x="470" y="100" width="220" height="22" fill="#1F407A"/>
         <text x="580" y="115" font-size="11" fill="#FFFFFF" text-anchor="middle">Velocity Clamp (v \u2264 0.9 m/s)</text>
         <text x="780" y="115" font-size="12" fill="#2D3748" text-anchor="middle">Drivetrain Lead</text>
         
@@ -112,7 +112,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
         <!-- Row 2 -->
         <text x="150" y="150" font-size="12" fill="#2D3748" text-anchor="middle">Ceramic void vol</text>
         <text x="350" y="150" font-size="12" fill="#A51C30" text-anchor="middle">Brittle fracture &lt; 38 ms</text>
-        <rect x="470" y="135" width="220" height="22" fill="#1F407A" rx="2"/>
+        <rect x="470" y="135" width="220" height="22" fill="#1F407A"/>
         <text x="580" y="150" font-size="11" fill="#FFFFFF" text-anchor="middle">Mechanical Compliance Interface</text>
         <text x="780" y="150" font-size="12" fill="#2D3748" text-anchor="middle">Tooling Lead</text>
         
@@ -121,7 +121,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
         <!-- Row 3 -->
         <text x="150" y="185" font-size="12" fill="#2D3748" text-anchor="middle">Pressure drift</text>
         <text x="350" y="185" font-size="12" fill="#A51C30" text-anchor="middle">Line overpressure rupture</text>
-        <rect x="470" y="170" width="220" height="22" fill="#1F407A" rx="2"/>
+        <rect x="470" y="170" width="220" height="22" fill="#1F407A"/>
         <text x="580" y="185" font-size="11" fill="#FFFFFF" text-anchor="middle">Hardware Burst-Disc (215 kPa)</text>
         <text x="780" y="185" font-size="12" fill="#2D3748" text-anchor="middle">Process Safety Lead</text>
         

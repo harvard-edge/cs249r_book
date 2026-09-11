@@ -148,7 +148,7 @@ def generate_svg():
         <text x="470" y="100" class="callout-text">until impact.</text>
         <text x="470" y="120" class="card-error">Result: Workspace collision</text>
 
-        <rect x="690" y="20" width="210" height="120" fill="#F0FFF4" stroke="#38A169" stroke-width="2" rx="4" ry="4" />
+        <rect x="690" y="20" width="210" height="120" fill="#F0FFF4" stroke="#38A169" stroke-width="2" />
         <text x="700" y="40" class="card-title" fill="#276749">Structured Fallback</text>
         <text x="700" y="60" class="callout-text">Precomputed C² deceleration.</text>
         <text x="700" y="80" class="callout-text">Stops within clearance</text>

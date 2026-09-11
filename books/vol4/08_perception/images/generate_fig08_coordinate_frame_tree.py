@@ -68,7 +68,7 @@ def generate_coordinate_tree():
     
     # Draw boxes
     for f in frames:
-        svg += f'<rect x="{f["x"]-box_w/2}" y="{f["y"]-box_h/2}" width="{box_w}" height="{box_h}" rx="6" fill="{c_gray_light}" stroke="{c_blue}" stroke-width="2"/>\n'
+        svg += f'<rect x="{f["x"]-box_w/2}" y="{f["y"]-box_h/2}" width="{box_w}" height="{box_h}" fill="{c_gray_light}" stroke="{c_blue}" stroke-width="2"/>\n'
         # Label (e.g. F_earth)
         label_text = f['label'].replace('F_', 'F<tspan baseline-shift="sub" font-size="10">') + '</tspan>'
         svg += f'<text x="{f["x"]}" y="{f["y"]}" font-family="sans-serif" font-weight="bold" font-size="16" fill="{c_blue}" text-anchor="middle">{label_text}</text>\n'
@@ -76,7 +76,7 @@ def generate_coordinate_tree():
 
     # Add the Covariance Equation Box at the bottom
     eq_y = 350
-    svg += f'<rect x="100" y="{eq_y-40}" width="700" height="80" rx="4" fill="{c_white}" stroke="{c_gray_dark}" stroke-width="1" stroke-dasharray="4,4"/>\n'
+    svg += f'<rect x="100" y="{eq_y-40}" width="700" height="80" fill="{c_white}" stroke="{c_gray_dark}" stroke-width="1" stroke-dasharray="4,4"/>\n'
     svg += f'<text x="450" y="{eq_y-15}" font-family="sans-serif" font-weight="bold" font-size="14" fill="{c_gray_dark}" text-anchor="middle">Spatial Covariance Composition</text>\n'
     
     # Sigma_map approx J_odom Sigma_drift J_odom^T + R_body Sigma_ext R_body^T + R_tot Sigma_z R_tot^T

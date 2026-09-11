@@ -124,7 +124,7 @@ def generate_svg():
     svg.append(f'  <text x="{tx2+35}" y="{ty2+10}" font-size="14" fill="{c_red}" font-weight="bold">Collision</text>')
     
     # Title/Description text box
-    svg.append(f'  <rect x="20" y="20" width="300" height="80" fill="{c_grey_light}" rx="4"/>')
+    svg.append(f'  <rect x="20" y="20" width="300" height="80" fill="{c_grey_light}"/>')
     svg.append(f'  <text x="30" y="45" font-size="16" fill="{c_dark_blue}" font-weight="bold">Coordinate Staleness Error</text>')
     svg.append(f'  <text x="30" y="65" font-size="14" fill="{c_grey_dark}">v = 0.80 m/s</text>')
     svg.append(f'  <text x="30" y="85" font-size="14" fill="{c_grey_dark}">ω = 1.50 rad/s, Δt = 40 ms</text>')

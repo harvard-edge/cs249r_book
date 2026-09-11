@@ -36,16 +36,16 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
     <!-- The 3 Pillars -->
     <!-- Brain -->
     <g transform="translate(50, 100)">
-        <rect width="250" height="400" fill="url(#bg-brain)" stroke="#1F407A" stroke-width="2" rx="4"/>
-        <rect x="0" y="0" width="250" height="40" fill="#1F407A" rx="4"/>
+        <rect width="250" height="400" fill="url(#bg-brain)" stroke="#1F407A" stroke-width="2"/>
+        <rect x="0" y="0" width="250" height="40" fill="#1F407A"/>
         <rect x="0" y="30" width="250" height="10" fill="#1F407A"/>
         <text x="125" y="25" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">BRAIN (Policy)</text>
         
-        <rect x="25" y="80" width="200" height="60" fill="#FFFFFF" stroke="#1F407A" stroke-width="1" rx="2"/>
+        <rect x="25" y="80" width="200" height="60" fill="#FFFFFF" stroke="#1F407A" stroke-width="1"/>
         <text x="125" y="105" font-size="14" font-weight="bold" fill="#1F407A" text-anchor="middle">Learned Perception</text>
         <text x="125" y="125" font-size="12" fill="#2D3748" text-anchor="middle">z = \u03a6(x)</text>
 
-        <rect x="25" y="200" width="200" height="60" fill="#FFFFFF" stroke="#1F407A" stroke-width="1" rx="2"/>
+        <rect x="25" y="200" width="200" height="60" fill="#FFFFFF" stroke="#1F407A" stroke-width="1"/>
         <text x="125" y="225" font-size="14" font-weight="bold" fill="#1F407A" text-anchor="middle">Action Planning</text>
         <text x="125" y="245" font-size="12" fill="#2D3748" text-anchor="middle">\u03c0(a|z) \u2192 u_hat</text>
 
@@ -54,18 +54,18 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
 
     <!-- Nervous System -->
     <g transform="translate(375, 100)">
-        <rect width="250" height="400" fill="url(#bg-nervous)" stroke="#2D3748" stroke-width="2" rx="4"/>
-        <rect x="0" y="0" width="250" height="40" fill="#2D3748" rx="4"/>
+        <rect width="250" height="400" fill="url(#bg-nervous)" stroke="#2D3748" stroke-width="2"/>
+        <rect x="0" y="0" width="250" height="40" fill="#2D3748"/>
         <rect x="0" y="30" width="250" height="10" fill="#2D3748"/>
         <text x="125" y="25" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">NERVOUS SYSTEM</text>
         
-        <rect x="25" y="140" width="200" height="120" fill="#FFFFFF" stroke="#2D3748" stroke-width="2" rx="2" stroke-dasharray="4,2"/>
+        <rect x="25" y="140" width="200" height="120" fill="#FFFFFF" stroke="#2D3748" stroke-width="2" stroke-dasharray="4,2"/>
         <text x="125" y="165" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">Barrier Constraints</text>
         <text x="125" y="185" font-size="12" fill="#A51C30" text-anchor="middle">h(x) \u2265 0</text>
         <text x="125" y="205" font-size="12" fill="#2D3748" text-anchor="middle">d_stop(v) \u2264 d_gap</text>
         <text x="125" y="225" font-size="12" fill="#2D3748" text-anchor="middle">1000 Hz Projection</text>
 
-        <rect x="25" y="300" width="200" height="60" fill="#FFFFFF" stroke="#2D3748" stroke-width="1" rx="2"/>
+        <rect x="25" y="300" width="200" height="60" fill="#FFFFFF" stroke="#2D3748" stroke-width="1"/>
         <text x="125" y="325" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">Current &amp; Reflexes</text>
         <text x="125" y="345" font-size="12" fill="#2D3748" text-anchor="middle">u_cmd</text>
 
@@ -74,20 +74,20 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600"
 
     <!-- Body (Physical Plant) -->
     <g transform="translate(700, 100)">
-        <rect width="250" height="400" fill="url(#bg-body)" stroke="#A51C30" stroke-width="2" rx="4"/>
-        <rect x="0" y="0" width="250" height="40" fill="#A51C30" rx="4"/>
+        <rect width="250" height="400" fill="url(#bg-body)" stroke="#A51C30" stroke-width="2"/>
+        <rect x="0" y="0" width="250" height="40" fill="#A51C30"/>
         <rect x="0" y="30" width="250" height="10" fill="#A51C30"/>
         <text x="125" y="25" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">BODY (Plant)</text>
         
-        <rect x="25" y="80" width="200" height="60" fill="#FFFFFF" stroke="#A51C30" stroke-width="1" rx="2"/>
+        <rect x="25" y="80" width="200" height="60" fill="#FFFFFF" stroke="#A51C30" stroke-width="1"/>
         <text x="125" y="105" font-size="14" font-weight="bold" fill="#A51C30" text-anchor="middle">Actuators</text>
         <text x="125" y="125" font-size="12" fill="#2D3748" text-anchor="middle">Joule Heating</text>
 
-        <rect x="25" y="200" width="200" height="60" fill="#FFFFFF" stroke="#A51C30" stroke-width="1" rx="2"/>
+        <rect x="25" y="200" width="200" height="60" fill="#FFFFFF" stroke="#A51C30" stroke-width="1"/>
         <text x="125" y="225" font-size="14" font-weight="bold" fill="#A51C30" text-anchor="middle">Dynamics &amp; Contact</text>
         <text x="125" y="245" font-size="12" fill="#2D3748" text-anchor="middle">F \u2264 \u03bcN (Friction)</text>
 
-        <rect x="25" y="320" width="200" height="60" fill="#FFFFFF" stroke="#A51C30" stroke-width="1" rx="2"/>
+        <rect x="25" y="320" width="200" height="60" fill="#FFFFFF" stroke="#A51C30" stroke-width="1"/>
         <text x="125" y="345" font-size="14" font-weight="bold" fill="#A51C30" text-anchor="middle">Transduction</text>
         <text x="125" y="365" font-size="12" fill="#2D3748" text-anchor="middle">Sensors \u2192 y(t)</text>
 

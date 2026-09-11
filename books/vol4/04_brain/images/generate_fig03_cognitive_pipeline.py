@@ -12,14 +12,14 @@ def create_svg():
     <g font-family="Arial, sans-serif" font-size="16" font-weight="bold" text-anchor="middle">
         
         <!-- Physical Sensors -->
-        <rect x="30" y="150" width="130" height="80" rx="8" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
+        <rect x="30" y="150" width="130" height="80" fill="#E2E8F0" stroke="#2D3748" stroke-width="2"/>
         <text x="95" y="195" fill="#2D3748">Sensors</text>
 
         <!-- Arrow -->
         <path fill="none" d="M 160 190 L 190 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Ingestion -->
-        <rect x="200" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="200" y="150" width="130" height="80" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="265" y="195" fill="#ffffff">Ingestion</text>
         <text x="265" y="215" font-size="12" fill="#E2E8F0">(Tokenization)</text>
 
@@ -27,7 +27,7 @@ def create_svg():
         <path fill="none" d="M 330 190 L 360 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Perception -->
-        <rect x="370" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="370" y="150" width="130" height="80" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="435" y="195" fill="#ffffff">Perception</text>
         <text x="435" y="215" font-size="12" fill="#E2E8F0">(Spatial/Afford.)</text>
 
@@ -35,7 +35,7 @@ def create_svg():
         <path fill="none" d="M 500 190 L 530 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Memory -->
-        <rect x="540" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="540" y="150" width="130" height="80" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="605" y="195" fill="#ffffff">Memory</text>
         <text x="605" y="215" font-size="12" fill="#E2E8F0">(World Model)</text>
 
@@ -43,7 +43,7 @@ def create_svg():
         <path fill="none" d="M 670 190 L 700 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Intent -->
-        <rect x="710" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="710" y="150" width="130" height="80" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="775" y="195" fill="#ffffff">Intent</text>
         <text x="775" y="215" font-size="12" fill="#E2E8F0">(Goal Leases)</text>
 
@@ -51,7 +51,7 @@ def create_svg():
         <path fill="none" d="M 840 190 L 870 190" stroke="#2D3748" stroke-width="3" marker-end="url(#arrow)" />
 
         <!-- Planning -->
-        <rect x="880" y="150" width="130" height="80" rx="8" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
+        <rect x="880" y="150" width="130" height="80" fill="#1F407A" stroke="#2D3748" stroke-width="2"/>
         <text x="945" y="195" fill="#ffffff">Planning</text>
         <text x="945" y="215" font-size="12" fill="#E2E8F0">(Action Chunk.)</text>
 
@@ -64,7 +64,7 @@ def create_svg():
         <text x="1060" y="300" fill="#A51C30" font-size="14">Boundary</text>
 
         <!-- Reflexes (Downstream) -->
-        <rect x="1080" y="150" width="90" height="80" rx="8" fill="#E2E8F0" stroke="#A51C30" stroke-width="2"/>
+        <rect x="1080" y="150" width="90" height="80" fill="#E2E8F0" stroke="#A51C30" stroke-width="2"/>
         <text x="1125" y="195" fill="#2D3748" font-size="14">Reflexes</text>
         <text x="1125" y="215" font-size="12" fill="#2D3748">(Real-time)</text>
     </g>

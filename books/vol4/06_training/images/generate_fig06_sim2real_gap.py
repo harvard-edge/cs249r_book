@@ -6,9 +6,9 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
 
     <!-- Dynamics -->
     <g transform="translate(50, 60)">
-        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <rect width="380" height="150" fill="#E2E8F0" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(a) Dynamics &amp; Contact Mismatch</text>
-        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" />
         <path fill="none" d="M 30 110 L 350 110" stroke="#2D3748" stroke-width="1" />
         <path d="M 30 110 L 80 110 L 120 50 L 300 50" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
         <path d="M 30 110 L 90 110 L 150 40 L 180 70 L 300 70" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real -->
@@ -18,9 +18,9 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
 
     <!-- Latency -->
     <g transform="translate(470, 60)">
-        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <rect width="380" height="150" fill="#E2E8F0" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(b) Actuator &amp; Pipeline Latency</text>
-        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" />
         <path fill="none" d="M 30 100 L 350 100" stroke="#2D3748" stroke-width="1" />
         <path d="M 30 80 Q 90 40 150 80 T 270 80" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
         <path d="M 70 80 Q 130 40 190 80 T 310 80" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real shifted -->
@@ -30,9 +30,9 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
 
     <!-- Sensing -->
     <g transform="translate(50, 230)">
-        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <rect width="380" height="150" fill="#E2E8F0" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(c) Sensing &amp; Transduction</text>
-        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" />
         <path fill="none" d="M 30 90 L 350 90" stroke="#2D3748" stroke-width="1" />
         <path d="M 30 70 L 150 70 L 180 70 L 300 70" stroke="#1F407A" stroke-width="2" stroke-dasharray="4" fill="none" /> <!-- Sim -->
         <path d="M 30 60 L 120 60 L 130 110 L 140 110 L 150 60 L 300 60" stroke="#A51C30" stroke-width="2" fill="none" /> <!-- Real with dropout & bias -->
@@ -42,9 +42,9 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400">
 
     <!-- Perceptual -->
     <g transform="translate(470, 230)">
-        <rect width="380" height="150" fill="#E2E8F0" rx="4" />
+        <rect width="380" height="150" fill="#E2E8F0" />
         <text x="190" y="25" font-family="sans-serif" font-size="14" font-weight="bold" fill="#2D3748" text-anchor="middle">(d) Perceptual Feature Shift</text>
-        <rect x="20" y="40" width="340" height="90" fill="#ffffff" rx="2" />
+        <rect x="20" y="40" width="340" height="90" fill="#ffffff" />
         <circle cx="120" cy="85" r="30" fill="#1F407A" fill-opacity="0.2" stroke="#1F407A" stroke-width="2" stroke-dasharray="4"/>
         <circle cx="150" cy="85" r="30" fill="#A51C30" fill-opacity="0.2" stroke="#A51C30" stroke-width="2"/>
         <line x1="120" y1="85" x2="150" y2="85" stroke="#2D3748" stroke-width="2" marker-end="url(#arrow-dark)"/>

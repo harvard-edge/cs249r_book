@@ -45,7 +45,7 @@ svg_code.append(f'<text x="110" y="{y_refl-15}" class="label" text-anchor="end">
 svg_code.append(f'<text x="110" y="{y_refl+5}" class="small-label" text-anchor="end">(1000 Hz)</text>')
 
 def draw_block(x_start, y, width, height, fill, stroke, text=""):
-    svg_code.append(f'<rect x="{x_start}" y="{y}" width="{width}" height="{height}" fill="{fill}" stroke="{stroke}" stroke-width="1.5" rx="3"/>')
+    svg_code.append(f'<rect x="{x_start}" y="{y}" width="{width}" height="{height}" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>')
     if text:
         svg_code.append(f'<text x="{x_start + width/2}" y="{y + height/2 + 4}" class="box-text" text-anchor="middle">{text}</text>')
 
@@ -68,7 +68,7 @@ for i in range(61):
         svg_code.append(f'<text x="{x}" y="{y_refl+20}" class="small-label" text-anchor="middle">{i} ms</text>')
 
 # Inset
-svg_code.append('<rect x="550" y="250" width="300" height="70" fill="#F7FAFC" stroke="#CBD5E0" stroke-width="1.5" rx="4"/>')
+svg_code.append('<rect x="550" y="250" width="300" height="70" fill="#F7FAFC" stroke="#CBD5E0" stroke-width="1.5"/>')
 svg_code.append('<text x="560" y="265" class="small-label" font-weight="bold">1 ms Slot Budgeting (Inset)</text>')
 ins_x, ins_w = 570, 260
 svg_code.append(f'<line x1="{ins_x}" y1="290" x2="{ins_x+ins_w}" y2="290" class="line"/>')
@@ -100,20 +100,20 @@ svg_code.append('<line x1="30" y1="350" x2="870" y2="350" stroke="#E2E8F0" strok
 svg_code.append('<text x="30" y="380" class="title">Panel B: SPSC Seqlock Triple-Buffer Architecture</text>')
 
 # Architectures nodes
-svg_code.append('<rect x="80" y="440" width="160" height="120" fill="#F7FAFC" stroke="#2D3748" stroke-width="2" rx="4"/>')
+svg_code.append('<rect x="80" y="440" width="160" height="120" fill="#F7FAFC" stroke="#2D3748" stroke-width="2"/>')
 svg_code.append('<text x="160" y="465" class="label" font-weight="bold" text-anchor="middle">Application Processor</text>')
 svg_code.append('<text x="160" y="485" class="small-label" text-anchor="middle">(Producer, 50 Hz)</text>')
-svg_code.append('<rect x="100" y="500" width="120" height="40" fill="#1F407A" stroke="#1a365d" stroke-width="1.5" rx="3"/>')
+svg_code.append('<rect x="100" y="500" width="120" height="40" fill="#1F407A" stroke="#1a365d" stroke-width="1.5"/>')
 svg_code.append('<text x="160" y="524" class="box-text" text-anchor="middle">Write Chunk</text>')
 
-svg_code.append('<rect x="660" y="440" width="160" height="120" fill="#F7FAFC" stroke="#2D3748" stroke-width="2" rx="4"/>')
+svg_code.append('<rect x="660" y="440" width="160" height="120" fill="#F7FAFC" stroke="#2D3748" stroke-width="2"/>')
 svg_code.append('<text x="740" y="465" class="label" font-weight="bold" text-anchor="middle">Real-Time MCU</text>')
 svg_code.append('<text x="740" y="485" class="small-label" text-anchor="middle">(Consumer, 1000 Hz)</text>')
-svg_code.append('<rect x="680" y="500" width="120" height="40" fill="#A51C30" stroke="#7b1523" stroke-width="1.5" rx="3"/>')
+svg_code.append('<rect x="680" y="500" width="120" height="40" fill="#A51C30" stroke="#7b1523" stroke-width="1.5"/>')
 svg_code.append('<text x="740" y="524" class="box-text" text-anchor="middle">Latch Latest</text>')
 
 # Triple Buffer 
-svg_code.append('<rect x="340" y="420" width="220" height="170" fill="#EDF2F7" stroke="#4A5568" stroke-width="2" rx="4"/>')
+svg_code.append('<rect x="340" y="420" width="220" height="170" fill="#EDF2F7" stroke="#4A5568" stroke-width="2"/>')
 svg_code.append('<text x="450" y="445" class="label" font-weight="bold" text-anchor="middle">Shared Memory (Triple Buffer)</text>')
 
 b_w, b_h, b_x = 180, 30, 360
@@ -132,7 +132,7 @@ svg_code.append(f'<text x="{b_x+10}" y="{b_y3+20}" class="small-label">Buffer 2:
 svg_code.append(f'<text x="{b_x+80}" y="{b_y3+20}" class="small-label" font-style="italic">Active (Read)</text>')
 
 # Seqlock Box
-svg_code.append('<rect x="390" y="605" width="120" height="30" fill="#F7FAFC" stroke="#2D3748" stroke-width="1.5" rx="3"/>')
+svg_code.append('<rect x="390" y="605" width="120" height="30" fill="#F7FAFC" stroke="#2D3748" stroke-width="1.5"/>')
 svg_code.append('<text x="450" y="625" class="small-label" font-weight="bold" text-anchor="middle">seqlock: cseq</text>')
 
 # Arrows 
