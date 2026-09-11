@@ -595,17 +595,21 @@ The data path and transfer protocols governing this multi-tiered context hierarc
 ![](images/svg/hierarchical_kv_paging_topology.svg)
 :::
 
-When an agent emits a tool call, the scheduler marks its Radix tree nodes as `SUSPENDED`. An asynchronous background Direct Memory Access (DMA) engine transfers the corresponding physical PagedAttention blocks over PCIe Gen5 into pinned host DRAM buffers:
+When an agent emits a tool call, the scheduler marks its Radix tree nodes as `SUSPENDED`. An asynchronous background Direct Memory Access (DMA) engine transfers the corresponding physical PagedAttention blocks over PCIe Gen5 into pinned host DRAM buffers governed by @eq-vol3-virtualmem-swap-latency:
 
-$$T_{\text{swap\_out}} = \frac{M_{\text{KV}}(S)}{B_{\text{PCIe}}} = \frac{S \cdot S_{\text{token}}}{64\text{ GB/s}}$$
+$$T_{\text{swap}} = \frac{M_{\text{KV}}(S)}{B_{\text{PCIe}}} {#eq-vol3-virtualmem-swap-latency}$$
 
-For an agent context of 32,000 tokens on Llama-3 70B ($10.49\text{ GB}$), swapping memory to host DRAM requires:
-
-$$T_{\text{swap}} = \frac{10.49\text{ GB}}{64\text{ GB/s}} \approx 164\text{ milliseconds}$$
+where $M_{\text{KV}}(S) = S \cdot S_{\text{token}}$ is the total sequence KV footprint and $B_{\text{PCIe}}$ is the effective interconnect transfer bandwidth.[^fn-virtualmem-swap-derivation] For an agent context of 32,000 tokens on Llama-3 70B ($10.49\text{ GB}$), swapping memory to host DRAM over a PCIe Gen5 x16 interconnect ($64\text{ GB/s}$) requires $T_{\text{swap}} = 10.49\text{ GB} / 64\text{ GB/s} \approx 164\text{ ms}$.
 
 Because the external tool invocation (e.g., executing a bash compilation or running an API query) requires several seconds, the $164\text{ ms}$ swap overhead is **completely hidden** behind tool I/O latency. The freed HBM blocks are returned to the free pool to serve active generation threads.
 
 When the tool execution nears completion (or when the orchestrator receives an asynchronous tool return interrupt, detailed in @sec-vol3-interrupts), the scheduler initiates **asynchronous prefetching**, streaming the PagedAttention blocks from host DRAM back into newly allocated HBM blocks before the next autoregressive decode step begins.
+
+[^fn-virtualmem-swap-derivation]: Swap latency represents physical serialization delay over the host-accelerator interconnect: $T_{\text{swap}} = (S \cdot 2 \cdot n_{\text{layers}} \cdot n_{\text{kv\_heads}} \cdot d_{\text{head}} \cdot P) / B_{\text{PCIe}}$. With asynchronous DMA double-buffering, host DRAM page allocation overlaps with transfer pipelining.
+
+::: {.callout-principle title="Systems Rule of Thumb: The Asynchronous Prefetch Invariant"}
+Because tool execution latency ($T_{\text{tool}} \sim 1 - 30\text{ s}$) exceeds PCIe Gen5 swap latency ($T_{\text{swap}} \approx 164\text{ ms}$ for 32k tokens) by one to two orders of magnitude, never hold idle KV cache in accelerator HBM during external I/O waits. Reclaim 100% of inactive agent memory via asynchronous host-DRAM paging, and initiate predictive prefetching upon early event triggers to resume autoregressive decode with zero TTFT penalty.
+:::
 
 ::: {#ws-vm-openai-redis-2023 .callout-war-story title="The shared cache boundary: The ChatGPT multi-tenant leak incident"}
 
@@ -663,27 +667,31 @@ The lifecycle of an agent request under PD disaggregation executes in three phas
 
 The fundamental viability of PD disaggregation hinges on network bandwidth. If the time required to transfer the KV cache from a $P$-instance to a $D$-instance exceeds the time saved by compute specialization, disaggregation collapses.
 
-The network transfer latency for a KV cache spanning $S_{\text{prompt}}$ tokens is modeled as:
+The network transfer latency for a KV cache spanning $S_{\text{prompt}}$ tokens is governed by @eq-vol3-virtualmem-rdma-latency:
 
-$$T_{\text{network}} = \alpha_{\text{net}} + \frac{S_{\text{prompt}} \cdot S_{\text{token}}}{B_{\text{network}}}$$
+$$T_{\text{network}} = \alpha_{\text{net}} + \frac{M_{\text{KV}}(S_{\text{prompt}})}{B_{\text{network}}} {#eq-vol3-virtualmem-rdma-latency}$$
 
-where $\alpha_{\text{net}}$ is the network connection handshake latency and $B_{\text{network}}$ is the effective sustained network bandwidth.
+where $M_{\text{KV}}(S_{\text{prompt}}) = S_{\text{prompt}} \cdot S_{\text{token}}$ is the serialized KV cache volume, $\alpha_{\text{net}}$ is the network connection handshake and memory-registration latency, and $B_{\text{network}}$ is the effective sustained interconnect bandwidth.[^fn-virtualmem-rdma-overlap]
 
-Consider transferring a 32,000-token prompt KV cache for Llama-3 70B ($S_{\text{token}} = 320\text{ KB}$, total footprint $M_{\text{KV}} \approx 10.49\text{ GB}$) across different network fabrics:
+Consider transferring a 32,000-token prompt KV cache for Llama-3 70B ($S_{\text{token}} = 320\text{ KB}$, total footprint $M_{\text{KV}} \approx 10.49\text{ GB}$) across different network fabrics, summarized in @tbl-vol3-virtualmem-rdma-transport.
 
-- **Standard $25\text{ Gbps}$ Data Center Ethernet ($3.125\text{ GB/s}$):**
-  $$T_{\text{network}} = \frac{10.49\text{ GB}}{3.125\text{ GB/s}} \approx \mathbf{3.36\text{ seconds}}$$
-  A $3.36$-second network transfer completely obliterates the prefill latency savings, rendering disaggregation catastrophic.
-- **$400\text{ Gbps}$ InfiniBand / RoCE v2 ($50\text{ GB/s}$):**
-  $$T_{\text{network}} = \frac{10.49\text{ GB}}{50\text{ GB/s}} \approx \mathbf{210\text{ milliseconds}}$$
-- **$800\text{ Gbps}$ InfiniBand / RoCE v2 ($100\text{ GB/s}$):**
-  $$T_{\text{network}} = \frac{10.49\text{ GB}}{100\text{ GB/s}} \approx \mathbf{105\text{ milliseconds}}$$
+| Interconnect Fabric | Raw Bandwidth | Effective $B_{\text{network}}$ | Transfer Latency ($10.49\text{ GB}$) | Systems Feasibility |
+| :--- | :--- | :--- | :--- | :--- |
+| Standard Data Center Ethernet | $25\text{ Gbps}$ | $3.125\text{ GB/s}$ | $3.36\text{ s}$ | 🔴 Infeasible (obliterates TTFT gains) |
+| InfiniBand / RoCE v2 | $400\text{ Gbps}$ | $50.0\text{ GB/s}$ | $210\text{ ms}$ | 🟡 Borderline (requires pipelining) |
+| Dual-Rail InfiniBand / RoCE v2 | $800\text{ Gbps}$ | $100.0\text{ GB/s}$ | $105\text{ ms}$ | 🟢 Production (fully hidden via RDMA) |
+: **KV Cache Transfer Latency Across Network Fabrics**: Serialization delay for transferring a 32,000-token Llama-3 70B KV cache ($10.49\text{ GB}$) from Prefill to Decode instances across standard cluster interconnects. {#tbl-vol3-virtualmem-rdma-transport}
 
-To completely eliminate this $105\text{ ms}$ network pause, modern disaggregated runtimes (such as Mooncake [@qin2024mooncake]) implement **Pipelined Layer-by-Layer Streaming via RDMA Write**:
+To eliminate this network serialization overhead, modern disaggregated runtimes (such as Mooncake [@qin2024mooncake]) implement **Pipelined Layer-by-Layer Streaming via RDMA Write**\index{RDMA Write}:
 
-- Rather than waiting for all $n_{\text{layers}}$ to complete before initiating network transfer, the $P$-instance initiates an asynchronous **Remote Direct Memory Access (RDMA) Write**\index{RDMA Write} transfer for layer $l$'s physical PagedAttention blocks immediately after layer $l$ completes its forward pass.
-- Because layer $l$'s network transfer executes concurrently with layer $l+1$'s forward pass computation on the $P$-instance, **the entire network transfer is completely overlapped with prefill computation**:
-  $$T_{\text{effective\_transfer}} = \max\left(0, \, T_{\text{network}} - T_{\text{prefill}}\right) \approx 0$$
+- Rather than waiting for all $n_{\text{layers}}$ to complete before initiating network transfer, the $P$-instance initiates an asynchronous **Remote Direct Memory Access (RDMA) Write** transfer for layer $l$'s physical PagedAttention blocks immediately after layer $l$ completes its forward pass.
+- Because layer $l$'s network transfer executes concurrently with layer $l+1$'s forward pass computation on the $P$-instance, the entire network transfer is completely overlapped with prefill computation ($T_{\text{effective\_transfer}} = \max(0, T_{\text{network}} - T_{\text{prefill}}) \approx 0$).
+
+[^fn-virtualmem-rdma-overlap]: In pipelined RDMA streaming, transfer begins at $t = T_{\text{layer}}$, so the net pipeline bubble is $\Delta T = \max(0, T_{\text{network\_layer}} - T_{\text{compute\_layer}})$. When $B_{\text{network}} \ge 50\text{ GB/s}$, layer transfer latency ($<3.5\text{ ms}$) is strictly less than layer GEMM prefill execution ($>5\text{ ms}$), hiding 100% of network transit.
+
+::: {.callout-principle title="Systems Rule of Thumb: The RDMA Bandwidth Invariant"}
+Prefill-decode disaggregation requires minimum inter-node network bandwidth matching the prefill generation rate: $B_{\text{network}} \ge B_{\text{prefill\_kv}}$. On $400\text{ Gbps}+$ InfiniBand/RoCE fabrics, always pipeline KV transfers layer-by-layer via asynchronous RDMA Write to achieve zero effective transfer latency ($T_{\text{effective}} \approx 0$). Never attempt disaggregation over standard $25\text{ Gbps}$ Ethernet, where serialization latency ($>3\text{ s}$) exceeds prefill computation time by an order of magnitude.
+:::
 
 ### Cluster sizing and disaggregated capacity planning
 
