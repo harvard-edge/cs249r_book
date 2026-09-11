@@ -76,12 +76,12 @@ Every historical inflection point in computer systems has redefined the fundamen
 An autonomous agent trajectory spans $10^1$ to $10^4$ seconds—minutes to hours of sustained, stateful execution. This ten-order-of-magnitude temporal expansion breaks the core assumptions inherited by modern software systems:
 
 - **Memory residency:** Operating systems and GPU runtimes expect to allocate memory for milliseconds, reclaim it, and serve the next request. An agent trajectory requires Key-Value (KV) cache memory to persist across dozens of asynchronous tool calls, stranding expensive GPU High Bandwidth Memory (HBM) during external network or disk latency.
-- **Transactional failure:** In classical distributed transactions, failures trigger an `ABORT` or rollback. When an agent trajectory executes a destructive tool call at step $t=14$ (e.g., modifying database records or pushing a git commit), the runtime cannot simply rewind physical wall-clock time.
+- **Transactional failure:** In classical distributed transactions, failures trigger an `ABORT` or rollback. When an agent trajectory executes a destructive tool call at step $t=14$ (e.g., modifying database records or pushing a git commit), the runtime cannot rewind physical wall-clock time.
 - **Resource scheduling:** Schedulers designed for Poisson arrivals of short inference requests collapse when confronted with multi-step workflows whose completion time and memory footprint expand dynamically at runtime.
 
 ### Why passive models hit a systems ceiling
 
-Why can we not simply train a larger foundation model to solve these problems in a single turn? The answer lies in the **information-theoretic limits of open-loop generation**.
+Attempting to solve these problems by training a larger foundation model in a single turn fails due to the **information-theoretic limits of open-loop generation**.
 
 In an open-loop forward pass, a model must predict the complete solution conditioned solely on its initial prompt. If a coding task requires editing five files across a 100,000-line repository, a passive model must generate all modifications in one continuous token stream without ever testing syntax, inspecting compiler output, or running a unit test. Any mistake made on line 10 poisons the autoregressive context for every subsequent token, making success across complex tasks statistically impossible.
 
@@ -407,7 +407,7 @@ Consider a representative agent step:
 2. **Tool Execution:** The shell command executes within an isolated microVM. Compiling the application, starting container dependencies, and executing test suites requires $30\text{ s}$.
 3. **Observation Ingestion:** The test runner emits compiler diagnostics, and the agent initiates the next turn.
 
-During the $30\text{ s}$ of tool execution, what happens to the accelerator? In a naive serving architecture, the agent's $20\text{ GB}$ KV cache remains pinned in GPU HBM. The GPU Tensor Cores sit completely idle, waiting for the operating system's `waitpid()` call to return.
+During the $30\text{ s}$ of tool execution, the accelerator experiences severe resource stranding. In a naive serving architecture, the agent's $20\text{ GB}$ KV cache remains pinned in GPU HBM. The GPU Tensor Cores sit completely idle, waiting for the operating system's `waitpid()` call to return.
 
 Across production agent workflows, agents spend between 70 percent and 90 percent of their total wall-clock lifetime waiting on external systems: compiler builds, remote API endpoints, database queries, and browser page rendering. Holding forty-thousand-dollar GPU accelerators in an idle memory-pinned state destroys data center operational economics. Memory capacity is exhausted not by active computation, but by dormant state waiting on I/O.
 
@@ -578,7 +578,7 @@ In the computer systems tradition established by John Hennessy and David Patters
 
 **Fallacy:** *A 1M+ token context window eliminates the need for hierarchical memory architectures.*
 
-With foundation models expanding supported context windows beyond one million tokens, engineers frequently assume that all state—repository files, multi-day interaction histories, intermediate reasoning traces, and database schemas—can simply be concatenated into the active prompt, rendering external episodic stores, working set management, and memory compaction obsolete.
+With foundation models expanding supported context windows beyond one million tokens, engineers frequently assume that all state—repository files, multi-day interaction histories, intermediate reasoning traces, and database schemas—can be concatenated directly into the active prompt, rendering external episodic stores, working set management, and memory compaction obsolete.
 
 This intuition ignores the computational complexity, memory bandwidth, and retrieval dynamics of transformer attention:
 
@@ -637,7 +637,7 @@ Parameter scale alone cannot breach the compounding reliability wall. High-relia
 
 **Pitfall:** *Unbounded naive retries on failed tool invocations inducing context poisoning.*
 
-When an agent generates an invalid tool invocation—such as emitting malformed JSON, passing an invalid parameter type, invoking a shell command that exits with a nonzero error code, or failing a compiler check—the standard naive implementation simply appends the raw error traceback to the prompt and instructs the model: *"The previous tool call failed with the following error. Please fix your error and try again."*
+When an agent generates an invalid tool invocation—such as emitting malformed JSON, passing an invalid parameter type, invoking a shell command that exits with a nonzero error code, or failing a compiler check—the standard naive implementation appends the raw error traceback directly to the prompt and instructs the model: *"The previous tool call failed with the following error. Please fix your error and try again."*
 
 This practice induces severe **context poisoning**\index{Context poisoning!in tool retries} and failure spirals:
 
