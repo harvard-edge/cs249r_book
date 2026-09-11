@@ -213,7 +213,7 @@ When target facts are placed at varying relative depths within a prompt, retriev
 2. **Extreme Suffix (90 to 100 percent depth):** Models achieve high retrieval accuracy ($>90\%$). Recent tokens benefit from immediate proximity to the generating query position.
 3. **The Middle Distance (20 to 80 percent depth):** Retrieval accuracy drops dramatically, frequently falling below $30\%$—even when the total context length is well within the model's nominal architectural limit.
 
-@Tbl-vol3-workingsets-lost-in-middle summarizes the empirical retrieval accuracy and attention allocation across context depth intervals.
+@tbl-vol3-workingsets-lost-in-middle summarizes the empirical retrieval accuracy and attention allocation across context depth intervals.
 
 | Context Depth Regime       | Relative Token Interval | Typical Fact Retrieval Accuracy | Attention Allocation Mechanics                        | Dominant Systems Consequence                         |
 |:---------------------------|:-----------------------:|:-------------------------------:|:------------------------------------------------------|:-----------------------------------------------------|
@@ -225,25 +225,15 @@ When target facts are placed at varying relative depths within a prompt, retriev
 
 : **Empirical Retrieval Accuracy across Context Window Depth**: The U-shaped retrieval degradation profile ("Lost in the Middle", @liu2024lost) resulting from RoPE distance attenuation and attention sink concentration. {#tbl-vol3-workingsets-lost-in-middle tbl-colwidths="[20, 15, 15, 25, 25]"}
 
-The primary mathematical driver of this U-shaped degradation in modern architectures is the interaction between **Rotary Position Embeddings (RoPE)** and query-key distance decay (@su2024).
+The primary mathematical driver of this U-shaped degradation in modern architectures is the interaction between **Rotary Position Embeddings (RoPE)**\index{Rotary Position Embeddings (RoPE)} and query-key distance decay (@su2024). RoPE encodes positional geometry by multiplying Query and Key representations by orthogonal rotation matrices whose inner product depends strictly on relative offset $\Delta = |m - n|$.[^fn-workingsets-rope-geometry]
 
-RoPE encodes positional information by multiplying the query and key representations by a block-diagonal rotation matrix. In a two-dimensional subspace with rotary frequency $\theta_i$, a query at position $m$ and a key at position $n$ are transformed as:
-
-$$
-\mathbf{R}_{\Theta, m}^{2i-1:2i} = \begin{pmatrix} \cos(m \theta_i) & -\sin(m \theta_i) \\ \sin(m \theta_i) & \cos(m \theta_i) \end{pmatrix}, \quad \theta_i = b^{-2(i-1)/d_h},
-$$
-
-where $b$ is the base frequency (typically $b = 10{,}000$ or $b = 500{,}000$ in extended-context models) and $i \in \{1, \ldots, d_h/2\}$. The inner product between the rotated query and key vectors depends strictly on their relative offset $m - n$:
+Because the rotation matrix sums harmonic oscillations across multiple frequency channels $\theta_i = b^{-2(i-1)/d_h}$, the expected dot-product magnitude for uncorrelated representations decays with relative token distance according to @eq-rope-decay:
 
 $$
-\langle \mathbf{R}_{\Theta, m} \mathbf{q}, \mathbf{R}_{\Theta, n} \mathbf{k} \rangle = \mathbf{q}^\top \mathbf{R}_{\Theta, n-m} \mathbf{k}.
-$$
-
-Because $\mathbf{R}_{\Theta, n-m}$ sums harmonic oscillations across multiple frequency channels $\theta_i$, the expected inner product for uncorrelated representations decays with relative distance $\Delta = |m - n|$:
-
-$$
-\mathbb{E}_{\mathbf{q}, \mathbf{k}}\left[ \mathbf{q}^\top \mathbf{R}_{\Theta, \Delta} \mathbf{k} \right] \propto \frac{1}{\Delta^\gamma}, \quad \gamma > 0.
+\mathbb{E}_{\mathbf{q}, \mathbf{k}}\left[ \mathbf{q}^\top \mathbf{R}_{\Theta, \Delta} \mathbf{k} \right] \propto \frac{1}{\Delta^\gamma}
 $$ {#eq-rope-decay}
+
+where $\gamma > 0$ is the empirical attenuation exponent governing attention dispersion across accelerator memory.
 
 This mathematical structure enforces a strong physical **recency bias**: high-frequency components oscillate rapidly, causing destructive interference across large token offsets and suppressing the attention logits of distant tokens. Consequently:
 
@@ -251,7 +241,11 @@ This mathematical structure enforces a strong physical **recency bias**: high-fr
 - Tokens in the extreme prefix ($n \approx 0$) benefit from dedicated attention sinks and low-frequency rotary stability.
 - Tokens situated in the middle ($0.2 m \le n \le 0.8 m$) suffer the maximum geometric penalty: their relative offset is large enough to induce severe rotary decay, but they lack the positional anchoring of the initial prompt prefix.
 
-When an agent operates in a real-world multi-turn setting, the middle region is precisely where earlier tool outputs, intermediate file contents, and environmental observations reside. Leaving this data unmanaged guarantees cognitive degradation.
+When an agent operates in a real-world multi-turn setting, the middle region is precisely where earlier tool outputs, intermediate file contents, and environmental observations reside, saturating accelerator HBM while degrading retrieval velocity.
+
+> **The Systems Rule of Thumb (The U-Shaped Retrieval Penalty):** Due to RoPE harmonic decay ($\propto 1/\Delta^\gamma$), facts located in the middle 20 to 80 percent of an unmanaged context window suffer up to a 70 percent retrieval failure rate, despite consuming expensive accelerator HBM. Never allow intermediate tool executions or file dumps to accumulate passively in the context middle; serving architectures must actively reposition critical schema instructions or summarize middle turns into structured state registers.
+
+[^fn-workingsets-rope-geometry]: RoPE partitions head dimension $d_h$ into $d_h/2$ orthogonal 2D subspaces. Each 2D block rotates coordinates by angle $m \theta_i$ with base frequency $\theta_i = b^{-2(i-1)/d_h}$, ensuring $\langle \mathbf{R}_{\Theta, m} \mathbf{q}, \mathbf{R}_{\Theta, n} \mathbf{k} \rangle = \mathbf{q}^\top \mathbf{R}_{\Theta, n-m} \mathbf{k}$.
 
 ### The attention sink phenomenon
 
