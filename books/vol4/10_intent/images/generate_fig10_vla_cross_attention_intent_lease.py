@@ -1,0 +1,112 @@
+import sys
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" style="background-color: white; font-family: sans-serif;">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2D3748" />
+    </marker>
+    <style>
+      .title { font-size: 16px; font-weight: bold; fill: #2D3748; }
+      .box { fill: #E2E8F0; stroke: #2D3748; stroke-width: 1.5; rx: 4; }
+      .box-blue { fill: #E6FFFA; stroke: #1F407A; stroke-width: 1.5; rx: 4; }
+      .box-red { fill: #FFF5F5; stroke: #A51C30; stroke-width: 1.5; rx: 4; }
+      .box-dark { fill: #EDF2F7; stroke: #2D3748; stroke-width: 1.5; rx: 4; }
+      .text { font-size: 14px; fill: #2D3748; text-anchor: middle; }
+      .text-bold { font-size: 14px; font-weight: bold; fill: #2D3748; text-anchor: middle; }
+      .text-small { font-size: 12px; fill: #2D3748; text-anchor: middle; }
+      .text-left { font-size: 14px; fill: #2D3748; text-anchor: start; }
+      .text-left-small { font-size: 12px; fill: #2D3748; text-anchor: start; }
+      .line { stroke: #2D3748; stroke-width: 1.5; marker-end: url(#arrow); }
+      .line-dashed { stroke: #2D3748; stroke-width: 1.5; stroke-dasharray: 4 4; marker-end: url(#arrow); }
+      .boundary { stroke: #A51C30; stroke-width: 2; stroke-dasharray: 8 8; }
+    </style>
+  </defs>
+
+  <text x="500" y="30" class="title" text-anchor="middle">Grounded Intent Architecture: Multimodal Cross-Attention to Expiring Lease</text>
+
+  <!-- Section 1: Multimodal Tokenization -->
+  <rect x="50" y="60" width="220" height="480" class="box-dark" />
+  <text x="160" y="85" class="text-bold">(1) Multimodal Tokenization</text>
+  
+  <rect x="70" y="110" width="180" height="50" class="box" />
+  <text x="160" y="140" class="text">Vision Transformer (ViT)</text>
+  
+  <rect x="70" y="180" width="180" height="50" class="box" />
+  <text x="160" y="210" class="text">Language Tokenizer</text>
+  
+  <rect x="70" y="250" width="180" height="50" class="box" />
+  <text x="160" y="280" class="text">Proprioception Encoder</text>
+
+  <line x1="250" y1="135" x2="330" y2="135" class="line" />
+  <line x1="250" y1="205" x2="330" y2="205" class="line" />
+  <line x1="250" y1="275" x2="330" y2="275" class="line" />
+
+  <!-- Section 2: Cross-attention reasoning -->
+  <rect x="330" y="60" width="240" height="480" class="box-blue" />
+  <text x="450" y="85" class="text-bold" fill="#1F407A">(2) Cross-Attention &amp; 3D</text>
+  <text x="450" y="100" class="text-bold" fill="#1F407A">Affordance Synthesis</text>
+  
+  <rect x="350" y="120" width="200" height="60" class="box" />
+  <text x="450" y="145" class="text">Large VLA Backbone</text>
+  <text x="450" y="165" class="text-small">(Cross-Attention Layers)</text>
+  
+  <line x1="450" y1="180" x2="450" y2="210" class="line" />
+  
+  <rect x="350" y="210" width="200" height="60" class="box" />
+  <text x="450" y="235" class="text">3D Value Map Gen.</text>
+  <text x="450" y="255" class="text-small">(Affordance + Repulsion)</text>
+
+  <line x1="450" y1="270" x2="450" y2="300" class="line" />
+
+  <rect x="350" y="300" width="200" height="60" class="box" />
+  <text x="450" y="325" class="text">Intent Geometry Extractor</text>
+  <text x="450" y="345" class="text-small">(Pose + Covariance)</text>
+
+  <line x1="550" y1="330" x2="630" y2="330" class="line" />
+
+  <!-- Section 3: Ambiguity Refusal Gate -->
+  <rect x="630" y="60" width="160" height="480" class="box-red" />
+  <text x="710" y="85" class="text-bold" fill="#A51C30">(3) Ambiguity</text>
+  <text x="710" y="100" class="text-bold" fill="#A51C30">Refusal Gate</text>
+  
+  <rect x="640" y="290" width="140" height="80" class="box" />
+  <text x="710" y="315" class="text">Posterior Entropy</text>
+  <text x="710" y="335" class="text">H(z) &gt; H_thresh ?</text>
+  
+  <!-- Path Yes -->
+  <line x1="710" y1="370" x2="710" y2="420" class="line" />
+  <text x="725" y="395" class="text-small">Yes</text>
+  <rect x="640" y="420" width="140" height="40" class="box" fill="#FED7D7" />
+  <text x="710" y="445" class="text-bold" fill="#A51C30">ERR_GROUNDING</text>
+  
+  <!-- Path No -->
+  <line x1="780" y1="330" x2="860" y2="330" class="line" />
+  <text x="820" y="320" class="text-small">No</text>
+
+  <!-- Boundary -->
+  <line x1="845" y1="40" x2="845" y2="560" class="boundary" />
+  <text x="845" y="30" class="text-bold" fill="#A51C30">MPU | MCU Boundary</text>
+  
+  <!-- Section 4: Expiring Intent Lease -->
+  <text x="920" y="85" class="text-bold">(4) Expiring</text>
+  <text x="920" y="100" class="text-bold">Intent Lease</text>
+  
+  <rect x="860" y="260" width="130" height="140" class="box-dark" />
+  <text x="925" y="280" class="text-bold">Lease Packet</text>
+  <line x1="860" y1="290" x2="990" y2="290" stroke="#2D3748" stroke-width="1" />
+  <text x="870" y="310" class="text-left-small">• target: p₀, R₀</text>
+  <text x="870" y="330" class="text-left-small">• bounds: Σ, v_max</text>
+  <text x="870" y="350" class="text-left-small">• force: F_max</text>
+  <text x="870" y="370" class="text-left-small">• TTL: τ (ms)</text>
+  <text x="870" y="390" class="text-left-small">• evidence: attn_map</text>
+
+  <line x1="925" y1="400" x2="925" y2="440" class="line" />
+  <rect x="860" y="440" width="130" height="50" class="box" />
+  <text x="925" y="460" class="text-small">Deterministic</text>
+  <text x="925" y="475" class="text-small">Safety Enforcer</text>
+
+</svg>
+"""
+
+with open("/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/10_intent/images/svg/fig10_vla_cross_attention_intent_lease.svg", "w") as f:
+    f.write(svg_content)
