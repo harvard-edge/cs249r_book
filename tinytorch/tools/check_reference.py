@@ -27,6 +27,7 @@ REGRESSIONS = (
     "14_profiling/test_profile_accounting.py",
     "16_compression/test_pruning_contracts.py",
     "18_memoization/test_cached_generation_equivalence.py",
+    "20_capstone/test_event_policy.py",
     "06_autograd/test_graph_lifetime.py",
     "08_training/test_accumulation_windows.py",
     "15_quantization/test_constant_roundtrip.py",

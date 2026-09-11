@@ -51,9 +51,9 @@ and comparison path provides the foundation for understanding the extensions.
 
 ```python
 # Final package structure:
-from tinytorch.perf.benchmarking import Benchmark, OlympicEvent
+from tinytorch.perf.benchmarking import Benchmark
 
-# For capstone submission:
+# Measure both models under the same conditions:
 benchmark = Benchmark([baseline_model, optimized_model],
                      [{"name": "baseline"}, {"name": "optimized"}])
 results = benchmark.run_latency_benchmark()
@@ -105,7 +105,6 @@ import statistics
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 
@@ -218,36 +217,6 @@ Every measurement has uncertainty. When combining metrics (like accuracy per jou
 
 Professional benchmarking quantifies and minimizes these uncertainties.
 """
-
-# %% [markdown]
-"""
-### OlympicEvent: Naming the Capstone's Events
-
-Module 20 scores submissions in five events, each optimizing a different
-objective. The event names need to be spelled the same way in every file that
-uses them, so they are declared once here as an `Enum`, a Python class whose
-members are a fixed set of named constants. `OlympicEvent.LATENCY_SPRINT` is
-one member; `.value` gives its string `"latency_sprint"`, and a typo such as
-`OlympicEvent.LATENCY_SPRNT` raises an `AttributeError` instead of silently
-scoring the wrong event. The thresholds in the comments are the capstone's
-rules, not anything this module enforces: Module 20 reads them when it scores.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "olympic-event", "solution": false}
-#| export
-class OlympicEvent(Enum):
-    """
-    Event categories for the Module 20 capstone.
-
-    Each event optimizes for a different objective under its own constraint,
-    so submissions are compared within an event, never across events.
-    The thresholds are the capstone's rules; Module 20 applies them.
-    """
-    LATENCY_SPRINT = "latency_sprint"      # Minimize latency (accuracy >= 85%)
-    MEMORY_CHALLENGE = "memory_challenge"   # Minimize memory (accuracy >= 85%)
-    ACCURACY_CONTEST = "accuracy_contest"   # Maximize accuracy (latency < 100ms, memory < 10MB)
-    ALL_AROUND = "all_around"               # Best balanced score across all metrics
-    EXTREME_PUSH = "extreme_push"           # Most aggressive optimization (accuracy >= 80%)
 
 # %% [markdown]
 """

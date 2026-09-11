@@ -48,6 +48,7 @@ Let's get started!
 ```python
 # Final package structure:
 from tinytorch.olympics import BenchmarkReport, generate_submission, save_submission, validate_submission_schema
+from tinytorch.olympics import OlympicEvent, qualifies_event
 
 # Benchmark your model
 report = BenchmarkReport(model_name="my_model")
@@ -56,6 +57,8 @@ report.benchmark_model(my_model, X_test, y_test)
 # Generate, validate, and save the submission (a plain dict, written as JSON)
 submission = generate_submission(report)
 validate_submission_schema(submission)
+# Eligibility is separate from a well-formed submission.
+qualifies_event(report.metrics, OlympicEvent.LATENCY_SPRINT)
 save_submission(submission, "my_submission.json")
 ```
 
@@ -78,6 +81,7 @@ save_submission(submission, "my_submission.json")
 - `json` (for submission serialization)
 - `pathlib` (for file path handling)
 - `platform` (for system information)
+- `enum` (for the capstone event names)
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor` (Tensor class from Module 01)
@@ -104,6 +108,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import platform
+from enum import Enum
 import sys
 
 # TinyTorch modules the capstone builds on
@@ -830,6 +835,63 @@ def test_unit_benchmark_report():
 
 if __name__ == "__main__":
     test_unit_benchmark_report()
+
+# %% [markdown]
+"""
+### OlympicEvent: Applying the Capstone's Rules
+
+Module 19 measures models under a shared protocol. This capstone decides whether
+those measurements meet a classroom event's requirements. Keep that decision
+separate from schema validation: a valid report can describe a model that does
+not qualify. These thresholds are classroom rules, not official MLPerf criteria.
+
+`OlympicEvent` gives each event one stable name. `qualifies_event` reads the
+accuracy, median single-sample latency, and model array storage already collected
+by `BenchmarkReport`. The legacy key `model_size_mb` stores MiB (bytes / 2**20).
+Latency and memory events require at least 85% accuracy; the accuracy event
+requires latency below 100 ms and storage below 10 MiB. Extreme push lowers the
+accuracy floor to 80%. All-around has no eligibility floor: it keeps the separate
+metrics for discussion and does not invent a combined ranking.
+
+The supplied policy is short so every student applies the same rules. It never
+changes the measurements, and it cannot verify the experiment that produced them.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "olympic-event", "solution": false}
+#| export
+class OlympicEvent(Enum):
+    """Stable names for the five classroom capstone events."""
+    LATENCY_SPRINT = "latency_sprint"
+    MEMORY_CHALLENGE = "memory_challenge"
+    ACCURACY_CONTEST = "accuracy_contest"
+    ALL_AROUND = "all_around"
+    EXTREME_PUSH = "extreme_push"
+
+
+def qualifies_event(metrics: Dict[str, float], event: OlympicEvent) -> bool:
+    """Check classroom eligibility without modifying or combining measurements.
+
+    Requires accuracy in [0, 1], positive median latency in milliseconds, and
+    positive array storage in MiB. Unknown events and invalid values raise;
+    missing measurements raise KeyError rather than receiving default values.
+    A False result means a valid measurement failed the selected event's rule.
+    """
+    event = OlympicEvent(event)
+    accuracy = metrics['accuracy']
+    latency = metrics['latency_ms_median']
+    size = metrics['model_size_mb']
+    if not all(np.isfinite(value) for value in (accuracy, latency, size)):
+        raise ValueError("Event measurements must be finite")
+    if not 0 <= accuracy <= 1 or latency <= 0 or size <= 0:
+        raise ValueError("Event measurements require valid accuracy and positive latency/storage")
+
+    if event in (OlympicEvent.LATENCY_SPRINT, OlympicEvent.MEMORY_CHALLENGE):
+        return bool(accuracy >= 0.85)
+    if event == OlympicEvent.ACCURACY_CONTEST:
+        return bool(latency < 100.0 and size < 10.0)
+    if event == OlympicEvent.EXTREME_PUSH:
+        return bool(accuracy >= 0.80)
+    return True  # All-around compares the separate metrics, without a floor.
 
 # %% [markdown]
 """
@@ -1732,6 +1794,16 @@ def test_module():
 
     submission = generate_submission(report, student_name="Integration Test")
     assert validate_submission_schema(submission), "Submission should pass validation"
+
+    print("🧪 Integration Test: Capstone Eligibility...")
+    metrics = submission['baseline']['metrics']
+    assert qualifies_event(metrics, OlympicEvent.LATENCY_SPRINT) == (metrics['accuracy'] >= 0.85)
+    # Known boundaries: schema validity does not imply event eligibility.
+    candidate = dict(metrics, accuracy=0.85, latency_ms_median=99.0, model_size_mb=9.0)
+    assert qualifies_event(candidate, OlympicEvent.LATENCY_SPRINT)
+    assert qualifies_event(candidate, OlympicEvent.ACCURACY_CONTEST)
+    assert not qualifies_event(dict(candidate, accuracy=0.84), OlympicEvent.LATENCY_SPRINT)
+    assert not qualifies_event(dict(candidate, latency_ms_median=100.0), OlympicEvent.ACCURACY_CONTEST)
 
     print("✅ Complete workflow works!")
 

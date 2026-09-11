@@ -54,7 +54,7 @@ $R$ is **accuracy retention**, the fraction of the baseline's accuracy the candi
 
 ### Events
 
-The benchmark module from Chapter 19 turns this into a set of events, each of which fixes floors on two axes and lets submissions compete on the third. A latency sprint requires accuracy of at least 85% and ranks by speed. A memory challenge has the same floor and ranks by bytes. An accuracy contest caps latency at 100 ms and memory at 10 MB and ranks by accuracy. An "extreme push" lowers the accuracy floor to 80% for anyone willing to go further. The floors are absolute here (85% accuracy, not 99% of a baseline), which suits the course's small models, whose baselines vary from run to run; the structure is what matters, and it is the MLPerf structure in miniature.
+The capstone module defines classroom events through `OlympicEvent` and checks eligibility with `qualifies_event`. A latency sprint requires accuracy of at least 85 percent; a memory challenge has the same floor. An accuracy contest requires latency strictly below 100 ms and stored size strictly below 10 in the report's `model_size_mb` units, each equal to $2^{20}$ bytes. An "extreme push" lowers the accuracy floor to 80 percent. The all-around event accepts any valid measurements without adding an eligibility floor. These rules determine eligibility; the helper neither ranks candidates nor invents a combined all-around score. The floors are absolute here, rather than relative to a baseline, and they are classroom policy rather than official MLPerf requirements.
 
 The set of candidates that cannot improve on one axis without giving something up on another is called the **Pareto frontier**.[^fn-pareto-frontier-scorecard] A benchmark with floors is a way of asking one question about that frontier at a time. Where on the frontier a deployment should sit is a product decision, not an engineering one, and the scorecard's job is to make the frontier visible so that the decision can be made with numbers.
 
@@ -67,7 +67,7 @@ The set of candidates that cannot improve on one axis without giving something u
 The code for this milestone lives in two places, the course's own scripts and this chapter's pure-Python model of what they compute, and the honest relationship between the two is worth stating before reading either.
 
 ::: {.callout-note title="Source Code Mapping"}
-This milestone's scripts (`milestones/06_2018_mlperf/01_optimization_olympics.py` and `02_generation_speedup.py`) drive the NumPy-backed modules students build in the TinyTorch course: `Profiler` from Module 14, `Quantizer` from 15, `Compressor` from 16, `vectorized_matmul` from 17, `KVCache` from 18, and `Benchmark` and `MLPerf` from 19. The excerpts below are taken from those scripts and need the exported `tinytorch` package to run. The scorecard and trace listings are book code, a pure-Python model of the same three-ratio benchmark, small enough to show every step of scoring a submission; they run on their own, and the six-weight trace checks its hand arithmetic against Module 15's `quantize_int8`.
+This milestone's scripts (`milestones/06_2018_mlperf/01_optimization_olympics.py` and `02_generation_speedup.py`) drive the NumPy-backed modules students build in the TinyTorch course: `Profiler` from Module 14, `Quantizer` from 15, `Compressor` from 16, `vectorized_matmul` from 17, `KVCache` from 18, and `Benchmark` and `MLPerf` from 19. The excerpts below are taken from those scripts and need the exported `tinytorch` package to run. The scorecard and trace listings are book code, a pure-Python model of the same three-ratio benchmark, small enough to show every step of scoring a submission; the event check calls Module 20's `qualifies_event` rather than duplicating its rules, and the six-weight trace checks its hand arithmetic against Module 15's `quantize_int8`.
 :::
 
 ### Script 1: profile, quantize, prune, benchmark
@@ -186,15 +186,10 @@ Each uncached call sees the full causal prefix. Each cached call sees one token 
 
 The three numbers now come from three different tools, and nothing in the script ties them together. The profiler knows the baseline, the quantizer knows a byte count, the benchmark knows a latency distribution, and the final table prints them side by side and leaves the verdict to the reader. Anyone reading that table wants one verdict, and the naive way to produce one is a weighted sum, so much weight on accuracy, so much on size, so much on speed. I tried it against the FP32 baseline from the trace below, with half the weight on retention and a quarter each on the other two ratios. A careful INT8 candidate that keeps 99.4% of the accuracy, is 3.97× smaller, and runs at the same speed scores 1.7. A reckless one that keeps 68% of the accuracy, is 7.9× smaller, and runs 100× faster scores 27. A sum lets one axis buy another, and the people submitting to a benchmark will find the weighting that lets them buy the most. A floor cannot be bought. Above it, memory and latency compete on their own; below it, nothing else is looked at.
 
-So the rest of the chapter uses a pure-Python scorecard that runs anywhere and refuses to add. It takes a baseline and a candidate, each described by three numbers, and returns the three ratios and the MLPerf-style verdict. A second function checks a candidate against the event floors of Chapter 19's benchmark module.
+The scorecard takes a baseline and a candidate, each described by three numbers, and returns the three ratios and the book's relative accuracy verdict. Its event adapter imports the capstone policy from the exported TinyTorch package. It converts the trace's field names and byte count into the report format without restating the eligibility rules.
 
 ```python
-EVENTS = {
-    "latency_sprint":   {"min_accuracy": 0.85},
-    "memory_challenge": {"min_accuracy": 0.85},
-    "accuracy_contest": {"max_latency_ms": 100.0, "max_bytes": 10 * 2**20},
-    "extreme_push":     {"min_accuracy": 0.80},
-}
+from tinytorch.olympics import OlympicEvent, qualifies_event
 
 def score(baseline, candidate):
     """Three ratios, each candidate-vs-baseline, plus the MLPerf-style floor."""
@@ -207,13 +202,15 @@ def score(baseline, candidate):
     }
 
 def qualifies(candidate, event):
-    rules = EVENTS[event]
-    return (candidate["accuracy"] >= rules.get("min_accuracy", 0.0)
-            and candidate["p50_ms"] <= rules.get("max_latency_ms", float("inf"))
-            and candidate["bytes"] <= rules.get("max_bytes", float("inf")))
+    metrics = {
+        "accuracy": candidate["accuracy"],
+        "latency_ms_median": candidate["p50_ms"],
+        "model_size_mb": candidate["bytes"] / 2**20,
+    }
+    return qualifies_event(metrics, event)
 ```
 
-There is deliberately nothing clever here. The three ratios are three divisions, the floor is one comparison, and the event rules are a dictionary. The value of the scorecard is not in the code but in what it refuses to do. It will not combine the ratios into a single number, but the function accepts whatever measurements the caller supplies. It cannot tell a measured value from an estimate; that distinction belongs in the report and the experiment that produced it. MLPerf calls the floor an accuracy target, and the bridge section covers what it builds around one.
+There is deliberately nothing clever here. The three ratios are three divisions, the floor is one comparison, and the event adapter delegates to the capstone helper. The value of the scorecard is not in the code but in what it refuses to do. It will not combine the ratios into a single number, but the function accepts whatever measurements the caller supplies. It cannot tell a measured value from an estimate; that distinction belongs in the report and the experiment that produced it. MLPerf calls the floor an accuracy target, and the bridge section covers what it builds around one.
 
 ---
 
@@ -295,16 +292,16 @@ for name, cand in ledger.items():
     s = score(base, cand)
     print(f"{name:7s} R={s['retention']:.3f} C={s['size_ratio']:.2f}x "
           f"S={s['speedup']:.2f}x floor={s['mlperf_ok']} "
-          f"events={[e for e in EVENTS if qualifies(cand, e)]}")
+          f"events={[e.value for e in OlympicEvent if qualifies(cand, e)]}")
 ```
 
 The sparse byte count assumes INT8 values with 1-byte column indices (every column index is below 64, so one byte suffices), 2-byte row-start entries for the 33 and 11 row boundaries of the two matrices, 42 bias bytes, and the scales. The loop prints the rows of @tbl-m3-scorecard from those counts.
 
-| Stage | Bytes | Accuracy | $R$ | $C$ | $S$ | $R \ge 0.99$? | Event floors met |
+| Stage | Bytes | Accuracy | $R$ | $C$ | $S$ | $R \ge 0.99$? | Events eligible |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| FP32 baseline | $9{,}640$ | $88.0\%$ | $1.000$ | $1.00\times$ | $1.00\times$ | yes | all four |
-| + INT8 | $2{,}430$ | $88.0\%$ (illustrative) | $1.000$ | $3.97\times$ | $1.00\times$ | yes | all four |
-| + prune 50%, CSR | $2{,}518$ | $86.0\%$ | $0.977$ | $3.83\times$ | $1.00\times$ | **no** | all four |
+| FP32 baseline | $9{,}640$ | $88.0\%$ | $1.000$ | $1.00\times$ | $1.00\times$ | yes | all five |
+| + INT8 | $2{,}430$ | $88.0\%$ (illustrative) | $1.000$ | $3.97\times$ | $1.00\times$ | yes | all five |
+| + prune 50%, CSR | $2{,}518$ | $86.0\%$ | $0.977$ | $3.83\times$ | $1.00\times$ | **no** | all five |
 
 : The scorecard for `DigitMLP`. Bytes are counts for the stated hypothetical storage formats; accuracies are the README's expected values; latency is the same napkin figure throughout because the script does not time the optimized models. {#tbl-m3-scorecard tbl-colwidths="[18,10,18,8,10,10,12,14]"}
 
@@ -345,7 +342,7 @@ What a practitioner should now look for is the same short list every time a spee
 
 ## Summary
 
-This milestone built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and events fix floors on two axes to rank on the third. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted a proposed packed representation of `DigitMLP` to show that its INT8 format would give $3.97\times$, that 50% pruning in sparse storage gives slightly less, and that neither changes how many multiplies the dense forward pass performs. Reading the milestone scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. Chapter 21 takes for granted that you can measure an optimization honestly on accuracy, memory, and latency at once, and asks what production compilers and custom silicon do to move those numbers further than pure Python can.
+This milestone built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and the capstone helper checks eligibility for each classroom event without combining the ratios into a ranking. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted a proposed packed representation of `DigitMLP` to show that its INT8 format would give $3.97\times$, that 50% pruning in sparse storage gives slightly less, and that neither changes how many multiplies the dense forward pass performs. Reading the milestone scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. Chapter 21 takes for granted that you can measure an optimization honestly on accuracy, memory, and latency at once, and asks what production compilers and custom silicon do to move those numbers further than pure Python can.
 
 ---
 
