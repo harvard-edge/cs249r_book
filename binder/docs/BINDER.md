@@ -632,8 +632,9 @@ How it works:
   (`binder-workspaces/`) and runs `./binder/binder build` there, reusing its
   worktree for every job it picks up.
 - Each job's log and output move to `books/_build/parallel/<run-id>/<job>/`, and
-  `summary.json` lists every job. The worktrees are removed at the end;
-  `--keep-workspaces` leaves them for inspection.
+  `summary.json` lists every job. The worktrees and their temporary run
+  directory are removed at the end; `--keep-workspaces` leaves them for
+  inspection.
 - Workers running side by side each get a private `XDG_CACHE_HOME`, because the
   diagram filter's cache is not safe for concurrent writers.
 - Ctrl-C stops every running build (SIGTERM, then SIGKILL after 15 seconds) and
