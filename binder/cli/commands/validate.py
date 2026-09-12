@@ -585,6 +585,9 @@ class ValidateCommand:
                   note="expand abbreviations on first use (§10.5)"),
             Scope("latin-abbrevs", "_run_mitpress_latin_running_text",
                   note="viz./e.g./etc. in running text (§10.6)"),
+            Scope("bold-definitions", "_run_index_bold_definitions",
+                  note="body-prose bold ⟺ \\index{!definition} co-location per emphasis-bold.md",
+                  default=False),
         ],
         "punctuation": [
             Scope("emdash", "_run_mitpress_spaced_emdash",
@@ -761,6 +764,9 @@ class ValidateCommand:
                   note='\\index{} not inside code / math / attribute strings'),
             Scope("encap-conflicts", "_run_index_encap_conflicts",
                   note="no direct \\index{X} and \\index{X|see{Y}} on same term"),
+            Scope("bold-definitions", "_run_index_bold_definitions",
+                  note="body-prose bold ⟺ \\index{!definition} co-location and uniqueness per emphasis-bold.md",
+                  default=False),
         ],
 
         "images": [
@@ -12270,6 +12276,35 @@ class ValidateCommand:
             root, "audit.checks.index_placement",
             "index-placement-contexts",
             "\\index{} forbidden contexts (code / math / attribute strings)",
+        )
+
+    def _run_index_bold_definitions(self, root: Path) -> ValidationRunResult:
+        """index/prose --scope bold-definitions: body-prose bold ⟺ \\index{!definition} co-location."""
+        from cli.commands._index_checks import check_bold_definitions
+
+        t0 = time.time()
+        raw = check_bold_definitions(root)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        target = root / "books" if (root / "books").is_dir() else root
+        if target.is_file():
+            files_checked = 1
+        elif (target / "books").is_dir():
+            files_checked = len(list((target / "books").rglob("*.qmd")))
+        else:
+            files_checked = len(list(target.rglob("*.qmd")))
+
+        return ValidationRunResult(
+            name="bold-definitions",
+            description="\\index{!definition} bold co-location and uniqueness per emphasis-bold.md",
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
