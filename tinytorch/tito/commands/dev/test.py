@@ -28,6 +28,9 @@ from rich import box
 
 from ..base import BaseCommand
 
+# Per-milestone cap for the user journey (see the milestone checkpoint loop).
+MILESTONE_TIMEOUT_S = 900
+
 
 @dataclass
 class TestResult:
@@ -1026,7 +1029,11 @@ class DevTestCommand(BaseCommand):
                             encoding="utf-8",
                             errors="replace",
                             cwd=project_root,
-                            timeout=300  # 5 min for heavy milestones (CNN, Transformer)
+                            # 2026-09-12: the CNN milestone trains 50 epochs in
+                            # NumPy; it takes ~130 s on a laptop and passed 300 s
+                            # on the hosted CI runner, so the old cap failed a
+                            # correct journey. The job itself is capped at 45 min.
+                            timeout=MILESTONE_TIMEOUT_S,
                         )
                         milestone_duration = time.time() - milestone_start
                         if result.returncode == 0:
@@ -1040,7 +1047,7 @@ class DevTestCommand(BaseCommand):
                     except subprocess.TimeoutExpired:
                         failed_milestones.append(milestone_id)
                         if ci_mode:
-                            print("✗ TIMEOUT (>180s)")
+                            print(f"✗ TIMEOUT (>{MILESTONE_TIMEOUT_S}s)")
                     except Exception as e:
                         failed_milestones.append(milestone_id)
                         if ci_mode:

@@ -744,8 +744,8 @@ def g_notebook_set():
     if not expected:
         return ["no source modules found; cannot validate notebook inventory"]
     actual = set(MODULES.glob("*/*.ipynb"))
-    return ([f"missing notebook: {p.relative_to(MODULES)}" for p in sorted(expected - actual)]
-            + [f"unexpected notebook: {p.relative_to(MODULES)}" for p in sorted(actual - expected)])
+    return ([f"missing notebook: {p.relative_to(MODULES).as_posix()}" for p in sorted(expected - actual)]
+            + [f"unexpected notebook: {p.relative_to(MODULES).as_posix()}" for p in sorted(actual - expected)])
 
 
 @gate("reference: source-built numerical and training regressions")

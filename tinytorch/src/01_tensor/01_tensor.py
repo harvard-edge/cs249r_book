@@ -1937,32 +1937,34 @@ def analyze_memory_layout():
     # Test 1: Row-wise access (cache-friendly)
     # Memory layout: [row0][row1][row2]... stored contiguously
     print("\nTest 1: Row-wise Access (Cache-Friendly)")
-    start = time.time()
+    # perf_counter, not time(): the wall clock ticks in ~15 ms steps on
+    # Windows, so a fast loop can measure 0 and break the ratio below.
+    start = time.perf_counter()
     row_sums = []
     for i in range(size):
         row_sum = matrix.data[i, :].sum()  # Access entire row sequentially
         row_sums.append(row_sum)
-    row_time = time.time() - start
+    row_time = time.perf_counter() - start
     print(f"   Time: {row_time*1000:.1f}ms")
     print("   Access pattern: Sequential (follows memory layout)")
 
     # Test 2: Column-wise access (cache-unfriendly)
     # Must jump between rows, poor spatial locality
     print("\nTest 2: Column-wise Access (Cache-Unfriendly)")
-    start = time.time()
+    start = time.perf_counter()
     col_sums = []
     for j in range(size):
         col_sum = matrix.data[:, j].sum()  # Access entire column with large strides
         col_sums.append(col_sum)
-    col_time = time.time() - start
+    col_time = time.perf_counter() - start
     print(f"   Time: {col_time*1000:.1f}ms")
     print(f"   Access pattern: Strided (jumps {size * BYTES_PER_FLOAT32} bytes per element)")
 
     # Calculate slowdown
-    slowdown = col_time / row_time
+    slowdown = col_time / max(row_time, 1e-9)
     print("\n" + "=" * 60)
     print("📊 PERFORMANCE IMPACT:")
-    print(f"   Slowdown factor: {slowdown:.2f}× ({col_time/row_time:.1f}× slower)")
+    print(f"   Slowdown factor: {slowdown:.2f}× ({slowdown:.1f}× slower)")
     print("   This timing ratio includes loop and reduction overhead; it does not count cache misses")
 
     # Educational insights
