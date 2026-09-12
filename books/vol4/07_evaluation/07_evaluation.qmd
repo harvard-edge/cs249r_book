@@ -154,6 +154,26 @@ The mapping between offline scores and physical task performance is not a simple
 ![](images/svg/fig07_open_vs_closed_loop.svg){width="100%"}
 :::
 
+::: {#chk-eval-open-vs-closed-loop-drift .callout-checkpoint title="Kinematic bias compounding vs. open-loop MSE"}
+**Setting:** An autonomous industrial forklift transporting an unpalletized payload navigates an indoor warehouse aisle at constant forward velocity $v = 2.00\text{ m/s}$ for transit duration $t_{\text{transit}} = 12.0\text{ s}$ ($24.0\text{ m}$ total distance). The aisle width provides lateral clearance $W_{\text{clear}} = 0.200\text{ m}$ ($20.0\text{ cm}$) to adjacent racking uprights. On an offline validation dataset of $10{,}000$ recorded expert frames, an imitation learning policy achieves a Mean Squared Angular Error of $\text{MSE}_\theta = 3.0\times 10^{-4}\text{ rad}^2$ (root mean square error $\text{RMSE}_\theta = \sqrt{3.0\times 10^{-4}} \approx 0.0173\text{ rad} \approx 0.99^\circ$).
+
+1. *Offline benchmark evaluation*:
+   - The policy predictions match expert demonstration angles within $1.0^\circ$ across $99.7\%$ of validation states.
+   - Standard regression metrics declare the policy qualified for physical deployment.
+2. *Closed-loop physical integration with persistent bias*:
+   - Unmodeled tire wear asymmetry and camera mast vibration introduce a minor persistent steering bias of $\bar{\epsilon}_\theta = 0.0150\text{ rad}$ ($0.859^\circ$) when evaluated in the wild.
+   - Under unicycle kinematics ($\dot{y} = v \sin \theta \approx v \bar{\epsilon}_\theta$), this uncorrected angular offset integrates continuously over time:
+     $$y(t) = \int_0^t v \bar{\epsilon}_\theta \, d\tau = v \bar{\epsilon}_\theta t$$
+   - Over the full $12.0\text{ s}$ transit, accumulated lateral drift reaches:
+     $$y(12.0) = 2.00\text{ m/s} \times 0.0150\text{ rad} \times 12.0\text{ s} = 0.360\text{ m} = 36.0\text{ cm}$$
+3. *Impact timing and task failure*:
+   - The forklift consumes the available $0.200\text{ m}$ clearance envelope at timestamp:
+     $$t_{\text{impact}} = \frac{W_{\text{clear}}}{v \bar{\epsilon}_\theta} = \frac{0.200\text{ m}}{2.00\text{ m/s} \times 0.0150\text{ rad}} \approx 6.67\text{ s}$$
+   - At $t = 6.67\text{ s}$ ($x = 13.3\text{ m}$ along the corridor), the vehicle strikes the shelving upright, dislodging the load. Closed-loop task success collapses to $0\%$, demonstrating that low open-loop prediction error is completely uninformative regarding closed-loop physical survival.
+4. *Architectural remedy*:
+   - Closed-loop evaluation must replace offline MSE with runtime Time-to-Intervention ($T_{\text{TTI}}$) metrics and control barrier functions on the real-time MCU that clamp steering commands whenever projected lateral clearance violates safety margins.
+:::
+
 This fundamental disconnect between open-loop statistical agreement and physical closed-loop survival is systematized in @tbl-07-offline-closed-loop-disconnect, which maps common machine learning validation metrics to their underlying physical failure modes and corresponding closed-loop evaluators.
 
 | Offline Evaluation Metric                     | Open-Loop Statistical Assumption                                                         | Physical Disconnect Mechanism                                                                                                                                          | Closed-Loop Hardware Failure Mode                                                                                                                  | Mandatory Closed-Loop Evaluator                                                                                                                                           |
@@ -225,6 +245,28 @@ While the Central Limit Theorem (CLT)\index{Central limit theorem} governs the a
 
 : **Extreme Value Tail Distribution Taxonomy across Physical AI Disturbance Channels**: Parametric classification of operational disturbance tails governing physical AI systems under the Fisher-Tippett-Gnedenko theorem. Standard validation protocols that report mean tracking errors or Gaussian confidence intervals underestimate catastrophic tail risks by orders of magnitude; mitigating extreme excursions requires dedicated deterministic nervous-system interceptors, mechanical compliances, and hardware safety supervisors. {#tbl-07-extreme-value-tails tbl-colwidths="[18,18,20,16,14,14]"}
 
+::: {#chk-eval-evt-contact-force .callout-checkpoint title="Extreme value theory tail sizing on contact impact shock"}
+**Setting:** A bipedal humanoid robot executes dynamic locomotion and step transitions on rigid concrete. Normal foot strike contact forces are instrumented via a 6-axis load cell in the ankle assembly. The ankle structural shear pins and load-cell internal strain gauges have a maximum mechanical yield ceiling of $F_{\text{yield}} = 1800\text{ N}$. Across $N = 500$ benign laboratory walking cycles, measured foot strike forces exhibit a sample mean $\mu_F = 420\text{ N}$ with standard deviation $\sigma_F = 85\text{ N}$.
+
+1. *Gaussian tail assumption fallacy*:
+   - If the engineering team models foot strike impact as a normal distribution $\mathcal{N}(420\text{ N}, (85\text{ N})^2)$:
+   - The standardized $z$-score required to breach structural yield is:
+     $$z_{\text{yield}} = \frac{F_{\text{yield}} - \mu_F}{\sigma_F} = \frac{1800 - 420}{85} = \frac{1380}{85} \approx 16.24$$
+   - Under Gaussian statistics, the probability of exceeding $16.24\sigma$ evaluates to $P(Z > 16.24) \approx 1.3\times 10^{-59}$, implying that structural overload is physically impossible during the lifetime of the universe.
+2. *Physical non-smooth contact mechanics: Fréchet (Type II) power-law distribution*:
+   - In physical reality, heel-strike impacts against rigid surfaces generate discontinuous contact velocity jumps ($v^+ \ne v^-$) and foot slap shocks governed by heavy-tailed extreme value theory.
+   - Fitting block-maxima across dynamic step sequences yields a Fréchet cumulative distribution $F(x) = \exp(-((x - \mu)/\sigma)^{-\alpha})$ with shape parameter $\alpha = 2.85$, scale $\sigma = 180\text{ N}$, and location $\mu = 400\text{ N}$.
+3. *True tail overload probability and failure recurrence*:
+   - The true probability of an impact force exceeding $F_{\text{yield}} = 1800\text{ N}$ on any dynamic step is:
+     $$P(F > 1800\text{ N}) = 1 - \exp\left(-\left(\frac{1800 - 400}{180}\right)^{-2.85}\right) \approx \left(\frac{1400}{180}\right)^{-2.85} \approx 7.778^{-2.85} \approx \frac{1}{342.6} \approx 2.92\times 10^{-3}$$
+   - Rather than once in cosmic time, structural overload occurs once every $\approx 343$ dynamic steps!
+   - At a nominal gait cadence of $1.50\text{ steps/s}$, mean time between catastrophic sensor overloads is:
+     $$T_{\text{fail}} = \frac{343\text{ steps}}{1.50\text{ steps/s}} \approx 228.7\text{ s} \approx 3.81\text{ minutes}$$
+4. *Nervous system mitigation*:
+   - Series elastic actuators (SEA) or compliant polyurethane sole elastomeric pads lengthen impact deceleration from $\Delta t_{\text{impact}} = 1.5\text{ ms}$ to $22.0\text{ ms}$, attenuating peak impulse forces by $>10\times$.
+   - The $1\text{ kHz}$ real-time MCU runs an instantaneous force-derivative clamp ($dF/dt \le 1.2\times 10^4\text{ N/s}$) that triggers active knee flexion impedance control within $1.0\text{ ms}$.
+:::
+
 Attempting to bypass these physical bottlenecks by distributing trials across a fleet of identical machines introduces spatial and environmental correlation. When ten mobile robots run concurrently across different bays of a testing warehouse, their operational histories are not independent. The machines share identical manufacturing tolerances from the same production batch, run on identical concrete floor finishes, share ambient temperature profiles governed by a single building ventilation system, and interact with human operators trained under identical protocols. If an environmental anomaly such as floor glazing or ambient lighting glare is absent from the facility, none of the ten machines will experience it. As illustrated by the multi-bay robotic qualification test facility in @fig-07-nist-test-arena, standardized physical test fixtures allow teams to isolate specific locomotion or perception capabilities under repeatable physical geometry, but they also bound the state space to that precise fixture envelope. Accumulating ten thousand fleet hours across ten machines in one facility yields ten parallel observations of a narrow environmental distribution, not ten thousand hours of independent operational diversity. Treating aggregated fleet hours as a direct substitute for independent statistical exposure obscures the common-mode biases that dominate physical operations.
 
 ::: {#fig-07-nist-test-arena fig-env="figure" fig-pos="t" fig-cap="**Standardized Robotic Evaluation Facility and Obstacle Bays**: The NIST Robot Test Facility configured under ASTM E54.09, with calibrated step fields, ramps, drop-offs, and constrained passages for repeatable trials. Repeatability is bought by bounding the state space, which is what limits the conclusion: a zero-failure run across standardized bays establishes competence inside the arena and says nothing about specular glare, surface contaminants, or novel obstacle dynamics outside it." fig-alt="Standardized Robotic Evaluation Facility and Obstacle Bays. Standardized physical test arenas—such as the National Institute of Standards and Technology (NIST) Robot Test Facility configured under ASTM E54.09 test methods—provide repeatable physical obstacle stations (including calibrated step fields, pitch and roll ramps, drop-offs, and constrained passages) to benchmark mobile robot locomotion, sensor payload stability, and operator control across discrete, repeatable trials. While such structured arenas isolate mechanical and algorithmic variables under controlled geometry and lighting, they bound the state space the robot encounters: zero-failure runs across standardized bays do not establish out-of-distribution robustness or cover environmental anomalies (such as specular glare, surface contaminants, or novel obstacle dynamics) present in unconstrained operational domains."}
@@ -263,6 +305,27 @@ Evaluating this bound across safety integrity standards reveals an insurmountabl
 **Fleet Testing Fallacy**: Distributing tests across a fleet of one hundred physical testbeds operating 24 hours a day, 365 days a year still requires over $3,420\text{ years}$ of continuous operation to certify a $10^{-9}\text{ h}^{-1}$ claim. Furthermore, fleet testbeds share common-mode software builds, environmental biases, and fixture setups, violating the statistical independence assumption.
 
 **Implication**: The derivation above is this book's, following their argument; they reach the same conclusion by a different route and their published figure for the flight-control case is on the order of $10^9$ hours. It shows that ultra-reliability cannot be tested into a machine through operational burn-in, fleet mileage accumulation, or passive sampling. High-assurance physical AI systems must instead enforce safety through deterministic runtime architectural supervisors, formal invariant filtering, and active unannounced fault injection.
+:::
+
+::: {#chk-eval-sample-size-mtbf .callout-checkpoint title="Sample size sizing and MTBF certification vs. hardware fatigue"}
+**Setting:** An autonomous mobile manipulation platform must be certified for an industrial manufacturing facility requiring a catastrophic failure rate $\lambda \le 1.0\times 10^{-4}\text{ failures/hour}$ (Mean Time Between Critical Failures $\text{MTBF} \ge 10{,}000\text{ hours}$) at $95\%$ statistical confidence ($\alpha = 0.05$). Each discrete warehouse retrieval mission requires $t_{\text{mission}} = 360\text{ s}$ ($6.0\text{ minutes} = 0.10\text{ hours}$), traveling $432\text{ m}$ at an average velocity of $v = 1.20\text{ m/s}$. Automated dock recharge and telemetry reset requires $t_{\text{reset}} = 120\text{ s}$ ($480\text{ s}$ total per trial cycle). Wheel diameter is $D_{\text{wheel}} = 0.20\text{ m}$, and drive gearhead $L_{10}$ bearing fatigue life is rated at $5.0\times 10^7\text{ revolutions}$.
+
+1. *Continuous exposure requirement (Butler & Finelli bound)*:
+   - Under a continuous-time Poisson arrival process, certifying failure rate $\lambda$ at confidence $1-\alpha$ without observing any failure requires continuous physical exposure time:
+     $$T_{\text{continuous}} = \frac{-\ln(\alpha)}{\lambda} = \frac{-\ln(0.05)}{1.0\times 10^{-4}\text{ h}^{-1}} = \frac{2.9957}{1.0\times 10^{-4}} \approx 29{,}957\text{ hours} \approx 3.42\text{ years}$$
+2. *Discrete mission trial count (Clopper-Pearson)*:
+   - Target failure probability per discrete mission: $p_{\text{target,fail}} \le \lambda \cdot t_{\text{mission}} = 10^{-4} \times 0.10 = 1.0\times 10^{-5}$ ($p_{\text{target,success}} \ge 0.99999$).
+   - Required zero-failure discrete trials:
+     $$N_{\text{req}} = \frac{\ln(\alpha)}{\ln(p_{\text{target,success}})} = \frac{\ln(0.05)}{\ln(0.99999)} \approx \frac{-2.9957}{-0.0000100} \approx 299{,}572\text{ consecutive trials}$$
+3. *Physical calendar duration and drivetrain wear limits*:
+   - Total calendar test cell duration on a single physical rig:
+     $$T_{\text{calendar}} = N_{\text{req}} \times 480\text{ s} = 299{,}572 \times 480\text{ s} \approx 1.438\times 10^8\text{ s} \approx 39{,}943\text{ hours} \approx 4.56\text{ years}$$
+   - Total wheel revolutions accumulated across the qualification campaign:
+     $$N_{\text{rev}} = \frac{N_{\text{req}} \times (v \cdot t_{\text{mission}})}{\pi D_{\text{wheel}}} = \frac{299{,}572 \times (1.20\text{ m/s} \times 360\text{ s})}{\pi \times 0.20\text{ m}} \approx \frac{1.294\times 10^8\text{ m}}{0.6283\text{ m}} \approx 2.06\times 10^8\text{ revolutions}$$
+   - The required testing distance exceeds the certified $L_{10}$ mechanical fatigue life of the drivetrain ($5.0\times 10^7\text{ revs}$) by $4.12\times$. The gearboxes, bearings, and tire treads will be destroyed more than four times over before statistical testing can conclude.
+4. *Systems conclusion*:
+   - Statistical verification via operational trial accumulation alone is physically impossible.
+   - High-assurance reliability in physical AI must be established through deterministic runtime safety governors, invariant monitors, and active hardware-in-the-loop fault injection rather than empirical black-box sampling.
 :::
 
 ::: {#fig-07-av-miles-scaling fig-env="figure" fig-pos="htb" fig-cap="**The Autonomous Miles Scaling Deficit**: Cumulative physical and simulated miles for leading autonomous vehicle programs against the RAND exposure thresholds [@kalra2016driving] for proving human-level and better-than-human safety. Simulated mileage crosses the lower threshold; physical mileage remains orders of magnitude below both." fig-alt="Log-scale chart comparing cumulative physical and simulated autonomous miles from 2010 to 2024, with two horizontal reference lines marking the RAND thresholds for proving human-level safety and 20 percent better than human. Simulated miles cross the upper threshold while physical miles remain far below both."}
