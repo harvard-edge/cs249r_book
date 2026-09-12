@@ -71,6 +71,90 @@ mailbox_register = FLAG_READY;
 ```
 Mathematically, if we have memory operations $S_1$ and $S_2$, a barrier ensures a strict temporal happens-before relationship: $t(S_1) < t(S_2)$ globally across all observers (other cores and hardware peripherals) in the system.
 
+## Actuator Electrical and Thermal Dynamics
+
+Embodied actuators transform electrical power into mechanical torque through electromagnetic induction, governed by coupled electrical and thermal differential equations.
+
+### Stator electrical rise time
+The phase winding of a brushless DC (BLDC) or permanent magnet synchronous motor (PMSM) exhibits phase resistance $R_{\text{phase}}$ and phase inductance $L_{\text{phase}}$. Applying terminal voltage $V_{\text{terminal}}$ against back-electromotive force $e_{\text{bemf}} = K_e \omega_m$ gives the first-order stator current ODE:
+$$ L_{\text{phase}} \frac{dI(t)}{dt} + R_{\text{phase}} I(t) = V_{\text{terminal}} - K_e \omega_m $$
+
+For a step voltage command applied from rest ($\omega_m = 0$), phase current rises exponentially:
+$$ I(t) = \frac{V_{\text{terminal}}}{R_{\text{phase}}} \left( 1 - e^{-t / \tau_e} \right), \quad \tau_e = \frac{L_{\text{phase}}}{R_{\text{phase}}} $$
+where $\tau_e$ is the electrical time constant. Actuator torque cannot change faster than $\tau_e$, establishing a fundamental physical lower bound on current rise times regardless of inverter switching frequencies.
+
+### Lumped thermal networks and duty cycle
+Current flowing through the stator dissipates resistive Joule heat:
+$$ P_{\text{loss}}(t) = I_{\text{rms}}^2(t) R_{\text{phase}}(T) $$
+where copper resistance increases linearly with temperature:
+$$ R_{\text{phase}}(T) = R_0 \left[ 1 + \alpha_{\text{Cu}} (T - T_0) \right] $$
+with temperature coefficient $\alpha_{\text{Cu}} \approx 0.00393\text{ K}^{-1}$ for copper. In a single-node lumped thermal model with thermal resistance to ambient $\theta_{JA}$ (in $\text{K/W}$) and thermal heat capacity $C_{\text{th}}$ (in $\text{J/K}$), the temperature rise $\Delta T(t) = T_{\text{winding}}(t) - T_{\text{ambient}}$ satisfies:
+$$ C_{\text{th}} \frac{d\Delta T(t)}{dt} = P_{\text{loss}}(t) - \frac{\Delta T(t)}{\theta_{JA}} $$
+
+Under constant power dissipation, temperature rises toward steady state with thermal time constant $\tau_{\text{th}} = \theta_{JA} C_{\text{th}}$:
+$$ \Delta T(t) = P_{\text{loss}} \theta_{JA} \left( 1 - e^{-t / \tau_{\text{th}}} \right) $$
+
+For a cyclic workload with period $T_{\text{cycle}}$, duty cycle $D = t_{\text{on}} / T_{\text{cycle}}$, peak power $P_{\text{peak}}$, and baseline power $P_{\text{base}}$, average steady-state heat dissipation is:
+$$ \bar{P} = D P_{\text{peak}} + (1 - D) P_{\text{base}} $$
+Continuous torque capacity $\tau_{\text{cont}}$ is bounded by the maximum allowable winding temperature $\Delta T_{\max}$:
+$$ \tau_{\text{cont}} \le K_t \sqrt{\frac{\Delta T_{\max}}{\theta_{JA} R_{\text{phase}}}} $$
+
+Operating at peak torque $\tau_{\text{peak}} > \tau_{\text{cont}}$ is permitted only transiently, strictly bounded by the integral thermal capacity $\int_0^t I^2 dt \le \text{Threshold}$ monitored by an embedded thermal observer.
+
+## DC Bus Power Distribution and Energy Absorption
+
+A physical robot's power distribution network must balance instantaneous motor acceleration demand and regenerative braking surges across finite bus capacitance and harness impedance.
+
+### Inductive droop and capacitive decoupling
+When multiple motor drives simultaneously accelerate, the aggregate current surge $\Delta I_{\text{bus}}$ over ramp duration $\Delta t$ draws from the main battery through wiring harness resistance $R_{\text{bus}}$ and inductance $L_{\text{bus}}$. Local decoupling capacitance $C_{\text{bus}}$ supplies high-frequency transient current. The peak voltage droop observed at the compute voltage regulator is:
+$$ \Delta V_{\text{droop}} \approx \Delta I_{\text{bus}} R_{\text{bus}} + L_{\text{bus}} \frac{dI_{\text{bus}}}{dt} + \frac{\Delta I_{\text{bus}} \Delta t}{2 C_{\text{bus}}} $$
+If $\Delta V_{\text{droop}}$ drops bus voltage below the under-voltage lockout (UVLO) threshold of the onboard DC-DC converter, computing processors suffer an immediate brownout reset.
+
+### Regenerative braking surges and chopper sizing
+When a decelerating robot executes emergency braking, kinetic energy $E_k = \frac{1}{2} m v_0^2$ (linear) or $E_k = \frac{1}{2} J_{\text{load}} \dot{q}_0^2$ (rotational) is backdriven through motor phases into the DC bus with electrical regeneration efficiency $\eta_{\text{regen}} \approx 0.70\text{--}0.85$. If the battery management system (BMS) disconnects or cannot accept rapid charge, the energy dumps into the DC bus capacitance $C_{\text{bus}}$, raising bus voltage:
+$$ \Delta E_C = \frac{1}{2} C_{\text{bus}} \left( V_{\text{final}}^2 - V_{\text{initial}}^2 \right) = \eta_{\text{regen}} E_k $$
+$$ V_{\text{final}} = \sqrt{ V_{\text{initial}}^2 + \frac{2 \eta_{\text{regen}} E_k}{C_{\text{bus}}} } $$
+
+To prevent $V_{\text{final}}$ from exceeding the breakdown voltage rating of inverter MOSFETs and silicon regulators ($V_{\max}$), an active dynamic braking circuit (brake chopper) shunts current through a power resistor $R_{\text{brake}}$ whenever $V_{\text{bus}} \ge V_{\text{clamp}}$:
+$$ R_{\text{brake}} \le \frac{V_{\text{clamp}}^2}{P_{\text{regen, peak}}} $$
+$$ P_{\text{regen, peak}} \approx \eta_{\text{regen}} \cdot \tau_{\text{brake}} \cdot \omega_{\max} $$
+
+## Real-Time Fieldbuses and Lock-Free Synchronization
+
+Coordinating distributed motor drives and compute nodes requires deterministic message serialization and lock-free memory exchange.
+
+### Fieldbus serialization and schedulability
+On a shared serial bus (such as CAN-FD or RS-485), $N_{\text{axes}}$ motor drives transmit state telemetry and receive torque setpoints cyclically. For payload size $B_{\text{frame}}$ (bits) and bus transmission bitrate $R_{\text{baud}}$ (bps), message transmission duration is $t_{\text{tx}} = B_{\text{frame}} / R_{\text{baud}}$.
+
+Under Controller Area Network (CAN-FD), each node arbitrates independently via non-destructive bitwise arbitration. In an $M$-node cluster with bus propagation delay $t_{\text{prop}}$ and protocol overhead bits $B_{\text{overhead}}$, total nominal cycle time across all axes is:
+$$ T_{\text{bus}} = \sum_{i=1}^{N_{\text{axes}}} \left( \frac{B_{\text{payload}, i} + B_{\text{overhead}}}{R_{\text{data}}} + t_{\text{prop}} \right) $$
+Under high bus utilization ($\rho = T_{\text{bus}} / T_{\text{target}} > 0.70$), arbitration collision retries increase nonlinearly, causing priority inversion and high-jitter deadlines.
+
+In contrast, EtherCAT utilizes on-the-fly telegram processing: an Ethernet frame traverses an open ring topology through dedicated slave hardware controllers (ASIC/FPGA). Slaves read and insert data directly within passing Ethernet frames with fixed internal forwarding latency $t_{\text{forward}} \approx 1\text{ }\mu\text{s}$ per node. The total cycle time is deterministic:
+$$ T_{\text{EtherCAT}} = \frac{B_{\text{Ethernet frame}}}{R_{\text{EtherCAT}}} + N_{\text{axes}} \cdot t_{\text{forward}} + \frac{2 \cdot \text{Distance}}{v_{\text{prop}}} $$
+enabling deterministic sub-millisecond cycle times ($<100\text{ }\mu\text{s}$) across dozens of axes.
+
+### Lock-free seqlocks for multi-rate shared memory
+When a single high-frequency writer (e.g., a $1\text{ kHz}$ sensor driver or IMU thread) updates a multi-word kinematic state $\mathbf{x} \in \mathbb{R}^d$ read by multiple low-frequency deliberative threads (e.g., a $20\text{ Hz}$ neural planner), traditional mutexes introduce unacceptable priority inversion and thread preemption.
+
+A **sequence lock (seqlock)** provides lock-free, zero-allocation synchronization using an integer sequence counter:
+
+1. **Writer Protocol**:
+   - Increment sequence counter from even ($2k$) to odd ($2k+1$) using an atomic store with release semantics.
+   - Insert a write memory barrier (`smp_wmb()`) to ensure the odd counter is visible before memory writes.
+   - Update state data fields.
+   - Insert a write memory barrier (`smp_wmb()`).
+   - Increment sequence counter from odd ($2k+1$) to even ($2k+2$) with release semantics.
+2. **Reader Protocol**:
+   - Read sequence counter $S_1$ with acquire semantics. If $S_1$ is odd (writer active), spin or yield.
+   - Insert a read memory barrier (`smp_rmb()`).
+   - Copy state data fields locally.
+   - Insert a read memory barrier (`smp_rmb()`).
+   - Read sequence counter $S_2$ with acquire semantics.
+   - If $S_1 \neq S_2$, data was torn during reading; discard and retry loop.
+
+Because writer duration is tiny ($t_{\text{write}} \approx 50\text{--}100\text{ ns}$ for $64\text{ bytes}$ of L1 cache copy), reader collision probability $P_{\text{collision}} = t_{\text{write}} / T_{\text{write}}$ is typically $< 0.01\%$, guaranteeing non-blocking, deterministic real-time telemetry transfer.
+
 ## Further Reading
 
 For a deeper dive into these topics, the following texts are foundational:
