@@ -120,6 +120,31 @@ To operationalize the four-stream action tap in hardware without introducing non
 3. **Physical response capture and commit:**
    Sample optical joint encoders and phase current shunts at PWM reload ($a_{\text{meas}}(t) \leftarrow \text{ReadPlantSensors}()$), compute tracking discrepancy $\delta_{\text{track}} \leftarrow \|a_{\text{enf}}(t) - a_{\text{meas}}(t)\|_2$, assemble synchronous telemetry packet $\mathcal{P}_t = \langle t_{\text{mono}}, \mathbf{o}_t, a_{\text{req}}, a_{\text{cmd}}, a_{\text{enf}}, a_{\text{meas}}, \mathbf{h}_{\text{plant}}, [b_{\text{clamped}}, \kappa, \delta_{\text{track}}] \rangle$, and commit $\mathcal{P}_t$ into a lock-free DMA circular ring buffer for non-blocking asynchronous persistence, ensuring the critical $1000\text{ Hz}$ control loop never stalls while waiting for data to be written to memory.
 
+::: {#chk-data-action-tap-discrepancy .callout-checkpoint title="Action tap discrepancy and governor contamination in imitation learning"}
+A teleoperator guides a 6-DoF robotic manipulator toward a rigid workbench located at distance $d_0 = 15\text{ mm}$ along the $z$-axis. At time $t_0$, the operator's input device commands a requested downward velocity $a_{\text{req}} = -0.40\text{ m/s}$. The real-time MCU evaluates a forward-invariant Control Barrier Function (CBF) enforcing a maximum stopping deceleration $a_{\text{decel}} = 2.0\text{ m/s}^2$ with a mandatory safety clearance buffer $d_{\text{safe}} = 2.0\text{ mm}$.
+
+1. Calculate the physical stopping distance $d_{\text{stop}}$ required to arrest the requested velocity $a_{\text{req}} = -0.40\text{ m/s}$, and verify whether $a_{\text{req}}$ violates the barrier constraint.
+2. Determine the maximum safe velocity $a_{\text{enf}}$ permitted by the MCU safety shield at distance $d_0 = 15\text{ mm}$.
+3. Contrast the physical failure modes that arise when training an imitation learning policy on $a_{\text{req}}$ versus training on $a_{\text{enf}}$ without preserving the four-stream action tuple $(a_{\text{req}}, a_{\text{cmd}}, a_{\text{enf}}, a_{\text{meas}})$.
+
+*Solution*:
+
+1. The physical stopping distance under constant deceleration $a_{\text{decel}} = 2.0\text{ m/s}^2$ from velocity $|v| = 0.40\text{ m/s}$ is:
+   $$d_{\text{stop}} = \frac{v^2}{2 a_{\text{decel}}} = \frac{(0.40\text{ m/s})^2}{2 \times 2.0\text{ m/s}^2} = \frac{0.16}{4.0} = 0.040\text{ m} = 40.0\text{ mm}.$$
+   The available deceleration clearance before the safety buffer is:
+   $$d_{\text{avail}} = d_0 - d_{\text{safe}} = 15.0\text{ mm} - 2.0\text{ mm} = 13.0\text{ mm}.$$
+   Because $d_{\text{stop}} = 40.0\text{ mm} > 13.0\text{ mm}$, the requested action violates the barrier invariant and would cause a physical collision at velocity $v_{\text{impact}} = \sqrt{(0.40)^2 - 2(2.0)(0.013)} \approx 0.329\text{ m/s}$.
+
+2. The maximum velocity that guarantees stopping within $d_{\text{avail}} = 13.0\text{ mm}$ is:
+   $$|a_{\text{enf}}| = \sqrt{2 a_{\text{decel}} d_{\text{avail}}} = \sqrt{2 \times 2.0\text{ m/s}^2 \times 0.013\text{ m}} = \sqrt{0.052} \approx 0.228\text{ m/s}.$$
+   The MCU safety shield clamps the command from $-0.400\text{ m/s}$ to $a_{\text{enf}} = -0.228\text{ m/s}$.
+
+3. *Failure modes of action tap conflation*:
+   - *Training exclusively on $a_{\text{req}}$*: The neural policy learns to command dynamically infeasible trajectories that breach safety corridors, triggering governor interventions on $100\%$ of deployment cycles and creating high-frequency chatter against the safety shield.
+   - *Training exclusively on $a_{\text{enf}}$ without override flags*: The policy misattributes the governor's intervention to the human demonstrator. The model assumes human intent naturally follows a parabolic braking curve $\sqrt{2 a d}$, masking the operator's actual intended velocity and preventing the policy from learning when and why the governor had to step in.
+   - *Systems resolution*: Preserving the complete tuple $(a_{\text{req}}, a_{\text{cmd}}, a_{\text{enf}}, a_{\text{meas}})$ alongside boolean clamp flags allows the training pipeline to train nominal policies on uncorrupted human intent while selectively training recovery or safety policies on enforcer interventions.
+:::
+
 ### Multi-stream asynchronous telemetry schemas and exposure midpoint timestamping
 
 Modern physical AI systems record telemetry across fundamentally asynchronous sensor modalities operating under disparate physics, sampling clocks, and bus protocols:
@@ -203,6 +228,36 @@ When a contact misalignment occurs at time $t$, the operator sees the error at $
 A high-capacity data acquisition workstation cannot log uncompressed multi-view streams over standard USB 3.0 buses (capped at $400\text{ MB/s}$ real-world throughput) or write to SATA SSDs (capped at $550\text{ MB/s}$). Ingesting $740\text{ MB/s}$ to $968\text{ MB/s}$ requires dedicated PCIe Gen4 NVMe storage (capable of $>5000\text{ MB/s}$ sequential writes) or hardware-accelerated NVENC video compression (H.265 intra-frame at CRF 18, compressing streams $8\times$ to $\approx 92.5\text{ MB/s}$ / $333\text{ GB/hr}$) to prevent OS buffer overruns and silent frame drops.
 :::
 
+::: {#chk-data-logging-bandwidth-saturation .callout-checkpoint title="Multi-camera ingestion throughput versus NVMe sequential write saturation"}
+A bimanual teleoperation workcell logs demonstration data across four cameras: two stationary overhead RGB-D cameras and two wrist-mounted eye-in-hand RGB-D cameras. Each RGB stream operates at $1920 \times 1080$ resolution ($24\text{ bits/px}$, uncompressed) at $30\text{ Hz}$, while each depth stream records $1280 \times 720$ resolution (`uint16`, $2\text{ bytes/px}$) at $30\text{ Hz}$. Low-level kinematics and four-stream action tuples are logged at $1000\text{ Hz}$ ($128\text{ bytes/step}$), and two tactile sensor arrays log $2048\text{ bytes/step}$ at $100\text{ Hz}$. The host workstation buffers inbound streams in a $16\text{ GB}$ kernel RAM ring buffer before writing to a SATA III SSD with a sustained sequential write limit of $480\text{ MB/s}$.
+
+1. Calculate the total sustained uncompressed telemetry write throughput $\text{BW}_{\text{total}}$ in megabytes per second (MB/s).
+2. Determine how long ($t_{\text{overflow}}$) the workstation can record continuously before the $16\text{ GB}$ RAM buffer exhausts and inbound camera frames are dropped.
+3. If hardware-accelerated H.265 intra-frame encoding (CRF 18) compresses the video streams by a factor of $8.0\times$, calculate the new compressed write throughput and verify whether the SATA SSD can sustain continuous recording without buffer overflow.
+
+*Solution*:
+
+1. Summing the sensory ingestion bandwidth:
+   $$\begin{aligned}
+   \text{BW}_{\text{RGB}} &= 4 \times (1920 \times 1080 \times 3\text{ B}) \times 30\text{ s}^{-1} = 4 \times 6.2208\text{ MB} \times 30 = 746.50\text{ MB/s}, \\
+   \text{BW}_{\text{Depth}} &= 4 \times (1280 \times 720 \times 2\text{ B}) \times 30\text{ s}^{-1} = 4 \times 1.8432\text{ MB} \times 30 = 221.18\text{ MB/s}, \\
+   \text{BW}_{\text{Kin}} &= 128\text{ B} \times 1000\text{ s}^{-1} = 0.128\text{ MB/s}, \\
+   \text{BW}_{\text{Tact}} &= 2048\text{ B} \times 100\text{ s}^{-1} = 0.205\text{ MB/s}.
+   \end{aligned}$$
+   Total sustained throughput:
+   $$\text{BW}_{\text{total}} = 746.50 + 221.18 + 0.128 + 0.205 = 968.01\text{ MB/s}.$$
+
+2. The SATA SSD write speed is $\text{BW}_{\text{disk}} = 480\text{ MB/s}$. The net buffer fill rate is:
+   $$\Delta \text{BW} = \text{BW}_{\text{total}} - \text{BW}_{\text{disk}} = 968.01 - 480.0 = 488.01\text{ MB/s} \approx 0.488\text{ GB/s}.$$
+   With a buffer capacity $M_{\text{RAM}} = 16\text{ GB}$, the time to buffer exhaustion is:
+   $$t_{\text{overflow}} = \frac{M_{\text{RAM}}}{\Delta \text{BW}} = \frac{16.0\text{ GB}}{0.48801\text{ GB/s}} \approx 32.8\text{ s}.$$
+   The host RAM buffer exhausts in under 33 seconds, causing dropped frames and non-uniform sampling intervals.
+
+3. Applying $8.0\times$ video compression to the vision stream ($967.68\text{ MB/s} / 8.0 = 120.96\text{ MB/s}$):
+   $$\text{BW}_{\text{compressed}} = 120.96 + 0.128 + 0.205 = 121.29\text{ MB/s}.$$
+   Because $121.29\text{ MB/s} < 480\text{ MB/s}$, the SATA drive sustains continuous recording with a safety margin of $358.7\text{ MB/s}$ ($74.7\%$ idle headroom), eliminating buffer overrun.
+:::
+
 In **bilateral teleoperation**, where contact forces measured at the follower arm are reflected back as haptic torques to the leader arm, transport delay creates a severe stability hazard. As Robert J. Anderson and Mark W. Spong demonstrated in their foundational analysis [@anderson1989bilateral], network transmission latency transforms an intrinsically passive physical link into an active energy generator. In an ideal, zero-latency system, the communication channel acts as a passive transmission line that cannot generate energy. But when transport delay varies dynamically across the network, the delayed force reflection acts out-of-phase with the operator's hand velocity.
 
 The interface behaves like a delayed spring: when the operator pushes into contact and begins to retract, the delayed reaction force arrives late, pushing the operator's hand in the direction of motion. This unexpected push injects virtual energy into the feedback loop. This non-passive energy drives high-frequency mechanical limit cycles (sustained, self-reinforcing oscillations), causing the master and follower arms to chatter violently against rigid contact fixtures. For a rigorous mathematical derivation of these passivity conditions, refer to @sec-appendix-control.
@@ -223,6 +278,27 @@ The physical interface through which the operator delivers commands acts as a ha
 | **Direct Instrumented Exoskeleton** (Wearable Master Glove / Arm Linkage)                                                                      | High-DoF joint-angle mapping with kinematic retargeting to multi-finger hand                                                                       | $25\text{ to }60\text{ ms}$ (Wearable bus + retargeting solver + low-level drive) | Moderate-to-high active tendon force feedback on individual finger linkages    | $200\text{ to }500\text{ Hz}$ joint state ($7\text{ to }12\text{ Hz}$ finger dexterity)    | $20\text{ to }35\text{ min}$ (Mechanical weight burden, pressure points, harness sweating) | Biomechanical calibration mismatch; non-linear retargeting artifacts; rich contact force profiles during multi-point precision grasps                             |
 
 : **Teleoperation master-follower interface taxonomy for physical demonstration collection**: Comparison of input interface paradigms across kinematic mapping, transport latency, haptic fidelity, control bandwidth, operator fatigue limits, and characteristic demonstration artifacts. The choice of teleoperation hardware acts as a mechanical and dynamical filter on the recorded state-action distribution. {#tbl-05-teleop-taxonomy tbl-colwidths="[14,14,14,16,14,14,14]"}
+
+::: {#chk-data-teleop-delay-stability .callout-checkpoint title="Teleoperation round-trip transport latency and human-in-the-loop stability"}
+A teleoperation interface for a precision assembly robot exhibits an end-to-end round-trip latency of $t_{\text{loop}} = 320\text{ ms}$, partitioned across camera exposure and readout ($20\text{ ms}$), video compression and network transport ($25\text{ ms}$), display monitor refresh ($15\text{ ms}$), human visual perception and neuromuscular response ($210\text{ ms}$), and actuator current ramp-up ($50\text{ ms}$). During a peg-in-hole alignment task, the operator attempts to regulate lateral position using visual feedback at a typical corrective movement frequency of $f_{\text{hum}} = 1.0\text{ Hz}$ ($\omega = 2\pi f_{\text{hum}} \approx 6.28\text{ rad/s}$). The target chamfer tolerance is $w_{\text{chamfer}} = 2.0\text{ mm}$.
+
+1. Calculate the phase lag $\Delta \phi$ (in radians and degrees) injected into the human-machine feedback loop by the $320\text{ ms}$ transport delay at $1.0\text{ Hz}$.
+2. If the nominal feedback controller requires a minimum phase margin of $45^\circ$ for stable tracking and the mechanical plant provides an initial phase margin of $60^\circ$ at $1.0\text{ Hz}$, determine the net phase margin $\text{PM}_{\text{net}}$ and explain the dynamic consequence.
+3. Calculate the maximum safe approach velocity $v_{\text{max}}$ the operator can sustain such that unguided drift during the $320\text{ ms}$ delay does not exceed the $2.0\text{ mm}$ chamfer tolerance.
+
+*Solution*:
+
+1. The phase lag induced by pure transport delay $\tau = t_{\text{loop}} = 0.320\text{ s}$ at angular frequency $\omega = 2\pi \times 1.0 = 6.283\text{ rad/s}$ is:
+   $$\Delta \phi = \omega \cdot \tau = 6.283\text{ rad/s} \times 0.320\text{ s} = 2.011\text{ rad} = 2.011 \times \left(\frac{180^\circ}{\pi}\right) \approx 115.2^\circ.$$
+
+2. The net phase margin after accounting for transport delay is:
+   $$\text{PM}_{\text{net}} = \text{PM}_{\text{plant}} - \Delta \phi = 60^\circ - 115.2^\circ = -55.2^\circ.$$
+   Because $\text{PM}_{\text{net}} < 0^\circ$, the closed-loop system is unstable. The operator's delayed corrective inputs arrive out-of-phase with the arm's motion, exciting high-frequency limit cycles where the end-effector overshoots the target and chatters against the fixture.
+
+3. To prevent unguided displacement from exceeding the chamfer width $w_{\text{chamfer}} = 2.0\text{ mm}$ during the sensory dead-time $\tau = 0.320\text{ s}$:
+   $$v_{\text{max}} = \frac{w_{\text{chamfer}}}{\tau} = \frac{2.0\times 10^{-3}\text{ m}}{0.320\text{ s}} \approx 6.25\times 10^{-3}\text{ m/s} = 6.25\text{ mm/s}.$$
+   The human operator is physically forced to slow down to under $6.25\text{ mm/s}$ (adopting an intermittent step-and-wait strategy) to avoid jamming the mechanism.
+:::
 
 Treating the recorded stream as a single sequence of states and actions obscures the signal transformations that occur between human intent and mechanical motion. A physical logging pipeline must record four distinct quantities at each time step:
 
@@ -270,11 +346,7 @@ An action label in a physical dataset exists only because the collecting policy 
 
 This absence creates the compounding failure mechanism of behavioral cloning. Suppose a policy trained on the cautious dataset executes on the physical hardware. At $t = 0.00\text{ s}$, an unmodeled friction variation or mechanical vibration perturbs the gripper to an angle of $\theta = +4.5^\circ$, placing the state outside the 8 demonstrated cells. The policy evaluates its neural network on an unvisited input. Because empirical risk minimization provides zero mathematical constraint on the neural network outside the support of the training distribution (meaning the network is effectively guessing when in unvisited regions), the policy outputs an action $\hat{a}$ with a small bounded angular error. Applying $\hat{a}$ causes the next state at $t = 0.01\text{ s}$ to reach $\theta = +6.0^\circ$ with a contact force of $11.0\text{ N}$. Because the dataset contains zero examples showing how to reduce an off-axis angle under high contact force back to the nominal corridor, the policy cannot generate a corrective command. The error shifts the system further from the demonstrated manifold on every control step, and the gripper jams against the fixture.
 
-::: {#dfn-data-endogenous-covariate-shift .callout-definition title="Endogenous covariate shift"}
-
-***Endogenous covariate shift***\index{Endogenous covariate shift!definition}\index{Covariate drift!physical AI} is the irreversible closed-loop phenomenon wherein execution errors from an embodied agent's own past actions alter its future physical states and sensor observations, driving the machine into unfamiliar operational regimes and causing compounding trajectory divergence that scales quadratically ($\mathcal{O}(T^2 \epsilon)$) over horizon $T$.
-
-:::
+As defined in \ref{dfn-data-endogenous-covariate-shift}, this compounding divergence is the signature of endogenous covariate shift. Because empirical risk minimization provides zero constraint outside the support of demonstrated corridors, small execution perturbations push the robot into unfamiliar states where the model's ungrounded outputs accelerate trajectory divergence.
 
 ::: {#psp-data-boundary-attractor .callout-perspective title="The boundary attractor law"}
 An imitation policy cannot interpolate across an unvisited physical state. Every boundary state omitted from the collection distribution $d^{\pi_{\text{col}}}(s)$ becomes an unconstrained dynamical attractor toward causal boundary violations (@sec-boundary-1-2) or actuator thermal limit exceedances (@sec-body-2-4) when evaluated under closed-loop feedback.
