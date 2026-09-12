@@ -10,10 +10,8 @@ import subprocess
 from pathlib import Path
 
 DIAGRAM_DIR_QUARTO = Path("tinytorch/quarto/assets/images/diagrams")
-DIAGRAM_DIR_BOOK = Path("tinytorch/book/assets/images/diagrams")
 
 DIAGRAM_DIR_QUARTO.mkdir(parents=True, exist_ok=True)
-DIAGRAM_DIR_BOOK.mkdir(parents=True, exist_ok=True)
 
 # Common SVG Header & Styles
 SVG_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
@@ -770,29 +768,22 @@ DIAGRAMS["20_capstone-diag-1.svg"] = generate_generic_diagram(
 for fname, body in DIAGRAMS.items():
     svg_content = SVG_HEAD.format(width=800, height=380) + body + "\n</svg>\n"
     
-    # Write SVG to quarto and book
+    # Write SVG
     p_quarto = DIAGRAM_DIR_QUARTO / fname
-    p_book = DIAGRAM_DIR_BOOK / fname
-    
+
     with open(p_quarto, "w", encoding="utf-8") as f:
-        f.write(svg_content)
-    with open(p_book, "w", encoding="utf-8") as f:
         f.write(svg_content)
         
     # Generate Vector PDF
     pdf_name = fname.replace(".svg", ".pdf")
     pdf_quarto = DIAGRAM_DIR_QUARTO / pdf_name
-    pdf_book = DIAGRAM_DIR_BOOK / pdf_name
     
     subprocess.run(["/opt/homebrew/bin/rsvg-convert", "-f", "pdf", "-o", str(pdf_quarto), str(p_quarto)], check=True)
-    subprocess.run(["/opt/homebrew/bin/rsvg-convert", "-f", "pdf", "-o", str(pdf_book), str(p_book)], check=True)
 
     # Generate High-DPI PNG
     png_name = fname.replace(".svg", ".png")
     png_quarto = DIAGRAM_DIR_QUARTO / png_name
-    png_book = DIAGRAM_DIR_BOOK / png_name
     subprocess.run(["/opt/homebrew/bin/rsvg-convert", "-f", "png", "-d", "150", "-p", "150", "-o", str(png_quarto), str(p_quarto)], check=True)
-    subprocess.run(["/opt/homebrew/bin/rsvg-convert", "-f", "png", "-d", "150", "-p", "150", "-o", str(png_book), str(p_book)], check=True)
 
     print(f"✓ Generated SVG, PDF, and PNG for {fname}")
 
