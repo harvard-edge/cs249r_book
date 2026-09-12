@@ -2,6 +2,9 @@
 
 *Machine learning systems that sense and act in the physical world.*
 
+> [!NOTE]
+> **In development.** This volume is being written now and changes quickly as I iterate. Chapters are added, reorganized, and rewritten often, so please do not cite or teach from it yet. Feedback is welcome through the [book feedback issue forms](https://github.com/harvard-edge/cs249r_book/issues/new/choose).
+
 ---
 
 ## About This Volume
@@ -10,21 +13,17 @@ Volume IV covers machine learning systems whose outputs are physical actions. It
 
 The governing constraint is irreversibility. A mispredicted token costs a retry. A mistimed motor command delivers kinetic energy into an environment that will not roll back. Every design decision in this volume is shaped by that asymmetry.
 
-## Status
-
-Working draft. Not yet published.
-
 ## Structure
 
-This volume follows the shared content skeleton used by all four volumes:
+This volume follows the content layout shared by all four volumes:
 
 ```
 vol4/
-├── index.qmd            volume home
-├── frontmatter/         author note, about, prerequisites, syllabus, notation
-├── parts/               part dividers + summaries.yml
-├── <chapter>/           one directory per chapter, containing <chapter>.qmd + images/
-└── backmatter/          references, appendices, glossary
+├── index.qmd              volume home page
+├── frontmatter/           author note, about, prerequisites, syllabus, notation
+├── parts/                 part openers and part summaries
+├── NN_chapter/            one directory per chapter: NN_chapter.qmd plus its images and data
+└── backmatter/            references, appendices, glossary
 ```
 
-See `contents/STRUCTURE.md` for the generated chapter order across all volumes.
+Chapter order comes from `books/config/_quarto-pdf-vol4.yml`, and `books/shared/STRUCTURE.md` lists it for every volume.
