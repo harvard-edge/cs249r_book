@@ -1,3 +1,4 @@
+import os
 import sys
 
 svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" style="background-color: white; font-family: sans-serif;">
@@ -159,5 +160,5 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" 
 </svg>
 """
 
-with open("/Users/VJ/GitHub/MLSysBook/books/vol4/10_intent/images/svg/fig10_intent_lease_envelope.svg", "w") as f:
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "svg", "fig10_intent_lease_envelope.svg"), "w") as f:
     f.write(svg_content)

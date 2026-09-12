@@ -52,14 +52,6 @@ The canonical `.json` at the non-`.new` path is overwritten only after a
 human reviews the diff and renames manually. The generator never
 overwrites without the staging suffix.
 
-## Legacy reference
-
-`binder/tools/scripts/quizzes/_legacy/quizzes_reference.py` is a
-read-only snapshot of the legacy `quizzes.py` (removed in `2bc58dba3d`).
-Kept as a reference for the SYSTEM_PROMPT, per-type criteria, and the
-known-buggy post-shuffle logic that this new pipeline deliberately does
-not replicate. Do not execute it; it is for historical inspection only.
-
 ## Pattern
 
 This directory is the first implementation of a broader pattern for

@@ -124,7 +124,7 @@ Do **not** use `git add .` — it's easy to commit unrelated edits, secrets, or
 build artifacts. Stage paths individually:
 
 ```bash
-git add books/vol1/introduction/introduction.qmd
+git add books/vol1/01_introduction/01_introduction.qmd
 git commit -m "Fix caption formatting in introduction (issue #14)"
 ```
 

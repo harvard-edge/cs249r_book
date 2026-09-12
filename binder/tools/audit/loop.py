@@ -93,7 +93,7 @@ def stage_plan(
             lanes["accepted"].append(issue)
         elif issue.auto_fixable:
             lanes["script"].append(issue)
-        elif issue.needs_subagent:
+        elif issue.needs_review:
             lanes["subagent"].append(issue)
         else:
             # Detection-only, e.g. binary-units-in-prose

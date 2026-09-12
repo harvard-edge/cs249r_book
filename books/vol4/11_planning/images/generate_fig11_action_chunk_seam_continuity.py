@@ -163,7 +163,7 @@ def generate_svg():
 
 </svg>
 """
-    with open('/Users/VJ/GitHub/MLSysBook/books/vol4/11_planning/images/svg/fig11_action_chunk_seam_continuity.svg', 'w') as f:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg', 'fig11_action_chunk_seam_continuity.svg'), 'w') as f:
         f.write(svg_content)
 
 if __name__ == "__main__":

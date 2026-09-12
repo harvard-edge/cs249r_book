@@ -61,6 +61,16 @@ class Violation:
     suggestion: str = ""
 
 
+# 2026-09-12: a local render leaves .quarto/idx/*.json caches under books/;
+# scanning them reported 264 false USD literals. Skip generated trees.
+GENERATED_DIRS = frozenset({".quarto", "_build", "__pycache__", ".venv", "venv", "node_modules"})
+
+
+def _is_generated(rel: Path) -> bool:
+    """True when *rel* sits inside a render cache or other generated tree."""
+    return any(part in GENERATED_DIRS or part.endswith("_files") for part in rel.parts[:-1])
+
+
 def iter_target_files(paths: Iterable[Path]) -> list[Path]:
     """Return content source files that can carry visible currency text."""
     files: list[Path] = []
@@ -71,6 +81,7 @@ def iter_target_files(paths: Iterable[Path]) -> list[Path]:
                 p
                 for p in path.rglob("*")
                 if p.is_file() and p.suffix.lower() in TARGET_SUFFIXES
+                and not _is_generated(p.relative_to(path))
             )
         elif path.is_file() and path.suffix.lower() in TARGET_SUFFIXES:
             files.append(path)

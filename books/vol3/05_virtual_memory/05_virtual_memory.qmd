@@ -49,16 +49,16 @@ During autoregressive generation, at each layer $l \in [1, n_{\text{layers}}]$, 
 
 For standard **Multi-Head Attention (MHA)**\index{Multi-Head Attention} [@vaswani2017], where the number of KV heads equals the number of Query heads ($n_{\text{kv\_heads}} = n_{\text{heads}}$), each token requires storing one Key vector and one Value vector of dimension $d_{\text{model}}$ across all layers. For an agent trajectory spanning an active context length of $S$ tokens, the cumulative KV cache memory footprint defined in @eq-vol3-virtualmem-mha-footprint scales with sequence length and model geometry:[^fn-virtualmem-mha-derivation]
 
-$$M_{\text{KV, MHA}}(S) = 2 \cdot b \cdot n_{\text{layers}} \cdot d_{\text{model}} \cdot S \quad [\text{bytes}] {#eq-vol3-virtualmem-mha-footprint}$$
+$$M_{\text{KV, MHA}}(S) = 2 \cdot b \cdot n_{\text{layers}} \cdot d_{\text{model}} \cdot S \quad [\text{bytes}]$$ {#eq-vol3-virtualmem-mha-footprint}
 
 To appreciate the physical scale of this footprint, consider a 70-billion parameter MHA foundation model ($n_{\text{layers}} = 80$, $d_{\text{model}} = 8192$) operating in 16-bit precision ($b = 2\text{ bytes}$). Storing the KV activations of a single token requires $S_{\text{token}} = 2 \times 2 \times 80 \times 8192 \approx 2.62\text{ MB/token}$. As detailed in @tbl-vol3-virtualmem-mha-sizing, scaling context depth across extended agent trajectories rapidly overwhelms physical accelerator memory:
 
-| Context Horizon ($S$) | Tokens Stored | Per-Token Footprint | Total KV Footprint | Physical H100 GPU Allocation |
-| :--- | :--- | :--- | :--- | :--- |
-| **Prompt Init ($4\text{k}$)** | $4,000$ | $2.62\text{ MB}$ | $10.49\text{ GB}$ | $13.1\%$ of 1x H100 ($80\text{ GB}$) |
-| **Short Trajectory ($16\text{k}$)** | $16,000$ | $2.62\text{ MB}$ | $41.94\text{ GB}$ | $52.4\%$ of 1x H100 |
-| **Extended Agent ($64\text{k}$)** | $64,000$ | $2.62\text{ MB}$ | $167.77\text{ GB}$ | **$2.10\times$ full H100 GPUs** |
-| **Repository Horizon ($128\text{k}$)** | $128,000$ | $2.62\text{ MB}$ | $335.54\text{ GB}$ | **$4.19\times$ full H100 GPUs** |
+| Context Horizon ($S$)                  | Tokens Stored | Per-Token Footprint | Total KV Footprint | Physical H100 GPU Allocation         |
+|:---------------------------------------|:--------------|:--------------------|:-------------------|:-------------------------------------|
+| **Prompt Init ($4\text{k}$)**          | $4,000$       | $2.62\text{ MB}$    | $10.49\text{ GB}$  | $13.1\%$ of 1x H100 ($80\text{ GB}$) |
+| **Short Trajectory ($16\text{k}$)**    | $16,000$      | $2.62\text{ MB}$    | $41.94\text{ GB}$  | $52.4\%$ of 1x H100                  |
+| **Extended Agent ($64\text{k}$)**      | $64,000$      | $2.62\text{ MB}$    | $167.77\text{ GB}$ | **$2.10\times$ full H100 GPUs**      |
+| **Repository Horizon ($128\text{k}$)** | $128,000$     | $2.62\text{ MB}$    | $335.54\text{ GB}$ | **$4.19\times$ full H100 GPUs**      |
 
 : **Multi-Head Attention (MHA) KV-Cache Footprint Scaling for a 70B Parameter Model**: Memory consumption across context lengths ($n_{\text{layers}}=80$, $d_{\text{model}}=8192$, FP16 precision). A single extended agent context completely overwhelms multi-GPU node memory without KV sharing. {#tbl-vol3-virtualmem-mha-sizing}
 
@@ -119,7 +119,7 @@ The memory fragmentation crisis is intensely exacerbated by the operational mech
 
 At step $t$, the full prompt sequence submitted to the foundation model, denoted $X^{(t)}$ in @eq-vol3-virtualmem-prompt-anatomy, is structured as an append-only token sequence:
 
-$$X^{(t)} = \left[ \mathbf{x}_{\text{sys}}, \, \mathbf{x}_{\text{tools}}, \, \mathbf{x}_{\text{env}}, \, \mathbf{x}_{\text{history}}^{(1:t-1)}, \, \mathbf{x}_{\text{action}}^{(t-1)}, \, \mathbf{x}_{\text{obs}}^{(t)} \right] {#eq-vol3-virtualmem-prompt-anatomy}$$
+$$X^{(t)} = \left[ \mathbf{x}_{\text{sys}}, \, \mathbf{x}_{\text{tools}}, \, \mathbf{x}_{\text{env}}, \, \mathbf{x}_{\text{history}}^{(1:t-1)}, \, \mathbf{x}_{\text{action}}^{(t-1)}, \, \mathbf{x}_{\text{obs}}^{(t)} \right]$$ {#eq-vol3-virtualmem-prompt-anatomy}
 
 | Segment                                                                               | Semantic Role                                               |       Token Length ($S$)       |       Mutation Cadence      |   Cache Invalidation Risk   |
 |:--------------------------------------------------------------------------------------|:------------------------------------------------------------|:------------------------------:|:---------------------------:|:---------------------------:|
@@ -142,7 +142,7 @@ In his classical formulation of memory locality, Peter Denning established that 
 ::: {#pri-trajectory-prefix-locality .callout-principle title="Trajectory prefix locality invariant"}
 For any autonomous agent executing an append-only perception-action trajectory of horizon $T$, the prefix sharing ratio $\rho(t, t+1)$ defined in @eq-vol3-virtualmem-prefix-locality between consecutive execution turns $t$ and $t+1$ asymptotically approaches unity as trajectory history accumulates:
 
-$$\rho(t, t+1) = \frac{|X^{(t)}|}{|X^{(t)}| + |\Delta \mathbf{x}^{(t+1)}|} \xrightarrow[t \to \infty]{} 1.0 {#eq-vol3-virtualmem-prefix-locality}$$
+$$\rho(t, t+1) = \frac{|X^{(t)}|}{|X^{(t)}| + |\Delta \mathbf{x}^{(t+1)}|} \xrightarrow[t \to \infty]{} 1.0$$ {#eq-vol3-virtualmem-prefix-locality}
 :::
 
 > **The Systems Rule of Thumb (The 95 Percent Prefix Locality Invariant):** In multi-turn agent execution, consecutive turns share over 95 percent of their prompt tokens ($|X^{(t)}| \gg |\Delta \mathbf{x}^{(t+1)}|$). Any inference serving engine that treats consecutive agent turns as stateless invocations wastes more than 90 percent of its arithmetic throughput recomputing identical Key-Value activations. Serving schedulers must maintain stateful session affinity to exploit this physical prefix invariance.
@@ -155,22 +155,22 @@ When an autonomous agent interacts with a conventional stateless serving endpoin
 
 For a transformer model containing $P$ active parameters, computing the prefill pass over an input sequence of length $S = |X^{(t)}|$ requires an arithmetic operation count defined in @eq-vol3-virtualmem-prefill-flops:
 
-$$\text{FLOPs}_{\text{prefill}}(S) \approx 2 P S + 4 n_{\text{layers}} d_{\text{model}} S^2 {#eq-vol3-virtualmem-prefill-flops}$$
+$$\text{FLOPs}_{\text{prefill}}(S) \approx 2 P S + 4 n_{\text{layers}} d_{\text{model}} S^2$$ {#eq-vol3-virtualmem-prefill-flops}
 
 where the quadratic term $4 n_{\text{layers}} d_{\text{model}} S^2$ accounts for the full self-attention matrix multiplications ($\mathbf{Q}\mathbf{K}^T$ and $\mathbf{A}\mathbf{V}$).
 
 If an agent executes a trajectory of $T$ turns, where turn 1 begins with a root prompt of length $S_1 = L_{\text{root}}$ (system instructions, tool schemas, environment map), and each subsequent turn appends an average observation delta of $\Delta S$ tokens, the cumulative tokens ingested by a stateless serving engine across the trajectory defined in @eq-vol3-virtualmem-stateless-turn-expansion scales quadratically as $\mathcal{O}(T \cdot L_{\text{root}} + T^2 \Delta S)$ with interaction depth:[^fn-virtualmem-stateless-summation]
 
-$$S_{\text{stateless}}(T) = T \cdot L_{\text{root}} + \frac{T(T-1)}{2} \Delta S {#eq-vol3-virtualmem-stateless-turn-expansion}$$
+$$S_{\text{stateless}}(T) = T \cdot L_{\text{root}} + \frac{T(T-1)}{2} \Delta S$$ {#eq-vol3-virtualmem-stateless-turn-expansion}
 
 The cumulative arithmetic work expended by the cluster scales quadratically with the trajectory horizon $T$. As summarized in @tbl-vol3-virtualmem-stateless-tax, for a 20-turn agent session ($T = 20$) with $L_{\text{root}} = 16\text{,}000$ and $\Delta S = 800$, stateless serving forces the accelerator to process $S_{\text{stateless}} = 472\text{,}000$ tokens, whereas the unique trajectory content represents only the terminal length $S_{\text{terminal}} = 31\text{,}200$ tokens. Stateless serving forces the accelerator cluster to recompute $440\text{,}800$ redundant tokens—a staggering $93.4\%$ waste of compute capacity.
 
-| Execution Metric | Turn 1 ($t=1$) | Turn 10 ($t=10$) | Turn 20 ($t=20$) | Cumulative (20 Turns) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Unique Context Tokens** | $16,000$ | $23,200$ | $31,200$ | $31,200$ (Terminal) |
-| **Stateless Prefill Tokens** | $16,000$ | $23,200$ | $31,200$ | **$472,000$ tokens** |
-| **Stateful (Cached) Tokens** | $16,000$ | $800$ | $800$ | **$31,200$ tokens** |
-| **Redundant Recomputation** | $0\%$ | $96.6\%$ | $97.4\%$ | **$93.4\%$ redundant** |
+| Execution Metric             | Turn 1 ($t=1$) | Turn 10 ($t=10$) | Turn 20 ($t=20$) | Cumulative (20 Turns)  |
+|:-----------------------------|:---------------|:-----------------|:-----------------|:-----------------------|
+| **Unique Context Tokens**    | $16,000$       | $23,200$         | $31,200$         | $31,200$ (Terminal)    |
+| **Stateless Prefill Tokens** | $16,000$       | $23,200$         | $31,200$         | **$472,000$ tokens**   |
+| **Stateful (Cached) Tokens** | $16,000$       | $800$            | $800$            | **$31,200$ tokens**    |
+| **Redundant Recomputation**  | $0\%$          | $96.6\%$         | $97.4\%$         | **$93.4\%$ redundant** |
 
 : **Compounding Recomputation Tax of Stateless Inference in Multi-Turn Agents**: Evaluated at $L_{\text{root}} = 16,000$ and $\Delta S = 800$ tokens/turn. Without prefix caching, $93.4\%$ of all processed tokens are redundant recomputations. {#tbl-vol3-virtualmem-stateless-tax}
 
@@ -270,13 +270,11 @@ class VirtualMemoryTtftCollapse:
 - Total tokens prefilled: $S_{\text{total}} = \sum_{t=1}^{20} [16\text{,}000 + 800(t-1)] = 472\text{,}000\text{ tokens}$.
 - Cumulative prefill execution time: $T_{\text{prefill, stateless}} = 472\text{,}000 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{132.16\text{ seconds}}$.
 - Turn-20 latency: With terminal prompt length $S_{20} = 16\text{,}000 + (19 \times 800) = 31\text{,}200$ tokens, the agent stalls waiting for first response: $\text{TTFT}_{\text{turn-20, stateless}} = 31\text{,}200 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{8.74\text{ seconds}}$.
-
 2. *Stateful Virtual Memory Execution (Prefix Caching):*
 - Turn 1 cold prefill over root prompt: $T_1 = 16\text{,}000 \times 2.8 \times 10^{-4}\text{ s} = 4.48\text{ seconds}$.
 - Turns 2–20 incremental delta prefill: $T_{2\dots 20} = 19 \times (800 \times 2.8 \times 10^{-4}\text{ s}) = 4.26\text{ seconds}$.
 - Cumulative prefill execution time: $T_{\text{prefill, cached}} = 4.48\text{ s} + 4.26\text{ s} = \mathbf{8.74\text{ seconds}}$.
 - Per-turn interactive latency ($t \ge 2$): $\text{TTFT}_{\text{turn-}t\text{, cached}} = 800 \times 2.8 \times 10^{-4}\text{ s} = \mathbf{224\text{ milliseconds}}$.
-
 3. *Comparative Performance Speedup:*
 - Trajectory prefill compute reduction: $\frac{132.16\text{ s}}{8.74\text{ s}} = \mathbf{15.1\times\text{ faster}}$.
 - Interactive TTFT reduction at turn 20: $\frac{8.74\text{ s}}{0.224\text{ s}} = \mathbf{39.0\times\text{ faster}}$.
@@ -314,11 +312,11 @@ Under PagedAttention, an agent's logical sequence of tokens $\mathbf{X} = (x_0, 
 
 Each physical block allocates fixed, contiguous storage for exactly $B_{\text{block}}$ tokens across all layers and attention heads defined in @eq-vol3-virtualmem-block-tensor:
 
-$$\mathcal{T}_{\text{block}} \in \mathbb{R}^{2 \times n_{\text{layers}} \times B_{\text{block}} \times n_{\text{kv\_heads}} \times d_{\text{head}}} {#eq-vol3-virtualmem-block-tensor}$$
+$$\mathcal{T}_{\text{block}} \in \mathbb{R}^{2 \times n_{\text{layers}} \times B_{\text{block}} \times n_{\text{kv\_heads}} \times d_{\text{head}}}$$ {#eq-vol3-virtualmem-block-tensor}
 
 During kernel execution, the GPU thread blocks resolve the physical byte address $\mathcal{A}(i)$ for any logical token position $i$ using fast integer division and modulo arithmetic defined in @eq-vol3-virtualmem-address-translation:
 
-$$\mathcal{A}(i) = \text{Base}\left(\mathcal{M}\left(\text{Request\_ID}, \, \left\lfloor \frac{i}{B_{\text{block}}} \right\rfloor\right)\right) + (i \bmod B_{\text{block}}) \cdot S_{\text{token\_layer}} {#eq-vol3-virtualmem-address-translation}$$
+$$\mathcal{A}(i) = \text{Base}\left(\mathcal{M}\left(\text{Request\_ID}, \, \left\lfloor \frac{i}{B_{\text{block}}} \right\rfloor\right)\right) + (i \bmod B_{\text{block}}) \cdot S_{\text{token\_layer}}$$ {#eq-vol3-virtualmem-address-translation}
 
 where the quotient $j = \lfloor i / B_{\text{block}} \rfloor$ indexes the logical block in the page table, the remainder $o = i \bmod B_{\text{block}}$ defines the intra-block token offset, and $S_{\text{token\_layer}} = 2 \cdot b \cdot n_{\text{kv\_heads}} \cdot d_{\text{head}}$ is the physical byte footprint of one token at that layer.
 
@@ -338,7 +336,7 @@ PagedAttention preserves this SRAM tiling efficiency while reading from physical
 
 Mathematically, during the autoregressive decode step for query vector $\mathbf{q}_i$, the kernel evaluates the attention reduction defined in @eq-vol3-virtualmem-paged-attention-kernel over all historical tokens $k \in [0, i]$:[^fn-virtualmem-online-softmax]
 
-$$\mathbf{o}_i = \sum_{k=0}^{i} \text{Softmax}\left( \frac{1}{\sqrt{d_h}} \mathbf{q}_i^T \mathbf{k}_k \right) \mathbf{v}_k {#eq-vol3-virtualmem-paged-attention-kernel}$$
+$$\mathbf{o}_i = \sum_{k=0}^{i} \text{Softmax}\left( \frac{1}{\sqrt{d_h}} \mathbf{q}_i^T \mathbf{k}_k \right) \mathbf{v}_k$$ {#eq-vol3-virtualmem-paged-attention-kernel}
 
 where the Key and Value vectors are retrieved dynamically through indirect block table addressing: $\mathbf{k}_k, \mathbf{v}_k = (\mathcal{K}, \mathcal{V})[\mathcal{M}(\lfloor k / B_{\text{block}} \rfloor), \, k \bmod B_{\text{block}}]$.
 
@@ -355,7 +353,7 @@ The shift to uniform block paging fundamentally alters the thermodynamics of acc
 1. **Elimination of External Fragmentation:** Because all physical blocks share an identical fixed capacity $B_{\text{block}}$, any free block anywhere in HBM can satisfy any allocation request from any agent. Physical memory allocation is reduced to managing a simple $\mathcal{O}(1)$ free-list stack or bitmask. Contiguous memory compaction pauses, memory-hole tracking, and allocation failures due to external fragmentation are mathematically eliminated ($\Phi_{\text{ext}} = 0$).
 2. **Bounding Internal Fragmentation:** Internal fragmentation is restricted strictly to the final, partially filled block of an active sequence. If an agent generates a sequence of length $S$, the number of fully saturated physical blocks is $\lfloor S / B_{\text{block}} \rfloor$, and the number of active tokens occupying the final block is $S_{\text{tail}} = S \bmod B_{\text{block}}$. If $S_{\text{tail}} > 0$, the final block reserves capacity for $B_{\text{block}}$ tokens but stores only $S_{\text{tail}}$, leaving $B_{\text{block}} - S_{\text{tail}}$ unused slots. Assuming that sequence lengths modulo $B_{\text{block}}$ are uniformly distributed over $[0, B_{\text{block}}-1]$, the expected internal waste per sequence defined in @eq-vol3-virtualmem-internal-waste depends strictly on block capacity and per-token footprint:
 
-$$\mathbb{E}[\text{Waste}_{\text{internal}}] = \frac{B_{\text{block}} - 1}{2} \cdot S_{\text{token}} {#eq-vol3-virtualmem-internal-waste}$$
+$$\mathbb{E}[\text{Waste}_{\text{internal}}] = \frac{B_{\text{block}} - 1}{2} \cdot S_{\text{token}}$$ {#eq-vol3-virtualmem-internal-waste}
 
 For Llama-3 70B ($S_{\text{token}} = 320\text{ KB}$) operating with block size $B_{\text{block}} = 16$, evaluating @eq-vol3-virtualmem-internal-waste yields an expected internal waste of $\frac{15}{2} \times 320\text{ KB} = 2.40\text{ MB}$ per sequence. In a 32,000-token context ($M_{\text{KV}} \approx 10.49\text{ GB}$), this internal waste represents **less than $0.023\%$** of the allocated memory.
 
@@ -393,7 +391,7 @@ With PagedAttention, context branching executes with **zero memory replication**
 ::: {#pri-virtual-context-invariant .callout-principle title="The virtual context invariant"}
 In any virtual context memory architecture deploying block-level paging, the physical memory consumed by $K$ divergent agent trajectories sharing an identical parent prefix of length $L_{\text{prefix}}$ and generating divergent rollouts of length $L_{\text{branch}}$ is strictly bounded by @eq-vol3-virtualmem-cow-capacity:
 
-$$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}(L_{\text{branch}}) + \mathcal{O}(K \cdot B_{\text{block}} \cdot S_{\text{token}}) {#eq-vol3-virtualmem-cow-capacity}$$
+$$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}(L_{\text{branch}}) + \mathcal{O}(K \cdot B_{\text{block}} \cdot S_{\text{token}})$$ {#eq-vol3-virtualmem-cow-capacity}
 
 as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in contiguous, unpaged architectures.
 :::
@@ -474,7 +472,6 @@ class SpeculativeBranchCapacity:
 1. *Under Naive Contiguous Replication:*
 - Memory per branch: Each branch must allocate private memory for the entire cumulative sequence ($L_{\text{prefix}} + L_{\text{branch}} = 41\text{,}024$ tokens), consuming $M_{\text{per\_branch, naive}} = M_{\text{prefix}} + M_{\text{branch}} = 13.11\text{ GB} + 0.336\text{ GB} = 13.446\text{ GB}$.
 - Maximum concurrent branches: $K_{\text{naive}} = \lfloor C_{\text{KV}} / M_{\text{per\_branch, naive}} \rfloor = \lfloor 436\text{ GB} / 13.446\text{ GB} \rfloor = \mathbf{32\text{ concurrent branches}}$.
-
 2. *Under PagedAttention with Copy-on-Write (CoW):*
 - The shared parent context of $40\text{,}000$ tokens is instantiated **exactly once** in physical HBM, consuming $M_{\text{prefix}} = 13.11\text{ GB}$. The remaining capacity ($C_{\text{available}} = 436\text{ GB} - 13.11\text{ GB} = 422.89\text{ GB}$) is dedicated exclusively to divergent branch tokens.
 - Factoring in tail allocation waste ($B_{\text{block}} \cdot S_{\text{token}} \approx 0.005\text{ GB}$), each branch consumes $0.336\text{ GB} + 0.005\text{ GB} = 0.341\text{ GB}$.
@@ -551,7 +548,7 @@ While Radix trees provide sub-millisecond prefix lookups on a single host machin
 
 A token sequence partitioned into uniform blocks of size $B_{\text{block}}$ is mapped to a high-speed rolling hash chain (e.g., xxHash64 or MurmurHash3). For base block $k=0$, the seed hash incorporates the model identifier: $h_0 = \mathcal{H}(\text{Model\_ID} \,\|\, \mathbf{t}_{0 : B_{\text{block}}-1})$. For each subsequent block $k \ge 1$, the key chains recursively from the preceding block's digest as defined in @eq-vol3-virtualmem-content-hash-chain:
 
-$$h_k = \mathcal{H}\left( h_{k-1} \,\|\, \mathbf{t}_{k \cdot B_{\text{block}} : (k+1) \cdot B_{\text{block}} - 1} \right) {#eq-vol3-virtualmem-content-hash-chain}$$
+$$h_k = \mathcal{H}\left( h_{k-1} \,\|\, \mathbf{t}_{k \cdot B_{\text{block}} : (k+1) \cdot B_{\text{block}} - 1} \right)$$ {#eq-vol3-virtualmem-content-hash-chain}
 
 Because the hash of block $k$ depends strictly on preceding state $h_{k-1}$ and its own token payload, the hash chain guarantees:
 
@@ -597,7 +594,7 @@ The data path and transfer protocols governing this multi-tiered context hierarc
 
 When an agent emits a tool call, the scheduler marks its Radix tree nodes as `SUSPENDED`. An asynchronous background Direct Memory Access (DMA) engine transfers the corresponding physical PagedAttention blocks over PCIe Gen5 into pinned host DRAM buffers governed by @eq-vol3-virtualmem-swap-latency:
 
-$$T_{\text{swap}} = \frac{M_{\text{KV}}(S)}{B_{\text{PCIe}}} {#eq-vol3-virtualmem-swap-latency}$$
+$$T_{\text{swap}} = \frac{M_{\text{KV}}(S)}{B_{\text{PCIe}}}$$ {#eq-vol3-virtualmem-swap-latency}
 
 where $M_{\text{KV}}(S) = S \cdot S_{\text{token}}$ is the total sequence KV footprint and $B_{\text{PCIe}}$ is the effective interconnect transfer bandwidth.[^fn-virtualmem-swap-derivation] For an agent context of 32,000 tokens on Llama-3 70B ($10.49\text{ GB}$), swapping memory to host DRAM over a PCIe Gen5 x16 interconnect ($64\text{ GB/s}$) requires $T_{\text{swap}} = 10.49\text{ GB} / 64\text{ GB/s} \approx 164\text{ ms}$.
 
@@ -667,17 +664,17 @@ The fundamental viability of PD disaggregation hinges on network bandwidth. If t
 
 The network transfer latency for a KV cache spanning $S_{\text{prompt}}$ tokens is governed by @eq-vol3-virtualmem-rdma-latency:
 
-$$T_{\text{network}} = \alpha_{\text{net}} + \frac{M_{\text{KV}}(S_{\text{prompt}})}{B_{\text{network}}} {#eq-vol3-virtualmem-rdma-latency}$$
+$$T_{\text{network}} = \alpha_{\text{net}} + \frac{M_{\text{KV}}(S_{\text{prompt}})}{B_{\text{network}}}$$ {#eq-vol3-virtualmem-rdma-latency}
 
 where $M_{\text{KV}}(S_{\text{prompt}}) = S_{\text{prompt}} \cdot S_{\text{token}}$ is the serialized KV cache volume, $\alpha_{\text{net}}$ is the network connection handshake and memory-registration latency, and $B_{\text{network}}$ is the effective sustained interconnect bandwidth.[^fn-virtualmem-rdma-overlap]
 
 Consider transferring a 32,000-token prompt KV cache for Llama-3 70B ($S_{\text{token}} = 320\text{ KB}$, total footprint $M_{\text{KV}} \approx 10.49\text{ GB}$) across different network fabrics, summarized in @tbl-vol3-virtualmem-rdma-transport.
 
-| Interconnect Fabric | Raw Bandwidth | Effective $B_{\text{network}}$ | Transfer Latency ($10.49\text{ GB}$) | Systems Feasibility |
-| :--- | :--- | :--- | :--- | :--- |
-| Standard Data Center Ethernet | $25\text{ Gbps}$ | $3.125\text{ GB/s}$ | $3.36\text{ s}$ | 🔴 Infeasible (obliterates TTFT gains) |
-| InfiniBand / RoCE v2 | $400\text{ Gbps}$ | $50.0\text{ GB/s}$ | $210\text{ ms}$ | 🟡 Borderline (requires pipelining) |
-| Dual-Rail InfiniBand / RoCE v2 | $800\text{ Gbps}$ | $100.0\text{ GB/s}$ | $105\text{ ms}$ | 🟢 Production (fully hidden via RDMA) |
+| Interconnect Fabric            | Raw Bandwidth     | Effective $B_{\text{network}}$ | Transfer Latency ($10.49\text{ GB}$) | Systems Feasibility                   |
+|:-------------------------------|:------------------|:-------------------------------|:-------------------------------------|:--------------------------------------|
+| Standard Data Center Ethernet  | $25\text{ Gbps}$  | $3.125\text{ GB/s}$            | $3.36\text{ s}$                      | 🔴 Infeasible (obliterates TTFT gains) |
+| InfiniBand / RoCE v2           | $400\text{ Gbps}$ | $50.0\text{ GB/s}$             | $210\text{ ms}$                      | 🟡 Borderline (requires pipelining)    |
+| Dual-Rail InfiniBand / RoCE v2 | $800\text{ Gbps}$ | $100.0\text{ GB/s}$            | $105\text{ ms}$                      | 🟢 Production (fully hidden via RDMA)  |
 : **KV Cache Transfer Latency Across Network Fabrics**: Serialization delay for transferring a 32,000-token Llama-3 70B KV cache ($10.49\text{ GB}$) from Prefill to Decode instances across standard cluster interconnects. {#tbl-vol3-virtualmem-rdma-transport}
 
 To eliminate this network serialization overhead, modern disaggregated runtimes (such as Mooncake [@qin2024mooncake]) implement **Pipelined Layer-by-Layer Streaming via RDMA Write**\index{RDMA Write}:
@@ -727,17 +724,17 @@ In Key-Value cache compression, these two formats map to fundamentally distinct 
 
 The trade-offs across floating-point and integer quantization formats are summarized in @tbl-vol3-vm-quantization-tradeoffs.
 
-| Format | Bits ($b$) | Encoding (Sign / Exp / Mantissa) | Dynamic Range | Primary KV Role | Compression Factor |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **FP16 / BF16** | 16 | $1 / 5 / 10$ (FP16) or $1 / 8 / 7$ (BF16) | $[-65504, 65504]$ | Baseline reference | $1.0\times$ (Uncompressed) |
-| **FP8 E4M3** | 8 | $1 / 4 / 3$ | $[-448, 448]$ | Value vectors ($\mathbf{V}$, convex sums) | $2.0\times$ ($50\%$ HBM savings) |
-| **FP8 E5M2** | 8 | $1 / 5 / 2$ | $[-57344, 57344]$ | Key vectors ($\mathbf{K}$, RoPE variance) | $2.0\times$ ($50\%$ HBM savings) |
-| **INT4 (Affine)**| 4 | Uniform integer with scale/zero | Dynamic ($s \cdot q$) | Token budget / cold tiers | $4.0\times$ ($75\%$ HBM savings) |
+| Format            | Bits ($b$) | Encoding (Sign / Exp / Mantissa)          | Dynamic Range         | Primary KV Role                           | Compression Factor               |
+|:------------------|:-----------|:------------------------------------------|:----------------------|:------------------------------------------|:---------------------------------|
+| **FP16 / BF16**   | 16         | $1 / 5 / 10$ (FP16) or $1 / 8 / 7$ (BF16) | $[-65504, 65504]$     | Baseline reference                        | $1.0\times$ (Uncompressed)       |
+| **FP8 E4M3**      | 8          | $1 / 4 / 3$                               | $[-448, 448]$         | Value vectors ($\mathbf{V}$, convex sums) | $2.0\times$ ($50\%$ HBM savings) |
+| **FP8 E5M2**      | 8          | $1 / 5 / 2$                               | $[-57344, 57344]$     | Key vectors ($\mathbf{K}$, RoPE variance) | $2.0\times$ ($50\%$ HBM savings) |
+| **INT4 (Affine)** | 4          | Uniform integer with scale/zero           | Dynamic ($s \cdot q$) | Token budget / cold tiers                 | $4.0\times$ ($75\%$ HBM savings) |
 : **KV Cache Precision Regimes and Hardware Trade-Offs**: Numerical formats supported on modern Tensor Cores and their operational assignments across Key and Value activation tensors. {#tbl-vol3-vm-quantization-tradeoffs}
 
 To compress tensors down to 4-bit integer precision (**INT4**), runtimes implement uniform affine quantization governed by @eq-vol3-virtualmem-affine-quant:
 
-$$\hat{x} = \text{clip}\left( \left\lfloor \frac{x}{s} \right\rceil + z, \, -2^{b-1}, \, 2^{b-1} - 1 \right) {#eq-vol3-virtualmem-affine-quant}$$
+$$\hat{x} = \text{clip}\left( \left\lfloor \frac{x}{s} \right\rceil + z, \, -2^{b-1}, \, 2^{b-1} - 1 \right)$$ {#eq-vol3-virtualmem-affine-quant}
 
 where $s$ is the per-channel or per-block floating-point scale factor and $z$ is the integer zero-point offset, defining the quantization resolution and memory cache capacity policy.[^fn-virtualmem-quant-params]
 
@@ -767,7 +764,7 @@ An alternative to scalar quantization is exploiting the intrinsic low-rank dimen
 
 In deep transformer architectures, token representations inhabit a low-dimensional semantic subspace where activation matrices exhibit rapid singular value decay. Rather than storing the full $d_{\text{head}}$-dimensional Key and Value vectors in accelerator HBM, the runtime projects each activation into a compact $r$-dimensional latent representation governed by @eq-vol3-virtualmem-lowrank-kv:
 
-$$\mathbf{c}_{K, k}^{(l)} = \mathbf{k}_k^{(l)} \mathbf{V}_r^{(l)} \in \mathbb{R}^r {#eq-vol3-virtualmem-lowrank-kv}$$
+$$\mathbf{c}_{K, k}^{(l)} = \mathbf{k}_k^{(l)} \mathbf{V}_r^{(l)} \in \mathbb{R}^r$$ {#eq-vol3-virtualmem-lowrank-kv}
 
 where $r \ll d_{\text{head}}$ is the target latent rank and $\mathbf{V}_r^{(l)} \in \mathbb{R}^{d_{\text{head}} \times r}$ is the right-singular projection matrix obtained via calibration or architectural design.[^fn-virtualmem-svd-reconstruction]
 
@@ -833,7 +830,7 @@ Because PagedAttention enables zero-overhead Copy-on-Write (CoW) page sharing ac
 
 While PagedAttention shares common parent prefix blocks with zero memory replication, the divergent leaves of the search tree expand exponentially as $N_{\text{leaves}} = K^D$, where $K$ is the branching factor and $D$ is search depth. If each leaf generates an unshared exploration rollout of $L_{\text{branch}}$ tokens, the private physical memory consumed by search leaves scales according to @eq-vol3-virtualmem-mcts-footprint:
 
-$$M_{\text{leaves}} = K^D \cdot L_{\text{branch}} \cdot S_{\text{token}} {#eq-vol3-virtualmem-mcts-footprint}$$
+$$M_{\text{leaves}} = K^D \cdot L_{\text{branch}} \cdot S_{\text{token}}$$ {#eq-vol3-virtualmem-mcts-footprint}
 
 For a modest MCTS configuration with $K = 4$ and depth $D = 4$, the tree evaluates $N_{\text{leaves}} = 256$ concurrent leaf trajectories. If $L_{\text{branch}} = 1\text{,}024$ tokens on Llama-3 70B ($S_{\text{token}} = 320\text{ KB}$), private leaf memory alone consumes $M_{\text{leaves}} = 256 \times 1\text{,}024 \times 320\text{ KB} \approx 83.89\text{ GB}$ of unshared accelerator HBM capacity—completely exhausting an 80 GB GPU. Without strict token budgets, tree-depth pruning, and verifier-guided admission control, speculative search algorithms will rapidly exhaust HBM and trigger catastrophic out-of-memory thrashing.
 

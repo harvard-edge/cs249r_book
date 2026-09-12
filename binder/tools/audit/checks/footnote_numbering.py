@@ -29,7 +29,7 @@ Auto-fixable: NO. A missing definition can only be resolved by the
 chapter author. An orphan definition might be intentional (some templates
 generate definitions for IDs that will be referenced later). A numeric
 ID needs a human to pick a descriptive name. Every issue is emitted with
-`auto_fixable=False, needs_subagent=False`.
+`auto_fixable=False, needs_review=False`.
 
 Protected contexts this check skips:
   - YAML frontmatter, fenced code blocks, display math, HTML comments
@@ -190,7 +190,7 @@ def check(
                 before=raw_line,
                 suggested_after="",
                 auto_fixable=False,
-                needs_subagent=False,
+                needs_review=False,
                 reason=(
                     f"footnote reference [^{fn_id}] has no matching "
                     f"[^{fn_id}]: definition in this file"
@@ -217,7 +217,7 @@ def check(
                 before=raw_line,
                 suggested_after="",
                 auto_fixable=False,
-                needs_subagent=False,
+                needs_review=False,
                 reason=(
                     f"footnote definition [^{fn_id}]: has no matching "
                     f"reference in body prose (possibly stale)"
@@ -248,7 +248,7 @@ def check(
                         before=raw_line,
                         suggested_after="",
                         auto_fixable=False,
-                        needs_subagent=False,
+                        needs_review=False,
                         reason=(
                             f"footnote [^{fn_id}]: defined "
                             f"{len(occurrences)}x in this file "
@@ -282,7 +282,7 @@ def check(
                 before=raw_line,
                 suggested_after="",
                 auto_fixable=False,
-                needs_subagent=False,
+                needs_review=False,
                 reason=(
                     f"footnote id [^{fn_id}] is numeric — likely an "
                     f"unconverted draft footnote; rename to a descriptive id"
@@ -312,7 +312,7 @@ def check(
                 before=raw_line,
                 suggested_after="",
                 auto_fixable=False,
-                needs_subagent=False,
+                needs_review=False,
                 reason=(
                     f"footnote reference [^{fn_id}] uses a numeric id — "
                     f"likely an unconverted draft footnote"

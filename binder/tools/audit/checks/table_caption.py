@@ -16,7 +16,7 @@ Rule: book-prose-merged.md section 6 (Visuals & Assets) — Table Formatting
     IMMEDIATELY after the table's last row (no blank line required).
 
 Auto-fixable: NO. Generating a sensible caption needs human judgment.
-We emit `needs_subagent=False, auto_fixable=False` so a human (or editor
+We emit `needs_review=False, auto_fixable=False` so a human (or editor
 agent) must add the caption.
 
 Protected contexts:
@@ -158,7 +158,7 @@ def check(
                         before=header_preview,
                         suggested_after=": **Title**: Description. {#tbl-slug}",
                         auto_fixable=False,
-                        needs_subagent=True,
+                        needs_review=True,
                         reason=(
                             "Pipe table lacks a caption line "
                             "(`: **Title**: Description. {#tbl-...}`)"

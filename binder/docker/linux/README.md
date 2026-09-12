@@ -40,7 +40,7 @@ The container is used in the containerized build workflow:
 
 ```yaml
 container:
-  image: ghcr.io/harvard-edge/cs249r_books/-build:latest
+  image: ghcr.io/harvard-edge/cs249r_book/quarto-build:latest
   options: --user root
 ```
 
@@ -69,7 +69,7 @@ The container build includes 17 comprehensive tests:
 ## Registry
 
 - **Registry**: GitHub Container Registry (ghcr.io)
-- **Image**: `ghcr.io/harvard-edge/cs249r_books/-build`
+- **Image**: `ghcr.io/harvard-edge/cs249r_book/quarto-build`
 - **Tags**: `latest`, `main`, `dev`, branch-specific tags
 - **Size**: ~2-3GB (includes TeX Live, R, Python packages)
 

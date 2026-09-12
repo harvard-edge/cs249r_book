@@ -206,7 +206,7 @@ def check(
                     before=line,
                     suggested_after="",  # No automatic fix; needs review
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     confidence="high",
                     reason=(
                         f"@{slug} has no matching {{#{slug}}} anchor in "

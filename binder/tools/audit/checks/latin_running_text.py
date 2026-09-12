@@ -30,7 +30,7 @@ Not flagged:
 Auto-fixable? Not deterministically. `e.g.` → "for example" is a
 mechanical substitution, BUT the result may need case adjustment
 at sentence start, comma handling, and surrounding rewording.
-Mark `auto_fixable=False`; `needs_subagent=True`.
+Mark `auto_fixable=False`; `needs_review=True`.
 """
 
 from __future__ import annotations
@@ -196,7 +196,7 @@ def check(
                     before=line,
                     suggested_after=f"Replace {latin!r} with {english!r} (e.g. in running text) or enclose in parentheses",
                     auto_fixable=False,
-                    needs_subagent=True,
+                    needs_review=True,
                     reason=f"{latin!r} in running text — prefer {english!r}",
                 )
             )

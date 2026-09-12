@@ -1,4 +1,5 @@
 import math
+import os
 
 def generate_ray_frustum():
     svg_width = 1000
@@ -135,7 +136,7 @@ def generate_ray_frustum():
 
     svg += '</svg>\n'
 
-    with open('/Users/VJ/GitHub/MLSysBook-vol4-physical/books/vol4/08_perception/images/svg/fig08_ray_frustum_voxel_lifting.svg', 'w') as f:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg', 'fig08_ray_frustum_voxel_lifting.svg'), 'w') as f:
         f.write(svg)
 
 if __name__ == "__main__":

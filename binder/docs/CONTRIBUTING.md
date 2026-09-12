@@ -100,7 +100,7 @@ Please make sure that your changes are consistent with the style of the existing
 Stage files explicitly (do not use `git add .`):
 
 ```bash
-git add books/vol1/introduction/introduction.qmd
+git add books/vol1/01_introduction/01_introduction.qmd
 git add books/vol1/introduction/images/svg/new-figure.svg
 git commit -m "Fix caption formatting in introduction chapter (issue #14)"
 ```

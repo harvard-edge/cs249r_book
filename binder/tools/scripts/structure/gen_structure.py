@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate books/shared/STRUCTURE.md from the per-volume Quarto PDF configs.
 
-The PDF config is the canonical chapter order (see CLAUDE.md, "Chapter order is
+The PDF config is the canonical chapter order ("Chapter order is
 canonical"). This script derives the reading order from it so the manifest can
 never disagree with what actually builds. Never hand-edit STRUCTURE.md.
 
@@ -70,7 +70,7 @@ def render() -> str:
         "",
         "Chapter order is derived from each volume's Quarto PDF config",
         "(`books/config/_quarto-pdf-<vol>.yml`), which is the canonical",
-        "reading order. This file is the human- and agent-readable view of that order.",
+        "reading order. This file is a readable summary of that order.",
         "",
         "## Shared skeleton",
         "",

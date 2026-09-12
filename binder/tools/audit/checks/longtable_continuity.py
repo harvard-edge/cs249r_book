@@ -34,7 +34,7 @@ default behavior is to apply `longtable` to any table inside a
 attribute that exceed the page-length heuristic are the defect class.
 
 Auto-fixable: NO. The fix requires deciding column widths and rewriting
-the caption attribute list. We emit `needs_subagent=False,
+the caption attribute list. We emit `needs_review=False,
 auto_fixable=False` so a human (or editor agent) makes the call.
 
 Confidence: medium. A 25-row pipe table is *likely* to overflow a
@@ -241,7 +241,7 @@ def check(
                         before=preview,
                         suggested_after=suggested_after,
                         auto_fixable=False,
-                        needs_subagent=False,
+                        needs_review=False,
                         confidence="medium",
                         reason=(
                             f"Long pipe table at line {table_start + 1}: "
@@ -293,7 +293,7 @@ def check(
                                 "repeats header rows."
                             ),
                             auto_fixable=False,
-                            needs_subagent=False,
+                            needs_review=False,
                             confidence="medium",
                             reason=(
                                 f"HTML <table> at line {html_start + 1} has "

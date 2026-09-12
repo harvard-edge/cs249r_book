@@ -548,7 +548,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">💼</td>
       <td><b>Improve assessment or career-readiness content</b></td>
-      <td><a href="staffml/README.md">StaffML guide</a> · <a href="binder/tools/scripts/genai/quiz_refresh/README.md">quiz refresh guide</a></td>
+      <td><a href="staffml/README.md">StaffML guide</a> · <a href="binder/tools/scripts/quizzes/README.md">quiz generation guide</a></td>
     </tr>
     <tr>
       <td align="center">🧠</td>

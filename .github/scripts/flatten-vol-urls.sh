@@ -18,6 +18,9 @@
 # Both legacy URL trees keep working as static redirects to the clean pages:
 #   /vol{N}/contents/vol{N}/...  the published form before URLs were flattened
 #   /vol{N}/vol{N}/...           the unflattened render layout
+# Chapter folders carry a two-digit order prefix (08_training). The unprefixed
+# chapter URL (/vol{N}/training/training.html, in all three trees) redirects to
+# the numbered page, so links published before that rename keep working.
 #
 # The script fails if the site has no vol{N}/ tree to flatten, and it fails
 # before deployment if any generated link still targets a redirect tree.
@@ -205,6 +208,33 @@ for tree in (vol, f"contents/{vol}"):
         stubs += 1
 print(f"  Wrote {stubs} redirect pages under {vol}/ and contents/{vol}/.")
 
+# 4b. Chapter folders carry a two-digit reading-order prefix
+#     (08_training/08_training.html). Links published before that rename use the
+#     unprefixed name, so the unprefixed form in all three trees redirects to
+#     the numbered clean page.
+CHAPTER_PREFIX = re.compile(r"^\d{2}_(.+)$")
+alias_roots: set[str] = set()
+unprefixed = 0
+for rel in legacy_pages:
+    parts = rel.split("/")
+    m = CHAPTER_PREFIX.match(parts[0])
+    if not m:
+        continue
+    bare = m.group(1)
+    tail = [f"{bare}.html" if p == f"{parts[0]}.html" else p for p in parts[1:]]
+    alias_rel = "/".join([bare, *tail])
+    alias_roots.add(f"{bare}/")
+    for tree in ("", vol, f"contents/{vol}"):
+        alias_path = f"{tree}/{alias_rel}" if tree else alias_rel
+        alias = site / alias_path
+        if alias.exists():
+            continue
+        target_url = posixpath.relpath(rel, posixpath.dirname(alias_path))
+        alias.parent.mkdir(parents=True, exist_ok=True)
+        alias.write_text(redirect_page(quote(target_url, safe="/#?=&.")), encoding="utf-8")
+        unprefixed += 1
+print(f"  Wrote {unprefixed} redirect pages for unprefixed chapter URLs.")
+
 # 5. Fail before deployment if any page still links into a redirect tree.
 failures: list[str] = []
 for page in sorted(site.rglob("*.html")):
@@ -222,7 +252,11 @@ for page in sorted(site.rglob("*.html")):
                 continue
             path, _ = split_url(url)
             target = site_target(page_dir, path) if path else None
-            if target is not None and (target == vol or target.startswith(STUB_ROOTS)):
+            if target is not None and (
+                target == vol
+                or target.startswith(STUB_ROOTS)
+                or any(target.startswith(root) for root in alias_roots)
+            ):
                 failures.append(f"{rel}:{line_no}: {url}")
 if failures:
     print(f"error: {len(failures)} link(s) still target the {vol}/ redirect trees:", file=sys.stderr)

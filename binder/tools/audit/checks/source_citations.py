@@ -132,7 +132,7 @@ def check(
                     col=m.start(),
                     before=line,
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason="Source note is wrapped in asterisks",
                 )
             )
@@ -152,7 +152,7 @@ def check(
                     col=lower.start(),
                     before=line,
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason="Use capitalized 'Source:'",
                 )
             )
@@ -179,7 +179,7 @@ def check(
                     col=start,
                     before=line,
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason="Source note should end with a period",
                 )
             )
@@ -198,7 +198,7 @@ def check(
                     col=start,
                     before=line,
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason="Source note contains a double period",
                 )
             )
@@ -218,7 +218,7 @@ def check(
                     col=start + (m.start() if m else 0),
                     before=line,
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason="Academic source should use bracketed citation syntax",
                 )
             )
@@ -238,7 +238,7 @@ def check(
                     col=start + (m.start() if m else 0),
                     before=line,
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason="Source note has extra citation brackets",
                 )
             )

@@ -7,7 +7,7 @@ Auto-fixable: NO. The fix depends on whether the source value was a binary
 or decimal quantity. A GiB -> GB conversion changes the number by ~7%. The
 correct fix requires either re-reading the spec source or leaving the
 value as-is and just changing the unit label (which produces a slightly
-incorrect number). We emit as 'needs_subagent=False, auto_fixable=False'
+incorrect number). We emit as 'needs_review=False, auto_fixable=False'
 so the operator has to hand-review each case.
 
 Protected contexts: code fences, YAML, math, HTML comments, inline code,
@@ -74,7 +74,7 @@ def check(
                     before=line,
                     suggested_after="",  # No automatic fix; needs review
                     auto_fixable=False,
-                    needs_subagent=False,  # Needs human judgment, not subagent
+                    needs_review=False,  # Needs human judgment, not subagent
                     reason=f"{unit} in body prose (needs manual review)",
                 )
             )

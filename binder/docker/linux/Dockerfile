@@ -24,9 +24,9 @@ COPY binder/tools/dependencies/requirements.txt /tmp/requirements.txt
 COPY binder/tools/dependencies/install_packages.R /tmp/install_packages.R
 COPY binder/tools/dependencies/required_r_packages.R /tmp/required_r_packages.R
 COPY binder/tools/dependencies/tl_packages /tmp/tl_packages
-COPY book/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
-COPY book/docker/linux/install-texlive-base.sh /opt/install-texlive-base.sh
-COPY book/docker/linux/install-tl-collections.sh /opt/install-tl-collections.sh
+COPY binder/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
+COPY binder/docker/linux/install-texlive-base.sh /opt/install-texlive-base.sh
+COPY binder/docker/linux/install-tl-collections.sh /opt/install-tl-collections.sh
 
 # Note: Python packages are installed later in Phase 10
 
@@ -348,7 +348,7 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     echo "Running R setup script with the following files:" && \
     echo "  - /tmp/install_packages.R (from binder/tools/dependencies/install_packages.R)" && \
     echo "  - /tmp/required_r_packages.R (from binder/tools/dependencies/required_r_packages.R)" && \
-    echo "  - /tmp/verify_r_packages.R (from book/docker/linux/verify_r_packages.R)" && \
+    echo "  - /tmp/verify_r_packages.R (from binder/docker/linux/verify_r_packages.R)" && \
     \
     echo "📦 Installing R packages..." && \
     Rscript /tmp/install_packages.R && \

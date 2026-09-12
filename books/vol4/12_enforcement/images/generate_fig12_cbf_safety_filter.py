@@ -177,8 +177,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" 
 </svg>
 """
 
-os.makedirs('/Users/VJ/GitHub/MLSysBook/books/vol4/12_enforcement/images/svg', exist_ok=True)
-with open('/Users/VJ/GitHub/MLSysBook/books/vol4/12_enforcement/images/svg/fig12_cbf_safety_filter.svg', 'w') as f:
+os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg'), exist_ok=True)
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'svg', 'fig12_cbf_safety_filter.svg'), 'w') as f:
     f.write(svg_content)
 
 print("fig12_cbf_safety_filter.svg generated")

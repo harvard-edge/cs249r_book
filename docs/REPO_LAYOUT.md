@@ -50,10 +50,10 @@ codespell, and lint settings), and `.pre-commit-config.yaml`.
 ```
 books/
   vol1/ … vol4/       one directory per volume and one subdirectory per chapter
-                      (vol1/introduction/introduction.qmd), plus parts/
+                      (vol1/01_introduction/01_introduction.qmd), plus parts/
   shared/             material more than one volume uses
     frontmatter/  backmatter/  _partials/  assets/  tex/  filters/
-    scripts/  publish/  audits/  calc/
+    scripts/  publish/  calc/
   config/             _quarto-{html,pdf,epub}-vol{1..4}.yml and shared YAML fragments
   _extensions/        Quarto extensions (they must sit at the project root)
   index-vol1.qmd …    per-volume landing pages
@@ -76,7 +76,7 @@ binder/
   tests/              toolchain tests
   docker/             Linux and Windows build containers
   docs/               toolchain documentation
-  config/  .layout/  vscode-ext/
+  config/  vscode-ext/
   postBuild  requirements.txt
 ```
 
@@ -106,7 +106,7 @@ The September 2026 reorganization moved every area to the home above:
 
 | Before | After |
 |---|---|
-| `publishing/quarto/contents/vol{1..4}/` | `books/vol{1..4}/` (the old `books/` copy was retired; see `docs/BOOKS_MIRROR_RETIREMENT.md`) |
+| `publishing/quarto/contents/vol{1..4}/` | `books/vol{1..4}/` (the old `books/` copy was retired) |
 | `publishing/`, reached as `book/` and `./binder` | `binder/`, run as `./binder/binder` |
 | `.binder/` | `binder/postBuild`, `binder/requirements.txt` |
 | `interviews/staffml`, `interviews/vault*`, `interviews/staffml-vault-{worker,types}` | `staffml/app`, `staffml/vault*`, `staffml/vault-{worker,types}` |

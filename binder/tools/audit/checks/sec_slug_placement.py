@@ -27,7 +27,7 @@ This check detects the broken placement and suggests two safe fixes:
 Auto-fixable: NO. The fix involves either relocating the slug to a heading
 that may or may not exist or deciding whether the cross-reference itself
 should be removed — both require human judgment. Every issue is emitted as
-needs_subagent=False (manual review) with a suggested_after that the
+needs_review=False (manual review) with a suggested_after that the
 operator can copy verbatim if (1) applies.
 
 Protected contexts this check honors:
@@ -229,7 +229,7 @@ def check(
                 before=line,
                 suggested_after=suggested,
                 auto_fixable=False,
-                needs_subagent=False,
+                needs_review=False,
                 confidence=confidence,
                 reason=reason,
             )

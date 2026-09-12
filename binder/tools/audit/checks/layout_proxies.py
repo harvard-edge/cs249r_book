@@ -282,7 +282,7 @@ def check(
                     before=line.rstrip(),
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason=(
                         f"Heading at line {line_num} has no body prose "
                         f"before next heading at line {next_heading_line} "
@@ -313,7 +313,7 @@ def check(
                     before=line.rstrip(),
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason=(
                         f"Heading at line {line_num} followed by only "
                         f"{body_count} body line(s) before next heading "
@@ -367,7 +367,7 @@ def check(
                         before=line.rstrip()[:140],
                         suggested_after="",
                         auto_fixable=False,
-                        needs_subagent=False,
+                        needs_review=False,
                         reason=(
                             f"Figure div `{fig_id}` has no `fig-cap=` "
                             "attribute — Quarto will render it without "
@@ -427,7 +427,7 @@ def check(
                         before=line.rstrip()[:140],
                         suggested_after="",
                         auto_fixable=False,
-                        needs_subagent=False,
+                        needs_review=False,
                         reason=(
                             f"Callout `.callout-{callout_type}` at line "
                             f"{line_num} has {body_lines} body line(s) "

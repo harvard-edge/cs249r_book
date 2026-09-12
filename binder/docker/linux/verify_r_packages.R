@@ -15,7 +15,7 @@ script_dir <- if (length(fa)) {
 } else {
   "."
 }
-# Docker: /tmp; local: repo locations (verify lives under book/docker/linux/)
+# Docker: /tmp; local: repo locations (verify lives under binder/docker/linux/)
 candidates <- c(
   if (file.exists("/tmp/required_r_packages.R")) "/tmp/required_r_packages.R" else NULL,
   file.path(script_dir, "required_r_packages.R"),

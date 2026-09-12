@@ -72,12 +72,12 @@ class Issue:
       col              - column offset on the line (0-indexed)
       suggested_after  - what the fixer should replace `before` with
       rule_text        - short excerpt of the rule for readability
-      reason           - free-text explanation, esp. for needs_subagent
+      reason           - free-text explanation, esp. for needs_review
       confidence       - "high" | "medium" | "low" - subagent output field
 
     Lane routing (scanner must set at least one):
       auto_fixable     - script lane can handle this deterministically
-      needs_subagent   - requires per-chapter judgment review
+      needs_review   - requires per-chapter judgment review
       protected_context - marked accepted, never touch (e.g. inside index)
 
     Lifecycle (fixer / verifier / orchestrator update):
@@ -104,7 +104,7 @@ class Issue:
 
     # Lane routing
     auto_fixable: bool = False
-    needs_subagent: bool = False
+    needs_review: bool = False
     protected_context: Optional[str] = None  # name of the protection if accepted
 
     # Lifecycle

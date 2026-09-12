@@ -113,6 +113,37 @@ def test_legacy_urls_redirect_to_clean_pages(tmp_path: Path) -> None:
     assert 'url=../../"' in home
 
 
+def test_unprefixed_chapter_urls_redirect_to_numbered_pages(tmp_path: Path) -> None:
+    """Chapter folders gained a two-digit order prefix; the old URLs must still work."""
+    site = tmp_path / "vol1-site"
+    write(site / "index.html", '<a href="./vol1/08_training/08_training.html#sec-x">Training</a>')
+    write(site / "vol1" / "08_training" / "08_training.html", '<a href="../../vol1/index.qmd">Home</a>')
+    write(site / "vol1" / "index.html", "<p>sidebar home</p>")
+    result = run(site)
+    assert result.returncode == 0, result.stderr
+
+    assert (site / "08_training" / "08_training.html").exists()
+    for alias, up in (
+        ("training/training.html", "../"),
+        ("vol1/training/training.html", "../../"),
+        ("contents/vol1/training/training.html", "../../../"),
+    ):
+        stub = (site / alias).read_text(encoding="utf-8")
+        assert f'http-equiv="refresh" content="0; url={up}08_training/08_training.html"' in stub
+
+    assert run(site).returncode == 0
+
+
+def test_link_into_unprefixed_alias_fails(tmp_path: Path) -> None:
+    """A generated page must link to the numbered chapter, not its redirect alias."""
+    site = tmp_path / "vol1-site"
+    write(site / "vol1" / "08_training" / "08_training.html", "<p>chapter</p>")
+    write(site / "vol1" / "index.html", '<a href="../training/training.html">stale</a>')
+    result = run(site)
+    assert result.returncode != 0
+    assert "redirect trees" in result.stderr
+
+
 def test_rerun_is_a_no_op(tmp_path: Path) -> None:
     site = tmp_path / "vol1-site"
     build_site(site)
