@@ -44,7 +44,14 @@ $$ {#eq-autoregressive-factorization}
 
 where $\boldsymbol{\theta}$ denotes the full parameter tensor of the model and each conditional is computed by one complete forward pass through the network. The irreducible unit of computation is therefore the single-step forward pass that maps a context of $t-1$ previously generated tokens to a probability distribution over the vocabulary $\mathcal{V}$. This step — hereafter the *autoregressive step* — is atomic in the systems sense: it cannot be decomposed into independently schedulable sub-operations without violating the sequential dependency structure imposed by @eq-autoregressive-factorization. No token $y_t$ can begin embedding until $y_{t-1}$ has been sampled from the preceding distribution; no layer $\ell+1$ can begin execution until layer $\ell$ has completed its residual update. The autoregressive step therefore imposes a strict serialization barrier that distinguishes agentic inference from embarrassingly parallel batch workloads.
 
-The forward pass decomposes into three stages executed for each of $L$ transformer layers: token embedding and positional encoding, multi-head attention over the accumulated key-value context, and the position-wise feed-forward sublayer. Each stage has a distinct arithmetic intensity and, consequently, a distinct performance-limiting resource.
+To a systems architect, this atomic step represents a direct neural analog of the classic CPU **Instruction Fetch-Decode-Execute-Writeback cycle**, augmented with stochastic branching:
+
+1. **Instruction Fetch (IF)**: The runtime retrieves the prompt history and fetches the previously emitted token $y_{t-1}$ from the active context token buffer.
+2. **Neural Decode (ID)**: The activation vector propagates through the $L$-layer transformer stack. The attention and feed-forward sublayers decode the context history into a dense representation $\mathbf{h}_L$, projecting the unnormalized logit score vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ over the discrete action space.
+3. **Execute and Stochastic Branch (EX)**: Rather than following a deterministic opcode, the execution unit applies sampling operators (temperature scaling, top-$p$, or grammar-derived logit masks) to evaluate the probability simplex and stochastically select the next token $y_t$.
+4. **Writeback and Commit (WB)**: The newly sampled token $y_t$ is appended to the context buffer, its key and value projections are committed to the key-value (KV) cache in high-bandwidth memory (HBM), and the program counter in the Agent Control Block advances ($t \leftarrow t + 1$).
+
+Under the hood, this forward pass decomposes into three primary computational stages: token embedding and positional encoding at the input, $L$ repeating transformer layers (each executing multi-head attention and a position-wise feed-forward network), and the final vocabulary projection. Each stage exhibits a distinct arithmetic intensity and, consequently, a distinct hardware bottleneck.
 
 ### Token embedding and positional encoding
 
@@ -54,7 +61,7 @@ $$
 \mathbf{h}_0 = \mathbf{E}[y_{t-1}] + \mathbf{p}_{t-1},
 $$ {#eq-embedding-lookup}
 
-In @eq-embedding-lookup, $\mathbf{p}_{t-1} \in \mathbb{R}^{d_{\text{model}}}$ is the positional encoding for position $t-1$ and $d_{\text{model}}$ is the model dimension. For a vocabulary of $|\mathcal{V}| = 128{,}000$ tokens and $d_{\text{model}} = 8192$, the embedding matrix alone occupies $128{,}000 \times 8192 \times 2 \approx 2.0\,\text{GB}$ in BF16 precision. The operation is a single row extraction: its arithmetic intensity is identically 0 FLOPs per byte, making it unconditionally memory-bound. It is also instantaneous relative to the cost of subsequent layers, but it must reside in high-bandwidth memory (HBM) to avoid catastrophic access latency; a miss to system DRAM over a PCIe 4.0 x16 link would incur approximately 10–20 µs of additional per-step latency, compounding to seconds across a multi-thousand-step generation.
+In @eq-embedding-lookup, $\mathbf{p}_{t-1} \in \mathbb{R}^{d_{\text{model}}}$ is the positional encoding for position $t-1$ and $d_{\text{model}}$ is the model dimension. For a vocabulary of $|\mathcal{V}| = 128{,}000$ tokens and $d_{\text{model}} = 8192$, the embedding matrix alone occupies $128{,}000 \times 8192 \times 2 \approx 2.0\,\text{GB}$ in BF16 precision. The operation is a single row extraction: its arithmetic intensity is identically 0 FLOPs per byte, making it unconditionally memory-bound. It is also instantaneous relative to the cost of subsequent layers, but it must reside in HBM to avoid catastrophic access latency; a miss to system DRAM over a PCIe 4.0 x16 link would incur approximately 10–20 µs of additional per-step latency, compounding to seconds across a multi-thousand-step generation.
 
 ### Multi-head attention and the key-value cache
 
@@ -183,7 +190,9 @@ $$
 H_{\text{path}} = \sum_{t=1}^{L} H_t(\tau)
 $$ {#eq-path-entropy}
 
-In @eq-path-entropy, assuming conditional independence of per-step entropies (an approximation that holds when the KV cache is deterministic and the sampling procedure is memoryless). A 512-token agentic action sequence at $\tau = 0.7$ over a 128K vocabulary typically yields $H_{\text{path}} \approx 2{,}000$–$4{,}000$ nats, implying an astronomically large space of valid completions. Reducing $\tau$ to $0.3$ compresses this to $\approx 400$–$800$ nats but does not eliminate non-determinism — it merely concentrates probability onto a smaller manifold of high-likelihood sequences.
+In @eq-path-entropy, assuming conditional independence of per-step entropies (an approximation that holds when the KV cache is deterministic and the sampling procedure is memoryless).
+
+To understand this from a systems branching perspective, note that an entropy of $H_t$ nats corresponds to an *effective branching factor* of $b_{\text{eff}}(t) = \exp(H_t)$ candidate tokens at each instruction step. Over an $L$-step action generation, the volume of reachable execution traces scales as $\prod_{t=1}^L b_{\text{eff}}(t) = \exp(H_{\text{path}})$. Even in a narrow distribution where $H_t \approx 1.39$ nats (an effective 4-way branch per token), a short 64-token action sequence generates $4^{64} \approx 3.4 \times 10^{38}$ potential paths. At $\tau = 0.7$, where $H_{\text{path}} \approx 2{,}000$ nats, the reachable path space is $\exp(2000) \approx 10^{868}$ — an impossibly large manifold. Lowering temperature to $\tau = 0.3$ compresses path entropy to $\approx 400$–$800$ nats, but $\exp(400) \approx 10^{173}$ remains astronomically vast. Temperature concentrates probability onto a smaller manifold of high-likelihood sequences, but it cannot enforce deterministic execution on its own.
 
 ### Truncated sampling: Top-$p$ and min-$p$
 
@@ -215,13 +224,15 @@ $$
 Z = \bigoplus_{k=1}^{K} s_k
 $$ {#eq-reduction}
 
-where $\oplus$ denotes floating-point addition, which satisfies $(a \oplus b) \oplus c \neq a \oplus (b \oplus c)$ in general due to rounding at each operation. The error magnitude is bounded by @eq-fp-error:
+where $\oplus$ denotes floating-point addition, which satisfies $(a \oplus b) \oplus c \neq a \oplus (b \oplus c)$ in general due to rounding at each operation. On parallel hardware, this summation executes across a tree of depth $D = \lceil \log_2 K \rceil$ warps and thread blocks. Because thread blocks are scheduled dynamically based on Streaming Multiprocessor (SM) availability, the exact pairing order in which partial sums meet varies across separate kernel launches. The theoretical worst-case error bound for recursive floating-point summation is given by @eq-fp-error:
 
 $$
 |Z - Z_{\text{exact}}| \leq (K-1) \cdot \epsilon_{\text{mach}} \cdot Z_{\text{exact}}
 $$ {#eq-fp-error}
 
-where $\epsilon_{\text{mach}} \approx 1.19 \times 10^{-7}$ for float32 and $\approx 1.22 \times 10^{-4}$ for bfloat16. For $K = 8{,}000$ threads and bfloat16 arithmetic (the dominant precision in contemporary inference kernels), the relative error can reach $\approx 10^{-3}$ — sufficient to produce rank inversions between closely scored tokens when $|z_v - z_{v'}| \lesssim 10^{-2}$.
+where $\epsilon_{\text{mach}} \approx 1.19 \times 10^{-7}$ for float32 and $\approx 1.22 \times 10^{-4}$ for bfloat16.[^reduction-depth] Even though tree reductions achieve an average-case error scaling closer to $\mathcal{O}(\sqrt{\log_2 K} \cdot \epsilon_{\text{mach}})$, the wide dynamic range of exponentials $\exp(z_v / \tau)$ across 128,000 vocabulary entries means that minor variations in intermediate sums frequently introduce relative errors on the order of $10^{-3}$ in bfloat16. When two top candidate tokens have logits separated by $|z_v - z_{v'}| \lesssim 10^{-2}$, this ULP-level numerical jitter alters their normalized probabilities and flips the argmax or sampling threshold.
+
+[^reduction-depth]: In balanced parallel tree reductions, the accumulated roundoff error along the tree depth scales as $\mathcal{O}(\log_2 K \cdot \epsilon_{\text{mach}})$; see @sec-vol3-appendix-math for formal numerical stability proofs under finite-precision arithmetic.
 
 ::: {.callout-warning title="Non-determinism at the hardware level"}
 Operators building agentic pipelines must treat token sampling as a fundamentally non-reproducible operation under the following conditions: (1) bfloat16 or float16 inference, (2) multi-GPU tensor parallelism, (3) differing batch padding between calls, or (4) driver-level CUDA graph replay with nondeterministic kernels enabled. Setting a fixed random seed guarantees reproducibility only within a single process, single-device, single-batch-size execution — a constraint that production systems virtually never satisfy. Design systems to be tolerant of output variation, not dependent on its absence.
@@ -259,7 +270,9 @@ A context-free grammar (CFG) $\mathcal{G} = (\Sigma, V, R, S)$ consists of a ter
 
 The central systems insight is that CFG membership can be checked *incrementally*, one token at a time, without buffering a complete output string. If the parser maintains its state after consuming each prefix $t_1 t_2 \ldots t_k$, it can compute, before sampling token $t_{k+1}$, the exact set of tokens that would leave the prefix extensible to a valid complete string. This set is the *valid continuation set* $\mathcal{V}_k \subseteq \mathcal{T}$. Any token outside $\mathcal{V}_k$ would make the prefix a dead end—no suffix exists that would close all open nonterminals and satisfy $\mathcal{G}$. Enforcing $t_{k+1} \in \mathcal{V}_k$ is both necessary and sufficient for the output to remain on a path to grammatical validity.
 
-The theoretical justification rests on the equivalence between CFGs and pushdown automata (PDAs). A PDA $\mathcal{A} = (Q, \Sigma, \Gamma, \delta, q_0, Z_0, F)$ adds an unbounded stack $\Gamma$ to a finite state machine, enabling recognition of context-free languages that FSMs alone cannot handle. The stack encodes pending nonterminals: when the PDA matches a terminal symbol against the current input token, it pops the corresponding production from the stack and pushes its right-hand side expansion. The state of the PDA after consuming prefix $t_1 \ldots t_k$ is the pair $(q_k, \gamma_k)$ where $q_k \in Q$ is the control state and $\gamma_k \in \Gamma^*$ is the current stack contents.
+The theoretical foundation rests on the equivalence between context-free grammars and pushdown automata (PDAs). A pushdown automaton augments a finite state machine with a stack, providing the memory needed to match recursive delimiters (such as nested JSON braces, SQL subqueries, or paired parentheses) that a flat state machine cannot track.[^pda-formal] The stack tracks pending nonterminal grammar symbols: when the parser matches a terminal symbol against the emitted token, it pops that production from the stack and pushes its expansion. At step $k$, the parser state is captured by the pair $(q_k, \gamma_k)$, where $q_k$ is the current control state and $\gamma_k$ represents the stack contents.
+
+[^pda-formal]: Formally, a pushdown automaton is specified by the 7-tuple $\mathcal{A} = (Q, \Sigma, \Gamma, \delta, q_0, Z_0, F)$; see @sec-vol3-appendix-math-dfa for the formal automata specification and compilation into GPU bitmasks.
 
 ::: {.callout-note title="Why a pushdown automaton and not a simple FSM"}
 Finite state machines can recognize only regular languages—they lack the memory to match balanced delimiters such as nested JSON objects, paired parentheses in SQL subqueries, or recursive function call arguments. A PDA's stack provides the bounded-but-unbounded memory required to track nesting depth. In practice, maximum stack depth correlates with maximum nesting depth in the grammar; for JSON at nesting depth $d$, the stack contains at most $O(d)$ symbols, which for typical API payloads stays below 32 frames and imposes negligible memory overhead relative to the KV cache.
@@ -289,13 +302,13 @@ $$ {#eq-mask-latency}
 
 where $\tau_{\text{lookup}} \approx 50$–$200$ ns for an L2/L3 cache hit on the transition table, $\tau_{\text{transfer}} \approx 18$–$100$ ns for NVLink or PCIe transfer of the 16 KB mask, and $\tau_{\text{apply}} \approx 50$ $\mu$s for the GPU vectorized scatter. Total $\tau_{\text{mask}} < 0.2$ ms per step for FSM-backed masking, compared to 1–10 ms for the forward pass itself.
 
-The transition table $T$ has memory footprint $|Q_F| \times |\mathcal{T}| \times 4$ bytes. For a JSON schema with $|Q_F| = 512$ states and $|\mathcal{T}| = 128{,}000$ tokens, this amounts to $512 \times 128{,}000 \times 4 = 262$ MB—well within host DRAM but too large for GPU L2 cache. Implementations therefore maintain the table in pinned host memory and transfer only the active row per decoding step, keeping device memory uncontested for KV cache allocation. For a 70B-parameter model at BF16 precision with sequence length $L = 4{,}096$ and $n_{\text{kv}} = 8$ key-value heads of dimension 128, the KV cache requires the allocation quantified in @eq-kv-cache:
+The transition table $T$ has memory footprint $|Q_F| \times |\mathcal{T}| \times 4$ bytes. For a JSON schema with $|Q_F| = 512$ states and $|\mathcal{T}| = 128{,}000$ tokens, this amounts to $512 \times 128{,}000 \times 4 = 262$ MB—well within host DRAM but too large for GPU L2 cache. Implementations therefore maintain the table in pinned host memory and transfer only the active row per decoding step, keeping device memory uncontested for KV cache allocation. For a 70B-parameter model at BF16 precision across $N_{\text{layers}} = 80$ transformer layers with sequence length $S = 4{,}096$ and $n_{\text{kv}} = 8$ grouped-query key-value heads of dimension $d_{\text{head}} = 128$, the KV cache requires the allocation quantified in @eq-kv-cache:
 
 $$
-M_{\text{KV}} = 2 \times L \times n_{\text{kv}} \times d_{\text{head}} \times 2 \; \text{bytes} = 2 \times 4096 \times 8 \times 128 \times 2 = 16.8 \; \text{MB}
+M_{\text{KV}} = 2 \cdot N_{\text{layers}} \cdot n_{\text{kv}} \cdot d_{\text{head}} \cdot S \cdot b_{\text{elem}} = 2 \times 80 \times 8 \times 128 \times 4096 \times 2 \approx 1.34 \; \text{GB}
 $$ {#eq-kv-cache}
 
-The 16 KB mask transfer per step is four orders of magnitude smaller than the KV cache footprint and does not compete for HBM bandwidth, which on the H100 peaks at 3.35 TB/s.
+amounting to $16.8\text{ MB}$ per layer. The 16 KB mask transfer per step is five orders of magnitude smaller than the active KV cache footprint and does not compete for HBM bandwidth, which on the H100 peaks at 3.35 TB/s.
 
 ### Vocabulary tokenization misalignment and the boundary artifact
 
@@ -333,7 +346,7 @@ $$
 \forall p \in \mathcal{P}: \quad w(p) \cdot x(p) = 0
 $$ {#eq-wx-invariant}
 
-where $w(p) = 1$ indicates the page is writable and $x(p) = 1$ indicates it is executable. @Eq-wx-invariant is enforced by the memory management unit (MMU) on every memory access at a hardware cost of approximately 1–2 additional bits per page-table entry. Violating the invariant raises a protection fault before any instruction in the writable page executes. The hardware does not ask the operating system for permission on each access; it enforces the invariant unconditionally, in silicon.
+where $w(p) = 1$ indicates the page is writable and $x(p) = 1$ indicates it is executable. The invariant in @eq-wx-invariant is enforced by the memory management unit (MMU) on every memory access at a hardware cost of approximately 1–2 additional bits per page-table entry. Violating the invariant raises a protection fault before any instruction in the writable page executes. The hardware does not ask the operating system for permission on each access; it enforces the invariant unconditionally, in silicon.
 
 The x86-64 architecture implements this through the NX bit (bit 63 of each page-table entry), introduced in AMD64 and later adopted by Intel as XD (Execute Disable). ARM implements the equivalent via the XN and PXN bits in the VMSA page descriptor. The Linux kernel enforces $W \oplus X$ system-wide through the `PROT_WRITE` and `PROT_EXEC` flags passed to `mmap(2)` and `mprotect(2)`, which map directly onto the hardware permission bits.
 
@@ -413,21 +426,29 @@ $$
 \alpha_k = \min\!\left(1,\, \frac{p_k}{q_k}\right)
 $$ {#eq-speculative-acceptance}
 
-where $\alpha_k \in (0, 1]$ is the per-token acceptance probability. This rule preserves the invariant that the output distribution is identical to that of the target model $M_p$, verified via a coupling argument: if $\tilde{x}_k$ is rejected, a correction token is sampled from the residual distribution $\text{norm}(\max(0, p(\cdot) - q(\cdot)))$, and decoding halts for the current speculation window. The expected number of accepted tokens per verification round is:
+where $\alpha_k \in (0, 1]$ is the per-token acceptance probability. This rule guarantees that the sampled output distribution remains provably identical to that of the target model $M_p$.[^coupling-spec] If draft token $\tilde{x}_k$ is rejected, a replacement token is sampled from the normalized residual distribution $\text{norm}(\max(0, p(\cdot) - q(\cdot)))$, and speculation halts for the current round.
+
+[^coupling-spec]: The exact equivalence between speculative decoding and autoregressive sampling from the target model is established via a coupling argument on probability spaces [@leviathan2023fast; @chen2023accelerating]; see @sec-vol3-appendix-math for formal proofs of distribution preservation.
+
+Because candidate token $k$ is evaluated only if all preceding $k-1$ draft tokens were accepted, the probability of accepting at least $k$ draft tokens is $\alpha^k$, where $\alpha = \mathbb{E}[\alpha_k]$ is the mean per-token acceptance rate. The expected number of accepted *draft* tokens is given by @eq-expected-accepted:
 
 $$
-\mathbb{E}[\tau] = \frac{1 - \alpha^K}{1 - \alpha}
+\mathbb{E}[\tau_{\text{draft}}] = \sum_{k=1}^{K} \alpha^k = \frac{\alpha (1 - \alpha^K)}{1 - \alpha}
 $$ {#eq-expected-accepted}
 
-where $\alpha = \mathbb{E}[\alpha_k]$ denotes the mean per-token acceptance probability under the empirical token distribution of the workload, and $\tau$ is the number of tokens accepted before the first rejection or window exhaustion. This closed-form follows from the geometric series for a process where each token is accepted independently with probability $\alpha$, a simplification that holds when token-level acceptance events are approximately uncorrelated—an assumption examined critically in this section.
-
-The wall-clock speedup factor $\rho$ relative to autoregressive decoding is:
+In every verification round, the target model unconditionally emits one final token: either a correction token upon the first rejection, or a fresh continuation token if all $K$ draft tokens were accepted. The total expected number of verified tokens produced per round is therefore given by @eq-expected-total-tokens:
 
 $$
-\rho = \frac{\mathbb{E}[\tau] + 1}{c \cdot K + 1}
+\mathbb{E}[N_{\text{total}}] = 1 + \mathbb{E}[\tau_{\text{draft}}] = 1 + \frac{\alpha (1 - \alpha^K)}{1 - \alpha} = \frac{1 - \alpha^{K+1}}{1 - \alpha}
+$$ {#eq-expected-total-tokens}
+
+When no draft tokens are accepted ($\alpha = 0$), $\mathbb{E}[N_{\text{total}}] = 1$, recovering the baseline autoregressive step. The wall-clock speedup factor $\rho$ relative to standard autoregressive decoding is:
+
+$$
+\rho = \frac{\mathbb{E}[N_{\text{total}}] \cdot T_p}{K \cdot T_q + T_p} = \frac{1 + \mathbb{E}[\tau_{\text{draft}}]}{c \cdot K + 1}
 $$ {#eq-speedup-factor}
 
-where $c = T_q / T_p$ is the ratio of draft to target model wall-clock forward-pass latency, and the $+1$ terms account for the mandatory target verification pass and the correction token respectively. For $\rho > 1$, the requirement is $\mathbb{E}[\tau] > c \cdot K$, which bounds the permissible draft model size: a draft model that is ten times faster than the target ($c = 0.1$) with a speculation window of $K = 8$ must achieve $\mathbb{E}[\tau] > 0.8$, implying from @eq-expected-accepted an acceptance rate $\alpha \gtrsim 0.64$. In practice, production deployments target $\alpha > 0.8$ to achieve $\rho \approx 2.5$–$3.0\times$ on long-form generation.
+where $c = T_q / T_p$ is the ratio of draft to target model forward-pass latency. For speculation to accelerate serving ($\rho > 1$), the system requires $\mathbb{E}[\tau_{\text{draft}}] > c \cdot K$. For example, if a draft model is ten times faster than the target ($c = 0.1$) with a speculation window of $K = 8$, the threshold is $\mathbb{E}[\tau_{\text{draft}}] > 0.8$ draft tokens, requiring an empirical acceptance rate $\alpha \gtrsim 0.45$. In practice, production deployments target $\alpha > 0.8$ to achieve $\rho \approx 2.5$–$3.0\times$ speedups.
 
 ### Why structured outputs exhibit high acceptance rates
 
@@ -459,12 +480,12 @@ EAGLE [@li2024eagle] advances beyond Medusa by modeling the dependency structure
 
 Agentic workloads impose a qualitatively different load profile than batch text generation. A single agent trajectory consists of interleaved generation and tool-call phases: the model emits a short structured action (32–128 tokens), the runtime executes the tool (latency 50–5,000 ms), and a new generation phase begins with an extended context. This creates a bursty, low-concurrency pattern that is mechanically distinct from the continuous high-concurrency throughput regime assumed by most inference optimization analyses.
 
-Under low concurrency (batch size $B = 1$–$4$), the per-token cost is dominated by the memory bandwidth required to load model weights: for a 70B FP16 model, $70 \times 10^9 \times 2\ \text{bytes} = 140\ \text{GB}$ must traverse HBM per forward pass when $B = 1$ and no weight reuse occurs across the batch. At HBM3 bandwidth of 3.35 TB/s (H100 SXM5), this yields a minimum per-token latency of $140\ \text{GB} / 3.35\ \text{TB/s} \approx 42\ \text{ms}$, which matches empirically observed values for single-batch 70B inference. Speculative decoding with $K = 8$ and $\alpha = 0.85$ raises $\mathbb{E}[\tau] \approx 4.8$ accepted tokens per verification round, amortizing the weight-load cost across $\sim$5 tokens and reducing effective per-token latency to $\approx 8$–$10\ \text{ms}$—a $4\times$–$5\times$ reduction in time-to-first-tool-result.
+Under low concurrency (batch size $B = 1$–$4$), the per-token cost is dominated by the memory bandwidth required to load model weights: for a 70B FP16 model, $70 \times 10^9 \times 2\ \text{bytes} = 140\ \text{GB}$ must traverse HBM per forward pass when $B = 1$ and no weight reuse occurs across the batch. At HBM3 bandwidth of 3.35 TB/s (H100 SXM5), this yields a minimum per-token latency of $140\ \text{GB} / 3.35\ \text{TB/s} \approx 42\ \text{ms}$, which matches empirically observed values for single-batch 70B inference. Speculative decoding with $K = 8$ and $\alpha = 0.85$ achieves $\mathbb{E}[\tau_{\text{draft}}] \approx 4.1$ accepted draft tokens, yielding $\mathbb{E}[N_{\text{total}}] \approx 5.1$ total tokens per verification round. This amortizes the weight-load cost across $\sim$5 tokens and reduces effective per-token latency from $42\ \text{ms}$ to $\approx 8$–$10\ \text{ms}$—a $4\times$–$5\times$ reduction in time-to-first-tool-result.
 
 However, the throughput advantages of speculative decoding degrade under high concurrency. At $B = 64$, the arithmetic intensity of the attention and linear layers rises above the roofline threshold, and the model becomes compute-bound. In this regime, the overhead of processing $K$ draft tokens plus a verification pass consumes arithmetic units that would otherwise serve additional batch members. As derived in @eq-crossover-batch, the crossover batch size $B^*$ above which speculative decoding reduces aggregate throughput can be estimated as:
 
 $$
-B^* \approx \frac{T_p^{\text{mem}}}{T_p^{\text{comp}}} \cdot \frac{\mathbb{E}[\tau] + 1}{K + 1}
+B^* \approx \frac{T_p^{\text{mem}}}{T_p^{\text{comp}}} \cdot \frac{\mathbb{E}[N_{\text{total}}]}{K + 1}
 $$ {#eq-crossover-batch}
 
 where $T_p^{\text{mem}}$ and $T_p^{\text{comp}}$ are the memory-bound and compute-bound per-token latencies of the target model, respectively. For the H100 SXM5 with 3.35 TB/s bandwidth and 989 TFLOPS BF16 throughput, $T_p^{\text{mem}} / T_p^{\text{comp}} \approx 40$ at 70B scale, placing $B^*$ in the range of 16–24 for typical $K = 8$ speculation windows. Serving systems must therefore route single-agent sessions to speculative decoding pipelines and aggregate high-concurrency batch workloads to standard autoregressive pipelines, using dynamic admission control based on the observed request queue depth.
@@ -527,13 +548,19 @@ $$ {#eq-kvcache-example}
 
 exceeding the combined HBM capacity of four H100 SXM5 GPUs ($4 \times 80\;\text{GB} = 320\;\text{GB}$) before a single weight byte is loaded. Serving a single 128K-token context of this model requires at minimum six H100s for the KV cache alone, at a node-level cost exceeding \$300{,}000 in capital equipment.
 
-Beyond capacity, arithmetic intensity degrades quadratically. During the autoregressive decode phase, the attention computation for one new token against a KV cache of length $S$ performs $4 \cdot H \cdot d_h \cdot S$ FLOPs while reading $2 \cdot L \cdot H \cdot d_h \cdot S \cdot 2$ bytes. The resulting arithmetic intensity (@eq-fallacy-attn-intensity) is
+Beyond memory capacity, the memory wall imposes an escalating throughput penalty as context lengthens. During single-request decode, the accelerator must stream both the static model weights and the active KV cache from HBM for every generated token, as quantified by @eq-fallacy-attn-bytes:
 
 $$
-I_{\text{attn}} = \frac{4 H d_h S}{4 L H d_h S} = \frac{1}{L} \;\text{FLOPs/byte}
+B_{\text{total}} = 2 \cdot N_{\text{params}} + 4 \cdot L \cdot H \cdot d_h \cdot S \;\text{bytes}
+$$ {#eq-fallacy-attn-bytes}
+
+For our 70B model at $S = 128{,}000$ tokens, the system must stream $140\text{ GB}$ of weights plus $420\text{ GB}$ of KV cache—a total of $B_{\text{total}} \approx 560\text{ GB}$ of data transferred to compute a single token. Meanwhile, total arithmetic operations scale as $F_{\text{total}} = 2 N_{\text{params}} + 4 L H d_h S \approx 140 \times 10^9 + 335 \times 10^9 = 475\text{ GFLOPs}$. The resulting aggregate arithmetic intensity remains trapped below unit intensity, as formulated in @eq-fallacy-attn-intensity:
+
+$$
+\mathcal{I}_{\text{decode}} = \frac{F_{\text{total}}}{B_{\text{total}}} = \frac{475 \;\text{GFLOPs}}{560 \;\text{GB}} \approx 0.85 \;\text{FLOPs/byte}
 $$ {#eq-fallacy-attn-intensity}
 
-which for $L = 80$ equals $0.0125$ FLOPs/byte—approximately $200\times$ below the arithmetic intensity required to saturate H100 tensor cores at peak. The attention decode phase becomes entirely memory-bandwidth-bound, limited to HBM bandwidth of $3.35$ TB/s on H100 SXM5, yielding a maximum decode throughput of roughly $3.35 \times 10^{12} / (4 \times 80 \times 64 \times 128 \times 4) \approx 320$ tokens/second per GPU for the attention operation alone—before accounting for weight streaming costs.
+which is more than $150\times$ below the H100 tensor core saturation threshold ($\approx 150$–$200$ FLOPs/byte). At an HBM3 bandwidth of $3.35\text{ TB/s}$, streaming $560\text{ GB}$ imposes an irreducible per-token latency of $560 / 3350 \approx 167\text{ ms}$, capping single-stream decode throughput to fewer than 6 tokens per second. Even when partitioned across 8 GPUs via tensor parallelism (where each GPU streams $17.5\text{ GB}$ of weights and $52.5\text{ GB}$ of KV cache), per-token latency is bounded by $70 / 3350 \approx 20.9\text{ ms}$ ($\approx 48$ tokens/second per user)—and the $420\text{ GB}$ KV cache footprint completely exhausts node HBM, eliminating the memory headroom required for concurrent continuous batching.
 
 The reliability failure is subtler and more dangerous than the cost failure. Empirical studies of transformer attention at long contexts document a well-characterized *lost-in-the-middle* phenomenon [@liu2024lost]: for contexts exceeding $32{,}000$ tokens, retrieval accuracy for critical instructions embedded in the middle of the context degrades by 35 to 55 percent relative to instructions placed at the beginning or end. An agent that naively appends full interaction history to maximize context utilization will, past a characteristic length threshold, *reduce* instruction-following reliability while simultaneously increasing per-token cost and latency. The stochastic processor contract is violated not by truncating context, but by failing to architect a retrieval or summarization strategy that maintains semantic fidelity within a reliable attention window.
 
@@ -585,7 +612,7 @@ Robust execution-layer design requires semantic validators: model-graded output 
 
 ## Summary {#sec-vol3-processor-summary}
 
-The central tension of this chapter resolves into a single engineering discipline: a stochastic transformer layer is not a liability to be apologized for but a physical substrate to be characterized, bounded, and contracted against. Temperature scaling, nucleus sampling, and logit-lens probing are not cosmetic controls—they are the tuning knobs that map a probability simplex onto an engineering reliability envelope, much as clock-gating and voltage guardband map a silicon die onto a thermal design point. KV cache sizing, governed by $B \cdot L \cdot 2 \cdot d_{\text{model}} \cdot 2$ bytes per request, couples statistical throughput directly to HBM capacity; at 3.35 TB/s of HBM3e bandwidth and a model arithmetic intensity below the roofline knee, memory pressure—not floating-point throughput—determines whether the stochastic processor can sustain a latency service level agreement (SLA) under load. Quantization and speculative decoding shift the operating point along the roofline, trading representational fidelity and verification overhead for throughput headroom. Reliability emerges not from eliminating randomness but from layering deterministic contracts—input sanitization, output grounding, hallucination rate budgets, constitutional rejection filters—over an inherently probabilistic substrate, so that the aggregate system behaves as a dependable instruction-processing unit even when no individual token draw is guaranteed.
+The central tension of this chapter resolves into a single engineering discipline: a stochastic transformer layer is not a liability to be apologized for but a physical substrate to be characterized, bounded, and contracted against. Temperature scaling, nucleus sampling, and logit-lens probing are not cosmetic controls—they are the tuning knobs that map a probability simplex onto an engineering reliability envelope, much as clock-gating and voltage guardband map a silicon die onto a thermal design point. KV cache sizing, governed by $2 \cdot L \cdot d_{\text{model}} \cdot S \cdot b_{\text{elem}}$ bytes per request, couples statistical throughput directly to HBM capacity; at 3.35 TB/s of HBM3e bandwidth and a model arithmetic intensity below the roofline knee, memory pressure—not floating-point throughput—determines whether the stochastic processor can sustain a latency service level agreement (SLA) under load. Quantization and speculative decoding shift the operating point along the roofline, trading representational fidelity and verification overhead for throughput headroom. Reliability emerges not from eliminating randomness but from layering deterministic contracts—input sanitization, output grounding, hallucination rate budgets, constitutional rejection filters—over an inherently probabilistic substrate, so that the aggregate system behaves as a dependable instruction-processing unit even when no individual token draw is guaranteed.
 
 ::: {.callout-takeaways title="Core systems principles of the stochastic processor contract"}
 
@@ -599,6 +626,6 @@ The central tension of this chapter resolves into a single engineering disciplin
 
 ::: {.callout-chapter-connection title="From the stochastic processor contract to test-time deliberation and search"}
 
-The contracts established in this chapter treat each forward pass as an independent, memoryless transaction: one prompt, one stochastic draw, one output. That framing is sufficient when the task admits a single-shot answer, but it breaks down the moment correctness requires multi-step reasoning, constraint satisfaction, or plans whose validity cannot be verified token-by-token. @Sec-vol3-deliberation extends the processor model into the temporal dimension: rather than accepting the first sample from the output distribution, a deliberating system allocates additional inference compute at test time—through beam search, Monte Carlo tree search, or learned verifier scoring—to identify trajectories that satisfy global correctness criteria the single-pass sampler cannot enforce. The transition is fundamentally a resource-allocation problem: determining the optimal allocation of FLOPs, KV cache capacity, and wall-clock latency to refine candidate trajectories before committing state mutations. The roofline analysis and memory-bandwidth constraints developed in this chapter carry forward unchanged; what changes is the objective—from minimizing per-token latency to maximizing the probability that the committed output satisfies a verifiable task specification.
+The contracts established in this chapter treat each forward pass as an independent, memoryless transaction: one prompt, one stochastic draw, one output. That framing is sufficient when the task admits a single-shot answer, but it breaks down the moment correctness requires multi-step reasoning, constraint satisfaction, or plans whose validity cannot be verified token-by-token. The framework in @sec-vol3-deliberation extends the processor model into the temporal dimension: rather than accepting the first sample from the output distribution, a deliberating system allocates additional inference compute at test time—through beam search, Monte Carlo tree search, or learned verifier scoring—to identify trajectories that satisfy global correctness criteria the single-pass sampler cannot enforce. The transition is fundamentally a resource-allocation problem: determining the optimal allocation of FLOPs, KV cache capacity, and wall-clock latency to refine candidate trajectories before committing state mutations. The roofline analysis and memory-bandwidth constraints developed in this chapter carry forward unchanged; what changes is the objective—from minimizing per-token latency to maximizing the probability that the committed output satisfies a verifiable task specification.
 
 :::

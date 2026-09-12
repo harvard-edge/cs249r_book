@@ -21,11 +21,11 @@ This chapter bridges the gap between accelerator silicon microarchitecture and o
 
 ::: {.callout-learning-objectives}
 - Derive the tokenomic roofline model parameterizing arithmetic intensity ($I$), memory bandwidth ($B_{\text{mem}}$), and compute ceiling ($P_{\text{peak}}$) across prefill and decode execution regimes.
-- Quantify the unit economics of prompt prefill versus autoregressive decode, calculating the Cost-per-Verified-Goal (CPVG) and KV cache memory footprint across multi-turn agent horizons.
+- Quantify the unit economics of prompt prefill versus autoregressive decode, calculating commercial caching discounts, prompt compression ROI, Cost-per-Verified-Goal (CPVG), and KV cache memory footprints across multi-turn agent horizons.
 - Size accelerator serving clusters using queueing theory ($M/M/k$ and $M/G/k$ approximations, Little's Law) to guarantee tail-latency service-level agreements under heavy-tailed agent request arrivals.
 - Architect multi-tier model cascades and speculative routers that optimize the Pareto frontier between task completion accuracy, end-to-end latency, and inference expenditure.
 - Formulate cost-optimal autonomy boundaries using decision-theoretic utility models to identify when to employ autonomous agents versus deterministic heuristics or human-in-the-loop escalation.
-- Implement enterprise economic governance frameworks, including cryptographic capability token budgets, monotonic quota attenuation, and automated financial circuit breakers.
+- Implement enterprise economic governance frameworks, including token leaky bucket rate limiters, cryptographic capability token budgets, monotonic quota attenuation, and automated financial circuit breakers.
 :::
 
 ## The Tokenomic Roofline Model {#sec-vol3-tokenomics-roofline}
@@ -93,6 +93,16 @@ As detailed in @tbl-vol3-tokenomics-single-stream-decode, single-stream decoding
 | Idle Silicon Fraction       |             $0.0\%$ (fully saturated) |                       $99.66\%$ (stalled on bus) | **$99.66\%$** cold silicon     |
 
 : **Single-Stream Autoregressive Decode Efficiency on NVIDIA H100 SXM5**: Severe ALU starvation under batch size $B=1$. {#tbl-vol3-tokenomics-single-stream-decode}
+
+To appreciate the physical reality behind this memory stall, consider the time required to emit a single token on an NVIDIA H100 SXM5 ($B_{\text{mem}} = 3.35\text{ TB/s} = 3,350\text{ GB/s}$). Generating one token from a 70B parameter model in FP16 ($140\text{ GB}$ of weights) requires streaming the entire $140\text{ GB}$ across the memory bus:
+
+$$T_{\text{token}}(B=1) = \frac{140\text{ GB}}{3,350\text{ GB/s}} \approx 0.0418\text{ seconds} = 41.8\text{ ms}$$
+
+This imposes an insurmountable physical speed ceiling for an unbatched stream:
+
+$$\text{Speed}_{\max} = \frac{1 \text{ token}}{0.0418 \text{ s}} \approx 23.9 \text{ tokens/second}$$
+
+Even if the GPU possessed infinite ALUs operating at zero picoseconds of compute latency, single-stream generation could not exceed 24 tokens per second. The execution speed is governed not by compute capacity, but by the physical pin bandwidth of the silicon interposer.
 
 > **The Systems Rule of Thumb (The Law of Single-Stream Decode):** At $B = 1$, the accelerator is completely memory-bus starved. The Tensor Cores sit idle for $99.66\%$ of every clock cycle, waiting for weights to arrive across the interposer. Upgrading to a GPU architecture with $2\times$ more Tensor Cores yields **zero increase** in single-stream generation speed; generation latency is dictated solely by memory bandwidth $B_{\text{mem}}$. Serving runtimes must batch concurrent agent requests to overcome this memory wall [@hennessy2011computer; @hennessy2019golden].
 
@@ -306,7 +316,66 @@ The cache break-even duration $T_{\text{break-even}}$ is the maximum idle time a
 
 $$T_{\text{break-even}} = \frac{c_{\text{prefill}} \cdot S_{\text{prefix}}}{C_{\text{HBM}} \cdot \text{Footprint}_{\text{KV}}(S_{\text{prefix}})}$$
 
-If an agent waits on a slow, human-in-the-loop approval or a 10-minute container compilation where $\tau_{\text{idle}} > T_{\text{break-even}}$, retaining the KV cache in HBM degrades cluster economics. High-performance runtimes resolve this by asynchronously swapping idle KV blocks to host system RAM (via PCIe Gen5) or fast NVMe storage, preserving prefix state without stranding accelerator HBM.
+To ground this trade-off in physical numbers, consider hosting Llama-3-70B on an 8-way H100 SXM5 node rented at $\$32.00/\text{hr}$ ($\$4.00/\text{GPU-hr}$). Each GPU provides 80 GB of HBM3, yielding an effective memory holding cost:
+
+$$C_{\text{HBM}} = \frac{\$4.00}{3,600\text{ s} \times 80\text{ GB}} \approx \$1.39 \times 10^{-5} \text{ per GB}\cdot\text{second}$$
+
+For an agent holding a $32,000$-token prefix, the KV cache footprint from @eq-vol3-tokenomics-kv-cache-footprint is $32,000 \times 320\text{ KB} \approx 10.24\text{ GB}$. Storing this state in HBM costs:
+
+$$C_{\text{rent}} = 10.24\text{ GB} \times (\$1.39 \times 10^{-5}/\text{GB}\cdot\text{s}) \approx \$1.42 \times 10^{-4} \text{ per second} \quad (\approx \$0.51/\text{hr})$$
+
+Meanwhile, re-prefilling those $32,000$ tokens on an H100 running at $50\%$ MFU ($495\text{ TFLOP/s}$) requires $2 \times 70\times 10^9 \times 32,000 \approx 4.48\text{ PFLOPs}$, taking $9.0\text{ ms}$ of compute time and costing:
+
+$$C_{\text{recompute}} = \frac{\$4.00}{3,600\text{ s}} \times 0.009\text{ s} \approx \$1.00 \times 10^{-5}$$
+
+Dividing the recomputation cost by the holding cost per second yields the break-even idle duration:
+
+$$T_{\text{break-even}} = \frac{\$1.00 \times 10^{-5}}{\$1.42 \times 10^{-4}/\text{s}} \approx 0.07 \text{ seconds}$$
+
+This reveals a startling systems reality: **HBM holding rent is so precious that whenever an agent waits more than a fraction of a second for an external tool (e.g., executing a 5-second bash command or database query), holding the KV cache in active GPU memory is economically worse than recomputing it!** To avoid either penalty, state-of-the-art serving runtimes asynchronously page idle KV blocks out to host system DRAM (via PCIe Gen5 at $128\text{ GB/s}$, transferring $10.24\text{ GB}$ in just $80\text{ ms}$) or fast local NVMe SSDs, keeping the HBM free for active decoders while avoiding redundant prefill FLOPs.
+
+### Commercial prompt caching discounts and pricing models
+
+In commercial foundation model APIs (e.g., Anthropic Claude, OpenAI, Google Gemini), users do not manage raw accelerator hardware directly. Instead, providers bill across structured pricing tiers that reflect these underlying physical mechanics:
+
+1. **Uncached Input (Cache Write / Full Prefill):** Billed at the base input rate $c_{\text{in}}$ (typically $\$2.50\text{--}\$3.00$ per 1M tokens for frontier models), covering the compute-intensive GEMM prefill pass and initial KV cache page allocation.
+2. **Cached Input (Cache Read / Hit):** Discounted by a caching factor $\delta_{\text{cache}} \in [0.75, 0.90]$, billing at $c_{\text{cached}} = (1 - \delta_{\text{cache}}) \cdot c_{\text{in}}$ (typically $\$0.30\text{--}\$0.75$ per 1M tokens). This reflects the fact that the provider reuses existing KV pages without executing prefill forward passes.
+3. **Generated Output (Autoregressive Decode):** Billed at a substantial premium $c_{\text{out}}$ (typically $\$10.00\text{--}\$15.00$ per 1M tokens), reflecting the memory-bandwidth tax and low ALU utilization of single-step token generation.
+
+Under this pricing structure, the dollar cost to execute turn $n$ of an $N$-turn agent trajectory with prefix length $S_{\text{prefix}}(n)$, new observation $\Delta_{\text{obs}}(n)$, and generated action $\Delta_{\text{act}}(n)$ is defined in @eq-vol3-tokenomics-cached-turn-cost:
+
+$$\text{Cost}_{\text{turn}}(n) = \left( c_{\text{cached}} \cdot S_{\text{prefix}}(n) + c_{\text{in}} \cdot \Delta_{\text{obs}}(n) + c_{\text{out}} \cdot \Delta_{\text{act}}(n) \right) \times 10^{-6}$$ {#eq-vol3-tokenomics-cached-turn-cost}
+
+Summing across all $N$ turns of a workflow where the prefix expands incrementally by $\bar{\Delta} = \bar{\Delta}_{\text{obs}} + \bar{\Delta}_{\text{act}}$ per turn, the cumulative invoice expenditure becomes:
+
+$$\text{Cost}_{\text{total}} = \left[ c_{\text{in}} S_0 + c_{\text{cached}} \sum_{n=2}^N \left( S_0 + (n-1)\bar{\Delta} \right) + c_{\text{in}} (N-1)\bar{\Delta}_{\text{obs}} + c_{\text{out}} N \bar{\Delta}_{\text{act}} \right] \times 10^{-6}$$ {#eq-vol3-tokenomics-cumulative-cached-cost}
+
+Comparing @eq-vol3-tokenomics-cumulative-cached-cost against stateless execution demonstrates that a $75\%\text{--}90\%$ caching discount slashes the multi-turn prefill bill by an order of magnitude, transforming extended agent trajectories from financial anomalies into viable production workloads.
+
+### Prompt compression and observation pruning unit economics
+
+While prompt caching amortizes the cost of *re-reading* historical context, it does nothing to mitigate the cost of *ingesting* new tokens. In autonomous agent loops, environment observations $\Delta_{\text{obs}}$—compiler stack traces, bash command outputs, git diffs, JSON payloads, and HTML dumps—frequently inject $5,000$ to $30,000$ tokens in a single turn.
+
+Because an agent's context window is cumulative, an unpruned observation ingested at turn $n$ is not billed once; it persists in the prompt across all remaining $K = N - n$ downstream turns. Ingesting a raw 10,000-token compiler log at turn 2 of a 20-turn trajectory means paying for those 10,000 tokens across 18 subsequent prompt evaluations!
+
+To counter this context bloat, high-performance agent runtimes deploy **Prompt Compression and Observation Pruning**:
+
+- **Deterministic Structural Pruning:** Stripping ANSI escape codes, applying syntax-aware abstract syntax tree (AST) truncation, slicing head-and-tail lines of compiler outputs, and extracting matching grep lines. Execution cost is negligible ($C_{\text{comp}} \approx 0$).
+- **Learned Semantic Compression (SLM Summarization):** Passing verbose tool outputs through a fast, distilled Small Language Model (e.g., a 1B–3B parameter model costing $\$0.10/\text{M}$ tokens) to extract relevant error signatures and structured summaries before context injection ($C_{\text{comp}} = c_{\text{slm}} \cdot S_{\text{raw}}$).
+
+Let $S_{\text{raw}}$ denote the raw observation size in tokens, and let $r_{\text{comp}} = S_{\text{comp}} / S_{\text{raw}} \in (0, 1)$ denote the compression ratio (typically $0.10\text{--}0.25$). The net financial return on investment ($\text{ROI}_{\text{comp}}$) from compressing an observation across $K$ remaining trajectory turns is formulated in @eq-vol3-tokenomics-compression-roi:
+
+$$\text{ROI}_{\text{comp}} = \frac{\Delta \text{Savings} - C_{\text{comp}}}{C_{\text{comp}}} = \frac{(1 - r_{\text{comp}}) S_{\text{raw}} \left[ c_{\text{in}} + K \cdot c_{\text{cached}} \right] - C_{\text{comp}}}{C_{\text{comp}}}$$ {#eq-vol3-tokenomics-compression-roi}
+
+> **First-Principles Systems Calculation (The Multi-Turn Compression Dividend):** Suppose a web testing agent ingests a 12,000-token DOM dump at turn 5 of a 15-turn task ($K = 10$ remaining turns). A fast Tier 1 SLM ($c_{\text{slm}} = \$0.20/\text{M}$) compresses this DOM to 1,200 tokens ($r_{\text{comp}} = 0.10$, pruning 10,800 tokens). The compression step costs $12,000 \times \$0.20 \times 10^{-6} = \$0.0024$.
+>
+> On the downstream frontier model ($c_{\text{in}} = \$3.00/\text{M}$, $c_{\text{cached}} = \$0.75/\text{M}$):
+>
+> - Upfront turn 5 prefill savings: $10,800 \times \$3.00 \times 10^{-6} = \$0.0324$.
+> - Downstream cache read savings across 10 turns: $10 \times (10,800 \times \$0.75 \times 10^{-6}) = \$0.0810$.
+> - Total gross savings: $\$0.0324 + \$0.0810 = \$0.1134$.
+>
+> Net savings equals $\$0.1134 - \$0.0024 = \$0.1110$—delivering a **$46.2\times$ ROI** on the compression compute! Furthermore, removing 10,800 tokens frees $3.45\text{ MB}$ of KV cache memory per batch stream, preventing HBM allocation stalls.
 
 ### Cost-per-verified-goal (CPVG)
 
@@ -382,13 +451,21 @@ $$\frac{1 + 3^2}{2} = \frac{1 + 9}{2} = 5.0$$
 
 At the exact same utilization $\rho = 0.80$, an autonomous agent cluster suffers **five times longer queue delays** than a standard Poisson service! If operators attempt to run the cluster at $\rho = 0.90$ to maximize expensive GPU utilization, the term $\frac{\rho}{1-\rho} = 9.0$ combines with the variance multiplier to inflate queue delays by $45\times$, causing immediate client timeouts.
 
-For a multi-server cluster with $k$ parallel GPU serving instances ($M/G/k$), queue waiting time can be modeled using **Kingman's Heavy-Traffic Approximation** (@eq-vol3-tokenomics-kingman-multiserver):
+For a multi-server cluster with $k$ parallel GPU serving instances ($M/G/k$), queue waiting time can be modeled using **Kingman's Heavy-Traffic Approximation** (@eq-vol3-tokenomics-kingman-multiserver):[^fn-tokenomics-kingman-approximation]
 
-$$W_q \approx \left( \frac{C_a^2 + C_s^2}{2} \right) \cdot \left( \frac{\rho^{\sqrt{2(k+1)} - 1}}{k(1 - \rho)} \right) \cdot \mathbb{E}[S]$$ {#eq-vol3-tokenomics-kingman-multiserver}
+$$W_q \approx \underbrace{\left( \frac{C_a^2 + C_s^2}{2} \right)}_{\text{Variability Factor}} \cdot \underbrace{\left( \frac{1}{1 - \rho} \right)}_{\text{Utilization Cliff}} \cdot \underbrace{\left( \frac{\rho^{\sqrt{2(k+1)} - 1}}{k} \right)}_{\text{Multi-Server Pooling Factor}} \cdot \mathbb{E}[S]$$ {#eq-vol3-tokenomics-kingman-multiserver}
 
 where $C_a$ is the arrival coefficient of variation, $C_s$ is the service coefficient of variation, and $\rho = \frac{\lambda}{k \mu}$ is the aggregate cluster utilization.
 
-To guarantee a tail-latency service level agreement (SLA) (e.g., $P(W_q \le t_{\text{max}}) \ge 0.99$), the cluster utilization $\rho$ must be strictly clamped below a critical stability ceiling $\rho_{\text{crit}} \approx 0.65\text{--}0.70$. Attempting to achieve $90\%$ hardware utilization on heavy-tailed agent fleets is a mathematical impossibility without violating latency SLAs.
+Rather than viewing @eq-vol3-tokenomics-kingman-multiserver as an abstract formula, capacity planners interpret it as three physical systems levers:
+
+1. **The Variability Factor $\left(\frac{C_a^2 + C_s^2}{2}\right)$:** Driven entirely by agent task characteristics. If agent trajectory lengths are heavy-tailed ($C_s \approx 3.0$), this factor introduces an immediate $5\times$ latency penalty over deterministic workloads.
+2. **The Utilization Cliff $\left(\frac{1}{1 - \rho}\right)$:** Dictated by cluster load. As utilization approaches $100\%$ ($\rho \to 1.0$), queue waiting time diverges asymptotically. Pushing utilization from $70\%$ ($\frac{1}{1-0.7} = 3.33$) to $90\%$ ($\frac{1}{1-0.9} = 10.0$) triples queue waiting delays.
+3. **The Multi-Server Pooling Factor $\left(\frac{\rho^{\sqrt{2(k+1)} - 1}}{k}\right)$:** Quantifies the benefit of centralized scheduling. Pooling $k$ GPUs into a shared queue dampens variance compared to $k$ isolated single-GPU servers.
+
+> **The Systems Rule of Thumb (The Headroom Reserve Law):** In classical stateless web services, clusters safely target $80\%–85\%$ CPU utilization. For stateful, heavy-tailed agent fleets ($C_s \ge 3.0$), Kingman's relation dictates that **aggregate GPU utilization must be clamped below $65\%–70\%$ under steady state**. The remaining $30\%–35\%$ of provisioned accelerator capacity is not "idle waste"—it is the mandatory mathematical headroom required to absorb long-horizon agent bursts without causing cascading tail-latency collapse.
+
+[^fn-tokenomics-kingman-approximation]: For the formal derivation of Kingman's multiserver approximation and heavy-tailed Pareto waiting-time bounds, see @sec-vol3-appendix-math-queueing and @sec-vol3-appendix-math-pareto.
 
 ### Provisioned throughput units (ptus) vs. serverless on-demand pay-per-token
 
@@ -514,7 +591,7 @@ Traditional cascading evaluates models sequentially: $M_1$ runs to completion, i
 
 $$T_{\text{cascade}} = T_1 + T_v + (1 - P_1) T_2$$
 
-In interactive environments where latency SLAs are strict, sequential fallback may violate deadlines. The systems remedy is **Speculative Agent Routing**.
+In interactive environments where latency service level agreements (SLAs) are strict, sequential fallback may violate deadlines. The systems remedy is **Speculative Agent Routing**.
 
 In speculative routing, the runtime issues task $x$ to $M_1$ while simultaneously initializing the context block for $M_2$. In parallel, a fast speculative confidence estimator $\kappa(x) \in [0, 1]$ scores the probability that $M_1$ can handle the task without escalation.
 
@@ -625,12 +702,34 @@ To prevent autonomous agent swarms from exhausting corporate cloud budgets durin
 
 | Governance Tier                    | Monitored Invariant & Telemetry                                                                  | Tripwire Trigger Condition                                                                                          | Automated Circuit Breaker Action                                                                    |
 |:-----------------------------------|:-------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
+| **Token Leaky Bucket Regulator**   | Token burst capacity $b(t)$, continuous refill rate $r$ (tokens/sec)                             | Token demand exceeds bucket level ($S_{\text{req}} > b(t)$)                                                         | Apply graceful tier degradation (fallback to SLM), prune context, or enqueue with backoff           |
 | **Capability Quota Attenuation**   | Cryptographic token budget lease $\mathcal{B}_{\text{task}}$; child leases                       | Subagent spawn request exceeds attenuated quota ($\mathcal{B}_{\text{child}} > \alpha \mathcal{B}_{\text{parent}}$) | Reject subagent instantiation; enforce geometric ceiling $\mathcal{B}_{\text{root}} / (1 - \alpha)$ |
 | **Derivative Spend-Rate Monitor**  | Instantaneous burn rate $\dot{C}(t) = dC/dt$ over 60-second window                               | Burn rate exceeds velocity threshold ($\dot{C}(t) > \$10.00/\text{min}$)                                            | Trigger hard execution freeze; pause gateway requests; page SRE on-call                             |
 | **Environmental State Progress**   | Workspace state hash delta $\Delta \mathcal{S}_n = \mathcal{H}(s_n) \oplus \mathcal{H}(s_{n-1})$ | State mutation delta vanishes ($\Delta \mathcal{S}_n = \emptyset$) for 3 turns                                      | Revoke tool execution leases; detect cycle flapping; terminate loop                                 |
 | **Hard Financial Circuit Breaker** | Cumulative trajectory cost $C_{\text{traj}}$ and wall-clock timeout                              | Spend reaches hard ceiling ($C_{\text{traj}} \ge C_{\text{max}}$) or timeout trips                                  | Forcibly evict agent; flush active KV cache to NVMe; escalate to human queue                        |
 
 : **Enterprise Agent Economic Governance Architecture**: Systems telemetry, trigger conditions, and automated circuit breaker actions across the runtime financial control plane. {#tbl-vol3-economic-governance-bus tbl-colwidths="[20,25,25,30]"}
+
+#### Token leaky bucket budget enforcement
+
+Static financial caps alone cannot protect serving fleets from transient throughput shockwaves. If twenty autonomous agents simultaneously encounter complex tool exceptions and trigger unconstrained retries, they can exhaust multi-tenant GPU memory pages or trigger upstream provider HTTP 429 rate limits within milliseconds, crashing concurrent workloads.
+
+To govern both instantaneous burst concurrency and sustained economic burn, production runtimes deploy the **Token Leaky Bucket Algorithm** at the gateway scheduler.
+
+The algorithm models available token capacity as a bucket of maximum burst volume $B_{\max}$ (tokens) that refills at a continuous leak/replenishment rate $r$ (tokens per second), governed by @eq-vol3-tokenomics-leaky-bucket:
+
+$$b(t + \Delta t) = \min\left( B_{\max}, \, b(t) + r \cdot \Delta t \right)$$ {#eq-vol3-tokenomics-leaky-bucket}
+
+When an agent runtime submits turn $n$ requiring an estimated token payload $S_{\text{req}} = \hat{S}_{\text{in}} + \hat{S}_{\text{out}}$:
+
+1. **Tokens Available ($b(t) \ge S_{\text{req}}$):** The request passes immediately to the inference scheduler, and the bucket is debited:
+   $$b(t) \leftarrow b(t) - S_{\text{req}}$$
+2. **Bucket Underflow ($b(t) < S_{\text{req}}$):** Rather than throwing a fatal rate-limit exception that causes the agent trajectory to crash and waste all accumulated turn state, the runtime applies **Graceful Tier Degradation**:
+   - *Speculative Model Downgrading:* The gateway reroutes the turn from an expensive Tier 3 frontier model to a lightweight Tier 1/2 model whose estimated token footprint satisfies $S_{\text{req}}' \le b(t)$.
+   - *Aggressive Observation Pruning:* The system applies deterministic token pruning to the incoming tool return, reducing prompt size until $S_{\text{req}} \le b(t)$.
+   - *Calculated Backoff Delay:* If the step cannot be safely downgraded, execution is enqueued for a deterministic delay $\Delta t_{\text{wait}} = \frac{S_{\text{req}} - b(t)}{r}$, smoothing out burst peaks into a predictable, constant-rate stream.
+
+By coupling tokenomic cost modeling directly to leaky bucket scheduling, platforms protect backend accelerators from queue collapse while preventing costly agent trajectory aborts.
 
 #### Monotonic capability quota attenuation
 
@@ -716,10 +815,10 @@ Governing the economics and capacity of autonomous agent systems requires an unc
 
 ::: {.callout-takeaways title="The system tokenomics contract"}
 1. **The Roofline Operational Invariant:** Single-sequence autoregressive decode is fundamentally memory-bandwidth bound ($I \approx 1.0\text{ FLOP/Byte}$), utilizing less than $1\%$ of modern GPU Tensor Cores. Accelerator cost per token is inversely proportional to batch size. Saturated continuous batching ($B \ge I^* \approx 295$) is the primary hardware mechanism to achieve economic viability.
-2. **The Quadratic Prefill Turn Tax:** In multi-turn agent loops, context accumulation causes total input token processing to explode quadratically ($\mathcal{O}(N^2 \bar{\Delta})$), causing prefill to dominate $80\text{--}90\%$ of total invoice dollars. Radix prefix caching collapses prefill complexity to linear ($\mathcal{O}(N \bar{\Delta})$), trading compute cost for memory holding rent.
+2. **The Quadratic Prefill Turn Tax & Compression ROI:** In multi-turn agent loops, context accumulation causes total input token processing to explode quadratically ($\mathcal{O}(N^2 \bar{\Delta})$), causing prefill to dominate $80\%–90\%$ of total invoice dollars. Radix prefix caching collapses prefill complexity to linear ($\mathcal{O}(N \bar{\Delta})$), while prompt compression and observation pruning deliver up to $40\times+$ ROI by eliminating multi-turn compounding token taxes.
 3. **The Sovereign Metric of Agency (CPVG):** Evaluating agents by nominal token price is an engineering fallacy. Systems economics are governed by Cost-per-Verified-Goal ($\text{CPVG} = \bar{C}_{\text{trajectory}} / p^N$). A cheap model with low per-step reliability exhibits astronomical CPVG due to compounding failure retries, whereas tiered verification cascades optimize both cost and success.
-4. **Heavy-Tailed Capacity Provisioning:** Agent service times exhibit extreme variance ($C_v > 2.5$). Under the Pollaczek-Khinchine relation, heavy-tailed agent workloads incur $5\times$ higher queue waiting times than Poisson web traffic at identical utilization. Sizing clusters requires clamping utilization below $\rho \le 0.70$ and adopting Prefill-Decode (PD) disaggregation over RDMA fabrics.
-5. **The Autonomy Decision Boundary:** Autonomous agents must be strictly rejected for deterministic workflows, hard real-time deadlines ($< 200\text{ ms}$), unverified irreversible mutations, and unbounded open-loop horizons. Enterprise economic governance mandates cryptographic capability leases, monotonic quota attenuation ($\mathcal{B}_{\text{child}} \le \alpha \mathcal{B}_{\text{parent}}$), and derivative spend-rate tripwires.
+4. **Heavy-Tailed Capacity Provisioning (The Headroom Reserve Law):** Agent service times exhibit extreme variance ($C_v > 2.5$). Under the Pollaczek-Khinchine relation, heavy-tailed agent workloads incur $5\times$ higher queue waiting times than Poisson web traffic at identical utilization. Sizing clusters requires clamping utilization below $\rho \le 0.65–0.70$ and adopting Prefill-Decode (PD) disaggregation over RDMA fabrics.
+5. **The Autonomy Decision Boundary & Governance:** Autonomous agents must be strictly rejected for deterministic workflows, hard real-time deadlines ($< 200\text{ ms}$), unverified irreversible mutations, and unbounded open-loop horizons. Enterprise economic governance mandates dual-token leaky bucket rate limiters with graceful degradation, cryptographic capability leases, monotonic quota attenuation ($\mathcal{B}_{\text{child}} \le \alpha \mathcal{B}_{\text{parent}}$), and derivative spend-rate tripwires.
 :::
 
 ::: {.callout-chapter-connection title="From fleet tokenomics to architectural synthesis"}

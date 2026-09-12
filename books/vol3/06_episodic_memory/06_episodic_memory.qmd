@@ -25,9 +25,9 @@ Without a durable external memory tier, an autonomous agent's operational lifeti
 
 ::: {.callout-learning-objectives}
 - **Analyze** the multi-tier agent memory hierarchy, quantifying the physical access latency, bandwidth, capacity, and cost trade-offs between volatile GPU registers, paged Key-Value caches, and non-volatile secondary storage tiers.
-- **Formulate** high-dimensional latent indexing topologies, deriving the mathematical limits of the curse of dimensionality and evaluating the trade-offs between IVF-PQ and HNSW approximate nearest neighbor search.
+- **Formulate** high-dimensional latent indexing topologies and semantic caching layers, deriving the physical limits of the curse of dimensionality and evaluating the trade-offs between IVF-PQ, HNSW, and exact versus fuzzy cache matching.
 - **Construct** deterministic structural knowledge graphs from code abstract syntax trees (ASTs) and implement Personalized PageRank (PPR) for seed-biased context hydration.
-- **Design** continuous belief consolidation and reflection architectures using Doyle's Truth Maintenance Systems, Lamport logical clocks, and bi-temporal schemas to resolve environmental contradictions.
+- **Design** continuous belief consolidation and reflection architectures using Ebbinghaus forgetting curves, Doyle's Truth Maintenance Systems, Lamport logical clocks, and bi-temporal schemas to resolve environmental contradictions.
 - **Evaluate** end-to-end memory retrieval latency budgets, decomposing the time-to-first-token impact of embedding generation, index lookups, graph traversals, and the prefill retrieval tax under strict operational SLAs.
 - **Diagnose** critical memory failure modes, including polarity blindness, context poisoning from stale tool observations, and the zombie memory trap in continuous agent deployments.
 :::
@@ -54,7 +54,7 @@ When translated into the systems architecture of autonomous AI agents, memory pa
 
 :::
 
-Just as classical operating systems cannot execute programs without virtual memory and persistent block devices [@silberschatz2018; @denning1970], autonomous agents cannot sustain complex, multi-turn reasoning workflows without an episodic storage tier. Without episodic memory, an agent's operational lifetime is strictly bounded by the physical capacity of its context window ($N_{\max}$). When context overflows, older observations are truncated or summarized, discarding deterministic historical facts and triggering catastrophic forgetting.
+Just as classical operating systems cannot execute programs without virtual memory and persistent block devices [@silberschatz2018; @denning1970], autonomous agents cannot sustain complex, multi-turn reasoning workflows without an episodic storage tier. Without episodic memory, an agent's operational lifetime is strictly bounded by the physical capacity of its context window ($N_{\max}$). When context overflows, older observations are truncated or summarized, discarding deterministic historical facts and triggering catastrophic forgetting. Conflating volatile context with persistent storage runs headfirst into the **agent memory wall**: quadratic self-attention explodes prefill latency, premium High-Bandwidth Memory is saturated by stagnant tokens, and attention dispersion degrades reasoning accuracy.
 
 ### Physical characteristics across storage tiers
 
@@ -70,7 +70,7 @@ Each tier in the agent memory hierarchy exhibits distinct trade-offs across late
 
 : **Memory and Storage Hierarchy of Autonomous AI Agents**: Physical properties, capacities, latencies, and persistence trade-offs across volatile inference context and non-volatile episodic storage tiers. {#tbl-vol3-episodic-memory-hierarchy tbl-colwidths="[16,16,14,16,14,14,10]"}
 
-L1 Context Registers provide instantaneous access during the transformer forward pass, but cost thousands of dollars in capital expenditure per terabyte and lose all state upon process termination. L2 Paged KV Cache expands volatile capacity across host memory via PagedAttention and CXL interconnects (@sec-vol3-virtual-memory), but remains node-bound and vulnerable to machine reboots. The L3 Episodic tier trades nanosecond memory bus access for durable, petabyte-scale persistence over local NVMe arrays and distributed network backends.
+L1 Context Registers provide instantaneous access during the transformer forward pass, but cost thousands of dollars in capital expenditure per terabyte and lose all state upon process termination. L2 Paged KV Cache expands volatile capacity across host memory via PagedAttention and Compute Express Link (CXL) interconnects (@sec-vol3-virtual-memory), but remains node-bound and vulnerable to machine reboots. The L3 Episodic tier trades nanosecond memory bus access for durable, petabyte-scale secondary storage over local NVMe arrays and distributed network backends. Storing long-term episodic traces in L1 would be as inefficient as running an entire enterprise relational database in CPU L1 data cache.
 
 ### Transaction boundaries and the write-ahead log invariant
 
@@ -152,21 +152,24 @@ A 614 ms memory scan per tool turn violates interactive execution budgets.
 
 Attempting to accelerate spatial search using classical partitioning trees (such as $k$-d trees or $R$-trees) fails catastrophically in high-dimensional embedding spaces due to the **Curse of Dimensionality**\index{Curse of Dimensionality}.
 
-As formalized by @beyer1999nearest, for independent and identically distributed random vectors in high dimensions, the distance contrast between the nearest and farthest neighbors vanishes:
+To see why high dimensions break spatial indexing, consider the elementary geometry of a $D$-dimensional hypersphere. In $D$ dimensions, volume scales proportionally to radius to the $D$-th power: $V_D(r) \propto r^D$. Consider a thin outer shell of relative thickness $\epsilon$ (where $0 < \epsilon < 1$) at the boundary of a sphere of radius $r$. The ratio of the volume of the inner core of radius $r(1 - \epsilon)$ to the total sphere volume is $(1 - \epsilon)^D$. Consequently, the fraction of volume packed into the thin outer shell is:
 
-$$\lim_{D \to \infty} \frac{\max_{1 \le i \le N} \|\mathbf{x}_i - \mathbf{q}\|_p - \min_{1 \le i \le N} \|\mathbf{x}_i - \mathbf{q}\|_p}{\min_{1 \le i \le N} \|\mathbf{x}_i - \mathbf{q}\|_p} = 0 $$
+$$\text{Shell Volume Fraction} = \frac{V_D(r) - V_D(r(1 - \epsilon))}{V_D(r)} = 1 - (1 - \epsilon)^D $$
 
-This loss of contrast stems from the geometry of high-dimensional hyperspheres. The volume of a $D$-dimensional hypersphere of radius $r$ is:
+For modern embedding dimensions ($D = 1536$) and a razor-thin shell of just $\epsilon = 0.01$ (the outer $1\%$ of the radius), this fraction evaluates to:
 
-$$V_D(r) = \frac{\pi^{D/2}}{\Gamma(D/2 + 1)} r^D $$
+$$1 - (0.99)^{1536} \approx 1 - 1.9 \times 10^{-7} \approx 0.9999998 $$
 
-The fraction of volume contained in a thin outer shell of thickness $\epsilon \cdot r$ (where $0 < \epsilon < 1$) is:
+Over $99.9999\%$ of the hypersphere's entire volume resides in the outermost $1\%$ crust! In high dimensions, the concept of an "interior" disappears: data points do not cluster in the center; they all live on the outer boundary, approximately equidistant and mutually orthogonal to one another.[^fn-beyer-curse-hypersphere]
 
-$$\frac{V_D(r) - V_D(r(1 - \epsilon))}{V_D(r)} = 1 - (1 - \epsilon)^D $$
+[^fn-beyer-curse-hypersphere]: Formally, @beyer1999nearest proved that for independent and identically distributed random vectors in high dimensions, the distance contrast between the nearest and farthest neighbors asymptotically vanishes: $\lim_{D \to \infty} (\max_{i} \|\mathbf{x}_i - \mathbf{q}\|_p - \min_{i} \|\mathbf{x}_i - \mathbf{q}\|_p) / \min_{i} \|\mathbf{x}_i - \mathbf{q}\|_p = 0$. The exact continuous hypersphere volume is given by $V_D(r) = \frac{\pi^{D/2}}{\Gamma(D/2 + 1)} r^D$. For the complete measure-concentration derivation and geometric proof, see @sec-vol3-appendix-math-curse-dimensionality.
 
-For $D = 1536$ and $\epsilon = 0.01$, this ratio evaluates to $1 - (0.99)^{1536} \approx 1 - 1.9 \times 10^{-7} \approx 0.9999998$. Virtually $100\%$ of the volume resides within the outermost $1\%$ shell of the hypersphere. Because all points are approximately equidistant from each other, spatial bounding boxes overlap across every partition, forcing spatial trees to inspect every branch and degenerating into an exhaustive $O(N \cdot D)$ linear scan.
+This geometry explains why classical spatial trees collapse into worst-case performance:
 
-To achieve sub-millisecond retrieval across millions of memories, agent architectures must employ **Approximate Nearest Neighbor (ANN)**\index{Approximate Nearest Neighbor} indexing, trading exact distance guarantees for orders-of-magnitude speedups.
+1. **Overlapping Partition Bounding Boxes:** Spatial indexing trees prune search by calculating whether a query point's bounding sphere intersects the hyperplane splitting each branch. Because all points lie on the extreme perimeter and pairwise distances are nearly identical, the query sphere overlaps almost *every* spatial bounding box in the tree.
+2. **Pathological Pointer Chasing:** Instead of pruning half the search space at each branch ($\mathcal{O}(\log N)$), the tree is forced to backtrack and inspect virtually every branch. Because tree nodes are scattered across dynamically allocated heap memory, traversing these failed branches incurs continuous pointer-chasing and cache misses across host DRAM. A high-dimensional $k$-d tree ends up executing an exhaustive search that is significantly *slower* than a contiguous SIMD-vectorized array scan.
+
+To achieve sub-millisecond retrieval across millions of memories, agent architectures must abandon exact tree partitioning and employ **Approximate Nearest Neighbor (ANN)**\index{Approximate Nearest Neighbor} indexing, trading exact distance guarantees for orders-of-magnitude speedups.
 
 ### Inverted file product quantization (IVF-PQ) and ADC
 
@@ -203,7 +206,9 @@ Inspired by skip-lists, an HNSW index builds a hierarchy of graph layers $\ell \
 
 $$P(\text{level} \ge \ell) = \exp(-\ell / m_L), \quad m_L = \frac{1}{\ln(M_{\text{hnsw}})} $$
 
-where $M_{\text{hnsw}}$ governs the maximum number of bidirectional connections per node. The uppermost layers contain sparse, long-range "highway" edges that allow greedy search to traverse vast geometric distances in single hops, achieving logarithmic routing complexity:
+where $M_{\text{hnsw}}$ governs the maximum number of bidirectional connections per node. This distribution translates to a straightforward geometric progression: each node is promoted to layer $\ell$ with probability $(1 / M_{\text{hnsw}})^\ell$. With $M_{\text{hnsw}} = 32$, Layer 1 retains only $1/32$ of the vertices in Layer 0; Layer 2 retains $1/32$ of Layer 1; and so forth. For an index of $N = 10^7$ vectors, the entire hierarchy spans only $\lceil \log_{32}(10^7) \rceil \approx 5$ layers, with the top layer containing only a dozen entry points.
+
+The uppermost layers contain sparse, long-range "highway" edges that allow greedy routing to traverse vast geometric distances in 2 to 3 hops per layer before descending to denser layers below, achieving logarithmic routing complexity:
 
 $$\mathcal{O}(\log N) $$
 
@@ -268,6 +273,49 @@ s3_text = "The quick brown fox jumps over the lazy sleeping dog."
 If an agent queries its episodic memory with: *"Did database migration 042 succeed?"*, an ANN search returns both the success log and the fatal failure log with nearly indistinguishable similarity scores ($S_C \approx 0.94$). If the prompt assembly engine blindly injects the top candidate, the agent risks consuming an obsolete error traceback or a negated premise.
 
 Dense latent spaces encode **thematic affinity**, not **propositional truth**. Systems requiring deterministic factual correctness cannot rely solely on vector proximity; they must ground retrieval in structured representations that capture the exact relational topology of the environment.
+
+### Semantic caching: Exact vs. approximate query matching
+
+In long-running agent workflows, the agent frequently issues identical or semantically redundant queries across turns—such as repeatedly checking service status, re-verifying environmental preconditions, or fetching the same tool documentation. Passing every query through the complete external retrieval pipeline and autoregressive transformer pass incurs massive latency and financial costs. To bypass this, production runtimes place a **Semantic Cache**\index{Semantic Cache} in front of external episodic retrieval.
+
+An agent semantic cache operates across two distinct tiers:
+
+1. **L1 Exact-Match Cache (Deterministic Key):** The query string is normalized and hashed via SHA-256. If an identical query was previously evaluated in the active session, the result is fetched in $\mathcal{O}(1)$ time from host RAM ($< 0.05\text{ ms}$). While exact caching incurs zero false positives, it is fragile: a minor difference in whitespace, reordered CLI arguments, or synonymous wording results in a cache miss.
+2. **L2 Semantic Cache (Approximate Metric Key):** The incoming query $q$ is mapped to embedding $\mathbf{v}_q$ and compared against an in-memory index of previously answered queries. If the nearest cached query $\mathbf{v}_{c}$ satisfies:
+   $$S_C(\mathbf{v}_q, \mathbf{v}_c) \ge \tau_{\text{cache}} $$
+   the runtime returns the cached retrieval context or model generation directly, bypassing the downstream secondary storage scan and model prefill.
+
+#### First-principles latency and cost napkin math
+
+The systems value of semantic caching is quantified by the gap between cache-hit and cache-miss execution latencies:
+
+- **Cache Hit Latency ($T_{\text{hit}}$):** Incurs only the local query embedding and in-memory index lookup:
+  $$T_{\text{hit}} = T_{\text{embed}} + T_{\text{cache\_scan}} \approx 2.8\text{ ms} + 0.2\text{ ms} = 3.0\text{ ms} $$
+- **Cache Miss Latency ($T_{\text{miss}}$):** Incurs the cache lookup plus the full retrieval, prompt assembly, prefill, and generation pipeline ($T_{\text{exec}}$):
+  $$T_{\text{miss}} = T_{\text{hit}} + T_{\text{exec}} \approx 3.0\text{ ms} + 600\text{ ms} = 603\text{ ms} $$
+
+On a cache hit, the agent achieves a **$200\times$ latency reduction** ($3.0\text{ ms}$ vs. $603\text{ ms}$). Across a multi-turn session with an empirical cache hit rate $h \in [0, 1]$, the expected turn latency evaluates to:
+
+$$T_{\text{avg}} = h \cdot T_{\text{hit}} + (1 - h) \cdot T_{\text{miss}} = T_{\text{hit}} + (1 - h) \cdot T_{\text{exec}} $$
+
+For an agent achieving a modest hit rate of $h = 0.35$ (35 percent repeated or near-identical queries) and $T_{\text{exec}} = 600\text{ ms}$:
+
+$$T_{\text{avg}} = 3.0\text{ ms} + (1 - 0.35) \times 600\text{ ms} = 3.0 + 390 = 393\text{ ms} $$
+
+Semantic caching slashes average turn latency by $34.5\%$ while eliminating over a third of downstream inference token charges and accelerator prefill FLOPs.
+
+#### The similarity threshold dilemma and cache poisoning
+
+The central systems challenge in semantic caching is tuning the similarity threshold $\tau_{\text{cache}}$:
+
+- **Loose Threshold ($\tau_{\text{cache}} < 0.90$):** Yields high hit rates ($h > 0.60$) but triggers catastrophic **Cache Poisoning**\index{Cache Poisoning}. Because of polarity blindness, a query such as *"Is database migration 042 complete?"* will falsely match a cached entry for *"Database migration 042 failed"*, injecting an obsolete or inverted factual premise into the agent's active reasoning state.
+- **Strict Threshold ($\tau_{\text{cache}} > 0.98$):** Eliminates false positives, but collapses the hit rate ($h \to 0$), reducing the semantic cache to an expensive, high-latency duplicate of the exact L1 hash cache.
+
+To resolve this trade-off, production agent architectures enforce three systems invariants:
+
+1. **Composite Partition Keys:** The cache key is never a raw embedding vector alone. It is a composite tuple: $\langle \text{TenantID}, \text{ToolNamespace}, \text{EnvironmentHash} \rangle + \mathbf{v}_q$. Semantic similarity is evaluated *strictly within* the deterministic partition.
+2. **Conservative Similarity Thresholds:** Runtimes enforce a strict operational boundary ($\tau_{\text{cache}} \ge 0.95$).
+3. **The Write-Invalidation Barrier:** Whenever an agent executes a state-mutating tool (such as running a database migration, editing source files, or altering cloud infrastructure), the runtime issues an invalidation barrier that purges all semantic cache entries associated with the affected environmental namespace. Without automated invalidation upon write, a semantic cache inevitably turns into a stale observation trap.
 
 ## Knowledge Graphs and Symbolic Relational Stores {#sec-vol3-episodic-graphs}
 
@@ -339,14 +387,33 @@ $$\mathbf{p}^{(t+1)} = (1 - \alpha) \mathbf{P}^T \mathbf{p}^{(t)} + \alpha \math
 where:
 
 - $\mathbf{P} = \mathbf{D}^{-1} \mathbf{A}$ is the row-stochastic transition probability matrix derived from graph adjacency matrix $\mathbf{A}$.
-- $\alpha \in [0.15, 0.20]$ is the teleportation (restart) probability.
+- $\alpha \in [0.15, 0.20]$ is the teleportation (restart) probability, representing the probability of jumping back to the active seed set.
 - $\mathbf{s} \in \mathbb{R}^{|V|}$ is the personalization vector, with $s_i = 1 / |\mathcal{S}|$ if $i \in \mathcal{S}$, and $s_i = 0$ otherwise.
 
-The stationary distribution $\mathbf{p}^* = \lim_{t \to \infty} \mathbf{p}^{(t)}$ satisfies:
+The stationary distribution $\mathbf{p}^* = \lim_{t \to \infty} \mathbf{p}^{(t)}$ satisfies the linear system:
 
 $$\mathbf{p}^* = \alpha [\mathbf{I} - (1 - \alpha) \mathbf{P}^T]^{-1} \mathbf{s} $$
 
 The stationary probability $p_v^*$ quantifies the structural relevance of symbol $v$ relative to the active seed set $\mathcal{S}$.
+
+#### First-principles systems math: Power iteration vs. matrix inversion
+
+While the analytical stationary distribution contains a matrix inverse, evaluating $[\mathbf{I} - (1 - \alpha) \mathbf{P}^T]^{-1}$ directly requires $\mathcal{O}(|V|^3)$ operations. For a mid-sized software repository containing $|V| = 50,000$ functions and classes, an exact inverse demands over $1.25 \times 10^{14}$ floating-point operations and hundreds of gigabytes of dense intermediate matrices—an unviable computation for an interactive tool turn.
+
+Production runtimes evaluate PPR using iterative **Power Iteration**\index{Power Iteration} over sparse adjacency matrices stored in **Compressed Sparse Row (CSR)**\index{Compressed Sparse Row} format:
+
+1. **CSR Memory Footprint:** A symbol dependency graph with $|V| = 50,000$ vertices and $|E| = 250,000$ directed edges stores two flat 32-bit integer arrays (an offset array of size $|V| + 1$ and a column-index array of size $|E|$):
+   $$\text{Memory}_{\text{CSR}} = (|V| + 1 + |E|) \times 4\text{ bytes} = (50,001 + 250,000) \times 4 \approx 1.20\text{ MB} $$
+   At $1.20\text{ MB}$, the entire graph topology fits comfortably inside the CPU's L3 hardware cache (typically 32 to 64 MB), eliminating DRAM bus traffic entirely during traversal.
+2. **Sparse Matrix-Vector (SpMV) Compute:** Each power-iteration step performs a single sparse matrix-vector multiplication requiring $2 \cdot |E| = 500,000$ FLOPs.
+3. **Geometric Convergence:** Because the damping factor $(1 - \alpha) \approx 0.85$ bounds the spectral radius of $(1 - \alpha)\mathbf{P}^T$, the approximation error contracts by at least $0.85$ on every step.[^fn-ppr-convergence-perron] Evaluating just $15$ to $20$ iterations yields a rank-stable relevance distribution:
+   $$\text{Total Compute} = 20 \times 500,000\text{ FLOPs} = 10\text{ MFLOPs} $$
+   On a modern CPU core delivering $50\text{ GFLOPS}$ of vector throughput, power iteration completes in:
+   $$T_{\text{PPR}} = \frac{10^7\text{ FLOPs}}{5 \times 10^{10}\text{ FLOPs/s}} = 0.0002\text{ s} = 0.2\text{ ms} $$
+
+Iterative graph diffusion turns structural context expansion from an intractable $\mathcal{O}(|V|^3)$ matrix bottleneck into a sub-millisecond, cache-resident CPU operation.
+
+[^fn-ppr-convergence-perron]: Formally, by the Perron-Frobenius theorem, the transition matrix $\mathbf{P}$ has maximum eigenvalue $\lambda_1 = 1$. The dampened operator $(1 - \alpha)\mathbf{P}^T$ has spectral radius $\rho \le 1 - \alpha$. Therefore, the power-iteration error vector satisfies $\|\mathbf{p}^{(k)} - \mathbf{p}^*\|_1 \le (1 - \alpha)^k \|\mathbf{p}^{(0)} - \mathbf{p}^*\|_1$. For the complete spectral proof and bounds on forward-push approximations, see @sec-vol3-appendix-math-pagerank.
 
 ### Knapsack context packing
 
@@ -463,17 +530,29 @@ Executing memory consolidation within an active agent's critical execution loop 
 
 During a sleep cycle, the consolidation engine processes raw execution trajectories $\tau = (s_0, a_0, o_0, \dots, s_T)$ through a three-stage reflection architecture:
 
-#### Importance scoring
+#### Importance scoring and the forgetting curve
 
-Every memory item $m$ in the episodic ledger is assigned an intrinsic importance score $I(m) \in [1, 10]$ evaluating its long-term operational value. High-importance items include fatal error post-mortems, architectural interface decisions, and user-specified constraints; low-importance items include transient directory listings and progress bar logs.
+An agent that retains every raw terminal printout, JSON dump, and transient compiler warning quickly exhausts its secondary storage and degrades retrieval precision. In both human neurobiology and systems caching, memory durability is governed by intentional forgetting [@tulving1972episodic; @denning1970].
 
-When evaluating memory items for reflection or retrieval, the runtime combines recency, importance, and query relevance:
+Every memory item $m$ in the episodic ledger is assigned an intrinsic importance score $I(m) \in [1, 10]$ evaluating its long-term operational value. High-importance items ($I(m) \ge 8$) include fatal error post-mortems, architectural interface decisions, and user-specified constraints; low-importance items ($I(m) \le 3$) include transient directory listings and progress bar logs.
+
+When evaluating memory items for retrieval, the runtime computes a composite score balancing recency, importance, and query relevance:
 
 $$\text{Score}(m, q) = w_{\text{rec}} \cdot \text{Recency}(m) + w_{\text{imp}} \cdot \frac{I(m)}{10} + w_{\text{rel}} \cdot S_C(\mathbf{q}, \mathbf{v}_m) $$
 
-where recency decays exponentially according to an elapsed-time decay constant $\lambda_{\text{decay}}$:
+To prevent memory bloat, recency is modeled using the **Ebbinghaus Forgetting Curve**\index{Ebbinghaus Forgetting Curve}, parameterized by a half-life $t_{1/2}$:
 
-$$\text{Recency}(m) = \exp(-\lambda_{\text{decay}} \cdot (t_{\text{now}} - t_{\text{accessed}})) $$
+$$\text{Recency}(m) = \exp\left(-\frac{\ln 2}{t_{1/2}} \cdot (t_{\text{now}} - t_{\text{accessed}})\right) = 2^{-\frac{\Delta t}{t_{1/2}}} $$
+
+where $\Delta t = t_{\text{now}} - t_{\text{accessed}}$ is the elapsed time since the memory was last retrieved.
+
+This exponential formulation provides clear systems mechanics:
+
+1. **Predictable Decay:** If a transient debugging log has a baseline half-life of $t_{1/2} = 12\text{ hours}$, its recency multiplier drops to $0.5$ after half a day, $0.25$ after 24 hours, and $0.06$ after two days.
+2. **Spaced Reinforcement:** Whenever an existing memory item $m$ is retrieved and successfully utilized by the agent to accomplish an action, its access timestamp updates ($t_{\text{accessed}} \leftarrow t_{\text{now}}$) and its half-life scales up:
+   $$t_{1/2} \leftarrow \min(t_{1/2} \cdot \gamma, t_{\max}) $$
+   where $\gamma \approx 1.5\text{--}2.0$ is the reinforcement factor. Frequently accessed architectural heuristics become nearly permanent, while one-off debugging traces naturally fade.
+3. **Sleep Compaction Threshold:** During offline sleep cycles, the consolidation engine computes the cumulative retention score $\text{Retention}(m) = \frac{I(m)}{10} \cdot \text{Recency}(m)$. Any memory item where $\text{Retention}(m) < \Theta_{\text{prune}}$ (e.g., $\Theta_{\text{prune}} = 0.05$) is evicted from the active L3 vector index and archived to compressed cold storage. This bounds the active vector index size to a stable steady state ($N_{\text{active}} \propto \text{Turn Rate} \times \bar{t}_{1/2}$) rather than allowing it to grow unbounded.
 
 #### Generative reflection
 
@@ -602,9 +681,9 @@ Every memory item is indexed by the causal tuple $\langle \text{agent\_id}, L, \
 
 ## Memory Retrieval Latency and End-to-End SLA {#sec-vol3-episodic-sla}
 
-A financial operations agent is deployed with a contractual Service Level Agreement (SLA) requiring a 99th-percentile (p99) turn response latency below 1,500 milliseconds for every automated portfolio query. The foundation model's autoregressive generation requires 450 ms (Time-to-First-Token prefill of 150 ms plus 300 ms for 20 decode tokens). However, the engineering team designed an unoptimized synchronous memory retrieval pipeline: generating a query embedding via an external REST API takes 380 ms; querying a remote managed vector database across the WAN takes 420 ms; traversing a distributed graph database for entity relations takes 650 ms; and running a cross-encoder re-ranker over 50 retrieved chunks takes 550 ms. Total retrieval overhead alone reaches 2,000 ms. The agent consistently logs a p99 latency of 2,450 ms—blowing past the SLA on 94 percent of production requests and triggering cascading client timeouts.
+A financial operations agent is deployed with a contractual SLA requiring a 99th-percentile (p99) turn response latency below 1,500 milliseconds for every automated portfolio query. The foundation model's autoregressive generation requires 450 ms (Time-to-First-Token prefill of 150 ms plus 300 ms for 20 decode tokens). However, the engineering team designed an unoptimized synchronous memory retrieval pipeline: generating a query embedding via an external REST API takes 380 ms; querying a remote managed vector database across the WAN takes 420 ms; traversing a distributed graph database for entity relations takes 650 ms; and running a cross-encoder re-ranker over 50 retrieved chunks takes 550 ms. Total retrieval overhead alone reaches 2,000 ms. The agent consistently logs a p99 latency of 2,450 ms—blowing past the SLA on 94 percent of production requests and triggering cascading client timeouts.
 
-Building persistent external memory requires enforcing strict systems latency budgets. In an autonomous agent execution loop, memory retrieval sits directly on the critical path between perceiving an environmental observation and emitting the subsequent action. Uncontrolled retrieval latency stalls the agent, drives up operational costs, and violates Service Level Agreements.
+Building persistent external memory requires enforcing strict systems latency budgets. In an autonomous agent execution loop, memory retrieval sits directly on the critical path between perceiving an environmental observation and emitting the subsequent action. Uncontrolled retrieval latency stalls the agent, drives up operational costs, and violates SLAs.
 
 ### End-to-end turn latency decomposition
 
@@ -714,6 +793,13 @@ Let $L_{\text{base}}$ be the baseline prompt length (system prompt, tool schemas
 
 $$\Delta \text{FLOPs} = 2 \cdot n_{\text{layers}} \cdot d_{\text{model}} \cdot \left( (L_{\text{base}} + K)^2 - L_{\text{base}}^2 \right) = 2 \cdot n_{\text{layers}} \cdot d_{\text{model}} \cdot (2 L_{\text{base}} K + K^2) $$
 
+To understand why this marginal compute expands as $(2 L_{\text{base}} K + K^2)$, consider the geometry of the attention grid. The full attention matrix across $(L_{\text{base}} + K)$ tokens forms a square of area $(L_{\text{base}} + K)^2$. The baseline prompt already computes the $L_{\text{base}} \times L_{\text{base}}$ sub-square. Injecting $K$ retrieved memory tokens adds two distinct computational regions:
+
+1. **The Cross-Interaction Rectangles ($2 L_{\text{base}} K$):** The $K$ retrieved tokens attending to the $L_{\text{base}}$ existing baseline tokens, and the baseline tokens attending to the new memory tokens.
+2. **The Mutual Memory Square ($K^2$):** The $K$ retrieved memory tokens attending mutually to one another.
+
+Each token-token pair evaluates $2 \cdot d_{\text{model}}$ FLOPs per layer (one multiply-accumulate for $Q K^T$ attention scores, and one for multiplying scores by $V$). Summing over $n_{\text{layers}}$ layers yields the exact formula.
+
 For a 70B parameter model ($n_{\text{layers}} = 80, d_{\text{model}} = 8192$) with a baseline prompt of $L_{\text{base}} = 16,384$ tokens, injecting $K = 8,192$ retrieved memory tokens increases prefill operations by:
 
 $$\Delta \text{FLOPs} = 2 \times 80 \times 8192 \times (2(16384)(8192) + (8192)^2) \approx 1.31 \times 10^6 \times 3.35 \times 10^8 \approx 4.4 \times 10^{14}\text{ FLOPs} $$
@@ -813,8 +899,8 @@ High-dimensional vector indexing provides fast exploratory retrieval over unstru
 ::: {.callout-takeaways title="Episodic and external memory systems"}
 1. **The Tripartite Hierarchy Invariant:** Memory must be strictly partitioned into Parametric ($\theta$), Volatile Working Context (GPU HBM / DRAM), and Non-Volatile Secondary Episodic Storage (Disk / NVMe). Context windows are volatile L1 registers; treating them as persistent storage induces quadratic compute bottlenecks, memory exhaustion, and attention dispersion.
 2. **The Write-Ahead Log Invariant:** To prevent state divergence upon crash recovery, an agent runtime must enforce the precedence $\text{Log}(s_t, a_t) \prec_{\text{commit}} \text{Execute}(a_t) \prec_{\text{commit}} \text{Log}(o_t, s_{t+1})$. No external tool command may be dispatched until the action proposal has been flushed to non-volatile disk via synchronous storage barriers.
-3. **Hybrid Topological Retrieval:** Dense vector retrieval captures thematic affinity but suffers from polarity blindness and syntactic amnesia. Production systems must implement dual-stage pipelines: dense ANN search discovers entry-point seeds, followed by Personalized PageRank over AST symbol graphs to retrieve structurally complete context.
-4. **Non-Monotonic Truth Maintenance:** Environmental states are non-stationary. Systems cannot treat historical memories as timeless assertions; they must deploy Doyle Truth Maintenance Systems (marking beliefs $\text{IN}$ or $\text{OUT}$) and bi-temporal schemas ($T_V \times T_T$) to resolve contradictions while preserving bit-exact historical auditability.
+3. **Hybrid Topological Retrieval & Semantic Caching:** Dense vector retrieval captures thematic affinity but suffers from polarity blindness and syntactic amnesia. Production systems deploy semantic caches (combining exact composite partition keys with high-threshold ANN lookups) to bypass retrieval latency, backed by dual-stage pipelines (dense ANN seed discovery coupled with Personalized PageRank over AST symbol graphs) to retrieve structurally complete context.
+4. **Non-Monotonic Truth Maintenance & Forgetting:** Environmental states are non-stationary. Systems cannot treat historical memories as timeless assertions; they must deploy Ebbinghaus forgetting curves ($2^{-\Delta t / t_{1/2}}$) with spaced reinforcement to prune transient noise, coupled with Doyle Truth Maintenance Systems (marking beliefs $\text{IN}$ or $\text{OUT}$) and bi-temporal schemas ($T_V \times T_T$) to resolve contradictions while preserving bit-exact historical auditability.
 5. **Retrieval SLA Governance:** Memory retrieval resides on the critical execution path. To satisfy sub-second SLAs, runtimes must eliminate remote WAN RPCs in favor of local-first indices, replace neural cross-encoders with Reciprocal Rank Fusion, and enforce knapsack token packing to minimize the quadratic Prefill Retrieval Tax.
 :::
 

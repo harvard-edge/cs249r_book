@@ -25,12 +25,13 @@ Treating the foundation model as an immutable neural processor forces systems ar
 
 ::: {.callout-learning-objectives}
 
-1. Analyze the economic, temporal, and mathematical limits of human trajectory annotation, quantifying why golden-path demonstration bias induces quadratic autoregressive covariate shift.
+1. Analyze the economic, temporal, and mathematical limits of human trajectory annotation, quantifying why golden-path demonstration bias induces quadratic autoregressive covariate shift $\mathcal{O}(\epsilon H^2)$.
 2. Architect a disaggregated synthetic data pipeline that decouples GPU-bound autoregressive rollout generation from CPU-bound deterministic verification to prevent oracle starvation and maximize cluster throughput.
 3. Formulate execution-based rejection sampling as a hard deterministic indicator gate, modeling the trade-off between softmax temperature, trajectory diversity, and verifier yield ($\text{pass@k}$).
 4. Design high-density microVM verification sandboxes utilizing Copy-on-Write (CoW) memory overlays to achieve sub-5 millisecond environment resets during continuous rollout validation.
 5. Formulate majority voting and consensus filtering across parallel stochastic rollouts to mitigate under-specified unit test suites and eliminate false-positive trajectory acceptance.
 6. Implement negative trajectory mining and synthetic fault injection to curate bifurcated training corpora (70 percent golden paths, 30 percent error-recovery traces) that teach policies self-diagnosis and autonomous error recovery.
+7. Calculate end-to-end token consumption, multi-stage filtering yield funnels, and tiered storage and indexing footprints for petabyte-scale trajectory log curation.
 
 :::
 
@@ -66,11 +67,17 @@ $$
 \pi_\theta(a \neq \pi^*(s) \mid s) \le \epsilon
 $$
 
-the probability that the agent remains on the expert distribution $d_{\pi^*}$ decays exponentially with trajectory length $H$. Under standard imitation learning assumptions, the expected error rate compounds quadratically:
+the probability that the agent remains on the expert distribution $d_{\pi^*}$ decays exponentially with trajectory length $H$.
+
+The physical systems intuition for why errors compound is straightforward: at each step $t \in \{1, \dots, H\}$, the policy makes an error with probability $\le \epsilon$. The instant an error occurs, the agent enters an unvisited state absent from golden-path training. Without demonstration guidance for error recovery, the policy is likely to fail on all subsequent $H - t$ steps of the horizon. Summing these compounding failure turns across all steps yields $\sum_{t=1}^H (H - t) = \frac{H(H-1)}{2} \approx \frac{H^2}{2}$ vulnerable steps. Multiplied by the per-step error probability $\epsilon$, the expected error count over the interaction horizon compounds quadratically with horizon length:
 
 $$
-\mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=1}^H \mathbb{I}(a_t \neq a_t^*) \right] \le \epsilon \cdot H + \epsilon \cdot (1 - \epsilon) \cdot \frac{H(H-1)}{2} \approx \mathcal{O}(\epsilon^2 H^2)
+\mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=1}^H \mathbb{I}(a_t \neq a_t^*) \right] \le \epsilon \cdot H + \epsilon \sum_{t=1}^H (H - t) = \epsilon \cdot H + \epsilon \cdot \frac{H(H-1)}{2} \approx \mathcal{O}(\epsilon H^2)
 $$ {#eq-quadratic-error-compounding}
+
+[^footnote-covariate-shift]
+
+[^footnote-covariate-shift]: For the formal total variation reduction and regret bound proofs establishing the $\mathcal{O}(\epsilon H^2)$ imitation learning performance gap under general cost functions, see @ross2011reduction and @sec-vol3-appendix-math.
 
 The instant the policy emits a suboptimal action or encounters an unprompted environment exception (e.g., an HTTP 504 gateway timeout or a missing dynamic library), the state $s_t$ exits the support of $d_{\pi^*}$. Because the model has never observed an error token in its training data, its conditional next-token distribution becomes high-entropy and uncalibrated, cascading into catastrophic failure loops.
 
@@ -160,7 +167,19 @@ $$
 T_{\text{CPU}} \ge T_{\text{GPU}} \implies N_{\text{CPU\_cores}} \ge N_{\text{GPU}} \cdot \left( \frac{B_{\text{rollout}} \cdot \mu_{\text{tokens}}}{\bar{L}_{\tau}} \right) \cdot \left( \frac{\bar{t}_{\text{verify}}}{\mu_{\text{core}}} \right)
 $$
 
-In production code-synthesis clusters running 8-way NVIDIA H100 nodes, maintaining full GPU saturation requires provisioning between 32 and 64 dedicated CPU verification cores for every individual GPU accelerator. Sizing below this threshold immediately induces catastrophic GPU under-utilization.
+To make this constraint concrete, consider an 8-GPU server of NVIDIA H100 SXM5 accelerators ($N_{\text{GPU}} = 8$) generating repository repair trajectories with mean length $\bar{L}_{\tau} = 4{,}000$ tokens. Operating under continuous batching with $B_{\text{rollout}} = 16$ concurrent streams per GPU and an aggregate decode speed of $\mu_{\text{tokens}} = 150$ tokens/second per stream, the 8-GPU node produces candidate trajectories at rate:
+
+$$
+T_{\text{GPU}} = \frac{8 \times 16 \times 150}{4{,}000} = 4.8 \text{ candidate trajectories per second}
+$$
+
+Now consider the downstream verification tax. If verifying a candidate trajectory requires checking out a repository, compiling dependencies, and executing a test suite taking an average of $\bar{t}_{\text{verify}} = 45$ CPU core-seconds with worker scheduling efficiency $\mu_{\text{core}} = 0.80$, the CPU verification cluster must provide:
+
+$$
+N_{\text{CPU\_cores}} \ge 4.8 \times \left( \frac{45}{0.80} \right) = 270 \text{ dedicated CPU cores}
+$$
+
+Divided across the 8 accelerators, this equates to $\frac{270}{8} \approx 34$ dedicated CPU cores per GPU. For heavier compilation workloads (e.g., C++ or Rust targets where $\bar{t}_{\text{verify}} \approx 80$ core-seconds), the requirement scales to $4.8 \times (80 / 0.80) = 480$ cores, or $60$ CPU cores per GPU. Maintaining line-rate throughput thus dictates provisioning between 32 and 64 dedicated CPU verification cores for every individual GPU accelerator. Sizing below this threshold immediately induces catastrophic GPU under-utilization, stranding tens of thousands of dollars of accelerator capital.
 
 ---
 
@@ -211,6 +230,10 @@ To evaluate synthesis efficiency across temperatures, pipelines compute the unbi
 $$
 \text{pass}@k = \mathbb{E}_{x \sim \mathcal{D}} \left[ 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} \right]
 $$ {#eq-pass-at-k-eval}
+
+The combinatorics behind @eq-pass-at-k-eval has a direct physical intuition. Out of $n$ generated candidate rollouts, $c$ passed verification and $n - c$ failed. If an operator selects a random subset of $k$ rollouts without replacement, the term $\binom{n - c}{k} / \binom{n}{k}$ represents the exact probability that *every single one* of the $k$ chosen candidates is a failure. Subtracting this term from $1$ yields the probability that at least one candidate in the subset succeeds. Evaluating this closed-form expectation across all tasks yields an unbiased, minimum-variance estimator that avoids the compute cost and high variance of running repeated $k$-sample empirical trials.[^footnote-pass-at-k]
+
+[^footnote-pass-at-k]: For the proof of minimum-variance unbiasedness and numerically stable implementations (computing log-factorials via `lgamma` to prevent combinatorial integer overflow when $n > 100$), see @chen2021evaluating and @sec-vol3-appendix-math.
 
 In production synthesis infrastructure, engineering teams employ **Adaptive Temperature Escalation**\index{Adaptive Temperature Escalation}: initial rollouts are sampled at $T = 0.2$ to capture low-cost greedy solutions; if the verifier rejects all initial candidates ($c = 0$), the scheduler dynamically escalates subsequent batches to $T = 0.7$ and $T = 0.9$ with Best-of-$N$ search to break out of deterministic local optima.
 
@@ -305,33 +328,33 @@ A cloud operations agent trained on raw accepted rejection sampling rollouts is 
 
 ### Mathematical formulation of execution-based rejection sampling
 
-Classical rejection sampling draws samples from a proposal distribution $q(x)$ to approximate an intractable target distribution $p(x)$ by accepting candidates with probability $\alpha(x) = p(x) / (M \cdot q(x))$, where $M \ge \sup_x p(x)/q(x)$.
+In classical Monte Carlo sampling, rejection sampling is notoriously difficult to scale: finding a tight bound $M \ge \sup_x p(x)/q(x)$ is analytically intractable, and acceptance probabilities decay exponentially in high-dimensional continuous spaces. In trajectory synthesis for autonomous agents, however, rejection sampling enjoys a clean physical simplification because the verification reward is a hard binary indicator: $R(\tau, x) \in \{0, 1\}$.
 
-In trajectory synthesis for autonomous agents, the proposal distribution is the autoregressive rollout policy $\pi_\theta(\tau \mid x)$, and the target distribution $p^*(\tau \mid x)$ is the distribution of trajectories conditioned on goal satisfaction and invariant preservation:
+Formally, the proposal distribution is the autoregressive rollout policy $\pi_\theta(\tau \mid x)$, and the target distribution $p^*(\tau \mid x)$ is the distribution of trajectories conditioned on goal satisfaction and invariant preservation:
 
 $$
 p^*(\tau \mid x) = \frac{\pi_\theta(\tau \mid x) \cdot R(\tau, x)}{\mathcal{Z}(x)}, \quad \text{where } \mathcal{Z}(x) = \sum_{\tau'} \pi_\theta(\tau' \mid x) R(\tau', x)
 $$
 
-Here, $\mathcal{Z}(x) \in [0, 1]$ represents the marginal task success probability under policy $\pi_\theta$. Because the verification oracle evaluates to a hard binary indicator $R(\tau, x) \in \{0, 1\}$, the rejection sampling acceptance probability collapses into an exact deterministic gate:
+Here, $\mathcal{Z}(x) \in [0, 1]$ represents the marginal task success probability under policy $\pi_\theta$. Because the verification oracle evaluates to a hard binary indicator $R(\tau, x) \in \{0, 1\}$, setting $M = 1 / \mathcal{Z}(x)$ causes the rejection sampling acceptance probability to collapse into an exact deterministic gate:
 
 $$
 \alpha(\tau) = \min\left(1, \frac{p^*(\tau \mid x)}{M \cdot \pi_\theta(\tau \mid x)}\right) = R(\tau, x)
 $$
 
-where $M = 1 / \mathcal{Z}(x)$.
+From a systems implementation perspective, this mathematical result means no stochastic coin tosses or importance re-weighting are needed at runtime. If the candidate trajectory passes all verification assertions ($R=1$), it is accepted with probability 1; if any assertion fails ($R=0$), it is rejected with probability 1. The accepted dataset $\mathcal{D}_{\text{accepted}} = \{\tau \sim \pi_\theta \mid R(\tau, x) = 1\}$ constitutes an exact, unbiased sample from the true conditional target distribution $p^*(\tau \mid x)$.[^footnote-rejection-sampling]
 
-This yields a mathematically rigorous systems property: the accepted dataset $\mathcal{D}_{\text{accepted}} = \{\tau \sim \pi_\theta \mid R(\tau, x) = 1\}$ constitutes an exact, unbiased sample from the true conditional target distribution $p^*(\tau \mid x)$. Trajectories that fail any verification assertion ($R=0$) are rejected with probability 1.
+[^footnote-rejection-sampling]: For the formal derivation proving that deterministic binary reward gating produces an unbiased sample of the conditional target distribution without importance weighting, see @sec-vol3-appendix-math.
 
 ### Trajectory economy and minimal golden path extraction
 
 When sampling $n$ independent candidates for a complex prompt, the proposal generator frequently yields multiple passing trajectories: $\mathcal{T}_{\text{pass}}(x) = \{\tau_1, \tau_2, \dots, \tau_m \mid R(\tau_i, x) = 1\}$. Naively adding all passing trajectories into the supervised fine-tuning corpus severely damages downstream policy efficiency. Stochastic rollouts frequently stumble upon the correct solution after executing redundant directory listings, duplicate status checks, and abandoned exploratory branches.
 
-To instill operational conciseness, the curation tier enforces **Trajectory Economy Filtering**\index{Trajectory Economy Filtering}. The system defines a trajectory cost objective parameterizing step count, token consumption, and wall-clock execution latency:
+To instill operational conciseness, the curation tier enforces **Trajectory Economy Filtering**\index{Trajectory Economy Filtering}. The system defines a trajectory cost objective parameterizing step count, token consumption, and wall-clock execution latency (@eq-trajectory-cost):
 
 $$
 J_{\text{cost}}(\tau) = \lambda_{\text{steps}} H(\tau) + \lambda_{\text{tokens}} \sum_{t=0}^{H(\tau)} (|z_t| + |a_t| + |o_t|) + \lambda_{\text{time}} t_{\text{wall}}(\tau)
-$$
+$$ {#eq-trajectory-cost}
 
 where $\lambda_{\text{steps}}, \lambda_{\text{tokens}}, \lambda_{\text{time}} \ge 0$ are weighting hyperparameters. The curation pipeline extracts exclusively the minimal-cost golden path $\tau^*(x)$:
 
@@ -340,6 +363,71 @@ $$
 $$
 
 Additionally, passing traces are passed through an algorithmic pruning pass that strips out idempotent loops (e.g., repeating `ls` without intervening filesystem mutations) and dead-end read operations that never inform downstream action arguments. Fine-tuning on $\tau^*(x)$ trains the model to execute the shortest, most computationally efficient trajectory that satisfies the task contract.
+
+### Rollout filtering funnels and synthetic token consumption
+
+In real-world post-training pipelines, candidate trajectories are not filtered in a single monolithic pass. Instead, raw rollouts pass through an aggressive multi-stage filtering funnel designed to discard unviable candidates as early as possible before consuming expensive downstream compute.
+
+@Tbl-vol3-filtering-funnel details the operational characteristics and empirical retention rates across each stage of this filtering funnel for a target synthesis run of 50,000 golden trajectories.
+
+| **Pipeline Stage**             | **Evaluated Invariant**                         | **Execution Substrate**                  | **Stage Latency** | **Stage Retention ($\eta_i$)** | **Remaining Candidates ($N_i$)** |
+|:-------------------------------|:------------------------------------------------|:-----------------------------------------|:-----------------:|:------------------------------:|:--------------------------------:|
+| **0. Raw Rollout Generation**  | Stochastic exploration ($\tau \sim \pi_\theta$) | GPU inference cluster (vLLM)             |      5 – 45 s     |             100.0%             |         $1{,}000{,}000$          |
+| **1. Syntax & Schema Gate**    | AST grammar, JSON schema, valid CLI flags       | In-process CPU worker threads            |      $<5$ ms      |             75.0%              |           $750{,}000$            |
+| **2. MicroVM Execution Gate**  | Exit code 0, unit and regression tests pass     | Isolated microVM sandboxes (Firecracker) |      1 – 30 s     |             25.0%              |           $187{,}500$            |
+| **3. Semantic Deduplication**  | MinHash LSH on AST diffs & action $n$-grams     | Distributed CPU cluster (Ray / Spark)    |     10 – 50 ms    |             60.0%              |           $112{,}500$            |
+| **4. Trajectory Economy Gate** | Minimal-cost path selection ($J_{\text{cost}}$) | In-memory ranking pass                   |      $<1$ ms      |             44.4%              |            $50{,}000$            |
+
+: **The Multi-Stage Trajectory Filtering Funnel**: Empirical retention rates, latency budgets, and cumulative candidate attrition from 1,000,000 raw rollouts to 50,000 golden paths. {#tbl-vol3-filtering-funnel tbl-colwidths="[20,24,20,12,12,12]"}
+
+The net pipeline yield $\eta_{\text{net}}$ is the product of retention rates across all four cascade stages (@eq-filtering-funnel-yield):
+
+$$
+\eta_{\text{net}} = \prod_{i=1}^4 \eta_i = \eta_{\text{syntax}} \cdot \eta_{\text{oracle}} \cdot \eta_{\text{dedup}} \cdot \eta_{\text{econ}} = 0.75 \times 0.25 \times 0.60 \times 0.444 \approx 0.050 \quad (5.0\%)
+$$ {#eq-filtering-funnel-yield}
+
+An end-to-end yield of $\eta_{\text{net}} = 5.0\%$ dictates that the system must synthesize:
+
+$$
+N_{\text{raw}} = \frac{N_{\text{golden}}}{\eta_{\text{net}}} = \frac{50{,}000}{0.050} = 1{,}000{,}000 \text{ raw candidate trajectories}
+$$
+
+To yield a single accepted, deduplicated golden path, the cluster must generate 20 candidate rollouts. The remaining 950,000 rejected rollouts are not discarded; as detailed in @sec-vol3-flywheel-negative-mining, traces passing Stage 1 but failing Stage 2 are mined to produce high-value error-recovery trajectories.
+
+#### Token consumption napkin math for synthetic generation
+
+Generating one million multi-turn rollouts imposes an immense token processing workload on the inference cluster. Systems engineers must budget both generated output tokens and expanding context prefill tokens from first principles.
+
+Consider a synthetic generation campaign targeting $N_{\text{raw}} = 1{,}000{,}000$ candidate trajectories with an average depth of $\bar{H} = 20$ interaction turns.
+
+1. **Generated Output Tokens ($N_{\text{out}}$):** At each turn, the agent emits an internal thought reasoning trace and a structured tool call with arguments, averaging $\bar{L}_{\text{out}} = 150$ tokens per turn. Across a 20-turn trajectory, the model generates $20 \times 150 = 3{,}000$ output tokens. Across the entire generation campaign:
+   $$
+   N_{\text{out}} = 1{,}000{,}000 \times 3{,}000 = 3.0 \times 10^9 \text{ tokens } (3.0\text{ Billion output tokens})
+   $$
+2. **Prefill Input Tokens ($N_{\text{prefill}}$):** Unlike stateless language model interactions, agentic rollouts feature an expanding context window. The initial task specification $S_0$ (system prompt, issue description, and repository directory map) is $2{,}000$ tokens. At each turn $t \in \{0, \dots, 19\}$, the context window expands by $150$ generated control tokens plus $250$ tokens of environment observation (bash stdout, compiler stderr, or git diffs), adding $\Delta S = 400$ tokens per turn. At turn $t$, the context prefill length is:
+   $$
+   S_t = S_0 + t \cdot \Delta S = 2{,}000 + 400 \cdot t \text{ tokens}
+   $$
+   The average context length across the 20 turns is $\bar{S} = 2{,}000 + 400 \times (19/2) = 5{,}800$ tokens. Because the agent invokes a prefill pass at every turn, the cumulative input tokens processed per candidate rollout evaluate to:
+   $$
+   S_{\text{cumulative}} = \sum_{t=0}^{19} S_t = 20 \times \bar{S} = 20 \times 5{,}800 = 116{,}000 \text{ prefill tokens per trajectory}
+   $$
+   Across one million candidate rollouts, the aggregate prefill volume reaches:
+   $$
+   N_{\text{prefill}} = 1{,}000{,}000 \times 116{,}000 = 1.16 \times 10^{11} \text{ tokens } (116\text{ Billion prefill tokens})
+   $$
+3. **Accelerator Compute Time and Financial Cost:**
+   Modern continuous batching engines running on an 8-GPU server of NVIDIA H100 SXM5 accelerators achieve an effective decode throughput of $\sim 1{,}600$ output tokens per second across concurrent streams. Generating $3.0\text{B}$ output tokens requires:
+   $$
+   t_{\text{compute}} = \frac{3.0 \times 10^9 \text{ tokens}}{1{,}600 \text{ tokens/s} \times 3{,}600 \text{ s/hr}} \approx 521 \text{ node-hours}
+   $$
+   At an on-demand cloud pricing rate of \$30.00 per 8x H100 node-hour, the direct GPU inference expenditure is:
+   $$
+   C_{\text{GPU}} = 521 \text{ node-hours} \times \$30.00/\text{node-hour} = \$15{,}630
+   $$
+   Divided across the $50{,}000$ verified golden paths, the unit compute cost is $\$15{,}630 / 50{,}000 \approx \$0.31$ per verified trajectory. This represents a $380\times$ cost reduction compared to human annotation (\$120.00/trace).
+4. **The Critical Role of Prefix Caching:**
+   Notice that the prefill volume ($116\text{B}$ tokens) dwarfs the output token volume ($3\text{B}$ tokens) by nearly a factor of 40. If every turn prefilled its entire context from scratch, attention prefill FLOPs and memory bandwidth would throttle the rollout fleet. Modern serving engines resolve this by utilizing **Prompt Prefix Caching** (such as RadixAttention in SGLang or PagedAttention prefix caching in vLLM). Because all candidate rollouts for a given task share identical system prompts, repository maps, and early turn prefixes, the engine reuses the precomputed KV cache across rollouts and turns, eliminating over 70 percent of prefill FLOPs and keeping tensor cores operating at peak decode saturation.
 
 ### Majority voting and consensus verification
 
@@ -429,7 +517,7 @@ $$
 Consequently, the probability of executing an incorrect action at step $t$ compounds, leading to the quadratic failure bound derived in @eq-quadratic-error-compounding:
 
 $$
-\mathbb{E}_{\tau \sim \pi_\theta} [\text{Errors}] \le \mathcal{O}(\epsilon^2 H^2)
+\mathbb{E}_{\tau \sim \pi_\theta} [\text{Errors}] \le \mathcal{O}(\epsilon H^2)
 $$
 
 To break this quadratic error compounding, post-training systems must expose the policy to its own error distribution during training, converting the quadratic error bound into a manageable linear bound $\mathcal{O}(\epsilon H)$. Achieving this requires mining failed trajectories.
@@ -546,6 +634,84 @@ All curated trajectories are serialized into standardized multi-turn training sc
 
 The synthesis pipeline pre-computes binary token loss masks $M_i \in \{0, 1\}$ across the serialized token stream. As detailed in @sec-vol3-sft, backpropagation gradients are evaluated strictly on agent control tokens ($M_i = 1$ for thoughts and tool call actions), while external environment observations and user instructions are masked out ($M_i = 0$). This hardware-to-training bridge guarantees that the model learns to *act* rather than wasting parameter capacity attempting to predict the non-differentiable transition dynamics of the external operating system.
 
+### Petabyte-scale trajectory storage, compression, and indexing
+
+As an autonomous data flywheel scales from experimental prototype to continuous post-training pipeline, trajectory storage and log indexing transform from routine data-engineering tasks into major infrastructure cost centers. Unlike stateless instruction-tuning datasets (where a single prompt-response pair occupies a few kilobytes), an agent trajectory is a rich multi-turn telemetry session capturing verbose compiler outputs, terminal diffs, file trees, and system state snapshots.
+
+#### Physical trajectory footprint and storage volume scaling
+
+To quantify the physical footprint of trajectory logs, we decompose the byte volume of an average interaction turn $t$:
+
+- **Turn Telemetry and Metadata:** Timestamps, worker node IDs, model checkpoint hashes, sampling temperature, step wall-clock latency, and per-turn token metrics: $\sim 1 \text{ KB}$.
+- **Deliberation Thoughts ($z_t$):** Internal chain-of-thought reasoning tokens: $\sim 1.5 \text{ KB}$.
+- **Emitted Action ($a_t$):** Tool call name, argument payloads, JSON schema wrappers, and CLI commands: $\sim 2.5 \text{ KB}$.
+- **Environment Observation ($o_t$):** Compiler stdout and stderr, package manager logs, AST diff hunks, directory trees, and HTTP response payloads: $10 \text{ KB}$ to $100 \text{ KB}$ (empirical mean $\bar{S}_{\text{obs}} \approx 25 \text{ KB}$).
+
+Summing these components, a single turn generates approximately $30 \text{ KB}$ of raw structured text. For a representative software engineering or DevOps trajectory spanning $\bar{H} = 25$ interaction turns, the uncompressed JSONL record evaluates to:
+
+$$
+S_{\text{traj}} \approx 25 \text{ turns} \times 30 \text{ KB/turn} \approx 750 \text{ KB per trajectory}
+$$
+
+At cluster scale, this footprint compounds rapidly:
+
+- **Synthetic Synthesis Campaign:** Generating $10^7$ candidate rollouts (retaining both passing golden paths and mined negative traces for error recovery) accumulates:
+  $$
+  10^7 \text{ trajectories} \times 750 \text{ KB} \approx 7.5 \text{ Terabytes}
+  $$
+- **Enterprise Production Telemetry:** An enterprise agent platform processing 5 million multi-turn operational tasks per day logs:
+  $$
+  5 \times 10^6 \times 750 \text{ KB} \approx 3.75 \text{ Terabytes per day}
+  $$
+  Accumulating over a single operational year, the raw telemetry repository expands to:
+  $$
+  365 \text{ days} \times 3.75 \text{ TB/day} \approx 1.37 \text{ Petabytes per year}
+  $$
+
+#### Columnar serialization and compression economics
+
+Retaining petabytes of trajectory logs as uncompressed flat JSONL files creates severe systems liabilities: reading a single attribute (such as filtering for trajectories where `exit_code == 137` to isolate out-of-memory crashes) requires parsing gigabytes of unindexed text from storage, incurring massive disk I/O and CPU deserialization bottlenecks.
+
+Modern data flywheels resolve this by converting raw ingestion streams into **Columnar Apache Parquet with Zstandard (ZSTD Level 6)** compression:
+
+1. **Columnar Projection and Dictionary Encoding:** Parquet decomposes the trajectory into independent column chunks: top-level metadata, tool action schemas, and observation strings. Repetitive JSON structural keys, tool identifiers (`exec_bash`, `apply_patch`), and environment variable blocks are dictionary-encoded into small integer IDs, eliminating textual redundancy.
+2. **High-Ratio Text Compression:** Observations consisting of repetitive compiler warnings, formatted stack traces, and unified diff syntax compress exceptionally well under dictionary-based Zstandard algorithms. In production benchmarks, Zstandard achieves an **80 to 88 percent compression ratio** ($5\times$ to $8\times$ storage reduction) over raw JSONL.
+3. **Cloud Storage Cost Arbitrage:** Compressing a 75 TB raw dataset down to $\approx 11 \text{ TB}$ reduces standard cloud object storage (for example, AWS S3 Standard at \$0.023/GB/month) from $\$1{,}725$ to $\$253$ per month, yielding tens of thousands of dollars in annual infrastructure savings across multi-year data retention horizons.
+
+#### Tiered storage architecture
+
+To balance low-latency training ingestion against long-term archival economics, trajectory storage is organized into a three-tier storage hierarchy:
+
+@Tbl-vol3-trajectory-storage-tiers formalizes the storage media, access latency, data representations, and lifecycle policies across these tiers.
+
+| **Storage Tier**        | **Physical Media**                  | **Access Latency** | **Data Representation**                | **Target Retention** | **Primary Systems Workload**                                          |
+|:------------------------|:------------------------------------|:------------------:|:---------------------------------------|:--------------------:|:----------------------------------------------------------------------|
+| **Hot Ingestion Tier**  | Host RAM & Local NVMe SSDs (RAID 0) |     $<0.1$ ms      | In-memory ring buffers & Arrow IPC     |     $<24$ hours      | Streaming rollouts to verification oracles and active RL buffer pools |
+| **Warm Analytics Tier** | Distributed Cloud Object Storage    |   $10$ – $50$ ms   | Columnar Apache Parquet (ZSTD Level 6) |  $30$ – $180$ days   | SFT dataset compilation, negative trajectory mining, DuckDB queries   |
+| **Cold Archival Tier**  | Deep Archive Cloud Blob Storage     |  $3$ – $12$ hours  | Tarball archives of microVM disk diffs |      $>1$ year       | Compliance auditing, incident forensics, catastrophic recovery        |
+
+: **Tiered Storage Architecture for Trajectory Logs**: Media characteristics, latency budgets, data representations, and operational roles across flywheel storage tiers. {#tbl-vol3-trajectory-storage-tiers tbl-colwidths="[16,20,11,20,11,22]"}
+
+In the **Warm Analytics Tier**, files are partitioned on object storage using hierarchical directory keys:
+
+```
+s3://flywheel-trajectories/year=2026/month=09/domain=code_repair/model=pi_v3/status=FAIL/
+```
+
+This layout allows query engines (such as DuckDB, ClickHouse, or Apache Spark) to execute **Partition Pruning** and **Projection Pushdown**: an engineer searching for 20,000 compiler error traces can scan solely the metadata and observation columns of the `status=FAIL` partition, evaluating queries in seconds without touching petabytes of passing traces.
+
+#### Selective metadata indexing versus full-text inverted indexes
+
+A frequent architectural mistake is building full-text search indexes (e.g., Elasticsearch or Apache Lucene) across all raw observation strings. Full-text indexing of multi-megabyte terminal outputs, stack traces, and compiler warnings inflates storage by $120$ to $150$ percent and consumes continuous CPU compute during ingestion.
+
+Instead, high-efficiency curation pipelines deploy **Selective Columnar Facet Indexing**:
+
+- **Structured Facet Columns:** The index stores only high-utility operational dimensions: `task_family`, `repo_name`, `turn_count`, `tools_invoked`, `terminal_exit_code`, `error_class`, and `execution_wall_time_ms`.
+- **Dense Semantic Embedding Index:** A compact 256-dimensional quantized embedding vector representing the user prompt and the final resolution patch, indexed via an in-memory Hierarchical Navigable Small World (HNSW) graph.
+- **Index Footprint:** The combined metadata and vector index consumes less than $15 \text{ MB}$ per $100{,}000$ trajectories ($<2\%$ of the dataset storage volume).
+
+This compact index enables sub-second retrieval of targeted training curricula—such as *"extract 30,000 multi-turn Python trajectories that encountered `ModuleNotFoundError` and successfully recovered within 2 turns"*—by filtering structured metadata columns in columnar storage and streaming only the matching compressed records directly to SFT worker nodes.
+
 ---
 
 ## Fallacies and Pitfalls {#sec-vol3-flywheel-fallacies}
@@ -576,7 +742,7 @@ A common architectural instinct is to maximize dataset quality by discarding eve
 
 Training an autonomous agent exclusively on golden paths produces severe **Autoregressive Covariate Shift**. During live inference, external environments are inherently non-deterministic: networks drop packets, databases lock tables, and filesystems return unexpected permission faults. Because a model trained exclusively on golden paths has never observed an error token conditioned on its own actions, the first runtime error forces the context into an out-of-distribution state.
 
-As derived in @eq-quadratic-error-compounding, the model's 1-step error probability compounds quadratically across the horizon: $\mathcal{O}(\epsilon^2 H^2)$. Under live testing, golden-path policies manifest a catastrophic failure signature: upon receiving a nonzero exit code, the policy panics, enters repetitive hallucination loops, and exhausts its context window. Production flywheels must explicitly preserve a bifurcated training distribution containing at least 25 to 35 percent error-recovery traces with verified corrective branches.
+As derived in @eq-quadratic-error-compounding, the model's 1-step error probability compounds quadratically across the horizon: $\mathcal{O}(\epsilon H^2)$. Under live testing, golden-path policies manifest a catastrophic failure signature: upon receiving a nonzero exit code, the policy panics, enters repetitive hallucination loops, and exhausts its context window. Production flywheels must explicitly preserve a bifurcated training distribution containing at least 25 to 35 percent error-recovery traces with verified corrective branches.
 
 :::
 
@@ -663,7 +829,8 @@ The transition from in-context prompt engineering to autonomous agency requires 
 2. **Deterministic Oracles Provide Ground Truth:** Trajectory verification must never be delegated to subjective LLM-as-a-judge evaluators, which suffer from length bias and circular hallucinations. Ground truth emerges exclusively from non-differentiable execution boundaries: AST parsers, schema validators, OS state diffs, and hermetic unit test suites.
 3. **Architectural Disaggregation Prevents Accelerator Starvation:** Coupling GPU token generation synchronously to CPU test execution collapses accelerator utilization to single digits. Production flywheels strictly decouple rollout generation from verification via asynchronous message brokers, balancing clusters with 32 to 64 CPU cores per GPU accelerator.
 4. **MicroVM Sandboxes with CoW Overlays Enable High-Density Verification:** Standard containers suffer from daemon lock contention, slow resets, and shared-kernel vulnerabilities. Hardware-isolated microVMs (AWS Firecracker) utilizing in-memory Copy-on-Write storage overlays achieve sub-5 millisecond environment resets and support thousands of concurrent verifications per host.
-5. **Bifurcated Curation Tames Covariate Shift:** Training exclusively on flawless golden paths induces quadratic error compounding $\mathcal{O}(\epsilon^2 H^2)$ when deployed agents encounter unexpected runtime exceptions. Curating bifurcated corpora (70 percent golden paths, 30 percent error-recovery traces) provides the causal supervision needed to bound error growth linearly $\mathcal{O}(\epsilon H)$.
+5. **Bifurcated Curation Tames Covariate Shift:** Training exclusively on flawless golden paths induces quadratic error compounding $\mathcal{O}(\epsilon H^2)$ when deployed agents encounter unexpected runtime exceptions. Curating bifurcated corpora (70 percent golden paths, 30 percent error-recovery traces) provides the causal supervision needed to bound error growth linearly $\mathcal{O}(\epsilon H)$.
+6. **Filtering Funnels and Columnar Tiering Dictate Flywheel Economics:** Multi-stage filtering cascades discard over 95 percent of unviable or duplicate candidate rollouts (5 percent net golden yield). Prompt prefix caching eliminates redundant prefill FLOPs across hundreds of billions of input tokens. Converting petabyte-scale trajectory logs to columnar Parquet with Zstandard achieves 80 to 88 percent compression, while selective metadata facet indexing enables sub-second retrieval without the massive overhead of full-text search.
 
 :::
 

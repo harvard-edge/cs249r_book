@@ -15,9 +15,9 @@ When an autonomous agent transitions from pure deliberative reasoning to real-wo
 \end{marginfigure}
 :::
 
-_Why does an interactive agent pause lock up millions of dollars of GPU silicon?_
+_Why does an interactive agent pause lock up millions of dollars of accelerator hardware?_
 
-In classical operating systems, hardware interrupts decouple fast arithmetic processors from sluggish mechanical peripherals by suspending threads and evacuating register state rather than busy-waiting. In agentic systems, human supervisors operate as the ultimate high-latency peripheral, introducing a latency disparity of up to six orders of magnitude compared to machine token generation. If a runtime synchronously blocks execution threads during these human-in-the-loop gates, it pins volatile memory in expensive accelerators, triggering rapid memory starvation, cluster-wide out-of-memory faults, and multi-agent deadlocks. To prevent these catastrophic cascading failures and safely yield control across the supervisory boundary, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+In classical operating systems, hardware interrupts decouple fast arithmetic processors from sluggish mechanical peripherals by suspending threads and evacuating register state rather than busy-waiting. In agentic systems, human supervisors operate as the ultimate high-latency peripheral, introducing a latency disparity of up to six orders of magnitude compared to machine token generation. If a runtime synchronously blocks execution threads during these human-in-the-loop gates, it pins volatile memory in expensive accelerators, triggering rapid memory starvation, cluster-wide out-of-memory faults, and multi-agent deadlocks. Interrupts and supervisory gates are the control plane for the H-S-A-C taxonomy: reconciling the open horizon and expanding state of an autonomous agent against strict authority bounds and verified invariant closure.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -25,10 +25,11 @@ In classical operating systems, hardware interrupts decouple fast arithmetic pro
 
 ::: {.callout-learning-objectives}
 
-- **Formulate** the mathematical bounds of interrupt latency ($T_{\text{int}}$) across token-decode and tool-actuation boundaries, deriving the conditions under which preemptive kernel traps supersede cooperative step-yielding.
+- **Formulate** the mathematical bounds of interrupt latency ($T_{\text{int}}$) across memory-bound decode ($T_{\text{decode}} \approx 2P / B_{\text{mem}}$), compute-bound prefill, and unbounded tool boundaries, deriving the conditions under which preemptive kernel traps supersede cooperative step-yielding.
 - **Architect** an asynchronous event reactor and signal-dispatch framework that maps POSIX signal semantics (`SIGINT`, `SIGPAUSE`, `SIGKILL`, `SIGBUDGET`, `SIGESCALATE`) to the Agent Control Block (ACB) state machine and append-only Write-Ahead Log (WAL).
-- **Quantify** the $10^6\times$ latency disparity between accelerator arithmetic and human deliberation, deriving the analytical swapping breakeven threshold ($T_{\text{breakeven}}$) governing Key-Value (KV) cache eviction across HBM, DRAM, and NVMe hierarchies.
-- **Design** hardware-enforced Policy Enforcement Points (PEPs), cryptographic capability leases with single-use nonces, and trusted execution enclaves (TEEs) that guarantee monotonic capability attenuation across the Reversibility Boundary.
+- **Quantify** the $10^6\times$ latency disparity between accelerator arithmetic and human deliberation, deriving the analytical swapping breakeven threshold ($T_{\text{breakeven}}$) and the latency amplification of synchronous approval gates.
+- **Evaluate** the economic trade-off between human inspection costs and automated recovery risks, calculating the quantitative escalation threshold ($P_{\text{threshold}} = C_{\text{human}} / C_{\text{blast}}$) governing transitions across the Reversibility Boundary.
+- **Design** hardware-enforced Policy Enforcement Points (PEPs), cryptographic capability leases with single-use nonces, and trusted execution enclaves (TEEs) that guarantee monotonic capability attenuation.
 - **Synthesize** deadlock-free scheduling policies by systematically eliminating Coffman's four conditions through optimistic staging, hierarchical resource partial orders, and authoritative watchdog preemption coupled with backward-compensating Sagas.
 
 :::
@@ -50,11 +51,13 @@ $$T_{\text{int}} = T_{\text{detect}} + T_{\text{drain}} + T_{\text{save}} + T_{\
 where:
 
 1. **Detection Latency ($T_{\text{detect}}$):** The duration required for the runtime to sense the incoming signal. In an asynchronous event loop, this is bounded by the tick resolution of the reactor polling mechanism ($\Delta t_{\text{tick}} \approx 0.1\text{--}1.0\text{ ms}$).
-2. **Step-Draining Latency ($T_{\text{drain}}$):** The time required to bring in-flight execution to a causally consistent checkpoint. If the agent is currently executing an autoregressive decode forward pass, the runtime must either wait for the current token tensor computation to finish or forcibly abort the CUDA stream. For a model with parameter count $P$ operating over memory bandwidth $B_{\text{mem}}$, the memory-bound token decode latency is:
+2. **Step-Draining Latency ($T_{\text{drain}}$):** The time required to bring in-flight execution to a causally consistent checkpoint. If the agent is currently executing an autoregressive decode forward pass, the runtime must either wait for the current token tensor computation to finish or forcibly abort the accelerator compute stream. Autoregressive token decoding is strictly memory-bandwidth bound: to emit a single token, all model parameters must be streamed from High-Bandwidth Memory (HBM) into compute registers. For a model with parameter count $P$ in 16-bit precision ($2P$ bytes) operating over aggregate memory bandwidth $B_{\text{mem}}$, the memory-bound token decode latency is:
    $$T_{\text{decode}} \approx \frac{2 \cdot P}{B_{\text{mem}}} + \delta_{\text{kernel}}$$
-   For an 8-way H100 SXM5 node ($B_{\text{mem}} \approx 3.35\text{ TB/s}$ per GPU) serving a 70B parameter model, $T_{\text{decode}}$ falls between $15\text{ ms}$ and $40\text{ ms}$. If the interrupt occurs during a prompt prefill phase over sequence length $S$, compute bound by peak FP16/BF16 tensor throughput $P_{\text{peak}}$, draining latency scales with sequence length:
-   $$T_{\text{prefill}} \approx \frac{2 \cdot P \cdot S}{P_{\text{peak}}} + \frac{2 \cdot S \cdot d_{\text{model}}}{B_{\text{mem}}}$$
-   Crucially, if the agent is blocked in a synchronous external tool call (e.g., executing a remote shell script or querying an unindexed database table), $T_{\text{drain}} = T_{\text{tool\_step}}$, which is unbounded unless bounded by hard real-time kernel preemption.
+   For an 8-way accelerator node ($B_{\text{mem}} \approx 8 \times 3.35\text{ TB/s} = 26.8\text{ TB/s}$) serving a 70B parameter model ($140\text{ GB}$ of weights), the raw parameter streaming time is $\frac{140 \times 10^9}{26.8 \times 10^{12}} \approx 5.2\text{ ms}$. Accounting for attention lookups and kernel launch overhead $\delta_{\text{kernel}}$, $T_{\text{decode}}$ falls between $15\text{ ms}$ and $40\text{ ms}$.
+   If the interrupt occurs during a prompt prefill phase over sequence length $S$, the forward pass processes all $S$ tokens in parallel via matrix multiplication, which is compute-bound by peak tensor throughput $P_{\text{peak}}$:
+   $$T_{\text{prefill}} \approx \frac{2 \cdot P \cdot S}{P_{\text{peak}}}$$
+   For $S = 4{,}096$ prompt tokens on an 8-way accelerator node with aggregate throughput $P_{\text{peak}} \approx 8 \times 989\text{ TFLOP/s} \approx 7.9\text{ PFLOP/s}$, prefill compute time is $\approx \frac{2 \times 70 \times 10^9 \times 4{,}096}{7.9 \times 10^{15}} \approx 72.6\text{ ms}$.
+   Crucially, whether decoding or prefilling, neural inference steps are physically bounded and finish in milliseconds. But if the agent is blocked in a synchronous external tool call (e.g., executing a remote shell script or querying an unindexed database table), $T_{\text{drain}} = T_{\text{tool\_step}}$, which is unbounded unless bounded by hard real-time kernel preemption.
 3. **State Preservation Latency ($T_{\text{save}}$):** The time required to serialize the Agent Control Block (ACB) to durable storage, including the trajectory event ledger, tool observation history, and token consumption accounting ($T_{\text{save}} \approx 5\text{--}20\text{ ms}$).
 4. **Dispatch Latency ($T_{\text{dispatch}}$):** The latency to look up and execute the registered Agent Interrupt Service Routine (AISR) within the runtime kernel ($T_{\text{dispatch}} < 1\text{ ms}$).
 
@@ -137,11 +140,7 @@ The core runtime thread never executes autoregressive inference or external tool
 3. **Supervisory Channels:** Asynchronous webhook endpoints and WebSocket connections delivering human approvals, steering text, and administrative signals.
 4. **Watchdog Timers:** High-resolution wall-clock timers tracking execution deadlines and approval timeouts.
 
-Mathematically, the Event Demultiplexer evaluates the set of ready streams $\mathcal{E}_{\text{ready}}$ across all registered stream descriptors $\mathcal{S}_{\text{streams}}$:
-
-$$\mathcal{E}_{\text{ready}} = \text{Demux}(\mathcal{S}_{\text{streams}}, \Delta t_{\text{timeout}})$$
-
-When events arrive, the reactor invokes registered callback handlers without blocking the central scheduling loop.
+Instead of spinning CPU cores in a busy-wait polling loop, which wastes energy and saturates execution threads, the reactor registers file descriptors for model streams, tool microVM pipes, supervisory webhooks, and timer eventfd descriptors with the operating system kernel (using `epoll_wait(2)` on Linux or `kqueue(2)` on BSD/macOS). The reactor thread blocks inside the kernel with zero CPU utilization until an event arrives. When a network packet arrives on an inference socket, a tool process exits, a human approval webhook lands, or a timer fires, the operating system wakes the reactor thread in microseconds. The reactor then dispatches the registered callback handler without blocking the central scheduling loop.
 
 ### The Agent Control Block (ACB) state machine
 
@@ -154,7 +153,7 @@ As illustrated in @fig-vol3-interrupts-lifecycle, the lifecycle of an agent traj
 :::
 
 - **`ACTIVE_EXECUTION`:** The agent is actively prefilling or decoding tokens on GPU accelerators, or evaluating observations.
-- **`SUSPENDED_IO`:** The agent is waiting for an asynchronous, low-risk tool execution (e.g., compiling a large software binary or waiting for a read-only database query). The KV cache remains resident in GPU high-bandwidth memory (HBM) or host DRAM.
+- **`SUSPENDED_IO`:** The agent is waiting for an asynchronous, low-risk tool execution (e.g., compiling a large software binary or waiting for a read-only database query). The KV cache remains resident in GPU HBM or host DRAM.
 - **`SUSPENDED_HUMAN_GATE`:** The agent has crossed the Reversibility Boundary and issued a `SYS_ESCALATE` trap. Execution is frozen, volatile accelerator memory is completely evacuated to DRAM or NVMe, and the runtime awaits an out-of-band cryptographic capability lease.
 - **`SPECULATIVE_EXECUTION`:** The agent executes causally independent, read-only sub-tasks in an ephemeral Copy-on-Write sandbox while awaiting human approval for a pending gate.
 - **`TERMINATED_SUCCESS`:** The agent has satisfied its goal criteria and flushed its final state to the durable ledger.
@@ -435,11 +434,23 @@ This production incident illustrates the fundamental tension of Human-in-the-Loo
 
 ### The asymmetric latency disparity
 
-In modern inference architectures, execution is scheduled across microsecond and millisecond intervals. A forward-pass general matrix multiplication (GEMM) kernel executes on GPU Tensor Cores in tens of microseconds; an autoregressive token decode step completes in $15\text{--}40\text{ ms}$; a full inference turn streams back in under a second. When the system blocks to wait for a human supervisor, the temporal scale fractures across six orders of magnitude:
+In modern inference architectures, execution is scheduled across microsecond and millisecond intervals. A forward-pass general matrix multiplication (GEMM) kernel executes on accelerator Tensor Cores in tens of microseconds; an autoregressive token decode step completes in $15\text{--}40\text{ ms}$; a full inference turn streams back in under a second. When the system blocks to wait for a human supervisor, the temporal scale fractures across six orders of magnitude:
 
 $$\text{Latency Disparity} = \frac{T_{\text{human}}}{T_{\text{model}}} \approx \frac{10^3\text{--}10^5\text{ s}}{10^{-3}\text{--}10^{-2}\text{ s}} \approx 10^5 \text{ to } 10^7$$
 
 A human engineer reviewing a proposed pull request, Slack escalation, or administrative authorization operates across minutes, hours, or entire business days ($300\text{ to } 86{,}400\text{ seconds}$). In computing systems design, treating a component with $10^5\text{ seconds}$ of latency as a synchronous participant in an execution thread that operates at $10^{-2}\text{ seconds}$ is an architectural flaw. Human supervisors must be modeled as **High-Latency, Asynchronous, Lossy Peripherals**.
+
+#### Latency amplification of synchronous gates: Napkin math
+
+To understand why synchronous human approval gates destroy systems throughput, consider an agent executing an $N = 50$-step trajectory. Each autonomous step consumes $T_{\text{step}} = 2\text{ s}$ ($1\text{ s}$ of token generation plus $1\text{ s}$ of sandboxed tool execution). Unsupervised, the complete trajectory finishes in:
+
+$$T_{\text{unsupervised}} = N \cdot T_{\text{step}} = 50 \times 2\text{ s} = 100\text{ s} \approx 1.7\text{ minutes}$$
+
+Now suppose a safety policy requires synchronous human approval, but only for high-risk operations occurring with low probability $p_{\text{gate}} = 0.02$ (exactly one step in fifty). If the human reviewer takes a median response time $\mathbb{E}[T_{\text{human}}] = 20\text{ minutes} = 1{,}200\text{ s}$:
+
+$$\mathbb{E}[T_{\text{supervised}}] = N \cdot T_{\text{step}} + (N \cdot p_{\text{gate}}) \cdot \mathbb{E}[T_{\text{human}}] = 100\text{ s} + 1 \times 1{,}200\text{ s} = 1{,}300\text{ s} \approx 21.7\text{ minutes}$$
+
+A single human gate accounts for $\frac{1{,}200}{1{,}300} \approx 92.3\%$ of the total wall-clock trajectory duration. If the runtime blocks synchronously during this gate, effective accelerator compute utilization drops from $100\%$ to $\frac{100}{1{,}300} \approx 7.7\%$, leaving expensive silicon idle for more than nine-tenths of its operational life.
 
 ### The math of memory starvation
 
@@ -463,7 +474,13 @@ To prevent memory starvation, runtimes must implement **Hierarchical Memory Swap
 ![](images/svg/latency_disparity_holding_cost.svg){width=100%}
 :::
 
-Evacuating and rehydrating gigabytes of memory across hardware buses incurs latency and bandwidth overhead. Let $\mathcal{B}_{\text{bus}}$ represent the effective bidirectional direct memory access (DMA) bandwidth of the interconnect (e.g., PCIe Gen5 x16 providing $\approx 54\text{ GB/s}$ real-world throughput, or NVLink providing $\approx 450\text{ GB/s}$), and let $\delta_{\text{kernel}}$ represent driver scheduling overhead. The total round-trip swap latency $T_{\text{swap}}$ is:
+When an agent execution thread enters a supervisory pause, the runtime must choose between three distinct architectural alternatives:
+
+1. **Retain in Accelerator HBM:** Retaining the KV cache in device memory incurs zero latency overhead upon resumption. However, it permanently ties up $21.47\text{ GB}$ of scarce HBM ($26.8\%$ of an 80 GB device). In a shared cluster, this pins capacity, prevents active batches from allocating pages, and risks fatal Out-of-Memory crashes.
+2. **Discard and Recompute:** Evicting the KV cache by dropping it entirely frees HBM immediately. However, when the human supervisor approves the request, the runtime must re-prefill all $S = 65{,}536$ prefix tokens from scratch. For a 70B parameter model, this requires $2 \cdot P \cdot S \approx 2 \times 70 \times 10^9 \times 65{,}536 \approx 9.18 \times 10^{15}\text{ FLOPs}$. On an 8-way accelerator node delivering $7.9\text{ PFLOP/s}$ aggregate tensor throughput, recomputation consumes $\approx 1.16\text{ seconds}$ of dedicated GPU compute and burns substantial energy.
+3. **Hierarchical Swap via Direct Memory Access (DMA):** Evacuate the KV cache to host system DRAM over the PCIe bus and stream it back upon resumption.
+
+Let $\mathcal{B}_{\text{bus}}$ represent the effective bidirectional DMA bandwidth of the interconnect (e.g., PCIe Gen5 x16 providing $\approx 54\text{ GB/s}$ real-world throughput, or NVLink providing $\approx 450\text{ GB/s}$), and let $\delta_{\text{kernel}}$ represent driver scheduling overhead. The total round-trip swap latency $T_{\text{swap}}$ is:
 
 $$T_{\text{swap}} = \frac{2 \cdot M_{\text{KV}}}{\mathcal{B}_{\text{bus}}} + \delta_{\text{kernel}}$$
 
@@ -475,7 +492,7 @@ For a $21.47\text{ GB}$ working set over PCIe Gen5 x16 ($\mathcal{B}_{\text{bus}
 
 $$T_{\text{breakeven}} = \frac{2 \cdot 21.47\text{ GB}}{54\text{ GB/s}} + 0.040\text{ s} \approx 0.795\text{ s} + 0.040\text{ s} = 0.835\text{ s}$$
 
-If an expected pause exceeds $835\text{ milliseconds}$, retaining volatile HBM is economically and operationally irrational. Because human deliberation latency ($T_{\text{human}} \ge 10^2\text{ s}$) exceeds $T_{\text{breakeven}}$ by three to five orders of magnitude ($T_{\text{human}} \gg T_{\text{breakeven}}$), proactive memory evacuation to host DRAM or NVMe is mathematically mandatory for every supervisory gate.
+If an expected pause exceeds $835\text{ milliseconds}$, retaining volatile HBM is economically and operationally irrational. Swapping out takes less than $400\text{ ms}$ of one-way DMA transfer, and swapping back takes another $400\text{ ms}$—faster than recomputing $9.18\text{ PFLOPs}$ of prefill context. Because human deliberation latency ($T_{\text{human}} \ge 300\text{ s}$) exceeds $T_{\text{breakeven}}$ by more than two orders of magnitude ($T_{\text{human}} \gg T_{\text{breakeven}}$), proactive memory evacuation to host DRAM or NVMe is mathematically mandatory for every supervisory gate.
 
 @Tbl-vol3-interrupts-swapping-breakeven quantifies the transfer bandwidths, evacuation latencies, breakeven thresholds, and holding-cost elimination across memory tiers for a $21.47\text{ GB}$ KV cache working set during a typical 30-minute human supervisory review ($1{,}800\text{ s}$).
 
@@ -530,6 +547,53 @@ If $a_j \notin \text{Tainted}(\mathcal{P})$, the runtime launches $a_j$ inside a
   - If **Approved:** The speculative branch is atomically merged into the main trajectory, completely masking human latency.
   - If **Rejected:** The speculative branch and its ephemeral microVM sandbox are discarded in under 5 milliseconds by tearing down the tmpfs overlay.
 
+### The economics of escalation: Human inspection vs. automated recovery
+
+If human oversight is essential for high-blast-radius actions, why not require human approval for *every* tool invocation? In production systems, human inspection is not free; it is the most expensive operational resource in the entire stack.
+
+#### Quantifying inspection vs. recovery costs
+
+Consider the physical economics of a human review gate versus an automated recovery loop:
+
+- **Cost of Human Inspection ($C_{\text{human}}$):** A site reliability or software engineer represents a fully loaded labor cost of $\$150{,}000\text{--}\$250{,}000\text{ per year}$, translating to roughly $\$1.50\text{--}\$2.50\text{ per minute}$. Reviewing an agent's proposed action (inspecting code diffs, verifying environment invariants, checking compliance) requires $3\text{--}5\text{ minutes}$ of focused attention. The direct labor cost of a single approval gate is:
+  $$C_{\text{human}} \approx \$5.00 \text{ to } \$12.50 \quad \text{per inspection}$$
+  This excludes the opportunity cost of interrupting engineering workflows and cognitive fatigue from frequent context switches.
+- **Cost of Automated Recovery ($C_{\text{auto}}$):** An automated recovery subroutine—such as re-prompting the model with compiler error messages, running unit tests in an ephemeral sandbox, or executing an automated `git checkout` rollback—consumes roughly $2{,}000\text{ to } 4{,}000\text{ tokens}$ across a few seconds of accelerator time:
+  $$C_{\text{auto}} = C_{\text{compute}} \approx \$0.01 \text{ to } \$0.05 \quad \text{per attempt}$$
+
+Human inspection is **$100\times$ to $1{,}000\times$ more expensive** than automated recovery. If an agent cluster generates 20 human approval requests per day per agent across a fleet of 50 agents, daily supervisory costs balloon to $\$5{,}000\text{--}\$12{,}500$, dwarfing the entire compute budget of the cluster.
+
+#### Deriving the optimal escalation threshold
+
+To maximize system throughput while preventing catastrophic accidents, the runtime must formalize when to escalate to human review (`SYS_ESCALATE`) versus when to permit autonomous self-healing.
+
+Let $a$ denote a candidate action, and let $P_{\text{fail}}$ be the estimated probability that autonomous execution fails or hallucinates an unrecoverable action. Let $C_{\text{blast}}$ denote the unrecoverable financial and operational blast radius of failure (e.g., corrupting customer data or executing an unauthorized wire transfer).
+
+The expected cost of attempting autonomous execution without human intervention is:
+
+$$\mathbb{E}[C_{\text{auto\_action}}] = C_{\text{compute}} + P_{\text{fail}} \cdot C_{\text{blast}}$$
+
+Conversely, the expected cost of invoking a human approval gate is the compute cost plus the human inspection fee:
+
+$$\mathbb{E}[C_{\text{supervised\_action}}] = C_{\text{compute}} + C_{\text{human}}$$
+
+The runtime should escalate to a human supervisor if and only if the expected loss of autonomous failure exceeds the inspection cost:
+
+$$P_{\text{fail}} \cdot C_{\text{blast}} > C_{\text{human}}$$
+
+Solving for $P_{\text{fail}}$ yields the **Optimal Escalation Threshold ($P_{\text{threshold}}$)**:
+
+$$P_{\text{threshold}} = \frac{C_{\text{human}}}{C_{\text{blast}}}$$
+
+The operational implications of this first-principles ratio are immediate:
+
+1. **Reversible Operations ($C_{\text{blast}} \approx 0$):** When an action occurs within an isolated sandbox or local git worktree, automated rollback is instantaneous and free ($C_{\text{blast}} \to 0$). Therefore, $P_{\text{threshold}} \to \infty$. The runtime should **never** escalate reversible operations to a human; it should permit the agent to fail, reflect, and retry autonomously.
+2. **Catastrophic Operations ($C_{\text{blast}} \gg C_{\text{human}}$):** If an action carries an irreversible blast radius of $\$100{,}000$ (e.g., dropping production database shards) while human inspection costs $\$5.00$, the escalation threshold collapses:
+   $$P_{\text{threshold}} = \frac{\$5.00}{\$100{,}000} = 0.005\%$$
+   Even if the model is $99.99\%$ confident, the $0.005\%$ residual risk of catastrophic failure mandates an immediate synchronous `SYS_ESCALATE` trap.[^fn-escalation-threshold-risk]
+
+[^fn-escalation-threshold-risk]: **Escalation Threshold**: When failure probability $P_{\text{fail}}$ is estimated with statistical uncertainty, risk-averse execution incorporates an upper confidence bound $\hat{P}_{\text{fail}} + z_\alpha \sigma_P$. The decision rule triggers human escalation whenever the upper bound exceeds $P_{\text{threshold}}$. For the formal decision-theoretic derivation and Bayesian risk minimization, see @sec-vol3-appendix-math-escalation. \index{Escalation Threshold!decision theory}
+
 ## Constitutional Safety Checks and Hardware Enclaves {#sec-vol3-interrupts-safety-checks}
 
 In early 2025, an enterprise procurement system integrated an autonomous large language model (LLM) agent to review invoices and automate vendor payments via a banking API. An attacker submitted an invoice containing a sophisticated indirect prompt injection hidden within white-on-white text in an attached PDF. The adversarial prompt instructed the model:
@@ -551,13 +615,13 @@ To construct secure agent systems, execution space must be partitioned into two 
 
 $$\mathcal{D}_{\text{reversible}} \quad \Big\Vert \quad \mathcal{D}_{\text{irreversible}}$$
 
-Formally, an action $a \in \mathcal{A}$ operating on environment $\mathcal{E}$ is **invertible** if and only if there exists a deterministic compensating action $a^{-1} \in \mathcal{A}$ such that applying the sequence yields an identity transformation:
+Formally, an action $a \in \mathcal{A}$ operating on environment state $\mathcal{E}$ is **invertible** if and only if there exists a deterministic compensating action $a^{-1} \in \mathcal{A}$ such that applying the inverse to the mutated state restores the original environment:
 
-$$\mathcal{E} \circ (a \circ a^{-1}) \equiv \mathcal{E}$$
+$$(a^{-1} \circ a)(\mathcal{E}) \equiv \mathcal{E}$$
 
-Within the **Reversible Domain ($\mathcal{D}_{\text{rev}}$)**, operations possess deterministic inverses. If an agent emits invalid code or hallucinated modifications inside an isolated microVM or git branch, the runtime executes an automated rollback ($a^{-1}$) in milliseconds by discarding the ephemeral filesystem overlay or executing `git reset --hard`.
+Within the **Reversible Domain ($\mathcal{D}_{\text{rev}}$)**, operations possess deterministic inverses. If an agent emits invalid code or hallucinated modifications inside an isolated microVM or git branch, the runtime executes an automated rollback ($a^{-1}$) in milliseconds by discarding the ephemeral filesystem overlay or executing `git reset --hard`. Because the blast radius is bounded by the negligible compute cost of the rollback ($C_{\text{blast}} \approx C_{\text{rollback}} \to 0$), the escalation threshold is effectively infinite ($P_{\text{threshold}} \to \infty$). The agent should execute autonomously without human gating.
 
-Outside this boundary, actions are **non-invertible ($\nexists a^{-1}$)**. Once an external wire transfer clears, a production table is dropped, an email is transmitted via SMTP, or a physical robotic actuator fires, physics, law, and distributed state prevent mathematical inversion.
+Outside this boundary, in the **Irreversible Domain ($\mathcal{D}_{\text{irrev}}$)**, actions are **non-invertible ($\nexists a^{-1}$)**. Once an external wire transfer clears, a production table is dropped, an email is transmitted via SMTP, or a physical robotic actuator fires, physics, law, and distributed state prevent mathematical inversion. Here, $C_{\text{blast}} \gg C_{\text{human}}$, collapsing the escalation threshold ($P_{\text{threshold}} \to 0$) and demanding cryptographic human authorization.
 
 ::: {.callout-important title="The fundamental law of autonomous agency"}
 **The Actuation Invariant:** No stochastic processor may execute an action crossing the Reversibility Boundary without presenting a verifiable, cryptographically signed capability lease authorized by an authoritative human supervisor or hardware-enforced Policy Enforcement Point.
@@ -672,8 +736,8 @@ Upon expiration:
 
 1. The pending promise transitions atomically to `TIMED_OUT`.
 2. All ephemeral sandbox environments and temporary credentials are confiscated.
-3. The runtime executes a **Backward-Compensating Saga** [@garciamolina1987sagas]. If the agent had executed partial external operations $A_1, A_2, \dots, A_k$, the runtime automatically dispatches the corresponding compensating transactions $C_k, \dots, C_2, C_1$ in reverse order, restoring external state to a clean checkpoint:
-   $$A_{\text{net}} = (A_1 \circ C_1) \circ (A_2 \circ C_2) \dots \circ (A_k \circ C_k) \equiv \mathcal{I}$$
+3. The runtime executes a **Backward-Compensating Saga** [@garciamolina1987sagas]. If the agent had executed partial external operations $A_1, A_2, \dots, A_k$ forward in time, the runtime automatically dispatches the corresponding compensating transactions $C_k, \dots, C_2, C_1$ in reverse chronological order, unwinding external mutations back to a clean invariant checkpoint:
+   $$A_{\text{net}} = C_1 \circ C_2 \dots \circ C_k \circ A_k \dots \circ A_2 \circ A_1 \equiv \mathcal{I}$$
 4. The escalation ticket is forwarded to a secondary escalation tier (e.g., paging the secondary on-call engineer via PagerDuty).
 
 #### 3. Breaking circular wait via global partial ordering
@@ -743,10 +807,10 @@ Autonomous agents operating over extended execution horizons cannot function as 
 
 ::: {.callout-takeaways title="The asynchronous control invariant"}
 
-1. **The Asymmetric Latency Disparity:** The $10^6\times$ temporal mismatch between neural token generation ($10^{-2}\text{ s}$) and human deliberation ($10^4\text{ s}$) dictates that agent runtimes must never synchronously block execution threads or pin volatile memory in accelerator hardware.
-2. **Preemptive Kernel Traps:** While benign interruptions yield cooperatively at step boundaries, critical safety breaches and administrative kill switches demand hard real-time kernel preemption ($T_{\text{int}} < 5\text{ ms}$) that severs inference sockets and terminates tool containers.
-3. **The Swapping Invariant:** Because human review latency exceeds the swapping breakeven threshold by orders of magnitude ($T_{\text{human}} \gg T_{\text{breakeven}} \approx 0.8\text{ s}$), runtimes must proactively dehydrate the Agent Control Block and KV cache to host DRAM or NVMe storage.
-4. **The Reversibility Boundary & Capability Leases:** Actions crossing into the irreversible domain ($\nexists a^{-1}$) require unforgeable, cryptographically signed Capability Leases containing single-use nonces and canonical argument digests verified by hardware-enforced Policy Enforcement Points.
+1. **The Asymmetric Latency Disparity:** The $10^6\times$ temporal mismatch between neural token generation ($10^{-2}\text{ s}$) and human deliberation ($10^4\text{ s}$) means that even a $2\%$ synchronous gate frequency inflates trajectory wall-clock latency by more than an order of magnitude, collapsing accelerator utilization from $100\%$ to under $10\%$. Agent runtimes must never synchronously block execution threads.
+2. **Preemptive Kernel Traps:** While benign interruptions yield cooperatively at step boundaries, critical safety breaches and administrative kill switches demand hard real-time kernel preemption ($T_{\text{int}} < 5\text{ ms}$) that severs inference sockets, destroys accelerator compute streams, and terminates tool containers.
+3. **The Swapping Invariant:** Because human review latency exceeds the swapping breakeven threshold by orders of magnitude ($T_{\text{human}} \gg T_{\text{breakeven}} \approx 0.8\text{ s}$), runtimes must proactively dehydrate the Agent Control Block and KV cache to host DRAM or NVMe storage, eliminating volatile holding costs.
+4. **The Reversibility Boundary & Escalation Economics:** Because human inspection is hundreds of times more expensive than automated recovery ($C_{\text{human}} \gg C_{\text{auto}}$), the runtime should escalate only when expected risk exceeds the inspection cost ($P_{\text{fail}} > C_{\text{human}} / C_{\text{blast}}$). Actions crossing into the irreversible domain ($\nexists a^{-1}$) require unforgeable cryptographic Capability Leases with single-use nonces verified by hardware-enforced Policy Enforcement Points.
 5. **Coffman Deadlock Prevention:** Suspending agents while they hold transactional locks induces cluster freezes. Runtimes guarantee liveness by eliminating Hold-and-Wait through optimistic staging, enforcing preemption via authoritative watchdog timers, and executing backward-compensating Sagas upon timeout expiry.
 
 :::

@@ -44,9 +44,9 @@ While SFT aligns the model's output distribution with the formal syntax of tool 
 
 Under maximum likelihood estimation, the policy is mathematically incentivized to match the probability density of the demonstration distribution:
 
-$$\pi_{\theta}^{\text{SFT}} \approx \arg\min_\pi D_{\text{KL}}(\pi_{\text{expert}} \,\|\, \pi)$$
+$$\pi_{\theta}^{\text{SFT}} = \arg\min_\pi D_{\text{KL}}(\pi_{\text{expert}} \,\|\, \pi)$$
 
-Consequently, the competence of the compiled policy is strictly upper-bounded by the skill and operational assumptions of the human demonstrators. If a human engineer resolves a repository refactoring task through eight sequential, inefficient shell commands, the student policy assigns maximum probability to that exact sequence of eight clumsy steps. The model is actively penalized during gradient updates if it discovers a more concise two-step solution that deviates from the human trace. Furthermore, in combinatorial software state spaces with branching factor $b \approx 10$ and trajectory depth $H \approx 20$, the potential state space exceeds $10^{20}$ states. Human demonstration corpora sample only a vanishingly small measure of this space.
+In practice, this forces the model to place probability mass everywhere the human demonstrator stepped. Consequently, the competence of the compiled policy is strictly upper-bounded by the skill and operational assumptions of the human demonstrators. If a human engineer resolves a repository refactoring task through eight sequential, inefficient shell commands, the student policy assigns maximum probability to that exact sequence of eight clumsy steps. The model is actively penalized during gradient updates if it discovers a more concise two-step solution that deviates from the human trace. Furthermore, in combinatorial software state spaces with branching factor $b \approx 10$ and trajectory depth $H \approx 20$, the potential state space exceeds $10^{20}$ states. Human demonstration corpora sample only a vanishingly small measure of this space.
 
 The more lethal operational vulnerability is **covariate shift** [@ross2011reduction]. During supervised training, the loss function enforces the **teacher-forcing** invariant: when predicting token $y_t^*$, the conditioning history $y_{<t}^*$ is drawn exclusively from the ground-truth demonstration. At inference time, however, the agent operates in closed-loop autoregression, sampling its own actions:
 
@@ -56,11 +56,11 @@ The moment the agent emits a sub-optimal parameter or encounters unexpected stde
 
 $$P(s_t \notin \text{supp}(\mathcal{D})) > 0$$
 
-Because the model was never exposed to its own errors during training, its probability of selecting a valid recovery action drops precipitously. The compounding of errors ensures that overall trajectory success probability decays exponentially with horizon length $H$:
+Because the model was never exposed to its own errors during training, its probability of selecting a valid recovery action drops precipitously. In an open-loop execution regime, errors compound across the trajectory, causing overall trajectory success probability to decay exponentially with horizon length $H$:
 
 $$P_{\text{success}}(H) \le \prod_{t=1}^H (1 - \epsilon_t) \approx (1 - \bar{\epsilon})^H \le e^{-\bar{\epsilon} H}$$
 
-For an agent with an optimistic per-step error probability of $\bar{\epsilon} = 0.04$, the probability of completing a 40-step trajectory without catastrophic derailment is less than $e^{-1.6} \approx 20.2\%$.
+For an agent with an optimistic per-step error probability of $\bar{\epsilon} = 0.04$, the probability of completing a 40-step trajectory without catastrophic derailment is less than $e^{-1.6} \approx 20.2\%$. An autonomous agent making 40 sequential shell commands has less than a 1-in-5 chance of completing its task without failing—unless it can receive environmental feedback, observe nonzero exit codes, and execute recovery actions.
 
 ### The collapse of RLHF in systems domains
 
@@ -75,19 +75,21 @@ While effective for subjective qualities like conversational tone, polite refusa
 
 ### Formulation of agent execution as a POMDP
 
-Reinforcement Learning with Verifiable Rewards resolves these systemic vulnerabilities by modeling agent execution as a **Partially Observable Markov Decision Process (POMDP)** defined by the 7-tuple $\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{O}, \mathcal{T}, \Omega, \mathcal{R}, \gamma \rangle$:
+Reinforcement Learning with Verifiable Rewards resolves these systemic vulnerabilities by modeling agent execution as a **Partially Observable Markov Decision Process (POMDP)** defined by the 7-tuple $\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{O}, \mathcal{T}, \Omega, \mathcal{R}, \gamma \rangle$:[^fn-rlvr-pomdp-kernel]
 
-- $\mathcal{S}$ is the set of unobserved physical environment states, including the complete host OS kernel state, virtual filesystem hierarchy, memory mappings, and external network buffers.
-- $\mathcal{A}$ is the discrete action space, representing token sequences emitted by the neural policy that delimit shell commands, code patches, or structured tool invocations.
-- $\mathcal{O}$ is the observation space, representing strings returned to the model context window: terminal stdout, stderr, process return codes, and structured JSON payloads.
-- $\mathcal{T}(s_{t+1} \mid s_t, a_t)$ defines the environment transition dynamics executed by the underlying operating system and virtualization sandbox.
-- $\Omega(o_t \mid s_t)$ is the observation emission probability, mapping raw machine state into context tokens.
-- $\mathcal{R}(s, a)$ is the reward function, which in RLVR is determined strictly by deterministic verification oracles.
-- $\gamma \in [0, 1]$ is the temporal discount factor.
+[^fn-rlvr-pomdp-kernel]: For the complete formal probabilistic specification of POMDP transition kernels and observation distributions, see @sec-vol3-appendix-math-pomdp.
 
-Rather than imitating static human traces, the agent policy $\pi_\theta(a_t \mid o_{\le t})$ acts as an active stochastic controller. It samples actions, interacts with real sandboxed runtimes, observes environmental transitions, and optimizes its parameters directly against cumulative trajectory return:
+- **Physical Environment State ($\mathcal{S}$):** The unobserved physical machine state, including the host OS kernel page tables, virtual filesystem hierarchy, memory mappings, open file descriptors, and network socket buffers.
+- **Action Space ($\mathcal{A}$):** Discrete token sequences emitted by the neural policy that delimit shell commands, code patches, or structured tool invocations.
+- **Observation Space ($\mathcal{O}$):** Strings returned to the agent's context window: terminal stdout, stderr, process return codes, and structured JSON payloads.
+- **Transition Dynamics ($\mathcal{T}$):** Real operating system transitions executed by the underlying virtualization sandbox and container runtime.
+- **Observation Emission ($\Omega$):** The mapping of machine state changes into readable context tokens.
+- **Reward Function ($\mathcal{R}$):** Deterministic verification signals returned by external execution oracles (compilers, test suites, formal checkers).
+- **Temporal Discount ($\gamma \in [0, 1]$):** Weighting factor balancing immediate versus delayed environmental returns.
 
-$$\mathcal{J}(\theta) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=0}^H \gamma^t \mathcal{R}(s_t, a_t) \right]$$
+Rather than imitating static human traces, the agent policy $\pi_\theta(a_t \mid o_{\le t})$ acts as an active stochastic controller. In typical RLVR settings, intermediate step rewards are zero ($\mathcal{R}(s_t, a_t) = 0$ for $t < H$), and the agent optimizes its parameters directly against the terminal verification outcome evaluated at horizon $H$:
+
+$$\mathcal{J}(\theta) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \mathcal{O}(s_H, \tau) \right]$$
 
 ### Deterministic ground-truth verification oracles
 
@@ -136,11 +138,13 @@ Resolving this memory bottleneck requires rethinking the necessity of the Critic
 
 ### The mechanics and overhead of classical PPO
 
-In standard Proximal Policy Optimization [@schulman2017proximal], policy updates rely on an Actor-Critic architecture. The Actor $\pi_\theta(a_t \mid s_t)$ generates action tokens, while a parametric Critic network $V_\phi(s_t)$ predicts the expected future cumulative return from state $s_t$. The advantage $\hat{A}_t^{\text{PPO}}$ is computed using Generalized Advantage Estimation (GAE):
+In standard Proximal Policy Optimization [@schulman2017proximal], policy updates rely on an Actor-Critic architecture. The Actor $\pi_\theta(a_t \mid s_t)$ generates action tokens, while a parametric Critic network $V_\phi(s_t)$ predicts the expected future cumulative return from state $s_t$. The advantage $\hat{A}_t^{\text{PPO}}$ measures how much better an action performed compared to the Critic's expectation, computed via Generalized Advantage Estimation (GAE) from intermediate temporal-difference (TD) errors:
 
-$$\hat{A}_t^{\text{PPO}} = \sum_{k=0}^{\infty} (\gamma \lambda)^k \delta_{t+k}^V, \quad \text{where } \delta_t^V = r_t + \gamma V_\phi(s_{t+1}) - V_\phi(s_t)$$
+$$\delta_t^V = r_t + \gamma V_\phi(s_{t+1}) - V_\phi(s_t)$$
 
-Here, $\gamma$ is the discount factor and $\lambda \in [0, 1]$ balances bias and variance in the advantage estimator.
+Here, $\gamma$ is the discount factor. GAE exponentially weights these TD residuals across the trajectory to estimate advantage.[^fn-rlvr-gae-expansion]
+
+[^fn-rlvr-gae-expansion]: For the complete infinite-horizon expansion and bias-variance derivation of Generalized Advantage Estimation, see @sec-vol3-appendix-math-rl.
 
 While mathematically principled, maintaining $V_\phi$ at frontier scale introduces crippling systems inefficiencies:
 
@@ -186,6 +190,27 @@ $$\hat{A}_i = \frac{r_i - \mu_q}{\sigma_q + \epsilon_{\text{stab}}}$$
 
 where $\epsilon_{\text{stab}} > 0$ (typically $10^{-6}$) ensures numerical stability when all rollouts within a group achieve identical returns (such as when all $G$ trajectories fail or all succeed).
 
+To see the physical elegance of in-group advantage estimation, consider a concrete systems debugging task. Suppose an agent is tasked with diagnosing a kernel race condition. The rollout engine generates $G = 8$ candidate completions. When evaluated against the automated test harness, $2$ candidates pass all tests ($r = 1.0$) and $6$ fail with compiler or test errors ($r = 0.0$).
+
+The in-group empirical statistics evaluate to:
+
+$$\mu_q = \frac{2 \times 1.0 + 6 \times 0.0}{8} = 0.25$$
+
+$$\sigma_q = \sqrt{\frac{2(1.0 - 0.25)^2 + 6(0.0 - 0.25)^2}{8}} = \sqrt{\frac{2(0.5625) + 6(0.0625)}{8}} = \sqrt{0.1875} \approx 0.433$$
+
+The standardized advantages assigned to candidate rollouts are:
+
+$$\hat{A}_{\text{pass}} = \frac{1.0 - 0.25}{0.433} \approx +1.73, \qquad \hat{A}_{\text{fail}} = \frac{0.0 - 0.25}{0.433} \approx -0.58$$
+
+The policy gradient update amplifies the tokens in the two successful patches with a positive push of $+1.73$, while gently depressing the tokens in the six failing attempts with $-0.58$.
+
+Now consider the boundary conditions:
+
+- **Universal failure ($8$ fails, $0$ passes):** Every candidate receives $r_i = 0.0 \implies \mu_q = 0.0, \sigma_q = 0.0$.
+- **Universal success ($8$ passes, $0$ fails):** Every candidate receives $r_i = 1.0 \implies \mu_q = 1.0, \sigma_q = 0.0$.
+
+In both boundary cases, $r_i - \mu_q = 0$, resulting in $\hat{A}_i = 0$ across all rollouts. The entire group contributes **zero policy gradient update**. GRPO acts as an **automatic curriculum filter**: tasks that are trivially easy (all succeed) or currently intractable (all fail) burn zero gradient bandwidth, concentrating 100 percent of the cluster's optimization capacity on tasks directly at the model's capability frontier.
+
 ### The GRPO objective function
 
 The GRPO policy gradient objective maximizes a length-normalized clipped surrogate return while constraining divergence from a frozen reference policy $\pi_{\text{ref}}$:
@@ -194,16 +219,18 @@ $$\mathcal{J}_{\text{GRPO}}(\theta) = \mathbb{E}_{q \sim \mathcal{D}, \{o_i\}_{i
 
 where:
 
-- $\rho_{i,t}(\theta) = \frac{\pi_\theta(o_{i,t} \mid q, o_{i,<t})}{\pi_{\theta_{\text{old}}}(o_{i,t} \mid q, o_{i,<t})}$ is the importance sampling probability ratio for token $t$ in candidate rollout $i$.
-- $\epsilon \in (0, 1)$ is the clipping threshold (typically $0.1$ or $0.2$) bounding step updates to prevent catastrophic policy collapse.
-- $|o_i|$ is the sequence length of candidate response $i$, enforcing length-normalized credit assignment.
-- $\beta$ is the regularization coefficient penalizing Kullback-Leibler (KL) divergence against the reference model $\pi_{\text{ref}}$.
+- $\rho_{i,t}(\theta) = \frac{\pi_\theta(o_{i,t} \mid q, o_{i,<t})}{\pi_{\theta_{\text{old}}}(o_{i,t} \mid q, o_{i,<t})}$ is the importance sampling probability ratio tracking policy drift during parameter updates.
+- $\text{clip}(\rho_{i,t}(\theta), 1-\epsilon, 1+\epsilon)$ bounds step updates within a trust-region envelope (typically $\epsilon = 0.1\text{--}0.2$), preventing a single outlier rollout from destabilizing model parameters.
+- $\frac{1}{|o_i|}$ is the sequence length normalizer for candidate response $i$, enforcing length-normalized credit assignment and removing the incentive for reasoning bloat.
+- $\beta$ is the regularization coefficient penalizing Kullback-Leibler (KL) divergence against the frozen reference model $\pi_{\text{ref}}$ to prevent language degradation.
 
 Critically, the KL divergence penalty is computed directly per-token without requiring an auxiliary neural estimator:
 
 $$D_{\text{KL}}(\pi_\theta \,\|\, \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(o_{i,t} \mid q, o_{i,<t})}{\pi_\theta(o_{i,t} \mid q, o_{i,<t})} - \log \frac{\pi_{\text{ref}}(o_{i,t} \mid q, o_{i,<t})}{\pi_\theta(o_{i,t} \mid q, o_{i,<t})} - 1$$
 
-This estimator is strictly non-negative, unbiased, and exhibits minimal variance because it relies exclusively on the forward logits of $\pi_\theta$ and $\pi_{\text{ref}}$.
+This estimator is strictly non-negative, unbiased, and exhibits minimal variance because it relies exclusively on the forward logits of $\pi_\theta$ and $\pi_{\text{ref}}$.[^fn-rlvr-estimator-unbiased]
+
+[^fn-rlvr-estimator-unbiased]: For the formal algebraic proof of unbiasedness and non-negativity of this estimator, see @sec-vol3-appendix-math-rl.
 
 ### Hardware memory accounting: PPO vs. GRPO
 
@@ -297,13 +324,19 @@ Production RLVR systems rely on a heterogeneous hierarchy of deterministic oracl
 
 A foundational breakthrough in verifiable reinforcement learning (demonstrated in systems like DeepSeek-R1 [@deepseekai2025deepseekr1] and OpenAI o1 [@openai2024o1]) is that **deliberative reasoning, self-correction, and autonomous backtracking emerge spontaneously from pure outcome verification without supervised human thought demonstrations**.
 
-When a policy is optimized purely against terminal verification ($R \in \{0, 1\}$) under group relative advantage normalization, the policy gradient applies positive advantage to every token in successful rollouts:
+Why does an agent trained purely against binary exit codes learn to stop, rethink, and correct its own mistakes? The physical mechanism lies in how the policy gradient scales token log-probabilities across candidate rollouts:
 
 $$\nabla_\theta \mathcal{J}(\theta) \propto \sum_{i=1}^G \left[ \frac{1}{|o_i|} \sum_{t=1}^{|o_i|} \nabla_\theta \log \pi_\theta(o_{i,t} \mid q, o_{i,<t}) \right] \hat{A}_i$$
 
-Over thousands of optimization steps, this pressure reinforces specific internal attention circuits:
+During exploratory rollout generation, the policy experiences a natural selection pressure:
 
-- **Self-Monitoring Attention Heads:** Attention heads in deep layers begin attending back to earlier intermediate outputs, checking them against constraints stated in prompt $q$.
+1. **Blind Execution Collapses:** Trajectories that rush headlong into the first plausible tool invocation frequently trigger syntax errors, deadlock cycles, or failed assertions ($r_i = 0$). Under in-group standardization, these receive negative advantages ($\hat{A}_i < 0$), depressing the likelihood of unreflective action tokens.
+2. **Reflective Self-Correction Succeeds:** Occasionally, stochastic token sampling produces a trajectory that pauses, checks an intermediate deduction against the prompt's constraints, emits an explicit reconsideration marker (`"Wait, this mutex lock order will deadlock..."`), invalidates the faulty branch, and attempts an alternative approach. When this self-correcting trajectory passes the verification test ($r_i = 1$), it earns a high positive advantage ($\hat{A}_i > 0$).
+3. **Internalization of Search Trees:** Because the positive scalar $\hat{A}_i$ amplifies the gradient for *every token in that successful trace*, the update directly reinforces the probability of emitting self-monitoring queries and backtracking phrases.
+
+Over thousands of gradient updates, this pressure reinforces specific internal deliberative circuits:
+
+- **Self-Monitoring Attention Heads:** Attention heads in deep layers begin attending back to earlier intermediate tokens, verifying variable types and logic invariants before generating actuation tokens.
 - **Reconsideration Markers:** When an internal inconsistency is detected, the policy learns to emit explicit reconsideration tokens: `"Wait, this violates the boundary condition..."`, `"Let me re-read the file contents..."`, or `"Alternatively, testing the lock-free path..."`.
 - **Dynamic Branch Invalidation:** The policy invalidates its prior deduction and initiates an alternative reasoning trajectory within the same autoregressive context stream, simulating a depth-first search tree entirely in weights.
 
@@ -391,6 +424,13 @@ $$R_{\text{total}}(\tau) = R_{\text{oracle}}(\tau) - \alpha_{\text{step}} \cdot 
 
 where $|\tau|$ represents the total count of tool interactions emitted during the episode.
 
+To see the physical effect of step regularization, consider two candidate trajectories attempting to resolve an invalid symlink:
+
+- **Trajectory A (Direct):** The agent inspects the broken link and re-creates it in $3$ commands: $R_{\text{total}} = 1.0 - (0.005 \times 3) = 0.985$.
+- **Trajectory B (Wandering):** The agent runs $40$ redundant directory listings, unneeded status checks, and verbose echo statements before fixing the link: $R_{\text{total}} = 1.0 - (0.005 \times 40) = 0.800$.
+
+Within the rollout group, Trajectory A secures an advantage gap of $\Delta R = +0.185$. The policy gradient update disproportionately reinforces the concise, efficient execution path, actively suppressing tool spam and reclaiming context-window memory.
+
 ### Defensive systems architecture: Hardened verification enclaves
 
 Preventing reward hacking and agent scheming requires treating the agent policy as an untrusted, adversarial entity. Production verification infrastructure enforces a five-layer defense-in-depth architecture:
@@ -455,20 +495,32 @@ Because all $G$ rollouts share the identical prefix $q$, advanced serving runtim
 
 $$M_{\text{shared}} = 2 \times 2 \times L \times H_{\text{kv}} \times d_h \times (S_{\text{prompt}} + G \times S_{\text{decode}}) \quad \text{bytes}$$
 
-For a 70B model ($L = 80, H_{\text{kv}} = 8, d_h = 128$) with $S_{\text{prompt}} = 8,192$, $S_{\text{decode}} = 2,048$, and group size $G = 8$:
+For a 70B model ($L = 80, H_{\text{kv}} = 8, d_h = 128$) with $S_{\text{prompt}} = 8,192$, $S_{\text{decode}} = 2,048$, and group size $G = 8$, each token's Key and Value tensors across all 80 layers consume:
+
+$$M_{\text{token}} = 2 \times 2 \times 80 \times 8 \times 128 = 327,680\text{ bytes} \approx 320\text{ KB}$$
+
+We can calculate the exact accelerator memory footprints under naive replication versus pinned prefix sharing:
 
 $$\begin{aligned}
-M_{\text{naive}} &= 8 \times 4 \times 80 \times 8 \times 128 \times (8,192 + 2,048) = 8 \times 2.684\text{ GB} = 21.47\text{ GB} \\
-M_{\text{shared}} &= 4 \times 80 \times 8 \times 128 \times (8,192 + 8 \times 2,048) = 262,144 \times 24,576\text{ bytes} = 6.44\text{ GB}
+M_{\text{naive}} &= 8 \times 327,680 \times (8,192 + 2,048)\text{ bytes} = 8 \times 3.355\text{ GB} = 26.84\text{ GB} \\
+M_{\text{shared}} &= 327,680 \times (8,192 + 8 \times 2,048)\text{ bytes} = 2.684\text{ GB} + 5.369\text{ GB} = 8.05\text{ GB}
 \end{aligned}$$
 
-Pinned prefix caching achieves an immediate **$3.33\times$ reduction** ($70\%$ memory reclamation) in rollout KV-cache footprint, allowing the inference cluster to maintain significantly higher batch concurrency without triggering page thrashing.
+Pinned prefix caching reclaims $18.79\text{ GB}$ of VRAM per prompt group, achieving an immediate **$3.33\times$ reduction** ($70.0\%$ memory reclamation) in rollout KV-cache footprint. This allows the inference cluster to maintain significantly higher batch concurrency without triggering page thrashing.
 
 ### Asynchronous FIFO replay buffering and straggler mitigation
 
 Because tool execution latencies in heterogeneous execution environments follow a heavy-tailed log-normal distribution, synchronous batching creates extreme straggler delays:
 
 $$\mathbb{E}[T_{\text{step}}] = \mathbb{E}\left[ \max_{1 \le i \le B} T_i \right] \gg \mathbb{E}[T_i]$$
+
+To see why synchronous batching is mathematically fatal to cluster efficiency, consider the compound probability. Suppose the median tool execution latency is $2.5\text{ s}$, but a heavy-tailed $5\%$ of tasks invoke multi-target C++ builds or formal Lean 4 proof timeouts taking up to $45\text{ s}$. In a synchronous batch of $B = 64$ rollouts, the probability that *at least one* rollout hits the $45\text{-second}$ straggler tail is:
+
+$$P(\text{at least one straggler}) = 1 - (1 - 0.05)^{64} = 1 - (0.95)^{64} \approx 1 - 0.0375 = 96.25\%$$
+
+Under synchronous barrier synchronization, **$96.3\%$ of all training batches** will stall waiting for a 45-second straggler! The cluster spends over $94\%$ of its wall-clock time waiting for the slowest container, collapsing accelerator compute utilization from $92\%$ to $8.4\%$.[^fn-rlvr-pareto-queue]
+
+[^fn-rlvr-pareto-queue]: For the formal Pareto distribution of agent service times and the Pollaczek-Khinchine queueing breakdown under FIFO scheduling, see @sec-vol3-appendix-math-pareto and @sec-vol3-appendix-math-queueing.
 
 To decouple variable-latency sandbox execution from GPU training, production RLVR pipelines implement an **Asynchronous FIFO Replay Buffer** over distributed shared memory (using Apache Arrow and Plasma over RDMA-enabled InfiniBand).
 
