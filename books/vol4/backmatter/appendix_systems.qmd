@@ -11,12 +11,41 @@ To enforce these deadlines physically, systems use **Watchdog Timers**. A watchd
 $$W(t_k) = W_{init}$$
 If at any time $t$, $W(t) \le 0$, the hardware triggers a non-maskable interrupt (NMI) or system reset. This guarantees that if a system hangs or a task exceeds its WCET indefinitely, the hardware will safely reboot the platform.
 
-## Inductive Voltage Droop ($L \frac{di}{dt}$)
+## Inductive Voltage Droop and Alpha-Power Gate Delay
 
-When a heavy ML workload (like a large matrix multiplication) suddenly begins on an accelerator, the current draw $i(t)$ increases dramatically over a tiny time window $\Delta t$.
-Every power delivery network has inherent inductance, $L$. According to Faraday's law of induction, a change in current through an inductor induces a voltage drop $V_{droop}$:
-$$V_{droop} = L \frac{di}{dt}$$
-If $\frac{di}{dt}$ is too large, $V_{droop}$ can cause the supply voltage to drop below the minimum required voltage for the transistors to operate correctly, leading to bit flips or a sudden system crash. Systems engineers mitigate this by adding decoupling capacitors (to provide local charge and smooth $\frac{di}{dt}$) or by throttling the ramp-up rate of compute-intensive kernels.
+When a heavy neural accelerator workload (such as a systolic matrix multiplication) suddenly begins on a shared system-on-chip, the current draw $i(t)$ increases dramatically over a nanosecond switching window.
+Every power delivery network (PDN) exhibits inherent loop inductance $L$ across package bond wires, package balls, and printed circuit board traces, as well as equivalent series resistance $R$. According to Faraday's law of induction and Ohm's law, a rapid transient current step $\Delta I$ with rise time $t_r$ (giving current slew rate $dI/dt \approx \Delta I / t_r$) induces an instantaneous supply voltage collapse $\Delta V_{\text{droop}}$:
+$$\Delta V_{\text{droop}} = L \frac{dI}{dt} + \Delta I \cdot R$$
+
+If the supply voltage $V(t) = V_{\text{nom}} - \Delta V_{\text{droop}}$ sags below the minimum operating threshold $V_{\min}$, digital CMOS logic suffers severe timing degradation. In sub-micron CMOS circuits, logic gate propagation delay $t_{\text{prop}}$ is governed by the Sakurai-Newton **alpha-power law**:
+$$t_{\text{prop}}(V) \propto \frac{C_L \cdot V}{(V - V_{\text{th}})^\alpha}$$
+where $C_L$ is the load capacitance, $V_{\text{th}}$ is the transistor threshold voltage, and $\alpha \in [1.2, 1.5]$ is the velocity saturation index (compared to $\alpha = 2.0$ in classical long-channel MOSFET theory).
+
+When rail voltage droops from $V_{\text{nom}}$ to $V_{\text{droop}}$, the ratio of stretched propagation delay to nominal delay is:
+$$\frac{t_{\text{prop}}(V_{\text{droop}})}{t_{\text{prop}}(V_{\text{nom}})} = \frac{V_{\text{droop}}}{V_{\text{nom}}} \left( \frac{V_{\text{nom}} - V_{\text{th}}}{V_{\text{droop}} - V_{\text{th}}} \right)^\alpha$$
+
+In a synchronous digital pipeline with clock period $T_{\text{clk}}$, flip-flop setup time $t_{\text{setup}}$, and clock skew $t_{\text{skew}}$, timing closure requires:
+$$t_{\text{prop}} + t_{\text{setup}} + t_{\text{skew}} \le T_{\text{clk}}$$
+If $\Delta V_{\text{droop}}$ stretches $t_{\text{prop}}$ beyond this threshold, setup slack becomes negative, corrupting state registers or triggering hardware brownout resets. On-package deep-trench decoupling capacitors (DTCs) and current-slew limiters mitigate this rail collapse by supplying charge during high-frequency transients.
+
+## DRAM Contention and Bank-Conflict Queuing
+
+In a shared memory subsystem, direct memory access (DMA) transfers and accelerator weight prefetching compete with real-time safety monitors for memory controller command queues and physical DRAM banks.
+
+A DRAM chip is organized into multiple independent banks. Each bank possesses a single row buffer. Memory access proceeds through three primitive operations:
+
+1. **Row activate** ($t_{\text{RCD}}$): Loads a row of storage cells into the bank's row buffer.
+2. **Column access** ($t_{\text{CAS}}$): Reads or writes data from the active row buffer onto the data bus.
+3. **Row precharge** ($t_{\text{RP}}$): Restores charge to the storage cells and closes the active row.
+
+When consecutive transactions target the same bank but different rows (a *bank conflict* or *row-buffer miss*), the memory controller must precharge the active row and activate the requested row before column access can proceed, adding an access penalty of $t_{\text{RP}} + t_{\text{RCD}}$ ($28\text{--}40\text{ ns}$).
+
+Furthermore, on-chip interconnect crossbars (e.g., AMBA AXI) schedule traffic in packet-atomic bursts. If a non-preemptive burst of size $B_{\text{burst}}$ (bytes) is in flight over a shared memory bus with bandwidth $\text{BW}_{\text{bus}}$ (bytes per second), an incoming real-time safety read must wait for the full remaining burst duration:
+$$t_{\text{burst}} = \frac{B_{\text{burst}}}{\text{BW}_{\text{bus}}}$$
+
+In the worst case where $K$ competing transactions are queued ahead of the real-time request and each induces a bank conflict, total queuing latency expands to:
+$$t_{\text{queue}} = \sum_{k=1}^K \frac{B_k}{\text{BW}_{\text{bus}}} + K (t_{\text{RP}} + t_{\text{RCD}}) + t_{\text{CAS}}$$
+This latency inflation operates beneath the visibility of operating system scheduling, demonstrating why real-time safety state must be isolated in SRAM-based Tightly-Coupled Memory (TCM).
 
 ## Clock Synchronization (IEEE 1588 PTP)
 
@@ -70,6 +99,129 @@ __sync_synchronize();          // Full Memory Barrier
 mailbox_register = FLAG_READY;
 ```
 Mathematically, if we have memory operations $S_1$ and $S_2$, a barrier ensures a strict temporal happens-before relationship: $t(S_1) < t(S_2)$ globally across all observers (other cores and hardware peripherals) in the system.
+
+## Actuator Electrical and Thermal Dynamics
+
+Embodied actuators transform electrical power into mechanical torque through electromagnetic induction, governed by coupled electrical and thermal differential equations.
+
+### Stator electrical rise time
+The phase winding of a brushless DC (BLDC) or permanent magnet synchronous motor (PMSM) exhibits phase resistance $R_{\text{phase}}$ and phase inductance $L_{\text{phase}}$. Applying terminal voltage $V_{\text{terminal}}$ against back-electromotive force $e_{\text{bemf}} = K_e \omega_m$ gives the first-order stator current ODE:
+$$ L_{\text{phase}} \frac{dI(t)}{dt} + R_{\text{phase}} I(t) = V_{\text{terminal}} - K_e \omega_m $$
+
+For a step voltage command applied from rest ($\omega_m = 0$), phase current rises exponentially:
+$$ I(t) = \frac{V_{\text{terminal}}}{R_{\text{phase}}} \left( 1 - e^{-t / \tau_e} \right), \quad \tau_e = \frac{L_{\text{phase}}}{R_{\text{phase}}} $$
+where $\tau_e$ is the electrical time constant. Actuator torque cannot change faster than $\tau_e$, establishing a fundamental physical lower bound on current rise times regardless of inverter switching frequencies.
+
+### Lumped thermal networks and duty cycle
+Current flowing through the stator dissipates resistive Joule heat:
+$$ P_{\text{loss}}(t) = I_{\text{rms}}^2(t) R_{\text{phase}}(T) $$
+where copper resistance increases linearly with temperature:
+$$ R_{\text{phase}}(T) = R_0 \left[ 1 + \alpha_{\text{Cu}} (T - T_0) \right] $$
+with temperature coefficient $\alpha_{\text{Cu}} \approx 0.00393\text{ K}^{-1}$ for copper. In a single-node lumped thermal model with thermal resistance to ambient $\theta_{JA}$ (in $\text{K/W}$) and thermal heat capacity $C_{\text{th}}$ (in $\text{J/K}$), the temperature rise $\Delta T(t) = T_{\text{winding}}(t) - T_{\text{ambient}}$ satisfies:
+$$ C_{\text{th}} \frac{d\Delta T(t)}{dt} = P_{\text{loss}}(t) - \frac{\Delta T(t)}{\theta_{JA}} $$
+
+Under constant power dissipation, temperature rises toward steady state with thermal time constant $\tau_{\text{th}} = \theta_{JA} C_{\text{th}}$:
+$$ \Delta T(t) = P_{\text{loss}} \theta_{JA} \left( 1 - e^{-t / \tau_{\text{th}}} \right) $$
+
+For a cyclic workload with period $T_{\text{cycle}}$, duty cycle $D = t_{\text{on}} / T_{\text{cycle}}$, peak power $P_{\text{peak}}$, and baseline power $P_{\text{base}}$, average steady-state heat dissipation is:
+$$ \bar{P} = D P_{\text{peak}} + (1 - D) P_{\text{base}} $$
+Continuous torque capacity $\tau_{\text{cont}}$ is bounded by the maximum allowable winding temperature $\Delta T_{\max}$:
+$$ \tau_{\text{cont}} \le K_t \sqrt{\frac{\Delta T_{\max}}{\theta_{JA} R_{\text{phase}}}} $$
+
+Operating at peak torque $\tau_{\text{peak}} > \tau_{\text{cont}}$ is permitted only transiently, strictly bounded by the integral thermal capacity $\int_0^t I^2 dt \le \text{Threshold}$ monitored by an embedded thermal observer.
+
+## DC Bus Power Distribution and Energy Absorption
+
+A physical robot's power distribution network must balance instantaneous motor acceleration demand and regenerative braking surges across finite bus capacitance and harness impedance.
+
+### Inductive droop and capacitive decoupling
+When multiple motor drives simultaneously accelerate, the aggregate current surge $\Delta I_{\text{bus}}$ over ramp duration $\Delta t$ draws from the main battery through wiring harness resistance $R_{\text{bus}}$ and inductance $L_{\text{bus}}$. Local decoupling capacitance $C_{\text{bus}}$ supplies high-frequency transient current. The peak voltage droop observed at the compute voltage regulator is:
+$$ \Delta V_{\text{droop}} \approx \Delta I_{\text{bus}} R_{\text{bus}} + L_{\text{bus}} \frac{dI_{\text{bus}}}{dt} + \frac{\Delta I_{\text{bus}} \Delta t}{2 C_{\text{bus}}} $$
+If $\Delta V_{\text{droop}}$ drops bus voltage below the under-voltage lockout (UVLO) threshold of the onboard DC-DC converter, computing processors suffer an immediate brownout reset.
+
+### Regenerative braking surges and chopper sizing
+When a decelerating robot executes emergency braking, kinetic energy $E_k = \frac{1}{2} m v_0^2$ (linear) or $E_k = \frac{1}{2} J_{\text{load}} \dot{q}_0^2$ (rotational) is backdriven through motor phases into the DC bus with electrical regeneration efficiency $\eta_{\text{regen}} \approx 0.70\text{--}0.85$. If the battery management system (BMS) disconnects or cannot accept rapid charge, the energy dumps into the DC bus capacitance $C_{\text{bus}}$, raising bus voltage:
+$$ \Delta E_C = \frac{1}{2} C_{\text{bus}} \left( V_{\text{final}}^2 - V_{\text{initial}}^2 \right) = \eta_{\text{regen}} E_k $$
+$$ V_{\text{final}} = \sqrt{ V_{\text{initial}}^2 + \frac{2 \eta_{\text{regen}} E_k}{C_{\text{bus}}} } $$
+
+To prevent $V_{\text{final}}$ from exceeding the breakdown voltage rating of inverter MOSFETs and silicon regulators ($V_{\max}$), an active dynamic braking circuit (brake chopper) shunts current through a power resistor $R_{\text{brake}}$ whenever $V_{\text{bus}} \ge V_{\text{clamp}}$:
+$$ R_{\text{brake}} \le \frac{V_{\text{clamp}}^2}{P_{\text{regen, peak}}} $$
+$$ P_{\text{regen, peak}} \approx \eta_{\text{regen}} \cdot \tau_{\text{brake}} \cdot \omega_{\max} $$
+
+## Real-Time Fieldbuses and Lock-Free Synchronization
+
+Coordinating distributed motor drives and compute nodes requires deterministic message serialization and lock-free memory exchange.
+
+### Fieldbus serialization and schedulability
+On a shared serial bus (such as CAN-FD or RS-485), $N_{\text{axes}}$ motor drives transmit state telemetry and receive torque setpoints cyclically. For payload size $B_{\text{frame}}$ (bits) and bus transmission bitrate $R_{\text{baud}}$ (bps), message transmission duration is $t_{\text{tx}} = B_{\text{frame}} / R_{\text{baud}}$.
+
+Under Controller Area Network (CAN-FD), each node arbitrates independently via non-destructive bitwise arbitration. In an $M$-node cluster with bus propagation delay $t_{\text{prop}}$ and protocol overhead bits $B_{\text{overhead}}$, total nominal cycle time across all axes is:
+$$ T_{\text{bus}} = \sum_{i=1}^{N_{\text{axes}}} \left( \frac{B_{\text{payload}, i} + B_{\text{overhead}}}{R_{\text{data}}} + t_{\text{prop}} \right) $$
+Under high bus utilization ($\rho = T_{\text{bus}} / T_{\text{target}} > 0.70$), arbitration collision retries increase nonlinearly, causing priority inversion and high-jitter deadlines.
+
+In contrast, EtherCAT utilizes on-the-fly telegram processing: an Ethernet frame traverses an open ring topology through dedicated slave hardware controllers (ASIC/FPGA). Slaves read and insert data directly within passing Ethernet frames with fixed internal forwarding latency $t_{\text{forward}} \approx 1\text{ }\mu\text{s}$ per node. The total cycle time is deterministic:
+$$ T_{\text{EtherCAT}} = \frac{B_{\text{Ethernet frame}}}{R_{\text{EtherCAT}}} + N_{\text{axes}} \cdot t_{\text{forward}} + \frac{2 \cdot \text{Distance}}{v_{\text{prop}}} $$
+enabling deterministic sub-millisecond cycle times ($<100\text{ }\mu\text{s}$) across dozens of axes.
+
+### Lock-free seqlocks for multi-rate shared memory
+When a single high-frequency writer (e.g., a $1\text{ kHz}$ sensor driver or IMU thread) updates a multi-word kinematic state $\mathbf{x} \in \mathbb{R}^d$ read by multiple low-frequency deliberative threads (e.g., a $20\text{ Hz}$ neural planner), traditional mutexes introduce unacceptable priority inversion and thread preemption.
+
+A **sequence lock (seqlock)** provides lock-free, zero-allocation synchronization using an integer sequence counter:
+
+1. **Writer Protocol**:
+   - Increment sequence counter from even ($2k$) to odd ($2k+1$) using an atomic store with release semantics.
+   - Insert a write memory barrier (`smp_wmb()`) to ensure the odd counter is visible before memory writes.
+   - Update state data fields.
+   - Insert a write memory barrier (`smp_wmb()`).
+   - Increment sequence counter from odd ($2k+1$) to even ($2k+2$) with release semantics.
+2. **Reader Protocol**:
+   - Read sequence counter $S_1$ with acquire semantics. If $S_1$ is odd (writer active), spin or yield.
+   - Insert a read memory barrier (`smp_rmb()`).
+   - Copy state data fields locally.
+   - Insert a read memory barrier (`smp_rmb()`).
+   - Read sequence counter $S_2$ with acquire semantics.
+   - If $S_1 \neq S_2$, data was torn during reading; discard and retry loop.
+
+Because writer duration is tiny ($t_{\text{write}} \approx 50\text{--}100\text{ ns}$ for $64\text{ bytes}$ of L1 cache copy), reader collision probability $P_{\text{collision}} = t_{\text{write}} / T_{\text{write}}$ is typically $< 0.01\%$, guaranteeing non-blocking, deterministic real-time telemetry transfer.
+
+## Kinematic Stopping Envelopes and Information Age Lag
+
+In an embodied machine transporting mass $m$ at translational velocity $v(t)$, halting motion before striking an obstacle requires balancing sensory information freshness and mechanical braking deceleration.
+
+### Sensorimotor information age and lag distance
+The total end-to-end information age $\tau_{\text{info}}$ from initial environmental transduction to mechanical torque generation is the sum of discrete pipeline delays across the sensing, compute, communication, and actuation tiers:
+$$ \tau_{\text{info}} = t_{\text{sensor}} + t_{\text{compute}} + t_{\text{bus}} + t_{\text{actuator}} $$
+where:
+
+- $t_{\text{sensor}}$ is the physical exposure and ADC conversion interval (e.g., rolling shutter integration or frame readout).
+- $t_{\text{compute}}$ is the DMA transfer, neural inference, and trajectory arbitration latency on the application processor or MCU.
+- $t_{\text{bus}}$ is the serial fieldbus transmission and arbitration jitter (e.g., CAN-FD or TSN packet delivery).
+- $t_{\text{actuator}}$ is the physical solenoid flux buildup or stator inductive current-decay time constant ($\tau_e = L / R$).
+
+During this latency window $\tau_{\text{info}}$, the vehicle continues traveling unchecked along its prior trajectory. For constant initial speed $v_0$, the unbraked lag distance is:
+$$ d_{\text{lag}} = v_0 \cdot \tau_{\text{info}} $$
+
+### Braking dynamics and friction limits
+Once braking torque engages, the deceleration rate $a_{\text{brake}}$ is fundamentally bounded by the available Coulomb friction coefficient $\mu$ between the contact patch and the surface, or by the maximum mechanical brake torque:
+$$ a_{\text{brake}} \le \mu g $$
+The distance required to arrest motion under constant deceleration $a_{\text{brake}}$ is:
+$$ d_{\text{brake}} = \frac{v_0^2}{2 a_{\text{brake}}} \ge \frac{v_0^2}{2 \mu g} $$
+
+The total kinematic stopping envelope $d_{\text{stop}}(v_0)$ is the sum of the lag distance and the braking distance:
+$$ d_{\text{stop}}(v_0) = d_{\text{lag}} + d_{\text{brake}} = v_0 \tau_{\text{info}} + \frac{v_0^2}{2 \mu g} $$
+
+Safety closure requires that the stopping envelope remain strictly within the measured physical clearance buffer $d_{\text{clear}}$:
+$$ d_{\text{stop}}(v_0) \le d_{\text{clear}} $$
+
+### Kinetic energy derating and friction collapse
+If surface contamination (such as water, hydraulic oil, or ice) causes friction to collapse from nominal $\mu_{\text{nom}}$ to degraded $\mu_{\text{fault}} \ll \mu_{\text{nom}}$, the braking distance expands inversely with friction:
+$$ \frac{d_{\text{brake}}(\mu_{\text{fault}})}{d_{\text{brake}}(\mu_{\text{nom}})} = \frac{\mu_{\text{nom}}}{\mu_{\text{fault}}} $$
+
+When forward friction cannot be continuously observed prior to braking, the nervous system enforces structural safety by clamping the maximum permitted velocity $v_{\text{clamp}}$ in firmware. Because kinetic energy scales quadratically with velocity ($E_k = \frac{1}{2} m v^2$), reducing velocity yields a quadratic reduction in required braking work:
+$$ \Delta E_k = \frac{1}{2} m \left( v_{\text{nom}}^2 - v_{\text{clamp}}^2 \right) $$
+Setting $d_{\text{stop}}(v_{\text{clamp}}) \le d_{\text{clear}}$ and solving the quadratic equation $v_{\text{clamp}} \tau_{\text{info}} + \frac{v_{\text{clamp}}^2}{2 \mu_{\text{fault}} g} \le d_{\text{clear}}$ yields the safe velocity clamp:
+$$ v_{\text{clamp}} = -\mu_{\text{fault}} g \tau_{\text{info}} + \sqrt{(\mu_{\text{fault}} g \tau_{\text{info}})^2 + 2 \mu_{\text{fault}} g d_{\text{clear}}} $$
+By clamping velocity to $v_{\text{clamp}}$, the physical stopping envelope is guaranteed to fit within physical clearance buffers even under catastrophic friction collapse, without requiring runtime friction sensing.
 
 ## Further Reading
 
