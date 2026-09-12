@@ -73,15 +73,18 @@ $$
 \mathbf{V}_t^{(\ell)} = \mathbf{h}_{t}^{(\ell)} \mathbf{W}_V^{(\ell)},
 $$ {#eq-qkv-projections}
 
-In @eq-qkv-projections, $\mathbf{W}_Q^{(\ell)}, \mathbf{W}_K^{(\ell)}, \mathbf{W}_V^{(\ell)} \in \mathbb{R}^{d_{\text{model}} \times d_{\text{head}} \cdot H}$ and $H$ denotes the number of attention heads. The attention output is then computed against all prior keys and values, which are materialized as the KV cache $\mathcal{K}^{(\ell)} \in \mathbb{R}^{t \times 2 \times H \times d_{\text{head}}}$ accumulated over the context. The memory footprint of this cache is
+In @eq-qkv-projections, $\mathbf{W}_Q^{(\ell)} \in \mathbb{R}^{d_{\text{model}} \times d_{\text{head}} \cdot H_Q}$, while $\mathbf{W}_K^{(\ell)}, \mathbf{W}_V^{(\ell)} \in \mathbb{R}^{d_{\text{model}} \times d_{\text{head}} \cdot H_{\text{KV}}}$, where $H_Q$ denotes query attention heads and $H_{\text{KV}}$ denotes key-value attention heads ($H_{\text{KV}} = H_Q$ under legacy Multi-Head Attention; $H_{\text{KV}} \ll H_Q$ under Grouped-Query Attention). The attention output is computed against all prior keys and values, which are materialized as the KV cache $\mathcal{K}^{(\ell)} \in \mathbb{R}^{t \times 2 \times H_{\text{KV}} \times d_{\text{head}}}$ accumulated over context length $t$. The memory footprint of this cache across all $L$ layers is
 
 $$
-M_{\text{KV}} = 2 \cdot L \cdot H \cdot d_{\text{head}} \cdot t \cdot b_{\text{elem}},
+M_{\text{KV}} = 2 \cdot L \cdot H_{\text{KV}} \cdot d_{\text{head}} \cdot t \cdot b_{\text{elem}},
 $$ {#eq-kv-cache-memory}
 
-where $L$ is the number of layers, $t$ is the current context length, and $b_{\text{elem}}$ is the byte width of each stored element (2 bytes for BF16). For a 70-billion-parameter model with $L = 80$, $H = 64$, $d_{\text{head}} = 128$, and a context of $t = 32{,}768$ tokens, @eq-kv-cache-memory evaluates to approximately 80 GB — a quantity that exceeds the capacity of a single H100 SXM5 GPU (80 GB HBM3) and demands tensor-parallel or disaggregated KV cache strategies even before model weights are considered.
+where $b_{\text{elem}}$ is the byte width of each stored element (2 bytes for BF16). For a 70-billion-parameter model with $L = 80$, $d_{\text{head}} = 128$, and a context of $t = 32{,}768$ tokens:
 
-During the decode phase, the attention computation for a single new token against an existing context of length $t$ performs $4Hd_{\text{head}}t$ multiply-accumulate operations while reading $2Hd_{\text{head}}t$ bytes from the KV cache and $d_{\text{model}}^2$ bytes from the projection weight matrices. The resulting arithmetic intensity across the attention sublayer is bounded by the ratio of FLOPs to bytes, and in the token-by-token decode regime — where the query tensor has sequence length 1 — this ratio approaches
+- Under legacy Multi-Head Attention ($H_{\text{KV}} = H_Q = 64$), @eq-kv-cache-memory evaluates to $2 \times 80 \times 64 \times 128 \times 32{,}768 \times 2 \approx 85.9\text{ GB}$ — a quantity that completely exhausts the 80 GB HBM3 capacity of a single NVIDIA H100 SXM5 GPU before a single weight byte is loaded.
+- Under modern Grouped-Query Attention (GQA, as deployed in Llama 3 70B with $H_{\text{KV}} = 8$), the KV cache memory footprint drops by an exact factor of 8 to $10.74\text{ GB}$ (or $328\text{ KB/token}$ across all layers), making multi-turn trajectory execution physically viable on production accelerators.
+
+During the decode phase, the attention computation for a single new token against an existing context of length $t$ performs $4 H_Q d_{\text{head}} t$ multiply-accumulate operations while reading $2 H_{\text{KV}} d_{\text{head}} t \cdot b_{\text{elem}}$ bytes from the KV cache and $d_{\text{model}}^2 \cdot b_{\text{elem}}$ bytes from projection weight matrices. Under MHA ($H_{\text{KV}} = H_Q$), the resulting arithmetic intensity across the attention sublayer is bounded by:
 
 $$
 \mathcal{I}_{\text{attn}} \approx \frac{4 H d_{\text{head}} t}{2 H d_{\text{head}} t \cdot b_{\text{elem}}} = \frac{2}{b_{\text{elem}}},
@@ -105,9 +108,9 @@ $$ {#eq-gemv-intensity}
 
 The expression in @eq-gemv-intensity converges to approximately 1 FLOPs per byte for large $m$ and $n$. The FFN sublayer, like the attention sublayer, is memory-bandwidth-bound during decode regardless of the specific activation function or normalization scheme applied.
 
-### The Agent Control Block as live execution state
+### Runtime execution context as live execution state
 
-The runtime of an agentic inference system must maintain structured state across autoregressive steps that extends well beyond the raw numerical tensors. This state — analogous in function to a process control block in an operating system scheduler, but operationally distinct in content — is formalized here as the *Agent Control Block* (ACB). As contrasted in @fig-pcb-vs-acb, the ACB encapsulates all information required to resume, audit, and coordinate a generation episode:
+The runtime of an agentic inference system must maintain structured state across autoregressive steps that extends well beyond raw weight tensors. As contrasted in @fig-pcb-vs-acb, this state — functionally analogous to a Process Control Block (PCB) in an operating system kernel, but orchestrating neural context, capability leases, and tool execution state (structurally designated in agent runtimes as the *Agent Control Block*, or ACB) — encapsulates all information required to resume, audit, and coordinate an execution trajectory:
 
 ::: {#fig-pcb-vs-acb fig-env="figure" fig-pos="htb" fig-cap="**POSIX Process Control Block (PCB) vs. Agent Control Block (ACB)**: Structural comparison between classical operating system process descriptors and neural agent runtime state. While a POSIX PCB manages hardware registers, linear virtual memory maps, and open file descriptors under bit-exact snapshotting, an ACB orchestrates non-stationary KV cache blocks, attenuated capability leases, tool execution logs, and token budget quotas across stochastic trajectories." fig-alt="Two-panel architectural diagram contrasting a POSIX Process Control Block with registers and page tables against an Agent Control Block with capability leases, KV cache descriptors, tool invocation logs, and budget burn counters."}
 
@@ -121,7 +124,7 @@ The runtime of an agentic inference system must maintain structured state across
 - **Tool invocation log**: A time-ordered record of tool calls emitted by prior steps, their arguments, and their returned observations, enabling the runtime to splice observation tokens into the active context without reprocessing prefix segments unnecessarily.
 - **Step counter and budget**: The current value of $t$, the maximum permitted generation length $T_{\max}$, and any token-budget soft constraints imposed by the orchestration layer.
 
-The ACB is not merely bookkeeping metadata; it is the live execution state of the system. Its memory footprint scales linearly with context length through the KV cache term, and its integrity is a precondition for correct resumption after preemption, migration, or partial generation restart. Systems that treat the ACB as an afterthought — serializing it lazily or evicting it under memory pressure without a coherent replacement policy — exhibit the class of collapse behaviors described in the opening trace of this section: generation proceeds, latency degrades silently, and no surface-level metric captures the root cause until throughput collapses entirely. The execution lifecycle of an ACB is governed by the deterministic state transitions diagrammed in @fig-vol3-processor-acb-fsm.
+The runtime execution context is not merely bookkeeping metadata; it is the live execution state of the system. Its memory footprint scales linearly with context length through the KV cache term, and its integrity is a precondition for correct resumption after preemption, migration, or partial generation restart. Systems that treat runtime context as an afterthought — serializing it lazily or evicting it under memory pressure without a coherent replacement policy — exhibit the class of collapse behaviors described in the opening trace of this section: generation proceeds, latency degrades silently, and no surface-level metric captures the root cause until throughput collapses entirely. The execution lifecycle of an agent context is governed by the deterministic state transitions diagrammed in @fig-vol3-processor-acb-fsm.
 
 ::: {#fig-vol3-processor-acb-fsm fig-env="figure" fig-pos="htb" fig-cap="**The Agent Control Block (ACB) Finite State Machine**: Runtime lifecycle transitions, accelerator memory management triggers, and compensating rollback paths governing autonomous agent execution. The runtime transitions between active accelerator forward passes (`ACTIVE_PREFILL` and `ACTIVE_DECODE`) and external sandbox execution (`SUSPENDED_TOOL_WAIT`). To eliminate accelerator idleness during extended tool execution, an out-of-band watchdog triggers asynchronous DMA transfer to host memory (`SUSPENDED_SWAPPED`), releasing High-Bandwidth Memory frames until the external tool returns." fig-alt="Nine-state finite state machine diagram detailing deterministic transitions between initialized, active prefill, active decode, tool wait, swapped host memory, human approval gate, checkpointing, and compensating rollback states."}
 ![](images/svg/acb_lifecycle_state_machine.svg){width="100%"}
@@ -554,33 +557,38 @@ The systems implication is precise: an agent orchestration layer that assumes id
 
 Context-window extension is frequently deployed as a straightforward reliability improvement: if the model sees more history, it will make fewer errors due to lost context. The hardware arithmetic governing this decision, however, reveals a severe arithmetic intensity collapse that degrades both throughput and reliability simultaneously.
 
-The KV cache memory footprint for a transformer with $L$ layers, $H$ attention heads, head dimension $d_h$, and context length $S$ tokens, stored in BF16 (2 bytes per element), is given by @eq-kvcache:
+The KV cache memory footprint for a transformer with $L$ layers, $H_{\text{KV}}$ key-value attention heads, head dimension $d_h$, and context length $S$ tokens, stored in BF16 ($b_{\text{elem}} = 2$ bytes per element), is given by @eq-kvcache:
 
 $$
-M_{\text{KV}} = 2 \cdot L \cdot H \cdot d_h \cdot S \cdot 2 \;\text{bytes}
+M_{\text{KV}} = 2 \cdot L \cdot H_{\text{KV}} \cdot d_h \cdot S \cdot b_{\text{elem}}
 $$ {#eq-kvcache}
 
-where the leading factor of $2$ accounts for both key and value tensors. For a 70B-parameter model with $L = 80$, $H = 64$, $d_h = 128$, a context of $S = 128{,}000$ tokens requires the capacity evaluated in @eq-kvcache-example:
+where the leading factor of $2$ accounts for both key and value tensors. For a 70B-parameter model ($L = 80, d_h = 128$) at a long context of $S = 128{,}000$ tokens, the architectural difference between legacy Multi-Head Attention and modern Grouped-Query Attention is dramatic:
+
+- **Legacy Multi-Head Attention ($H_{\text{KV}} = H_Q = 64$):**
+  $$
+  M_{\text{KV}}^{\text{MHA}} = 2 \times 80 \times 64 \times 128 \times 128{,}000 \times 2 \approx 335.5 \;\text{GB}
+  $$
+  This exhausts the combined 320 GB HBM3 capacity of four H100 SXM5 GPUs ($4 \times 80\;\text{GB}$) before loading a single byte of the 140 GB model weights. Serving an uncompressed 128K context under MHA required at minimum six H100s for KV cache alone.
+- **Modern Grouped-Query Attention ($H_{\text{KV}} = 8$, as in Llama 3 70B):**
+  $$
+  M_{\text{KV}}^{\text{GQA}} = 2 \times 80 \times 8 \times 128 \times 128{,}000 \times 2 \approx 41.9 \;\text{GB}
+  $$
+  GQA reduces KV cache storage by an exact factor of $8\times$ (from $2.62\text{ MB/token}$ down to $328\text{ KB/token}$ across all layers), allowing the cache to fit within GPU node memory.
+
+Beyond capacity, however, memory bandwidth imposes an escalating throughput penalty as context lengthens. During single-request decode ($B=1$), the accelerator must stream both the static model weights ($140\text{ GB}$ in BF16) and the active KV cache from HBM for every generated token, as quantified by @eq-fallacy-attn-bytes:
 
 $$
-M_{\text{KV}} = 2 \times 80 \times 64 \times 128 \times 128{,}000 \times 2 \approx 420 \;\text{GB}
-$$ {#eq-kvcache-example}
-
-exceeding the combined HBM capacity of four H100 SXM5 GPUs ($4 \times 80\;\text{GB} = 320\;\text{GB}$) before a single weight byte is loaded. Serving a single 128K-token context of this model requires at minimum six H100s for the KV cache alone, at a node-level cost exceeding \$300{,}000 in capital equipment.
-
-Beyond memory capacity, the memory wall imposes an escalating throughput penalty as context lengthens. During single-request decode, the accelerator must stream both the static model weights and the active KV cache from HBM for every generated token, as quantified by @eq-fallacy-attn-bytes:
-
-$$
-B_{\text{total}} = 2 \cdot N_{\text{params}} + 4 \cdot L \cdot H \cdot d_h \cdot S \;\text{bytes}
+B_{\text{total}} = 2 \cdot N_{\text{params}} + 2 \cdot L \cdot H_{\text{KV}} \cdot d_h \cdot S \cdot b_{\text{elem}}
 $$ {#eq-fallacy-attn-bytes}
 
-For our 70B model at $S = 128{,}000$ tokens, the system must stream $140\text{ GB}$ of weights plus $420\text{ GB}$ of KV cache—a total of $B_{\text{total}} \approx 560\text{ GB}$ of data transferred to compute a single token. Meanwhile, total arithmetic operations scale as $F_{\text{total}} = 2 N_{\text{params}} + 4 L H d_h S \approx 140 \times 10^9 + 335 \times 10^9 = 475\text{ GFLOPs}$. The resulting aggregate arithmetic intensity remains trapped below unit intensity, as formulated in @eq-fallacy-attn-intensity:
+Under GQA at $S = 128{,}000$ tokens, the system must stream $140\text{ GB}$ of weights plus $41.9\text{ GB}$ of KV cache—a total of $B_{\text{total}} \approx 181.9\text{ GB}$ of data transferred to emit a single token. Meanwhile, total arithmetic operations scale as $F_{\text{total}} = 2 N_{\text{params}} + 4 L H_Q d_h S \approx 140 \times 10^9 + 335.5 \times 10^9 = 475.5\text{ GFLOPs}$, because all $H_Q = 64$ query heads must evaluate attention across the 128k context. The resulting aggregate arithmetic intensity is formulated in @eq-fallacy-attn-intensity:
 
 $$
-\mathcal{I}_{\text{decode}} = \frac{F_{\text{total}}}{B_{\text{total}}} = \frac{475 \;\text{GFLOPs}}{560 \;\text{GB}} \approx 0.85 \;\text{FLOPs/byte}
+\mathcal{I}_{\text{decode}} = \frac{F_{\text{total}}}{B_{\text{total}}} = \frac{475.5 \;\text{GFLOPs}}{181.9 \;\text{GB}} \approx 2.61 \;\text{FLOPs/byte}
 $$ {#eq-fallacy-attn-intensity}
 
-which is more than $150\times$ below the H100 tensor core saturation threshold ($\approx 150$–$200$ FLOPs/byte). At an HBM3 bandwidth of $3.35\text{ TB/s}$, streaming $560\text{ GB}$ imposes an irreducible per-token latency of $560 / 3350 \approx 167\text{ ms}$, capping single-stream decode throughput to fewer than 6 tokens per second. Even when partitioned across 8 GPUs via tensor parallelism (where each GPU streams $17.5\text{ GB}$ of weights and $52.5\text{ GB}$ of KV cache), per-token latency is bounded by $70 / 3350 \approx 20.9\text{ ms}$ ($\approx 48$ tokens/second per user)—and the $420\text{ GB}$ KV cache footprint completely exhausts node HBM, eliminating the memory headroom required for concurrent continuous batching.
+While GQA improves upon the dismal $1.0\text{ FLOPs/byte}$ of legacy MHA ($\frac{475.5\text{ GFLOPs}}{140\text{ GB} + 335.5\text{ GB}} = 1.0\text{ FLOPs/byte}$), an intensity of $2.61\text{ FLOPs/byte}$ remains more than $110\times$ below the H100 SXM5 dense tensor core saturation threshold ($\mathcal{I}_{\text{knee}} \approx 295\text{ FLOPs/byte}$). At an HBM3 bandwidth of $3.35\text{ TB/s}$, streaming $181.9\text{ GB}$ imposes an irreducible per-token latency lower bound of $181.9 / 3350 \approx 54.3\text{ ms}$, capping single-stream decode throughput to $\approx 18.4$ tokens per second (compared to $\approx 7.0$ tokens per second under MHA). Even when partitioned across 8 GPUs via tensor parallelism (where each GPU streams $17.5\text{ GB}$ of weights and $5.24\text{ GB}$ of KV cache, totaling $22.74\text{ GB}$), per-token latency is bounded by $22.74 / 3350 \approx 6.79\text{ ms}$ before collective communication overhead—and the $41.9\text{ GB}$ KV cache footprint severely constrains concurrent batching.
 
 The reliability failure is subtler and more dangerous than the cost failure. Empirical studies of transformer attention at long contexts document a well-characterized *lost-in-the-middle* phenomenon [@liu2024lost]: for contexts exceeding $32{,}000$ tokens, retrieval accuracy for critical instructions embedded in the middle of the context degrades by 35 to 55 percent relative to instructions placed at the beginning or end. An agent that naively appends full interaction history to maximize context utilization will, past a characteristic length threshold, *reduce* instruction-following reliability while simultaneously increasing per-token cost and latency. The stochastic processor contract is violated not by truncating context, but by failing to architect a retrieval or summarization strategy that maintains semantic fidelity within a reliable attention window.
 

@@ -15,6 +15,8 @@ from .performance import (
     calc_training_time_days,
     calc_amdahls_speedup,
     calc_strong_scaling_speedup,
+    calc_universal_scalability_law,
+    calc_usl_optimal_concurrency,
     calc_bottleneck,
     calc_pipeline_bubble,
     calc_effective_flops,
@@ -54,7 +56,11 @@ from .reliability import (
     calc_availability_stacked,
     calc_failure_probability,
 )
-from .transformer import calc_transformer_training_flops, calc_transformer_decode_flops
+from .transformer import (
+    calc_transformer_training_flops,
+    calc_transformer_decode_flops,
+    calc_transformer_prefill_flops,
+)
 from .serving import calc_queue_latency_mmc
 from .statistics import (
     calc_population_stability_index,
@@ -71,6 +77,8 @@ from .agents import (
     calc_radix_cache_effective_latency,
     calc_test_time_compute_cost,
     calc_multi_agent_coordination_overhead,
+    calc_multiagent_speedup,
+    calc_multiagent_optimal_concurrency,
 )
 from .robotics import (
     calc_sensor_to_actuator_latency,
@@ -103,6 +111,8 @@ __all__ = [
     "calc_training_time_days",
     "calc_amdahls_speedup",
     "calc_strong_scaling_speedup",
+    "calc_universal_scalability_law",
+    "calc_usl_optimal_concurrency",
     "calc_bottleneck",
     "calc_pipeline_bubble",
     "calc_effective_flops",
@@ -138,6 +148,7 @@ __all__ = [
     "calc_failure_probability",
     "calc_transformer_training_flops",
     "calc_transformer_decode_flops",
+    "calc_transformer_prefill_flops",
     "calc_queue_latency_mmc",
     "calc_population_stability_index",
     "calc_two_proportion_sample_size",
@@ -151,6 +162,8 @@ __all__ = [
     "calc_radix_cache_effective_latency",
     "calc_test_time_compute_cost",
     "calc_multi_agent_coordination_overhead",
+    "calc_multiagent_speedup",
+    "calc_multiagent_optimal_concurrency",
     "calc_sensor_to_actuator_latency",
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",

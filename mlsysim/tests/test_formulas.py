@@ -27,6 +27,11 @@ from mlsysim.physics import (
     dTime,
     calc_amdahls_speedup,
     calc_strong_scaling_speedup,
+    calc_universal_scalability_law,
+    calc_usl_optimal_concurrency,
+    calc_multiagent_speedup,
+    calc_multiagent_optimal_concurrency,
+    calc_transformer_prefill_flops,
     calc_bottleneck,
     model_memory,
     calc_ring_allreduce_time,
@@ -1089,3 +1094,117 @@ class TestKvCacheValidation:
             calc_kv_cache_size(n_layers=-1, n_heads=8, head_dim=128, seq_len=2048, batch_size=1)
         with pytest.raises(ValueError):
             calc_kv_cache_size(n_layers=32, n_heads=8, head_dim=128, seq_len=-5, batch_size=1)
+
+
+# ======================================================================
+# calc_universal_scalability_law
+# ======================================================================
+
+class TestUniversalScalabilityLaw:
+    """Gunther's Universal Scalability Law C(N) = N / (1 + sigma*(N-1) + kappa*N*(N-1))."""
+
+    def test_n_equals_one_is_unity(self):
+        assert calc_universal_scalability_law(1, sigma=0.2, kappa=0.01) == 1.0
+
+    def test_zero_kappa_matches_amdahl(self):
+        # With kappa = 0, USL must match Amdahl's Law exactly
+        sigma = 0.1
+        parallel_fraction = 1.0 - sigma
+        for n in [2, 4, 8, 16]:
+            usl = calc_universal_scalability_law(n, sigma=sigma, kappa=0.0)
+            amdahl = calc_amdahls_speedup(p=parallel_fraction, s=n)
+            assert usl == pytest.approx(amdahl, rel=1e-6)
+
+    def test_retrograde_scaling_with_coherency_penalty(self):
+        sigma = 0.05
+        kappa = 0.01
+        n_star = calc_usl_optimal_concurrency(sigma, kappa)
+        assert n_star == pytest.approx(math.sqrt(0.95 / 0.01), rel=1e-6)  # ~9.75
+        c_9 = calc_universal_scalability_law(9, sigma, kappa)
+        c_10 = calc_universal_scalability_law(10, sigma, kappa)
+        c_12 = calc_universal_scalability_law(12, sigma, kappa)
+        assert c_10 > c_9
+        assert c_10 > c_12  # Retrograde collapse past N*
+
+    def test_infinite_optimal_concurrency_when_kappa_zero(self):
+        assert calc_usl_optimal_concurrency(sigma=0.1, kappa=0.0) == float("inf")
+
+    def test_validation_bounds(self):
+        with pytest.raises(ValueError):
+            calc_universal_scalability_law(0, sigma=0.1, kappa=0.01)
+        with pytest.raises(ValueError):
+            calc_universal_scalability_law(4, sigma=-0.1, kappa=0.01)
+        with pytest.raises(ValueError):
+            calc_universal_scalability_law(4, sigma=1.5, kappa=0.01)
+        with pytest.raises(ValueError):
+            calc_universal_scalability_law(4, sigma=0.1, kappa=-0.01)
+
+
+# ======================================================================
+# calc_multiagent_speedup
+# ======================================================================
+
+class TestMultiAgentSpeedup:
+    """Multi-Agent Amdahl's Law with linear and quadratic coordination tax."""
+
+    def test_chapter15_known_values(self):
+        s = 0.15
+        alpha = 0.004
+        beta = 0.030
+
+        # Hand-computed known answers from Chapter 15
+        assert calc_multiagent_speedup(1, s, alpha, beta) == pytest.approx(1.0 / 1.034, rel=1e-3)
+        assert calc_multiagent_speedup(4, s, alpha, beta) == pytest.approx(1.830, rel=1e-2)
+        assert calc_multiagent_speedup(8, s, alpha, beta) == pytest.approx(1.329, rel=1e-2)
+        assert calc_multiagent_speedup(12, s, alpha, beta) == pytest.approx(0.864, rel=1e-2)
+
+    def test_optimal_concurrency_root(self):
+        s = 0.15
+        alpha = 0.004
+        beta = 0.030
+        m_star = calc_multiagent_optimal_concurrency(s, alpha, beta)
+        # Stationary root: 2 * alpha * M^3 + beta * M^2 - (1 - s) = 0
+        assert 3.7 < m_star < 3.8
+        f_root = 2 * alpha * (m_star ** 3) + beta * (m_star ** 2) - (1.0 - s)
+        assert abs(f_root) < 1e-6
+
+    def test_reduces_to_standard_amdahl_when_taxes_zero(self):
+        s = 0.2
+        for m in [2, 5, 10]:
+            speedup = calc_multiagent_speedup(m, s_serial=s, alpha=0.0, beta=0.0)
+            expected = 1.0 / (s + (1.0 - s) / m)
+            assert speedup == pytest.approx(expected, rel=1e-6)
+
+    def test_validation_bounds(self):
+        with pytest.raises(ValueError):
+            calc_multiagent_speedup(0, s_serial=0.1)
+        with pytest.raises(ValueError):
+            calc_multiagent_speedup(4, s_serial=1.2)
+        with pytest.raises(ValueError):
+            calc_multiagent_speedup(4, s_serial=0.1, alpha=-0.01)
+
+
+# ======================================================================
+# calc_transformer_prefill_flops
+# ======================================================================
+
+class TestTransformerPrefillFlops:
+    """Transformer prompt prefill FLOPs calculation."""
+
+    def test_projections_only(self):
+        p = 70e9
+        s = 1000
+        result = calc_transformer_prefill_flops(p, s)
+        assert result.m_as(ureg.flop) == pytest.approx(2.0 * p * s, rel=1e-6)
+
+    def test_causal_vs_bidirectional_attention(self):
+        p = 70e9
+        s = 4096
+        layers = 80
+        hidden = 8192
+        causal = calc_transformer_prefill_flops(p, s, n_layers=layers, hidden_dim=hidden, causal=True)
+        bidir = calc_transformer_prefill_flops(p, s, n_layers=layers, hidden_dim=hidden, causal=False)
+        attn_causal = 2.0 * layers * hidden * (s ** 2)
+        attn_bidir = 4.0 * layers * hidden * (s ** 2)
+        assert causal.m_as(ureg.flop) == pytest.approx(2.0 * p * s + attn_causal, rel=1e-6)
+        assert bidir.m_as(ureg.flop) == pytest.approx(2.0 * p * s + attn_bidir, rel=1e-6)

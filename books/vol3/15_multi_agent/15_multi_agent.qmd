@@ -75,17 +75,17 @@ However, in multi-agent systems, agents are not frictionless abstract processors
 1. **Linear Provisioning and Context Re-Encoding Overhead ($\beta M$):** Each subagent instance requires independent system instructions, tool schemas, dependency context, and private KV-cache allocations. As $M$ increases, cluster memory bandwidth and prompt ingestion costs grow linearly with slope $\beta > 0$. For instance, if a subagent requires $K_{\text{sys}} \approx 3{,}000\text{ tokens}$ of system prompts and tool schemas, and the baseline task consumes $K_{\text{base}} = 100{,}000\text{ tokens}$, the marginal provisioning overhead per worker is $\beta \approx K_{\text{sys}} / K_{\text{base}} = 0.030$.
 2. **Superlinear Synchronization and Coordination Tax ($\alpha M^2$):** When agents communicate, coordinate access to shared filesystems, resolve merge conflicts, or execute consensus rounds, synchronization overhead scales with the density of pairwise interaction edges ($M(M-1)/2 \sim \frac{1}{2} M^2$). Let $\alpha > 0$ parameterize network roundtrips, serialization latencies, and distributed lock contention. If each pairwise coordination edge (lock heartbeat, git rebase, or RPC verification turn) adds $t_{\text{sync}} \approx 800\text{ ms}$ on a task with baseline serial latency $T_{\text{base}} = 100\text{ s}$, the coordination tax per interaction pair is $\alpha \approx t_{\text{sync}} / (2 T_{\text{base}}) = 0.004$.
 
-Incorporating these physical overheads yields **Multi-Agent Amdahl's Law**\index{Multi-Agent Amdahl's Law}:
+Incorporating these physical overheads extends classical Amdahl scaling into **Multi-Agent Amdahl's Law**\index{Multi-Agent Amdahl's Law}, directly integrating the coherency penalty from Neil Gunther's **Universal Scalability Law (USL)** [@gunther1993; @amdahl1967]:
 
 $$S(M) = \frac{1}{s + \frac{1 - s}{M} + \alpha M^2 + \beta M}$$ {#eq-multiagent-amdahl}
 
 where:
 
 - $s \in (0, 1]$ is the irreducible serial fraction.
-- $\alpha > 0$ is the quadratic synchronization coefficient (governed by network roundtrips, lock contention, and consensus rounds).
+- $\alpha > 0$ is the quadratic synchronization coefficient (governed by network roundtrips, lock contention, and consensus rounds, directly analogous to Gunther's pairwise coherency crosstalk parameter).
 - $\beta > 0$ is the linear provisioning coefficient (governed by context ingestion and prompt boilerplate).
 
-::: {#fig-vol3-multiagent-coordination-tax fig-env="figure" fig-pos="htb" fig-cap="**The Coordination Tax and Multi-Agent Amdahl's Law**: Analytical speedup curves showing the optimal scaling point ($M^*$) and the subsequent descent into the Negative Return Collapse Zone caused by quadratic communication overhead. Unlike classical Amdahl scaling which plateaus asymptotically, multi-agent scaling turns downward past $M^*$, where adding agents increases total execution time. Adapted from [@amdahl1967]." fig-alt="Line graph plotting effective speedup S(M) against number of concurrent subagents M. Curve rises to an optimal peak M* between 4 and 6 agents, then declines steeply into a shaded red Negative Return Collapse Zone where quadratic coordination tax dominates."}
+::: {#fig-vol3-multiagent-coordination-tax fig-env="figure" fig-pos="htb" fig-cap="**The Coordination Tax and Multi-Agent Amdahl's Law**: Analytical speedup curves showing the optimal scaling point ($M^*$) and the subsequent descent into the Negative Return Collapse Zone caused by quadratic communication overhead. Unlike classical Amdahl scaling which plateaus asymptotically, multi-agent scaling turns downward past $M^*$, where adding agents increases total execution time. Adapted from [@amdahl1967; @gunther1993]." fig-alt="Line graph plotting effective speedup S(M) against number of concurrent subagents M. Curve rises to an optimal peak M* between 4 and 6 agents, then declines steeply into a shaded red Negative Return Collapse Zone where quadratic coordination tax dominates."}
 ![](images/svg/coordination_tax_scaling.svg){width="100%"}
 :::
 
@@ -131,20 +131,17 @@ class MultiAgentFleetSizing:
     # Cubic stationary equation: 2*alpha*M^3 + beta*M^2 - (1 - s) = 0
     f_3 = 2 * alpha * (3**3) + beta * (3**2) - p_parallel  # -0.364
     f_4 = 2 * alpha * (4**3) + beta * (4**2) - p_parallel  # +0.142
+    m_star = calc_multiagent_optimal_concurrency(s_serial, alpha, beta)
 
-    # Denominator D(M) = s + (1 - s)/M + alpha*M^2 + beta*M
-    d_1 = s_serial + p_parallel / 1 + alpha * (1**2) + beta * 1  # 1.034
-    d_4 = s_serial + p_parallel / 4 + alpha * (4**2) + beta * 4  # 0.5465
-    d_8 = s_serial + p_parallel / 8 + alpha * (8**2) + beta * 8  # 0.75225
-    d_12 = s_serial + p_parallel / 12 + alpha * (12**2) + beta * 12  # 1.156833
-
-    s_1 = 1.0 / d_1  # 0.967
-    s_4 = 1.0 / d_4  # 1.830
-    s_8 = 1.0 / d_8  # 1.329
-    s_12 = 1.0 / d_12  # 0.864
+    # Multi-Agent Amdahl speedup: S(M) = 1 / (s + (1 - s)/M + alpha*M^2 + beta*M)
+    s_1 = calc_multiagent_speedup(1, s_serial, alpha, beta)  # 0.967
+    s_4 = calc_multiagent_speedup(4, s_serial, alpha, beta)  # 1.830
+    s_8 = calc_multiagent_speedup(8, s_serial, alpha, beta)  # 1.329
+    s_12 = calc_multiagent_speedup(12, s_serial, alpha, beta)  # 0.864
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(f_3 < 0 < f_4, f"Stationary root not bounded between M=3 and M=4: f(3)={f_3}, f(4)={f_4}")
+    check(3.0 < m_star < 4.0, f"Expected optimal concurrency M* between 3 and 4, got {m_star}")
     check(abs(s_4 - 1.83) < 0.01, f"Expected S(4) ≈ 1.83, got {s_4}")
     check(abs(s_8 - 1.33) < 0.01, f"Expected S(8) ≈ 1.33, got {s_8}")
     check(abs(s_12 - 0.86) < 0.01, f"Expected S(12) ≈ 0.86, got {s_12}")
@@ -460,7 +457,7 @@ This failure highlights the classical **Split-Brain Problem**\index{Split-Brain 
 
 In classical distributed systems, consensus is governed by the **FLP Impossibility Result** (Fischer, Lynch, Paterson 1985): in an asynchronous network, no deterministic consensus protocol can guarantee both safety and liveness in the presence of even a single unannounced crash failure. To achieve practical consensus, distributed systems introduce partial synchrony assumptions and randomized timeouts.
 
-Multi-agent architectures adapt consensus protocols (such as Raft or Paxos) to govern cluster state [@decandia2007dynamo]. Crucially, the system enforces a strict architectural boundary:
+Multi-agent architectures adapt consensus protocols (such as Raft or Paxos) to govern cluster state [@ongaro2014search; @lamport1978time]. Crucially, the system enforces a strict architectural boundary:
 
 $$\text{Raft governs deterministic cluster metadata; stochastic LLMs propose candidate state transitions.}$$
 
