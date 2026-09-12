@@ -288,6 +288,28 @@ As budgeted stage-by-stage in @tbl-08-latency-budget, every hardware serializati
 
 : **End-to-End Information Age Accumulation and Physical Displacement Budget**: Stage-by-stage temporal accounting from initial photon arrival at the sensor photosite through hardware deserialization, direct memory access (DMA), neural backbone inference, and inter-process communication (IPC) dispatch. Information age $\Delta t$ reflects the elapsed time from physical energy integration midpoint ($t_{\text{exp}}/2$) to downstream availability. Nominal metrics reflect optimized embedded hardware pipelines (e.g., $60\text{ Hz}$ global-shutter camera, hardware ISP, INT8 NPU acceleration); worst-case bounds ($P_{99.9}$) reflect thermal clock throttling, memory bus saturation, and OS scheduling jitter. Physical displacement $\Delta x = v \cdot t_{\text{age}}$ demonstrates how latency converts directly into unrecoverable spatial drift across operational speeds. {#tbl-08-latency-budget tbl-colwidths="[20,10,10,10,12,10,10,18]"}
 
+::: {#chk-percep-spatial-info-age .callout-checkpoint title="Spatial information age and kinematic corridor depletion"}
+An Autonomous Mobile Robot (AMR) navigates a narrow factory aisle ($W_{\text{aisle}} = 1.2\text{ m}$, chassis width $W_{\text{robot}} = 0.8\text{ m}$, leaving nominal lateral clearance $C_{\text{nominal}} = 200\text{ mm}$) at cruising velocity $v = 2.5\text{ m/s}$. Its vision perception pipeline exhibits the cumulative latency waterfall detailed in @tbl-08-latency-budget: exposure midpoint $t_{\text{exp}}/2 = 8.0\text{ ms}$, column readout $t_{\text{readout}} = 16.6\text{ ms}$, CSI-2 serializer transport $t_{\text{transport}} = 0.8\text{ ms}$, DMA kernel queue $t_{\text{DMA}} = 1.2\text{ ms}$, hardware ISP rectification $t_{\text{ISP}} = 2.5\text{ ms}$, INT8 ViT backbone forward pass $t_{\text{backbone}} = 22.0\text{ ms}$, and IPC shared-memory dispatch $t_{\text{IPC}} = 0.5\text{ ms}$.
+
+If the downstream trajectory controller evaluates obstacle bounding boxes relative to current platform coordinates without timestamp-compensated odometric back-projection:
+
+1. Calculate the total spatial information age $\tau_{\text{age}}$.
+2. Calculate the unmodeled kinematic displacement $\Delta x_{\text{age}}$ traveled during this perception window.
+3. Compute the fraction of the nominal clearance margin $C_{\text{nominal}}$ depleted before the control policy can evaluate an evasive maneuver.
+
+---
+
+*Solution.*
+
+1. Summing the cascade of pipeline processing stages yields total information age:
+   $$\tau_{\text{age}} = 8.0 + 16.6 + 0.8 + 1.2 + 2.5 + 22.0 + 0.5 = 51.6\text{ ms} = 0.0516\text{ s}$$
+2. At cruising velocity $v = 2.5\text{ m/s}$, the physical chassis moves blindly over:
+   $$\Delta x_{\text{age}} = v \cdot \tau_{\text{age}} = 2.5\text{ m/s} \times 0.0516\text{ s} = 0.129\text{ m} = 129\text{ mm}$$
+3. Expressed against the nominal clearance margin $C_{\text{nominal}} = 200\text{ mm}$:
+   $$\text{Depletion} = \frac{\Delta x_{\text{age}}}{C_{\text{nominal}}} = \frac{129\text{ mm}}{200\text{ mm}} = 64.5\%$$
+   The perception latency waterfall wipes out nearly two-thirds of the lateral clearance corridor before the policy even receives the bounding box tensor. Downstream trajectory trackers must explicitly back-propagate the observation to the exposure epoch $t_0$ via high-frequency IMU dead reckoning, or the vehicle will plan around an obstacle located $129\text{ mm}$ behind physical reality.
+:::
+
 ## The Cost of Ingestion {#sec-perception-8-4}
 
 Getting sensory data into main memory is not free, and it does not happen in an isolated subsystem. When raw pixel streams arrive across physical links such as MIPI CSI-2 or Ethernet, hardware engines write those bytes directly into dynamic random-access memory (DRAM)\index{Memory!DRAM} through DMA\index{Memory!DMA}. That transfer shares the physical interconnect, cache hierarchies, and memory controllers\index{Memory!controller} with every other executing workload on the machine, including neural inference engines, operating system drivers, and safety monitors. Every sensory stream therefore imposes two numbers on the machine. The first number is the age the transport pipeline adds to the observation before compute cores can read it, delaying when the policy knows what happened. The second number is the delay the incoming data stream imposes on the safety enforcement path\index{Safety!enforcement path} competing for the exact same memory bus\index{Memory!bus}, which dictates whether the safety reflex can veto an unsafe actuation command before a physical deadline expires.
@@ -311,6 +333,29 @@ Sensor resolution, frame rate, and channel count are safety parameters, not perc
 :::
 
 In machine learning pipelines, engineering teams routinely increase camera resolution or add sensor modalities to improve open-loop model accuracy. In a physical machine, every additional pixel, bit of quantization depth, and exposure frame is an unavoidable withdrawal from the memory bandwidth budget\index{Memory!bandwidth budget} that pays for timely refusal. Upgrading four cameras from $1080\text{p}$ ($1920 \times 1080$) to $4\text{K}$ ($3840 \times 2160$) quadruples the total burst volume $V_{\text{burst}}$ from $12.44\text{ MB}$ to $49.76\text{ MB}$ per exposure. On a system with the timing margins derived above, that single change pushes the worst-case memory stall from $622.0\,\mu\text{s}$ to $2488.0\,\mu\text{s}$, exceeding the $1000\,\mu\text{s}$ slack and causing the safety enforcement loop\index{Safety!enforcement loop} to overrun its period. The higher-resolution image may produce a more confident detection in the learned model, but it removes the machine's guarantee of stopping in time.[^fn-std-iso-mpam] The growth in that budget line is steep. @Fig-perception-bandwidth-scaling traces two decades of sensor ingress, and the raw data rate rose by nearly two orders of magnitude, which is why a resolution increase justified on perception grounds must still be paid for out of the safety path's timing margin.
+
+::: {#chk-percep-ingress-bandwidth-stall .callout-checkpoint title="Camera DMA burst volume and memory controller stall"}
+A physical AI platform considers upgrading its surround perception suite from 4 synchronized $1080\text{p}$ cameras ($1920 \times 1080$, 12-bit raw packed into $1.5\text{ B/px}$) to $4\text{K}$ cameras ($3840 \times 2160$, 12-bit raw) at $30\text{ Hz}$. A hardware GPIO trigger strobes all four sensors simultaneously, causing their readout DMA bursts to hit host LPDDR5 DRAM concurrently over a $16.0\text{ ms}$ window. The safety enforcement monitor executes at $1\text{ kHz}$ ($T_{\text{enforce}} = 1000\,\mu\text{s}$), with an idle-bus execution time of $t_{\text{exec}} = 150\,\mu\text{s}$ (leaving timing slack $S = 850\,\mu\text{s}$). The memory controller provides an effective service rate of $R_{\text{arb}} = 20.0\text{ GB/s}$ ($20{,}000\text{ MB/s}$) under sustained write contention.
+
+1. Calculate the single-exposure sensory burst volume $V_{\text{burst}}$ for both $1080\text{p}$ and $4\text{K}$ suites.
+2. Calculate the worst-case memory contention stall $\Delta t_{\text{stall}} = V_{\text{burst}} / R_{\text{arb}}$ experienced by competing safety read transactions.
+3. Determine whether the $4\text{K}$ upgrade causes the safety enforcement loop to overrun its $1000\,\mu\text{s}$ period deadline.
+
+---
+
+*Solution.*
+
+1. For $1080\text{p}$, each frame occupies $1920 \times 1080 \times 1.5\text{ B} \approx 3.11\text{ MB}$. Across 4 cameras:
+   $$V_{\text{burst, 1080p}} = 4 \times 3.11\text{ MB} = 12.44\text{ MB}$$
+   For $4\text{K}$, each frame occupies $3840 \times 2160 \times 1.5\text{ B} \approx 12.44\text{ MB}$. Across 4 cameras:
+   $$V_{\text{burst, 4K}} = 4 \times 12.44\text{ MB} = 49.76\text{ MB}$$
+2. Contention stall duration under effective service rate $R_{\text{arb}} = 20{,}000\text{ MB/s}$:
+   $$\Delta t_{\text{stall, 1080p}} = \frac{12.44\text{ MB}}{20{,}000\text{ MB/s}} = 0.622\text{ ms} = 622\,\mu\text{s}$$
+   $$\Delta t_{\text{stall, 4K}} = \frac{49.76\text{ MB}}{20{,}000\text{ MB/s}} = 2.488\text{ ms} = 2488\,\mu\text{s}$$
+3. Comparing against available timing slack $S = 850\,\mu\text{s}$:
+   - At $1080\text{p}$: Total execution time is $t_{\text{exec}} + \Delta t_{\text{stall}} = 150\,\mu\text{s} + 622\,\mu\text{s} = 772\,\mu\text{s} \le 1000\,\mu\text{s}$. The safety reflex comfortably completes within its period.
+   - At $4\text{K}$: Total execution time expands to $150\,\mu\text{s} + 2488\,\mu\text{s} = 2638\,\mu\text{s} \approx 2.64\text{ ms}$. This overruns the $1000\,\mu\text{s}$ period by $164\%$, dropping two consecutive safety enforcement cycles. Sensor resolution is an explicit safety parameter; quadrupling pixel count without dedicated QoS traffic shaping or isolated memory channels destroys real-time determinism on the nervous system path.
+:::
 
 ::: {#fig-perception-bandwidth-scaling fig-env="figure" fig-pos="htb" fig-cap="**Historical Scaling of Autonomous Vehicle Camera Resolution and Ingress**: Primary camera resolution and raw data rate by deployment year, from VGA-class DARPA sensors to fifteen-megapixel next-generation ADAS. Ingress bandwidth rose faster than resolution alone implies, and every megabyte of it is memory bus service time taken from the safety refusal path." fig-alt="Chart of raw camera data rate and sensor resolution against deployment year from 2004 to 2026, rising from VGA-class DARPA sensors to fifteen-megapixel next-generation ADAS, with both axes climbing steeply after 2018."}
 
@@ -376,6 +421,30 @@ $$\delta z = \frac{(2.0\text{ m})^2}{800\text{ px} \times 0.20\text{ m}} \times 
 At a distance of $z = 10.0\text{ m}$, the same disparity uncertainty yields:
 $$\delta z = \frac{(10.0\text{ m})^2}{800\text{ px} \times 0.20\text{ m}} \times 0.5\text{ px} = 0.3125\text{ m} = 312.5\text{ mm}$$
 At ten meters, the depth uncertainty alone exceeds the total physical envelope of many small mobile robots.
+
+::: {#chk-percep-stereo-quadratic-error .callout-checkpoint title="Passive stereo quadratic depth divergence vs. LiDAR time of flight"}
+A mobile robot must maintain a physical collision clearance threshold $C_{\text{safe}} = 100\text{ mm}$ while evaluating obstacle boundaries at ranges from $2.0\text{ m}$ to $10.0\text{ m}$. The engineering team compares two depth sensing modalities:
+
+- **Sensor A (Passive Stereo Rig):** Baseline $b = 0.25\text{ m}$, focal length $f = 1000\text{ px}$, and subpixel disparity matching uncertainty $\delta d = 0.5\text{ px}$, where depth error scales quadratically as $\delta z = \frac{z^2}{fb}\delta d$.
+- **Sensor B (Time-of-Flight LiDAR):** Pulsed laser diode with SPAD receiver exhibiting clock jitter $\Delta t = 133\text{ ps}$, yielding range uncertainty $\delta z = \frac{c \Delta t}{2} \approx 20.0\text{ mm}$ independent of operating distance.
+1. Calculate the stereo depth uncertainty $\delta z_{\text{stereo}}$ at operating distances $z = 2.0\text{ m}$, $5.0\text{ m}$, and $10.0\text{ m}$.
+2. Compute the required clearance inset margin $C_{\text{inset}} = C_{\text{safe}} + \delta z$ for both sensors across all three distances.
+3. Explain why passive stereo requires the robot to dynamically derate operating speed at long range while LiDAR maintains uniform trajectory execution.
+
+---
+
+*Solution.*
+
+1. Using stereo baseline factor $fb = 1000\text{ px} \times 0.25\text{ m} = 250\text{ m}\cdot\text{px}$:
+   - At $z = 2.0\text{ m}$: $\delta z_{\text{stereo}} = \frac{(2.0)^2}{250} \times 0.5 = \frac{4.0}{250} \times 0.5 = 0.008\text{ m} = 8.0\text{ mm}$.
+   - At $z = 5.0\text{ m}$: $\delta z_{\text{stereo}} = \frac{(5.0)^2}{250} \times 0.5 = \frac{25.0}{250} \times 0.5 = 0.050\text{ m} = 50.0\text{ mm}$.
+   - At $z = 10.0\text{ m}$: $\delta z_{\text{stereo}} = \frac{(10.0)^2}{250} \times 0.5 = \frac{100.0}{250} \times 0.5 = 0.200\text{ m} = 200.0\text{ mm}$.
+2. Required clearance inset margin $C_{\text{inset}} = C_{\text{safe}} + \delta z$ ($C_{\text{safe}} = 100\text{ mm}$):
+   - At $2.0\text{ m}$: Stereo $C_{\text{inset}} = 100 + 8 = 108\text{ mm}$; LiDAR $C_{\text{inset}} = 100 + 20 = 120\text{ mm}$.
+   - At $5.0\text{ m}$: Stereo $C_{\text{inset}} = 100 + 50 = 150\text{ mm}$; LiDAR $C_{\text{inset}} = 100 + 20 = 120\text{ mm}$.
+   - At $10.0\text{ m}$: Stereo $C_{\text{inset}} = 100 + 200 = 300\text{ mm}$; LiDAR $C_{\text{inset}} = 100 + 20 = 120\text{ mm}$.
+3. Stereo depth error grows with $z^2$. At $10.0\text{ m}$, the stereo spatial uncertainty ($200\text{ mm}$) is double the base clearance threshold ($100\text{ mm}$), forcing the planner to defend a wide $300\text{ mm}$ buffer that often blocks narrow navigable corridors. To avoid false stops or path blockage, a stereo-guided vehicle must derate cruising speed so its stopping horizon shrinks to within the short range ($z \le 3\text{--}4\text{ m}$) where disparity resolution remains sharp. LiDAR time-of-flight error depends strictly on picosecond timing electronics rather than geometric disparity, maintaining flat metric certainty ($20\text{ mm}$) out to maximum range and enabling unconstrained high-speed trajectory tracking.
+:::
 
 ::: {#fig-08-lidar-pointcloud fig-env="figure" fig-pos="t" fig-cap="**Registered 3D LiDAR Point Cloud in an Urban Environment**: Twenty-three million time-of-flight returns from an Ouster OS1-64 on a moving vehicle, registered into the world frame by SLAM and colorized by intensity. Ranging uncertainty stays roughly constant across the operating range, which is the property that matters for clearance, since passive stereo degrades quadratically with distance over the same span. Motion compensation across sweeping scanlines is what keeps vehicle velocity from shearing the reconstructed geometry. Attribution: Ouster Inc. public dataset, CC BY 4.0." fig-alt="Registered 3D LiDAR Point Cloud in an Urban Environment. High-resolution orthographic projection of 23 million time-of-flight points acquired by an Ouster OS1-64 multi-beam LiDAR mounted on a moving vehicle navigating an urban intersection (Folsom and Dore St, San Francisco). Points are registered in real time into the global coordinate frame (Fworld) via simultaneous localization and mapping (SLAM) and colorized by calibrated return intensity scaled by range. Because time-of-flight ranging uncertainty (z = c Delta t / 2) remains approximately constant across operating range, LiDAR generates dense metric surfaces for physical clearance estimation without the quadratic depth degradation (delta z propto z^2) characteristic of passive stereo triangulation. Continuous motion compensation across sweeping scanlines is essential to prevent vehicle velocity from shearing the reconstructed geometry. Attribution: Ouster Inc. public dataset, CC BY 4.0."}
 ![](images/jpg/fig08_real_lidar_pointcloud.jpg){width="85%"}
