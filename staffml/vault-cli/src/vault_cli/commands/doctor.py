@@ -80,8 +80,8 @@ def _check_disk_coverage(vault_dir: Path) -> CheckResult:
 
     The registry is the canonical assigned-IDs ledger. If a YAML file
     exists with an ID not in the registry, the registry is out of date —
-    likely a generation run that did not append on write. Run
-    ``tools/repair_registry.py`` to reconcile.
+    likely a question was added without appending its ID. Run
+    ``staffml/vault/scripts/repair_registry.py`` to reconcile.
     """
     reg = vault_dir / "id-registry.yaml"
     if not reg.exists():
@@ -215,24 +215,6 @@ def _check_content_hash_sample(vault_dir: Path) -> CheckResult:
     )
 
 
-def _check_llm_spend_ledger() -> CheckResult:
-    config = Path.home() / ".config" / "vault" / "llm-spend.json"
-    if not config.exists():
-        return CheckResult("llm-spend-ledger", "skip", "no ledger yet (vault generate unused)")
-    data = json.loads(config.read_text())
-    today = data.get("today_usd", 0.0)
-    ceiling = data.get("ceiling_usd", 50.0)
-    if today > ceiling:
-        return CheckResult(
-            "llm-spend-ledger", "fail",
-            f"${today:.2f} used today; ceiling ${ceiling:.2f}",
-        )
-    return CheckResult(
-        "llm-spend-ledger", "pass",
-        f"${today:.2f} used today; ceiling ${ceiling:.2f}",
-    )
-
-
 def _check_link_rot() -> CheckResult:
     """Nightly job runs this — shipping a stub that reads the artifact."""
     artifact = Path("staffml/vault/link-rot.yaml")
@@ -252,7 +234,6 @@ SUBCHECKS = {
     "release-integrity":    _check_release_integrity,
     "d1-connectivity":      lambda _vd: _check_d1_connectivity(),
     "content-hash-sample":  _check_content_hash_sample,
-    "llm-spend-ledger":     lambda _vd: _check_llm_spend_ledger(),
     "link-rot":             lambda _vd: _check_link_rot(),
 }
 

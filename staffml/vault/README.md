@@ -12,7 +12,7 @@ got us here.
 
 ```
 staffml/vault/
-├── ARCHITECTURE.md          ← v2.2 design doc (1600+ lines, definitive)
+├── ARCHITECTURE.md          ← v2.2 design doc (definitive)
 ├── REVIEWS.md               ← 3-round adversarial review ledger
 ├── TESTING.md               ← test plan; see vault-cli for impl
 ├── README.md                ← this file
@@ -28,8 +28,8 @@ staffml/vault/
 │   ├── mobile/
 │   ├── tinyml/
 │   └── global/
-├── exemplars/               ← curated human-only pool for `vault generate`
-├── drafts/                  ← LLM-generated, awaiting `vault promote`
+├── exemplars/               ← curated, human-reviewed exemplar pool
+├── drafts/                  ← unreviewed drafts awaiting `vault promote`
 ├── releases/                ← citable release artifacts
 │   ├── 0.9.0/
 │   │   ├── vault.db         ← compiled SQLite (committed, citable)
@@ -44,36 +44,20 @@ staffml/vault/
 └── exemplar-gaps.yaml       ← local/CI-generated coverage audit output (gitignored)
 ```
 
-### Pipeline artifacts: `_pipeline/` (gitignored)
+### Intermediate files: `_pipeline/` (gitignored)
 
-LLM-driven tooling (chain proposals, gap detection, draft scorecards,
-audit traces) writes intermediate outputs to `_pipeline/` — the
-directory is gitignored as a unit. Only durable corpus artifacts
-(chains.json, id-registry.yaml, questions/) belong in git; pipeline
-runs are reproducible from the live tooling on demand and would
-otherwise pollute history with byte-stable LLM noise.
-
-```
-staffml/vault/_pipeline/                  ← gitignored
-├── chains.proposed.json                      ← build_chains_with_gemini.py
-├── chains.proposed.lenient.json              ← build_chains_with_gemini.py --mode lenient
-├── gaps.proposed.json                        ← gap-detection sidecar (strict)
-├── gaps.proposed.lenient.json                ← gap-detection sidecar (lenient)
-├── draft-validation-scorecard.json           ← validate_drafts.py output
-└── runs/
-    ├── AUDIT_REPORT.md                       ← latest audit_chains_with_gemini.py rollup
-    └── <UTC-timestamp>/                      ← per-run audit traces
-```
-
-When adding a new pipeline tool, route default outputs through the
-`PIPELINE_DIR` constant (`vault/_pipeline/`) and never commit anything
-under it.
+Tooling writes intermediate outputs (proposed chain files, coverage
+reports, run traces) to `_pipeline/`, which is gitignored as a unit.
+Only durable corpus artifacts (chains.json, id-registry.yaml,
+questions/) belong in git. When adding a tool, route default outputs
+through the `PIPELINE_DIR` constant (`vault/_pipeline/`) and never commit
+anything under it.
 
 ## Quick commands
 
 ```bash
 # From repo root, with venv activated and `pip install -e staffml/vault-cli/[dev]`:
-vault --help                      # 22 subcommands, phase-aware
+vault --help                      # subcommands, phase-aware
 vault build                       # compile YAML → vault.db
 vault check --strict              # fast + structural invariants (<60s)
 vault check --tier slow           # nightly tier incl. LSH scenario dedup
@@ -156,7 +140,7 @@ vault ship 1.0.0 --env production --canary-percent 10
 - **LSH scenario-dedup** (CI, <10s, LSH-blocked): MinHash + 16-band LSH +
   Jaro-Winkler within-bucket candidate pairs at 0.95 threshold.
 - **Nightly**: deep-dive URL reachability, napkin-math dimensional analysis
-  (Pint), LLM math verification.
+  (Pint).
 - **Weekly**: secret-leak grep.
 
 Full specification: ARCHITECTURE.md §5.

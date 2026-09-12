@@ -93,7 +93,7 @@ CI re-runs these. PRs are merge-blocked on red CI.
 Every question's `provenance` field must honestly reflect how it was made:
 
 - `human` — written from scratch by a human.
-- `llm-draft` — produced by `vault generate`; not yet human-reviewed.
+- `llm-draft` — machine-drafted; not yet human-reviewed.
 - `llm-then-human-edited` — an LLM draft substantially revised by a human (the
   common case). `generation_meta.human_reviewed_at` records when.
 - `imported` — from an external source (e.g., book, published paper). Include

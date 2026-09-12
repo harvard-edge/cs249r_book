@@ -15,10 +15,9 @@ The vault follows [Semantic Versioning](https://semver.org/) for its schema:
 ### Summary
 
 Multi-phase release-readiness push across one branch
-(`feat/massive-build-2026-04-25-run`). Bundle: 9,224 → ~9,800 published
-items; three new structural validators at the data boundary; generator
-retrofit; closed the parallelism gap that survived three prior
-generation passes.
+(2026-04-25). Bundle: 9,224 → ~9,800 published
+items; three new structural validators at the data boundary; closed
+the parallelism coverage gap.
 
 ### Schema changes (additive, no migration)
 
@@ -33,8 +32,7 @@ generation passes.
   Documents the contract that `zone` and `bloom_level` must agree on
   cognitive level — no more zone=recall + bloom_level=evaluate.
 - **`BLOOM_CANONICAL_ZONE` added**: canonical bloom→zone fallback used
-  by `reclassify_zone_bloom_mismatch.py` to deterministically repair
-  zone-bloom contradictions. Used once to fix 576 mistagged items.
+  to deterministically repair zone-bloom contradictions. Used once to fix 576 mistagged items.
 - **`ZONE_LEVEL_AFFINITY` widened** to all 6 levels per zone: the soft
   pedagogical constraint was retired in favor of the stronger
   `ZONE_BLOOM_AFFINITY` hard constraint. Lint warnings: 1,308 → 0.
@@ -55,28 +53,9 @@ generation passes.
   refactor's debt (5,269 + 167 + 87 entries across the push).
 - `scripts/repair_chains.py`: drops orphan singletons; renumbers chain
   positions to be unique + Bloom-monotonic. 80 file edits applied.
-- `scripts/reclassify_zone_bloom_mismatch.py`: deterministic bloom-
-  canonical reclassification for items violating ZONE_BLOOM_AFFINITY.
-- `scripts/fix_competency_areas.py`: REMAP table extended with 30+ new
-  patterns (zones-as-area, bloom-verbs-as-area, underscore
-  hallucinations, dash/slash track-prefix forms). 462 fixes applied.
-- `scripts/render_visuals.py`: structured per-ID failure log to
-  `_validation_results/render_failures.json`; non-zero exit on any
-  per-item crash. Surfaced two prior silent failures (`mobile-1962`
-  graphviz `Edge` keyword collision; `tinyml-1570` matplotlib missing
-  `numpy as np` import).
-- `scripts/gemini_cli_generate_questions.py`: validate-at-write
-  contract (every YAML round-trips through `Question.model_validate()`
-  before disk write); `--prompt-variant {default,parallelism}` flag
-  (parallelism variant: forbid bandwidth division, require concrete
-  topology, require quantified sync/bubble cost, require non-obvious
-  failure mode); `--targets-from <file>` flag; retry-on-validation-fail
-  (single retry per batch with structured error context);
-  `bloom_for_zone_level()` helper respects ZONE_BLOOM_AFFINITY;
-  `parse_target()` sets competency_area from canonical `TOPIC_TO_AREA`.
-- `scripts/analyze_coverage_gaps.py`: `--include-areas <areas>` flag
-  injects area-targeted cells into the recommended_plan. Closes the
-  topic-priority-misses-area-gaps mismatch.
+- Deterministic bloom-canonical reclassification for items violating
+  ZONE_BLOOM_AFFINITY, and a competency-area remap covering 30+
+  malformed patterns (462 fixes applied).
 - `vault build --local-json`: auto-emits `vault-manifest.json`
   alongside corpus.json. Eliminates the recurring stale-manifest
   pre-commit failure.
@@ -97,9 +76,8 @@ generation passes.
 
 - **320 PASS items** from initial massive build (Phase 1-7,
   `ece6eccf2`) — cloud-heavy + edge/mobile/tinyml backfill.
-- **144 PASS items** from Phase B + C (`e7cd3b24c`) — 110 from a
-  refined loop with validate-at-write + bloom-aware prompts; 34 from
-  rehabilitating the prior NEEDS_FIX queue via fix-agent.
+- **144 PASS items** from Phase B + C (`e7cd3b24c`), including 34
+  repaired items from the prior NEEDS_FIX queue.
 - **87 PASS items** from Phase D + F (`6b2b3e054`) — closed the
   parallelism gap that had survived three prior pushes:
   - tinyml/parallelism: 0 → 8
@@ -113,15 +91,9 @@ generation passes.
   validators each prevent a prior failure mode at write time.
   Audit-time validation discovers damage; data-boundary validation
   prevents it.
-- **Prompt specificity beats budget.** Parallelism cells went from
-  51% pass rate (B.5, standard prompt, 26 API calls) to 80.6%
-  (D.3, PARALLELISM_RULES variant, 3 API calls). Same model, same
-  judge, same API.
-- **Topic-priority ranking misses area-level gaps.** The analyzer's
-  recommended_plan ranks track×topic cells by priority; parallelism
-  area-gaps don't surface because the priority is split across many
-  parallelism-flavored topics. Closing area-level gaps needs
-  explicit area targeting — solved by `--include-areas`.
+- **Coverage gaps hide at the area level.** Parallelism gaps did not
+  show up in per-topic counts because they were split across many
+  parallelism-flavored topics; closing them needed area-level targets.
 
 ---
 
@@ -182,7 +154,7 @@ silently dropped everything else.
   every YAML. `bloom_level`, `phase` optional. Together these form the
   paper's 4-axis classification.
 - `human_reviewed: {status, by, date, notes}` — new field tracking human
-  verification independently of LLM validation stamps. Every migrated YAML
+  verification independently of automated validation stamps. Every migrated YAML
   carries `status: not-reviewed` until a human reviews it.
 - `chains: [{id, position}]` — plural form recovers multi-chain membership.
 - `schema/enums.py` — single source of Python enum values; imported by
@@ -200,8 +172,6 @@ silently dropped everything else.
 - `status: deleted` added as a valid status (paired with `deletion_reason`)
   to represent the 458 soft-deleted corpus records.
 - `human_reviewed` status `{not-reviewed, verified, flagged, needs-rework}`.
-- Migration script preserved at `scripts/migrate_to_v1_0.py` for forensic
-  reference.
 
 ### Normalisations applied during migration
 
@@ -239,8 +209,8 @@ comparison):
 
 ### Follow-up work (planned)
 
-- LLM-assisted content-quality audit on a per-YAML basis (now easy
-  because every YAML is self-contained). Target: verify
+- Content-quality audit on a per-YAML basis (now easy because every
+  YAML is self-contained). Target: verify
   content-level/zone fit for the remaining non-mechanical mis-labels.
 - CI drift check between `schema/enums.py` and `schema/question_schema.yaml`
   so the single-source-of-truth claim is enforced mechanically.

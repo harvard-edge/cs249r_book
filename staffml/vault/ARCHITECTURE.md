@@ -10,7 +10,7 @@
 > - **C-2**: §11 rewritten — YAML is the sole authoring surface from Day 1 of Phase 1; `corpus.json` is generated-only, pre-commit-hook-protected.
 > - **C-3**: Content hash is SHA-256 over canonical JSON of whitelisted semantic fields (not SQLite bytes). Release hash is a Merkle root over `(id, content_hash)` pairs.
 > - **C-5**: IDs are content-addressed (topic + short-hash-of-title + dedup suffix); `id-registry.yaml` is an append-only log.
-> - **C-6**: `vault generate` draws exemplars only from `vault/exemplars/` (curated human-reviewed pool), never from LLM-generated questions.
+> - **C-6**: Exemplars live in a separate curated, human-reviewed pool at `vault/exemplars/`.
 > - **H-1**: `schema/EVOLUTION.md` added as a Phase-0 deliverable.
 > - **H-2**: LinkML is sole schema SSoT; `vault publish` codegens Pydantic, SQL DDL, and TypeScript types as release artifacts.
 > - **H-17**: Phase 0 adds `vault api` (local Worker-surface shim) + `CONTRIBUTING.md` so contributors can clone-and-render without a Cloudflare account.
@@ -47,7 +47,7 @@
 > - **`vault new` appends registry + git rebase** (David R3-H3): `id-registry.yaml` append-only; pre-allocation `git pull --rebase` to reduce collision rate.
 > - **`authors:` auto-populated from `git config user.email`** (David R3-H4 / M-15).
 > - **`vault renumber` command implemented** (David R3-N-2): post-rebase seq-bump + git-mv + id-field update + registry append. No longer spec-only.
-> - **`vault mark-exemplar` command implemented** (David R3-N-9): provenance + `human_reviewed_at` gate enforced; refuses LLM-only; `git mv` into `vault/exemplars/`.
+> - **`vault mark-exemplar` command implemented** (David R3-N-9): provenance + `human_reviewed_at` gate enforced; refuses unreviewed items; `git mv` into `vault/exemplars/`.
 > - **CONTRIBUTING.md quickstart aligned** (David R3-H5): dropped `doctor`/`stats` references from Phase-0 quickstart; clarified phase gating.
 > - **FTS5 virtual table + sync triggers in DDL** (B.5): `questions_fts` keeps in sync via AFTER-INSERT/UPDATE/DELETE triggers. Worker `/search` can upgrade from LIKE to MATCH in Phase-3.x.
 > - **`vault stats` CLI + Prometheus mode** (B.8): live scorecard over vault.db, `--format-prometheus` for scrape.
@@ -123,7 +123,7 @@ staffml/
 │   │   ├── mobile/
 │   │   ├── tinyml/
 │   │   └── global/
-│   ├── drafts/                         ← Unreviewed / LLM-generated (NEW)
+│   ├── drafts/                         ← Unreviewed drafts (NEW)
 │   │   └── <same shape as questions/>
 │   └── releases/                       ← Built artifacts (NEW)
 │       ├── v1.0.0/
@@ -196,9 +196,6 @@ created_at: 2026-04-15T10:00:00Z
 last_modified: 2026-04-15T10:00:00Z
 provenance: human                       # closed enum — see H-5
 generation_meta:                        # required iff provenance != human
-  model: claude-opus-4-6                # must exist in vault/schema/models.yaml
-  prompt_hash: sha256:abc123...         # references vault/generation-log/<date>/<hash>.txt
-  prompt_cost_usd: 0.0234
   human_reviewed_at: 2026-04-15T11:00:00Z  # required before exemplar use
 authors:                                # optional; populated from git config by `vault new`
   - vjreddi
@@ -256,9 +253,7 @@ tags:
 
 *Provenance (closed enum — fixes H-5):*
 - `provenance` is one of `{human, llm-draft, llm-then-human-edited, imported}`.
-- `generation_meta.model` references `vault/schema/models.yaml` (a registry — new models added by explicit PR).
-- `generation_meta.prompt_hash` references a git-tracked file in `vault/generation-log/<yyyy-mm-dd>/<hash>.txt` containing the full prompt (L-2).
-- `generation_meta.human_reviewed_at` must be set before the question may be used as an exemplar by `vault generate` (fixes C-6).
+- `generation_meta.human_reviewed_at` must be set before a non-human question may be used as an exemplar (fixes C-6).
 
 *Content format per field (fixes H-6):*
 - `title`: plaintext (≤120 chars).
@@ -351,9 +346,7 @@ release_hash = sha256(b"\n".join(f"{id}:{h}".encode() for id, h in leaves))
 ### 3.6 v1.1 architecture updates (post-Phase-1/2 — chain build)
 
 After the v1.0 design doc above was written, three deltas landed during
-the corpus growth workstream tracked in
-[`vault-cli/docs/CHAIN_ROADMAP.md`](../vault-cli/docs/CHAIN_ROADMAP.md).
-They are additive to the v1 invariants, not replacements:
+the corpus growth workstream. They are additive to the v1 invariants, not replacements:
 
 **1. Hierarchical question layout.** Questions live at
 `staffml/vault/questions/<track>/<area>/<id>.yaml` (the v1 design
@@ -386,47 +379,16 @@ they no longer apply to YAML source.
     on read (validator + TS runtime + UI), which keeps the v1.0
     chains.json shape forward-compatible.
 
-Tooling that produced these: `diagnose_chain_coverage.py`,
-`build_chains_with_gemini.py` (with `--mode {strict,lenient}`),
-`merge_chain_passes.py`. See the README's "Chain build pipeline"
-section for invocation, and CHAIN_ROADMAP.md for the running log.
-
 The v1 release-pipeline invariants (§3.5 hashing, §5 validators)
 absorb these without modification — `chains.json` is a Merkle leaf,
 and the new `tier` field flows into that leaf transparently.
 
-#### 3.6.1 Authoring conventions introduced in Phase 3
+#### 3.6.1 Authoring conventions
 
-Two YAML-body conventions were introduced when LLM-authored questions
-started landing via [`generate_question_for_gap.py`](../vault-cli/scripts/generate_question_for_gap.py).
-Neither is enforced by the schema (Pydantic accepts extra keys); both
-are stable across the pipeline:
-
-- **Private `_authoring` block** (drafts only). Underscore-prefixed so
-  it's clearly metadata, not a content field. Recorded by
-  `generate_question_for_gap.py` and stripped at promotion time
-  (`promote_drafts.py`). Shape:
-  ```yaml
-  _authoring:
-    origin: gemini-3.1-pro-preview
-    tool: generate_question_for_gap.py
-    generated_at: <ISO-8601 UTC>
-    gap:
-      between: [<lower-qid>, <higher-qid>]
-      missing_level: L<N>
-      rationale: <free text>
-  ```
-  At promotion the block is unwound into proper schema fields:
-  `provenance: llm-draft`, `authors: [<origin>]`,
-  `human_reviewed: { status: ... }`, `created_at: <generated_at>`,
-  plus a `gap-bridge:<lower>-<higher>` tag (see below).
-
-- **`gap-bridge:<from>-<to>` tag.** Added to the question's `tags` list
-  at promotion. Lets you find every LLM-bridge question for a given
-  pair of anchors via plain `git grep`, and gives the chain rebuild a
-  signal that this question was authored to fit a specific bridge.
-  Format is intentionally machine-stable: lowercase qids joined by a
-  literal dash, no whitespace.
+- **`gap-bridge:<from>-<to>` tag.** Marks a question written to bridge
+  a specific pair of chain anchors, so every bridge question for a pair
+  can be found with plain `git grep`. Format is intentionally
+  machine-stable: lowercase qids joined by a literal dash, no whitespace.
 
 ---
 
@@ -488,7 +450,7 @@ vault check [--strict] [--tier fast|structural|slow]
         taxonomy.
     --strict: runs fast + structural tiers (CI default).
     --tier fast: pre-commit hook tier only, <1s budget.
-    --tier slow: nightly-CI-only tier (link checks, LLM math verification).
+    --tier slow: nightly-CI-only tier (link checks, napkin-math verification).
     --json emits structured errors in LSP-diagnostic format so editors can render
         inline squiggles. (See §4.5.)
 
@@ -574,7 +536,7 @@ vault ship <version> --env production [--dry-run] [--resume] [--skip-legs <legs>
 vault stats [--topic X] [--track Y] [--level Z] [--zone W]
            [--format table|json|csv|prometheus]
     Scorecard over latest vault.db. --format prometheus emits scrape-ready metrics
-        including authoring-health SLIs (LLM-vs-human ratio, corpus staleness,
+        including authoring-health SLIs (provenance mix, corpus staleness,
         validation-failure rate on main). (Fixes M-9.)
 
 vault diff <from-version> <to-version> [--classify]
@@ -584,16 +546,6 @@ vault diff <from-version> <to-version> [--classify]
         structural changes are flagged as potentially breaking for student bookmarks.
         (Fixes M-3.)
 
-vault generate --topic X --zone Y --level Lz --track T --count N [--model M]
-              [--no-context] [--yes] [--dry-run]
-    LLM-assisted generation — see §12 for exemplar-pool discipline (C-6) and cost
-        controls (H-8). Writes to vault/drafts/.
-    Hard cap: N ≤ 25 per invocation. Higher requires --i-know-what-im-doing + env var.
-    Context grounding defaults ON; --no-context opts out. (Fixes L-5.)
-    Dry-run emits token/cost estimate and the prompt; no API calls.
-    Daily spend ledger at vault/.llm-spend.json; refuses further calls if ceiling hit.
-    Secrets from ~/.config/vault/secrets.toml (mode 0600), never env vars.
-
 vault promote <id> [--reviewed-by <git-user>]  |  vault promote --all-drafts [--topic X]
     Moves drafts to vault/questions/. Sets status: published.
     If provenance is llm-draft, updates to llm-then-human-edited.
@@ -602,7 +554,7 @@ vault promote <id> [--reviewed-by <git-user>]  |  vault promote --all-drafts [--
 
 vault mark-exemplar <id> (v2.1 — David N-9)
     Moves a published question from vault/questions/ to vault/exemplars/ for use as
-        a style exemplar in `vault generate`. Requires:
+        a style exemplar. Requires:
       (a) provenance = human, OR
       (b) provenance = llm-then-human-edited AND generation_meta.human_reviewed_at set.
     For external contributor PRs: CI gates on a maintainer-approval label
@@ -629,8 +581,7 @@ vault api [--port 8002] [--db <path>]
 vault doctor [--check <name>] [--json]
     Runs diagnostic subchecks. Each check has a stable name:
       git-state, schema-version, registry-integrity, release-integrity,
-      d1-connectivity, content-hash-sample (20 IDs), link-rot (nightly only),
-      llm-spend-ledger.
+      d1-connectivity, content-hash-sample (20 IDs), link-rot (nightly only).
     --check X runs only one. --json emits {check, status, detail} per row.
     Exits 0 if all green; 1 if any red. (Fixes L-4.)
 ```
@@ -700,7 +651,7 @@ Every `vault build` and `vault check` runs these. Grouped by speed tier. The fas
 ### Slow (nightly CI)
 23. Deep-dive URLs reachable (HTTP 200). Failures logged to `vault/link-rot.yaml`; monthly auto-filed issue for maintainer (fixes L-3).
 24. Napkin-math units dimensionally consistent (Pint check, where applicable).
-25. LLM math verification pass (existing `gemini_math_review.py` flow).
+25. Napkin-math verification pass.
 
 ### Secret-leak (weekly)
 26. `vault check --secrets` greps for common patterns (API keys, emails, private URLs, AWS/GCP key formats).
@@ -1005,7 +956,7 @@ Transport-layer metrics (5xx, p99) cannot detect silent corruption. Add data-pla
 | schema_fingerprint parity | D1 row matches committed fingerprint | on cold start | refuse service |
 | `/manifest` release_id propagation | 8 sampled POPs agree | on deploy + hourly | stale > 30 min |
 | Validation-failure rate on main | `vault check --strict` pass/fail per merged commit | continuous | any failure |
-| LLM-vs-human ratio | `provenance` distribution | daily | drift > 5%/week |
+| Provenance mix | `provenance` distribution | daily | drift > 5%/week |
 | Corpus staleness | oldest `last_modified` for status=published | daily | > 18 months |
 
 Dashboards: Cloudflare Analytics + a `vault stats --format prometheus` scrape exported to Grafana (existing stack).
@@ -1108,58 +1059,14 @@ Before Phase 4 flips production:
 
 ---
 
-## 12. LLM-Assisted Generation (`vault generate`, v2)
-
-**Change from v1 (fixes C-6, H-8, L-2)**: v1 drew style exemplars from the general corpus. Since the corpus is partially LLM-generated and will eventually accept external PRs, this created a **prompt-injection loop**: one malicious question could propagate instructions into every future generation. v2 isolates exemplars and hardens cost/secret controls.
-
-### 12.1 Invocation
-
-```
-vault generate --topic kv-cache-management \
-               --zone specification \
-               --track cloud --level L5 \
-               --count 3 \
-               --model claude-opus-4-6 \
-               [--no-context] [--yes] [--dry-run]
-```
-
-### 12.2 Exemplar pool discipline (fixes C-6)
-
-- **`vault/exemplars/` is a separate, curated, human-only directory**. Structure mirrors `vault/questions/` but every question in it must have `provenance: human` OR (`provenance: llm-then-human-edited` AND `generation_meta.human_reviewed_at` set).
-- `vault generate` draws exemplars **only from `vault/exemplars/`**, never from the general corpus. Invariant enforced by the loader.
-- Minimum exemplar pool per `(track, level, zone)` cell: 3 questions. `vault generate` refuses to run if the pool is smaller — a "cold-start" manual-write task.
-- When a question is considered exemplar-eligible, moving it into `vault/exemplars/` is an explicit `vault mark-exemplar <id>` operation requiring maintainer approval in CI. This prevents silent corpus poisoning.
-
-### 12.3 Prompt construction (sanitized)
-
-1. Load 10 exemplars from `vault/exemplars/` (or N=`--exemplar-count`).
-2. **Never pass exemplar `scenario`/`solution` text directly**. Pass only structural metadata: topic, level, zone, word count, napkin-math present/absent, chain depth. Free text is stripped. (Prevents exemplar-content from becoming instructions to the generating model.)
-3. Schema, taxonomy context, and writing-style guidelines come from `vault/generation-guidelines/*.md` (authored by maintainers, not derived from corpus).
-4. Full prompt written to `vault/generation-log/<yyyy-mm-dd>/<prompt-hash>.txt` and git-tracked before the API call (fixes L-2). `generation_meta.prompt_hash` references this file.
-
-### 12.4 Cost & secret controls (fixes H-8)
-
-- **Secrets**: `ANTHROPIC_API_KEY` etc. read from `~/.config/vault/secrets.toml` (mode 0600 enforced by CLI). Never from shared env vars. Never committed. `vault generate` refuses if the file is world-readable.
-- **Hard cap**: `--count ≤ 25` per invocation. Higher requires `--i-know-what-im-doing` AND `VAULT_LLM_OVERRIDE=1` env var both set.
-- **Dry-run default**: `vault generate --dry-run` prints the full prompt, exemplar IDs, token estimate (input + max-output), and projected USD cost. No API call.
-- **Interactive confirm**: without `--yes`, print the same summary and require typed confirmation of the topic name before calling.
-- **Daily spend ledger**: `vault/.llm-spend.json` tracks per-day USD spend. Configurable ceiling in `vault/llm-budget.yaml` (default $50/day). Refuses further calls if ceiling hit; error names the ledger file.
-- **Actual usage recorded**: `generation_meta.prompt_cost_usd` is filled from the API response.
-
-### 12.5 Processing
-
-1. Call LLM with rate limit, max-tokens budget, timeout.
-2. Parse response into candidate YAML files.
-3. Validate each against schema (fail-closed on any schema error; partial-parse emits as many drafts as valid).
-4. Write to `vault/drafts/<track>/<level>/<zone>/*.yaml` with `status: draft`, `provenance: llm-draft`, full `generation_meta`.
-5. Print summary: drafted IDs, locations, next-step pointer. Exit 0 even on partial success; exit 1 only if zero drafts emitted.
-
-### 12.6 Promotion path
+## 12. Drafts and Promotion
 
 Drafts do **not** reach the published corpus without human review:
 - `vault edit <id>` on a draft for iteration.
-- `vault promote <id>` (or `--all-drafts --topic X`) moves to `vault/questions/`, sets `status: published`, records `provenance: llm-then-human-edited` (the operator attests they reviewed).
+- `vault promote <id>` (or `--all-drafts --topic X`) moves to `vault/questions/`, sets `status: published`, records `provenance: llm-then-human-edited` when the draft was not human-written (the operator attests they reviewed).
 - `vault promote` refuses without a `--reviewed-by <git-config-user>` flag recorded in the promoted YAML's `authors` list.
+
+Exemplars live in `vault/exemplars/`, a separate curated, human-reviewed pool. Moving a question there is an explicit `vault mark-exemplar <id>` operation requiring maintainer approval in CI, which prevents silent corpus poisoning.
 
 ---
 
@@ -1199,7 +1106,7 @@ Drafts do **not** reach the published corpus without human review:
 ### Observability (v2, fixes H-15)
 - Transport metrics (5xx, p99 latency, request count, anomaly detection) — Cloudflare Analytics.
 - Data-plane SLIs — see §10.5 table. Row-count parity, content-hash sampling, FTS5 index parity, schema_fingerprint parity. These detect silent corruption that transport metrics miss.
-- Authoring health — LLM-vs-human ratio, corpus staleness, validation-failure rate on main — exported via `vault stats --format prometheus`.
+- Authoring health — provenance mix, corpus staleness, validation-failure rate on main — exported via `vault stats --format prometheus`.
 - Weekly review of slow queries → candidate index additions.
 - Error tracking: Cloudflare Workers observability + Sentry for the site.
 - Alert SLOs: 5xx > 1% over 5min; p99 > 500ms sustained; any data-plane SLI divergence; validation failure on main.
@@ -1216,7 +1123,6 @@ Drafts do **not** reach the published corpus without human review:
 
 ### Concurrent CLI use (v2, fixes C-5)
 - `vault publish` uses a lockfile (`vault/.publish.lock`) with PID + 30-min stale-lock timeout.
-- `vault generate` uses a lockfile on `vault/.llm-spend.json` to serialize spend-ledger updates.
 - ID allocation (in `vault new`) is content-addressed + append-only registry; no single-machine lock needed. Collision-by-hash is 1-in-16M per `(topic, title-prefix)` bucket; `--dedup-seq` suffix handles the tail.
 - `vault new` requires the working tree to be current with origin (`git pull --rebase` before allocation) to minimize rebase pain downstream.
 
@@ -1314,7 +1220,6 @@ Each phase is a safe stopping point. If priorities shift, pause at a phase bound
 - **Milestone**: academic readers find the paper in ≤5s from landing on About.
 
 ### Phase 7 — Polish (ongoing, not in critical path)
-- `vault generate` LLM command (per §12).
 - `vault-cli` migrations, diff polish, doctor subchecks.
 - R2 nightly snapshot GitHub Action (pre-deploy snapshots already in Phase 3).
 - Per-user progress on D1 (separate feature; requires auth; privacy-policy work).
@@ -1357,15 +1262,12 @@ Recommendations are v2's proposed defaults. User confirmation required for items
 | `staffml/vault/corpus.json` (28 MB) | **Generated, not authored.** Pre-commit hook refuses direct edits. Retained as pre-split reference snapshot. |
 | `staffml/vault/questions/**/*.yaml` | Sole source of truth. 9,657 files. |
 | `staffml/app/src/data/corpus.json` | **Regenerated** by `vault build --local-json` from YAML. 9,199 published questions. CI diff-check enforces equivalence. Bundled in site until Phase-4 cutover; removed 2 releases post-cutover per §7.1 retention. |
-| `staffml/vault/scripts/generate.py` | Phase-7 follow-up: `vault generate --topic X --zone Y --level Lz --count N` (see §12). |
 | `staffml/vault/scripts/export_to_staffml.py` | **DEPRECATED** (header added). Replaced by `vault build --local-json`. |
 | `staffml/app/scripts/sync-vault.py` | **DEPRECATED** (header added). Replaced by `vault build --local-json`. |
 | `staffml/app/scripts/generate-manifest.py` | **DEPRECATED** (header added). Manifest emitted as release artifact by `vault publish`. |
 | `staffml/paper/scripts/analyze_corpus.py` | **DEPRECATED** (header added). Replaced by `vault export-paper <version>` (SQL over vault.db). |
 | `staffml/paper/scripts/generate_macros.py` | **Rewritten** as thin wrapper over `vault export-paper`. Paper.tex needs no edits — legacy `\num*` namespace preserved alongside new `\staffml*`. |
 | `staffml/app/src/lib/corpus.ts` | Static-import path remains live pre-cutover. `corpus-source.ts` + `corpus-vault.ts` + `useVaultQuestion` hook provide the Phase-4 cutover path; components opt in one-at-a-time. |
-| `staffml/vault/scripts/DEPRECATED.md` | New. Maps every legacy script to its replacement. |
-| `staffml/app/scripts/DEPRECATED.md` | New. Same for the site side. |
 
 **Migration complete** (in-repo): YAML is authoritative; all downstream
 artifacts (vault.db, corpus.json, macros.tex, corpus_stats.json) regenerate
@@ -1462,7 +1364,7 @@ GitHub Actions workflow `.github/workflows/staffml-validate-vault.yml`:
    - Report results as PR status check.
 2. Merge-blocked on any red status.
 3. Nightly workflow `.github/workflows/vault-nightly.yml`:
-   - Slow-tier invariants (link rot, LLM math verification).
+   - Slow-tier invariants (link rot, napkin-math verification).
    - D1 R2 snapshot (belt-and-suspenders; primary snapshots are pre-deploy).
    - Data-plane SLI sweep (row-count parity, content-hash sampling across production).
 

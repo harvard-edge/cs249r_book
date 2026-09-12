@@ -323,10 +323,9 @@ class Question(BaseModel):
     @field_validator("competency_area")
     @classmethod
     def _area(cls, v: str) -> str:
-        # Closed enum (added 2026-04-25 — see fix_competency_areas.py).
-        # Catches Gemini-generated drafts that mistakenly populate the
-        # area field with a topic name or zone name instead of one of
-        # the 13 canonical competency areas.
+        # Closed enum (added 2026-04-25). Catches drafts that populate the
+        # area field with a topic name or zone name instead of one of the
+        # 13 canonical competency areas.
         if v not in VALID_COMPETENCY_AREAS:
             raise ValueError(
                 f"invalid competency_area {v!r}; "
@@ -386,10 +385,8 @@ class Question(BaseModel):
         v0.1.2 hard rule: every zone admits a specific Bloom verb set
         (ZONE_BLOOM_AFFINITY). When zone says one thing and bloom_level
         says another, the question's classification literally
-        contradicts itself. Fixed at the data boundary so future
-        generation runs can never write a self-contradicting item.
-        See lint-calibration-2026-04-25 (expert consensus) for the
-        rule's pedagogical justification.
+        contradicts itself. Fixed at the data boundary so no write path
+        can produce a self-contradicting item.
         """
         if self.bloom_level is None:
             return self
@@ -399,8 +396,7 @@ class Question(BaseModel):
         raise ValueError(
             f"zone={self.zone!r} and bloom_level={self.bloom_level!r} "
             f"are incompatible (zone={self.zone!r} admits "
-            f"{sorted(admits)}). Run reclassify_zone_bloom_mismatch.py "
-            f"to repair, or correct one of the two fields manually."
+            f"{sorted(admits)}). Correct one of the two fields."
         )
 
     @model_validator(mode="after")
@@ -418,9 +414,8 @@ class Question(BaseModel):
         if not svg.is_file():
             raise ValueError(
                 f"visual.path does not resolve to a real file: {svg} "
-                f"(question id={self.id}). Either render it via "
-                f"`render_visuals.py --id {self.id}` or remove the visual "
-                f"block from the YAML."
+                f"(question id={self.id}). Either add the SVG asset or "
+                f"remove the visual block from the YAML."
             )
         return self
 

@@ -1,10 +1,9 @@
 """Tests for the `vault new` scaffold templates.
 
 Guards against accidental removal or rewording of the markup-convention
-markers in `vault new`'s scaffolded YAML. The format-compliance gate
-(currently in validate_drafts.py; CORPUS_HARDENING_PLAN.md Phase 6
-lifts it into vault check --strict) requires these exact bold markers
-to be present in every published common_mistake / napkin_math block.
+markers in `vault new`'s scaffolded YAML. The format-marker invariant in
+`vault check --strict` requires these exact bold markers to be present
+in every published common_mistake / napkin_math block.
 
 If a contributor removes one of the markers from the scaffold (e.g.,
 dropping `**The Rationale:**` to "save space"), every new question
@@ -19,9 +18,9 @@ from vault_cli.commands.authoring import (
     NAPKIN_MATH_TEMPLATE,
 )
 
-# Markers required by the format-compliance gate. Mirrored from
-# staffml/vault-cli/scripts/validate_drafts.py so a marker rename
-# in either place breaks the test loudly.
+# Markers required by the format-marker invariant. Mirrored from
+# vault_cli/validator.py so a marker rename in either place breaks
+# the test loudly.
 COMMON_MISTAKE_REQUIRED = (
     "**The Pitfall:**",
     "**The Rationale:**",

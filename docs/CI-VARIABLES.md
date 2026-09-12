@@ -112,7 +112,6 @@ Secrets hold credentials, so this list names them without values. Set one with
 | `CLOUDFLARE_CACHE_PURGE_TOKEN` | infra-cloudflare-purge |
 | `CLOUDFLARE_REDIRECTS_TOKEN` | infra-cloudflare-redirects (Zone > Config Rules > Edit on `mlsysbook.ai`) |
 | `CLOUDFLARE_ZONE_ID` | infra-cloudflare-purge, infra-cloudflare-redirects (fallback for the variable) |
-| `GEMINI_API_KEY` | staffml-audit-corpus-monthly, staffml-chain-rebuild |
 
 ## What is not a variable, and why
 

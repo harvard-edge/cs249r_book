@@ -23,10 +23,6 @@ git add staffml/vault/questions/<track>/<area>/<id>.yaml
 git commit
 ```
 
-For LLM-driven authoring, see `vault generate --help` instead — that
-path skips this manual flow but still validates against the same
-schema.
-
 ## Required fields
 
 Every YAML must include these (Pydantic `Question` model). The schema is
@@ -62,9 +58,8 @@ Optional but **strongly recommended**:
 ## Markup conventions
 
 These two fields use a 3-part bold-marker structure. The structure is
-**enforced** by `vault check --strict` (CORPUS_HARDENING_PLAN.md Phase
-6 will lift this from regex to LinkML pattern). Authoring without the
-markers will fail CI.
+**enforced** by `vault check --strict`. Authoring without the markers
+will fail CI.
 
 ### `common_mistake` — Pitfall / Rationale / Consequence
 
@@ -143,10 +138,6 @@ provenance: llm-draft
 expected_time_minutes: 6
 ```
 
-Reference questions per `(track, level)` cell are populated as
-CORPUS_HARDENING_PLAN.md Phase 4's audit findings identify gold-standard
-candidates.
-
 ## Title conventions
 
 - **Length:** ≤ 120 characters. Pydantic enforces.
@@ -160,9 +151,8 @@ candidates.
   ✓; "KV Cache Q1" ✗.
 - **Concrete vendor names** when actually invoked. "Apple Neural Engine"
   ✓; "the on-device accelerator" — only if the question deliberately
-  abstracts the hardware. Do not invent vendor names — the audit's
-  vendor-fabrication failure mode catches `"Coral Edge TPU XL"` and
-  similar.
+  abstracts the hardware. Do not invent vendor or product names such as
+  `"Coral Edge TPU XL"`.
 
 ## Levels and Bloom mapping
 
@@ -175,10 +165,10 @@ candidates.
 | L5 | evaluate | judge a design; weigh alternatives quantitatively |
 | L6+ | create | synthesize a new design under unusual constraints (Staff+ scope) |
 
-A common failure (caught by the audit's `level_fit` gate) is **level
-inflation**: stamping L4 on a question that's actually a fill-in-the-blank
-multiplication (L1 or L2). If you can't articulate the *decomposition*
-or *trade-off* the candidate must perform, the question is not L4.
+A common failure is **level inflation**: stamping L4 on a question
+that's actually a fill-in-the-blank multiplication (L1 or L2). If you
+can't articulate the *decomposition* or *trade-off* the candidate must
+perform, the question is not L4.
 
 ## Zones
 
@@ -260,46 +250,20 @@ applies to either is `both`.
   literal asterisks, not bold.
 - **No `<script>`, `javascript:`, or `data:text/html`** in scenarios.
   The validator rejects these.
-- **`visual.path` must resolve.** If you reference an SVG, render it
-  first (`render_visuals.py --id <qid>`) — `vault check --strict` fails
+- **`visual.path` must resolve.** If you reference an SVG, add it under
+  `staffml/vault/visuals/<track>/` first — `vault check --strict` fails
   on a dangling reference.
-- **`provenance: human`** for `vault new` flow; **`llm-draft`** for
-  `vault generate` output; **`imported`** for the historical corpus;
-  **`llm-then-human-edited`** when an `llm-draft` was substantively
+- **`provenance: human`** for the `vault new` flow; **`imported`** for the
+  historical corpus; **`llm-draft`** for a machine draft that has not been
+  reviewed; **`llm-then-human-edited`** when such a draft was substantively
   rewritten by a human.
 
 ## How to test your draft
 
 ```bash
-# 1. Schema + invariant check (fastest — runs on the whole corpus, <60s)
+# Schema + invariant check (runs on the whole corpus, <60s)
 vault check --strict
-
-# 2. Format-marker compliance (no LLM call)
-python3 staffml/vault-cli/scripts/validate_drafts.py --no-llm-judge
-
-# 3. Full LLM-judge gate (level_fit, coherence, bridge, teaching_power)
-python3 staffml/vault-cli/scripts/validate_drafts.py
 ```
-
-## The teaching-power bar (Bloom-graded)
-
-The `teaching_power` gate enforces that a question delivers the cognitive depth
-its **level** promises — recall at the bottom of Bloom's ladder, reasoning at the
-top. It is NOT a blanket "every question must compute": recall is a first-class
-skill, and L1/Remember & L2/Understand questions are warm-up and screening, so a
-clean recall item there passes. The gate fails only when a question scores BELOW
-the floor for its level:
-
-| Level (Bloom) | Floor | Meaning |
-|---|---|---|
-| L1 remember / L2 understand | `tp >= 1` | recall is the job — passes |
-| L3 apply | `tp >= 2` | must apply a formula, not just recall |
-| L4 analyze / L5 evaluate / L6+ create | `tp >= 3` | must reason; recall masquerading as hard fails |
-
-The failure mode is a **mismatch**: a question tagged L5/evaluate that is really an
-L1 lookup. The fix is to lift its reasoning to match the level, or relabel it to
-the level it actually tests. The gate calibrates against gold-standard exemplars,
-not mediocre same-cell peers.
 
 ## End-to-end flow
 
@@ -320,8 +284,7 @@ push, CI runs staffml-validate-vault.yml (full validator + tests + lint)
 
 The schema's `extra="allow"` on `Question` permits unknown top-level
 fields (the `validation_*` and `math_*` audit-stamp fields, for
-instance). On `Details`, CORPUS_HARDENING_PLAN.md Phase 6 flips this to
-`extra="forbid"` — every legitimate extra detail field must be added
+instance). Every legitimate extra detail field should be added
 explicitly to the model. If you find yourself reaching for an
 unrecognized field, it's a schema-evolution conversation. Open an
 issue; don't sneak it in.
@@ -332,4 +295,3 @@ issue; don't sneak it in.
 - `staffml/vault/schema/enums.py` — the Python frozensets (mirror)
 - `staffml/vault-cli/src/vault_cli/models.py` — the Pydantic model (derived)
 - `staffml/vault/ARCHITECTURE.md` § 3.6.1 — the markup-convention rationale
-- `staffml/vault-cli/docs/CORPUS_HARDENING_PLAN.md` — the active workplan

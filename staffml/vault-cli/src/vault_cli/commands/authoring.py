@@ -30,10 +30,8 @@ REGISTRY_PATH = Path("staffml/vault/id-registry.yaml")
 APPLICABILITY_PATH = Path("staffml/vault/data/applicable_cells.json")
 
 # Markup-convention templates for `vault new`. The bold markers are
-# enforced by the format-compliance gate (currently in
-# validate_drafts.py; CORPUS_HARDENING_PLAN.md Phase 6 lifts this into
-# `vault check --strict`). See staffml/vault/AUTHORING.md "Markup
-# conventions" for the rationale.
+# enforced on published questions by `vault check --strict`. See
+# staffml/vault/AUTHORING.md "Markup conventions" for the rationale.
 COMMON_MISTAKE_TEMPLATE = (
     "**The Pitfall:** <TODO: the wrong intuition or shortcut a candidate takes>\n"
     "**The Rationale:** <TODO: why that intuition is wrong, in one sentence>\n"
@@ -527,7 +525,7 @@ def register(app: typer.Typer) -> None:
         question_id: str = typer.Argument(..., metavar="ID"),
         vault_dir: Path = typer.Option(Path("staffml/vault"), "--vault-dir"),
     ) -> None:
-        """Promote a question to the curated exemplar pool used by `vault generate`.
+        """Promote a question to the curated exemplar pool.
 
         Refuses unless provenance is ``human`` or
         ``llm-then-human-edited`` with ``human_reviewed_at`` set — per §12.2
