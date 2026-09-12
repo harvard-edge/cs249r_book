@@ -27,6 +27,7 @@ from .memory import (
     calc_kv_cache_size,
     calc_mla_cache_size,
     calc_paged_kv_cache_size,
+    calc_speculative_branch_capacity,
 )
 from .communication import (
     calc_alpha_beta_crossover,
@@ -113,6 +114,7 @@ __all__ = [
     "calc_kv_cache_size",
     "calc_mla_cache_size",
     "calc_paged_kv_cache_size",
+    "calc_speculative_branch_capacity",
     "calc_ring_allreduce_time",
     "calc_point_to_point_time",
     "calc_ring_allreduce_data_factor",

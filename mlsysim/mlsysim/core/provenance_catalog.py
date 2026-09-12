@@ -128,6 +128,12 @@ OURA_SLEEP_STAGE_STUDY = _lit(
     url="https://doi.org/10.3390/s21134302",
     verified="2026-06-03",
 )
+PHYSICAL_AI_SENSORS = _ds(
+    "prov:physical-ai-sensors",
+    "Automotive and industrial physical AI sensor specifications and datasheets",
+    "https://www.sony-semicon.com/en/products/is/automotive/",
+    notes="4K 30fps automotive camera sensors, MIPI CSI-2 interfaces, 128-beam mechanical LiDARs, and industrial process monitoring transducers.",
+)
 ENERGY_SCALE_ANCHORS = Provenance(
     id="prov:energy-scale-anchors",
     kind=ProvenanceKind.ILLUSTRATIVE,
@@ -337,6 +343,62 @@ NVIDIA_JETSON_ORIN_NX = _ds(
     "https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-orin/",
 )
 
+NVIDIA_DRIVE_THOR = _ds(
+    "prov:nvidia-drive-thor",
+    "NVIDIA DRIVE Thor architecture whitepaper and technical brief",
+    "https://www.nvidia.com/en-us/autonomous-machines/drive-thor/",
+    notes="Thor autonomous vehicle and physical AI SoC integrating Blackwell GPU architecture and Arm Neoverse V3AE CPU cores.",
+)
+
+BOSTON_DYNAMICS_SPOT = _ds(
+    "prov:boston-dynamics-spot",
+    "Boston Dynamics Spot Enterprise quadruped technical specifications",
+    "https://www.bostondynamics.com/products/spot",
+    notes="Mass 32.7 kg, 14 kg payload, max velocity 1.6 m/s, 12 DOFs, 1 kHz actuator torque loop.",
+)
+
+BOSTON_DYNAMICS_ATLAS = _ds(
+    "prov:boston-dynamics-atlas",
+    "Boston Dynamics Atlas humanoid robot technical brief",
+    "https://www.bostondynamics.com/atlas",
+    notes="Fully electric humanoid, 28 DOFs, 500-1000 Hz balance control loop, high-bandwidth actuator units.",
+)
+
+FRANKA_EMIKA_PANDA = _ds(
+    "prov:franka-emika-panda",
+    "Franka Emika Panda 7-DOF articulated robot arm datasheet",
+    "https://franka.de/",
+    notes="7-DOF, 18 kg mass, 3 kg payload, 855 mm reach, 1 kHz torque sensing at all joints, harmonic drive transmissions.",
+)
+
+DJI_MATRICE_350_RTK = _ds(
+    "prov:dji-matrice-350-rtk",
+    "DJI Matrice 350 RTK enterprise industrial drone datasheet",
+    "https://enterprise.dji.com/matrice-350-rtk",
+    notes="Mass 6.47 kg MTOW with TB65 batteries, 2.7 kg payload, 21 m/s max velocity, 55 min max hover flight time, 400 Hz ESC loop.",
+)
+
+INDUSTRIAL_AMR = _ds(
+    "prov:industrial-amr-ansi-itsdf",
+    "Industrial Autonomous Mobile Robot specifications (ANSI/ITSDF B56.5 and ISO 3691-4)",
+    "https://itsdf.org/",
+    notes="Mass 150 kg, nominal velocity 1.5-1.8 m/s, emergency braking 2.5-3.0 m/s^2, 270-degree safety laser scanner.",
+)
+
+AUTONOMOUS_VEHICLE_ROBOTAXI = _ds(
+    "prov:autonomous-vehicle-robotaxi",
+    "Level 4 passenger autonomous vehicle system envelope",
+    "https://waymo.com/",
+    notes="Mass 2400 kg, cruise speed 22 m/s, chassis jerk limit 12 m/s^3, steering column jerk limit 500 N*m/s.",
+)
+
+UNITREE_H1_HUMANOID = _ds(
+    "prov:unitree-h1-humanoid",
+    "Unitree H1 general-purpose humanoid robot specifications",
+    "https://www.unitree.com/h1/",
+    notes="Mass 47 kg, 19 DOFs, 360 N*m peak joint torque, 3.3 m/s walking speed, dual Jetson AGX Orin compute payload.",
+)
+
 GOOGLE_CORAL = _ds(
     "prov:google-coral-edge-tpu",
     "Google Coral Edge TPU product documentation",
@@ -492,6 +554,34 @@ DEPLOYMENT_ENVELOPES = _est(
     "prov:mlsysim-deployment-envelopes",
     "MLSysIM deployment envelope defaults for cloud, edge, mobile, and TinyML systems",
     notes="Pedagogical order-of-magnitude envelopes used for first-pass deployment reasoning; not vendor SLA targets.",
+)
+
+SWE_BENCH_HARNESS = _lit(
+    "prov:swe-bench-harness",
+    "Jimenez et al. (2024), SWE-bench: Can Language Models Resolve Real-World GitHub Issues?",
+    url="https://arxiv.org/abs/2310.06770",
+    notes="Official benchmark harness running agent code modifications inside hermetic containers/microVMs.",
+)
+
+FIRECRACKER_MICROVM = _lit(
+    "prov:firecracker-microvm",
+    "Agache et al. (2020), Firecracker: Lightweight Virtualization for Serverless Applications (NSDI '20)",
+    url="https://www.usenix.org/conference/nsdi20/presentation/agache",
+    notes="Sub-5 ms CoW fork latency, <5 MB memory overhead per jail, deterministic CPU/memory boundary.",
+)
+
+TEST_TIME_DELIBERATION = _lit(
+    "prov:test-time-deliberation",
+    "Snell et al. (2024), Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters",
+    url="https://arxiv.org/abs/2408.03314",
+    notes="Deliberation tree search, verifier scoring, Pareto frontier between branch count N and model size.",
+)
+
+MULTI_AGENT_ORCHESTRATION = _lit(
+    "prov:multi-agent-orchestration",
+    "Hong et al. (2023), MetaGPT: Multi-Agent Collaborative Framework; Wu et al. (2023), AutoGen",
+    url="https://arxiv.org/abs/2308.00352",
+    notes="Multi-agent orchestrator-worker topology, message passing overhead, coordination token overhead.",
 )
 
 MLOPS_DRIFT_THRESHOLDS = _conv(

@@ -48,5 +48,6 @@ class Hardware(Registry):
     Workstation = WorkstationHardware
     Mobile = MobileHardware
     Edge = EdgeHardware
+    Embodied = EdgeHardware  # Volume IV: Embodied AI compute chips (Jetson, Thor, Hailo)
     Tiny = TinyHardware
     Tech = _Tech  # technology-class facts (latency / energy / generic bandwidth)

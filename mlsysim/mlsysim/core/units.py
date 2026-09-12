@@ -44,6 +44,8 @@ __all__ = [
     "USD", "EUR",
     # Model parameters
     "param", "Kparam", "Mparam", "Bparam", "Tparam",
+    # Tokens
+    "token", "Ktoken", "Mtoken", "Btoken",
     # Energy and power aliases
     "J", "kJ", "MJ", "mJ", "uJ", "pJ", "Wh", "kWh", "MWh", "GWh",
     "GW", "MW", "kW", "mW", "uW",
@@ -238,6 +240,11 @@ Kparam = ureg.Kparam
 Mparam = ureg.Mparam
 Bparam = ureg.Bparam
 Tparam = ureg.Tparam
+
+token = ureg.token
+Ktoken = ureg.Ktoken
+Mtoken = ureg.Mtoken
+Btoken = ureg.Btoken
 
 # --- Convenience aliases (prefer these over ureg.* in authored examples) ---
 J = joule

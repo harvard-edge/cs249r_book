@@ -329,3 +329,62 @@ def calc_paged_kv_cache_size(
         2 * n_layers * n_heads * head_dim * padded_seq_len * batch_size * bpe
     ).to(ureg.byte)
     return size, frag_pct
+
+
+def calc_speculative_branch_capacity(
+    c_kv_memory,
+    l_prefix: int,
+    l_branch: int,
+    bytes_per_token,
+    cow: bool = True,
+    page_block_tokens: int = 16,
+) -> int:
+    """
+    Calculate maximum concurrent speculative branches admitted by KV cache memory.
+
+    Under naive replication, each branch duplicates the entire (prefix + branch) context:
+        M_per_branch = (l_prefix + l_branch) * bytes_per_token
+        K = floor(c_kv_memory / M_per_branch)
+
+    Under Copy-on-Write (PagedAttention), the parent prefix is stored exactly once,
+    and each branch allocates branch tokens plus a tail block buffer for internal fragmentation:
+        M_prefix = l_prefix * bytes_per_token
+        M_per_branch = (l_branch + page_block_tokens) * bytes_per_token
+        K = floor((c_kv_memory - M_prefix) / M_per_branch)
+
+    Parameters
+    ----------
+    c_kv_memory : Quantity
+        Total dedicated KV cache memory capacity (e.g. GB).
+    l_prefix : int
+        Shared parent context length in tokens.
+    l_branch : int
+        Speculative branch rollout length in tokens.
+    bytes_per_token : Quantity
+        KV cache memory consumed per token across all layers.
+    cow : bool, optional
+        Whether Copy-on-Write prefix sharing is enabled (default True).
+    page_block_tokens : int, optional
+        Number of tokens in a PagedAttention block allocated as tail buffer (default 16).
+
+    Returns
+    -------
+    int
+        Maximum number of concurrent speculative branches.
+    """
+    import math
+
+    mem_bytes = c_kv_memory.to(ureg.byte).magnitude
+    token_bytes = bytes_per_token.to(ureg.byte).magnitude
+
+    if not cow:
+        mem_per_branch = (l_prefix + l_branch) * token_bytes
+        return math.floor(mem_bytes / mem_per_branch)
+    else:
+        m_prefix = l_prefix * token_bytes
+        m_per_branch = (l_branch + page_block_tokens) * token_bytes
+        c_avail = mem_bytes - m_prefix
+        if c_avail <= 0:
+            return 0
+        return math.floor(c_avail / m_per_branch)
+

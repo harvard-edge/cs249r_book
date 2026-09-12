@@ -2355,6 +2355,18 @@ def _pick_latency_unit(qty):
     return hour
 
 
+def _pick_frequency_unit(qty):
+    mag = abs(qty.to(ureg.hertz).magnitude)
+    if mag >= 1e9:
+        return ureg.gigahertz
+    if mag >= 1e6:
+        return ureg.megahertz
+    if mag >= 1e3:
+        return ureg.kilohertz
+    return ureg.hertz
+
+
+
 def fmt_power(
     quantity,
     *,
@@ -3072,6 +3084,80 @@ def fmt_latency(duration, *, unit=None, precision=None, commas=False):
         commas=commas,
         style="symbol",
         trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_frequency(quantity, *, unit=None, precision=None, commas=False):
+    """Format frequency quantities for prose (Hz, kHz, MHz, GHz)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_frequency() requires a Pint Quantity.")
+    if (1 * quantity).dimensionality != (1 * ureg.hertz).dimensionality:
+        raise ValueError(f"fmt_frequency unit must have frequency dimensionality (1/s), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_frequency_unit(quantity)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+
+
+def fmt_acceleration(quantity, *, unit=None, precision=None, commas=False):
+    """Format acceleration quantities for prose (m/s²)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_acceleration() requires a Pint Quantity.")
+    accel_dim = (1 * (ureg.meter / (ureg.second**2))).dimensionality
+    if (1 * quantity).dimensionality != accel_dim:
+        raise ValueError(f"fmt_acceleration unit must have acceleration dimensionality (m/s²), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.meter / (ureg.second**2))
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+
+
+def fmt_torque(quantity, *, unit=None, precision=None, commas=False):
+    """Format torque/moment quantities for prose (N·m)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_torque() requires a Pint Quantity.")
+    torque_dim = (1 * (ureg.newton * ureg.meter)).dimensionality
+    if (1 * quantity).dimensionality != torque_dim:
+        raise ValueError(f"fmt_torque unit must have torque dimensionality (N·m), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton * ureg.meter)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label="N·m",
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_token_rate(
+    value,
+    *,
+    unit="tokens/s",
+    precision=0,
+    commas=True,
+    scale=None,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+    allow_negative=False,
+):
+    """Format an LLM token generation or ingestion rate (tokens/s)."""
+    return fmt_rate(
+        value,
+        unit=unit,
+        precision=precision,
+        commas=commas,
+        scale=scale,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        allow_negative=allow_negative,
     )
 
 
