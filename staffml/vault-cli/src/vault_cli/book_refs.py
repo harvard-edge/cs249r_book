@@ -13,7 +13,11 @@ harvard-edge/cs249r_book#1822.
 
 URL pattern (verified live, HTTP 200):
 
-    https://mlsysbook.ai/vol{N}/contents/vol{N}/{chapter}/{chapter}.html
+    https://mlsysbook.ai/vol{N}/{chapter}/{chapter}.html
+
+``chapter`` is the numbered chapter folder (``08_training``). The published
+site redirects the pre-numbering URLs (``/vol1/training/training.html`` and the
+older ``/vol1/contents/vol1/...`` form) to these pages.
 
 Chapter titles are read from the chapter's ``.qmd`` H1 when the book tree is
 available; that same pass is the build-time **link-checker** — a mapped chapter
@@ -46,12 +50,12 @@ class BookRefError(ValueError):
 
 
 def _chapter_url(vol: int, chapter: str) -> str:
-    return f"https://mlsysbook.ai/vol{vol}/contents/vol{vol}/{chapter}/{chapter}.html"
+    return f"https://mlsysbook.ai/vol{vol}/{chapter}/{chapter}.html"
 
 
 def _slug_title(chapter: str) -> str:
     """Fallback display title when the book tree is unavailable."""
-    return chapter.replace("_", " ").title()
+    return re.sub(r"^\d{2}_", "", chapter).replace("_", " ").title()
 
 
 class BookRefResolver:

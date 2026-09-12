@@ -217,7 +217,7 @@ def check(
                     before=line,
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     confidence="high",
                     reason=(
                         f"adjacent math spans {before_text!r} should be a "
@@ -245,7 +245,7 @@ def check(
                     before=line,
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     confidence="medium",
                     reason=(
                         f"{before_text!r} reads as plural-s, not "
@@ -277,7 +277,7 @@ def check(
                     before=line,
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     confidence="medium",
                     reason=(
                         f"{before_text!r} likely missing \\mu; should be "
@@ -317,7 +317,7 @@ def check(
                     before=line,
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     confidence="high",
                     reason=(
                         f"{before_text!r} lacks space around \\times; "
@@ -361,7 +361,7 @@ def check(
                     before=line,
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     confidence="high",
                     reason=(
                         f"bare `%` inside math span `${body}$` starts a "

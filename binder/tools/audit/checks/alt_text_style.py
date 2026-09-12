@@ -37,7 +37,7 @@ addressed many of them.
 Auto-fixable? Technically yes — the substitution is deterministic.
 But fixing alt-text is delicate (wrong substitutions break screen-
 reader output) so the fix is marked `auto_fixable=False,
-needs_subagent=True` for conservative editorial review.
+needs_review=True` for conservative editorial review.
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def check(
                             before=line,
                             suggested_after=f"In fig-alt: replace {term!r} with {replacement!r}",
                             auto_fixable=False,
-                            needs_subagent=True,
+                            needs_review=True,
                             reason=f"alt-text: {term} -> {replacement}",
                         )
                     )

@@ -31,7 +31,7 @@ immediately and §10.5's intent is satisfied.
 
 Fix: editorial judgment required. The typical fix is to insert the canonical
 expansion at the first bare use or move an existing later expansion earlier.
-Not auto-fixable; `needs_subagent=True`.
+Not auto-fixable; `needs_review=True`.
 
 Reference: abbreviations.md (canonical forms dict).
 """
@@ -484,7 +484,7 @@ def check(
                 before=line,
                 suggested_after=suggested_after,
                 auto_fixable=False,
-                needs_subagent=True,
+                needs_review=True,
                 reason=reason,
             )
         )
@@ -512,7 +512,7 @@ def check(
                         f"(already introduced at line {occurrences[0][0]})"
                     ),
                     auto_fixable=False,
-                    needs_subagent=True,
+                    needs_review=True,
                     reason=(
                         f"Repeat expansion of {abbrev!r} at line {line_num}; "
                         f"the chapter already introduced it at line "

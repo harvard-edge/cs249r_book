@@ -18,7 +18,6 @@
  * Intentional non-mirrors (different content per subsite, keep in sync
  * manually if behaviour needs to align):
  *   tinytorch/quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
- *   tinytorch/site/_static/subscribe-modal.js                (legacy Sphinx site)
  */
 
 (function() {

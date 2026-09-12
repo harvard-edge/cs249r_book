@@ -10,7 +10,7 @@ safe to automate — "ResNet Architecture" should become "ResNet architecture"
 but "Hardware Balance" should become "Hardware balance". A subagent must
 review each one.
 
-Auto-fixable: NO. Every issue is marked needs_subagent=True.
+Auto-fixable: NO. Every issue is marked needs_review=True.
 
 The section header slug (e.g. {#sec-foo-bar-1234}) is not considered part
 of the heading text for case-analysis purposes; we strip it before
@@ -420,7 +420,7 @@ def check(
 ) -> tuple[list[Issue], int]:
     """Scan for H3+ headings that look like title case.
 
-    Returns (issues, next_counter). Every issue has needs_subagent=True
+    Returns (issues, next_counter). Every issue has needs_review=True
     because proper-noun detection is not safe to automate.
     """
     issues: list[Issue] = []
@@ -451,7 +451,7 @@ def check(
                 before=line,
                 suggested_after=f"Convert H{level} heading to sentence case (preserve proper nouns and acronyms)",
                 auto_fixable=False,
-                needs_subagent=True,
+                needs_review=True,
                 reason=f"H{level} heading in title case: {heading_text!r}",
             )
         )

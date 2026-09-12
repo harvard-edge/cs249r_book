@@ -148,7 +148,7 @@ Rank chapters by focal-verify failures + `{python}` ref density. Ledger:
 ### Phase 1 — Gates (per chapter or corpus)
 
 ```bash
-CH=books/vol1/introduction/introduction.qmd
+CH=books/vol1/01_introduction/01_introduction.qmd
 ./binder/binder check code --scope lego-dead-code --path "$CH"
 ./binder/binder check code --scope lego-prose-units --path "$CH"
 python3 binder/tools/audit/book_check_lego_prose_units.py "$CH"
@@ -162,7 +162,6 @@ python3 binder/tools/scripts/maintenance/validate_inline_refs.py --path "$CH"
 flags domain glyphs (`FLOP/byte`, `TFLOP/s`, `g/kWh`, `GB`, …) immediately after a
 **closed** `` `{python} *_str` `` output. `fmt_prose_contract.py` flags `%`, `$`, scale,
 and `×` duplication. Open `fmt()` outputs intentionally keep units in prose.
-See `binder/tools/audit/artifacts/lego_closed_prose_audit.md`.
 
 ### Phase 2 — Naming contract
 
@@ -240,8 +239,6 @@ Spot-check certificates for substituted QMD→HTML prose; no literal `{python}`.
 ./binder/tools/audit/verify_lego_pipeline.sh   # or /precheck before push
 ```
 
-Sign-off template: `binder/tools/audit/artifacts/lego_audit_signoff.md`.
-
 ### Follow-up: distance / length outputs (P5)
 
 Some cells still use **open** `fmt()` for meters while prose supplies the unit:
@@ -255,4 +252,4 @@ This pass deferred a corpus-wide decision on:
 
 - **Comma rule** — no commas for small decimals (2.8 m, 3.33 m); commas when displaying km or values ≥ 1,000 m.
 - **Closed vs open** — compare `LightLatency.distance_str` (`fmt_qty`, closed km) vs `BrakingDistance` / `EdgeLatencyDistance` (open m + prose “meters”).
-- **`fmt_length` helper** — optional typed formatter (pinned `unit=` or auto m/km) if the pattern repeats; see P5 in `lego_audit_signoff.md`.
+- **`fmt_length` helper** — optional typed formatter (pinned `unit=` or auto m/km) if the pattern repeats.

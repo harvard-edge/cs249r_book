@@ -54,7 +54,7 @@ import yaml
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 # AI-pipeline intermediate artifacts live under _pipeline/ (gitignored).
-# See staffml/CLAUDE.md for the convention.
+# See staffml/vault/README.md for the convention.
 PIPELINE_DIR = VAULT_DIR / "_pipeline"
 DEFAULT_OUTPUT = PIPELINE_DIR / "chains.proposed.json"
 

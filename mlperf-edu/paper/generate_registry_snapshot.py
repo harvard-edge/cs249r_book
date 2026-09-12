@@ -445,7 +445,9 @@ def host_macros() -> list[str]:
     fact comes from the same content-addressed artifact the runs recorded.
     """
     candidates = sorted((PROJECT / "conformance_results").glob("course-budgets-*.json"))
-    require(bool(candidates), "no committed course-budget record for the reference host")
+    require(
+        bool(candidates), "no committed course-budget record for the reference host"
+    )
     record = json.loads(candidates[-1].read_text())
     hardware = record.get("hardware") or {}
     require(bool(hardware), f"{candidates[-1].name} carries no hardware fingerprint")
@@ -505,9 +507,7 @@ def score_gate_status(
     return {"passing": score_bearing_count, "missing": 0, "stale": []}
 
 
-def evidence_rows(
-    records: list[dict[str, Any]], workloads: dict[str, Workload]
-) -> str:
+def evidence_rows(records: list[dict[str, Any]], workloads: dict[str, Workload]) -> str:
     rows = []
     for record in records:
         entry = record["entry"]
@@ -633,7 +633,7 @@ def executed_contract_macros(
     return [
         rf"\newcommand{{\ExecutedContracts}}{{{executed}}}",
         rf"\newcommand{{\ExecutedContractsPassing}}{{{executed}}}",
-        rf"\newcommand{{\ExecutedContractsMissing}}{{0}}",
+        r"\newcommand{\ExecutedContractsMissing}{0}",
     ]
 
 
@@ -671,7 +671,9 @@ def determinism_macros() -> list[str]:
     study = json.loads(DETERMINISM.read_text(encoding="utf-8"))
     cases = study["cases"]
     require(bool(cases), "determinism study has no cases")
-    worst_seed = max(abs(finite_number(c["seed_spread"], label="seed spread")) for c in cases)
+    worst_seed = max(
+        abs(finite_number(c["seed_spread"], label="seed spread")) for c in cases
+    )
     worst_backend = max(
         abs(finite_number(c["backend_delta"], label="backend delta")) for c in cases
     )
@@ -704,7 +706,6 @@ def render_tex(
         if workload.raw.get("promotion_scope", True)
     }
     roles = Counter(record["entry"]["result_role"] for record in records)
-    evidence_classes = Counter(record["result"]["evidence_class"] for record in records)
     gate_status = score_gate_status(records, workloads)
     score_medians = [
         finite_number(

@@ -10477,6 +10477,11 @@ class ValidateCommand:
     def _strip_bib_inline_protected(line: str) -> str:
         line = re.sub(r"`[^`]*`", "", line)
         line = re.sub(r"<!--.*?-->", "", line)
+        # Strip math. Pandoc's `@` citation syntax has no meaning inside math
+        # mode, so `$\text{pass@k}$` is notation, not a citation. The refs
+        # citations scope already masks math; bib-integrity must match it.
+        line = re.sub(r"\$\$.*?\$\$", "", line)
+        line = re.sub(r"(?<!\\)\$[^$\n]+\$", "", line)
         return line
 
     def _citation_occurrences_for_qmd(self, path: Path) -> List[_CitationOccurrence]:
@@ -10490,6 +10495,7 @@ class ValidateCommand:
         in_fence = False
         in_html_comment = False
         in_raw_block: Optional[str] = None
+        in_display_math = False
 
         for line_no, line in enumerate(lines, start=1):
             stripped = line.strip()
@@ -10525,6 +10531,16 @@ class ValidateCommand:
                 continue
             if in_fence:
                 continue
+
+            # A multi-line `$$ ... $$` display-math block spans several lines,
+            # so the per-line math stripping below cannot see its interior.
+            if in_display_math:
+                if "$$" in line:
+                    in_display_math = False
+                continue
+            if line.count("$$") % 2 == 1:
+                in_display_math = True
+                line = line.split("$$", 1)[0]
 
             scan_line = self._strip_bib_inline_protected(line)
             for match in self._BIB_CITE_RE.finditer(scan_line):
@@ -11359,9 +11375,9 @@ class ValidateCommand:
                 except ValueError:
                     rel = str(qmd)
                 message = issue.reason or issue.rule_text or issue.category
-                # needs_subagent flag → warning (human must review).
+                # needs_review flag → warning (human must review).
                 # Auto-fixable and protected issues → error (scripted fix).
-                severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+                severity = "warning" if getattr(issue, "needs_review", False) else "error"
                 issues.append(ValidationIssue(
                     file=rel,
                     line=issue.line,
@@ -11413,7 +11429,7 @@ class ValidateCommand:
             audit_issues, counter = mod.check(qmd, text, "both", counter)
             for issue in audit_issues:
                 message = issue.reason or issue.rule_text or issue.category
-                severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+                severity = "warning" if getattr(issue, "needs_review", False) else "error"
                 try:
                     rel = str(qmd.relative_to(self.config_manager.root_dir))
                 except ValueError:
@@ -11512,7 +11528,7 @@ class ValidateCommand:
             except ValueError:
                 rel = str(issue.file)
             message = issue.reason or issue.rule_text or issue.category
-            severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+            severity = "warning" if getattr(issue, "needs_review", False) else "error"
             issues.append(ValidationIssue(
                 file=rel,
                 line=issue.line,

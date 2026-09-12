@@ -145,7 +145,7 @@ def check(
                     before=preview,
                     suggested_after="",
                     auto_fixable=False,
-                    needs_subagent=False,
+                    needs_review=False,
                     reason=(
                         f"Caption at line {i + 1} is sandwiched between two "
                         f"closing `:::` fences (prev close at line {prev[0] + 1}, "

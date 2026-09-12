@@ -673,8 +673,6 @@ do_install() {
            "$INSTALL_DIR/assignments" \
            "$INSTALL_DIR/benchmark_results" \
            "$INSTALL_DIR/.git-hooks" \
-           "$INSTALL_DIR/.claude" \
-           "$INSTALL_DIR/.cursor" \
            "$INSTALL_DIR/.vscode" \
            "$INSTALL_DIR/Makefile" \
            "$INSTALL_DIR/activate.sh" \

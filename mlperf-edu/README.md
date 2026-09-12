@@ -91,9 +91,10 @@ prevents fraud.
 
 ## Read the Paper
 
-[**mlperf-edu-paper.pdf**](paper/mlperf-edu-paper.pdf) explains the design, the
-workload selection, and the results in about fifteen pages. It is committed
-here so you can read it straight from a clone without installing TeX.
+The paper, with its LaTeX source in [`paper/paper.tex`](paper/paper.tex), explains the
+design, the workload selection, and the results in about fifteen pages. The PDF
+is a build output rather than a tracked file; `make -C paper` compiles it
+locally, which requires a TeX installation.
 
 Its numbers come from the same registry the CLI runs, regenerated on every
 build. If the paper and the suite ever disagreed, the build would fail rather

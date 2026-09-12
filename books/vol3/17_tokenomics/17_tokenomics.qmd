@@ -42,23 +42,23 @@ Moving a byte from off-chip HBM into on-chip registers costs substantially more 
 
 The classical Roofline model formulated by Williams, Waterman, and Patterson [@williams2009] formalizes this boundary condition. It bounds the attainable floating-point performance $P$ ($\text{FLOP/s}$) in @eq-vol3-tokenomics-roofline-bound as a function of the operational **arithmetic intensity** $I$ ($\text{FLOPs per byte}$ transferred across the memory bus):
 
-$$P = \min\left(P_{\text{peak}},\, I \cdot B_{\text{mem}}\right) {#eq-vol3-tokenomics-roofline-bound}$$
+$$P = \min\left(P_{\text{peak}},\, I \cdot B_{\text{mem}}\right)$$ {#eq-vol3-tokenomics-roofline-bound}
 
 where $P_{\text{peak}}$ represents the accelerator's theoretical peak floating-point throughput when every execution unit is fully saturated, and $B_{\text{mem}}$ represents the physical throughput limit of the memory bus streaming bytes from HBM into the on-chip register file. The critical parameter governing which physical subsystem throttles the workload is the **arithmetic intensity** $I$ defined in @eq-vol3-tokenomics-arithmetic-intensity:
 
-$$I = \frac{\text{Total Floating-Point Operations Retired (FLOPs)}}{\text{Total Memory Traffic Transferred Across HBM Bus (Bytes)}} {#eq-vol3-tokenomics-arithmetic-intensity}$$
+$$I = \frac{\text{Total Floating-Point Operations Retired (FLOPs)}}{\text{Total Memory Traffic Transferred Across HBM Bus (Bytes)}}$$ {#eq-vol3-tokenomics-arithmetic-intensity}
 
 Arithmetic intensity is an intrinsic property of the computational algorithm and its memory access patterns, not the GPU silicon. It quantifies how many mathematical operations the execution pipeline can perform on each byte of data before that byte is evicted from the register file or shared memory. Equating the memory-bandwidth delivery ceiling ($P = I \cdot B_{\text{mem}}$) to the peak computational retirement rate ($P = P_{\text{peak}}$) reveals the hardware balance point—the **roofline knee** $I^*$ defined in @eq-vol3-tokenomics-roofline-knee:[^fn-tokenomics-roofline-knee]
 
-$$I^* = \frac{P_{\text{peak}}}{B_{\text{mem}}} {#eq-vol3-tokenomics-roofline-knee}$$
+$$I^* = \frac{P_{\text{peak}}}{B_{\text{mem}}}$$ {#eq-vol3-tokenomics-roofline-knee}
 
 Any kernel whose operational arithmetic intensity falls below the knee ($I < I^*$) is strictly **memory-bandwidth bound**. Its execution time is dominated by memory bus transfer latencies; the compute units sit idle, and scaling up Tensor Core clocks provides zero speedup. Conversely, when $I \ge I^*$, the kernel enters the **compute-bound** plateau: the memory bus supplies operands faster than the ALUs can consume them, enabling near-$100\%$ hardware compute efficiency. As summarized in @tbl-vol3-tokenomics-roofline-parameters, the physical subsystem boundaries dictate the hardware balance point:
 
-| Hardware Subsystem | Physical Metric (H100 SXM5) | Systems Implication |
-|:-------------------|----------------------------:|:--------------------|
-| Peak Compute ($P_{\text{peak}}$) | $989.4\text{ TFLOP/s}$ (dense FP16/BF16) | Maximum ALU retirement rate |
-| Memory Bandwidth ($B_{\text{mem}}$) | $3.35\text{ TB/s}$ (HBM3) | Maximum bus streaming throughput |
-| **Roofline Knee ($I^*$)** | **$295.3\text{ FLOP/Byte}$** | Minimum arithmetic intensity to saturate ALUs |
+| Hardware Subsystem                  |              Physical Metric (H100 SXM5) | Systems Implication                           |
+|:------------------------------------|-----------------------------------------:|:----------------------------------------------|
+| Peak Compute ($P_{\text{peak}}$)    | $989.4\text{ TFLOP/s}$ (dense FP16/BF16) | Maximum ALU retirement rate                   |
+| Memory Bandwidth ($B_{\text{mem}}$) |                $3.35\text{ TB/s}$ (HBM3) | Maximum bus streaming throughput              |
+| **Roofline Knee ($I^*$)**           |             **$295.3\text{ FLOP/Byte}$** | Minimum arithmetic intensity to saturate ALUs |
 
 : **H100 SXM5 Roofline Parameters**: Physical compute ceilings and memory bus bandwidth governing operational intensity. {#tbl-vol3-tokenomics-roofline-parameters}
 
@@ -74,23 +74,23 @@ Because the GPU's on-chip SRAM register file (roughly $50\text{ MB}$ on an NVIDI
 
 Let $P_{\text{params}}$ denote the total active model parameters. In 16-bit precision (FP16 or BF16), each parameter occupies $2\text{ bytes}$ of storage. Neglecting KV cache reads for a moment, the memory traffic required to generate a single token is:[^fn-tokenomics-decode-traffic]
 
-$$\text{Traffic}_{\text{decode}}(B=1) \approx 2 \cdot P_{\text{params}} \text{ Bytes} {#eq-vol3-tokenomics-decode-traffic-b1}$$
+$$\text{Traffic}_{\text{decode}}(B=1) \approx 2 \cdot P_{\text{params}} \text{ Bytes}$$ {#eq-vol3-tokenomics-decode-traffic-b1}
 
 Multiplying a single incoming activation token vector $\mathbf{x}$ across the Transformer's weight projections requires computing a dot product between the activation vector and each weight column. In floating-point arithmetic, each multiply-accumulate operation constitutes two operations (one multiplication and one addition). Thus, retiring the forward pass for one token executes exactly two FLOPs per parameter:
 
-$$\text{FLOPs}_{\text{decode}}(B=1) \approx 2 \cdot P_{\text{params}} \text{ FLOPs} {#eq-vol3-tokenomics-decode-flops-b1}$$
+$$\text{FLOPs}_{\text{decode}}(B=1) \approx 2 \cdot P_{\text{params}} \text{ FLOPs}$$ {#eq-vol3-tokenomics-decode-flops-b1}
 
 Because both the floating-point operations and the memory bus traffic scale strictly proportionally to the model size $P_{\text{params}}$, the parameter count cancels out completely ($I_{\text{decode}} = \frac{2 P_{\text{params}}}{2 P_{\text{params}}}$). Substituting the workload's floating-point demand from @eq-vol3-tokenomics-decode-flops-b1 and memory bus traffic from @eq-vol3-tokenomics-decode-traffic-b1 into our arithmetic intensity definition yields the invariant single-stream intensity in @eq-vol3-tokenomics-decode-intensity-b1:
 
-$$I_{\text{decode}}(B=1) = 1.0 \text{ FLOP/Byte} {#eq-vol3-tokenomics-decode-intensity-b1}$$
+$$I_{\text{decode}}(B=1) = 1.0 \text{ FLOP/Byte}$$ {#eq-vol3-tokenomics-decode-intensity-b1}
 
 As detailed in @tbl-vol3-tokenomics-single-stream-decode, single-stream decoding operates at less than $0.34\%$ of the H100 hardware balance knee ($I^* \approx 295.3\text{ FLOP/Byte}$):
 
-| Decoding Metric | H100 SXM5 Hardware Ceiling | Single-Stream Decode ($B=1$) | Attained Efficiency |
-|:----------------|---------------------------:|-----------------------------:|:--------------------|
-| Operational Intensity ($I$) | $295.3\text{ FLOP/Byte}$ (knee) | $1.0\text{ FLOP/Byte}$ | **$0.339\%$** of hardware knee |
-| Attained Throughput ($P$) | $989.4\text{ TFLOP/s}$ (peak compute) | $3.35\text{ TFLOP/s}$ ($I \cdot B_{\text{mem}}$) | **$0.339\%$** MFU |
-| Idle Silicon Fraction | $0.0\%$ (fully saturated) | $99.66\%$ (stalled on bus) | **$99.66\%$** cold silicon |
+| Decoding Metric             |            H100 SXM5 Hardware Ceiling |                     Single-Stream Decode ($B=1$) | Attained Efficiency            |
+|:----------------------------|--------------------------------------:|-------------------------------------------------:|:-------------------------------|
+| Operational Intensity ($I$) |       $295.3\text{ FLOP/Byte}$ (knee) |                           $1.0\text{ FLOP/Byte}$ | **$0.339\%$** of hardware knee |
+| Attained Throughput ($P$)   | $989.4\text{ TFLOP/s}$ (peak compute) | $3.35\text{ TFLOP/s}$ ($I \cdot B_{\text{mem}}$) | **$0.339\%$** MFU              |
+| Idle Silicon Fraction       |             $0.0\%$ (fully saturated) |                       $99.66\%$ (stalled on bus) | **$99.66\%$** cold silicon     |
 
 : **Single-Stream Autoregressive Decode Efficiency on NVIDIA H100 SXM5**: Severe ALU starvation under batch size $B=1$. {#tbl-vol3-tokenomics-single-stream-decode}
 
@@ -104,11 +104,11 @@ The primary systems mechanism to escape memory-bandwidth starvation during decod
 
 For a batch of $B$ concurrent streams, the floating-point execution demand scales linearly with $B$, while the weight-loading traffic across the memory bus remains invariant:[^fn-tokenomics-batch-amortization]
 
-$$I_{\text{decode}}(B) \approx B \text{ FLOP/Byte} {#eq-vol3-tokenomics-batched-decode-intensity}$$
+$$I_{\text{decode}}(B) \approx B \text{ FLOP/Byte}$$ {#eq-vol3-tokenomics-batched-decode-intensity}
 
 Under this linear scaling relationship defined in @eq-vol3-tokenomics-batched-decode-intensity, an agent runtime's operational arithmetic intensity is directly proportional to its concurrency. To shift an NVIDIA H100 GPU from the memory-bandwidth slope onto the compute-saturated plateau, the serving runtime must sustain the active saturation batch size defined in @eq-vol3-tokenomics-saturation-batch-size:
 
-$$B^* \ge 295 \text{ concurrent streams} {#eq-vol3-tokenomics-saturation-batch-size}$$
+$$B^* \ge 295 \text{ concurrent streams}$$ {#eq-vol3-tokenomics-saturation-batch-size}
 
 As illustrated in @fig-tokenomics-roofline, increasing concurrency pushes decode throughput up the memory-bandwidth slope toward the compute ceiling:
 
@@ -118,11 +118,11 @@ As illustrated in @fig-tokenomics-roofline, increasing concurrency pushes decode
 
 As summarized in @tbl-vol3-tokenomics-batch-scaling, batching amortizes memory traffic across concurrent streams:
 
-| Concurrency Level | Operational Intensity ($I$) | Attained Throughput ($P$) | Primary Hardware Bottleneck |
-|:------------------|----------------------------:|--------------------------:|:----------------------------|
-| Single stream ($B=1$) | $1.0\text{ FLOP/Byte}$ | $3.35\text{ TFLOP/s}$ ($0.34\%$ MFU) | HBM bus streaming bandwidth |
-| Small batch ($B=32$) | $32.0\text{ FLOP/Byte}$ | $107.2\text{ TFLOP/s}$ ($10.8\%$ MFU) | Memory bus transfer latency |
-| Saturated batch ($B=295$) | $295.3\text{ FLOP/Byte}$ | $989.4\text{ TFLOP/s}$ ($100\%$ MFU) | Tensor Core ALU retirement rate |
+| Concurrency Level         | Operational Intensity ($I$) |             Attained Throughput ($P$) | Primary Hardware Bottleneck     |
+|:--------------------------|----------------------------:|--------------------------------------:|:--------------------------------|
+| Single stream ($B=1$)     |      $1.0\text{ FLOP/Byte}$ |  $3.35\text{ TFLOP/s}$ ($0.34\%$ MFU) | HBM bus streaming bandwidth     |
+| Small batch ($B=32$)      |     $32.0\text{ FLOP/Byte}$ | $107.2\text{ TFLOP/s}$ ($10.8\%$ MFU) | Memory bus transfer latency     |
+| Saturated batch ($B=295$) |    $295.3\text{ FLOP/Byte}$ |  $989.4\text{ TFLOP/s}$ ($100\%$ MFU) | Tensor Core ALU retirement rate |
 
 : **Impact of Batch Size on H100 Accelerator Utilization**: Scaling concurrency amortizes weight transfers and shifts decode toward compute saturation. {#tbl-vol3-tokenomics-batch-scaling}
 
@@ -153,23 +153,23 @@ Because cloud accelerators are leased by wall-clock time rather than retired ins
 
 Let $C_{\text{GPU}}$ denote the amortized hourly lease cost of an accelerator node ($\$/\text{hr}$). The infrastructure expenditure required to generate $N_{\text{out}}$ output tokens across a batch of $B$ concurrent streams is the lease cost scaled by execution time:
 
-$$\text{Cost}_{\text{decode}}(B) = \frac{C_{\text{GPU}}}{3600} \cdot \frac{N_{\text{out}}}{\text{TokensPerSec}(B)} {#eq-vol3-tokenomics-cost-decode-general}$$
+$$\text{Cost}_{\text{decode}}(B) = \frac{C_{\text{GPU}}}{3600} \cdot \frac{N_{\text{out}}}{\text{TokensPerSec}(B)}$$ {#eq-vol3-tokenomics-cost-decode-general}
 
 The aggregate token generation rate $\text{TokensPerSec}(B)$ is throttled by memory bus throughput. Each decode step requires streaming the full model weights $2 \cdot P_{\text{params}}$ plus the active KV cache traffic $\text{KV}_{\text{bytes}}(B)$ across the bus:[^fn-tokenomics-decode-rate]
 
-$$\text{TokensPerSec}(B) \approx \frac{B \cdot B_{\text{mem}}}{2 \cdot P_{\text{params}} + \text{KV}_{\text{bytes}}(B)} {#eq-vol3-tokenomics-aggregate-decode-throughput}$$
+$$\text{TokensPerSec}(B) \approx \frac{B \cdot B_{\text{mem}}}{2 \cdot P_{\text{params}} + \text{KV}_{\text{bytes}}(B)}$$ {#eq-vol3-tokenomics-aggregate-decode-throughput}
 
 Because the parameter traffic $2 \cdot P_{\text{params}}$ is read once per batch, generation throughput scales almost linearly with $B$ until KV cache traffic or compute limits intervene. Substituting @eq-vol3-tokenomics-aggregate-decode-throughput into @eq-vol3-tokenomics-cost-decode-general demonstrates that the marginal infrastructure cost per output token $c_{\text{token}}(B)$ is fundamentally inversely proportional to concurrency, as captured in @eq-vol3-tokenomics-token-cost-proportionality:
 
-$$c_{\text{token}}(B) \propto \frac{1}{B} {#eq-vol3-tokenomics-token-cost-proportionality}$$
+$$c_{\text{token}}(B) \propto \frac{1}{B}$$ {#eq-vol3-tokenomics-token-cost-proportionality}
 
 As shown in @tbl-vol3-tokenomics-batch-economics, scaling concurrency from single-stream to batched serving slashes generation expenses:
 
-| Concurrency Regime | Decode Speed (70B Model) | Attained Cost (\$4.00/GPU-hr) | Relative Multiplier |
-|:-------------------|-------------------------:|-----------------------------:|:--------------------|
-| Isolated Agent ($B=1$) | $24\text{ tokens/s}$ | $\$46.30\text{ per million tokens}$ | $32.0\times$ premium |
-| Light Batched ($B=8$) | $190\text{ tokens/s}$ | $\$5.85\text{ per million tokens}$ | $4.0\times$ premium |
-| Production Serving ($B=32$) | $750\text{ tokens/s}$ | $\$1.48\text{ per million tokens}$ | Baseline parity |
+| Concurrency Regime          | Decode Speed (70B Model) |       Attained Cost (\$4.00/GPU-hr) | Relative Multiplier  |
+|:----------------------------|-------------------------:|------------------------------------:|:---------------------|
+| Isolated Agent ($B=1$)      |     $24\text{ tokens/s}$ | $\$46.30\text{ per million tokens}$ | $32.0\times$ premium |
+| Light Batched ($B=8$)       |    $190\text{ tokens/s}$ |  $\$5.85\text{ per million tokens}$ | $4.0\times$ premium  |
+| Production Serving ($B=32$) |    $750\text{ tokens/s}$ |  $\$1.48\text{ per million tokens}$ | Baseline parity      |
 
 : **Economic Impact of Decode Batching for a 70B Parameter Model**: Increasing batch concurrency directly amortizes the fixed hourly hardware lease. {#tbl-vol3-tokenomics-batch-economics}
 
@@ -189,21 +189,21 @@ During the **prefill** phase, an agent runtime submits a prompt consisting of $S
 
 For an input sequence of length $S_{\text{in}}$, the floating-point execution demand across a dense Transformer with $P_{\text{params}}$ parameters and $L$ layers scales with both linear feedforward projections and quadratic self-attention:[^fn-tokenomics-prefill-derivation]
 
-$$\text{FLOPs}_{\text{prefill}} \approx 2 \cdot P_{\text{params}} \cdot S_{\text{in}} + 4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{in}}^2 {#eq-vol3-tokenomics-prefill-flops}$$
+$$\text{FLOPs}_{\text{prefill}} \approx 2 \cdot P_{\text{params}} \cdot S_{\text{in}} + 4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{in}}^2$$ {#eq-vol3-tokenomics-prefill-flops}
 
 where $2 \cdot P_{\text{params}} \cdot S_{\text{in}}$ represents linear feedforward and projection weight multiplications, and $4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{in}}^2$ accounts for self-attention matrix multiplications ($\mathbf{Q}\mathbf{K}^T$ and $\mathbf{A}\mathbf{V}$).
 
 Because model weights ($2 \cdot P_{\text{params}}\text{ Bytes}$) are read from HBM once while each weight operand is reused across all $S_{\text{in}}$ activation rows, the operational arithmetic intensity scales directly with prompt length defined in @eq-vol3-tokenomics-prefill-intensity:
 
-$$I_{\text{prefill}}(S_{\text{in}}) \approx S_{\text{in}} \text{ FLOP/Byte} {#eq-vol3-tokenomics-prefill-intensity}$$
+$$I_{\text{prefill}}(S_{\text{in}}) \approx S_{\text{in}} \text{ FLOP/Byte}$$ {#eq-vol3-tokenomics-prefill-intensity}
 
 As detailed in @tbl-vol3-tokenomics-prefill-intensity-scaling, any prompt exceeding $S_{\text{in}} \ge 512$ tokens easily crosses the H100 hardware knee ($I^* \approx 295.3\text{ FLOP/Byte}$):
 
-| Prompt Length ($S_{\text{in}}$) | Arithmetic Intensity ($I$) | Hardware Regime | Attained MFU | Primary Bottleneck |
-|:--------------------------------|---------------------------:|:----------------|:-------------|:-------------------|
-| Short prompt ($128$ tokens) | $128\text{ FLOP/Byte}$ | Memory-bandwidth bound | $\sim 25\%$ | Memory bus latency |
-| Medium prompt ($512$ tokens) | $512\text{ FLOP/Byte}$ | Compute saturated (knee) | $\sim 45\%$ | Tensor Core compute |
-| Long agent context ($4,096$ tokens) | $4,096\text{ FLOP/Byte}$ | Deeply compute bound | $55\%–62\%$ | Thermal & power throttling |
+| Prompt Length ($S_{\text{in}}$)     | Arithmetic Intensity ($I$) | Hardware Regime          | Attained MFU | Primary Bottleneck         |
+|:------------------------------------|---------------------------:|:-------------------------|:-------------|:---------------------------|
+| Short prompt ($128$ tokens)         |     $128\text{ FLOP/Byte}$ | Memory-bandwidth bound   | $\sim 25\%$  | Memory bus latency         |
+| Medium prompt ($512$ tokens)        |     $512\text{ FLOP/Byte}$ | Compute saturated (knee) | $\sim 45\%$  | Tensor Core compute        |
+| Long agent context ($4,096$ tokens) |   $4,096\text{ FLOP/Byte}$ | Deeply compute bound     | $55\%–62\%$  | Thermal & power throttling |
 
 : **Prefill Arithmetic Intensity Across Context Lengths on NVIDIA H100 SXM5**: Longer prompts shift execution deep into the compute-bound plateau. {#tbl-vol3-tokenomics-prefill-intensity-scaling}
 
@@ -233,18 +233,18 @@ While model weights maintain a static, invariant footprint in HBM throughout ser
 
 For a Transformer with $L$ layers, hidden dimension $d_{\text{model}}$, and Multi-Head Attention (MHA), each token requires storing two vectors (Key and Value) per layer in 16-bit precision ($2\text{ bytes}$ per element). Under **Grouped-Query Attention (GQA)** [@shazeer2019fast], where $n_{\text{heads}}$ query heads share $n_{\text{kv}}$ key-value heads with compression ratio $g = n_{\text{heads}} / n_{\text{kv}}$, the total memory footprint across $B$ concurrent agent streams at context length $S$ is defined in @eq-vol3-tokenomics-kv-cache-footprint:[^fn-tokenomics-kv-footprint]
 
-$$\text{Memory}_{\text{KV}}(B, S) = B \cdot S \cdot \left( \frac{4 \cdot L \cdot d_{\text{model}}}{g} \right) \text{ Bytes} {#eq-vol3-tokenomics-kv-cache-footprint}$$
+$$\text{Memory}_{\text{KV}}(B, S) = B \cdot S \cdot \left( \frac{4 \cdot L \cdot d_{\text{model}}}{g} \right) \text{ Bytes}$$ {#eq-vol3-tokenomics-kv-cache-footprint}
 
 Evaluating @eq-vol3-tokenomics-kv-cache-footprint for the industry-standard Llama-3-70B architecture ($L = 80$ layers, hidden dimension $d_{\text{model}} = 8,192$, and GQA grouping ratio $g = 64/8 = 8$) yields an invariant memory requirement of $\frac{4 \cdot 80 \cdot 8,192}{8} = 327,680\text{ bytes}$, or approximately **$320\text{ KB per token}$**.
 
 Every single context token retained across an agent trajectory consumes approximately $320\text{ KB}$ of scarce GPU HBM. As shown in @tbl-vol3-tokenomics-kv-cache-sizing, when context length or concurrency grows, activation memory rapidly dwarfs the model weights themselves:
 
-| Concurrency ($B$) | Context Length ($S$) | Total Tokens Stored | KV Cache Footprint | Physical HBM Impact |
-|:------------------|:---------------------|--------------------:|-------------------:|:--------------------|
-| Single stream ($B=1$) | Short prompt ($4\text{k}$) | $4,000$ tok | $1.31\text{ GB}$ | Fits easily on 1 GPU |
-| Single stream ($B=1$) | Extended horizon ($64\text{k}$) | $64,000$ tok | $20.97\text{ GB}$ | $26\%$ of an 80 GB GPU |
-| Team fleet ($B=16$) | Extended horizon ($64\text{k}$) | $1,024,000$ tok | $335.5\text{ GB}$ | **Exceeds 4x H100 GPUs** |
-| Production cluster ($B=64$) | Deep agent search ($128\text{k}$) | $8,192,000$ tok | $2,684.4\text{ GB}$ | **Exceeds 33x H100 GPUs** |
+| Concurrency ($B$)           | Context Length ($S$)              | Total Tokens Stored |  KV Cache Footprint | Physical HBM Impact       |
+|:----------------------------|:----------------------------------|--------------------:|--------------------:|:--------------------------|
+| Single stream ($B=1$)       | Short prompt ($4\text{k}$)        |         $4,000$ tok |    $1.31\text{ GB}$ | Fits easily on 1 GPU      |
+| Single stream ($B=1$)       | Extended horizon ($64\text{k}$)   |        $64,000$ tok |   $20.97\text{ GB}$ | $26\%$ of an 80 GB GPU    |
+| Team fleet ($B=16$)         | Extended horizon ($64\text{k}$)   |     $1,024,000$ tok |   $335.5\text{ GB}$ | **Exceeds 4x H100 GPUs**  |
+| Production cluster ($B=64$) | Deep agent search ($128\text{k}$) |     $8,192,000$ tok | $2,684.4\text{ GB}$ | **Exceeds 33x H100 GPUs** |
 
 : **KV Cache Memory Sizing for Llama-3-70B Across Concurrency and Context**: Activation memory scales multiplicatively ($B \times S$), rapidly overtaking model weight storage. {#tbl-vol3-tokenomics-kv-cache-sizing}
 
@@ -258,26 +258,27 @@ In a standard single-turn conversational interface, prompt evaluation is a one-t
 
 If the serving engine does not maintain active prefix state in its KV cache across turns, the hardware must re-prefill this accumulated context from scratch on every single iteration. Because context expands with each tool call, the cumulative input tokens processed across an $N$-turn trajectory explode quadratically defined in @eq-vol3-tokenomics-quadratic-prefill:[^fn-tokenomics-turn-tax]
 
-$$S_{\text{total\_in}} = N \cdot S_0 + \bar{\Delta} \cdot \frac{N(N - 1)}{2} {#eq-vol3-tokenomics-quadratic-prefill}$$
+$$S_{\text{total\_in}} = N \cdot S_0 + \bar{\Delta} \cdot \frac{N(N - 1)}{2}$$ {#eq-vol3-tokenomics-quadratic-prefill}
 
 where:
+
 - $S_0$ is the base repository and system prompt size ($\text{tokens}$).
 - $\bar{\Delta} = \bar{\Delta}_{\text{act}} + \bar{\Delta}_{\text{obs}}$ is the average incremental context added per turn ($\text{tokens/turn}$).
 - $N$ is the interaction depth ($\text{turns}$).
 
 Meanwhile, generated decode tokens scale strictly linearly with interaction depth defined in @eq-vol3-tokenomics-linear-decode:
 
-$$S_{\text{total\_out}} = N \cdot \bar{\Delta}_{\text{act}} {#eq-vol3-tokenomics-linear-decode}$$
+$$S_{\text{total\_out}} = N \cdot \bar{\Delta}_{\text{act}}$$ {#eq-vol3-tokenomics-linear-decode}
 
 Because input tokens grow quadratically ($\mathcal{O}(N^2 \bar{\Delta})$) while output tokens grow linearly ($\mathcal{O}(N \bar{\Delta}_{\text{act}})$), **input prefill expenditure inevitably swamps decode expenditure in extended agent workflows**, as demonstrated in @tbl-vol3-tokenomics-turn-tax-breakdown:
 
-| Trajectory Metric | Turn 1 ($N=1$) | Turn 10 ($N=10$) | Turn 30 ($N=30$) | Systems Consequence |
-|:------------------|---------------:|-----------------:|-----------------:|:--------------------|
-| Context Evaluated | $15,000$ tok | $41,100$ tok | $99,100$ tok | $6.6\times$ prompt expansion |
-| Cumulative Prefill | $15,000$ tok | $280,500$ tok | $1,711,500$ tok | Quadratic recomputation surge |
-| Cumulative Decode | $400$ tok | $4,000$ tok | $12,000$ tok | Purely linear decode |
-| Prefill Cost (\$3/M) | $\$0.045$ | $\$0.842$ | $\$5.135$ | **$96.6\%$** of total bill |
-| Decode Cost (\$15/M) | $\$0.006$ | $\$0.060$ | $\$0.180$ | **$3.4\%$** of total bill |
+| Trajectory Metric    | Turn 1 ($N=1$) | Turn 10 ($N=10$) | Turn 30 ($N=30$) | Systems Consequence           |
+|:---------------------|---------------:|-----------------:|-----------------:|:------------------------------|
+| Context Evaluated    |   $15,000$ tok |     $41,100$ tok |     $99,100$ tok | $6.6\times$ prompt expansion  |
+| Cumulative Prefill   |   $15,000$ tok |    $280,500$ tok |  $1,711,500$ tok | Quadratic recomputation surge |
+| Cumulative Decode    |      $400$ tok |      $4,000$ tok |     $12,000$ tok | Purely linear decode          |
+| Prefill Cost (\$3/M) |      $\$0.045$ |        $\$0.842$ |        $\$5.135$ | **$96.6\%$** of total bill    |
+| Decode Cost (\$15/M) |      $\$0.006$ |        $\$0.060$ |        $\$0.180$ | **$3.4\%$** of total bill     |
 
 : **Compounding Turn Tax for an Autonomous Coding Agent**: Evaluated at $S_0 = 15,000$ tokens, $\bar{\Delta}_{\text{act}} = 400$, and $\bar{\Delta}_{\text{obs}} = 2,500$ tokens/turn under standard commercial pricing tiers. {#tbl-vol3-tokenomics-turn-tax-breakdown}
 
@@ -313,7 +314,7 @@ The disconnect between token pricing and engineering value necessitates a system
 
 Let an agent task require up to $K_{\text{attempts}}$ independent trajectory attempts, where each attempt consumes dollar cost $C_{\text{trajectory}}(k)$ in accelerator compute and token allocations. Let $P_{\text{success}}$ denote the probability that an autonomous trajectory successfully satisfies a deterministic verification oracle (such as passing a unit test suite, compiler type-check, or schema validator). The expected Cost-per-Verified-Goal is defined in @eq-vol3-tokenomics-cpvg-simple:[^fn-tokenomics-cpvg-derivation]
 
-$$\text{CPVG} = \frac{\bar{C}_{\text{trajectory}}}{P_{\text{success}}} {#eq-vol3-tokenomics-cpvg-simple}$$
+$$\text{CPVG} = \frac{\bar{C}_{\text{trajectory}}}{P_{\text{success}}}$$ {#eq-vol3-tokenomics-cpvg-simple}
 
 where $\bar{C}_{\text{trajectory}}$ is the mean dollar cost of an end-to-end trajectory attempt, and $P_{\text{success}}$ is the single-pass verification probability.
 
@@ -321,7 +322,7 @@ When an autonomous agent executes an unguided open-loop trajectory consisting of
 
 Substituting this exponential decay into our cost-per-goal relation exposes the severe non-linear cost cliff of extended autonomous agency:
 
-$$\text{CPVG} \approx \frac{\bar{C}_{\text{trajectory}}}{p^N} {#eq-vol3-tokenomics-cpvg-exponential}$$
+$$\text{CPVG} \approx \frac{\bar{C}_{\text{trajectory}}}{p^N}$$ {#eq-vol3-tokenomics-cpvg-exponential}
 
 @Tbl-vol3-cpvg-comparison demonstrates how small differences in per-step reliability cause radical divergences in fleet economics across a 20-step software engineering task:
 
@@ -395,26 +396,26 @@ When architecting production agent infrastructure, platform engineering teams mu
 
 1. **Provisioned Capacity (Reserved Instances / PTUs):** Reserving dedicated accelerator hardware (such as 8-way NVIDIA H100 SXM nodes leased by the month). The infrastructure expenditure is strictly fixed, paid as a flat monthly capital lease regardless of whether the Tensor Cores are crunching tokens or sitting completely idle in the data center:
 
-$$\text{Cost}_{\text{reserved}}(k) = k \cdot C_{\text{instance/hr}} \cdot 730 \text{ Hours/Month} {#eq-vol3-tokenomics-cost-reserved}$$
+$$\text{Cost}_{\text{reserved}}(k) = k \cdot C_{\text{instance/hr}} \cdot 730 \text{ Hours/Month}$$ {#eq-vol3-tokenomics-cost-reserved}
 
 2. **Serverless Pay-per-Token APIs:** Consuming managed model endpoints where costs scale strictly with runtime request volume. The organization incurs zero capital expenditure during idle hours, but pays commercial provider margins on every million input and output tokens processed across the network interface:
 
-$$\text{Cost}_{\text{serverless}}(\lambda) = \lambda \cdot \left( \bar{S}_{\text{in}} \cdot c_{\text{in}} + \bar{S}_{\text{out}} \cdot c_{\text{out}} \right) \cdot T_{\text{month}} {#eq-vol3-tokenomics-cost-serverless}$$
+$$\text{Cost}_{\text{serverless}}(\lambda) = \lambda \cdot \left( \bar{S}_{\text{in}} \cdot c_{\text{in}} + \bar{S}_{\text{out}} \cdot c_{\text{out}} \right) \cdot T_{\text{month}}$$ {#eq-vol3-tokenomics-cost-serverless}
 
 where $T_{\text{month}} \approx 2.628 \times 10^6\text{ seconds/month}$.
 
 The financial decision boundary between these models is the **break-even duty cycle** $\rho^*$ defined in @eq-vol3-tokenomics-ptu-breakeven. Equating reserved capacity expenses to peak serverless expenditures establishes the utilization threshold required for dedicated silicon to be economically advantageous:[^fn-tokenomics-ptu-breakeven]
 
-$$\rho^* = \frac{\text{Cost}_{\text{reserved}}(k)}{\text{Cost}_{\text{serverless}}(\lambda_{\text{peak}})} {#eq-vol3-tokenomics-ptu-breakeven}$$
+$$\rho^* = \frac{\text{Cost}_{\text{reserved}}(k)}{\text{Cost}_{\text{serverless}}(\lambda_{\text{peak}})}$$ {#eq-vol3-tokenomics-ptu-breakeven}
 
 As detailed in @tbl-vol3-tokenomics-procurement-tradeoffs, cluster utilization dictates whether dedicated or serverless infrastructure minimizes total cost of ownership (TCO):
 
-| Operating Duty Cycle ($\bar{\rho}$) | Monthly Bill (Reserved 8xH100) | Monthly Bill (Serverless API) | Economic Recommendation |
-|:------------------------------------|-------------------------------:|------------------------------:|:------------------------|
-| Low / Burst ($15\%$) | $\$23,360$ | $\$8,500$ | **Serverless Pay-per-Token** (prevents paying for idle silicon) |
-| Break-even knee ($\sim 40\%$) | $\$23,360$ | $\$23,100$ | Transition threshold |
-| High / Sustained ($75\%$) | $\$23,360$ | $\$44,200$ | **Reserved Instances / PTUs** ($47\%$ cost reduction) |
-| Continuous Batch ($95\%$) | $\$23,360$ | $\$57,800$ | **Reserved Instances / PTUs** ($60\%$ cost reduction) |
+| Operating Duty Cycle ($\bar{\rho}$) | Monthly Bill (Reserved 8xH100) | Monthly Bill (Serverless API) | Economic Recommendation                                         |
+|:------------------------------------|-------------------------------:|------------------------------:|:----------------------------------------------------------------|
+| Low / Burst ($15\%$)                |                     $\$23,360$ |                     $\$8,500$ | **Serverless Pay-per-Token** (prevents paying for idle silicon) |
+| Break-even knee ($\sim 40\%$)       |                     $\$23,360$ |                    $\$23,100$ | Transition threshold                                            |
+| High / Sustained ($75\%$)           |                     $\$23,360$ |                    $\$44,200$ | **Reserved Instances / PTUs** ($47\%$ cost reduction)           |
+| Continuous Batch ($95\%$)           |                     $\$23,360$ |                    $\$57,800$ | **Reserved Instances / PTUs** ($60\%$ cost reduction)           |
 
 : **Capacity Procurement Comparison for 70B Parameter Model**: Dedicated hardware achieves massive savings under high duty cycles, while serverless absorbs spiky, intermittent traffic. {#tbl-vol3-tokenomics-procurement-tradeoffs}
 
@@ -494,12 +495,12 @@ $$P_1 > \frac{c_1 + c_v}{c_2}$$ {#eq-vol3-tokenomics-cascade-dominance}
 
 Consider an enterprise deployment where frontier deliberation costs $c_2 = \$ 2.00$ per task, lightweight execution costs $c_1 = \$ 0.05$, and deterministic verification costs $c_v = \$ 0.01$. Under @eq-vol3-tokenomics-cascade-dominance, the lightweight model must succeed on only $(\$0.05 + \$0.01) / \$2.00 = 3\%$ of tasks to achieve financial parity with pure frontier routing. As shown in @tbl-vol3-tokenomics-cascade-economics, if $M_1$ successfully resolves $60\%$ of incoming tasks ($P_1 = 0.60$), the expected expenditure drops to $\$0.86$ per task—a $57\%$ reduction in infrastructure budget.
 
-| Architecture Routing Policy | Tier 1 Pass Rate ($P_1$) | Verification Overhead ($c_v$) | Expected Cost / Task ($\mathbb{E}[C]$) | Savings vs. Frontier Baseline |
-| :--- | :--- | :--- | :--- | :--- |
-| **Frontier-Only Baseline ($M_2$)** | --- | --- | $\$2.00$ | Baseline ($0\%$) |
-| **Cascade at Break-Even** | $3.0\%$ | $\$0.01$ | $\$2.00$ | $0.0\%$ |
-| **Cascade Moderate ($P_1 = 60\%$)** | $60.0\%$ | $\$0.01$ | $\$0.86$ | $57.0\%$ |
-| **Cascade High ($P_1 = 85\%$)** | $85.0\%$ | $\$0.01$ | $\$0.36$ | $82.0\%$ |
+| Architecture Routing Policy         | Tier 1 Pass Rate ($P_1$) | Verification Overhead ($c_v$) | Expected Cost / Task ($\mathbb{E}[C]$) | Savings vs. Frontier Baseline |
+|:------------------------------------|:-------------------------|:------------------------------|:---------------------------------------|:------------------------------|
+| **Frontier-Only Baseline ($M_2$)**  | ---                      | ---                           | $\$2.00$                               | Baseline ($0\%$)              |
+| **Cascade at Break-Even**           | $3.0\%$                  | $\$0.01$                      | $\$2.00$                               | $0.0\%$                       |
+| **Cascade Moderate ($P_1 = 60\%$)** | $60.0\%$                 | $\$0.01$                      | $\$0.86$                               | $57.0\%$                      |
+| **Cascade High ($P_1 = 85\%$)**     | $85.0\%$                 | $\$0.01$                      | $\$0.36$                               | $82.0\%$                      |
 
 : **Cascade Economics Under Varying Tier 1 Resolution Rates**: Financial performance of a two-stage cascade ($c_1 = \$0.05$, $c_2 = \$2.00$, $c_v = \$0.01$). Even modest Tier 1 success rates deliver massive infrastructure cost reductions while preserving frontier capability through fallback escalation. {#tbl-vol3-tokenomics-cascade-economics}
 

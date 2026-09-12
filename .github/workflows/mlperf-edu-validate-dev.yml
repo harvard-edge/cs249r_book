@@ -232,7 +232,9 @@ jobs:
                   encoding="utf-8",
               )
           )
-          assert len(listed["workloads"]) == 9, listed
+          # The registry lists 14 workloads; 9 of them are in promotion scope and
+          # carry the 12 draft evidence cases asserted below.
+          assert len(listed["workloads"]) == 14, listed
           assert audit["draft_evidence_source"]["claim_scope"] == (
               "unverified-installed-artifact"
           ), audit["draft_evidence_source"]
@@ -371,6 +373,7 @@ jobs:
           import json
           from pathlib import Path
 
+          from mlperf.registry import load_registry
           from tools.import_reference_evidence import case_id, expected_cases
 
           output_dir = Path("submissions/ci-coverage/min-all")
@@ -378,6 +381,17 @@ jobs:
               case_id(case.workload.id, "min", case.mode, case.phase)
               for case in expected_cases().values()
           }
+          # `mlperf validate coverage` runs every registry workload at min, while
+          # expected_cases() covers promotion scope only. Add the remaining
+          # workloads with the same case shape so the closure stays exact.
+          for workload in load_registry(Path("registry")).values():
+              if workload.raw.get("promotion_scope", True) is True:
+                  continue
+              mode = (workload.raw.get("canonical_max_contract") or {}).get("mode")
+              expected.add(case_id(workload.id, "min", mode, None))
+              inference = (workload.raw.get("mode_contracts") or {}).get("inference") or {}
+              for phase in inference.get("phases") or {}:
+                  expected.add(case_id(workload.id, "min", "inference", phase))
           actual = set()
           for path in output_dir.glob("*_min_report.json"):
               payload = json.loads(path.read_text())
@@ -447,9 +461,12 @@ jobs:
           set -euo pipefail
           wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
           test -n "$wheel"
-          unzip -l "$wheel" | grep -q 'mlperf_edu/workloads.yaml'
-          unzip -l "$wheel" | grep -q 'mlperf_edu/datasets.yaml'
-          unzip -l "$wheel" | grep -q 'mlperf_edu/provisional_results/index.json'
+          # Capture the member list once. `unzip -l | grep -q` under pipefail
+          # fails intermittently with SIGPIPE (exit 141) when grep exits early.
+          wheel_members=$(unzip -Z1 "$wheel")
+          grep -qx 'mlperf_edu/workloads.yaml' <<<"$wheel_members"
+          grep -qx 'mlperf_edu/datasets.yaml' <<<"$wheel_members"
+          grep -qx 'mlperf_edu/provisional_results/index.json' <<<"$wheel_members"
           uv venv /tmp/mlperf-edu-wheel-smoke --python 3.12
           uv pip install --python /tmp/mlperf-edu-wheel-smoke/bin/python "$wheel"
           cd /tmp
@@ -498,16 +515,23 @@ jobs:
           from mlperf.registry import load_registry
 
           registry = load_registry()
-          expected_case_count = len(registry) + sum(
-              len((((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get("phases") or {}))
+          # Evidence closure covers promotion-scope workloads only, matching
+          # tools/import_reference_evidence.py:expected_cases().
+          promoted = [
+              workload
               for workload in registry.values()
+              if workload.raw.get("promotion_scope", True) is True
+          ]
+          expected_case_count = len(promoted) + sum(
+              len((((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get("phases") or {}))
+              for workload in promoted
           )
           index = json.loads(
               files("mlperf_edu").joinpath("provisional_results/index.json").read_text()
           )
           listed = json.load(open("/tmp/mlperf-edu-list.json"))
           assert index["case_count"] == expected_case_count, index
-          assert index["workload_count"] == len(registry), index
+          assert index["workload_count"] == len(promoted), index
           assert index["five_run_verified_case_count"] == 6, index
           assert index["provisional_case_count"] == 6, index
           assert len(listed["workloads"]) == len(registry), listed

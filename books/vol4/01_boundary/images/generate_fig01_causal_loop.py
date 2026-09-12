@@ -133,7 +133,7 @@ svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"
   </g>
 </svg>"""
 
-out_dir = "/Users/VJ/GitHub/MLSysBook/books/vol4/01_boundary/images/svg"
+out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "svg")
 os.makedirs(out_dir, exist_ok=True)
 out_path = os.path.join(out_dir, "fig01_causal_loop.svg")
 with open(out_path, "w") as f:

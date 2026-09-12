@@ -104,7 +104,7 @@ def write_svg_1():
         <text x="800" y="105" class="text-sub">(Zero Recompute)</text>
     </g>
 </svg>"""
-    with open('/Users/VJ/GitHub/MLSysBook-gem-vol3/publishing/quarto/assets/images/svg/vol3/09_latency_disparity.svg', 'w') as f:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '09_latency_disparity.svg'), 'w') as f:
         f.write(svg)
 
 def write_svg_2():
@@ -200,10 +200,10 @@ def write_svg_2():
         <text x="35" y="210" class="policy-text">Action: Destroy MicroVM Sandbox &amp; Burn Capability Leases</text>
     </g>
 </svg>"""
-    with open('/Users/VJ/GitHub/MLSysBook-gem-vol3/publishing/quarto/assets/images/svg/vol3/09_interrupt_taxonomy.svg', 'w') as f:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '09_interrupt_taxonomy.svg'), 'w') as f:
         f.write(svg)
 
-os.makedirs('/Users/VJ/GitHub/MLSysBook-gem-vol3/publishing/quarto/assets/images/svg/vol3/', exist_ok=True)
+os.makedirs(os.path.dirname(os.path.abspath(__file__)), exist_ok=True)
 write_svg_1()
 write_svg_2()
 print("SVGs generated successfully.")

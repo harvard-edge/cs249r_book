@@ -365,7 +365,7 @@ def check(
                     before=line,
                     suggested_after=_build_suggestion(line, start, end),
                     auto_fixable=False,
-                    needs_subagent=True,  # picking the right bib key is judgment work
+                    needs_review=True,  # picking the right bib key is judgment work
                     confidence="medium",
                     reason=(
                         f"Bare attribution `{phrase}` with no `[@cite]` on "

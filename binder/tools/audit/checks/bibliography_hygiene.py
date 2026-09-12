@@ -184,7 +184,7 @@ def check(
                 before=_entry_first_line(text, entry_start),
                 suggested_after="",
                 auto_fixable=False,
-                needs_subagent=True,
+                needs_review=True,
                 reason=(
                     f"@{entry_type}{{{entry_key}}} missing required "
                     f"field `{required}`"

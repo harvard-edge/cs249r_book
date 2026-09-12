@@ -35,29 +35,29 @@ def test_resolves_primary_and_also_see_with_qmd_title(tmp_path: Path) -> None:
     vault_dir = _vault_with_map(
         tmp_path,
         "attention-scaling:\n"
-        "  primary:  { vol: 1, chapter: nn_architectures }\n"
-        "  also_see: [ { vol: 2, chapter: inference } ]\n"
+        "  primary:  { vol: 1, chapter: 06_nn_architectures }\n"
+        "  also_see: [ { vol: 2, chapter: 10_inference } ]\n"
         '  why: "MHA/GQA variants are architectural."\n',
     )
-    _write_chapter(vault_dir, 1, "nn_architectures", "# Neural Architectures {#sec-nn-arch}")
-    _write_chapter(vault_dir, 2, "inference", "# Model Inference")
+    _write_chapter(vault_dir, 1, "06_nn_architectures", "# Neural Architectures {#sec-nn-arch}")
+    _write_chapter(vault_dir, 2, "10_inference", "# Model Inference")
 
     refs = BookRefResolver(vault_dir).refs_for_topic("attention-scaling")
 
     assert refs == [
         {
             "vol": 1,
-            "chapter": "nn_architectures",
+            "chapter": "06_nn_architectures",
             "title": "Neural Architectures",  # anchor stripped, from .qmd H1
-            "url": "https://mlsysbook.ai/vol1/contents/vol1/nn_architectures/nn_architectures.html",
+            "url": "https://mlsysbook.ai/vol1/06_nn_architectures/06_nn_architectures.html",
             "role": "primary",
             "why": "MHA/GQA variants are architectural.",
         },
         {
             "vol": 2,
-            "chapter": "inference",
+            "chapter": "10_inference",
             "title": "Model Inference",
-            "url": "https://mlsysbook.ai/vol2/contents/vol2/inference/inference.html",
+            "url": "https://mlsysbook.ai/vol2/10_inference/10_inference.html",
             "role": "also_see",  # also_see carries no `why`
         },
     ]
@@ -89,11 +89,11 @@ def test_link_check_skipped_and_slug_fallback_when_no_book_tree(tmp_path: Path) 
     """Standalone (no book tree): no link-check, titles fall back to slug."""
     vault_dir = _vault_with_map(
         tmp_path,
-        "attention-scaling:\n  primary: { vol: 1, chapter: hw_acceleration }\n",
+        "attention-scaling:\n  primary: { vol: 1, chapter: 11_hw_acceleration }\n",
     )
     # No book/ tree created → link-check skipped, must not raise.
     refs = BookRefResolver(vault_dir).refs_for_topic("attention-scaling")
-    assert refs[0]["title"] == "Hw Acceleration"  # slug title-case fallback
+    assert refs[0]["title"] == "Hw Acceleration"  # order prefix dropped, slug title-cased
 
 
 def test_absent_map_is_noop(tmp_path: Path) -> None:

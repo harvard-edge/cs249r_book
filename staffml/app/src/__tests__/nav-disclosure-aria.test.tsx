@@ -41,7 +41,7 @@ describe('Nav Tools dropdown ARIA', () => {
     const menu = document.getElementById('nav-tools-menu');
     expect(menu).not.toBeNull();
     // Sanity-check the controlled element actually holds the tool links.
-    expect(within(menu as HTMLElement).getByText('Framework')).toBeInTheDocument();
+    expect(within(menu as HTMLElement).getByText('Vault Explorer')).toBeInTheDocument();
   });
 });
 

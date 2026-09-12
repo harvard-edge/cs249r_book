@@ -132,7 +132,6 @@ def test_quality_figure_covers_every_executed_contract():
     counting bars would compute a higher pass rate than the text claims, which
     is precisely the selective-denominator impression the paper avoids.
     """
-    import yaml
 
     module = load_generator()
     workloads = module.load_registry(ROOT / "registry")

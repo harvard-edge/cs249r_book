@@ -378,7 +378,7 @@ def check(
                     line=occ.line_num,
                     before=line_raw,
                     auto_fixable=False,
-                    needs_subagent=True,
+                    needs_review=True,
                     status=STATUS_DEFERRED,
                     reason="Bandwidth is recommended as \\text{BW} (not bare BW). Review for consistency.",
                 )
@@ -404,7 +404,7 @@ def check(
                             line=occ.line_num,
                             before=line_raw,
                             auto_fixable=False,
-                            needs_subagent=True,
+                            needs_review=True,
                             reason="Possible bandwidth written as bare B; convention is \\text{BW}.",
                         )
                     )
@@ -428,7 +428,7 @@ def check(
                         line=occ.line_num,
                         before=line_raw,
                         auto_fixable=False,
-                        needs_subagent=True,
+                        needs_review=True,
                         reason="Possible bytes-moved written as bare D; convention is D_{\\text{vol}}.",
                     )
                 )
@@ -457,7 +457,7 @@ def check(
                         line=occ.line_num,
                         before=line_raw,
                         auto_fixable=False,
-                        needs_subagent=True,
+                        needs_review=True,
                         reason="Possible peak performance written as bare P; convention is R_{\\text{peak}}.",
                     )
                 )
@@ -476,7 +476,7 @@ def check(
                         line=occ.line_num,
                         before=line_raw,
                         auto_fixable=False,
-                        needs_subagent=True,
+                        needs_review=True,
                         reason="Possible latency written as bare L; convention is L_{\\text{lat}} (loss is \\mathcal{L}).",
                     )
                 )
@@ -495,7 +495,7 @@ def check(
                     line=occ.line_num,
                     before=line_raw,
                     status=STATUS_DEFERRED,
-                    needs_subagent=True,
+                    needs_review=True,
                     reason="\\eta is context-dependent (learning rate vs efficiency). Review for collision.",
                 )
             )
@@ -511,7 +511,7 @@ def check(
                     line=occ.line_num,
                     before=line_raw,
                     status=STATUS_DEFERRED,
-                    needs_subagent=True,
+                    needs_review=True,
                     reason="\\lambda is context-dependent (sensitivity vs failure rate). Review for collision.",
                 )
             )
@@ -527,7 +527,7 @@ def check(
                     line=occ.line_num,
                     before=line_raw,
                     status=STATUS_DEFERRED,
-                    needs_subagent=True,
+                    needs_review=True,
                     reason="\\alpha is context-dependent (network latency vs learning rate). Review for collision.",
                 )
             )
@@ -543,7 +543,7 @@ def check(
                     line=occ.line_num,
                     before=line_raw,
                     status=STATUS_DEFERRED,
-                    needs_subagent=True,
+                    needs_review=True,
                     reason="d is context-dependent (hidden dimension vs data parallelism). Review for collision.",
                 )
             )

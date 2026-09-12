@@ -107,8 +107,8 @@ COPY binder/tools/dependencies/install_packages.R C:/temp/install_packages.R
 # list has to travel with it or every R install silently resolves to nothing.
 COPY binder/tools/dependencies/required_r_packages.R C:/temp/required_r_packages.R
 COPY binder/tools/dependencies/tl_packages C:/temp/tl_packages
-COPY book/docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
-COPY book/docker/windows/install_texlive.ps1 C:/temp/install_texlive.ps1
+COPY binder/docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
+COPY binder/docker/windows/install_texlive.ps1 C:/temp/install_texlive.ps1
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------

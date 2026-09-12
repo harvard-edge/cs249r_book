@@ -213,7 +213,7 @@ def check(
                     f"{first_line}-{last_line}; do not use `Reference:` prose)"
                 ),
                 auto_fixable=False,
-                needs_subagent=False,
+                needs_review=False,
                 confidence="low",
                 reason=(
                     f"@{key} cited {cite_count} times within "

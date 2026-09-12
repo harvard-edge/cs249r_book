@@ -91,7 +91,7 @@ Run `./binder/binder check` with no arguments to print the live group/scope cata
 # Checks — usually pre-commit only; run locally when debugging a failed hook
 ./binder/binder check cli
 ./binder/binder check all --vol1
-./binder/binder check refs --path books/vol1/introduction/introduction.qmd
+./binder/binder check refs --path books/vol1/01_introduction/01_introduction.qmd
 
 # Fixes — maintenance / repair (rare in daily chapter work)
 ./binder/binder fix repo-health
@@ -177,7 +177,7 @@ Requires Python 3.10+ and project dependencies (Rich, etc.). Run `./binder/binde
 ./binder/binder check refs --scope inline-python --path books/vol1/training/training.qmd
 
 # Inline `{python}` variable references
-./binder/binder check refs --scope inline --path books/vol1/introduction/introduction.qmd
+./binder/binder check refs --scope inline --path books/vol1/01_introduction/01_introduction.qmd
 
 # LEGO fmt / suffix discipline (also runs as part of `check math` on commit)
 ./binder/binder check math --scope canonical --path books/vol1/training/training.qmd
@@ -317,9 +317,9 @@ Every `book-check-*` hook in `.pre-commit-config.yaml` calls `./binder/binder ch
 To reproduce a hook locally:
 
 ```bash
-pre-commit run book-check-refs --files books/vol1/introduction/introduction.qmd
+pre-commit run book-check-refs --files books/vol1/01_introduction/01_introduction.qmd
 # equivalent:
-./binder/binder check refs --path books/vol1/introduction/introduction.qmd
+./binder/binder check refs --path books/vol1/01_introduction/01_introduction.qmd
 ```
 
 ### Bibliography (`.bib` + pre-commit)
@@ -634,7 +634,7 @@ When you run `./binder/binder build pdf intro`, the system automatically:
 2. **Comments out all chapters** except the target chapter and essential files
 3. **Builds only the selected content**:
    - ✅ `index.qmd` (always included)
-   - ✅ `contents/core/introduction/introduction.qmd` (target chapter)
+   - ✅ `books/vol1/01_introduction/01_introduction.qmd` (target chapter)
    - ❌ `contents/backmatter/glossary/glossary.qmd` (commented out)
    - ❌ `contents/backmatter/references.qmd` (commented out)
 4. **Restores the original configuration** after build completion
@@ -648,7 +648,7 @@ When you run `./binder/binder build pdf intro`, the system automatically:
 ⚡ Setting up fast build mode...
 📋 Files to build: 2 files
 ✓ - index.qmd
-✓ - contents/core/introduction/introduction.qmd
+✓ - books/vol1/01_introduction/01_introduction.qmd
 ✓ Fast build mode configured (PDF/EPUB)
 ```
 

@@ -267,7 +267,7 @@ CANONICAL_PUBLISHERS: set[str] = {
     "Google Research", "Uber Engineering Blog", "VentureBeat",
     "IEEE Computer Society", "ISCA", "Sage Publications", "Routledge", "USENIX",
     "SAGE Publications", "PLOS", "PLOS ONE", "Frontiers Media S.A.",
-    "American Statistical Association", "Pearson",
+    "American Statistical Association", "Pearson", "Prentice Hall",
 }
 
 

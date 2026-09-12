@@ -33,7 +33,7 @@ discusses the concept.
 Auto-fixable: NO. The relocation requires reading the surrounding
 prose to find the right body-prose mention; some tags should be
 dropped (per §2 'Do NOT index passing mentions') rather than moved.
-Marked `needs_subagent=False` because the per-site judgment is
+Marked `needs_review=False` because the per-site judgment is
 quick once the operator sees the file:line.
 """
 
@@ -69,7 +69,7 @@ def _emit(issues, counter, scope, file_path, line_no, line, context_label, reaso
             before=line[:200],
             suggested_after="",  # relocation needs human judgment
             auto_fixable=False,
-            needs_subagent=False,
+            needs_review=False,
             reason=f"\\index{{}} in {context_label}: {reason}",
         )
     )
