@@ -14,6 +14,8 @@ from . import infrastructure
 from . import systems
 from . import sim
 from . import physics
+from . import embodied
+from . import agents
 
 # AUTHORITATIVE API ENTRY POINTS
 from .engine.engine import Engine
@@ -27,6 +29,8 @@ from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
 # Non-executable sourced anchors used by examples and external analyses.
 from .reference_stats.registry import ReferenceStats
+from .embodied.registry import Embodied
+from .agents.registry import Agents
 from .ops import Ops
 from .engine import calibration
 
@@ -47,6 +51,7 @@ from .fmt import (
     fmt_arithmetic_intensity, fmt_ops_rate, fmt_compute_efficiency,
     fmt_area, fmt_heat_flux, fmt_specific_heat, fmt_memory, fmt_length, fmt_emissions, fmt_carbon_intensity, fmt_water,
     fmt_water_rate, fmt_water_intensity, fmt_latency,
+    fmt_frequency, fmt_acceleration, fmt_torque, fmt_token_rate,
     fmt_energy_per_op,
     assert_qty_close, check, MarkdownStr,
 )

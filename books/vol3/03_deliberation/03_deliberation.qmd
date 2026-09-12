@@ -228,10 +228,10 @@ By contrast, an architecture that scales test-time compute can deploy a compact 
 :::
 
 ```{python}
+#| label: calc-deliberation-pareto-breakeven
 #| echo: false
-#| label: deliberation-pareto-breakeven-notebook
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ DELIBERATION PARETO BREAK-EVEN (NOTEBOOK)
+# │ DELIBERATION PARETO BREAK-EVEN (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: "Pareto break-even between pretraining parameters and test-time deliberation" .callout-notebook
 # │
@@ -239,12 +239,9 @@ By contrast, an architecture that scales test-time compute can deploy a compact 
 # │ Show: 8B search uses 37% more FLOPs (96 vs 70 TFLOPs) but 8.75x less VRAM (16 vs 140 GB).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import sys
-
-sys.path.insert(0, "./mlsysim")
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import check, fmt, fmt_int, fmt_qty
+from mlsysim.fmt import check, fmt, fmt_int, fmt_qty, fmt_multiple
 
 class DeliberationParetoBreakeven:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
@@ -252,7 +249,8 @@ class DeliberationParetoBreakeven:
     t_out_a = 500  # output tokens
 
     p_b = 8e9  # 8B parameters
-    n_branches_b = 8  # parallel candidate branches
+    agent = Agents.Deliberation.TreeSearch
+    n_branches_b = agent.deliberation_branches  # 8 parallel candidate branches
     t_delib_b = 250  # thinking tokens per branch
     t_out_b = 500  # output tokens per branch
     t_branch_b = t_delib_b + t_out_b  # 750 tokens
@@ -295,7 +293,7 @@ class DeliberationParetoBreakeven:
     m_weights_a_str = fmt(m_weights_a_gb, precision=0)
     m_weights_b_str = fmt(m_weights_b_gb, precision=0)
     flop_increase_pct_str = fmt_int(round((flop_ratio - 1) * 100))
-    vram_ratio_str = fmt(vram_ratio, precision=2)
+    vram_ratio_mult_str = fmt_multiple(vram_ratio, precision=2)
 ```
 
 ::: {#nbk-deliberation-pareto-breakeven .callout-notebook title="Pareto break-even between pretraining parameters and test-time deliberation"}
@@ -321,25 +319,33 @@ Calculate the inference FLOPs per task, monthly aggregate inference compute, and
 *Architecture A (70B Greedy):*
 Inference FLOPs per query:
 $$C_{\text{query}, A} = 2 \times (70 \times 10^9) \times 500 = 7.0 \times 10^{13} \text{ FLOPs } (70\text{ TFLOPs})$$
+Delivering `{python} DeliberationParetoBreakeven.c_query_a_tflops_str` TFLOPs per task.
+
 Monthly aggregate compute across $10^7$ queries:
 $$C_{\text{monthly}, A} = 10^7 \times 70\text{ TFLOPs} = 7.0 \times 10^{20} \text{ FLOPs } (\mathbf{700\text{ EFLOPs}})$$
+Requiring `{python} DeliberationParetoBreakeven.c_monthly_a_eflops_str` EFLOPs of monthly cluster compute.
+
 Weight memory footprint (FP16 precision, 2 bytes/param):
 $$M_{\text{weights}, A} = 70 \times 10^9 \times 2 \text{ bytes} = 140\text{ GB}$$
-Serving requires at minimum two 80 GB GPUs (e.g., $2 \times \text{H100 SXM5}$) per replica purely to hold the model weights in HBM before allocating KV caches.
+Serving requires `{python} DeliberationParetoBreakeven.m_weights_a_str` GB of HBM, demanding at minimum two 80 GB GPUs (e.g., $2 \times \text{H100 SXM5}$) per replica purely to hold the model weights before allocating KV caches.
 
 *Architecture B (8B Test-Time Search):*
 Total tokens generated per task across $N = 8$ branches:
 $$T_{\text{total}, B} = 8 \times 750 = 6{,}000 \text{ tokens}$$
 Inference FLOPs per query:
 $$C_{\text{query}, B} = 2 \times (8 \times 10^9) \times 6{,}000 = 9.6 \times 10^{13} \text{ FLOPs } (96\text{ TFLOPs})$$
+Delivering `{python} DeliberationParetoBreakeven.c_query_b_tflops_str` TFLOPs per task.
+
 Monthly aggregate compute:
 $$C_{\text{monthly}, B} = 10^7 \times 96\text{ TFLOPs} = 9.6 \times 10^{20} \text{ FLOPs } (\mathbf{960\text{ EFLOPs}})$$
+Requiring `{python} DeliberationParetoBreakeven.c_monthly_b_eflops_str` EFLOPs of monthly cluster compute.
+
 Weight memory footprint (FP16 precision):
 $$M_{\text{weights}, B} = 8 \times 10^9 \times 2 \text{ bytes} = 16\text{ GB}$$
-Serving requires only a single compact GPU (e.g., an L40S or a single partitioned H100 MIG slice) per replica.
+Serving requires only `{python} DeliberationParetoBreakeven.m_weights_b_str` GB of memory, fitting on a single compact GPU (e.g., an L40S or a single partitioned H100 MIG slice) per replica.
 
 **Systems Insight:**
-While Architecture B consumes $37\%$ more gross FLOPs than Architecture A ($96\text{ TFLOPs}$ vs. $70\text{ TFLOPs}$), its hardware serving economics are overwhelmingly superior. Hosting Architecture A demands distributed tensor parallelism across multiple interconnected GPUs, incurring cross-node all-reduce communication latency and high idle capital expenditure during off-peak hours. Architecture B fits comfortably on a single cheap accelerator ($16\text{ GB}$ weights), maximizes tensor core arithmetic intensity by batching the $N=8$ search rollouts in parallel, and achieves identical reasoning accuracy at dramatically lower infrastructure cost.
+While Architecture B consumes `{python} DeliberationParetoBreakeven.flop_increase_pct_str`% more gross FLOPs than Architecture A (`{python} DeliberationParetoBreakeven.c_query_b_tflops_str` TFLOPs vs. `{python} DeliberationParetoBreakeven.c_query_a_tflops_str` TFLOPs), its hardware serving economics are overwhelmingly superior. Hosting Architecture A demands distributed tensor parallelism across multiple interconnected GPUs, incurring cross-node all-reduce communication latency and high idle capital expenditure during off-peak hours. Architecture B fits comfortably on a single cheap accelerator (`{python} DeliberationParetoBreakeven.m_weights_b_str` GB weights, achieving an `{python} DeliberationParetoBreakeven.vram_ratio_mult_str` memory reduction), maximizes tensor core arithmetic intensity by batching the $N=8$ search rollouts in parallel, and achieves identical reasoning accuracy at dramatically lower infrastructure cost.
 :::
 
 Scaling test-time compute provides the raw computational capacity needed to navigate complex reasoning spaces. However, unstructured compute allocation is hazardous: without rigorous structural boundaries, multi-branch generation rapidly degenerates into chaotic execution loops. We must therefore examine the formal graph topologies that bound and direct deliberation.
