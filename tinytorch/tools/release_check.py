@@ -792,7 +792,12 @@ def g_journey():
                 if p.returncode:
                     errs.append(f"{path.parent.name}: " + (p.stderr or p.stdout)[-1500:])
                     break
-                nb_export(str(path), lib_path=str(package))
+                # 2026-09-12: nbdev relates the notebook path to the output module;
+                # on Windows the repo and the temp dir can sit on different drives,
+                # so export a copy that lives beside the package.
+                local_nb = pathlib.Path(tmp) / path.name
+                shutil.copyfile(path, local_nb)
+                nb_export(str(local_nb), lib_path=str(package))
             except subprocess.TimeoutExpired:
                 errs.append(f"{path.parent.name}: notebook exceeded 300 seconds")
                 break
