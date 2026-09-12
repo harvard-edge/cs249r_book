@@ -40,6 +40,16 @@ STATUS_STYLES = {
 
 @dataclass(frozen=True)
 class ReleaseStage:
+    """One planned Binder invocation in the release workflow.
+
+    ``severity`` is ``"required"`` or ``"advisory"``. The boolean flags drive
+    filtering and classification: ``network`` stages run only with
+    ``--include-network``, ``artifact_stage`` stages are dropped by
+    ``--source-only``, ``build_stage`` stages are dropped by ``--skip-build``,
+    and ``allow_layout_advisory`` lets a layout-planner exit be downgraded to
+    ``passed_with_advisory``.
+    """
+
     id: str
     title: str
     category: str
@@ -54,6 +64,12 @@ class ReleaseStage:
 
 @dataclass
 class StageResult:
+    """Outcome of one release stage.
+
+    ``exit_code`` is ``None`` when the stage was only planned or timed out;
+    ``skipped_reason`` carries the timeout message in that case.
+    """
+
     stage: ReleaseStage
     status: str
     exit_code: int | None
@@ -63,13 +79,20 @@ class StageResult:
 
     @property
     def blocking_failed(self) -> bool:
+        """True when a required stage failed, which fails the release gate."""
         return self.stage.severity == "required" and self.status == "failed"
 
     @property
     def advisory_failed(self) -> bool:
+        """True when an advisory stage failed (fatal only with ``--fail-on-advisory``)."""
         return self.stage.severity == "advisory" and self.status == "failed"
 
     def to_dict(self, binder_label: str) -> dict[str, Any]:
+        """Serialize the result for the JSON report.
+
+        The ``command`` entry is ``binder_label`` followed by the stage argv.
+        ``output_excerpt`` and ``skipped_reason`` are included only when non-empty.
+        """
         payload = {
             "id": self.stage.id,
             "title": self.stage.title,
@@ -280,12 +303,21 @@ class ReleaseCommand:
     """
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store shared managers and resolve the repo root and ``binder/binder`` script."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
         self.repo_root = self.config_manager.root_dir
         self.binder = self.repo_root / "binder" / "binder"
 
     def run(self, args: list[str]) -> bool:
+        """Parse ``binder release`` arguments, run the stage plan, and emit the report.
+
+        With ``--dry-run`` every stage is reported as ``planned`` and nothing
+        runs. Otherwise stages run sequentially as subprocesses and a JSON
+        report is written (see ``_emit_report``). Returns False when a required
+        stage failed, or an advisory stage failed under ``--fail-on-advisory``.
+        An argparse error returns False; ``-h``/``--help`` returns True.
+        """
         parser = argparse.ArgumentParser(
             prog="binder release",
             description=(
@@ -386,6 +418,7 @@ class ReleaseCommand:
         return not failed
 
     def _selected_volumes(self, ns: argparse.Namespace) -> list[str]:
+        """Return the volumes chosen by ``--vol1``/``--vol2``, defaulting to both."""
         if ns.vol1:
             return ["vol1"]
         if ns.vol2:
@@ -393,6 +426,12 @@ class ReleaseCommand:
         return ["vol1", "vol2"]
 
     def _build_stage_plan(self, volumes: list[str], *, include_layout: bool) -> list[ReleaseStage]:
+        """Assemble the full ordered stage list before option filtering.
+
+        Order: source stages, artifact advisory stages, then per volume a PDF
+        build followed by its PDF verify stages, the final ``check all`` stage,
+        and finally the network advisory stages.
+        """
         stages = list(SOURCE_STAGES)
         stages.extend(ARTIFACT_ADVISORY_STAGES)
         for volume in volumes:
@@ -403,6 +442,11 @@ class ReleaseCommand:
         return stages
 
     def _build_pdf_stage(self, volume: str, *, include_layout: bool) -> ReleaseStage:
+        """Create the required ``build pdf`` stage for a volume.
+
+        When ``include_layout`` is set the build runs with ``--layout`` and the
+        stage may be classified as ``passed_with_advisory``.
+        """
         argv = ("build", "pdf", f"--{volume}")
         if include_layout:
             argv = (*argv, "--layout")
@@ -418,6 +462,7 @@ class ReleaseCommand:
         )
 
     def _pdf_verify_stages(self, volume: str) -> list[ReleaseStage]:
+        """Create one required ``check pdf --scope`` stage per ``PDF_VERIFY_SCOPES`` entry."""
         volume_label = self._volume_label(volume)
         return [
             _stage(
@@ -432,6 +477,7 @@ class ReleaseCommand:
         ]
 
     def _final_check_stage(self, volumes: list[str]) -> ReleaseStage:
+        """Create the closing ``check all`` stage, scoped to a volume when only one is selected."""
         argv = ["check", "all", "--quiet"]
         if len(volumes) == 1:
             argv.insert(2, f"--{volumes[0]}")
@@ -447,6 +493,7 @@ class ReleaseCommand:
     def _filter_stages(
         self, stages: list[ReleaseStage], ns: argparse.Namespace
     ) -> list[ReleaseStage]:
+        """Drop network, artifact, or build stages according to the parsed options."""
         filtered = []
         for stage in stages:
             if stage.network and not ns.include_network:
@@ -459,6 +506,12 @@ class ReleaseCommand:
         return filtered
 
     def _run_stage(self, stage: ReleaseStage, ns: argparse.Namespace) -> StageResult:
+        """Run one stage as a ``binder`` subprocess from the repo root.
+
+        Stdout and stderr are merged and truncated to ``--output-limit`` chars.
+        The stage's own timeout wins over ``--timeout``. A timeout yields a
+        ``failed`` result with no exit code and a ``skipped_reason`` message.
+        """
         started = time.time()
         timeout = stage.timeout_seconds or ns.timeout
         command = [sys.executable, str(self.binder), *stage.argv]
@@ -496,6 +549,13 @@ class ReleaseCommand:
             )
 
     def _classify_status(self, stage: ReleaseStage, exit_code: int, output: str) -> str:
+        """Map a stage's exit code and output to a report status.
+
+        Exit 0 is ``passed``. A rendered-Python-leak stage whose output reports
+        ``html_audit_missing`` is ``skipped``. A layout-enabled build that exits
+        1 with only layout-advisory output is ``passed_with_advisory``. Anything
+        else is ``failed``.
+        """
         if exit_code == 0:
             return "passed"
         normalized = self._normalize_output(output)
@@ -508,10 +568,16 @@ class ReleaseCommand:
 
     @staticmethod
     def _normalize_output(output: str) -> str:
+        """Collapse all whitespace runs to single spaces so marker matching ignores wrapping."""
         return " ".join(output.split())
 
     @staticmethod
     def _is_layout_advisory_only(output: str) -> bool:
+        """Return True when a build log shows a clean PDF with only layout-planner findings.
+
+        Requires the build-completed, clean-text, Auto Layout Plan, and zero
+        Purpose-overflow markers, and the absence of any PDF-validation failure.
+        """
         return (
             "PDF validation failed" not in output
             and "Build artifact written but PDF validation failed" not in output
@@ -522,6 +588,7 @@ class ReleaseCommand:
         )
 
     def _print_stage_result(self, result: StageResult) -> None:
+        """Print a one-line status, exit code, and elapsed time for a finished stage."""
         style, label = STATUS_STYLES.get(result.status, ("white", result.status.upper()))
         console.print(
             f"  [{style}]{label}[/{style}] "
@@ -537,6 +604,12 @@ class ReleaseCommand:
         *,
         status: str,
     ) -> dict[str, Any]:
+        """Build the ``binder-release/v1`` report payload.
+
+        Includes the generation time, overall status, git branch and short HEAD
+        (empty strings if git is unavailable), the effective options, per-status
+        counts, required/advisory failure totals, and every stage result.
+        """
         binder_label = "binder"
         counts: dict[str, int] = {}
         for result in results:
@@ -571,6 +644,15 @@ class ReleaseCommand:
         }
 
     def _emit_report(self, payload: dict[str, Any], ns: argparse.Namespace) -> None:
+        """Write the JSON report to disk and print it or a summary panel.
+
+        The report goes to ``--output`` (resolved against the repo root when
+        relative) or, for real runs, to a timestamped file under
+        ``books/_build/release/``; dry runs without ``--output`` write nothing.
+        The chosen path is added to the payload as ``report_path``. With
+        ``--json`` the payload is printed to stdout; otherwise a status-count
+        table and a pass/fail/planned message are printed.
+        """
         report_path = None
         if ns.output:
             report_path = Path(ns.output)
@@ -616,6 +698,7 @@ class ReleaseCommand:
             console.print("[green]Release gate passed.[/green]")
 
     def _git(self, args: Iterable[str]) -> str:
+        """Run a git command in the repo root and return stripped stdout, or "" on any failure."""
         try:
             completed = subprocess.run(
                 ["git", *args],
@@ -630,9 +713,11 @@ class ReleaseCommand:
         return completed.stdout.strip() if completed.returncode == 0 else ""
 
     def _volume_label(self, volume: str) -> str:
+        """Return "Volume I" for ``vol1`` and "Volume II" for any other volume key."""
         return "Volume I" if volume == "vol1" else "Volume II"
 
     def _excerpt(self, text: str, limit: int) -> str:
+        """Normalize line endings, strip, and truncate to ``limit`` chars with a marker."""
         cleaned = text.replace("\r\n", "\n").replace("\r", "\n").strip()
         if len(cleaned) <= limit:
             return cleaned

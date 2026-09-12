@@ -11,6 +11,8 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class RegistryIssue:
+    """One registry-gate finding; repo-wide findings default to file ``(registry)``, line 0."""
+
     code: str
     message: str
     file: str = "(registry)"
@@ -19,14 +21,20 @@ class RegistryIssue:
 
 
 def repo_root_from_here() -> Path:
+    """Return the repository root that contains ``binder/``, resolved from this file."""
     return Path(__file__).resolve().parents[3]
 
 
 def yaml_dir(root: Path) -> Path:
+    """Return the directory expected to hold the MLSysIM constants audit YAML files."""
     return root / "binder" / "tools" / "audits" / "mlsysim_constants"
 
 
 def count_should_change(root: Path) -> int:
+    """Count constants marked ``should_change: true`` across the audit YAML files.
+
+    Returns 0 when the YAML directory is missing or holds no ``*.yaml`` files.
+    """
     import yaml
 
     total = 0
@@ -40,6 +48,7 @@ def count_should_change(root: Path) -> int:
 
 
 def _load_script_module(name: str, script: Path):
+    """Import the Python file *script* as module *name* and register it in ``sys.modules``."""
     spec = importlib.util.spec_from_file_location(name, script)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
@@ -92,6 +101,7 @@ def check_lego_prose_literals(root: Path, paths: list[Path] | None = None) -> li
 
 
 def _load_check_module(name: str, root: Path):
+    """Import ``binder/tools/audit/<name>.py`` as a module."""
     return _load_script_module(name, root / "binder" / "tools" / "audit" / f"{name}.py")
 
 

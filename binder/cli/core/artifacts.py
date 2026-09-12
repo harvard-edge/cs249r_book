@@ -11,6 +11,8 @@ from rich.console import Console
 
 @dataclass(frozen=True)
 class ArtifactCleanupResult:
+    """Counts of removed artifacts and restored config backups (dry runs count them too)."""
+
     cleaned_count: int
     restored_count: int
 

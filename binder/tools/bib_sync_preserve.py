@@ -55,15 +55,19 @@ CHUNKED_BIBS = {
 
 @dataclass(frozen=True)
 class Rename:
+    """One accepted citekey rename from ``old`` to ``new``."""
+
     old: str
     new: str
 
 
 def _norm_token(text: str) -> str:
+    """Lowercase ``text`` and drop every character that is not a letter or digit."""
     return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
 def _normalize_doi(value: str | None) -> str:
+    """Return a lowercased DOI with any ``doi.org`` URL prefix removed, or ``""``."""
     if not value:
         return ""
     s = value.strip()
@@ -80,6 +84,11 @@ def _normalize_doi(value: str | None) -> str:
 
 
 def _normalize_authors(value: str | None) -> str:
+    """Return the normalized author surnames of a BibTeX author field, joined by ``|``.
+
+    Authors are split on ``and``; the surname is the text before a comma, or
+    the last word when there is no comma.
+    """
     if not value:
         return ""
     authors: list[str] = []
@@ -97,6 +106,7 @@ def _normalize_authors(value: str | None) -> str:
 
 
 def _field(entry, *names: str) -> str:
+    """Return the first non-blank stripped value among ``names`` in ``entry``, or ``""``."""
     for name in names:
         field = entry.get(name)
         if field and field.value.strip():
@@ -105,6 +115,7 @@ def _field(entry, *names: str) -> str:
 
 
 def _title_similarity(orig, new) -> float:
+    """Return the ``SequenceMatcher`` ratio of the normalized titles, or 0.0 if either is empty."""
     a = _norm_token(_field(orig, "title"))
     b = _norm_token(_field(new, "title"))
     if not a or not b:
@@ -113,6 +124,7 @@ def _title_similarity(orig, new) -> float:
 
 
 def _title_tokens(entry) -> set[str]:
+    """Return the set of lowercase alphanumeric words in the entry's title."""
     return set(re.findall(r"[a-z0-9]+", _field(entry, "title").lower()))
 
 
@@ -146,6 +158,14 @@ def _entry_signatures(entry) -> set[str]:
 
 
 def _similarity_score(orig, new, index_hint: bool) -> int:
+    """Score how likely ``new`` is the synced form of ``orig``; 0 means no pairing.
+
+    An unchanged citekey scores 200 or more. Otherwise the score starts from
+    the strongest shared identity signature (DOI ranks highest) and adds
+    bonuses for title similarity and word overlap, matching year, authors,
+    venue, and entry type. ``index_hint`` (same position in both lists) adds
+    one point as a tie-breaker.
+    """
     if orig.key == new.key:
         score = 200
         if orig.entry_type == new.entry_type:
@@ -229,6 +249,7 @@ def _match_entries(original: Sequence, synced: Sequence) -> list[tuple[int, int,
 
 
 def _entry_field_map(entry) -> dict[str, str]:
+    """Map each lowercased field name of ``entry`` to its stripped value."""
     out: dict[str, str] = {}
     for field in entry.fields:
         out[field.name.lower()] = field.value.strip()
@@ -236,6 +257,7 @@ def _entry_field_map(entry) -> dict[str, str]:
 
 
 def _entry_diff_summary(orig, new) -> list[str]:
+    """Return the sorted names of fields whose values differ between two entries."""
     old_fields = _entry_field_map(orig)
     new_fields = _entry_field_map(new)
     names = sorted(set(old_fields) | set(new_fields))
@@ -271,6 +293,7 @@ def _merge_same_work_entry(orig, new):
 
 
 def _entry_error_messages(entry) -> list[str]:
+    """Return the messages of error-severity bib lint violations for ``entry``."""
     return [
         v.message
         for v in validate_entry(entry)
@@ -279,12 +302,14 @@ def _entry_error_messages(entry) -> list[str]:
 
 
 def _entry_batches(entries: Sequence, chunk_size: int) -> list[list]:
+    """Split ``entries`` into consecutive lists of ``chunk_size``; raise ``ValueError`` if it is not positive."""
     if chunk_size <= 0:
         raise ValueError("chunk size must be positive")
     return [list(entries[i : i + chunk_size]) for i in range(0, len(entries), chunk_size)]
 
 
 def _render_entries(entries: Sequence) -> str:
+    """Format entries as BibTeX separated by blank lines, ending in one newline."""
     return "\n\n".join(format_entry(entry) for entry in entries).rstrip() + "\n"
 
 
@@ -295,6 +320,26 @@ def _review_entry_pairs(
     reserved_keys: set[str] | None = None,
     global_original_keys: set[str] | None = None,
 ) -> tuple[list, list[Rename], list[str]]:
+    """Decide, entry by entry, whether to keep the synced record or the original.
+
+    Entries are paired by position. The original is kept whenever
+    ``_same_work`` fails. A same-work entry is merged with the original's
+    leftover fields; if the merge has lint errors and betterbib changed the
+    entry type, the original type is retried, and the original entry is kept
+    when that still fails lint. A changed citekey is accepted as a ``Rename``
+    unless the new key is in ``reserved_keys`` or collides with another key in
+    ``global_original_keys``, in which case the original entry is kept. Every
+    chosen key is added to ``reserved_keys`` (a fresh set when the argument is
+    empty or omitted).
+
+    Returns:
+        ``(merged_entries, renames, diagnostics)``; each diagnostic line starts
+        with ``ACCEPT`` or ``REJECT``.
+
+    Raises:
+        RuntimeError: If the entry counts differ, the originals contain
+            duplicate citekeys, or the merged output would duplicate a key.
+    """
     if len(original_entries) != len(synced_entries):
         raise RuntimeError(
             f"entry count changed from {len(original_entries)} to {len(synced_entries)}"
@@ -416,6 +461,12 @@ def _review_entry_pairs(
 
 
 def _same_work(orig, new) -> bool:
+    """Return True when ``orig`` and ``new`` plausibly describe the same publication.
+
+    Matches on DOI, arXiv id, a shared title combined with year, authors, or
+    venue, or on title-similarity and title-word-overlap thresholds. A shared
+    title alone is not enough.
+    """
     if _normalize_doi(_field(orig, "doi")) and _normalize_doi(_field(orig, "doi")) == _normalize_doi(_field(new, "doi")):
         return True
     if _norm_token(_field(orig, "eprint", "arxiv", "archiveprefix")) and _norm_token(_field(orig, "eprint", "arxiv", "archiveprefix")) == _norm_token(_field(new, "eprint", "arxiv", "archiveprefix")):
@@ -446,6 +497,7 @@ def _same_work(orig, new) -> bool:
 
 
 def _is_chunked_bib(bib_path: Path) -> bool:
+    """Return True if ``bib_path`` is listed in ``CHUNKED_BIBS`` and must be synced in batches."""
     try:
         rel = bib_path.resolve().relative_to(REPO).as_posix()
     except ValueError:
@@ -454,6 +506,7 @@ def _is_chunked_bib(bib_path: Path) -> bool:
 
 
 def _find_bib_files(args: Sequence[str]) -> list[Path]:
+    """Resolve CLI arguments to existing ``.bib`` files, silently dropping anything else."""
     out: list[Path] = []
     for raw in args:
         p = Path(raw).expanduser()
@@ -465,6 +518,11 @@ def _find_bib_files(args: Sequence[str]) -> list[Path]:
 
 
 def _tracked_text_files(root: Path) -> list[Path]:
+    """Return sorted git-tracked prose files (``TEXT_EXTS``) that exist under ``root``.
+
+    Runs ``git ls-files`` in the repo root and raises
+    ``subprocess.CalledProcessError`` if git fails.
+    """
     raw = subprocess.check_output(
         ["git", "ls-files", "-z"], cwd=REPO, text=False
     )
@@ -487,6 +545,7 @@ def _tracked_text_files(root: Path) -> list[Path]:
 
 
 def _bib_companion_root(bib_path: Path) -> Path:
+    """Return the tree whose prose cites ``bib_path``: the volume root for a ``vol1``/``vol2`` backmatter bib, else the bib's directory."""
     if bib_path.parent.name == "backmatter" and bib_path.parent.parent.name in {
         "vol1",
         "vol2",
@@ -496,6 +555,7 @@ def _bib_companion_root(bib_path: Path) -> Path:
 
 
 def _run_betterbib_sync(temp_bib: Path) -> subprocess.CompletedProcess[str]:
+    """Run ``betterbib sync --in-place`` on ``temp_bib`` and return the captured result without raising."""
     return subprocess.run(
         ["betterbib", "sync", "--in-place", str(temp_bib)],
         cwd=REPO,
@@ -505,6 +565,7 @@ def _run_betterbib_sync(temp_bib: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _replace_qmd_md(text: str, renames: Sequence[Rename]) -> str:
+    """Rewrite exact ``@oldkey`` citation tokens to ``@newkey`` for each rename."""
     out = text
     for rename in renames:
         pattern = re.compile(
@@ -522,9 +583,15 @@ _TEX_CITE_RE = re.compile(
 
 
 def _replace_tex(text: str, renames: Sequence[Rename]) -> str:
+    """Rewrite renamed keys inside ``\\cite*``, ``\\nocite``, and ``\\bibitem`` key lists.
+
+    Only commands containing a renamed key are rebuilt (keys rejoined with
+    ``", "``); all other commands are left byte-identical.
+    """
     rename_map = {r.old: r.new for r in renames}
 
     def repl(match: re.Match[str]) -> str:
+        """Return the command with renamed keys substituted, or the original match if none changed."""
         body = match.group("body")
         items = [item.strip() for item in body.split(",")]
         changed = False
@@ -544,6 +611,7 @@ def _replace_tex(text: str, renames: Sequence[Rename]) -> str:
 
 
 def _apply_renames(text: str, path: Path, renames: Sequence[Rename]) -> str:
+    """Apply renames with the Markdown or LaTeX rewriter chosen by ``path``'s suffix; other files pass through."""
     if path.suffix.lower() in {".qmd", ".md", ".markdown", ".mkd"}:
         return _replace_qmd_md(text, renames)
     if path.suffix.lower() == ".tex":
@@ -552,6 +620,7 @@ def _apply_renames(text: str, path: Path, renames: Sequence[Rename]) -> str:
 
 
 def _rewrite_companions(root: Path, renames: Sequence[Rename]) -> list[Path]:
+    """Apply renames to every tracked prose file under ``root``, rewriting changed files in place; return them."""
     if not renames:
         return []
     touched: list[Path] = []
@@ -565,12 +634,14 @@ def _rewrite_companions(root: Path, renames: Sequence[Rename]) -> list[Path]:
 
 
 def _run_bib_mechanical_fix(bib_path: Path) -> None:
+    """Apply the repo's mechanical bib fixes to ``bib_path`` in place; raise ``RuntimeError`` on failure."""
     result = apply_mechanical_fixes_to_file(bib_path)
     if result.error:
         raise RuntimeError(result.error)
 
 
 def _run_bib_lint_check(bib_path: Path) -> subprocess.CompletedProcess[str]:
+    """Run ``binder check bib --json`` on ``bib_path`` and return the captured result without raising."""
     binder = REPO / "binder" / "binder"
     return subprocess.run(
         [sys.executable, str(binder), "check", "bib", "--path", str(bib_path), "--json"],
@@ -581,6 +652,7 @@ def _run_bib_lint_check(bib_path: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _rollback(backups: dict[Path, str]) -> None:
+    """Restore each file in ``backups`` to its saved text."""
     for path, text in backups.items():
         path.write_text(text, encoding="utf-8")
 
@@ -592,6 +664,11 @@ def _sync_entries(
     reserved_keys: set[str] | None = None,
     global_original_keys: set[str] | None = None,
 ) -> tuple[list, list[Rename], list[str]]:
+    """Run betterbib on a temp copy of ``entries`` and review the result against the originals.
+
+    ``label`` names the batch in error messages. Raises ``RuntimeError`` if
+    betterbib exits nonzero; otherwise returns ``_review_entry_pairs`` output.
+    """
     temp_text = _render_entries(entries)
     with tempfile.TemporaryDirectory(prefix="betterbib-sync-chunk-") as td:
         temp_bib = Path(td) / "chunk.bib"
@@ -695,6 +772,11 @@ def sync_one(bib_path: Path, dry_run: bool = False) -> bool:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Sync each ``.bib`` file named on the command line.
+
+    Returns 0 when every file succeeds, 1 when any fails or no ``.bib`` file
+    was supplied.
+    """
     ap = argparse.ArgumentParser(
         description="Run betterbib sync safely while preserving citekeys",
     )

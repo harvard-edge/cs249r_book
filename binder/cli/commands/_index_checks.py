@@ -32,6 +32,8 @@ _SKIP_PATH_PARTS = (
 
 @dataclass(frozen=True)
 class IndexIssue:
+    """One index-check finding; corpus-wide findings use file ``(corpus)`` and line 0."""
+
     file: str
     line: int
     code: str
@@ -125,6 +127,7 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
     issues: list[IndexIssue] = []
 
     def _add(code: str, samples: list, label: str) -> None:
+        """Append one corpus-level issue previewing up to three samples; skip if empty."""
         if not samples:
             return
         preview = "; ".join(str(s) for s in samples[:3])

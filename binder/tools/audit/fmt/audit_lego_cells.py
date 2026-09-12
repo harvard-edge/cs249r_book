@@ -50,6 +50,7 @@ GOAL = re.compile(r"#\s*[│├].*Goal:\s*(.+)", re.I)
 
 
 def _classes_in_code(code: str) -> list[str]:
+    """Return the names of all column-0 ``class`` statements in *code*."""
     return CLASS.findall(code)
 
 
@@ -65,6 +66,12 @@ def _exports_for_class(code: str, cls: str) -> list[str]:
 
 
 def _parse_lego_cells(qmd: Path) -> list[dict]:
+    """Return one entry per class defined in each LEGO-marked python cell.
+
+    Each dict carries the fence line, class name, cell code, the declared
+    ``*_str``/``*_math``/``*_eq``/``*_frac`` exports in that class's block, and
+    the ``Goal:`` header text (empty when absent). Cells are not executed.
+    """
     lines = qmd.read_text(encoding="utf-8").splitlines()
     cells: list[dict] = []
     in_cell = False
@@ -159,6 +166,15 @@ def _exec_with_cell_errors(
 
 
 def audit_chapter(vol: str, name: str, qmd: Path, html: Path) -> dict:
+    """Verify each LEGO cell in one chapter: exports resolve and prose refs render.
+
+    A cell record is ``FAIL`` when an export does not resolve or a prose ref is
+    missing from the HTML, and ``NO_PROSE_REFS`` when the class has no prose
+    refs; both fail the chapter. Selected ``UserWarning`` messages raised during
+    execution are kept under ``cell_warnings``. Returns a row dict whose
+    ``status`` is ``NO_QMD``, ``NO_HTML``, ``EXEC_FAIL`` (with ``exec_error``),
+    ``PASS``, ``FAIL``, or ``NO_LEGO``.
+    """
     row: dict = {
         "vol": vol,
         "chapter": name,
@@ -260,6 +276,12 @@ def audit_chapter(vol: str, name: str, qmd: Path, html: Path) -> dict:
 
 
 def main() -> int:
+    """Audit all chapters (or ``--chapter``), write the JSON report, and print results.
+
+    The report goes to ``--report`` or
+    ``binder/tools/audit/artifacts/lego_cells_verify_report.json``. Returns 2 for
+    an unknown ``--chapter`` slug, 1 if any chapter is not ``PASS``, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Print full JSON report")
     parser.add_argument("--report", type=Path, help="Write JSON report path")

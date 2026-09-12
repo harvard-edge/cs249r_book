@@ -75,9 +75,11 @@ class ImageDownloader:
     """Validator and manager for external image assets."""
 
     def __init__(self, base_dir: str):
+        """Store the directory tree to scan for QMD files."""
         self.base_dir = Path(base_dir)
 
     def find_qmd_files(self) -> List[Path]:
+        """Return every ``.qmd`` file under the base directory (empty if it does not exist)."""
         qmd_files = []
         if not self.base_dir.exists():
             return qmd_files
@@ -87,6 +89,15 @@ class ImageDownloader:
         return qmd_files
 
     def validate_external_images(self, ignore_external: bool = False) -> Tuple[int, List[Tuple[Path, str, str]]]:
+        """Collect external (HTTP/HTTPS) image references across all QMD files.
+
+        Files that cannot be read are skipped silently. The
+        ``ignore_external`` argument is accepted but not used.
+
+        Returns:
+            A tuple of (number of QMD files scanned, list of
+            ``(qmd_path, fig_id, url)`` for each external image).
+        """
         qmd_files = self.find_qmd_files()
         all_external_images = []
 

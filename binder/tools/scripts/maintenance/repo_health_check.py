@@ -25,7 +25,15 @@ from rich import print as rprint
 console = Console()
 
 class RepoHealthChecker:
+    """Health checks and cleanup actions for a git repository.
+
+    Shell commands run with ``repo_path`` as their working directory, but the
+    ``os.path`` existence and size checks, and build-artifact removal, resolve
+    paths against the process's current directory.
+    """
+
     def __init__(self, repo_path: str = None):
+        """Target ``repo_path``, or the current working directory when omitted."""
         self.repo_path = Path(repo_path) if repo_path else Path.cwd()
         self.console = Console()
 
@@ -487,6 +495,12 @@ class RepoHealthChecker:
         return results
 
 def main():
+    """Run the health report (the default, or ``--health-check``) or, with ``--full``, the maintenance workflow.
+
+    ``--full`` always deletes build artifacts; image optimization,
+    duplicate-audio removal, and BFG history rewriting run only when their
+    own flags are also given.
+    """
     parser = argparse.ArgumentParser(description="Repository Health Check and Maintenance")
     parser.add_argument("--repo", help="Repository path (default: current directory)")
     parser.add_argument("--min-size", type=int, default=5, help="Minimum file size in MB to report")

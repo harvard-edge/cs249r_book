@@ -230,6 +230,8 @@ MANUAL_FMT_PREFIX_CONCAT = re.compile(
 
 @dataclass
 class Violation:
+    """One canonical-formatter violation at a file line."""
+
     file: str
     line: int
     code: str
@@ -766,6 +768,7 @@ def _extract_python_cells(lines: list[str]):
 
 
 def _call_name(node: ast.AST) -> str:
+    """Return the bare name of a call target (``f`` or ``obj.f``), or ``""`` otherwise."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -826,6 +829,7 @@ def _audit_manual_markdown_math(qmd_path: Path) -> list[Violation]:
 
 
 def audit(paths: list[Path]) -> list[Violation]:
+    """Run every canonical-formatter audit over each file, or each ``.qmd`` under a directory."""
     all_violations: list[Violation] = []
     for p in paths:
         if p.is_file():
@@ -847,6 +851,12 @@ def audit(paths: list[Path]) -> list[Violation]:
 
 
 def main() -> int:
+    """CLI entry point: audit the given paths (default ``books``) and print the result.
+
+    Output is a per-violation report by default, a JSON list with ``--json``,
+    or a per-file table of counts by code with ``--by-file``.
+    Returns 1 if any violation was found, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "paths",

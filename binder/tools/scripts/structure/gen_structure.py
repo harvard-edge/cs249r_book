@@ -49,6 +49,7 @@ def entries_for(vol: str) -> list[str]:
 
 
 def classify(rel: str) -> str:
+    """Return the manifest kind of a volume-relative path: frontmatter, backmatter, part, index, or chapter."""
     top = rel.split("/", 1)[0]
     if top == "frontmatter":
         return "frontmatter"
@@ -62,6 +63,7 @@ def classify(rel: str) -> str:
 
 
 def render() -> str:
+    """Build the STRUCTURE.md text: a fixed preamble, then a numbered reading-order table for each volume with a PDF config."""
     lines = [
         "# Content Structure",
         "",
@@ -115,6 +117,7 @@ def render() -> str:
 
 
 def main() -> int:
+    """Write STRUCTURE.md, or with ``--check`` compare it to the rendered text and return 1 if stale."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="fail if STRUCTURE.md is stale")
     args = ap.parse_args()

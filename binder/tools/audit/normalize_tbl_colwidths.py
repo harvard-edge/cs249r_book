@@ -11,7 +11,14 @@ WRAPPER_RE = re.compile(r'^::: \{tbl-colwidths="(\[[^\]]+\])"\}\s*$')
 CAPTION_RE = re.compile(r'^(: .* \{#tbl-[^\s\}]+)(.*\})\s*$')
 
 def normalize_content(text: str) -> tuple[str, int]:
-    lines = text.splitlines(keepends=True)
+    """Unwrap ``::: {tbl-colwidths="[...]"}`` divs, moving the widths onto the table caption line.
+
+    Returns the new text and the number of captions changed. A caption that
+    already has ``tbl-colwidths`` keeps its own value, though the wrapper is
+    still removed. The wrapper ends at the first bare ``:::`` line. Raises
+    ``ValueError`` when a wrapper holds no ``: ... {#tbl-...}`` caption.
+    """
+    lines =text.splitlines(keepends=True)
     out: list[str] = []
     i = 0
     changes = 0
@@ -55,7 +62,14 @@ def normalize_content(text: str) -> tuple[str, int]:
     return "".join(out), changes
 
 def main(argv: list[str]) -> int:
-    paths = [Path(p) for p in argv[1:]] if len(argv) > 1 else list(
+    """Normalize the QMD files named in ``argv[1:]``, or all of ``books/**/*.qmd``.
+
+    The default glob is resolved against the current directory. Files are
+    rewritten in place, but only when at least one caption changed. A wrapper
+    without a caption raises ``ValueError`` and stops the run; otherwise
+    returns 0.
+    """
+    paths =[Path(p) for p in argv[1:]] if len(argv) > 1 else list(
         Path("books").rglob("*.qmd")
     )
     total = 0

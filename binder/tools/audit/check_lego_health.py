@@ -47,6 +47,17 @@ CELL = re.compile(r"^```\{python\}\s*$(.*?)^```\s*$", re.M | re.S)
 
 
 def main() -> int:
+    """Execute every Python cell with both guards softened and report all defects.
+
+    Replaces ``mlsysim.fmt._check_fmt_precision`` and ``check`` (on
+    ``mlsysim.fmt`` and, when present, the ``mlsysim`` package) with recording
+    versions for the rest of the process. Runs each file's cells in order in a
+    fresh shared namespace, skipping paths containing ``_shelved``, and
+    collects precision defects, narrative guard failures, and cell exceptions.
+    With no paths, scans every ``.qmd`` under ``books/``. Prints findings
+    grouped by file, or as JSON with ``--json``. Returns 1 if any defect was
+    found, otherwise 0.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--json", action="store_true")
@@ -62,6 +73,11 @@ def main() -> int:
     narrative: list[dict] = []
 
     def qmd_line() -> int | None:
+        """Return the QMD line of the cell code that called the guard, or None.
+
+        Walks up the stack from the guard's caller to the first frame compiled
+        as ``<audit-cell>`` and adds the current cell's line offset.
+        """
         fr = sys._getframe(2)
         while fr is not None:
             if fr.f_code.co_filename == "<audit-cell>":
@@ -72,6 +88,7 @@ def main() -> int:
     real_precision = F._check_fmt_precision
 
     def soft_precision(val, prec, result):
+        """Run the real precision guard, recording a failure instead of raising."""
         try:
             real_precision(val, prec, result)
         except Exception as exc:  # noqa: BLE001
@@ -87,6 +104,7 @@ def main() -> int:
             )
 
     def soft_check(condition, message):
+        """Record a failed narrative ``check()`` instead of raising."""
         if not condition:
             narrative.append(
                 {"file": cur["file"], "line": qmd_line(), "message": str(message)}
@@ -136,6 +154,7 @@ def main() -> int:
         return 1 if total else 0
 
     def group(rows):
+        """Group finding rows by their ``file`` key."""
         out: dict[str, list] = {}
         for r in rows:
             out.setdefault(r["file"], []).append(r)

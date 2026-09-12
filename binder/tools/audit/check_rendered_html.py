@@ -57,7 +57,13 @@ CHECKS: list[tuple[str, re.Pattern[str]]] = [
 
 
 def visible_text(raw: str) -> str:
-    t = DROP.sub(" ", raw)
+    """Approximate the reader-visible text of an HTML page.
+
+    Drops script, style, pre, and code elements and pseudocode containers,
+    replaces client-side math with a `MATH_EXPR` placeholder, strips the
+    remaining tags, and unescapes HTML entities.
+    """
+    t =DROP.sub(" ", raw)
     t = PSEUDO.sub(" ", t)
     # Keep a non-whitespace boundary where math was removed. Replacing an
     # operator such as ``$\\times$`` with a plain space can accidentally join
@@ -81,6 +87,7 @@ BARE_REF = re.compile(
 
 
 def bare_ref_findings(raw: str) -> list[str]:
+    """Return a visible-text context snippet for each bare-word crossref link in the raw HTML."""
     out = []
     for m in BARE_REF.finditer(raw):
         s = max(0, m.start() - 220)
@@ -90,7 +97,14 @@ def bare_ref_findings(raw: str) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    roots = [Path(a) for a in argv[1:]]
+    """Scan every `*.html` under the given directories and print defects grouped by kind.
+
+    Paths containing `_files` are skipped. Within each kind, findings with
+    the same file and context prefix are printed once. Returns 0 when no
+    defect is found, 1 when any is found, and 2 (with a usage message) when
+    no directory is given.
+    """
+    roots =[Path(a) for a in argv[1:]]
     if not roots:
         print("usage: check_rendered_html.py <built-html-dir> [...]", file=sys.stderr)
         return 2

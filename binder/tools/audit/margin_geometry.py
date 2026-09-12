@@ -22,7 +22,12 @@ from binder.cli.checks.margin_geometry import scan_pdf
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    """Scan a PDF page range for margin overlaps and overflows and print each finding.
+
+    ``--last 0`` scans through the final page, and ``--json`` also writes the
+    findings to that path. The exit code is 0 whatever was found.
+    """
+    parser =argparse.ArgumentParser()
     parser.add_argument("pdf")
     parser.add_argument("--first", type=int, default=1)
     parser.add_argument("--last", type=int, default=0)

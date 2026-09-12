@@ -114,12 +114,22 @@ def _numeric_semantic_findings(text: str):
 
 @dataclass
 class Finding:
+    """One flagged defect: the check code, the chapter path, and a text snippet."""
+
     code: str
     chapter: str
     snippet: str
 
 
 def scan_chapter(qmd: Path) -> tuple[list[Finding], str | None]:
+    """Execute a chapter and scan its substituted prose for semantic defects.
+
+    Uses ``assess_equiv.snapshot_file`` to get the visible composite of every
+    inline-ref line. Each ``CHECKS`` pattern reports its first match per line;
+    the numeric checks report every match. Findings are deduplicated by
+    ``(code, snippet)``. Returns ``(findings, None)``, or ``([], error)`` with
+    the first 120 characters of the error when a cell fails to execute.
+    """
     values, prose, fail = snapshot_file(qmd)
     if fail:
         return [], fail[0][:120]
@@ -127,6 +137,7 @@ def scan_chapter(qmd: Path) -> tuple[list[Finding], str | None]:
     out: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     def _emit(code: str, m):
+        """Record a finding with a 30-char context snippet from the current ``text``, skipping duplicates."""
         lo = max(0, m.start() - 30)
         hi = min(len(text), m.end() + 30)
         snip = ("…" if lo else "") + text[lo:hi].strip() + ("…" if hi < len(text) else "")
@@ -147,6 +158,12 @@ def scan_chapter(qmd: Path) -> tuple[list[Finding], str | None]:
 
 
 def main() -> int:
+    """Scan the given QMD files and/or every ``.qmd`` under ``--root``.
+
+    Nonexistent paths are skipped silently. Prints each finding and the
+    chapters that failed to execute, then a summary. Returns 1 if any finding
+    was reported, else 0; execution failures alone do not fail the run.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("qmd", nargs="*")
     ap.add_argument("--root")

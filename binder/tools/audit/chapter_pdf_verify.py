@@ -132,6 +132,11 @@ MATH_ENVS = (
 
 @dataclass
 class ChapterResult:
+    """Ledger record for one chapter's PDF verification run.
+
+    ``prose_ok`` and ``registry_ok`` stay None when those checks did not run.
+    """
+
     vol: str
     chapter: str
     qmd: str
@@ -154,14 +159,21 @@ class ChapterResult:
 
 
 def _chapter_id(vol: str, ch_path: str) -> str:
+    """Return the ledger key ``<vol>/<chapter short name>``."""
     return f"{vol}/{ch_path.split('/')[-1]}"
 
 
 def _qmd_path(vol: str, ch_path: str) -> Path:
+    """Return the absolute QMD path for a chapter path such as ``training/training``."""
     return REPO_ROOT / "books" / vol / f"{ch_path}.qmd"
 
 
 def _build_pdf(vol: str, ch_path: str) -> tuple[bool, float, str]:
+    """Build a single-chapter volume PDF with ``./binder/binder build pdf --<vol> <chapter>``.
+
+    Writes combined stdout and stderr to ``/tmp/render_pdf_<vol>_<chapter>.log``
+    and returns ``(succeeded, elapsed_seconds, log_path)``.
+    """
     name = ch_path.split("/")[-1]
     log = Path(f"/tmp/render_pdf_{vol}_{name}.log")
     t0 = time.monotonic()
@@ -177,14 +189,20 @@ def _build_pdf(vol: str, ch_path: str) -> tuple[bool, float, str]:
 
 
 def _live_pdf(vol: str) -> Path:
+    """Return where the build writes the volume PDF, under ``books/_build/pdf-<vol>/``."""
     return BOOK_DIR / "_build" / f"pdf-{vol}" / PDF_NAMES[vol]
 
 
 def _live_tex(vol: str) -> Path:
+    """Return the path of the kept intermediate TeX file for the volume, under ``books/``."""
     return BOOK_DIR / TEX_NAMES[vol]
 
 
 def _archive_artifacts(vol: str, ch_path: str, live_pdf: Path, live_tex: Path) -> tuple[Path, Path]:
+    """Copy the built PDF and TeX to ``books/_build/pdf-audit/<vol>/<chapter>.{pdf,tex}``.
+
+    Returns the ``(pdf_copy, tex_copy)`` paths.
+    """
     name = ch_path.split("/")[-1]
     archive_dir = BOOK_DIR / "_build/pdf-audit" / vol
     archive_dir.mkdir(parents=True, exist_ok=True)
@@ -196,6 +214,15 @@ def _archive_artifacts(vol: str, ch_path: str, live_pdf: Path, live_tex: Path) -
 
 
 def _scan_tex(tex: Path) -> tuple[list[str], list[str], int, int]:
+    """Scan the TeX source, ignoring whole-line comments, for errors and math balance.
+
+    Returns ``(error_patterns, imbalances, display_math_count,
+    inline_math_lines)``. ``imbalances`` names each math environment whose
+    begin and end counts differ, plus unbalanced display brackets. Both counts
+    are approximate: the display count adds display-environment begins to
+    every display-bracket opener, and the inline count adds lines with paren
+    delimiters to lines with a single dollar sign, so one line can count twice.
+    """
     text = tex.read_text(encoding="utf-8", errors="replace")
     active_text = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("%")
@@ -230,6 +257,12 @@ def _scan_tex(tex: Path) -> tuple[list[str], list[str], int, int]:
 
 
 def _scan_pdf_text(pdf: Path) -> tuple[list[str], list[str]]:
+    """Extract text with ``pdftotext -layout`` and match error and warning patterns.
+
+    Returns ``(error_patterns, warning_patterns)``. Errors cover tracebacks and
+    ``Figure ??``-style unresolved references; warnings cover raw ``@fig-``
+    style cross-reference keys. A pdftotext failure is reported as one error.
+    """
     proc = subprocess.run(
         ["pdftotext", "-layout", str(pdf), "-"],
         capture_output=True,
@@ -250,6 +283,12 @@ def _scan_pdf_text(pdf: Path) -> tuple[list[str], list[str]]:
 
 
 def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
+    """Execute the chapter's cells and prose previews via ``fmt/audit_prose.py``.
+
+    Runs with ``mlsysim`` on ``PYTHONPATH`` and the Agg matplotlib backend.
+    Returns ``(True, "ok")`` on a zero exit; otherwise ``False`` with the first
+    300 characters of error output, or a timeout message after ``timeout_s``.
+    """
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "mlsysim"), "MPLBACKEND": "Agg"}
     try:
         proc = subprocess.run(
@@ -270,6 +309,7 @@ def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
 
 
 def _registry_scan(qmd: Path) -> tuple[bool, str]:
+    """Run ``book_check_registry_sources.py`` on the QMD; return (exit 0, last 200 chars of output)."""
     proc = subprocess.run(
         [sys.executable, str(REPO_ROOT / "binder/tools/audit/book_check_registry_sources.py"), str(qmd)],
         cwd=REPO_ROOT,
@@ -280,6 +320,17 @@ def _registry_scan(qmd: Path) -> tuple[bool, str]:
 
 
 def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterResult:
+    """Run every check for one chapter and return its ledger record.
+
+    Runs the registry source scan and prose execution, then builds the chapter
+    PDF and archives the PDF and TeX (or, with ``skip_build``, reuses the
+    archived pair). Scans the TeX for error patterns and math imbalance and,
+    when ``pdftotext`` is on ``PATH``, the PDF text for errors. Cross-reference
+    warnings are noted but do not fail the chapter. Status is ``skip`` when the
+    QMD is missing, ``pending`` when ``skip_build`` finds no archive, ``fail``
+    on a build failure, missing output, or any failed check, and ``pass``
+    otherwise.
+    """
     qmd = _qmd_path(vol, ch_path)
     name = ch_path.split("/")[-1]
     res = ChapterResult(
@@ -375,12 +426,14 @@ def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterR
 
 
 def load_ledger() -> dict:
+    """Load the JSON ledger, or return an empty ledger if the file does not exist."""
     if LEDGER_JSON.is_file():
         return json.loads(LEDGER_JSON.read_text(encoding="utf-8"))
     return {"updated_at": "", "chapters": {}}
 
 
 def save_ledger(ledger: dict) -> None:
+    """Stamp ``updated_at`` on the ledger, write the JSON, and regenerate the Markdown table."""
     LEDGER_JSON.parent.mkdir(parents=True, exist_ok=True)
     ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
     LEDGER_JSON.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
@@ -388,9 +441,11 @@ def save_ledger(ledger: dict) -> None:
 
 
 def _write_markdown_table(ledger: dict) -> None:
+    """Write the ledger to ``LEDGER_MD`` as a status table with pass/fail/pending totals."""
     rows = [ledger["chapters"][k] for k in sorted(ledger.get("chapters", {}).keys())]
 
     def yn(v):
+        """Map True, False, or anything else to a check, cross, or dash cell."""
         if v is True:
             return "✅"
         if v is False:
@@ -439,6 +494,16 @@ def _write_markdown_table(ledger: dict) -> None:
 
 
 def main() -> int:
+    """Command-line entry point.
+
+    ``--list`` prints chapter names and ``--report`` only regenerates the
+    Markdown table. Otherwise verifies the chapters named after ``--vol1`` or
+    ``--vol2``, saving the ledger after each one. ``--all`` selects every
+    chapter of each flagged volume, or of both volumes when neither flag is
+    given. Returns 0 when no chapter fails, 1 if any fails, and 2 (after
+    printing help) when nothing is selected; unknown chapter names exit through
+    ``parser.error``.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vol1", nargs="*", metavar="CHAPTER")
     parser.add_argument("--vol2", nargs="*", metavar="CHAPTER")

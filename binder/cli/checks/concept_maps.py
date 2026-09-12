@@ -27,12 +27,15 @@ REQUIRED_CONCEPT_MAP_FIELDS = {"source", "primary_concepts", "secondary_concepts
 
 @dataclass
 class ConceptMapIssue:
+    """One concept-map or frontmatter wiring problem, keyed by a repo-relative path."""
+
     severity: str
     path: str
     message: str
 
 
 def _read_yaml(path: Path) -> Any:
+    """Load a YAML file, returning ``{}`` if it is empty, unreadable, or invalid."""
     try:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except Exception:
@@ -40,6 +43,12 @@ def _read_yaml(path: Path) -> Any:
 
 
 def _frontmatter(path: Path) -> dict[str, Any]:
+    """Return a QMD file's YAML frontmatter as a dict.
+
+    Returns ``{}`` if the file cannot be read, does not start with ``---``,
+    or its frontmatter is not a mapping. Invalid YAML is not caught here and
+    propagates to the caller.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except Exception:
@@ -55,10 +64,12 @@ def _frontmatter(path: Path) -> dict[str, Any]:
 
 
 def _normalized_items(values: list[Any]) -> list[str]:
+    """Return non-blank items stringified, stripped, and casefolded for comparison."""
     return [str(value).strip().casefold() for value in values if str(value).strip()]
 
 
 def _validate_list(path: Path, name: str, value: Any, root: Path, findings: list[ConceptMapIssue]) -> None:
+    """Append an error if ``concept_map.<name>`` is not a list or has case-insensitive duplicates."""
     rel_path = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
     if not isinstance(value, list):
         findings.append(ConceptMapIssue("error", rel_path, f"concept_map.{name} must be a list"))
@@ -76,6 +87,15 @@ def _validate_concept_map_file(
     root: Path,
     findings: list[ConceptMapIssue],
 ) -> None:
+    """Validate one ``*_concepts.yml`` file and its link back to the source QMD.
+
+    Appends errors to ``findings`` for a missing or malformed ``concept_map``
+    object, missing required fields, a ``source`` that is absent or not a
+    ``.qmd``, non-list or duplicate-bearing list fields, and non-list
+    top-level ``keywords``/``topics_covered``. When the source exists, it
+    also checks that the source QMD's frontmatter ``concepts`` value resolves
+    back to this file.
+    """
     rel_path = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
     data = _read_yaml(path)
     if not isinstance(data, dict) or "concept_map" not in data:

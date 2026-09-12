@@ -105,6 +105,13 @@ SCENARIO_LOCAL_HINT = re.compile(
 
 @dataclass(frozen=True)
 class Issue:
+    """One advisory finding.
+
+    ``rule`` is a ``QF00x`` or ``ST001`` code, ``file`` is repo-relative,
+    ``line`` is the 1-based QMD line, ``snippet`` is the stripped source line,
+    and ``cell`` and ``stage`` give the LEGO class name and stage.
+    """
+
     rule: str
     file: str
     line: int
@@ -115,6 +122,7 @@ class Issue:
 
 
 def _repo_rel(path: Path) -> str:
+    """Return ``path`` relative to the repo root, or as given if it lies outside."""
     try:
         return str(path.resolve().relative_to(REPO_ROOT))
     except ValueError:
@@ -122,6 +130,13 @@ def _repo_rel(path: Path) -> str:
 
 
 def _python_cells(path: Path) -> list[tuple[int, str, bool]]:
+    """Return ``(fence_line, code, is_lego)`` for each ``{python}`` cell.
+
+    ``fence_line`` is the 1-based QMD line of the opening fence, so code line
+    ``n`` (1-based) sits at ``fence_line + n``. ``is_lego`` is True when the
+    code carries a LEGO header or OUTPUT marker. An unterminated cell runs to
+    end of file.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     cells: list[tuple[int, str, bool]] = []
     i = 0
@@ -142,11 +157,18 @@ def _python_cells(path: Path) -> list[tuple[int, str, bool]]:
 
 
 def _class_name(code: str) -> str:
+    """Return the name of the first ``class`` statement in the cell, or ``""``."""
     match = re.search(r"^\s*class\s+([A-Za-z_]\w*)", code, re.M)
     return match.group(1) if match else ""
 
 
 def _stage_by_line(code: str) -> dict[int, str]:
+    """Map each 1-based cell line to the current LEGO stage.
+
+    A comment containing LOAD switches to ``LOAD``; otherwise a comment
+    containing EXECUTE, GUARD, or OUTPUT (case-insensitive) switches to that
+    stage. Lines before any marker map to an empty string.
+    """
     stage = ""
     stages: dict[int, str] = {}
     for idx, line in enumerate(code.splitlines(), start=1):
@@ -166,6 +188,18 @@ def _stage_by_line(code: str) -> dict[int, str]:
 
 
 def check_file(path: Path, *, all_cells: bool = False) -> list[Issue]:
+    """Scan one QMD file for quantity-flow issues, line by line.
+
+    Only LEGO cells are scanned unless ``all_cells`` is set; blank and comment
+    lines are skipped. Rules: QF001 ``fmt_qty`` reattaching a unit to a scalar;
+    QF002 a unit-suffixed name assigned from ``.to(...).magnitude``; QF003 an
+    inline magnitude immediately multiplied by a unit; QF004 ``ureg.<unit>``
+    where an exported alias exists; QF005 ``fmt_count(scale=..., precision=0)``;
+    QF006 an unparenthesized compound rate unit; QF007 ``float()`` applied to a
+    variable assigned from a formatter; ST001 a LOAD-stage ``number * unit``
+    literal on a line without a scenario hint word. Returns issues in source
+    order.
+    """
     issues: list[Issue] = []
     rel = _repo_rel(path)
     for cell_start, code, is_lego in _python_cells(path):
@@ -301,6 +335,13 @@ def check_file(path: Path, *, all_cells: bool = False) -> list[Issue]:
 
 
 def _resolve_paths(paths: list[Path]) -> list[Path]:
+    """Expand CLI paths into QMD files.
+
+    With no paths, returns every ``.qmd`` under ``books/``. Relative paths are
+    resolved against the repo root, directories are searched recursively, and
+    non-QMD files are dropped. Argument order is kept and duplicates are not
+    removed.
+    """
     if not paths:
         return sorted(CONTENTS.rglob("*.qmd"))
     out: list[Path] = []
@@ -314,6 +355,7 @@ def _resolve_paths(paths: list[Path]) -> list[Path]:
 
 
 def _print_summary(issues: list[Issue]) -> None:
+    """Print issue counts per rule and the 20 files with the most issues."""
     by_rule: dict[str, int] = {}
     by_file: dict[str, int] = {}
     for issue in issues:
@@ -328,6 +370,13 @@ def _print_summary(issues: list[Issue]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Command-line entry point.
+
+    Scans the given QMD files or directories (all of ``books/`` by default) and
+    prints issues as text, JSON, or a grouped summary; ``--format json`` takes
+    precedence over ``--summary``. Returns 1 only when ``--fail-on-findings``
+    is set and issues exist, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, help="QMD files or directories")
     parser.add_argument("--all-cells", action="store_true", help="Scan all Python cells, not just LEGO cells")

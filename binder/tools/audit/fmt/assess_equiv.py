@@ -111,7 +111,13 @@ def collect_prose_previews(lines: list[str], ns: dict) -> dict:
 
 
 def snapshot_file(qmd: Path) -> tuple[dict, dict, list]:
-    lines = qmd.read_text(encoding="utf-8").splitlines()
+    """Execute a ``.qmd`` file's python cells and snapshot its exports and prose previews.
+
+    Returns ``(values, prose, failures)``: the ``collect_value_exports`` and
+    ``collect_prose_previews`` maps plus a list of error messages. If a cell
+    fails to execute, both maps are empty and ``failures`` holds the error.
+    """
+    lines =qmd.read_text(encoding="utf-8").splitlines()
     try:
         ns = _exec_python_cells(lines)
     except RuntimeError as exc:
@@ -122,6 +128,12 @@ def snapshot_file(qmd: Path) -> tuple[dict, dict, list]:
 
 
 def cmd_snapshot(args) -> int:
+    """Handle ``snapshot``: report, and optionally write, the snapshots of --qmd.
+
+    ``--show`` prints value exports whose dotted name equals or ends with each
+    given name; ``--json``/``--prose`` write sorted JSON, creating parent
+    directories. Returns 2 if a cell failed to execute, else 0.
+    """
     values, prose, failures = snapshot_file(Path(args.qmd))
     if failures:
         for f in failures:
@@ -176,7 +188,8 @@ def cmd_baseline(args) -> int:
 
 
 def _diff_maps(before: dict, after: dict, label: str) -> int:
-    keys = sorted(set(before) | set(after))
+    """Print changed, dropped, and added keys between two snapshot maps; return 0 if identical, else 3."""
+    keys =sorted(set(before) | set(after))
     changed = [(k, before[k], after[k]) for k in keys
                if k in before and k in after and before[k] != after[k]]
     dropped = [k for k in keys if k in before and k not in after]
@@ -196,13 +209,19 @@ def _diff_maps(before: dict, after: dict, label: str) -> int:
 
 
 def cmd_diff(args) -> int:
-    before = json.loads(Path(args.before).read_text())
+    """Handle ``diff``: compare two snapshot JSON files and return ``_diff_maps``'s exit code.
+
+    The printed label is ``values`` when the --before filename contains
+    "value", otherwise ``prose``.
+    """
+    before =json.loads(Path(args.before).read_text())
     after = json.loads(Path(args.after).read_text())
     label = "values" if "value" in Path(args.before).name else "prose"
     return _diff_maps(before, after, label)
 
 
 def main() -> int:
+    """Parse the ``snapshot``/``baseline``/``diff`` subcommands and return the chosen handler's exit code."""
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("snapshot")

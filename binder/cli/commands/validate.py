@@ -77,6 +77,11 @@ def _is_chapter_qmd(path) -> bool:
 
 
 class ValidationIssue:
+    """One finding reported by a check scope.
+
+    ``severity`` defaults to ``error``. ``context`` carries the offending source snippet;
+    ``suggestion``, ``rule_doc``, and ``auto_fix_cmd`` are optional and serialized only when set.
+    """
     file: str
     line: int
     code: str
@@ -88,6 +93,7 @@ class ValidationIssue:
     auto_fix_cmd: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
+        """Return the issue as a JSON-ready dict, omitting empty optional fields."""
         payload = {
             "file": self.file,
             "line": self.line,
@@ -107,6 +113,7 @@ class ValidationIssue:
 
 @dataclass
 class ValidationRunResult:
+    """Outcome of one check scope: its issues, files checked, and elapsed time."""
     name: str
     description: str
     files_checked: int
@@ -115,9 +122,11 @@ class ValidationRunResult:
 
     @property
     def passed(self) -> bool:
+        """True when the run reported no issues; warnings count as issues."""
         return len(self.issues) == 0
 
     def to_dict(self) -> Dict[str, Any]:
+        """Return the run as a JSON-ready dict with pass state, issue count, and issues."""
         return {
             "name": self.name,
             "description": self.description,
@@ -145,6 +154,7 @@ GRID_TABLE_SEP_PATTERN = re.compile(r"^\+[-:=+]+\+$")
 
 
 def _is_escaped(text: str, idx: int) -> bool:
+    """True when the character at ``idx`` follows an odd number of backslashes."""
     backslashes = 0
     j = idx - 1
     while j >= 0 and text[j] == "\\":
@@ -191,6 +201,7 @@ def _inline_math_spans(text: str) -> List[str]:
 
 
 def _inline_python_math_spans(text: str) -> List[str]:
+    """Return the inline math spans on a line that contain inline Python."""
     return [span for span in _inline_math_spans(text) if "{python}" in span]
 
 
@@ -846,10 +857,19 @@ class ValidateCommand:
     }
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store the config manager and chapter discovery helper used by the scopes."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
 
     def run(self, args: List[str]) -> bool:
+        """Parse ``binder check`` arguments, run the selected checks, and report results.
+
+        ``help`` alone or ``<group> help`` prints a help panel. A group runs its default scopes,
+        every scope with ``--all-scopes``, or one scope with ``--scope``; ``all`` runs every group.
+        Results print as JSON with ``--json``, otherwise as a rich or plain summary. Returns True
+        when every run passed or help was shown, and False on any reported issue, an unknown scope,
+        a missing path, or an argument error.
+        """
         if args == ["help"]:
             self._print_check_help()
             return True
@@ -1289,6 +1309,13 @@ class ValidateCommand:
         volume: Optional[str] = None,
         **kwargs,
     ) -> Path:
+        """Resolve the file or directory a check should scan.
+
+        An explicit path wins and is made absolute against the current directory. Otherwise an
+        existing ``volume`` subdirectory, then the first set flag among vol1 to vol4 and TinyTorch,
+        then any truthy keyword naming an existing subdirectory selects a directory under the book
+        root; the book root itself is the fallback.
+        """
         if path_arg:
             path = Path(path_arg)
             if not path.is_absolute():
@@ -1313,6 +1340,11 @@ class ValidateCommand:
         return base
 
     def _selected_label_types(self, ns: argparse.Namespace) -> Dict[str, List[re.Pattern[str]]]:
+        """Return the label-definition patterns selected by the label-type flags.
+
+        ``--all-types`` or no type flag selects every type; otherwise only flagged types are
+        included.
+        """
         explicit = ns.figures or ns.tables or ns.sections or ns.equations or ns.listings
         if ns.all_types:
             return LABEL_DEF_PATTERNS
@@ -1333,6 +1365,10 @@ class ValidateCommand:
         return LABEL_DEF_PATTERNS
 
     def _qmd_files(self, root: Path) -> List[Path]:
+        """Return the QMD file itself, or the sorted chapter QMD files under a directory.
+
+        A non-QMD file yields an empty list, and scaffolding pages are excluded.
+        """
         if root.is_file():
             return [root] if root.suffix == ".qmd" else []
         return sorted(
@@ -1340,6 +1376,10 @@ class ValidateCommand:
         )
 
     def _bib_files(self, root: Path) -> List[Path]:
+        """Return the ``.bib`` file itself, those under a directory, or its scoped bibliographies.
+
+        The scoped bibliographies are used only when a directory holds no ``.bib`` files.
+        """
         if root.is_file():
             return [root] if root.suffix == ".bib" else []
         bibs = sorted(root.rglob("*.bib"))
@@ -1348,12 +1388,14 @@ class ValidateCommand:
         return self._book_bib_files_for_root(root)
 
     def _read_text(self, path: Path) -> str:
+        """Read a file as UTF-8, dropping undecodable bytes instead of failing."""
         try:
             return path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             return path.read_text(encoding="utf-8", errors="ignore")
 
     def _relative_file(self, path: Path) -> str:
+        """Return a path relative to the book directory, or unchanged when outside it."""
         try:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:
@@ -1472,6 +1514,12 @@ class ValidateCommand:
         )
 
     def _run_inline_python(self, root: Path) -> ValidationRunResult:
+        """refs --scope inline-python: flag inline Python syntax and placement hazards.
+
+        Outside code fences, reports missing or dollar-sign backticks, inline Python in display or
+        inline math, in grid tables, or unwrapped by backticks, plus warnings for non-canonical
+        values next to LaTeX operators and inline Python in headings.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1577,6 +1625,11 @@ class ValidateCommand:
         )
 
     def _run_refs(self, root: Path, citations_in_code: bool, citations_in_raw: bool) -> ValidationRunResult:
+        """refs --scope cross-refs: flag citations that Pandoc will not process.
+
+        With ``citations_in_code``, reports bracket citations inside ``.tikz``, ``.latex``, or
+        ``.tex`` fenced blocks; with ``citations_in_raw``, inside raw HTML, LaTeX, or TeX blocks.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1764,6 +1817,12 @@ class ValidateCommand:
         return bib_file if bib_file.exists() else None
 
     def _run_citations(self, root: Path) -> ValidationRunResult:
+        """refs --scope citations: flag citation keys missing from the file's bibliography.
+
+        Files without a resolvable bibliography are skipped. Front matter, style blocks, code, and
+        math are stripped before collecting ``@key`` references, and cross-reference prefixes and
+        numeric tokens are ignored. Each missing key is reported once, at its first occurrence.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1821,6 +1880,10 @@ class ValidateCommand:
     _SCAFFOLD_H2_RE = re.compile(r"^##\s+")
 
     def _load_scaffold_citation_baseline(self) -> Set[Tuple[str, str, str]]:
+        """Load grandfathered ``(file, kind, key)`` scaffold citations.
+
+        Returns an empty set when the baseline file is missing or is not valid JSON.
+        """
         try:
             data = json.loads(SCAFFOLD_CITATION_BASELINE_PATH.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
@@ -1832,6 +1895,7 @@ class ValidateCommand:
 
     @staticmethod
     def _scaffold_citation_kind(raw_kind: str) -> str:
+        """Map a callout class to its baseline kind name, or return it unchanged."""
         if raw_kind == "callout-learning-objectives":
             return "learning-objectives"
         if raw_kind == "callout-takeaways":
@@ -1840,6 +1904,10 @@ class ValidateCommand:
 
     @classmethod
     def _is_bibliography_citation_key(cls, key: str) -> bool:
+        """True when a citation token names a bibliography entry.
+
+        Trailing punctuation is ignored; cross-reference prefixes and numeric tokens are rejected.
+        """
         key = key.rstrip(".,;:)")
         return (
             bool(key)
@@ -2269,6 +2337,7 @@ class ValidateCommand:
         def issue_et_al(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a typed *et al.* parenthetical before a bracket cite."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2285,6 +2354,7 @@ class ValidateCommand:
         def issue_ampersand(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a typed *Author & Author* before a bracket cite."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2301,6 +2371,7 @@ class ValidateCommand:
         def issue_bare_attribution(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for *Author et al. (YEAR)* with no citation on the line."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2318,6 +2389,7 @@ class ValidateCommand:
         def issue_etal_no_cite(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for *Author et al.* prose with no citation on the line."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2335,6 +2407,7 @@ class ValidateCommand:
         def issue_two_authors_no_cite(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a two-surname (YEAR) attribution with no citation."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2352,6 +2425,7 @@ class ValidateCommand:
         def issue_three_authors_no_cite(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a three-surname (YEAR) attribution with no citation."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2369,6 +2443,7 @@ class ValidateCommand:
         def issue_paren_authors_no_cite(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a (Surname and Surname, YEAR) parenthetical."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2386,6 +2461,7 @@ class ValidateCommand:
         def issue_two_surname_and_bracket(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for *Surname and Surname* before a bracket cite."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2403,6 +2479,7 @@ class ValidateCommand:
         def issue_single_paren_year_bracket(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a (Surname, YEAR) parenthetical before a bracket cite."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2419,6 +2496,7 @@ class ValidateCommand:
         def issue_bold_head_bracket(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a footnote head with (Author, YEAR) and a bracket cite."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2439,6 +2517,7 @@ class ValidateCommand:
         def issue_footnote_head_then_bracket(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a footnote bold head followed by a bracket cite."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2459,6 +2538,7 @@ class ValidateCommand:
         def issue_narrative_year_dup(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a narrative citation whose year is repeated."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2475,6 +2555,7 @@ class ValidateCommand:
         def issue_period_before_bracket(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a period placed before a bracket cite."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2492,6 +2573,7 @@ class ValidateCommand:
         def issue_no_space_before_bracket(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a bracket cite glued to the preceding word."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2507,6 +2589,7 @@ class ValidateCommand:
         def issue_comma_multicite(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
+            """Build the issue for a comma-separated multi-citation."""
             return ValidationIssue(
                 file=self._relative_file(f),
                 line=line_num,
@@ -2651,6 +2734,11 @@ class ValidateCommand:
         )
 
     def _run_duplicate_labels(self, root: Path, label_types: Dict[str, List[re.Pattern[str]]]) -> ValidationRunResult:
+        """labels --scope duplicates: flag labels defined more than once.
+
+        Definitions inside code fences are ignored, and every location of a duplicated label is
+        reported.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -2694,6 +2782,12 @@ class ValidateCommand:
         )
 
     def _run_unreferenced_labels(self, root: Path, label_types: Dict[str, List[re.Pattern[str]]]) -> ValidationRunResult:
+        """labels --scope orphans: flag unreferenced labels and unresolved references.
+
+        Code fences and HTML comments are skipped, except pseudocode ``#| label: algo-`` chunk
+        options, which count as definitions. Non-section labels that are never referenced are
+        warnings; references with no matching definition in the scanned files are errors.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -2798,6 +2892,13 @@ class ValidateCommand:
 
     def _run_inline_refs(self, root: Path, check_patterns: bool,
                          check_scope: bool = False) -> ValidationRunResult:
+        """refs --scope inline: flag inline Python references not defined in Python cells.
+
+        A reference resolves when its name, or the name before a dot, is assigned or defined as a
+        class in a Python cell of the same file. ``check_patterns`` adds grid-table, inline
+        f-string, inline call, and YAML caption hazards. ``check_scope`` adds class-scope warnings
+        from the maintenance validator, ignoring files whose analysis raises.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -2924,6 +3025,11 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_headers(self, root: Path) -> ValidationRunResult:
+        """headers --scope ids: flag headings without a ``{#sec-...}`` ID.
+
+        Headings inside code fences, HTML comments, and class divs are skipped, as are
+        ``.unnumbered`` headings.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -3010,6 +3116,13 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_footnote_placement(self, root: Path) -> ValidationRunResult:
+        """footnotes --scope placement: flag footnotes in forbidden or misanchored spots.
+
+        Reports inline ``^[...]`` footnotes, markers right after a citation, before punctuation, or
+        stacked, ``:[^fn-...]`` definitions, definitions placed between items of one list, and
+        markers in table cells, captions, callout titles, or boxing div blocks. Spacing-only divs
+        such as ``.fallacy-pitfall`` do not count as boxes.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -3305,6 +3418,11 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_footnote_refs(self, root: Path) -> ValidationRunResult:
+        """footnotes --scope integrity: check footnote references against definitions.
+
+        Per file, undefined references, duplicate definitions, and definitions without a blank line
+        before them are errors; unused definitions are warnings.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -3429,6 +3547,12 @@ class ValidateCommand:
     )
 
     def _run_mitpress_caption_head_style(self, root: Path) -> ValidationRunResult:
+        """figures --scope caption-heads: check captions use ``**Bold Title**: Explanation``.
+
+        Chunk-option captions are checked anywhere; attribute and Markdown ``{#label}`` captions are
+        checked outside code fences. Flags a missing bold head, a colon inside the bold, terminal
+        punctuation in the head, a lowercase body start, and extra bold in the body.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -3440,6 +3564,7 @@ class ValidateCommand:
             value: str,
             context: str,
         ) -> None:
+            """Append caption-head style issues for one caption value."""
             if not value.startswith("**"):
                 issues.append(
                     ValidationIssue(
@@ -3554,6 +3679,11 @@ class ValidateCommand:
         )
 
     def _run_figures(self, root: Path) -> ValidationRunResult:
+        """figures --scope captions: flag figures missing a caption or alt text.
+
+        Checks attribute-labeled figures, where Markdown image text also counts as a caption, and
+        code-cell figures whose ``fig-`` label lacks ``fig-cap`` or ``fig-alt``.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -3671,6 +3801,7 @@ class ValidateCommand:
     _LST_CAP_ATTR_RE = re.compile(r'lst-cap\s*=\s*"')
 
     def _captions_skip_file(self, file: Path) -> bool:
+        """True for front matter, back matter, and shared partials exempt from caption checks."""
         rel = str(file).replace("\\", "/")
         return any(p in rel for p in self._CAPTIONS_SKIP_PATH_PARTS)
 
@@ -4438,6 +4569,14 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_float_flow(self, root: Path) -> ValidationRunResult:
+        """figures --scope flow: flag figures and tables placed far from their first reference.
+
+        A float that is defined but never referenced is an orphan. A float defined more than 30
+        non-code lines after its first reference is late, unless some reference lies within 30 lines
+        before or 10 lines after it; one defined more than 10 lines before its first reference is
+        early. All findings are warnings. References on ``fig-cap``/``fig-alt`` lines and
+        self-references inside a float div are ignored.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -4583,6 +4722,12 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_indexes(self, root: Path) -> ValidationRunResult:
+        """index --scope placement: flag misplaced LaTeX index commands.
+
+        Outside code fences, reports an index command on a heading line, right before a ``:::``
+        fence, on a div opening line without ``fig-cap=``, or at the start of a line that also holds
+        a footnote definition.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -4633,6 +4778,14 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_rendering(self, root: Path) -> ValidationRunResult:
+        """markup --scope patterns: flag Markdown patterns that render incorrectly.
+
+        Outside code fences, reports inline Python in grid tables or inline math, missing or
+        dollar-sign backticks, quad asterisks, footnotes in table rows, unescaped currency dollars,
+        and lowercase ``x`` used for multiplication. Math spans are masked before the currency
+        check, and attribute blocks, cross-reference IDs, hex literals, ``fig-alt`` lines, and index
+        lines are excluded from the multiplication check.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -4913,6 +5066,12 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_dropcaps(self, root: Path) -> ValidationRunResult:
+        """markup --scope dropcaps: flag drop-cap paragraphs that start with non-text.
+
+        Finds the first paragraph line after the first numbered H2 that follows a chapter heading,
+        outside front matter, code, and divs, and reports it when it begins with a cross-reference,
+        Markdown link, or inline code. Only that one line per file is examined.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -5029,6 +5188,13 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_parts(self, root: Path) -> ValidationRunResult:
+        """structure --scope parts: flag part keys missing from ``summaries.yml``.
+
+        Keys come from the book-level and per-volume ``parts/summaries.yml`` files and are compared
+        case-insensitively with underscores and hyphens removed. The check returns a passing
+        zero-file result when PyYAML is unavailable or no keys load; unparsable summary files are
+        ignored.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -5365,6 +5531,11 @@ class ValidateCommand:
     })
 
     def _run_duplicate_words(self, root: Path) -> ValidationRunResult:
+        """prose --scope duplicate-words: warn on repeated consecutive words.
+
+        Skips YAML front matter, code fences, comment, LaTeX, div, HTML, and chunk-option lines,
+        allow-listed words, and matches preceded by a backslash or touching a brace.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -5436,6 +5607,12 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_images(self, root: Path) -> ValidationRunResult:
+        """figures --scope files: flag local image references that are missing or miscased.
+
+        Covers PNG, JPEG, GIF, and SVG Markdown images and skips remote URLs. Root-relative paths
+        resolve under ``books/`` in the configured root, then the root itself; other paths resolve
+        against the QMD file. An existing file whose on-disk path case differs is also an error.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -6528,6 +6705,7 @@ class ValidateCommand:
 
     @classmethod
     def _strip_quotes(cls, raw: str) -> str:
+        """Remove one pair of matching single or double quotes around a stripped value."""
         s = raw.strip()
         if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
             return s[1:-1]
@@ -6543,6 +6721,7 @@ class ValidateCommand:
         not math zones we want to ignore for the bare-brace scan.
         """
         def _sub(m: re.Match) -> str:
+            """Blank out a dollar span that looks like math; keep currency-like spans."""
             return " " if cls._looks_like_math(m.group(1)) else m.group(0)
         return cls._ATTR_DOLLAR_MATH_RE.sub(_sub, value)
 
@@ -7930,6 +8109,7 @@ class ValidateCommand:
         # having scanned 0 files. Two cross-volume table refs reached the EPUB
         # build behind that silent pass. (2026-08-18)
         def _volume_of(path: Path) -> str | None:
+            """Return ``vol1`` or ``vol2`` when a path contains that directory, else None."""
             parts = path.parts
             if "vol1" in parts:
                 return "vol1"
@@ -8663,6 +8843,11 @@ class ValidateCommand:
     # logic so the check and the fixer cannot drift apart.
 
     def _run_footnote_capitalization(self, root: Path) -> ValidationRunResult:
+        """footnotes --scope capitalization: flag lowercase footnote openings.
+
+        Uses the shared footnote-caps scanner with its allowlist of ids whose lowercase opening is
+        canonical.
+        """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -8744,6 +8929,7 @@ class ValidateCommand:
         )
 
         def opener_ok(rest: str) -> bool:
+            """True when a definition body starts with an allowed bold-head shape."""
             rest = rest.strip()
             om = offset_prefix.match(rest)
             if om:
@@ -9585,6 +9771,12 @@ class ValidateCommand:
         tinytorch: bool = False,
         log_path: Optional[str] = None,
     ) -> ValidationRunResult:
+        """pdf --scope verify: verify built volume PDFs and report failures as issues.
+
+        Volumes come from the volume flags or the scanned root. Each PDF is checked with
+        ``log_path`` or the log left by the build. Failures are reported against the PDF path at
+        line 0, and the last issue of a failing volume carries the formatted checklist as context.
+        """
         from cli.commands._pdf_checks import (
             default_log_path,
             format_checklist,
@@ -9640,6 +9832,7 @@ class ValidateCommand:
         vol4: bool = False,
         tinytorch: bool = False,
     ) -> ValidationRunResult:
+        """pdf --scope numbering: scan built volume PDFs for object-numbering regressions."""
         from cli.commands._pdf_checks import default_pdf_path, scan_pdf_numbering
 
         t0 = time.time()
@@ -9685,6 +9878,10 @@ class ValidateCommand:
         vol4: bool = False,
         tinytorch: bool = False,
     ) -> ValidationRunResult:
+        """pdf --scope table-spacing: find table rules jammed against following text.
+
+        Scans each selected volume's built PDF and keeps the severity set by the scanner.
+        """
         from cli.commands._pdf_checks import default_pdf_path, scan_table_prose_spacing
 
         t0 = time.time()
@@ -9774,6 +9971,7 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_registry_sources(self, root: Path) -> ValidationRunResult:
+        """registry --scope sources: flag banned legacy constant and registry patterns."""
         from cli.commands._registry_checks import check_registry_sources, repo_root_from_here
 
         t0 = time.time()
@@ -9796,6 +9994,10 @@ class ValidateCommand:
         )
 
     def _run_registry_tests(self, root: Path) -> ValidationRunResult:
+        """registry --scope tests: run MLSysIM registry gates and book usage checks.
+
+        Reports a fixed ``files_checked`` count of 5.
+        """
         from cli.commands._registry_checks import run_registry_pytest, repo_root_from_here
 
         t0 = time.time()
@@ -9813,6 +10015,7 @@ class ValidateCommand:
         )
 
     def _run_registry_appendix(self, root: Path) -> ValidationRunResult:
+        """registry --scope appendix: verify appendix LEGO cells against the registry."""
         from cli.commands._registry_checks import verify_appendix_lego, repo_root_from_here
 
         t0 = time.time()
@@ -9830,6 +10033,7 @@ class ValidateCommand:
         )
 
     def _run_registry_anchors(self, root: Path) -> ValidationRunResult:
+        """registry --scope anchors: validate paper anchor consistency."""
         from cli.commands._registry_checks import verify_paper_anchors, repo_root_from_here
 
         t0 = time.time()
@@ -9847,6 +10051,10 @@ class ValidateCommand:
         )
 
     def _run_registry_yaml_pending(self, root: Path) -> ValidationRunResult:
+        """registry --scope yaml-pending: fail while audit YAML has pending changes.
+
+        Pending changes are entries still marked ``should_change=true``.
+        """
         from cli.commands._registry_checks import check_yaml_pending, repo_root_from_here
 
         t0 = time.time()
@@ -9985,6 +10193,10 @@ class ValidateCommand:
         )
 
     def _case_study_findings(self, severity: str) -> tuple:
+        """Collect case-study provenance findings of one severity as issues.
+
+        Returns ``(files_checked, issues)``.
+        """
         from cli.checks import case_study_provenance
 
         checked, findings = case_study_provenance.collect(repo=self.config_manager.root_dir)
@@ -10095,12 +10307,20 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _line_for_token(self, content: str, token: str) -> int:
+        """Return the 1-based line of a token's first occurrence, or 1 when absent."""
         index = content.find(token)
         if index < 0:
             return 1
         return content[:index].count("\n") + 1
 
     def _print_human_summary(self, summary: Dict[str, Any], verbose: bool = True, plain: bool = False) -> None:
+        """Print check results as plain diagnostics or a rich summary.
+
+        ``plain`` prints one ``file:line: SEVERITY: [code] message`` line per issue, adding context
+        and suggestion lines when ``verbose``. Otherwise nothing prints when there are no issues and
+        every run scanned at least one file; else a summary table (zero-file passes shown as NO-OP),
+        up to 30 issues per run, and a closing failure line.
+        """
         runs = summary["runs"]
         total = summary["total_issues"]
         status = summary["status"]
@@ -10207,6 +10427,7 @@ class ValidateCommand:
         console.print(f"[red]Validation failed with {label}.[/red]")
 
     def _emit(self, as_json: bool, payload: Dict[str, Any], failed: bool) -> None:
+        """Print a status payload as JSON, or print its message in red or green."""
         if as_json:
             print(json.dumps(payload, indent=2, ensure_ascii=False))
             return
@@ -10338,12 +10559,14 @@ class ValidateCommand:
 
     @dataclass(frozen=True)
     class _BibScope:
+        """A bibliography scope: QMD path prefixes and the ``.bib`` files serving them."""
         name: str
         qmd_prefixes: Tuple[str, ...]
         bib_paths: Tuple[Path, ...]
 
     @dataclass(frozen=True)
     class _BibEntryRef:
+        """Location and entry type of one bibliography entry."""
         key: str
         path: Path
         line: int
@@ -10351,6 +10574,7 @@ class ValidateCommand:
 
     @dataclass(frozen=True)
     class _CitationOccurrence:
+        """One citation key found in a QMD line, with context and bibliography scope."""
         key: str
         path: Path
         line: int
@@ -10375,6 +10599,11 @@ class ValidateCommand:
     }
 
     def _book_bib_scopes(self) -> List[_BibScope]:
+        """Return the bibliography scopes for the book.
+
+        Each discovered volume maps ``<vol>/`` to ``references-<vol>.bib`` when that file exists,
+        else to the shared ``references.bib``; front matter and back matter use the shared file.
+        """
         contents = self.config_manager.book_dir
         shared_bib = contents / "references.bib"
         from cli.core.discovery import discover_volumes
@@ -10393,6 +10622,7 @@ class ValidateCommand:
         return scopes
 
     def _book_bib_scope_for_qmd(self, qmd_path: Path) -> Optional[_BibScope]:
+        """Return the bibliography scope covering a QMD file in the book, or None."""
         try:
             rel = qmd_path.relative_to(self.config_manager.book_dir).as_posix()
         except ValueError:
@@ -10403,6 +10633,7 @@ class ValidateCommand:
         return None
 
     def _book_bib_scope_for_bib(self, bib_path: Path) -> Optional[_BibScope]:
+        """Return the bibliography scope that uses a given ``.bib`` file, or None."""
         resolved = bib_path.resolve()
         for scope in self._book_bib_scopes():
             if any(path.resolve() == resolved for path in scope.bib_paths):
@@ -10439,6 +10670,11 @@ class ValidateCommand:
         return []
 
     def _book_bib_files_for_root(self, root: Path) -> List[Path]:
+        """Return the existing ``.bib`` files serving the QMD files under a root.
+
+        A ``.bib`` root returns itself. When no scoped QMD files are found, scope bibliographies
+        located at or under the root are returned instead.
+        """
         if root.is_file() and root.suffix == ".bib":
             return [root]
 
@@ -10464,6 +10700,11 @@ class ValidateCommand:
 
     @classmethod
     def _bib_should_skip_cite_key(cls, key: str) -> bool:
+        """True when an ``@`` token is not a bibliography citation.
+
+        Skips empty keys, cross-reference and other non-citation prefixes, known CSS and decorator
+        false positives, capital initials, and numeric tokens.
+        """
         key = key.rstrip(".,;:)")
         return (
             not key
@@ -10475,6 +10716,7 @@ class ValidateCommand:
 
     @staticmethod
     def _strip_bib_inline_protected(line: str) -> str:
+        """Remove inline code, one-line HTML comments, and math before citation scanning."""
         line = re.sub(r"`[^`]*`", "", line)
         line = re.sub(r"<!--.*?-->", "", line)
         # Strip math. Pandoc's `@` citation syntax has no meaning inside math
@@ -10485,6 +10727,11 @@ class ValidateCommand:
         return line
 
     def _citation_occurrences_for_qmd(self, path: Path) -> List[_CitationOccurrence]:
+        """Return citation-key occurrences in a QMD file that has a bibliography scope.
+
+        YAML front matter, HTML comments, style and script blocks, code fences, display math, and
+        inline code and math are skipped. Files outside every scope yield an empty list.
+        """
         scope = self._book_bib_scope_for_qmd(path)
         if scope is None:
             return []
@@ -10557,6 +10804,10 @@ class ValidateCommand:
         return occurrences
 
     def _parse_bib_entries_for_integrity(self, bib_path: Path) -> Dict[str, _BibEntryRef]:
+        """Index a ``.bib`` file's entries by key with line and entry type.
+
+        Later duplicates of a key overwrite earlier ones; an unreadable file yields an empty dict.
+        """
         try:
             text = self._read_text(bib_path)
         except OSError:
@@ -10573,6 +10824,7 @@ class ValidateCommand:
         return entries
 
     def _book_bib_index(self) -> Dict[Path, Dict[str, _BibEntryRef]]:
+        """Parse each existing scope bibliography once into a per-file entry index."""
         index: Dict[Path, Dict[str, ValidateCommand._BibEntryRef]] = {}
         for scope in self._book_bib_scopes():
             for bib_path in scope.bib_paths:
@@ -10698,6 +10950,10 @@ class ValidateCommand:
 
     @staticmethod
     def _bib_style_suggestion(rule: str, key: str) -> str:
+        """Return a fix suggestion for a bibliography style rule on one entry.
+
+        Unknown rules fall back to a generic rerun hint.
+        """
         suggestions = {
             "author-initials-only": (
                 f"Verify @{key}'s published byline and expand given names when "
@@ -10931,6 +11187,7 @@ class ValidateCommand:
         import unicodedata
 
         def fold(s: str) -> str:
+            """Lowercase a string and strip combining diacritics."""
             norm = unicodedata.normalize("NFKD", s.lower())
             return "".join(c for c in norm if not unicodedata.combining(c))
 
@@ -10970,6 +11227,12 @@ class ValidateCommand:
         }
 
         def author_list_surnames(author_field: str) -> List[str]:
+            """Return author surnames from a BibTeX author field.
+
+            LaTeX accent commands are removed first, and both ``Last, First`` and ``First Last``
+            forms are handled. Returns an empty list when either of the first two surnames is a
+            corporate token.
+            """
             if not author_field:
                 return []
             # Strip common LaTeX accent commands so `H\'ebert` → `Hebert`.
@@ -11222,6 +11485,11 @@ class ValidateCommand:
         header_re = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
 
         def resolve(u):
+            """Request a URL with HEAD, falling back to GET; return ``(status, error_name)``.
+
+            HEAD network errors and HEAD responses 400, 401, 403, 404, 405, 410, or 501 are retried
+            with GET. A GET network error returns ``(None, exception class name)``.
+            """
             for method in ("HEAD", "GET"):
                 try:
                     r = urllib.request.urlopen(urllib.request.Request(
@@ -11273,6 +11541,7 @@ class ValidateCommand:
 
         issues: List[ValidationIssue] = []
         def check(t):
+            """Resolve one locator target and return it with its status and error."""
             rel, key, line, kind, url = t
             st, err = resolve(url)
             return (rel, key, line, kind, url, st, err)
@@ -12643,6 +12912,7 @@ class ValidateCommand:
                 paragraphs.append(" ".join(current))
 
             def add(line_no, msg, ctx):
+                """Append an ``appendix_opening_shape`` error for the current file."""
                 issues.append(
                     ValidationIssue(
                         file=self._relative_file(file), line=line_no,

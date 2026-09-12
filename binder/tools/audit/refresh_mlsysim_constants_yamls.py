@@ -15,7 +15,8 @@ YAML_DIR = REPO_ROOT / "binder" / "tools" / "audits" / "mlsysim_constants"
 AUDIT_DIR = REPO_ROOT / "binder" / "tools" / "audit"
 
 def _load_merged_mapping() -> dict[str, str]:
-    spec = importlib.util.spec_from_file_location(
+    """Load ``migrate_constants_to_registry.py`` by path and return its ``merged_mapping()``."""
+    spec =importlib.util.spec_from_file_location(
         "migrate_constants_to_registry",
         AUDIT_DIR / "migrate_constants_to_registry.py",
     )
@@ -25,6 +26,11 @@ def _load_merged_mapping() -> dict[str, str]:
     return mod.merged_mapping()
 
 def _fmt_target(target: str) -> str:
+    """Qualify a mapping target as an ``mlsysim`` path.
+
+    ``mlsysim.`` targets are kept, ``defaults.`` targets gain ``mlsysim.core.``,
+    registry-root targets gain ``mlsysim.``, and anything else is returned as is.
+    """
     if target.startswith("mlsysim."):
         return target
     if target.startswith("defaults."):
@@ -34,6 +40,10 @@ def _fmt_target(target: str) -> str:
     return target
 
 def _tokens_from_value(value: str) -> list[str]:
+    """Return the uppercase constant-name tokens in a YAML ``value`` string.
+
+    The value is split on commas and whitespace.
+    """
     if not value or value in ("null", "~"):
         return []
     parts = re.split(r"[,\s]+", value.strip().strip('"').strip("'"))
@@ -80,7 +90,16 @@ def finalize_yaml(path: Path) -> bool:
     return changed
 
 def refresh_yaml(path: Path, mapping: dict[str, str]) -> bool:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    """Update one audit YAML file from ``mapping`` and return whether it was rewritten.
+
+    Sets ``status: migrated``. A constant entry whose ``value`` names mapped
+    symbols gets their comma-joined qualified targets as ``target_source`` and
+    ``should_change: false``; an entry with no mapped symbol whose
+    ``target_source`` points at ``mlsysim.core.units`` gets a physics-only
+    note. The file is re-dumped with PyYAML only when something changed, which
+    discards comments and original formatting.
+    """
+    data =yaml.safe_load(path.read_text(encoding="utf-8"))
     changed = False
     if data.get("status") != "migrated":
         data["status"] = "migrated"
@@ -114,7 +133,11 @@ def refresh_yaml(path: Path, mapping: dict[str, str]) -> bool:
     return changed
 
 def main() -> int:
-    finalize = "--finalize" in sys.argv
+    """Refresh every YAML file in ``YAML_DIR`` and print how many changed; returns 0.
+
+    With ``--finalize`` in ``sys.argv``, each file is also finalized.
+    """
+    finalize ="--finalize" in sys.argv
     mapping = _load_merged_mapping()
     updated = 0
     for path in sorted(YAML_DIR.glob("*.yaml")):

@@ -82,21 +82,19 @@ def verify_scanner_delta(
     changed_files: list[Path],
     verbose: bool,
 ) -> tuple[bool, list[str]]:
-    """Re-run the scanner against the changed files and verify the delta.
+    """Re-run every check module on the changed files that have fixed issues.
 
     Returns (success, error_messages).
 
-    For each changed file, we compare:
-      - Number of fixed issues in each category (from the ledger)
-      - Current number of open issues in each category (re-scan)
-      - New count for each category after the fix
+    Changed files with no fixed issues in the ledger are skipped. For each
+    remaining file, an error is recorded when the file no longer exists or when
+    a check module raises during the re-scan. With ``verbose``, the fixed count
+    and current issue count per fixed category are printed to stderr.
 
-    The new count should be old_count - applied_count for each category.
-    If it's higher, fixes were lost. If it's lower than expected, some
-    side-effect fix also happened (usually fine, worth logging).
-
-    We also check that NEW categories with issues didn't appear in the
-    changed files. That would signal unintended side effects.
+    The intended delta test (the new count should be old_count minus the
+    applied count, and no new categories should appear) is not enforced:
+    counts are computed but never compared, so lost fixes and side-effect
+    issues do not fail this stage.
     """
     errors: list[str] = []
 
@@ -322,6 +320,14 @@ def verify(
 
 
 def main() -> int:
+    """Parse the CLI, verify the changed files, and promote fixed issues on success.
+
+    Changed files come from ``--changed-files`` or, with
+    ``--changed-files-from-ledger``, from issues in a ``fixed-*`` status; with
+    none, a notice is printed and 0 returned. On success the ledger file is
+    rewritten in place with those issues marked ``verified``. Returns 0 on
+    success and 1 on failure.
+    """
     parser = argparse.ArgumentParser(description="Pass 15 verifier")
     parser.add_argument(
         "--ledger", type=Path, required=True, help="Audit ledger JSON"

@@ -29,6 +29,7 @@ class NewsletterCommand:
     """Handles newsletter operations for the MLSysBook."""
 
     def __init__(self, config_manager, verbose: bool = False):
+        """Store settings and derive the drafts, sent, and posts dirs under <repo>/newsletter."""
         self.config_manager = config_manager
         self.verbose = verbose
         # Newsletter lives at repo root, not inside book/

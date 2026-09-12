@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""Smoke-test the binder commands exposed by the VS Code extension.
+
+Runs each command as a shell subprocess from the repo root with a per-command
+timeout, prints a pass/fail summary with output tails for non-passing cases,
+writes a JSON report, and exits 1 if any case failed. Several cases (clean,
+reset, build, fix) modify the working tree.
+
+    python3 binder/vscode-ext/scripts/smoke_extension_ux.py
+"""
 from __future__ import annotations
 
 import json
@@ -16,6 +25,13 @@ Verdict = Literal["pass", "fail", "pass_started"]
 
 @dataclass
 class Case:
+    """One shell command to smoke-test.
+
+    ``allow_timeout_as_started`` turns a timeout into a ``pass_started``
+    verdict (for long-running commands); ``allow_nonzero_exit`` counts any
+    exit code as a pass.
+    """
+
     name: str
     command: str
     timeout_s: int = 60
@@ -25,6 +41,8 @@ class Case:
 
 @dataclass
 class Result:
+    """Outcome of one ``Case``; ``exit_code`` is None on timeout and ``output_tail`` holds the last 20 output lines."""
+
     name: str
     command: str
     verdict: Verdict
@@ -35,6 +53,12 @@ class Result:
 
 
 def run_case(repo_root: Path, case: Case) -> Result:
+    """Run ``case.command`` through the shell from ``repo_root`` and classify the outcome.
+
+    stdout and stderr are merged. A zero exit passes; a nonzero exit passes
+    only with ``allow_nonzero_exit``; a timeout is ``pass_started`` only with
+    ``allow_timeout_as_started`` and fails otherwise.
+    """
     start = time.time()
     try:
         completed = subprocess.run(
@@ -91,6 +115,12 @@ def run_case(repo_root: Path, case: Case) -> Result:
 
 
 def first_vol1_chapter(repo_root: Path) -> str:
+    """Return the first chapter slug printed by ``binder list --vol1``.
+
+    Falls back to ``"introduction"`` when the command exits nonzero or prints
+    no numbered chapter lines. A 60-second timeout raises
+    ``subprocess.TimeoutExpired``.
+    """
     proc = subprocess.run(
         "./binder/binder list --vol1",
         cwd=repo_root,
@@ -109,12 +139,20 @@ def first_vol1_chapter(repo_root: Path) -> str:
 
 
 def precommit_hook_ids(constants_file: Path) -> list[str]:
+    """Return the sorted unique hook ids named in ``pre-commit run <id> --all-files`` strings in ``constants_file``."""
     text = constants_file.read_text(encoding="utf-8")
     ids = set(re.findall(r"pre-commit run ([a-zA-Z0-9_-]+)\s+--all-files", text))
     return sorted(ids)
 
 
 def build_cases(repo_root: Path) -> list[Case]:
+    """Assemble the smoke cases.
+
+    Covers a fixed list of binder CLI commands run against the first Vol. I
+    chapter and a sample chapter QMD, plus one ``pre-commit run`` case per
+    hook id read from ``book/vscode-ext/src/constants.ts`` under
+    ``repo_root``.
+    """
     chapter = first_vol1_chapter(repo_root)
     sample_file = "books/vol1/introduction/introduction.qmd"
     constants_file = repo_root / "book/vscode-ext/src/constants.ts"
@@ -165,6 +203,7 @@ def build_cases(repo_root: Path) -> list[Case]:
 
 
 def main() -> int:
+    """Run every case, print the summary, and write ``book/vscode-ext/.smoke-extension-ux.json``; return 1 if any case failed."""
     script_path = Path(__file__).resolve()
     repo_root = script_path.parents[3]
     cases = build_cases(repo_root)

@@ -110,6 +110,7 @@ def resolve_scope(scope: str) -> list[Path]:
       <path>        -> treat as a file or directory path
     """
     def _walk(root: Path) -> list[Path]:
+        """Return every ``.qmd`` and ``.bib`` file under ``root``, unsorted."""
         files: list[Path] = []
         for pattern in _SCANNED_EXTENSIONS:
             files.extend(root.rglob(pattern))
@@ -317,6 +318,12 @@ def print_summary(ledger: Ledger) -> None:
 
 
 def main() -> int:
+    """Parse the CLI, run the scan, write the ledger JSON, and print a summary to stderr.
+
+    The ledger goes to ``--output`` or ``audit-ledger.json`` in the current
+    directory. With ``--fail-on-open``, returns 1 when any issue is still open
+    after the accept-list is applied; otherwise returns 0.
+    """
     parser = argparse.ArgumentParser(
         description="Pass 15 audit scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,

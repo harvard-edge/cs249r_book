@@ -57,6 +57,11 @@ _ATTR_NAMES = ("fig-cap", "fig-alt", "tbl-cap", "tbl-alt", "lst-cap", "title")
 
 
 def _emit(issues, counter, scope, file_path, line_no, line, context_label, reason):
+    """Append an index-placement issue for one site to `issues` and return `counter + 1`.
+
+    The `before` text is truncated to 200 characters and no suggested fix
+    is given, since relocating the tag needs human judgment.
+    """
     issues.append(
         Issue(
             id=make_issue_id(scope, CATEGORY, counter),

@@ -19,9 +19,17 @@ class ResetCommand:
     FORMATS = ("html", "pdf", "epub")
 
     def __init__(self, build_command):
+        """Keep the build command whose ``reset_build_config`` performs each reset."""
         self.build_command = build_command
 
     def run(self, args: List[str]) -> bool:
+        """Parse ``binder reset`` arguments and reset the selected build config family.
+
+        ``all`` resets HTML, PDF, and EPUB; without ``--vol1``/``--vol2`` both
+        volume configs are reset. Every format is attempted even after a failure.
+        Returns False if any reset failed or on an argparse error (True for
+        ``-h``/``--help``).
+        """
         if not args or args[0] in ("help", "-h", "--help"):
             self._print_help()
             return True
@@ -53,6 +61,7 @@ class ResetCommand:
         return ok
 
     def _print_help(self) -> None:
+        """Print the reset targets and usage examples."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Command", style="cyan", width=34)
         table.add_column("Description", style="white", width=44)

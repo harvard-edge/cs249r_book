@@ -13,6 +13,11 @@ sys.path.insert(0, str(REPO / "binder/cli"))
 from core.discovery import get_chapters_from_config
 
 def _build(volume, stem, fmt, log_dir):
+    """Build one chapter with `binder build` and write its combined output to `<log_dir>/<stem>.log`.
+
+    Returns `(succeeded, elapsed_seconds, tail)`, where `tail` is the last
+    12 lines of stdout (or of stderr when stdout is empty).
+    """
     log_path = log_dir / f"{stem}.log"
     cmd = [str(BINDER), "build", fmt, f"{volume}/{stem}", f"--{volume}"]
     t0 = time.monotonic()
@@ -23,6 +28,16 @@ def _build(volume, stem, fmt, log_dir):
     return proc.returncode == 0, elapsed, tail
 
 def main():
+    """Parse arguments and build each selected volume's chapters in order.
+
+    Builds vol1 and vol2 unless `--vol1` or `--vol2` narrows the set, in
+    the chapter order from the volume config. `--from STEM` starts at that
+    chapter when it is in the list. Logs go to
+    `books/_build/chapter-sequence/<UTC run id>/<volume>/`. On the first
+    failure it prints the output tail and a resume command and returns 1,
+    unless `--continue-on-error` is set, in which case it returns 1 at the
+    end if any chapter failed. Returns 0 when every build passes.
+    """
     p = argparse.ArgumentParser()
     p.add_argument("--vol1", action="store_true")
     p.add_argument("--vol2", action="store_true")

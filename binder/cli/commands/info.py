@@ -67,6 +67,7 @@ class InfoCommand:
     """Native ``binder info`` command group."""
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store the shared config manager and chapter discovery helpers."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
 
@@ -75,6 +76,12 @@ class InfoCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        """Parse ``binder info`` arguments and dispatch to the chosen subcommand.
+
+        With no subcommand (or ``help``) prints the help panel and returns True.
+        Returns False on an argparse error (True for ``-h``/``--help``), when
+        the resolved path does not exist, or when the subcommand reports failure.
+        """
         if args == ["help"]:
             self._print_help()
             return True
@@ -147,6 +154,7 @@ class InfoCommand:
     # ------------------------------------------------------------------
 
     def _print_help(self) -> None:
+        """Print the subcommand table and usage examples."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=50)
@@ -171,6 +179,13 @@ class InfoCommand:
     # ------------------------------------------------------------------
 
     def _resolve_path(self, path_arg: Optional[str], vol1: bool, vol2: bool) -> Path:
+        """Resolve the scan root.
+
+        ``--path`` wins (relative paths resolve against the current directory);
+        otherwise ``--vol1``/``--vol2`` select that volume directory under the
+        book dir, and the fallback is ``<book_dir>/contents``. Existence is not
+        checked here.
+        """
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else Path.cwd() / p
@@ -182,6 +197,7 @@ class InfoCommand:
         return base / "contents"
 
     def _qmd_files(self, root: Path) -> List[Path]:
+        """Return ``root`` if it is a ``.qmd`` file, else every ``.qmd`` file under it, sorted."""
         if root.is_file():
             return [root] if root.suffix == ".qmd" else []
         return sorted(root.rglob("*.qmd"))
@@ -203,6 +219,7 @@ class InfoCommand:
         return path.stem.replace("_", " ").title()
 
     def _relative(self, path: Path) -> str:
+        """Return ``path`` relative to the book dir, or the full path if it lies outside."""
         try:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:
@@ -213,6 +230,13 @@ class InfoCommand:
     # ------------------------------------------------------------------
 
     def _run_stats(self, root: Path, ns: argparse.Namespace) -> bool:
+        """Count book elements per chapter file and print totals.
+
+        Files under ``parts/`` and ``frontmatter/`` are excluded. With ``--json``
+        prints a JSON payload (per-chapter rows only with ``--by-chapter``);
+        otherwise prints a summary or per-chapter Rich table. Returns False when
+        no ``.qmd`` files are found under ``root``.
+        """
         files = self._qmd_files(root)
         if not files:
             console.print("[yellow]No QMD files found.[/yellow]")
@@ -369,6 +393,7 @@ class InfoCommand:
 
     @staticmethod
     def _empty_stats() -> Dict:
+        """Return a zeroed stats dict with the same keys as ``_count_file``."""
         return {
             "figures": 0, "tables": 0, "equations": 0, "listings": 0,
             "sections": 0, "footnotes": 0, "citations": 0,
@@ -377,6 +402,7 @@ class InfoCommand:
 
     @staticmethod
     def _aggregate(stats_list: List[Dict]) -> Dict:
+        """Sum every integer-valued field across per-file stats dicts."""
         totals: Dict = {}
         for s in stats_list:
             for k, v in s.items():
@@ -385,6 +411,7 @@ class InfoCommand:
         return totals
 
     def _print_summary_stats(self, all_stats, totals, root) -> None:
+        """Print a book-wide totals table titled with ``root`` relative to the book dir."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Metric", style="cyan", width=20)
         table.add_column("Count", style="white", justify="right", width=10)
@@ -409,6 +436,7 @@ class InfoCommand:
         console.print(Panel(table, title=f"Book Statistics — {scope}", border_style="cyan"))
 
     def _print_chapter_stats(self, all_stats, totals) -> None:
+        """Print one row of element counts per chapter plus a bold totals row."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Chapter", style="white", width=32, no_wrap=True)
         table.add_column("Fig", justify="right", width=5)
@@ -456,6 +484,15 @@ class InfoCommand:
     # ------------------------------------------------------------------
 
     def _run_figures(self, root: Path, ns: argparse.Namespace) -> bool:
+        """Extract figures from chapter files and print or write the figure list.
+
+        With ``--with-pdf`` chapters are taken in PDF config order (falling back
+        to a directory scan) and figures are paired by sequential position with
+        entries from the LaTeX manifest; a count mismatch only prints a warning,
+        and unmatched figures get ``"?"``. Output goes to ``--output`` when given,
+        otherwise to a Rich table (text format) or stdout. Returns False only
+        when no ``.qmd`` files are found.
+        """
         with_pdf = getattr(ns, "with_pdf", False)
 
         # Determine chapter file list
@@ -648,6 +685,7 @@ class InfoCommand:
 
     @staticmethod
     def _is_latex_manifest(path: Path) -> bool:
+        """Return True if the manifest header appears in the file's first 200 chars."""
         try:
             return _MANIFEST_HEADER in path.read_text(encoding="utf-8")[:200]
         except Exception:
@@ -798,10 +836,12 @@ class InfoCommand:
 
     @staticmethod
     def _unescape(s: str) -> str:
+        """Turn backslash-escaped double and single quotes into plain quotes."""
         return s.replace('\\"', '"').replace("\\'", "'")
 
     @staticmethod
     def _strip_quotes(s: str) -> str:
+        """Strip whitespace and one pair of matching surrounding quotes."""
         s = s.strip()
         if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
             s = s[1:-1]
@@ -834,6 +874,12 @@ class InfoCommand:
         return str(fig.get("seq", ""))
 
     def _format_figures(self, figures: List[Dict], fmt: str, with_pdf: bool = False) -> str:
+        """Render the figure list as ``csv``, ``markdown``, or plain text.
+
+        CSV quotes text fields and doubles embedded quotes. Markdown and text
+        group figures under chapter headings and end with caption and alt-text
+        coverage totals. PDF figure and page numbers are shown when ``with_pdf``.
+        """
         if fmt == "csv":
             header = "chapter,fig_number,page,label,id,caption,alt_text,source,file"
             lines = [header]
@@ -908,6 +954,11 @@ class InfoCommand:
         return "\n".join(lines) + "\n"
 
     def _print_figures_rich(self, figures: List[Dict], with_pdf: bool = False) -> None:
+        """Print the figure list as a Rich table with chapter separator rows.
+
+        Marks caption and alt-text presence per figure, adds figure-number and
+        page columns when ``with_pdf``, and prints coverage totals afterward.
+        """
         table = Table(show_header=True, header_style="bold cyan", box=None)
         if with_pdf:
             table.add_column("Fig #", style="bold", width=8, justify="right")

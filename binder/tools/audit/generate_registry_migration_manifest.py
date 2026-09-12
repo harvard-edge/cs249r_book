@@ -179,6 +179,14 @@ SKIP_DIRS = {
 
 @dataclass
 class SymbolRecord:
+    """Reference counts and migration decision for one uppercase constants symbol.
+
+    ``refs_outside_definition`` and ``chapters`` exclude the defining file and
+    any ``defaults.py`` or ``calibration.py``; ``chapters`` maps
+    ``vol<N>/<dir>`` to counts. ``action`` is ``migrate``, ``keep``,
+    ``delete_dead`` or ``inventory_only``.
+    """
+
     name: str
     defined_in: str
     total_refs: int = 0
@@ -190,6 +198,10 @@ class SymbolRecord:
     notes: str = ""
 
 def load_map_constants() -> dict[str, str]:
+    """Return the ``mapping`` dict from ``scripts/map_constants.py``.
+
+    Returns an empty dict when that file does not exist.
+    """
     if not MAP_CONSTANTS_PATH.exists():
         return {}
     spec = importlib.util.spec_from_file_location("map_constants", MAP_CONSTANTS_PATH)
@@ -199,7 +211,11 @@ def load_map_constants() -> dict[str, str]:
     return dict(getattr(mod, "mapping", {}))
 
 def parse_constants_symbols() -> set[str]:
-    text = CONSTANTS_PATH.read_text(encoding="utf-8")
+    """Return the uppercase names assigned at module level in ``CONSTANTS_PATH``.
+
+    The file is parsed with ``ast`` rather than imported.
+    """
+    text =CONSTANTS_PATH.read_text(encoding="utf-8")
     tree = ast.parse(text)
     names: set[str] = set()
     for node in tree.body:
@@ -213,7 +229,12 @@ def parse_constants_symbols() -> set[str]:
     return names
 
 def git_tracked_files() -> list[Path]:
-    out = subprocess.check_output(
+    """Return git-tracked files with a scanned suffix, skipping paths through ``SKIP_DIRS``.
+
+    Runs ``git ls-files`` at the repo root; a git failure raises
+    ``CalledProcessError``.
+    """
+    out =subprocess.check_output(
         ["git", "ls-files"], cwd=REPO_ROOT, text=True
     )
     files = []
@@ -227,6 +248,10 @@ def git_tracked_files() -> list[Path]:
     return files
 
 def count_symbol_refs(files: list[Path], symbols: set[str]) -> dict[str, dict[str, int]]:
+    """Count whole-word occurrences of each symbol in each file.
+
+    Returns ``{symbol: {repo_relative_path: count}}``; unreadable files are skipped.
+    """
     per_file: dict[str, dict[str, int]] = {s: defaultdict(int) for s in symbols}
     patterns = {s: re.compile(rf"\b{re.escape(s)}\b") for s in symbols}
     for path in files:
@@ -242,10 +267,18 @@ def count_symbol_refs(files: list[Path], symbols: set[str]) -> dict[str, dict[st
     return per_file
 
 def chapter_key(rel_path: str) -> str | None:
-    m = re.search(r"books/(vol[12]/[^/]+)/", rel_path)
+    """Return ``vol1/<dir>`` or ``vol2/<dir>`` for a path under ``books/``, else None."""
+    m =re.search(r"books/(vol[12]/[^/]+)/", rel_path)
     return m.group(1) if m else None
 
 def infer_replacement(name: str, mapping: dict[str, str]) -> tuple[str | None, str, str]:
+    """Choose a replacement target for ``name`` and return ``(target, tier, note)``.
+
+    Precedence: an explicit ``map_constants`` entry (tier ``map_constants``),
+    the physics allowlist (tier ``keep``, no target), a ``HEURISTIC_PREFIXES``
+    match (target ``<namespace>.*``), a ``_THRESHOLD`` or ``_EXAMPLE`` suffix,
+    and finally tier ``unknown`` with no target.
+    """
     if name in mapping:
         return mapping[name], "map_constants", "mapped"
     if name in PHYSICS_KEEP:
@@ -262,6 +295,13 @@ def build_records(
     per_file_refs: dict[str, dict[str, int]],
     mapping: dict[str, str],
 ) -> list[SymbolRecord]:
+    """Build one ``SymbolRecord`` per symbol, sorted by name.
+
+    Physics-allowlisted symbols are ``keep``; symbols with no references
+    outside the definition, ``defaults.py`` and ``calibration.py`` are
+    ``delete_dead``; unmapped symbols with at most one such reference are
+    ``inventory_only``; everything else is ``migrate``.
+    """
     records: list[SymbolRecord] = []
     for sym in sorted(symbols):
         rec = SymbolRecord(name=sym, defined_in=str(CONSTANTS_PATH.relative_to(REPO_ROOT)))
@@ -293,6 +333,12 @@ def build_records(
     return records
 
 def main() -> int:
+    """Write the dead-symbol list and the migration manifest to ``binder/tools/audit/artifacts``.
+
+    Prints both output paths and lists on stderr (up to 20) the ``migrate``
+    symbols that still lack a mapping. Returns 0; a missing constants file
+    raises instead.
+    """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     symbols = parse_constants_symbols()
     mapping = load_map_constants()

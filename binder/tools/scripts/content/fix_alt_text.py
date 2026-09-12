@@ -52,6 +52,7 @@ def process_file(filepath: Path, edits: dict[str, str], dry_run: bool) -> int:
         pattern = rf'({{[^}}]*#{re.escape(label)}\b[^}}]*fig-alt=")([^"]*?)(")'
 
         def replacer(m):
+            """Swap in ``new_alt`` when it differs from the current alt text, counting the change and printing it in dry-run mode."""
             nonlocal count
             old_alt = m.group(2)
             if old_alt.strip() != new_alt:
@@ -72,6 +73,7 @@ def process_file(filepath: Path, edits: dict[str, str], dry_run: bool) -> int:
 
 
 def main():
+    """Apply the ``--edits`` JSON to every ``.qmd`` under ``path`` and print a total; files are written only without ``--dry-run``."""
     parser = argparse.ArgumentParser(description="Apply edited alt-text")
     parser.add_argument("path", type=Path, help="Directory to process")
     parser.add_argument("--dry-run", action="store_true")

@@ -35,6 +35,11 @@ NUM_TOKEN = re.compile(r"\d[\d,]*\.?\d*")
 
 
 def _normalize(s: str) -> str:
+    """Normalize text for loose matching.
+
+    Lowercases, drops ``$``, backslashes, braces, and commas, maps ``×`` to
+    ``x``, and collapses whitespace.
+    """
     s = (
         s.replace("\\$", "$").replace("$", "").replace("\\", "")
         .replace("{", "").replace("}", "").replace(",", "")
@@ -44,6 +49,13 @@ def _normalize(s: str) -> str:
 
 
 def _value_in_text(value: str, text: str) -> bool:
+    """Return True when a resolved inline value plausibly appears in the rendered text.
+
+    Tries an exact substring match, then normalized matches. Failing those, it
+    requires every significant numeric token (anything but a lone 0, 1, or 2)
+    to appear, or, for values without one, the first 12 characters of the
+    normalized alphanumeric form. Empty and ``<MISSING:...>`` values never match.
+    """
     if not value or value.startswith("<MISSING:"):
         return False
     plain = value.strip()
@@ -63,6 +75,13 @@ def _value_in_text(value: str, text: str) -> bool:
 
 @dataclass
 class ChapterBrowserReport:
+    """Browser verification result for one chapter page, serialized into the JSON report.
+
+    ``leaks`` stops at 50 entries, ``errors`` lists matched error patterns or a
+    cell-execution failure, and ``ref_failures`` lists inline references whose
+    values were not found in the page text.
+    """
+
     chapter: str
     vol: str
     html: str
@@ -76,10 +95,15 @@ class ChapterBrowserReport:
 
 
 def _stem_from_artifact(name: str) -> str:
+    """Strip the extension and any leading ``NN_`` order prefix from an artifact file name."""
     return re.sub(r"^\d+_", "", Path(name).stem)
 
 
 def _find_qmd(vol: str, stem: str) -> Path | None:
+    """Return the source QMD for a chapter stem, or None if absent.
+
+    Appendix stems are looked up in ``backmatter/``.
+    """
     base = REPO_ROOT  / "books" / vol
     if stem.startswith("appendix_"):
         p = base / "backmatter" / f"{stem}.qmd"
@@ -89,6 +113,10 @@ def _find_qmd(vol: str, stem: str) -> Path | None:
 
 
 def _collect_inline_refs(qmd: Path) -> list[str]:
+    """Return the unique inline ``{python}`` references in the prose of ``qmd``.
+
+    References keep first-seen order; lines inside code cells are skipped.
+    """
     refs: list[str] = []
     in_cell = False
     for line in qmd.read_text(encoding="utf-8").splitlines():
@@ -105,6 +133,16 @@ def _collect_inline_refs(qmd: Path) -> list[str]:
 
 
 def verify_chapter_browser(page, html_path: Path, *, vol: str, check_refs: bool, screenshot_dir: Path | None) -> ChapterBrowserReport:
+    """Load one HTML page in a Playwright ``page`` and check its rendered text.
+
+    Waits for MathJax startup when present (a timeout is ignored), extracts the
+    visible text of ``main`` while skipping code and math elements, and records
+    LaTeX leaks and error patterns. With ``check_refs`` and a chapter QMD that
+    has inline Python, it executes the QMD's cells and checks that each inline
+    reference's value appears in the page; a cell failure marks the report
+    failed and returns at once. Failing pages are screenshotted into
+    ``screenshot_dir`` when given. ``html_path`` must lie inside the repository.
+    """
     stem = _stem_from_artifact(html_path.name)
     rep = ChapterBrowserReport(chapter=stem, vol=vol, html=str(html_path.resolve().relative_to(REPO_ROOT.resolve())))
     qmd = _find_qmd(vol, stem)
@@ -176,6 +214,11 @@ def verify_chapter_browser(page, html_path: Path, *, vol: str, check_refs: bool,
 
 
 def _artifact_dirs(vol: str, explicit: Path | None) -> Path:
+    """Return ``explicit`` or the newest debug run's ``phase1/artifacts`` directory for ``vol``.
+
+    Exits when the debug root has no runs; a missing debug root raises
+    ``FileNotFoundError``.
+    """
     if explicit:
         return explicit
     debug_root = REPO_ROOT / "books/_build/debug" / vol / "html"
@@ -186,6 +229,14 @@ def _artifact_dirs(vol: str, explicit: Path | None) -> Path:
 
 
 def main() -> int:
+    """Verify one volume's chapter pages in headless Chromium and write a JSON report.
+
+    Pages come from ``books/_build/html-audit/<vol>`` with ``--html-audit``,
+    otherwise from ``--artifact-dir`` or the newest debug run; ``--chapter``
+    narrows to one stem. The report defaults to
+    ``binder/tools/audit/artifacts/playwright_<vol>.json``. Returns 0 only when
+    every page passed.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--vol", choices=("vol1", "vol2"), required=True)
     ap.add_argument("--artifact-dir", type=Path)

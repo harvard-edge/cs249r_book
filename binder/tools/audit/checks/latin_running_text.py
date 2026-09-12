@@ -237,6 +237,12 @@ _NEGATIVE_LINES = [
 
 
 def _self_test() -> int:
+    """Run the positive and negative line corpora against the detector.
+
+    Each positive line must be flagged and each negative line must not.
+    Prints a pass/fail summary with the failing lines and returns 0 when
+    all cases pass, 1 otherwise.
+    """
     from audit.protected_contexts import LineState
     state = LineState()
 
@@ -244,6 +250,7 @@ def _self_test() -> int:
     neg_fail: list[str] = []
 
     def has_hit(line: str) -> bool:
+        """Return True if the line has a Latin abbreviation outside every protected span and parenthetical."""
         if _skip_line(line, state):
             return False
         spans = inline_protected_spans(line)

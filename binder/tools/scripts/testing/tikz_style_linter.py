@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+"""Report custom TikZ styles used in QMD ``{.tikz}`` blocks that are never defined.
+
+Scans every ``.qmd`` under ``<root>/books``. Within each ```` ```{.tikz} ````
+block, capitalized single-word options of ``\\draw``, ``\\node``, and similar
+commands are treated as candidate custom styles and checked against styles
+collected from ``\\tikzset`` in that block and in
+``books/shared/tex/header-includes.tex``. Findings are printed with the first
+line that uses each style.
+
+    python3 binder/tools/scripts/testing/tikz_style_linter.py [ROOT]
+
+Exits 1 when undefined styles are found, 2 when ROOT does not exist, else 0.
+"""
 
 import re
 import sys
@@ -59,6 +72,7 @@ KNOWN_TOKENS: Set[str] = {
 
 
 def read_text(path: Path) -> str:
+    """Read ``path`` as UTF-8, falling back to the locale encoding with undecodable bytes ignored."""
     try:
         return path.read_text(encoding="utf-8")
     except Exception:
@@ -66,6 +80,7 @@ def read_text(path: Path) -> str:
 
 
 def find_tikz_blocks(text: str) -> List[Tuple[int, int, str]]:
+    """Return ``(start, end, block_text)`` for each ```` ```{.tikz} ```` fenced block in ``text``."""
     blocks: List[Tuple[int, int, str]] = []
     for m in TIKZ_BLOCK_PATTERN.finditer(text):
         start, end = m.span()
@@ -74,6 +89,12 @@ def find_tikz_blocks(text: str) -> List[Tuple[int, int, str]]:
 
 
 def collect_defined_styles(text: str) -> Set[str]:
+    """Return style names matched by ``STYLE_DEF_PATTERN`` inside ``\\tikzset{...}`` bodies in ``text``.
+
+    Each body match ends at the first closing brace. As written, the pattern
+    expects a backslash between ``/`` and the character before ``style``, so
+    a plain ``Name/.style`` definition is not collected.
+    """
     styles: Set[str] = set()
     for m in TIKZSET_BLOCK_PATTERN.finditer(text):
         body = m.group(1)
@@ -83,6 +104,7 @@ def collect_defined_styles(text: str) -> Set[str]:
 
 
 def extract_option_tokens(option_text: str) -> List[str]:
+    """Split a TikZ option list on top-level commas and return the stripped, non-empty tokens."""
     # naive split by comma, ignore content inside braces or brackets
     tokens: List[str] = []
     buf: List[str] = []
@@ -111,6 +133,7 @@ def extract_option_tokens(option_text: str) -> List[str]:
 
 
 def looks_like_style_token(token: str) -> bool:
+    """Return True if ``token`` is a capitalized single identifier, not a key=value pair, arrow spec, or known keyword."""
     # Exclude key=value and tokens with spaces that are clearly compound phrases unless uppercase start
     if '=' in token:
         return False
@@ -133,6 +156,7 @@ def looks_like_style_token(token: str) -> bool:
 
 
 def find_undefined_styles_in_block(block_text: str, defined_styles: Set[str]) -> Set[str]:
+    """Return candidate style tokens in ``block_text`` command option lists that are not in ``defined_styles``."""
     used_unknown: Set[str] = set()
     for pat in OPTION_CAPTURE_PATTERNS:
         for m in pat.finditer(block_text):
@@ -149,6 +173,7 @@ def find_undefined_styles_in_block(block_text: str, defined_styles: Set[str]) ->
 
 
 def build_line_index(text: str) -> List[int]:
+    """Return the character offset at which each line of ``text`` starts."""
     # returns start index of each line
     idxs = [0]
     for m in re.finditer(r"\n", text):
@@ -157,6 +182,7 @@ def build_line_index(text: str) -> List[int]:
 
 
 def offset_to_line(line_starts: List[int], offset: int) -> int:
+    """Return the 1-based line number containing character ``offset``."""
     # binary search for line number from offset
     lo, hi = 0, len(line_starts) - 1
     ans = 0
@@ -171,6 +197,7 @@ def offset_to_line(line_starts: List[int], offset: int) -> int:
 
 
 def scan_quarto_root(root: Path) -> int:
+    """Print undefined-style findings for every ``.qmd`` under ``root/books`` and return the total count."""
     # Collect global styles from header-includes.tex if present
     global_styles: Set[str] = set()
     header_includes = root / "books" / "shared" / "tex" / "header-includes.tex"
@@ -214,6 +241,7 @@ def scan_quarto_root(root: Path) -> int:
 
 
 def main(argv: List[str]) -> int:
+    """Scan ``argv[1]`` (default: the repo root); return 1 if undefined styles were found, 2 if the root is missing, else 0."""
     root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[4]
     if not root.exists():
         print(f"Root path does not exist: {root}", file=sys.stderr)

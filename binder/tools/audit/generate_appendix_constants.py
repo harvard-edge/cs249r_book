@@ -53,6 +53,14 @@ INTERCONNECT_FIELDS: list[tuple[str, str]] = [
 
 @dataclass
 class PythonCell:
+    """One fenced ``{python}`` cell extracted from an appendix QMD file.
+
+    ``start_line`` and ``end_line`` are 1-indexed and point at the opening and
+    closing fence lines. ``source`` includes the fences; ``body`` holds only the
+    code between them. ``label`` is the last ``#| label:`` value in the cell,
+    and ``class_name`` is the first class defined at the start of a line.
+    """
+
     path: Path
     start_line: int
     end_line: int
@@ -63,6 +71,12 @@ class PythonCell:
 
 @dataclass
 class VerifyResult:
+    """Outcome of executing one appendix cell against the live mlsysim package.
+
+    ``error`` holds ``"<ExceptionType>: <message>"`` when execution failed, and
+    ``registry_sources`` lists the registry expressions the cell body references.
+    """
+
     path: Path
     label: str | None
     class_name: str | None
@@ -71,6 +85,10 @@ class VerifyResult:
     registry_sources: list[str] = field(default_factory=list)
 
 def _extract_cells(path: Path) -> list[PythonCell]:
+    """Split a QMD file into its fenced ``{python}`` cells, in document order.
+
+    A cell left unterminated at the end of the file is dropped.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     cells: list[PythonCell] = []
     i = 0
@@ -106,6 +124,7 @@ def _extract_cells(path: Path) -> list[PythonCell]:
     return cells
 
 def _exec_preamble() -> str:
+    """Return the mlsysim import block prepended to every executed cell."""
     return textwrap.dedent(
         """
         from mlsysim import *
@@ -117,6 +136,7 @@ def _exec_preamble() -> str:
     ).strip()
 
 def _registry_sources_in_body(body: str) -> list[str]:
+    """Return the unique registry and ``constants.*`` expressions in ``body``, sorted."""
     patterns = [
         r"Hardware\.[\w.]+(?:\[[^\]]+\])?(?:\.[\w]+)*",
         r"Models\.[\w.]+(?:\[[^\]]+\])?(?:\.[\w]+)*",
@@ -133,6 +153,12 @@ def _registry_sources_in_body(body: str) -> list[str]:
     return sorted(dict.fromkeys(found))
 
 def verify_cell(cell: PythonCell) -> VerifyResult:
+    """Execute one cell body after the import preamble and report whether it ran.
+
+    The code runs through ``exec`` in a fresh namespace inside this process, so
+    any side effects of the cell happen here. Exceptions are caught and recorded
+    on the result rather than raised.
+    """
     code = _exec_preamble() + "\n\n" + cell.body
     namespace: dict = {}
     try:
@@ -152,6 +178,11 @@ def verify_cell(cell: PythonCell) -> VerifyResult:
     )
 
 def verify_all() -> list[VerifyResult]:
+    """Execute every class-defining cell in the vol1 and vol2 appendix files.
+
+    Puts the repository's ``mlsysim`` checkout on ``sys.path`` so the live
+    package is imported. Cells that define no class are skipped.
+    """
     if str(MLSYSIM_ROOT) not in sys.path:
         sys.path.insert(0, str(MLSYSIM_ROOT))
     results: list[VerifyResult] = []
@@ -163,6 +194,11 @@ def verify_all() -> list[VerifyResult]:
     return results
 
 def _render_interconnect_class() -> str:
+    """Render the ``InterconnectConstants`` class source from ``INTERCONNECT_FIELDS``.
+
+    Each field becomes a ``<NAME>_val_str`` / ``<NAME>_unit_str`` pair built
+    with ``fmt_val`` and ``fmt_unit``, padded so the ``=`` signs line up.
+    """
     lines = [
         "class InterconnectConstants:",
         '    """Formatted constants for Interconnect and Network Bandwidth."""',
@@ -178,6 +214,7 @@ def _render_interconnect_class() -> str:
     return "\n".join(lines)
 
 def _render_interconnect_cell() -> str:
+    """Render the full fenced ``appendix-interconnectconstants`` cell, header comments included."""
     body = _render_interconnect_class()
     return (
         "```{python}\n"
@@ -215,6 +252,12 @@ def _replace_cell_by_label(text: str, label: str, new_cell: str) -> str | None:
     return text[:start] + new_cell + text[end:]
 
 def write_interconnect() -> bool:
+    """Regenerate the interconnect cell in the vol1 appendix file in place.
+
+    Returns True only when the file was rewritten. Prints an error to stderr and
+    returns False when the labeled cell is missing, and returns False without
+    writing when the regenerated cell matches the current text.
+    """
     path = APPENDIX_PATHS[0]
     text = path.read_text(encoding="utf-8")
     new_cell = _render_interconnect_cell()
@@ -233,6 +276,10 @@ def write_interconnect() -> bool:
     return True
 
 def _resolve_source(expr: str):
+    """Evaluate a registry expression after the import preamble and return its value.
+
+    Puts the ``mlsysim`` checkout on ``sys.path``; evaluation errors propagate.
+    """
     if str(MLSYSIM_ROOT) not in sys.path:
         sys.path.insert(0, str(MLSYSIM_ROOT))
     namespace: dict = {}
@@ -250,6 +297,11 @@ def verify_interconnect_spec() -> list[str]:
     return errors
 
 def refresh_yaml() -> int:
+    """Load ``refresh_mlsysim_constants_yamls.py`` from this directory and run its ``main()``.
+
+    Returns that script's exit code. The script rewrites the audit YAML
+    inventory files in place.
+    """
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
@@ -276,6 +328,18 @@ def _check_ast_no_legacy_imports(cell: PythonCell) -> list[str]:
     return issues
 
 def main(argv: list[str] | None = None) -> int:
+    """Command-line entry point; returns the process exit code.
+
+    At least one of ``--verify``, ``--write interconnect`` or ``--refresh-yaml``
+    is required; with none, help is printed and 2 is returned.
+    ``--write interconnect`` first checks that every spec field resolves, then
+    rewrites the vol1 cell, returning 1 on a spec error, a missing cell, or a
+    cell that was already up to date. ``--verify`` reports spec errors, executes
+    every appendix class cell, and warns on stderr about uppercase imports from
+    ``mlsysim.core.units`` in ``*Constants`` cells (warnings do not affect the
+    exit code); any spec error or failed cell yields 1. ``--refresh-yaml`` runs
+    the YAML refresh and ignores its return code.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--verify",

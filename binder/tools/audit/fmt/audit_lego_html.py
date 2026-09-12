@@ -67,6 +67,13 @@ CHAPTER_LIST = {
 
 
 def _chapter_paths(root: Path) -> list[tuple[str, str, Path, Path]]:
+    """Return ``(vol, name, qmd, html)`` for every chapter in ``CHAPTER_LIST``.
+
+    Appendix QMDs live under ``books/<vol>/backmatter/``. The HTML path prefers
+    ``books/_build/html-audit/<vol>/<name>.html`` and falls back to the Quarto
+    build output under ``books/_build/html-<vol>/contents/``. Existence of the
+    returned paths is not checked.
+    """
     out: list[tuple[str, str, Path, Path]] = []
     for vol, names in CHAPTER_LIST.items():
         for name in names:
@@ -91,6 +98,13 @@ def _chapter_paths(root: Path) -> list[tuple[str, str, Path, Path]]:
 
 
 def _exec_cells(qmd: Path) -> tuple[dict, set[str], str | None]:
+    """Exec a chapter's python cells in order in one shared namespace.
+
+    Returns ``(namespace, lego_classes, error)``. ``lego_classes`` holds the
+    first top-level class defined in each cell that carries a LEGO marker.
+    Execution stops at the first failing cell, whose exception text is
+    returned as ``error``; otherwise ``error`` is None.
+    """
     lines = qmd.read_text(encoding="utf-8").splitlines()
     ns = make_exec_namespace()
     lego: set[str] = set()
@@ -120,6 +134,12 @@ def _exec_cells(qmd: Path) -> tuple[dict, set[str], str | None]:
 
 
 def _resolve(ref: str, ns: dict) -> tuple[str, str]:
+    """Resolve dotted *ref* from *ns* and return ``(str(value), kind)``.
+
+    ``kind`` is ``"math"`` for names ending in ``_math``, ``_eq``, ``_frac``, or
+    ``_eqn_str`` and ``"plain"`` otherwise. Raises ``KeyError`` or
+    ``AttributeError`` when the ref does not exist.
+    """
     parts = ref.split(".")
     obj = ns[parts[0]]
     for part in parts[1:]:
@@ -129,6 +149,7 @@ def _resolve(ref: str, ns: dict) -> tuple[str, str]:
 
 
 def _html_narrative(html: Path) -> str:
+    """Return the whitespace-collapsed text of ``<main>`` (or ``<body>``) without script, style, pre, or code."""
     soup = BeautifulSoup(html.read_text(encoding="utf-8"), "html.parser")
     main = soup.find("main") or soup.body
     for tag in main(["script", "style", "pre", "code"]):
@@ -137,6 +158,12 @@ def _html_narrative(html: Path) -> str:
 
 
 def _normalize(s: str) -> str:
+    """Reduce *s* to a lowercase comparison key for LaTeX-vs-HTML matching.
+
+    Drops dollar signs, backslashes, braces, commas, tildes, and approximately
+    signs; maps dashes to ``-``, ``×`` to ``x``, ``÷`` to ``/``, and subscript
+    two to ``2``; joins ``co 2`` into ``co2``; and collapses whitespace.
+    """
     s = (
         s.replace("\\$", "$")
         .replace("$", "")
@@ -163,6 +190,12 @@ def _normalize(s: str) -> str:
 
 
 def _plain_in_html(value: str, ht: str) -> bool:
+    """Return True if a plain output appears in the HTML text.
+
+    Tries the value as given, without commas, without surrounding ``$``, and
+    normalized, each literally and after normalizing both sides. A blank value
+    counts as found.
+    """
     if not value.strip():
         return True
     candidates = [
@@ -196,6 +229,15 @@ def _math_in_html(value: str, ht: str) -> bool:
 
 
 def audit_chapter(vol: str, name: str, qmd: Path, html: Path) -> dict:
+    """Check that every inline ref in one chapter renders into its HTML.
+
+    Refs are grouped by class (first dotted component) together with any
+    LEGO-marked classes. Plain refs pass on a plain match (or a math match when
+    the value contains ``$``); math refs pass on ``_math_in_html``. A class with
+    no prose refs is recorded as ``NO_REFS`` and does not fail the chapter.
+    Returns a row dict whose ``status`` is ``NO_QMD``, ``NO_HTML``,
+    ``EXEC_FAIL`` (with ``error``), ``PASS``, or ``FAIL``, plus per-class blocks.
+    """
     row: dict = {"vol": vol, "chapter": name, "qmd": str(qmd), "html": str(html)}
     if not qmd.is_file():
         row["status"] = "NO_QMD"
@@ -270,6 +312,13 @@ def audit_chapter(vol: str, name: str, qmd: Path, html: Path) -> dict:
 
 
 def main() -> int:
+    """Audit every chapter, write the JSON report, and print a summary.
+
+    The report always goes to ``--report`` or
+    ``books/_build/html-audit/lego_html_verify_report.json``. With ``--json``
+    the full report is printed and the exit code is 0 regardless of results;
+    otherwise returns 1 if any chapter is not ``PASS``, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Print full JSON report")
     parser.add_argument("--report", type=Path, help="Write JSON report path")

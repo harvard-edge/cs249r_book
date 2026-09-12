@@ -192,6 +192,7 @@ def process_bib(filepath: Path, dry_run: bool = False) -> int:
 
 
 def main():
+    """Enrich the ``.bib`` file given on the command line (or only preview with ``--dry-run``) and print the count."""
     parser = argparse.ArgumentParser(description="Enrich bibliography entries")
     parser.add_argument("path", type=Path, help="Bib file to process")
     parser.add_argument("--dry-run", action="store_true", help="Preview without applying")

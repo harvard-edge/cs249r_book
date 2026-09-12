@@ -64,6 +64,7 @@ print(r.status, r.source or "", r.title, sep="\t")
 
 
 def _to_ascii(s: str) -> str:
+    """NFKD-decompose ``s`` and drop every non-ASCII character (accents become base letters)."""
     if not s:
         return s
     n = unicodedata.normalize("NFKD", s)
@@ -71,6 +72,7 @@ def _to_ascii(s: str) -> str:
 
 
 def _normalize_title(raw: str) -> str:
+    """Remove BibTeX braces and collapse whitespace in a title."""
     if not raw:
         return ""
     t = re.sub(r"[\{\}]", "", raw)
@@ -79,6 +81,11 @@ def _normalize_title(raw: str) -> str:
 
 
 def _parse_authors(author_field: str) -> List[str]:
+    """Return up to 15 ASCII family names from a BibTeX ``author`` field.
+
+    Splits on ``and``; takes the part before the comma in "Family, Given" form
+    and otherwise the whole name, with LaTeX commands and braces removed.
+    """
     if not author_field or not author_field.strip():
         return []
     authors = []
@@ -99,7 +106,8 @@ def _parse_authors(author_field: str) -> List[str]:
 
 
 def _extract_arxiv_id(entry: dict) -> Optional[str]:
-    ap = (entry.get("archiveprefix") or "").strip().lower()
+    """Return the arXiv ID from ``archiveprefix``/``eprint`` or an arxiv.org/abs URL, else None."""
+    ap =(entry.get("archiveprefix") or "").strip().lower()
     eprint = (entry.get("eprint") or "").strip()
     if ap == "arxiv" and eprint:
         return eprint
@@ -111,6 +119,11 @@ def _extract_arxiv_id(entry: dict) -> Optional[str]:
 
 
 def _bib_entries_to_references(bib_path: Path) -> List[Tuple[str, Any]]:
+    """Parse a .bib file into ``(citekey, hallucinator.Reference)`` pairs.
+
+    Entries whose normalized title has fewer than ``MIN_TITLE_WORDS`` words are
+    skipped. Titles are ASCII-folded; DOI and arXiv ID are passed when present.
+    """
     with open(bib_path, encoding="utf-8", errors="replace") as f:
         bib_str = f.read()
     parser = bibtexparser.bparser.BibTexParser(common_strings=True)
@@ -132,6 +145,7 @@ def _bib_entries_to_references(bib_path: Path) -> List[Tuple[str, Any]]:
 
 
 def _dedupe_refs(items: List[Tuple[str, Any]]) -> List[Tuple[str, Any]]:
+    """Keep the first entry for each (title, DOI, arXiv ID) signature, preserving order."""
     seen: set = set()
     out = []
     for key, ref in items:
@@ -144,6 +158,13 @@ def _dedupe_refs(items: List[Tuple[str, Any]]) -> List[Tuple[str, Any]]:
 
 
 def _validate_resilient(keys: List[str], refs: List[Any], console: Optional[Any]) -> List[Any]:
+    """Validate each reference in its own Python subprocess so one crash cannot abort the run.
+
+    Each child runs ``_CHILD_SCRIPT`` with a 90-second timeout. A timeout, a
+    nonzero exit, or empty output yields an ``error`` result. Returns
+    namespaces with ``status``, ``title``, and ``source``, and prints one
+    progress line per reference when ``console`` is given.
+    """
     results = []
     n = len(refs)
     key_w = min(36, max(12, max(len(k) for k in keys) if keys else 12))
@@ -188,6 +209,7 @@ def _validate_resilient(keys: List[str], refs: List[Any], console: Optional[Any]
 
 
 def _load_cache(cache_path: Path) -> Dict[str, dict]:
+    """Load the verification cache JSON, returning {} if it is missing or unreadable."""
     if not cache_path.exists():
         return {}
     try:
@@ -198,6 +220,7 @@ def _load_cache(cache_path: Path) -> Dict[str, dict]:
 
 
 def _save_cache(cache_path: Path, updates: Dict[str, dict]) -> None:
+    """Merge ``updates`` into the on-disk cache and rewrite it, creating parent dirs."""
     existing = _load_cache(cache_path)
     existing.update(updates)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -331,6 +354,7 @@ def run(
         key_w = min(36, max(12, max(len(k) for k in keys) if keys else 12))
 
         def progress(event: Any) -> None:
+            """Print one progress line per validator result event when a console is set."""
             if event.event_type == "result" and console:
                 r = event.result
                 idx = event.index + 1

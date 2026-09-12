@@ -211,9 +211,11 @@ def apply_fixes(paths: Iterable[str]) -> Tuple[int, int]:
 # ─── Internal: tokenization + case classification ────────────────────────────
 
 def _is_single_letter_shape(w: str) -> bool:
+    """Return True for a capital-letter label joined to a lowercase word, such as ``S-curve``."""
     return bool(re.match(r"^[A-Z]-[a-z]", w))
 
 def _is_lowercase_api_dotted(w: str) -> bool:
+    """Return True for a lowercase dotted API name, such as ``torch.compile`` or ``nn.Module``."""
     return bool(re.match(r"^[a-z][a-z]*\.", w))
 
 def _is_proper_whole(w: str) -> bool:
@@ -252,9 +254,11 @@ def _is_proper_generic(w: str) -> bool:
     return False
 
 def _is_wordlike(tok: str) -> bool:
+    """Return True when a token starts with a Latin or Greek letter."""
     return bool(re.match(r"[A-Za-z\u0370-\u03ff]", tok)) and tok != ":"
 
 def _parenthetical_axis(text: str) -> Optional[str]:
+    """Return the D\u00b7A\u00b7M axis named in a trailing ``(Axis)`` parenthetical, else None."""
     m = re.search(r"\(([A-Z][a-z]+)\)\s*$", text)
     return m.group(1) if m and m.group(1) in DAM_AXES else None
 
@@ -297,6 +301,11 @@ def _case_hyphenated(w: str, is_start: bool) -> Optional[str]:
     return sep.join(new_parts)
 
 def _is_legislation_act(words: List[str], idx: int) -> bool:
+    """Return True when the word at ``idx`` follows a legislation acronym context.
+
+    Matches a preceding regulator acronym (AI, EU, GDPR, ...) or two
+    preceding words that are both known acronyms.
+    """
     if idx == 0:
         return False
     prev = words[idx - 1]
@@ -307,13 +316,15 @@ def _is_legislation_act(words: List[str], idx: int) -> bool:
     return False
 
 def _preprocess_math(text: str) -> str:
+    """Replace letter-attached ``$^2$``/``$^3$`` superscripts with Unicode ² and ³."""
     # Normalize "C$^3$"-style LaTeX so the tokenizer treats it as a single word.
     text = re.sub(r"([A-Za-z])\$\^3\$", r"\1³", text)
     text = re.sub(r"([A-Za-z])\$\^2\$", r"\1²", text)
     return text
 
 def _postprocess_math(text: str) -> str:
-    text = text.replace("³", "$^3$").replace("²", "$^2$")
+    """Restore Unicode ³ and ² to ``$^3$`` and ``$^2$`` LaTeX superscripts."""
+    text =text.replace("³", "$^3$").replace("²", "$^2$")
     return text
 
 def _find_clause_start(toks: List[str], start_idx: int) -> Optional[int]:
@@ -341,6 +352,7 @@ def _fix_sentence_case(text: str, paren_axis: Optional[str] = None) -> str:
     # Stash math spans so tokenizer doesn't touch chars inside $...$
     math_spans: List[str] = []
     def stash(m):
+        """Save a ``$...$`` span and return an indexed placeholder for it."""
         math_spans.append(m.group(0))
         return f"\x00MATHSPAN{len(math_spans) - 1}\x00"
     text = re.sub(r"\$[^$]+\$", stash, text)
@@ -499,6 +511,7 @@ class HeadingsCommand:
     """Native ``binder headings`` command group."""
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store the shared config manager and chapter discovery helpers."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
 
@@ -507,6 +520,12 @@ class HeadingsCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        """Parse ``binder headings`` arguments and dispatch to check, dry-run, or apply.
+
+        With no subcommand (or ``help``) prints help and returns True. Returns
+        False on an argparse error (True for ``-h``/``--help``) or when
+        ``check`` finds violations.
+        """
         if args == ["help"]:
             self._print_help()
             return True
@@ -549,6 +568,7 @@ class HeadingsCommand:
     # ------------------------------------------------------------------
 
     def _print_help(self) -> None:
+        """Print the subcommand table, usage examples, and the style-guide reference."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=60)
@@ -569,6 +589,13 @@ class HeadingsCommand:
     # ------------------------------------------------------------------
 
     def _resolve_files(self, path: Optional[str], vol1: bool, vol2: bool) -> List[str]:
+        """Return the sorted ``.qmd`` files to process.
+
+        An existing ``--path`` file or directory wins. Otherwise globs
+        ``books/vol1`` and/or ``books/vol2`` (or all of ``books/``) relative to
+        the current working directory. A ``--path`` that does not exist falls
+        through to the volume globs.
+        """
         if path:
             p = Path(path)
             if p.is_file():
@@ -622,6 +649,7 @@ class HeadingsCommand:
         return False
 
     def _run_dry_run(self, files: List[str]) -> bool:
+        """Print the heading changes ``apply`` would make, grouped by file; always returns True."""
         violations = find_violations(files)
         if not violations:
             console.print("[green]✓ DRY RUN — no changes needed. 0 violations.[/green]")
@@ -644,6 +672,7 @@ class HeadingsCommand:
         return True  # dry-run is informational; always returns success
 
     def _run_apply(self, files: List[str]) -> bool:
+        """Rewrite H3+ heading violations in place, print change counts, and return True."""
         files_changed, total_changes = apply_fixes(files)
         console.print(
             f"[green]APPLIED — changed {total_changes} heading(s) "

@@ -53,6 +53,8 @@ NOTATION_RENDERED_CONTEXT = "U.S. dollars (USD)"
 
 @dataclass(frozen=True)
 class Violation:
+    """One currency-style finding in a source file or rendered HTML page."""
+
     file: str
     line: int
     code: str
@@ -105,6 +107,7 @@ def iter_html_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def _is_allowed_notation_definition(path: Path, line: str) -> bool:
+    """Return True if *line* is the one sanctioned ``USD`` definition in the notation partial."""
     # Match on the trailing "_partials/_notation_body.qmd" rather than the whole
     # path, so the check holds whether it runs from the repository root or from
     # books/.
@@ -114,6 +117,12 @@ def _is_allowed_notation_definition(path: Path, line: str) -> bool:
 
 
 def _audit_file(path: Path) -> list[Violation]:
+    """Return currency violations for one source file.
+
+    Flags each literal ``USD`` outside ``{python}`` cells (except the notation
+    definition line), and, in ``.qmd`` files, any ``prefix=``/``suffix=``
+    string argument containing a dollar sign.
+    """
     violations: list[Violation] = []
     lines = path.read_text(encoding="utf-8").splitlines()
     in_python_cell = False
@@ -182,6 +191,7 @@ class _VisibleTextParser(HTMLParser):
     _SKIP_TAGS = {"script", "style", "code", "pre"}
 
     def __init__(self) -> None:
+        """Initialize depth counters and the ``(line, text)`` chunk lists for prose and math."""
         super().__init__(convert_charrefs=True)
         self._skip_depth = 0
         self._math_depth = 0
@@ -189,6 +199,11 @@ class _VisibleTextParser(HTMLParser):
         self.math_chunks: list[tuple[int, str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Track entry into skipped elements and elements with a ``math`` class.
+
+        Once inside a skipped or math element, every nested start tag deepens
+        the corresponding counter so the matching end tags unwind it.
+        """
         classes = {
             token
             for key, value in attrs
@@ -202,12 +217,14 @@ class _VisibleTextParser(HTMLParser):
             self._skip_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
+        """Unwind the math and skip depth counters by one level each."""
         if self._math_depth:
             self._math_depth -= 1
         if self._skip_depth:
             self._skip_depth -= 1
 
     def handle_data(self, data: str) -> None:
+        """Record non-blank text as a math chunk inside math elements, else as visible prose."""
         if self._math_depth and data.strip():
             self.math_chunks.append((self.getpos()[0], data))
         elif not self._skip_depth and data.strip():
@@ -215,11 +232,13 @@ class _VisibleTextParser(HTMLParser):
 
 
 def _context(text: str, start: int, end: int, *, width: int = 80) -> str:
+    """Return a whitespace-collapsed excerpt around a match, capped at 220 characters."""
     context = text[max(0, start - width) : min(len(text), end + width)]
     return re.sub(r"\s+", " ", context).strip()[:220]
 
 
 def _is_allowed_rendered_notation_usd(path: Path, context: str) -> bool:
+    """Return True for the rendered notation page's own ``U.S. dollars (USD)`` definition."""
     return path.name == "notation.html" and NOTATION_RENDERED_CONTEXT in context
 
 
@@ -312,6 +331,11 @@ def audit(paths: Iterable[Path]) -> list[Violation]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: audit source files (default ``books``) or, with ``--rendered-html``, HTML output.
+
+    Prints violations as text, or as a JSON list with ``--json``.
+    Returns 1 if any violation was found, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, default=[Path("books")])
     parser.add_argument(

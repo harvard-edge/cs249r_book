@@ -65,6 +65,7 @@ class GridTableParser:
     """Parser for grid-style markdown tables."""
 
     def __init__(self, lines: List[str], start_line: int = 0):
+        """Hold the table's raw ``lines``; ``start_line`` offsets the line numbers reported in issues."""
         self.lines = lines
         self.start_line = start_line
         self.issues: List[TableIssue] = []
@@ -903,6 +904,14 @@ def process_file(file_path: Path, mode: str, verbose: bool = False, max_width: O
 
 
 def main():
+    """Check or fix grid tables in the files chosen by ``-f``, ``-d``, or ``--all`` and print a summary.
+
+    Relative paths resolve against the repo root, and ``--all`` scans
+    ``books/core``. With no selection the help is printed and 0 returned.
+    Otherwise returns an ``ExitCode`` value: 3 if the directory to scan is
+    missing, 2 if any table (or file) failed validation, 1 if check mode found
+    formatting issues, else 0.
+    """
     parser = argparse.ArgumentParser(
         description='Production table formatter for MLSysBook',
         formatter_class=argparse.RawDescriptionHelpFormatter,

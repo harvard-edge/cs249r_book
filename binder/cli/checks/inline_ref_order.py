@@ -20,6 +20,12 @@ INLINE = re.compile(r"`\{python\}\s*([A-Za-z_]\w*)(?:\.\w+)*\s*`")
 
 @dataclass
 class InlineOrderIssue:
+    """One inline `{python}` reference whose root name is not yet defined.
+
+    ``line`` is 1-based; ``name`` is the leading identifier of the reference
+    and ``raw`` is the full matched inline span.
+    """
+
     path: Path
     line: int
     name: str
@@ -38,6 +44,7 @@ def check_inline_order(path: Path, text: str) -> List[InlineOrderIssue]:
     cell_spans = [(m.start(), m.end()) for m in CELL.finditer(text)]
 
     def inside_cell(pos: int) -> bool:
+        """Return True if character offset ``pos`` falls inside a Python cell."""
         return any(a <= pos < b for a, b in cell_spans)
 
     defined: set[str] = set()

@@ -124,6 +124,11 @@ HTML_MATH_RENDER_PATTERNS = [
 
 @dataclass
 class ChapterResult:
+    """Ledger record for one chapter's HTML verification run.
+
+    Optional boolean check fields stay None when that check did not run.
+    """
+
     vol: str
     chapter: str
     qmd: str
@@ -143,10 +148,12 @@ class ChapterResult:
 
 
 def _chapter_id(vol: str, ch_path: str) -> str:
+    """Return the ledger key ``<vol>/<chapter short name>``."""
     return f"{vol}/{ch_path.split('/')[-1]}"
 
 
 def _qmd_path(vol: str, ch_path: str) -> Path:
+    """Return the absolute QMD path for a chapter path such as ``training/training``."""
     return REPO_ROOT / "books" / vol / f"{ch_path}.qmd"
 
 
@@ -168,6 +175,12 @@ def _prepare_single_chapter_build(vol: str) -> None:
 
 
 def _build_html(vol: str, ch_path: str) -> tuple[bool, float, str]:
+    """Render one chapter with ``./binder/binder build html``, skipping hygiene and validation.
+
+    Deletes stale chapter HTML first, writes combined stdout and stderr to
+    ``/tmp/render_<vol>_<chapter>.log``, and returns
+    ``(succeeded, elapsed_seconds, log_path)``.
+    """
     name = ch_path.split("/")[-1]
     binder_vol = f"--{vol}"
     binder_ch = f"{vol}/{name}"
@@ -187,11 +200,13 @@ def _build_html(vol: str, ch_path: str) -> tuple[bool, float, str]:
 
 
 def _live_html(vol: str, ch_path: str) -> Path:
+    """Return where the build writes the chapter page, under ``books/_build/html-<vol>/<vol>/``."""
     build_dir = REPO_ROOT / "books/_build" / f"html-{vol}" / vol
     return build_dir / f"{ch_path}.html"
 
 
 def _archive_html(vol: str, ch_path: str, live: Path) -> Path:
+    """Copy the built page to ``books/_build/html-audit/<vol>/<chapter>.html`` and return the copy."""
     name = ch_path.split("/")[-1]
     archive_dir = REPO_ROOT / "books/_build/html-audit" / vol
     archive_dir.mkdir(parents=True, exist_ok=True)
@@ -201,6 +216,11 @@ def _archive_html(vol: str, ch_path: str, live: Path) -> Path:
 
 
 def _audit_spurious(html: Path) -> tuple[bool, list[str]]:
+    """Run ``fmt/audit_html.py`` on the page to find spurious ``.0`` numbers in prose.
+
+    Returns ``(True, [])`` when the script exits 0 and prints ``CLEAN``;
+    otherwise ``False`` with up to 10 non-blank lines of its output.
+    """
     proc = subprocess.run(
         [sys.executable, str(AUDIT_HTML), str(html)],
         capture_output=True,
@@ -213,6 +233,12 @@ def _audit_spurious(html: Path) -> tuple[bool, list[str]]:
 
 
 def _scan_html_errors(html: Path) -> list[str]:
+    """Return the ``HTML_ERROR_PATTERNS`` that match the page's main content text.
+
+    Script, style, pre, and code elements are removed before matching.
+    Returns an empty list, meaning no errors, when BeautifulSoup is not
+    installed or the page has no body.
+    """
     try:
         from bs4 import BeautifulSoup
     except ImportError:
@@ -232,6 +258,12 @@ def _scan_html_errors(html: Path) -> list[str]:
 
 
 def _visible_text(html: Path) -> str:
+    """Return the page's reader-visible main content text, whitespace-collapsed.
+
+    Removes scripts, styles, code, MathJax annotation and assistive markup, and
+    client-rendered math and pseudocode containers. Returns an empty string
+    when BeautifulSoup is not installed or the page has no body.
+    """
     try:
         from bs4 import BeautifulSoup
     except ImportError:
@@ -253,6 +285,11 @@ def _visible_text(html: Path) -> str:
 
 
 def _scan_math_render_artifacts(html: Path) -> list[str]:
+    """Scan visible text for math-rendering artifacts and unresolved cross-references.
+
+    Returns ``"<label>: <context>"`` strings with up to 50 characters of
+    context on each side of the match, capped at 10 hits.
+    """
     text = _visible_text(html)
     if not text:
         return []
@@ -269,6 +306,11 @@ def _scan_math_render_artifacts(html: Path) -> list[str]:
 
 
 def _lego_focal(qmd: Path) -> tuple[bool, str]:
+    """Run ``lego_focal_verify.py`` on the QMD and return ``(ok, message)``.
+
+    Passes on a zero exit with no output, or a zero exit whose output contains
+    ``issues=0``. The message is the last output line.
+    """
     proc = subprocess.run(
         [sys.executable, str(REPO_ROOT / "binder/tools/audit/lego_focal_verify.py"), str(qmd)],
         cwd=REPO_ROOT,
@@ -283,6 +325,12 @@ def _lego_focal(qmd: Path) -> tuple[bool, str]:
 
 
 def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
+    """Execute the chapter's cells and prose previews via ``fmt/audit_prose.py``.
+
+    Runs with ``mlsysim`` on ``PYTHONPATH`` and the Agg matplotlib backend.
+    Returns ``(True, "ok")`` on a zero exit; otherwise ``False`` with the first
+    300 characters of error output, or a timeout message after ``timeout_s``.
+    """
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "mlsysim"), "MPLBACKEND": "Agg"}
     try:
         proc = subprocess.run(
@@ -303,6 +351,7 @@ def _prose_exec(qmd: Path, timeout_s: int = 120) -> tuple[bool, str]:
 
 
 def _registry_scan(qmd: Path) -> tuple[bool, str]:
+    """Run ``book_check_registry_sources.py`` on the QMD; return (exit 0, last 200 chars of output)."""
     proc = subprocess.run(
         [sys.executable, str(REPO_ROOT / "binder/tools/audit/book_check_registry_sources.py"), str(qmd)],
         cwd=REPO_ROOT,
@@ -313,6 +362,16 @@ def _registry_scan(qmd: Path) -> tuple[bool, str]:
 
 
 def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterResult:
+    """Run every check for one chapter and return its ledger record.
+
+    Runs the registry source scan, LEGO focal check, and prose execution, then
+    builds and archives the chapter HTML (or, with ``skip_build``, reuses the
+    archived copy) and scans it for error text, math-rendering artifacts, and
+    spurious ``.0`` numbers. Failure details accumulate in ``notes``. Status is
+    ``skip`` when the QMD is missing, ``pending`` when ``skip_build`` finds no
+    archive, ``fail`` on a build failure, missing output, or any failed check,
+    and ``pass`` otherwise.
+    """
     qmd = _qmd_path(vol, ch_path)
     name = ch_path.split("/")[-1]
     res = ChapterResult(
@@ -397,12 +456,14 @@ def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterR
 
 
 def load_ledger() -> dict:
+    """Load the JSON ledger, or return an empty ledger if the file does not exist."""
     if LEDGER_JSON.is_file():
         return json.loads(LEDGER_JSON.read_text(encoding="utf-8"))
     return {"updated_at": "", "chapters": {}}
 
 
 def save_ledger(ledger: dict) -> None:
+    """Stamp ``updated_at`` on the ledger, write the JSON, and regenerate the Markdown table."""
     LEDGER_JSON.parent.mkdir(parents=True, exist_ok=True)
     ledger["updated_at"] = datetime.now(timezone.utc).isoformat()
     LEDGER_JSON.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
@@ -410,12 +471,14 @@ def save_ledger(ledger: dict) -> None:
 
 
 def _write_markdown_table(ledger: dict) -> None:
+    """Write the ledger to ``LEDGER_MD`` as a status table with pass/fail/pending totals."""
     rows = []
     for key in sorted(ledger.get("chapters", {}).keys()):
         c = ledger["chapters"][key]
         rows.append(c)
 
     def yn(v):
+        """Map True, False, or anything else to a check, cross, or dash cell."""
         if v is True:
             return "✅"
         if v is False:
@@ -461,6 +524,16 @@ def _write_markdown_table(ledger: dict) -> None:
 
 
 def main() -> int:
+    """Command-line entry point.
+
+    ``--list`` prints chapter names and ``--report`` only regenerates the
+    Markdown table. Otherwise verifies the chapters named after ``--vol1`` or
+    ``--vol2``, saving the ledger after each one. ``--all`` with a bare volume
+    flag, or with none, selects every chapter of both volumes; with named
+    chapters it selects every chapter of the flagged volume. Returns 0 when no
+    chapter fails, 1 if any fails, and 2 (after printing help) when nothing is
+    selected; unknown chapter names exit through ``parser.error``.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vol1", nargs="*", metavar="CHAPTER", help="Vol1 chapter(s) by short name")
     parser.add_argument("--vol2", nargs="*", metavar="CHAPTER", help="Vol2 chapter(s) by short name")

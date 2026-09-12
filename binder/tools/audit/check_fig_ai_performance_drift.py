@@ -82,6 +82,15 @@ def label_value(block: str, chip: str) -> float | None:
 
 
 def main() -> int:
+    """Compare each guarded chip's figure label with its registry-derived value.
+
+    Reads `QMD`, isolates the figure block, and prints a per-chip table.
+    A chip fails when it is absent from `Hardware.Cloud`, its label is not
+    found, its value differs from registry value x sparsity factor by more
+    than `TOL`, or its expected unit string is missing from the block.
+    Returns 0 when all chips pass, 1 on any drift. A missing QMD file or
+    figure block raises instead of returning.
+    """
     text = QMD.read_text(encoding="utf-8")
     block = fig_block(text)
 

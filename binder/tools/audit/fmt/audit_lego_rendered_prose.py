@@ -75,11 +75,16 @@ UNIT_SUFFIXES = (
 
 
 def _substitute_line(line: str, ref: str, val: str) -> str:
+    """Replace every inline ``{python} ref`` token in *line* with *val*."""
     token = f"`{{python}} {ref}`"
     return line.replace(token, val)
 
 
 def _substitute_all_refs(line: str, ns: dict) -> str:
+    """Substitute every resolvable inline ref in *line* from namespace *ns*.
+
+    Refs that fail to resolve are left in place as their original token.
+    """
     rendered = line
     for ref in INLINE.findall(line):
         try:
@@ -91,6 +96,15 @@ def _substitute_all_refs(line: str, ns: dict) -> str:
 
 
 def _html_paragraphs(html: Path) -> list[str]:
+    """Split a chapter's rendered HTML into whitespace-collapsed prose blocks.
+
+    Reads ``<main>`` (or ``<body>``) after removing script, style, pre, and code
+    elements, and collects the text of paragraphs, list items, table cells,
+    captions, blockquotes, definition bodies, and h3-h5 headings, plus any
+    callout/notebook/lighthouse element whose text is not already collected.
+    Falls back to the whole narrative as one block when nothing matches, and
+    returns an empty list when the page has neither ``<main>`` nor ``<body>``.
+    """
     soup = BeautifulSoup(html.read_text(encoding="utf-8"), "html.parser")
     main = soup.find("main") or soup.body
     if not main:
@@ -112,6 +126,12 @@ def _html_paragraphs(html: Path) -> list[str]:
 
 
 def _context_windows(text: str, needle: str, *, width: int = 220) -> list[str]:
+    """Return up to three distinct snippets of about *width* chars around *needle*.
+
+    Tries the needle as given, without commas, and normalized; a candidate not
+    present verbatim is searched as the normalized needle in the normalized
+    text. A blank needle returns the first *width* characters of *text*.
+    """
     if not needle.strip():
         return [text[:width]]
     contexts: list[str] = []
@@ -159,6 +179,13 @@ def _context_needles(value: str) -> list[str]:
 
 
 def _find_html_contexts(value: str, paragraphs: list[str]) -> list[str]:
+    """Extract up to three HTML prose snippets surrounding a rendered *value*.
+
+    Only paragraphs that contain the value (plain or math match) are searched,
+    trying the needles from ``_context_needles`` in order and stopping once a
+    snippet has been found. When no paragraph yields one, the paragraphs are
+    joined and searched as a single text.
+    """
     found: list[str] = []
     needles = _context_needles(value)
     for para in paragraphs:
@@ -215,6 +242,14 @@ def _mechanical_issues(
     html_contexts: list[str],
     full_html: str,
 ) -> list[str]:
+    """List mechanical prose defects for one inline ref.
+
+    Flags a literal ``{python}`` anywhere in the chapter narrative, a value
+    absent from the narrative (plain or math match depending on *kind* and a
+    ``$`` in the value), an empty *html_contexts*, and a unit typed in the QMD
+    prose right after a formatter value that already ends in that unit.
+    *qmd_rendered* is accepted but not used. Returns an empty list when clean.
+    """
     issues: list[str] = []
     if "{python}" in full_html:
         issues.append("literal {python} in HTML")
@@ -236,6 +271,15 @@ def _mechanical_issues(
 
 
 def audit_chapter(vol: str, name: str, qmd: Path, html: Path) -> dict:
+    """Audit every inline ``{python}`` ref in one chapter against its HTML.
+
+    Executes the chapter's python cells in a shared namespace, then for each
+    ref outside a cell records the resolved value, the QMD line with all refs
+    substituted, the HTML contexts found, and the mechanical issues. Returns a
+    row dict whose ``status`` is ``NO_QMD``, ``NO_HTML``, ``EXEC_FAIL`` (with
+    ``exec_error``), ``PASS``, ``FAIL``, or ``NO_REFS``; a ref that raises
+    during resolution or checking is recorded as ``RESOLVE_FAIL``.
+    """
     row: dict = {
         "vol": vol,
         "chapter": name,
@@ -348,6 +392,11 @@ def _write_full_markdown(path: Path, report: list[dict]) -> None:
 
 
 def _write_markdown(path: Path, report: list[dict]) -> None:
+    """Write the failure digest: a summary line plus every non-passing ref.
+
+    Only chapters with status ``FAIL``, ``EXEC_FAIL``, or ``NO_HTML`` get a
+    section, and within them only refs whose status is not ``PASS``.
+    """
     lines = [
         "# LEGO rendered prose audit",
         "",
@@ -383,6 +432,14 @@ def _write_markdown(path: Path, report: list[dict]) -> None:
 
 
 def main() -> int:
+    """Run the audit over all chapters (or ``--chapter``) and write reports.
+
+    Writes the JSON report, the markdown failure digest, and one full
+    per-chapter review under ``artifacts/lego_chapter_reports/`` (skipping
+    ``NO_QMD``/``NO_HTML`` chapters); the corpus-wide
+    ``lego_rendered_prose_full.md`` is written only when ``--chapter`` is not
+    given. Returns 1 if any chapter is ``FAIL`` or ``EXEC_FAIL``, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", type=Path, help="Write JSON report")
     parser.add_argument("--markdown", type=Path, help="Write markdown failure digest")

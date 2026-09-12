@@ -37,7 +37,18 @@ def _is_chapter_anchor(block: str) -> bool:
 
 
 def analyze(path: Path) -> dict:
-    content = path.read_text(encoding="utf-8")
+    """Measure how tightly each LEGO class's inline prose references cluster around its cell.
+
+    Returns ``{"path", "skipped": True}`` for files without inline ``{python}``;
+    otherwise the class count, the number of coherent classes, per-class issues,
+    and cross-cell reference totals. A class with no inline references is a
+    ``no_prose_refs`` issue. Unless its cell is marked as a chapter anchor, a
+    class is flagged when other class cells reference it, when its references
+    span more than one H2 section and more than 80 lines, when they span more
+    than 200 lines, or when the first one sits more than 150 lines after the
+    cell. ``cross_cell_violations`` counts references to non-anchor classes.
+    """
+    content =path.read_text(encoding="utf-8")
     if "`{python}" not in content:
         return {"path": str(path), "skipped": True}
 
@@ -82,6 +93,7 @@ def analyze(path: Path) -> dict:
         refs[cls].append(content[: m.start()].count("\n") + 1)
 
     def section_at(line_no: int) -> str:
+        """Return the nearest H2 heading at or above a 1-indexed line, or ``(preamble)``."""
         for idx in range(line_no - 1, -1, -1):
             if H2.match(lines[idx]):
                 return lines[idx].strip()
@@ -125,7 +137,12 @@ def analyze(path: Path) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    """Analyze each QMD path and print a status line per file.
+
+    Directories are searched recursively. Exits 1 if any file has issues or
+    cross-cell violations, else 0.
+    """
+    parser =argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="+", help="QMD files or directories")
     args = parser.parse_args()
 

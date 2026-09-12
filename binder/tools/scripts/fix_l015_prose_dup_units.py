@@ -16,6 +16,7 @@ PROSE_DUP = re.compile(
 
 
 def fix_file(path: Path) -> int:
+    """Drop unit words that repeat a ``*_<unit>_str`` export's unit, writing the file only if something changed; return the count."""
     text = path.read_text(encoding="utf-8")
     new_text, n = PROSE_DUP.subn(r"\1", text)
     if n:
@@ -24,6 +25,7 @@ def fix_file(path: Path) -> int:
 
 
 def main() -> int:
+    """Fix every ``.qmd`` under the repo's ``books/`` and print per-file counts."""
     root = Path(__file__).resolve().parents[3]  / "books"
     grand = 0
     for path in sorted(root.rglob("*.qmd")):

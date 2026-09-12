@@ -13,6 +13,10 @@ from typing import List, Set, Tuple
 
 
 def extract_tikz_blocks(content: str, filepath: str) -> List[Tuple[str, int]]:
+    """Return ``(block_text, start_line)`` for each ``tikzpicture`` environment.
+
+    Lines are 1-based. The ``filepath`` argument is accepted but not used.
+    """
     blocks = []
     lines = content.split('\n')
     in_tikz = False
@@ -36,6 +40,12 @@ def extract_tikz_blocks(content: str, filepath: str) -> List[Tuple[str, int]]:
 
 
 def clean_latex_text(text: str) -> str:
+    """Reduce a LaTeX label to plain words.
+
+    Drops line breaks and font commands, unwraps formatting commands up to
+    three levels deep (sub/superscripts become ``_``/``^``), removes ``$``
+    and any remaining control words, and collapses whitespace.
+    """
     text = text.replace('\\\\', ' ')
     text = re.sub(r'\\(tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge)\s+', ' ', text)
     text = re.sub(r'\\usefont\{[^}]*\}\{[^}]*\}\{[^}]*\}\{[^}]*\}', ' ', text)
@@ -60,6 +70,12 @@ def clean_latex_text(text: str) -> str:
 
 
 def extract_all_curly_brace_text(tikz_content: str) -> List[Tuple[str, str, int]]:
+    """Return ``(raw_text, context_label, offset)`` for visible brace-delimited TikZ text.
+
+    Covers ``\\node{...}``, inline ``node{...}`` in paths, text formatting
+    commands, ``label``/``pin``/``xlabel``/``ylabel`` options, and
+    ``\\legend{...}``. Nested braces are not followed.
+    """
     texts = []
     node_standalone = r'\\node\s*(?:\[[^\]]*\])?\s*(?:\([^)]*\))?\s*(?:at\s*\([^)]*\))?\s*\{([^}]+)\}'
     for match in re.finditer(node_standalone, tikz_content):
@@ -91,6 +107,10 @@ def extract_all_curly_brace_text(tikz_content: str) -> List[Tuple[str, str, int]
 
 
 def extract_text_from_foreach(tikz_content: str) -> List[Tuple[str, str]]:
+    """Return ``(cleaned_text, context)`` for ``/{text}/`` items in ``\\foreach`` lists.
+
+    Items that clean to two characters or fewer, or to numbers only, are dropped.
+    """
     texts = []
     foreach_pattern = r'\\foreach[^{]+in\s*\{([^}]+)\}'
     for match in re.finditer(foreach_pattern, tikz_content, re.DOTALL):
@@ -104,6 +124,14 @@ def extract_text_from_foreach(tikz_content: str) -> List[Tuple[str, str]]:
 
 
 def extract_text_from_tikz(tikz_content: str) -> List[Tuple[str, str]]:
+    """Collect spell-checkable ``(text, context)`` pairs from one TikZ block.
+
+    Sources are brace text, ``\\foreach`` items, ``pics/<name>/`` definitions,
+    ``\\pic{name}`` uses, ``%`` comments, and ``\\def`` macro names (longer
+    than three characters, not all caps, not starting with ``r``). Numeric,
+    very short, and color-spec-like strings are skipped, and results are
+    deduplicated by lowercased text and source kind.
+    """
     texts = []
     seen_texts = set()
 
@@ -162,6 +190,12 @@ def extract_text_from_tikz(tikz_content: str) -> List[Tuple[str, str]]:
 
 
 def check_spelling_with_aspell(text: str) -> List[str]:
+    """Return words aspell flags in *text*, minus a built-in list of TikZ and project terms.
+
+    Runs ``aspell --version`` and then ``aspell list --lang=en`` as
+    subprocesses on every call. Returns an empty list if aspell is
+    unavailable, fails, or raises.
+    """
     ignore_terms = {
         'scalefac', 'picname', 'filllcolor', 'drawcolor', 'linewidth',
         'filllcirclecolor', 'drawcircle', 'bodycolor', 'tiecolor', 'stetcolor',
@@ -204,6 +238,7 @@ def check_spelling_with_aspell(text: str) -> List[str]:
 
 
 def simple_spell_check(text: str) -> List[str]:
+    """Return ``"word (suggest: fix)"`` for each word found in a small built-in typo table."""
     common_typos = {
         'teh': 'the', 'htat': 'that', 'taht': 'that', 'adn': 'and', 'nad': 'and',
         'gatewey': 'gateway', 'poihnts': 'points', 'poitns': 'points',
@@ -222,6 +257,14 @@ def simple_spell_check(text: str) -> List[str]:
 
 
 def check_file(filepath: Path, use_aspell: bool = True) -> List[dict]:
+    """Spell-check the visible text of every TikZ diagram in one file.
+
+    Each extracted text runs through the typo table and, when ``use_aspell``
+    is set, aspell; each source of findings yields its own error dict with
+    keys ``file``, ``line`` (the diagram's start line, not the text's line),
+    ``text``, ``context``, and ``suggestions``. Returns an empty list if the
+    file cannot be read as UTF-8.
+    """
     try:
         content = filepath.read_text(encoding='utf-8')
     except Exception:

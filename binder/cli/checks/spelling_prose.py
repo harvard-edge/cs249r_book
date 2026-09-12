@@ -14,6 +14,11 @@ from typing import List, Set, Tuple
 
 
 def extract_yaml_frontmatter(content: str) -> Tuple[int, int]:
+    """Return the character range of the leading YAML frontmatter.
+
+    The range starts at 0 and ends just past the newline after the closing
+    ``---``. Returns ``(0, 0)`` when the content has no closed frontmatter.
+    """
     if not content.startswith('---'):
         return (0, 0)
     lines = content.split('\n')
@@ -26,6 +31,7 @@ def extract_yaml_frontmatter(content: str) -> Tuple[int, int]:
 
 
 def extract_code_blocks(content: str) -> List[Tuple[int, int]]:
+    """Return character spans of fenced code blocks and ``tikzpicture`` environments."""
     blocks = []
     pattern = r'```.*?```'
     for match in re.finditer(pattern, content, re.DOTALL):
@@ -37,6 +43,7 @@ def extract_code_blocks(content: str) -> List[Tuple[int, int]]:
 
 
 def extract_inline_code(content: str) -> List[Tuple[int, int]]:
+    """Return character spans of single-backtick inline code."""
     spans = []
     pattern = r'`[^`]+?`'
     for match in re.finditer(pattern, content):
@@ -45,6 +52,7 @@ def extract_inline_code(content: str) -> List[Tuple[int, int]]:
 
 
 def extract_math_blocks(content: str) -> List[Tuple[int, int]]:
+    """Return character spans of ``$$...$$`` display math and ``$...$`` inline math."""
     blocks = []
     pattern = r'\$\$.*?\$\$'
     for match in re.finditer(pattern, content, re.DOTALL):
@@ -56,6 +64,12 @@ def extract_math_blocks(content: str) -> List[Tuple[int, int]]:
 
 
 def extract_links_and_urls(content: str) -> List[Tuple[int, int]]:
+    """Return character spans that are link or reference syntax rather than prose.
+
+    Covers Markdown link targets (the link text stays checkable), bracketed
+    citations, ``{#id}`` attributes, ``@prefix-id`` cross-references, and bare
+    HTTP(S) URLs.
+    """
     spans = []
     pattern = r'\[([^\]]+)\]\([^\)]+\)'
     for match in re.finditer(pattern, content):
@@ -72,6 +86,7 @@ def extract_links_and_urls(content: str) -> List[Tuple[int, int]]:
 
 
 def extract_quarto_syntax(content: str) -> List[Tuple[int, int]]:
+    """Return character spans of fenced-div openers (``::: {...}``) and ``{{< ... >}}`` shortcodes."""
     spans = []
     pattern = r':::\s*\{[^\}]+\}'
     for match in re.finditer(pattern, content):
@@ -83,6 +98,7 @@ def extract_quarto_syntax(content: str) -> List[Tuple[int, int]]:
 
 
 def should_exclude_position(pos: int, exclude_ranges: List[Tuple[int, int]]) -> bool:
+    """Return True if character offset ``pos`` falls inside any half-open ``[start, end)`` range."""
     for start, end in exclude_ranges:
         if start <= pos < end:
             return True
@@ -90,6 +106,13 @@ def should_exclude_position(pos: int, exclude_ranges: List[Tuple[int, int]]) -> 
 
 
 def extract_prose_text(content: str) -> List[Tuple[str, int]]:
+    """Split a QMD file into prose segments with their 1-based line numbers.
+
+    All non-prose ranges (frontmatter, code, TikZ, math, links, Quarto syntax)
+    are merged, and each line is broken into the stripped runs of characters
+    outside them. A line whose first character is already inside an excluded
+    range is skipped entirely.
+    """
     exclude_ranges = []
     yaml_start, yaml_end = extract_yaml_frontmatter(content)
     if yaml_end > 0:
@@ -133,6 +156,7 @@ def extract_prose_text(content: str) -> List[Tuple[str, int]]:
 
 
 def clean_prose_text(text: str) -> str:
+    """Strip Markdown emphasis markers and replace punctuation (except ``'`` and ``-``) with spaces."""
     text = re.sub(r'\*\*([^\*]+)\*\*', r'\1', text)
     text = re.sub(r'\*([^\*]+)\*', r'\1', text)
     text = re.sub(r'_([^_]+)_', r'\1', text)
@@ -143,6 +167,11 @@ def clean_prose_text(text: str) -> str:
 
 
 def check_with_aspell(text: str, ignore_terms: Set[str]) -> List[str]:
+    """Return words ``aspell list --lang=en`` flags in *text*, minus ``ignore_terms``.
+
+    Matching against ``ignore_terms`` is case-insensitive. Returns an empty
+    list if aspell is missing, raises, or exits nonzero.
+    """
     try:
         result = subprocess.run(
             ['aspell', 'list', '--lang=en'],
@@ -160,6 +189,17 @@ def check_with_aspell(text: str, ignore_terms: Set[str]) -> List[str]:
 
 
 def check_file(filepath: Path) -> List[dict]:
+    """Spell-check every prose segment of one QMD file with aspell.
+
+    Runs one aspell subprocess per segment against a built-in list of
+    project terms to ignore. Returns an empty list if the file cannot be
+    read as UTF-8.
+
+    Returns:
+        One dict per segment with misspellings, with keys ``file`` (resolved
+        path), ``line``, ``text`` (truncated to 100 characters), and
+        ``misspelled``.
+    """
     ignore_terms = {
         'qmd', 'yml', 'json', 'png', 'jpg', 'svg', 'pdf',
         'tikz', 'quarto', 'pandoc', 'latex', 'tensorflow', 'pytorch',

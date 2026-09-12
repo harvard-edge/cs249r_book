@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Expand abbreviations on first use per chapter per MIT Press style.
+"""Report abbreviations not expanded on first use per chapter per MIT Press style.
 
-For each chapter QMD file, finds the first occurrence of each abbreviation
-in body prose and ensures it's expanded. Subsequent uses stay abbreviated.
+For each QMD file, finds the first occurrence of each abbreviation in body
+prose and reports it when that line does not contain the expansion. Files
+are never modified.
 
 Usage:
     python3 fix_abbreviations.py --check books/vol1/
@@ -186,6 +187,12 @@ def check_file(filepath: Path) -> list[dict]:
 
 
 def main():
+    """Report, for each ``.qmd`` under ``path``, abbreviations whose first prose use lacks the expansion.
+
+    Prints one line per finding and a total. No files are modified; the
+    ``--check`` and ``--dry-run`` flags are accepted but do not change
+    behavior.
+    """
     parser = argparse.ArgumentParser(description="Check/fix abbreviation first-use expansion")
     parser.add_argument("path", type=Path, help="Directory to process")
     parser.add_argument("--check", action="store_true", help="Check only, don't fix")

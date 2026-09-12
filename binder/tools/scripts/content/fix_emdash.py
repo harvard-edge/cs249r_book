@@ -94,6 +94,7 @@ def process_file(filepath: Path, dry_run: bool = False) -> int:
 
 
 def main():
+    """Close up spaced em dashes in one ``.qmd`` file or every ``.qmd`` under a directory; ``--dry-run`` only reports counts."""
     parser = argparse.ArgumentParser(description="Close up spaced em dashes")
     parser.add_argument("path", type=Path, help="Directory or file to process")
     parser.add_argument("--dry-run", action="store_true", help="Preview without applying")

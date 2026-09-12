@@ -27,6 +27,8 @@ ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=")
 
 @dataclass(frozen=True)
 class Violation:
+    """One LEGO structure or unused-export finding in a QMD file."""
+
     file: str
     line: int
     code: str
@@ -159,6 +161,7 @@ def qmd_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def audit_paths(paths: Iterable[Path]) -> list[Violation]:
+    """Audit every QMD file under *paths*, skipping files that cannot be read or decoded."""
     violations: list[Violation] = []
     for path in qmd_files(paths):
         try:
@@ -169,6 +172,7 @@ def audit_paths(paths: Iterable[Path]) -> list[Violation]:
 
 
 def _default_paths() -> list[Path]:
+    """Return ``[books]`` if it exists relative to the working directory, else ``[.]``."""
     base = Path("books")
     if base.exists():
         return [base]
@@ -176,6 +180,10 @@ def _default_paths() -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: audit files or directories and print violations grouped by file.
+
+    Returns 1 if any violation was found, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description="Check for unused LEGO variables.")
     parser.add_argument("files", nargs="*", help="Files or directories to check")
     args = parser.parse_args(argv)

@@ -166,6 +166,7 @@ def get_section_headers_from_ast(content: str) -> list[dict]:
         headers = []
 
         def walk_ast(element):
+            """Recursively append each ``Header`` node's level, id, and plain-text title to ``headers``."""
             if isinstance(element, dict):
                 element_type = element.get('t', '')
 
@@ -523,6 +524,11 @@ def list_sections(chapter: ChapterStructure) -> None:
 
 
 def main():
+    """Split ``--file`` and run one action: list sections, extract them, print a manifest, or print one section.
+
+    ``--extract`` writes files under ``--output-dir``. ``--get-section`` is
+    1-based and exits 1 when the index is out of range.
+    """
     parser = argparse.ArgumentParser(
         description="Split .qmd chapter files into sections for processing"
     )

@@ -521,6 +521,7 @@ def _self_test() -> int:
     state = LineState()  # fresh state — tests are single-line
 
     def _has_match(line: str) -> bool:
+        """Return True if any capitalized concept term in the line survives every skip rule."""
         if _skip_concept_term_line(line, state):
             return False
         spans = _spans_excluding_attributes(line)

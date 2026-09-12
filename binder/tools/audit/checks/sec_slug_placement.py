@@ -315,6 +315,11 @@ def _run_corpus(corpus: str) -> int:
 
 
 def _self_test() -> int:
+    """Run the positive and negative corpora and compare hit counts.
+
+    Prints a pass/fail summary with each mismatching corpus and returns 0
+    when every case matches its expected count, 1 otherwise.
+    """
     failures: list[str] = []
 
     for i, (corpus, expected) in enumerate(_POSITIVE_CASES):

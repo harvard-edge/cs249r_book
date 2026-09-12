@@ -112,6 +112,12 @@ def process_callout_icons():
     return found
 
 def main():
+    """List the icon directory, then make the callout-definition icon's white background transparent.
+
+    Returns early if ``books/shared/assets/images/icons`` is missing. The
+    listing step slices ``Path.iterdir()`` directly, which raises
+    ``TypeError`` as soon as the directory has a subdirectory.
+    """
     print("🎨 Removing white background from callout-definition icon...")
 
     # First, let's find where the icons are located

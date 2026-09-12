@@ -313,6 +313,11 @@ def process_file(filepath: Path, check_only: bool = False) -> int:
 
 
 def main():
+    """Check or prettify pipe tables in the given ``.qmd``/``.md`` files and directories (searched recursively).
+
+    Prints help and returns 0 when no path is given. Returns 1 in
+    ``--check`` mode when any table needs formatting, otherwise 0.
+    """
     import argparse
     
     parser = argparse.ArgumentParser(

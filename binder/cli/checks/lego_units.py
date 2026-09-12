@@ -15,6 +15,8 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class LintIssue:
+    """One unit-discipline finding; ``severity`` is ``"warning"`` or ``"error"``."""
+
     rule: str
     file: str
     line: int
@@ -84,6 +86,7 @@ MAG_RATIO_RATE = re.compile(
 
 
 def _scan_python_blocks(text: str) -> list[tuple[int, str]]:
+    """Return ``(fence_line, body)`` for each ```` ```{python} ```` block, with 1-based fence lines."""
     blocks: list[tuple[int, str]] = []
     for match in re.finditer(r"```\{python\}(.*?)```", text, re.S):
         start = text[: match.start()].count("\n") + 1
@@ -92,6 +95,16 @@ def _scan_python_blocks(text: str) -> list[tuple[int, str]]:
 
 
 def lint_file(path: Path, root: Path) -> list[LintIssue]:
+    """Apply the LEGO unit rules to one QMD file.
+
+    Line rules (L001-L004, L006-L009, L011, L019) run on each non-comment line
+    of every Python cell; L014 and L016 run on whole cell bodies; L015 scans
+    the full file for prose that repeats a unit after a closed export. Only
+    L019 is reported as an error; the rest are warnings.
+
+    Returns:
+        Issues with ``file`` relative to *root* when possible.
+    """
     path = path.resolve()
     root = root.resolve()
     try:
@@ -192,6 +205,19 @@ def _staged_qmd_paths(root: Path) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for the LEGO unit linter.
+
+    Target selection: explicit paths (resolved against the repository root);
+    otherwise git-staged ``.qmd`` files when ``--staged-only`` is set or
+    ``PRE_COMMIT=1``; otherwise every ``.qmd`` under ``books/``.
+    ``--write-baseline`` writes all warning-severity issues to a JSON file and
+    returns 0. Otherwise issues matching a ``--baseline`` entry (by rule,
+    file, and message) are ignored, and the rest fail if they are errors or
+    if ``--fail-on warning`` is set.
+
+    Returns:
+        1 if any failing issue remains, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description="Lint LEGO unit discipline in QMD files.")
     parser.add_argument("paths", nargs="*", help="QMD files or directories")
     parser.add_argument("--fail-on", choices=("error", "warning"), default="error")

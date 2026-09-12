@@ -60,6 +60,14 @@ def _skip_rendered_violation(issue) -> bool:
 
 
 def audit_html(file_path: Path) -> list[dict[str, str]]:
+    """Return rendered-HTML issues as ``{"value", "context"}`` dicts.
+
+    Combines the currency/math violations from
+    ``currency_style.audit_rendered_file`` (``value`` holds the violation code;
+    raw-LaTeX hits inside algorithm blocks are skipped) with spurious ``*.0``
+    numbers found in the ``<main>`` (or ``<body>``) text after removing script,
+    style, pre, code, cell-code, appendix, and figure elements.
+    """
     issues = [
         {
             "value": issue.code,
@@ -88,6 +96,10 @@ def audit_html(file_path: Path) -> list[dict[str, str]]:
 
 
 def main() -> int:
+    """Audit one HTML file; print ``CLEAN`` and return 0, or print findings and return 1.
+
+    Also returns 1 when the file does not exist.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("html", type=Path, help="Rendered chapter .html file")
     args = parser.parse_args()

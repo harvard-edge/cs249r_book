@@ -134,6 +134,7 @@ _FMT_UNITS: dict[str, frozenset[str]] = {
 
 
 def _name_suffix_units(name: str) -> frozenset[str]:
+    """Return the unit tokens implied by an export name's unit suffix (e.g. ``_gb_str``), or an empty set."""
     m = re.search(
         r"_(w|kw|mw|j|mj|wh|kwh|mwh|gwh|gb|tb|gib|ms|s|kg|gbps|m|km|mm2|cm2|m2|w_per_cm2|tflop|tonnes?|tonne)_str$",
         name,
@@ -175,6 +176,11 @@ def _closed_units_from_code(code: str, cls: str) -> dict[str, frozenset[str]]:
 
 
 def _closed_map_from_cells(lines: list[str]) -> dict[str, frozenset[str]]:
+    """Build the ``Class.export_str`` to carried-unit map from every Python cell in a file.
+
+    Each cell is attributed to the first class it defines; cells without a
+    class are ignored.
+    """
     out: dict[str, frozenset[str]] = {}
     in_cell = False
     buf: list[str] = []
@@ -196,6 +202,7 @@ def _closed_map_from_cells(lines: list[str]) -> dict[str, frozenset[str]]:
 
 
 def _normalize_unit(token: str) -> str:
+    """Lowercase a prose unit token and fold equivalent spellings (``USD``/``$``, ``%``/percent, ``×``/x, FLOPs/FLOP)."""
     t = token.strip().lower()
     if t in {"$", "usd"}:
         return "$"
@@ -211,6 +218,12 @@ def _normalize_unit(token: str) -> str:
 
 
 def _unit_duplicates_closed(token: str, closed_units: frozenset[str]) -> bool:
+    """Return True if a prose unit token repeats a unit the closed export already carries.
+
+    Matches when the normalized token equals, contains, or is contained in a
+    carried unit, or, for tokens of four characters or fewer, shares a
+    suffix with one. An empty ``closed_units`` never matches.
+    """
     if not closed_units:
         return False
     norm = _normalize_unit(token)
@@ -226,6 +239,11 @@ def _unit_duplicates_closed(token: str, closed_units: frozenset[str]) -> bool:
 
 
 def _line_hits(line: str, closed_map: dict[str, frozenset[str]]) -> list[str]:
+    """Return a message for each closed ``_str`` ref on a prose line that is followed by a duplicate unit.
+
+    Lines containing ``<!-- lego-ok`` are skipped, and a ``$`` that is
+    evidently a math delimiter is not treated as currency.
+    """
     if "<!-- lego-ok" in line:
         return []
     hits: list[str] = []
@@ -249,6 +267,11 @@ def _line_hits(line: str, closed_map: dict[str, frozenset[str]]) -> list[str]:
 
 
 def check_file(path: Path) -> list[tuple[int, str, list[str]]]:
+    """Return ``(lineno, snippet, messages)`` for prose lines that repeat a closed export's unit.
+
+    Lines inside Python cells and other fenced blocks are skipped; snippets
+    are truncated to 120 characters.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     closed_map = _closed_map_from_cells(lines)
     issues: list[tuple[int, str, list[str]]] = []
@@ -278,6 +301,11 @@ def check_file(path: Path) -> list[tuple[int, str, list[str]]]:
 
 
 def main() -> int:
+    """Check the given QMD files or directories (default: all of ``books/``) and print violations per file.
+
+    Relative paths resolve against the repository root. Returns 1 if any
+    file has a violation, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, help="QMD files (default: all contents)")
     args = parser.parse_args()

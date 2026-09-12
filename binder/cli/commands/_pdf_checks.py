@@ -151,6 +151,8 @@ LOG_STALENESS_TOLERANCE_S = 300.0
 
 @dataclass(frozen=True)
 class PdfIssue:
+    """One finding from a PDF text or build-log scan, aggregated by ``count``."""
+
     code: str
     message: str
     count: int = 1
@@ -161,6 +163,8 @@ class PdfIssue:
 
 @dataclass
 class PdfCheckItem:
+    """One row of the PDF validation checklist (pass, fail, warn, or skipped)."""
+
     check_id: str
     label: str
     passed: bool
@@ -172,6 +176,8 @@ class PdfCheckItem:
 
 @dataclass
 class PdfValidationResult:
+    """Issues and checklist for one volume PDF, plus the margin geometry summary if scanned."""
+
     volume: str
     pdf_path: Path
     issues: list[PdfIssue] = field(default_factory=list)
@@ -180,12 +186,14 @@ class PdfValidationResult:
 
     @property
     def ok(self) -> bool:
+        """True when no error issue exists and every non-warning check passed or was skipped."""
         no_errors = not any(i.severity == "error" for i in self.issues)
         checks_ok = all(c.passed or c.skipped or c.is_warning for c in self.checks)
         return no_errors and checks_ok
 
 
 def default_pdf_path(quarto_dir: Path, volume: str) -> Path:
+    """Return the expected built PDF path, ``<quarto_dir>/_build/pdf-<volume>/<filename>``."""
     return quarto_dir / "_build" / f"pdf-{volume}" / PDF_BY_VOLUME[volume]
 
 
@@ -216,6 +224,7 @@ def default_log_path(quarto_dir: Path, volume: str) -> Path | None:
 
 
 def _pdftotext(pdf_path: Path) -> str:
+    """Return layout-preserving text from ``pdftotext``; raise RuntimeError on nonzero exit."""
     proc = subprocess.run(
         ["pdftotext", "-layout", str(pdf_path), "-"],
         capture_output=True,
@@ -229,6 +238,7 @@ def _pdftotext(pdf_path: Path) -> str:
 
 
 def _x_overlap(a: dict, b: dict) -> float:
+    """Return the horizontal overlap in points between two ``x0``/``x1`` boxes (0 if disjoint)."""
     return max(0.0, min(a["x1"], b["x1"]) - max(a["x0"], b["x0"]))
 
 
@@ -574,6 +584,7 @@ def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
             pass
 
     def _chapter_for_tex_line(line_num: int) -> str:
+        """Return the chapter whose cover image last precedes ``line_num``, or "unknown"."""
         if not chapter_map:
             return "unknown"
         result = chapter_map[0][1]
@@ -869,6 +880,7 @@ def _purpose_chapter_paths(repo_root: Path, volume: str) -> list[Path]:
     config = yaml.safe_load((books / "config" / f"_quarto-pdf-{volume}.yml").read_text())
 
     def paths(entries):
+        """Yield chapter file names from string entries and nested ``file``/``chapters`` dicts."""
         for entry in entries:
             if isinstance(entry, str):
                 yield entry
@@ -921,6 +933,11 @@ def scan_purpose_overflow(
         return [PdfIssue(code="purpose-unverified", message=str(error))]
 
     def find_anchor(words, first, last, *, head=False):
+        """Return the first PDF sheet in ``first..last`` containing an anchor from ``words``.
+
+        Tries the leading (``head``) or trailing 12, 10, 8, 6, then 4 normalized
+        tokens, and returns None when no length matches on any sheet.
+        """
         tokens = words.split()
         for count in (12, 10, 8, 6, 4):
             if len(tokens) < count:
@@ -1155,6 +1172,7 @@ def format_checklist(result: PdfValidationResult) -> str:
 
 
 def format_failure_report(label: str, pdf_path: Path, issues: list[PdfIssue]) -> str:
+    """Format a numbered issue list with fix guidance for a failed post-build validation."""
     lines = [
         f"PDF validation failed for {label}:",
         f"  artifact: {pdf_path}",

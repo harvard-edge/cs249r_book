@@ -123,6 +123,14 @@ def literal_str(node):
 
 
 def classify_suffix(suffix: str):
+    """Map a literal ``suffix=`` string to a semantic kind label.
+
+    Checks run in a fixed order and the first match wins: percent,
+    percentage_point, multiplier, rate_denominator, service_rate, scale_glyph,
+    scale_word, compound_scale, resource_time, op_count, time_compound,
+    unit_rate_or_denominator, count_label, time_unit, and finally the
+    physical_unit fallback.
+    """
     s = suffix
     stripped = s.strip()
     if s in PERCENT_SUFFIXES or s.strip() in {"%", "percent"}:
@@ -167,6 +175,7 @@ def classify_suffix(suffix: str):
 
 
 def get_src(src_segment_fn, node):
+    """Return ``src_segment_fn(node)``, or ``""`` when it is empty or raises."""
     try:
         seg = src_segment_fn(node)
         return seg or ""
@@ -175,12 +184,24 @@ def get_src(src_segment_fn, node):
 
 
 def analyze_cell(cell_src: str, fence_line: int, file_rel: str, records: list):
+    """Record every fmt-family call in one python cell.
+
+    Appends one dict per call to *records* (mutated in place) with the file,
+    file line, function name, literal ``suffix``/``extra_suffix``/``prefix``
+    kwargs, the suffix's semantic kind, the first argument's source (truncated
+    to 80 chars), the percent input form, and the abuse labels detected
+    (``double_wrap``, ``markdownstr_wraps_fmt``, ``percent_via_suffix``,
+    ``pp_via_suffix``, ``multiplier_via_suffix``, ``scale_glyph_on_fmt``,
+    ``nonempty_prefix``). Returns the number of calls found, or 0 when the cell
+    does not parse.
+    """
     try:
         tree = ast.parse(cell_src)
     except SyntaxError:
         return 0  # skip un-parseable cells (rare; inline shell etc.)
 
     def src_of(node):
+        """Return the cell source text for *node*, or ``""``."""
         return ast.get_source_segment(cell_src, node) or ""
 
     # Map child fmt-calls that are arguments of an outer numeric fmt call,
@@ -284,6 +305,12 @@ def analyze_cell(cell_src: str, fence_line: int, file_rel: str, records: list):
 
 
 def main():
+    """Scan every ``.qmd`` under ``--root``, write the call records, and print a summary.
+
+    The full record list is written as JSON to ``--json`` (default
+    ``/tmp/fmt_audit.json``); the Markdown summary tables and the top 15 files
+    by abuse count go to stdout.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="books")
     ap.add_argument("--json", default="/tmp/fmt_audit.json")
@@ -320,6 +347,7 @@ def main():
     Path(args.json).write_text(json.dumps(records, indent=2))
 
     def table(counter, title):
+        """Print a ``###`` heading and the counter's entries, most common first."""
         print(f"\n### {title}")
         for k, v in counter.most_common():
             print(f"  {v:>6}  {k}")

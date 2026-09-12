@@ -1,3 +1,15 @@
+"""Render the book with Quarto, compress the PDF with Ghostscript, and publish to gh-pages.
+
+Run from the Quarto project directory::
+
+    python3 render_compress_publish.py [--no-pdf] [--no-html] [--quality N]
+
+Renders PDF (then compresses it in place) and HTML unless disabled, then
+always runs ``quarto publish --no-render gh-pages``. The ``--publish`` and
+``--no-publish`` flags are parsed but not consulted, ``--compress`` cannot be
+turned off, and ``--quality`` is only printed. Render or compression failures
+exit the process; a failed HTML render or publish raises ``RuntimeError``.
+"""
 import os
 import sys
 import re
@@ -12,6 +24,7 @@ import time
 DEFAULT_COMPRESSION_QUALITY = 60
 
 def compress_image(image_path, quality=DEFAULT_COMPRESSION_QUALITY):
+    """Re-save an image in place with PIL ``optimize`` and ``quality``, printing rather than raising any error."""
     try:
         img = Image.open(image_path)
         img.save(image_path, optimize=True, quality=quality)
@@ -24,7 +37,10 @@ def compress_image(image_path, quality=DEFAULT_COMPRESSION_QUALITY):
 
 def quarto_pdf_render():
     """
-    Install Quarto's TinyTeX and render the book to PDF.
+    Render the book to PDF with ``quarto render --no-clean --to pdf``.
+
+    Exits the process if Quarto fails or no ``Output created: *.pdf`` line
+    appears in its output.
 
     Returns:
         str: Path to the generated PDF file.
@@ -63,7 +79,9 @@ def quarto_pdf_render():
 
 def quarto_render_html():
     """
-    Publish the rendered book using Quarto.
+    Render the book to HTML with ``quarto render --no-clean --to html``.
+
+    Raises ``RuntimeError`` if Quarto fails.
     """
     print("Publishing the rendered book using Quarto")
     try:

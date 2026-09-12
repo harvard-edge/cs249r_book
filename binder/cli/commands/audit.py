@@ -13,10 +13,12 @@ console = Console()
 
 
 def _repo_root() -> Path:
+    """Return the repository root that contains ``binder/``, resolved from this file."""
     return Path(__file__).resolve().parents[3]
 
 
 def _load_module(name: str, path: Path):
+    """Import the Python file *path* as module *name* and register it in ``sys.modules``."""
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
@@ -28,12 +30,18 @@ class AuditCommand:
     """Per-chapter PDF/HTML build audits with ledger tracking."""
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store shared managers and locate the ``binder/tools/audit`` script directory."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
         self.repo_root = _repo_root()
         self.audit_dir = self.repo_root / "binder" / "tools" / "audit"
 
     def run(self, args: list[str]) -> bool:
+        """Dispatch ``chapter-pdf`` or ``chapter-html`` to its audit script.
+
+        No arguments or a help flag prints help and returns True. An unknown
+        target prints an error plus help and returns False.
+        """
         if not args or args[0] in ("-h", "--help", "help"):
             self._print_help()
             return True
@@ -49,6 +57,11 @@ class AuditCommand:
         return False
 
     def _run_chapter_audit(self, module_name: str, args: list[str]) -> bool:
+        """Load an audit script and call its ``main()`` with *args* as ``sys.argv``.
+
+        ``sys.argv`` is restored afterward. Returns True only when ``main()``
+        returns 0, and False when the script file does not exist.
+        """
         script = self.audit_dir / f"{module_name}.py"
         if not script.exists():
             console.print(f"[red]Audit module not found: {script}[/red]")
@@ -62,6 +75,7 @@ class AuditCommand:
             sys.argv = old_argv
 
     def _print_help(self) -> None:
+        """Print the audit targets and usage examples."""
         console.print("[bold cyan]binder audit[/bold cyan] — per-chapter build audits\n")
         console.print("  [green]chapter-pdf[/green]  Build + audit one chapter PDF (ledger under artifacts/)")
         console.print("  [green]chapter-html[/green] Build + audit one chapter HTML (ledger under artifacts/)\n")

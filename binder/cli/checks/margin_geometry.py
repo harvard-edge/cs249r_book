@@ -52,6 +52,12 @@ BODY_FRAME_TOL = 5.0
 
 @dataclass
 class MarginGeometryElement:
+    """A rendered box in PDF sheet coordinates (points).
+
+    ``side`` is ``"left"``, ``"right"``, or ``"body"``; ``kind`` is ``"text"``,
+    ``"image"``, ``"drawing"``, or ``"mixed"`` after merging.
+    """
+
     x0: float
     y0: float
     x1: float
@@ -62,13 +68,20 @@ class MarginGeometryElement:
 
     @property
     def width(self) -> float:
+        """Return the box width in points."""
         return self.x1 - self.x0
 
     @property
     def height(self) -> float:
+        """Return the box height in points."""
         return self.y1 - self.y0
 
     def merge(self, other: "MarginGeometryElement") -> None:
+        """Grow this box in place to cover *other*.
+
+        The kind becomes ``"mixed"`` when the kinds differ, and *other*'s
+        snippet is appended if new, capped at 160 characters.
+        """
         self.x0 = min(self.x0, other.x0)
         self.y0 = min(self.y0, other.y0)
         self.x1 = max(self.x1, other.x1)
@@ -83,6 +96,8 @@ class MarginGeometryElement:
 
 @dataclass(frozen=True)
 class MarginGeometryFinding:
+    """One geometry issue on a 1-based page, with a rounded bounding box and text excerpt."""
+
     page: int
     issue: str
     side: str
@@ -93,6 +108,8 @@ class MarginGeometryFinding:
 
 @dataclass(frozen=True)
 class MarginGeometrySummary:
+    """Result of scanning a PDF: page counts plus every finding."""
+
     pdf_path: Path
     page_count: int
     pages_scanned: int
@@ -100,26 +117,31 @@ class MarginGeometrySummary:
 
     @property
     def counts(self) -> Counter:
+        """Return the number of findings per issue type."""
         return Counter(f.issue for f in self.findings)
 
     @property
     def overlaps(self) -> int:
+        """Return the number of margin ``overlap`` findings."""
         return self.counts.get("overlap", 0)
 
     @property
     def overflow_bottom(self) -> int:
+        """Return margin plus trim bottom overflows (``body-overflow-bottom`` is not included)."""
         return self.counts.get("overflow-bottom", 0) + self.counts.get(
             "trim-overflow-bottom", 0
         )
 
     @property
     def overflow_top(self) -> int:
+        """Return margin plus trim top overflows."""
         return self.counts.get("overflow-top", 0) + self.counts.get(
             "trim-overflow-top", 0
         )
 
     @property
     def overflows(self) -> int:
+        """Return the total of top and bottom overflows."""
         return self.overflow_bottom + self.overflow_top
 
     @property
@@ -133,6 +155,7 @@ class MarginGeometrySummary:
 
 
 def _band_side(x_center: float) -> str | None:
+    """Return ``"right"`` or ``"left"`` if an x center lies in that margin band, else None."""
     if RIGHT_BAND[0] <= x_center <= RIGHT_BAND[1]:
         return "right"
     if LEFT_BAND[0] <= x_center <= LEFT_BAND[1]:
@@ -141,6 +164,7 @@ def _band_side(x_center: float) -> str | None:
 
 
 def _text_from_block(block: dict[str, Any]) -> str:
+    """Join the non-blank span texts of a PyMuPDF text block, capped at 160 characters."""
     parts: list[str] = []
     for line in block.get("lines", []):
         for span in line.get("spans", []):
@@ -151,6 +175,7 @@ def _text_from_block(block: dict[str, Any]) -> str:
 
 
 def _rect_tuple(rect) -> tuple[float, float, float, float]:
+    """Convert a PyMuPDF ``Rect`` to an ``(x0, y0, x1, y1)`` float tuple."""
     return (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
 
 
@@ -159,6 +184,7 @@ def _is_cover_printer_strip_label(
     bbox: tuple[float, float, float, float],
     snippet: str,
 ) -> bool:
+    """Return True for the one- or two-character label below the trim at the outer corner of the first four sheets."""
     return (
         pageno <= 4
         and len(snippet) <= 2
@@ -185,6 +211,11 @@ def _trim_boundary_findings(page, pageno: int) -> list[MarginGeometryFinding]:
         *,
         bottom_only: bool = False,
     ) -> None:
+        """Record a candidate for each trim edge the box crosses beyond tolerance.
+
+        With ``bottom_only`` only the bottom edge is tested. The bottom test
+        also catches boxes lying wholly below the trim.
+        """
         x0, y0, x1, y1 = bbox
         if not bottom_only and y0 < TRIM_TOP - EDGE_TOL and y1 > TRIM_TOP + EDGE_TOL:
             candidates["top"].append((TRIM_TOP - y0, kind, bbox, snippet))
@@ -309,14 +340,17 @@ def _body_frame_findings(page, pageno: int) -> list[MarginGeometryFinding]:
 
 
 def _x_overlap(a: MarginGeometryElement, b: MarginGeometryElement) -> float:
+    """Return horizontal overlap in points (negative when the boxes are apart)."""
     return min(a.x1, b.x1) - max(a.x0, b.x0)
 
 
 def _y_overlap(a: MarginGeometryElement, b: MarginGeometryElement) -> float:
+    """Return vertical overlap in points (negative when the boxes are apart)."""
     return min(a.y1, b.y1) - max(a.y0, b.y0)
 
 
 def _vertical_gap(a: MarginGeometryElement, b: MarginGeometryElement) -> float:
+    """Return the vertical gap between two boxes, or the negated overlap when they intersect vertically."""
     if a.y1 < b.y0:
         return b.y0 - a.y1
     if b.y1 < a.y0:
@@ -329,6 +363,7 @@ def _contains(
     inner: MarginGeometryElement,
     tol: float = 2.0,
 ) -> bool:
+    """Return True if *inner* lies within *outer* expanded by *tol* points on every side."""
     return (
         inner.x0 >= outer.x0 - tol
         and inner.x1 <= outer.x1 + tol
@@ -381,6 +416,13 @@ def _is_body_intrusion(
 
 
 def _raw_margin_boxes(page) -> list[MarginGeometryElement]:
+    """Collect unmerged margin-band candidates on a page.
+
+    Includes text and image blocks and vector drawings whose horizontal center
+    lies in a margin band. Degenerate drawings, drawings taller than 80% of
+    the text frame, and pieces of wide body figures that reach into the band
+    are excluded.
+    """
     out: list[MarginGeometryElement] = []
     body_spanners = _body_spanners(page)
 
@@ -419,6 +461,13 @@ def _mergeable(
     a: MarginGeometryElement,
     b: MarginGeometryElement,
 ) -> bool:
+    """Return True if two same-side margin boxes belong to one logical element.
+
+    Text joins nearby text, graphics join nearby graphics, and text joins a
+    graphic when contained in it, when it is a narrow side label beside it,
+    when the graphic is a thin rule, or when it sits caption-close with
+    enough horizontal overlap.
+    """
     if a.side != b.side:
         return False
 
@@ -451,6 +500,12 @@ def _mergeable(
 
 
 def _cluster(boxes: list[MarginGeometryElement]) -> list[MarginGeometryElement]:
+    """Merge raw margin boxes into logical elements.
+
+    Boxes are first folded top to bottom into the most recent mergeable
+    element on their side, then pairs are merged repeatedly until stable.
+    Returns new elements (inputs are not mutated) sorted by side and top edge.
+    """
     elems: list[MarginGeometryElement] = []
     for side in ("left", "right"):
         side_boxes = sorted((b for b in boxes if b.side == side), key=lambda b: b.y0)
@@ -482,6 +537,13 @@ def _cluster(boxes: list[MarginGeometryElement]) -> list[MarginGeometryElement]:
 
 
 def scan_page(page, pageno: int) -> list[MarginGeometryFinding]:
+    """Return every geometry finding for one PyMuPDF page.
+
+    Combines trim-edge crossings, body text below the main frame, and, for
+    clustered margin elements (cover strip labels excluded), ``overlap``
+    between vertically adjacent elements in the same column plus
+    ``overflow-bottom`` and ``overflow-top`` against the text frame.
+    """
     findings: list[MarginGeometryFinding] = _trim_boundary_findings(page, pageno)
     findings.extend(_body_frame_findings(page, pageno))
     elems = _cluster(_raw_margin_boxes(page))
@@ -559,6 +621,14 @@ def scan_pdf(
     first: int = 1,
     last: int = 0,
 ) -> MarginGeometrySummary:
+    """Scan a rendered PDF's pages for margin and trim geometry problems.
+
+    Pages ``first`` through ``last`` (1-based, inclusive; ``last=0`` means the
+    final page) are scanned, capped at ``limit`` pages when ``limit`` is
+    positive and clamped to the page count. PyMuPDF is imported lazily, so
+    a missing ``fitz`` module or an unopenable file raises; the document is
+    always closed.
+    """
     import fitz  # PyMuPDF
 
     path = Path(pdf_path)

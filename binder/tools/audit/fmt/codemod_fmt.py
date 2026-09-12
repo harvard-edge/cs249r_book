@@ -52,10 +52,12 @@ _TIMES_AFTER = re.compile(r"^\s*(\$\\times\$|\\times|×)")
 
 
 def _const_str(node):
+    """Return the value of a string-constant AST node, else None."""
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
 def _assign_target(node: ast.Assign):
+    """Return the name bound by the first ``Name`` or ``Attribute`` target of an assignment, else None."""
     for tgt in node.targets:
         if isinstance(tgt, ast.Name):
             return tgt.id
@@ -66,6 +68,11 @@ def _assign_target(node: ast.Assign):
 
 @dataclass
 class MultEdit:
+    """A single-line cell rewrite: replace ``old`` with ``new`` on file line ``line`` for export ``var``.
+
+    Despite the name, every rewrite lane (multiplier, percent, scale, unit,
+    time, rate) emits this record.
+    """
     line: int          # 1-based file line of the call
     var: str
     old: str           # exact call source segment
@@ -74,6 +81,10 @@ class MultEdit:
 
 @dataclass
 class QueueItem:
+    """A fmt call that cannot be rewritten mechanically, with the human decision it needs.
+
+    The ``queue`` command serializes these with ``asdict`` into its JSON output.
+    """
     file: str
     line: int
     var: str | None
@@ -92,6 +103,7 @@ _NEEDS_PAREN = (ast.BinOp, ast.BoolOp, ast.Compare, ast.UnaryOp, ast.IfExp, ast.
 
 
 def _is_const_100(node) -> bool:
+    """True if ``node`` is a numeric constant equal to 100 (not a bool)."""
     return isinstance(node, ast.Constant) and node.value == 100 and not isinstance(node.value, bool)
 
 
@@ -374,6 +386,7 @@ def _prescaled_raw(node: ast.AST, scale: str, src: str) -> str | None:
 
 
 def _scale_style_raw(node: ast.AST, scale: str, src: str) -> str | None:
+    """Return raw-count source for a scaled argument, trying division, ``round(x / SCALE)``, ``m_as(<scale>param)``, then a pre-scaled value times the factor."""
     return (
         _division_raw(node, scale, src)
         or _round_divisor_raw(node, scale, src)
@@ -444,6 +457,7 @@ def scan_scale_style(path: Path):
                    for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
 
         def _qualifier(lineno: int) -> str:
+            """Return ``"ClassName."`` for the innermost class enclosing ``lineno`` in this cell, or ``""``."""
             best = None
             for name, s, e in classes:
                 if s <= lineno <= e and (best is None or s > best[1]):
@@ -539,6 +553,7 @@ _UNIT_LITERAL_EXPR = {
 
 
 def _unit_literal_expr(literal: str) -> str | None:
+    """Map a string unit passed to ``m_as`` (such as ``"GB"`` or ``"GB/s"``) to the unit expression for ``fmt_qty``, or None if unknown."""
     if literal in _UNIT_LITERAL_EXPR:
         return _UNIT_LITERAL_EXPR[literal]
     for sep in ("/s", "/second"):
@@ -960,6 +975,7 @@ def scan_file(path: Path, variants: bool = False):
                    for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
 
         def _qualifier(lineno: int) -> str:
+            """Return ``"ClassName."`` for the innermost class enclosing ``lineno`` in this cell, or ``""``."""
             best = None
             for name, s, e in classes:
                 if s <= lineno <= e and (best is None or s > best[1]):
@@ -1092,7 +1108,12 @@ def _patch_prose(text: str, mult_vars: set[str]) -> tuple[str, list[tuple[int, s
 
 
 def _apply_cell_edits(text: str, edits: list[MultEdit]) -> str:
-    lines = text.splitlines()
+    """Replace the first occurrence of each edit's ``old`` on its target line, preserving a trailing newline.
+
+    Edits whose line is out of range or no longer contains ``old`` are skipped
+    silently.
+    """
+    lines =text.splitlines()
     for e in edits:
         idx = e.line - 1
         if 0 <= idx < len(lines) and e.old in lines[idx]:
@@ -1102,6 +1123,11 @@ def _apply_cell_edits(text: str, edits: list[MultEdit]) -> str:
 
 
 def cmd_multiple(args) -> int:
+    """Handle the retired ``multiple`` command: print a retirement notice to stderr and return 2.
+
+    The code after the early return is the old dry-run/``--write``
+    implementation and is unreachable.
+    """
     print(
         "codemod_fmt.py multiple is retired. Design B makes fmt_multiple own "
         "$\\times$ and uses *_mult_str exports.",
@@ -1141,7 +1167,12 @@ def cmd_multiple(args) -> int:
 
 
 def cmd_queue(args) -> int:
-    files = [Path(p) for p in args.qmd]
+    """Handle ``queue``: collect ``scan_file`` queue items for the given ``.qmd`` files plus every ``.qmd`` under --root.
+
+    Prints the item counts by kind and, with --out, writes the summary and all
+    items as JSON. Always returns 0.
+    """
+    files =[Path(p) for p in args.qmd]
     if args.root:
         files += sorted(Path(args.root).rglob("*.qmd"))
     items: list[QueueItem] = []
@@ -1161,6 +1192,7 @@ def cmd_queue(args) -> int:
 
 
 def main() -> int:
+    """Parse the ``multiple``/``queue`` subcommands and return the chosen handler's exit code."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 

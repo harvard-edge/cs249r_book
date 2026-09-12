@@ -288,6 +288,12 @@ def process_directory(directory: str, check_only: bool = False, verbose: bool = 
 
 
 def main():
+    """Check or fix div spacing for the ``-f`` file and/or ``-d`` directory, then print a summary.
+
+    Exits 1 when no path is given or a given path is missing, when
+    ``--check`` finds issues, or when files were modified (the pre-commit
+    convention); otherwise exits 0.
+    """
     parser = argparse.ArgumentParser(
         description="Fix spacing inside Quarto div blocks (callouts) for proper PDF rendering.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
