@@ -872,8 +872,7 @@ def section_results_pointer(w: Workload, records: list[dict[str, Any]]) -> str:
         "and software fingerprint, asset digests, and model lineage for the run "
         "you performed.",
         "",
-        "See [Reading Results](../../guide/results.qmd) for how to interpret "
-        "them.",
+        "See [Reading Results](../../guide/results.qmd) for how to interpret them.",
         "",
     ]
     return "\n".join(lines)
@@ -1129,8 +1128,7 @@ def benchmarks_index(
         upstream = entry.get("upstream") or {}
         href = workload_href(lead.suite, family, depth=1)
         authority = (
-            f"{upstream.get('authority', '')}. "
-            f"{upstream.get('published_baseline', '')}"
+            f"{upstream.get('authority', '')}. {upstream.get('published_baseline', '')}"
         )
         lines.append(
             f"| [`{esc(family)}`]({href}) "

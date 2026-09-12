@@ -78,7 +78,11 @@ class TrainingProgress:
         self.unit = unit
         self.min_interval = float(min_interval_seconds)
         self.stream = stream if stream is not None else sys.stderr
-        self.enabled = os.environ.get("MLPERF_EDU_QUIET", "") not in {"1", "true", "yes"}
+        self.enabled = os.environ.get("MLPERF_EDU_QUIET", "") not in {
+            "1",
+            "true",
+            "yes",
+        }
         self._start = time.perf_counter()
         self._last_emit = 0.0
         self._emitted = False

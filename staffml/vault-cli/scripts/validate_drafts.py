@@ -17,7 +17,7 @@ multi-gate scorecard:
 
 A draft passes when **all** gates return "yes" (or skipped). Output:
 
-  - per-draft scorecard rows in staffml/vault/draft-validation-scorecard.json
+  - per-draft scorecard rows in staffml/vault/_pipeline/draft-validation-scorecard.json
   - stdout summary: pass/fail counts + per-gate failure reasons
 
 Use case: pilot run lands ~30 drafts in the tree; this script tells the
@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_DIR = REPO_ROOT / "staffml" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 EMBEDDINGS_PATH = VAULT_DIR / "embeddings.npz"
-DEFAULT_OUTPUT = VAULT_DIR / "draft-validation-scorecard.json"
+DEFAULT_OUTPUT = VAULT_DIR / "_pipeline" / "draft-validation-scorecard.json"
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 ORIGINALITY_THRESHOLD = 0.92  # cosine; >= this is "too duplicative"

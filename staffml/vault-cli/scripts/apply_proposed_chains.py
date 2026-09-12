@@ -35,7 +35,7 @@ import yaml
 
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
 # AI-pipeline staging artifacts live under _pipeline/ (gitignored).
-# See staffml/CLAUDE.md.
+# See staffml/vault/README.md.
 PIPELINE_DIR = VAULT_DIR / "_pipeline"
 PROPOSED = PIPELINE_DIR / "chains.proposed.json"
 LIVE = VAULT_DIR / "chains.json"

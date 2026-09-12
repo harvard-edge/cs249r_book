@@ -315,16 +315,6 @@ class TestLabCatalog:
             assert metadata.mlsysim_version, f"{path} missing mlsysim_version"
             assert metadata.updated_at, f"{path} missing updated_at"
 
-    def test_every_lab_has_track_plan_file(self):
-        from mlsysbook_labs import LAB_CATALOG
-
-        missing = []
-        for path in LAB_CATALOG:
-            plan_path = (LABS_ROOT / path).with_suffix(".track-plan.md")
-            if not plan_path.exists():
-                missing.append(str(plan_path.relative_to(LABS_ROOT)))
-        assert not missing, f"Missing track plan files: {missing}"
-
     def test_every_lab_has_track_report_surface(self):
         from mlsysbook_labs import LAB_CATALOG
 

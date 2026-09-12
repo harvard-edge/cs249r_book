@@ -39,7 +39,7 @@ VAULT_DIR = REPO_ROOT / "staffml" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 # AI-pipeline staging lives under _pipeline/ (gitignored). The live chain
 # registry is the durable artifact at vault/chains.json.
-# See staffml/CLAUDE.md.
+# See staffml/vault/README.md.
 PIPELINE_DIR = VAULT_DIR / "_pipeline"
 DEFAULT_PRIMARY = VAULT_DIR / "chains.json"
 DEFAULT_SECONDARY = PIPELINE_DIR / "chains.proposed.lenient.json"

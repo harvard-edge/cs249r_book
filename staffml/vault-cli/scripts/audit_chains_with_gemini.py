@@ -72,7 +72,7 @@ VAULT_DIR = REPO_ROOT / "staffml" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 CHAINS_PATH = VAULT_DIR / "chains.json"
 # AI-pipeline staging artifacts live under _pipeline/ (gitignored).
-# See staffml/CLAUDE.md.
+# See staffml/vault/README.md.
 PIPELINE_DIR = VAULT_DIR / "_pipeline"
 GAPS_PRIMARY_PATH = PIPELINE_DIR / "gaps.proposed.json"
 GAPS_LENIENT_PATH = PIPELINE_DIR / "gaps.proposed.lenient.json"

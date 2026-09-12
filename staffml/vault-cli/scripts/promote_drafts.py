@@ -56,7 +56,7 @@ VAULT_DIR = REPO_ROOT / "staffml" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 ID_REGISTRY = VAULT_DIR / "id-registry.yaml"
 # AI-pipeline scorecard lives under _pipeline/ (gitignored).
-# See staffml/CLAUDE.md.
+# See staffml/vault/README.md.
 PIPELINE_DIR = VAULT_DIR / "_pipeline"
 DEFAULT_SCORECARD = PIPELINE_DIR / "draft-validation-scorecard.json"
 

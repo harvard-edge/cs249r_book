@@ -1499,7 +1499,9 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                 # exceptions: transformers' BatchEncoding.__getattr__ raises
                 # AttributeError with no args, so str(exc) is the empty string
                 # and the recorded note said nothing about what broke.
-                "note": f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__,
+                "note": f"{type(exc).__name__}: {exc}"
+                if str(exc)
+                else type(exc).__name__,
                 "experiment_run": {
                     "plan_id": plan["id"],
                     "plan_source_sha256": plan["source_sha256"],
@@ -1512,9 +1514,7 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                     "imported": bool(run.get("baseline_import")),
                 },
             }
-            console.print(
-                f"[red]{run['name']} failed:[/red] {report['note']}"
-            )
+            console.print(f"[red]{run['name']} failed:[/red] {report['note']}")
         finally:
             for key, value in previous.items():
                 if value is None:
