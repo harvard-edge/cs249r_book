@@ -37,7 +37,7 @@ A manipulator may lose sight of a moving fixture just as its tool approaches con
 
 Within the **brain**\index{Brain}, the memory stage in @fig-09-locator connects perception to intent and planning. Its **spatial memory**\index{Spatial memory} carries geometric and physical estimates forward while tracking their uncertainty against task-defined limits. The authority separation established in @sec-nervous gives those limits an operational consequence: once a belief can no longer support a proposed action, downstream execution must be able to withdraw permission to use it.
 
-Extending the proposal-permission architecture from @sec-brain-3-1, this principle governs the division of responsibility between compute tiers in a heterogeneous dual-brain System-on-Chip (SoC)\index{System-on-Chip (SoC)}. The unprivileged application processor (Linux MPU) maintains high-dimensional spatial memory structures and generates candidate trajectory proposals. Because the MPU experiences unpredictable scheduling jitter\index{Jitter!scheduling}, memory bus contention\index{Bus contention}, and inference latency\index{Latency!inference}, it cannot be trusted to self-report temporal freshness. The real-time safety processor (MCU) acts as the permission referee, evaluating every incoming proposal against independent hardware timers and revoking tracking authority the moment an unrefreshed belief breaches task safety margins.
+Extending the proposal-permission architecture from @sec-brain-4-1, this principle governs the division of responsibility between compute tiers in a heterogeneous dual-brain System-on-Chip (SoC)\index{System-on-Chip (SoC)}. The unprivileged application processor (Linux MPU) maintains high-dimensional spatial memory structures and generates candidate trajectory proposals. Because the MPU experiences unpredictable scheduling jitter\index{Jitter!scheduling}, memory bus contention\index{Bus contention}, and inference latency\index{Latency!inference}, it cannot be trusted to self-report temporal freshness. The real-time safety processor (MCU) acts as the permission referee, evaluating every incoming proposal against independent hardware timers and revoking tracking authority the moment an unrefreshed belief breaches task safety margins.
 
 Consider an analytical example of a manipulator tasked with touching a workpiece and regulating contact force against a moving assembly fixture. The fixture drifts relative to the robot base at a bounded velocity of at most $20\text{ mm/s}$. The tooling compliance of $1\text{ mm/N}$ permits an allowable positioning error of $2\text{ mm}$ before generating a $2\text{ N}$ reaction force that overloads the wrist sensor. Dividing the allowable error by the maximum drift velocity yields an operational lifetime of $100\text{ ms}$, calculated as $2\text{ mm} / (20\text{ mm/s}) = 0.100\text{ s}$. For the first $50\text{ ms}$ after the camera captures an image, the physical position of the workpiece remains safely within the tolerance window. At $100\text{ ms}$, the unobserved displacement reaches the outer boundary of the error budget. At $101\text{ ms}$, without a new measurement to constrain the state, the unobserved drift exceeds the mechanical tolerance; relying on the stored coordinate could cause the tool to crash into the fixture rather than softly touch it.
 
@@ -67,7 +67,7 @@ The minimum record fields necessary for a consumer to evaluate a stored state ca
 
 Expressing uncertainty through physical bounds and expansion rates distinguishes a physical AI belief from a probabilistic confidence score. An object detection network might output a class confidence of $0.94$, but a downstream position controller cannot convert a unitless probability into a safe actuator displacement margin (i.e., how far the arm can physically move before risking a collision). A confidence score of $0.94$ provides no information about whether an obstacle boundary is uncertain by $2.0\text{ mm}$ or by $200\text{ mm}$, nor does it indicate how rapidly that boundary moves when occlusion occurs. A physical memory record must express its initial bound $e_0$ and expansion rate $r$ in concrete physical dimensions such as meters, radians, or newtons per second. Furthermore, these rates are valid only within a defined operating envelope, such as a maximum assumed acceleration or a verified contact friction coefficient. If physical operating conditions exceed that envelope, the expansion rate is no longer guaranteed, and the belief record must be treated as invalid.
 
-Extending the proposal-permission architecture from @sec-brain-3-1, when memory hands over a tuple containing value, reference frame, measurement epoch $t_0$, initial bound $e_0$, and growth rate $r$, the consumer executes a deterministic verification step before applying the data to physical control. The consumer possesses an application tolerance $\epsilon_{\text{tol}}$ dictated by the physical task. In a precision insertion operation with a radial clearance of $0.80\text{ mm}$, the controller requires that positional uncertainty remain below $\epsilon_{\text{tol}} = 0.80\text{ mm}$. Upon reading the belief record at current time $t_{\text{now}}$, the consumer calculates the elapsed time $\Delta t = t_{\text{now}} - t_0$, evaluates the present error bound $e(t_{\text{now}}) = e_0 + r \Delta t$, and compares the result directly against $\epsilon_{\text{tol}}$. If $e(t_{\text{now}}) \le \epsilon_{\text{tol}}$, the controller executes the motion. If $e(t_{\text{now}}) > \epsilon_{\text{tol}}$, the belief has expired, and the controller transitions immediately to a safe holding state or an active search routine (such as sweeping a wrist camera to re-acquire the target) without waiting for an external invalidation signal.
+Extending the proposal-permission architecture from @sec-brain-4-1, when memory hands over a tuple containing value, reference frame, measurement epoch $t_0$, initial bound $e_0$, and growth rate $r$, the consumer executes a deterministic verification step before applying the data to physical control. The consumer possesses an application tolerance $\epsilon_{\text{tol}}$ dictated by the physical task. In a precision insertion operation with a radial clearance of $0.80\text{ mm}$, the controller requires that positional uncertainty remain below $\epsilon_{\text{tol}} = 0.80\text{ mm}$. Upon reading the belief record at current time $t_{\text{now}}$, the consumer calculates the elapsed time $\Delta t = t_{\text{now}} - t_0$, evaluates the present error bound $e(t_{\text{now}}) = e_0 + r \Delta t$, and compares the result directly against $\epsilon_{\text{tol}}$. If $e(t_{\text{now}}) \le \epsilon_{\text{tol}}$, the controller executes the motion. If $e(t_{\text{now}}) > \epsilon_{\text{tol}}$, the belief has expired, and the controller transitions immediately to a safe holding state or an active search routine (such as sweeping a wrist camera to re-acquire the target) without waiting for an external invalidation signal.
 
 ::: {#dfn-memory-spatial-belief-contract .callout-definition title="The spatial belief contract"}
 
@@ -106,6 +106,32 @@ When an onboard computer chains together links across a robot arm, it multiplies
 The cost of an expired transform is direct spatial displacement (@fig-frame-staleness-error). Applying the delay-as-distance principle from @sec-body to kinematics, uncompensated latency translates directly into geometric positioning error through the lever arm of the linkages. For the rigorous cross-product derivation of this kinematic error propagation, see @sec-appendix-control.
 
 Consider an analytical example of a manipulator holding a tool point at a distance of $\ell = 0.60\text{ m}$ from its wrist assembly. Suppose the base and wrist rotate at an angular velocity of $\omega = 1.50\text{ rad/s}$ while the arm translates through space at $v = 0.80\text{ m/s}$. If a tracking pipeline publishes a camera-to-tool transform with an uncompensated staleness of $\Delta t = 40\text{ ms} = 0.040\text{ s}$, the translation of the frame drifts by $e_{\text{trans}} = v \cdot \Delta t = (0.80\text{ m/s})(0.040\text{ s}) = 0.032\text{ m} = 3.20\text{ cm}$. Over the same interval, the angular orientation rotates through $\Delta \theta = \omega \cdot \Delta t = (1.50\text{ rad/s})(0.040\text{ s}) = 0.060\text{ rad}$. Through the lever-arm relation $e_{\text{rot}} \approx \ell \Delta \theta$, this angular shift swings the tool point across an arc of $e_{\text{rot}} \approx (0.60\text{ m})(0.060\text{ rad}) = 0.036\text{ m} = 3.60\text{ cm}$. Summing the translational shift and the lever-arm deflection yields a total tool-point positioning error of $e_{\text{tool}} \approx e_{\text{trans}} + \ell \Delta \theta = 3.20\text{ cm} + 3.60\text{ cm} = 6.80\text{ cm}$. In a precision contact task where an end-effector regulates force against a workpiece, a spatial discrepancy of $6.80\text{ cm}$ commands an actuator to drive through solid metal before tactile sensors can register unexpected resistance.
+
+::: {#chk-mem-transform-staleness-lever-arm .callout-checkpoint title="Coordinate transform staleness and lever-arm deflection"}
+An articulated manipulator holds an end-effector tool point at distance $\ell = 0.60\text{ m}$ from its wrist pitch/yaw assembly. During a high-speed precision approach, the robot base and wrist rotate at angular velocity $\omega = 1.50\text{ rad/s}$ while the base translates at $v = 0.80\text{ m/s}$. The vision tracking pipeline publishes camera-to-tool kinematic transforms across a shared-memory IPC buffer, but an unmonitored thread scheduling stall introduces an uncompensated transform latency $\Delta t = 40\text{ ms} = 0.040\text{ s}$.
+
+If downstream motion planning evaluates tool coordinates against a rigid workpiece with task clearance tolerance $\epsilon_{\text{tol}} = \pm 0.50\text{ mm}$:
+
+1. Calculate the translational frame drift $e_{\text{trans}} = v \cdot \Delta t$.
+2. Calculate the angular orientation deflection $\Delta \theta = \omega \cdot \Delta t$ and the resulting lever-arm tool-point displacement $e_{\text{rot}} \approx \ell \cdot \Delta \theta$.
+3. Compute the cumulative tool-point positioning error $e_{\text{tool}} \approx e_{\text{trans}} + e_{\text{rot}}$ and determine by what factor it breaches the task clearance margin.
+
+---
+
+*Solution.*
+
+1. Over the $40\text{ ms}$ staleness window, base translation shifts the tool frame by:
+   $$e_{\text{trans}} = v \cdot \Delta t = (0.80\text{ m/s})(0.040\text{ s}) = 0.032\text{ m} = 32.0\text{ mm}$$
+2. Over the same interval, the angular orientation rotates through:
+   $$\Delta \theta = \omega \cdot \Delta t = (1.50\text{ rad/s})(0.040\text{ s}) = 0.060\text{ rad}$$
+   Amplified by the linkage lever arm $\ell = 0.60\text{ m}$, this angular displacement deflects the tool point across an arc of:
+   $$e_{\text{rot}} \approx \ell \cdot \Delta \theta = (0.60\text{ m})(0.060\text{ rad}) = 0.036\text{ m} = 36.0\text{ mm}$$
+3. Summing translational and rotational components yields cumulative tool positioning error:
+   $$e_{\text{tool}} \approx e_{\text{trans}} + e_{\text{rot}} = 32.0\text{ mm} + 36.0\text{ mm} = 68.0\text{ mm}$$
+   Comparing against the physical task clearance $\epsilon_{\text{tol}} = 0.50\text{ mm}$:
+   $$\text{Breach Factor} = \frac{e_{\text{tool}}}{\epsilon_{\text{tol}}} = \frac{68.0\text{ mm}}{0.50\text{ mm}} = 136\times$$
+   An uncompensated latency of just $40\text{ ms}$ breaches clearance by over two orders of magnitude ($136\times$). Because the transform tree silently evaluates without mathematical error, the controller commands the motor drives to push through solid metal before tactile sensors can detect the collision.
+:::
 
 ::: {#psp-memory-leverage-of-staleness .callout-perspective title="The leverage of staleness"}
 *Transform staleness multiplies through kinematic link lengths; an uncompensated millisecond of lag at the robot base swings the tool center point through centimeters of unobserved deflection.*
@@ -303,6 +329,31 @@ This streaming architecture caps peak KV-cache memory to a deterministic, bounde
 $$\text{Memory}_{\text{KV},\max} = 2 \cdot N_{\text{layers}} \cdot N_{\text{heads}} \cdot d_{\text{head}} \cdot (N_{\text{sink}} + W) \cdot b_{\text{bytes}}$$
 For our 7B-parameter VLA with $N_{\text{sink}} = 4$ and $W = 512$, maximum KV-cache memory is strictly bounded at $258.0\text{ MB}$, converting an open-loop memory leak into a verifiable real-time invariant while reducing attention inference complexity from $\mathcal{O}(L^2)$ to $\mathcal{O}(L \cdot W)$.
 
+::: {#chk-mem-vla-kv-cache-ring-buffer .callout-checkpoint title="VLA model key-value cache memory growth and ring buffer capping"}
+A 7-billion-parameter Vision-Language-Action (VLA) foundation policy ($N_{\text{layers}} = 32$, $N_{\text{heads}} = 32$, $d_{\text{head}} = 128$) executes on an embedded edge SoC with $16\text{ GB}$ of unified LPDDR5 DRAM, where $8\text{ GB}$ is allocated to model weights and $4\text{ GB}$ is reserved for system OS, display, and camera buffers, leaving $M_{\text{avail}} = 4\text{ GB}$ for the attention Key-Value (KV) cache. The model processes streaming multimodal tokens in half precision ($b_{\text{bytes}} = 2\text{ B}$ for `bf16`) at an ingestion rate of $r_{\text{token}} = 100\text{ tokens/s}$ ($20\text{ Hz}$ loop generating multi-view patch tokens, proprioceptive states, and action tokens).
+
+1. Calculate the memory consumed per appended token $\Delta M_{\text{token}} = 2 \cdot N_{\text{layers}} \cdot N_{\text{heads}} \cdot d_{\text{head}} \cdot b_{\text{bytes}}$.
+2. Under unconstrained sequence caching, compute the KV-cache growth rate in MB/s and determine the time $t_{\text{OOM}}$ until the available $4\text{ GB}$ cache budget is exhausted.
+3. The system deploys a streaming ring-buffer attention architecture pinning $N_{\text{sink}} = 4$ initial prompt tokens and cycling a rolling observation window $W = 512$ tokens. Calculate the peak steady-state memory footprint $M_{\text{KV},\max}$ and the resulting memory reduction factor.
+
+---
+
+*Solution.*
+
+1. The KV-cache memory consumed by a single token across all attention layers and heads is:
+   $$\Delta M_{\text{token}} = 2 \times 32 \times 32 \times 128 \times 2\text{ B} = 524{,}288\text{ B} = 512\text{ kB}$$
+2. At an ingestion rate of $r_{\text{token}} = 100\text{ tokens/s}$, unconstrained memory growth rate is:
+   $$\dot{M}_{\text{KV}} = 100 \times 512\text{ kB/s} = 51{,}200\text{ kB/s} = 51.2\text{ MB/s} = 3.072\text{ GB/min}$$
+   The time until the $M_{\text{avail}} = 4\text{ GB} = 4096\text{ MB}$ budget is exhausted is:
+   $$t_{\text{OOM}} = \frac{4096\text{ MB}}{51.2\text{ MB/s}} = 80.0\text{ s} = 1.33\text{ minutes}$$
+   In less than 90 seconds of continuous manipulation, unconstrained caching exhausts unified DRAM, triggering Linux out-of-memory kernel panics.
+3. With streaming ring-buffer attention, total retained sequence length is capped at $L_{\max} = N_{\text{sink}} + W = 4 + 512 = 516\text{ tokens}$. Peak memory footprint is:
+   $$M_{\text{KV},\max} = 516 \times 512\text{ kB} = 264{,}192\text{ kB} \approx 258.0\text{ MB}$$
+   Compared to the $4096\text{ MB}$ ceiling, the ring buffer caps consumption to $<6.5\%$ of budget, providing a memory reduction factor of:
+   $$\text{Reduction Factor} = \frac{4096\text{ MB}}{258.0\text{ MB}} \approx 15.9\times$$
+   This converts an open-loop memory leak into a deterministic $258\text{ MB}$ real-time invariant while bounding attention inference latency from $\mathcal{O}(L^2)$ to $\mathcal{O}(L \cdot W)$.
+:::
+
 ::: {#dfn-memory-vla-kv-cache-ring-buffer .callout-definition title="VLA KV-cache ring buffer"}
 
 ***VLA KV-cache ring buffer***\index{VLA KV-cache ring buffer!definition}\index{KV-cache ring buffer!definition} is an embedded transformer memory architecture that caps autoregressive attention cache allocation to a constant ceiling ($\text{Memory}_{\text{KV},\max} \propto N_{\text{sink}} + W$) by permanently pinning initial prompt tokens ($N_{\text{sink}}$) as attention sinks while cycling continuous sensory and action tokens through a rolling circular FIFO buffer ($W$).
@@ -315,7 +366,7 @@ For our 7B-parameter VLA with $N_{\text{sink}} = 4$ and $W = 512$, maximum KV-ca
 
 A corrupted system architecture fails more destructively when a transform freezes than when it disappears. Known as the **frozen transform trap**\index{Frozen transform trap}, this failure mode occurs when a sensor driver or intermediate transport bridge caches its last computed pose and repeatedly republishes that stale matrix under refreshed message timestamps, allowing every mathematical operation downstream to succeed without error. Matrix multiplications evaluate cleanly, linear algebra libraries raise no exceptions, and tracking filters treat the static values as proof of a stationary physical environment. While the physical robot continues to articulate, the planner calculates goal vectors relative to a phantom coordinate frame pinned to where the arm was located hundreds of milliseconds earlier. Because numerical pipelines cannot distinguish between a stationary object and a halted sensor pipeline, the machine executes open-loop motions with complete mathematical confidence.
 
-The safety of a physical architecture under ISO 10218 and ISO/TS 15066 safety envelopes depends on treating every spatial transform as a decaying belief bounded by an explicit expiration budget. Extending the proposal-permission architecture from @sec-brain-3-1, a transform without an epoch is an unverified assertion, and a transform whose age exceeds task tolerance must be discarded before it commands motor drivers beyond authorized force limits. When direct geometric observations become unavailable, the machine cannot simply halt every operation at the first missed sensor frame. Extending action across brief sensing gaps requires estimators that propagate physical belief forward until new measurements arrive to confirm or correct the state.
+The safety of a physical architecture under ISO 10218 and ISO/TS 15066 safety envelopes depends on treating every spatial transform as a decaying belief bounded by an explicit expiration budget. Extending the proposal-permission architecture from @sec-brain-4-1, a transform without an epoch is an unverified assertion, and a transform whose age exceeds task tolerance must be discarded before it commands motor drivers beyond authorized force limits. When direct geometric observations become unavailable, the machine cannot simply halt every operation at the first missed sensor frame. Extending action across brief sensing gaps requires estimators that propagate physical belief forward until new measurements arrive to confirm or correct the state.
 
 ## Belief Through Occlusion {#sec-memory-9-5}
 
@@ -354,6 +405,33 @@ This closed-form derivation exposes the three distinct physical mechanisms gover
 As an analytical example (a bench realization will depend on specific motor thermal curves and bearing preload), consider an articulated arm holding a tool tip where the operation requires positioning error to remain below $E_{\max} = 1.0\text{ mm}$ (@fig-uncertainty-growth). At the final visual update at $t = 0$, the estimator reports an initial 3-sigma position envelope of $E(0) = 0.1\text{ mm}$ and a velocity uncertainty $\sigma_v = 4.0\text{ mm/s}$. Unmodeled joint friction and transmission backlash inject an unmeasured acceleration disturbance bounded by $a_{\mathrm{dist}} = 50\text{ mm/s}^2$. The validated position error envelope expands over time according to the kinematic growth bound
 $$E(t) = E(0) + 3\sigma_v t + \frac{1}{2} a_{\mathrm{dist}} t^2$$
 Evaluating this expression with the stated parameters yields $E(t) = 0.1 + 12.0 t + 25.0 t^2$, with $t$ in seconds and $E(t)$ in millimeters. Setting $E(t) = E_{\max} = 1.0\text{ mm}$ gives the quadratic equation $25.0 t^2 + 12.0 t - 0.9 = 0$. The single positive real root gives $t = 0.066\text{ s}$, establishing that the unobserved propagation window cannot exceed $66\text{ ms}$ before the tool envelope breaches the task clearance.
+
+::: {#chk-mem-occlusion-invalidation-horizon .callout-checkpoint title="Occlusion covariance expansion and dynamic invalidation horizon"}
+An articulated arm descends toward an assembly fixture to perform a close-tolerance peg insertion requiring lateral positioning error to remain strictly below $E_{\max} = 1.00\text{ mm}$. At the final visual update ($t = 0$), the vision pipeline latches an initial 3-sigma error envelope $E(0) = 0.10\text{ mm}$ and velocity uncertainty $\sigma_v = 4.0\text{ mm/s}$. Gripper fingers then occlude the camera line of sight. Unmodeled joint friction and transmission backlash inject an unmeasured disturbance acceleration bounded by $a_{\text{dist}} = 50.0\text{ mm/s}^2$. The validated position error envelope follows the kinematic expansion:
+$$E(t) = E(0) + 3\sigma_v t + \frac{1}{2} a_{\text{dist}} t^2$$
+
+1. Calculate the belief state invalidation horizon $t_{\text{exp}} = \inf \{ t \ge 0 : E(t) \ge E_{\max} \}$ for the nominal clearance $E_{\max} = 1.00\text{ mm}$.
+2. If the task is upgraded to a precision micro-clearance bore with $E_{\max} = 0.30\text{ mm}$, calculate the new invalidation horizon.
+3. Compare the true horizon for $E_{\max} = 1.00\text{ mm}$ against a naive constant-velocity predictor that ignores disturbance acceleration ($a_{\text{dist}} = 0$). Explain the physical hazard of understating disturbance dynamics.
+
+---
+
+*Solution.*
+
+1. Substituting nominal parameters into the expansion envelope with $E(t) = 1.00\text{ mm}$:
+   $$0.10 + 12.0 t + 25.0 t^2 = 1.00 \implies 25.0 t^2 + 12.0 t - 0.90 = 0$$
+   Applying the quadratic formula:
+   $$t = \frac{-12.0 + \sqrt{12.0^2 - 4(25.0)(-0.90)}}{2(25.0)} = \frac{-12.0 + \sqrt{144.0 + 90.0}}{50.0} = \frac{-12.0 + \sqrt{234.0}}{50.0} \approx \frac{-12.0 + 15.297}{50.0} = 0.0659\text{ s} \approx 66\text{ ms}$$
+2. For the micro-clearance bore ($E_{\max} = 0.30\text{ mm}$):
+   $$25.0 t^2 + 12.0 t - 0.20 = 0$$
+   $$t = \frac{-12.0 + \sqrt{144.0 + 4(25.0)(0.20)}}{50.0} = \frac{-12.0 + \sqrt{144.0 + 20.0}}{50.0} = \frac{-12.0 + 12.806}{50.0} = 0.0161\text{ s} \approx 16.1\text{ ms}$$
+   Tightening mechanical tolerance by $3.3\times$ shrinks allowable unobserved duration by $4.1\times$, requiring sensor re-acquisition or compliant impedance holding within two $100\text{ Hz}$ control frames.
+3. If the estimator assumes constant velocity ($a_{\text{dist}} = 0$):
+   $$E_{\text{linear}}(t) = 0.10 + 12.0 t = 1.00 \implies 12.0 t = 0.90 \implies t_{\text{linear}} = \frac{0.90}{12.0} = 0.075\text{ s} = 75\text{ ms}$$
+   The naive linear predictor claims a $75\text{ ms}$ valid horizon, underestimating physical divergence. At $t = 75\text{ ms}$, true physical error is:
+   $$E(0.075) = 0.10 + 12.0(0.075) + 25.0(0.075)^2 = 0.10 + 0.90 + 0.141 = 1.141\text{ mm}$$
+   This exceeds the $1.00\text{ mm}$ clearance by $14.1\%$. The robot continues open-loop descent for $9\text{ ms}$ past true expiration, driving the tool shoulder into the fixture while the estimator falsely reports a valid state.
+:::
 
 An estimator's internal **covariance matrix**\index{Covariance matrix} is a product of its own mathematical assumptions, not a direct measurement of physical divergence. Filter tuning parameters are frequently softened in production software to smooth commanded trajectories or prevent filter divergence, causing theoretical filter covariance to underestimate actual tracking drift. A defensible decay rate must be established by measuring empirical prediction error over staged sensor dropout intervals during hardware characterization. By systematically suppressing sensor frames for controlled durations from $10\text{ ms}$ to $500\text{ ms}$ while recording ground truth with an external laser tracker or rigid optical cage, the engineer collects an empirical distribution of prediction residuals. Because system safety depends on worst-case deviations rather than average tracking, the error envelope $E(t)$ must be fitted to the $P_{99}$ or $P_{99.9}$ empirical error tail across thousands of dropout trials rather than the theoretical filter covariance.
 
@@ -424,7 +502,7 @@ When sensor updates drop out, an estimator relies entirely on its predictive for
 **Systems lesson**: Spatial memory cannot treat static visual appearance as a permanent guarantee of physical traversability. When terramechanical interaction (subsurface sinkage, friction collapse) violates the assumptions in the spatial state estimator, the machine accumulates massive unobservable drift. Systems architectures must treat terrain belief as an expiring hypothesis that requires continuous multimodal re-validation, revoking traversal authority the instant kinematic slip crosses task margins.
 :::
 
-Preventing stale, misattributed, and unbounded estimates from compromising the physical machine requires formal structure at the boundary between estimation and control. An ad hoc dictionary of floating-point values and raw transformation matrices cannot distinguish between active evidence and cached momentum. Extending the proposal-permission architecture from @sec-brain-3-1, every element of spatial memory must reside within an explicit state record that couples the numerical value to its base coordinate frame, its sensor provenance, its decay envelope, and a hard invalidation deadline that forces downstream consumers to act on physical truth rather than numerical habit.
+Preventing stale, misattributed, and unbounded estimates from compromising the physical machine requires formal structure at the boundary between estimation and control. An ad hoc dictionary of floating-point values and raw transformation matrices cannot distinguish between active evidence and cached momentum. Extending the proposal-permission architecture from @sec-brain-4-1, every element of spatial memory must reside within an explicit state record that couples the numerical value to its base coordinate frame, its sensor provenance, its decay envelope, and a hard invalidation deadline that forces downstream consumers to act on physical truth rather than numerical habit.
 
 ## The Spatial State Schema {#sec-memory-9-9}
 

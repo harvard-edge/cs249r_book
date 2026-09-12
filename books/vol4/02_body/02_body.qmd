@@ -297,9 +297,13 @@ Because kinetic energy scales with the square of speed ($\frac{1}{2} J \dot{\the
 
 $$J_{\text{ref}} = N^2 J_{\text{rotor}}$$
 
-This **reflected rotor inertia**\index{Reflected rotor inertia!definition} means that in a $100:1$ transmission, a tiny $50\text{ gram}$ motor rotor acts at the joint as if it has the inertia of a $500\text{ kg}$ flywheel [@lynch2017modern].
+This **reflected rotor inertia**\index{Reflected rotor inertia!definition} means that in a $100:1$ transmission, a tiny $50\text{ g}$ motor rotor ($J_{\text{rotor}} \approx 5.6 \times 10^{-6}\text{ kg}\cdot\text{m}^2$) acts at the joint as if it has an inertia of $J_{\text{ref}} = 100^2 \times J_{\text{rotor}} = 0.056\text{ kg}\cdot\text{m}^2$—equivalent to the rotational inertia of an $11.2\text{ kg}$ solid steel flywheel with a $10\text{ cm}$ radius [@lynch2017modern].
 
-This quadratic scaling creates a hard physical boundary for machine learning policies. Neural policies trained in physics simulators (such as Isaac Gym or MuJoCo) frequently output piecewise-constant action setpoints at discrete control intervals ($20\text{ Hz}$ to $50\text{ Hz}$). Across timestep boundaries, commanded velocity jumps discontinuously, producing near-infinite requested acceleration ($\ddot{q} \to \infty$). In an actuator with a high gear reduction ratio (such as $N = 50$ to $100$, typical in strain wave gears and multi-stage planetary gearboxes), $N^2$ amplifies the rotor's inertia by a factor of $2500\times$ to $10{,}000\times$. Purely to accelerate the spinning rotor, the motor demands a massive current surge. This demand instantly drives the inverter into its current ceiling $I_{\max}$ and saturates phase voltage against back-electromotive force.
+The combined equation of motion for a geared joint driving load inertia $J_{\text{load}}$ with motor torque $\tau_{\text{motor}}$ is:
+$$ \ddot{q} = \frac{N \tau_{\text{motor}}}{J_{\text{load}} + N^2 J_{\text{rotor}}} $$
+Differentiating with respect to gear ratio $N$ reveals that peak joint acceleration occurs at the **inertia matching ratio**:
+$$ N^* = \sqrt{\frac{J_{\text{load}}}{J_{\text{rotor}}}} $$
+When $N < N^*$, joint acceleration is torque-limited. When $N > N^*$, counter-intuitively, increasing the gear ratio *decreases* delivered joint acceleration, because the motor spends the majority of its electromagnetic torque accelerating its own spinning rotor rather than moving the robot's physical link.
 
 Because the actuator cannot instantly deliver the massive torque needed to spin up this amplified inertia, the reflected inertia acts as a dynamic mechanical low-pass filter—smearing the software's sharp, instantaneous command into a sluggish, delayed physical response. This delivered output motion severely lags behind the policy's candidate setpoint, injecting unmodeled phase lag that erodes feedback stability, excites structural resonance, and spikes mechanical stress across the gear teeth. Motion-profile filtering (such as quintic polynomial splines or S-curve rate limiters) must be enforced by the real-time microcontroller to guarantee that requested joint acceleration $\ddot{q}$ remains within the current and voltage envelopes of the hardware [@lynch2017modern].
 
@@ -335,14 +339,31 @@ Rather than acting like an immovable steel bar, the physical joint behaves like 
 
 Selecting an appropriate mechanical transmission architecture establishes the fundamental systems trade-offs between continuous torque density and backdrivability, as summarized in @tbl-02-mechanical-drives.
 
-| Transmission Archetype                       | Gear Ratio ($N$)                  | Reflected Inertia ($N^2$)                | Implication for Physical AI Policies                                                                                                        |
-|:---------------------------------------------|:----------------------------------|:-----------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------|
-| **Direct Drive (No Gearing)**                | $1:1$ ($N = 1$)                   | $N^2 = 1$ (Minimal)                      | Transparently backdrivable; absorbs impact shocks; limited continuous torque density ($\sim 2\text{--}5\text{ N}\cdot\text{m/kg}$).         |
-| **Quasi-Direct Drive (QDD)**                 | $3:1\text{--}10:1$ ($N \le 10$)   | $N^2 \le 100$ (Low)                      | High backdrivability; enables proprioceptive torque sensing via motor current; high impact tolerance for dynamic quadrupeds and arms.       |
-| **High-Ratio Geared (Planetary / Harmonic)** | $30:1\text{--}160:1$ ($N \ge 30$) | $N^2 \ge 900\text{--}25{,}000$ (Extreme) | High torque density for heavy payloads; non-backdrivable; high-frequency policy chatter causes inverter current saturation and tooth shear. |
-| **Open-Loop Stepper Motor**                  | $1:1$ (High pole count)           | $N^2 = 1$                                | High static holding torque at zero speed; silent state loss ("lost steps") when commanded acceleration exceeds magnetic pull-out torque.    |
+| Transmission Archetype           | Gear Ratio ($N$)                  | Reflected Inertia ($N^2$)                 | Implication for Physical AI Policies                                                                                                       |
+|:---------------------------------|:----------------------------------|:------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|
+| **Direct Drive (No Gearing)**    | $1:1$ ($N = 1$)                   | $N^2 = 1$ (Minimal)                       | Transparently backdrivable; absorbs impact shocks; limited continuous torque density ($\sim 2\text{--}5\text{ N}\cdot\text{m/kg}$).        |
+| **Quasi-Direct Drive (QDD)**     | $3:1\text{--}10:1$ ($N \le 10$)   | $N^2 \le 100$ (Low)                       | High backdrivability; enables proprioceptive torque sensing via motor current; high impact tolerance for dynamic quadrupeds and arms.      |
+| **Cycloidal Drive (RV Reducer)** | $30:1\text{--}100:1$ ($N \ge 30$) | $N^2 \ge 900\text{--}10{,}000$ (High)     | Exceptional shock-load tolerance ($3\text{--}5\times$ peak rating via multi-pin contact); minimal backlash; moderate backdrivability.      |
+| **Strain Wave (Harmonic Drive)** | $50:1\text{--}160:1$ ($N \ge 50$) | $N^2 \ge 2500\text{--}25{,}600$ (Extreme) | Zero initial backlash; compact co-axial form factor; low torsional stiffness ($k_s$); fragile under sudden tooth shear impact.             |
+| **Planetary / Roller Screw**     | $N_{\text{eff}} \ge 50$ (Linear)  | $N^2 \ge 2500$ (Extreme)                  | Transforms rotary to linear motion; massive continuous force density ($>10\text{ kN}$); non-backdrivable; used in humanoid legs and knees. |
+| **Open-Loop Stepper Motor**      | $1:1$ (High pole count)           | $N^2 = 1$                                 | High static holding torque at zero speed; silent state loss ("lost steps") when commanded acceleration exceeds magnetic pull-out torque.   |
 
 : **Comparative Systems Matrix of Actuator Transmission Mechanisms**: Quantitative trade-offs across robotic drive mechanisms, mapping reduction ratio ($N$), reflected rotor inertia scaling ($N^2$), and operational implications for learned control policies. {#tbl-02-mechanical-drives tbl-colwidths="[22,18,20,40]"}
+
+::: {#chk-body-inertia-matching .callout-checkpoint title="Transmission sizing, reflected inertia, and joint acceleration"}
+A bipedal humanoid knee joint must rapidly accelerate a lower-leg link of inertia $J_{\text{load}} = 0.18\text{ kg}\cdot\text{m}^2$. The joint is driven by a brushless frameless motor producing peak torque $\tau_{\text{motor}} = 4.0\text{ N}\cdot\text{m}$ with rotor inertia $J_{\text{rotor}} = 1.2 \times 10^{-4}\text{ kg}\cdot\text{m}^2$.
+
+* **Optimal inertia matching ratio:** The gear ratio that maximizes delivered joint angular acceleration is:
+  $$N^* = \sqrt{\frac{J_{\text{load}}}{J_{\text{rotor}}}} = \sqrt{\frac{0.18}{1.2 \times 10^{-4}}} = \sqrt{1500} \approx 38.7 \approx 39$$
+* **Joint acceleration at $N^* = 39$:**
+  $$J_{\text{ref}} = (39)^2 (1.2 \times 10^{-4}\text{ kg}\cdot\text{m}^2) = 0.1825\text{ kg}\cdot\text{m}^2$$
+  $$\ddot{q}_{\text{opt}} = \frac{N^* \tau_{\text{motor}}}{J_{\text{load}} + J_{\text{ref}}} = \frac{39 \times 4.0\text{ N}\cdot\text{m}}{0.18 + 0.1825\text{ kg}\cdot\text{m}^2} = \frac{156}{0.3625} \approx 430.3\text{ rad/s}^2$$
+* **Acceleration penalty of oversizing to $N = 100$:** An engineer might naively select a $100:1$ harmonic drive to deliver $400\text{ N}\cdot\text{m}$ of gross torque. However, at $N = 100$:
+  $$J_{\text{ref}} = 100^2 \times (1.2 \times 10^{-4}) = 1.20\text{ kg}\cdot\text{m}^2$$
+  $$\ddot{q}_{100} = \frac{100 \times 4.0}{0.18 + 1.20} = \frac{400}{1.38} \approx 289.9\text{ rad/s}^2$$
+  The available joint acceleration plummets by $32.6\%$, despite delivering $2.5\times$ more output torque, because $87.0\%$ of the motor's torque ($1.20 / 1.38$) is wasted accelerating its own spinning rotor.
+* **Systems lesson:** In high-speed, dynamic physical AI (locomotion, agility, catching), higher gear ratios degrade physical responsiveness. Gear ratios must be sized to balance steady-state payload torque against dynamic acceleration bandwidth.
+:::
 
 In [Class 2 machines]{#sec-body-class-2} (articulated robot arms, multi-fingered hands, and contact-rich assembly workcells), the primary physical failure mode is **destructive contact force spikes and drive-train tooth shear**. When a robot makes physical contact with an unmodeled workpiece or rigid environment, the interaction is governed by the non-smooth mechanics of unilateral contact, Coulomb friction cones, and kinematic constraints [@mason2001mechanics]. As Matthew T. Mason formalized in his foundational analysis of manipulation mechanics [@mason2001mechanics], physical interaction cannot be treated as smooth Euclidean regression: contact modes switch discontinuously between sticking, sliding, and separation, and stable grasp maintenance demands satisfying form-closure (wrapping around an object so it physically cannot escape) or force-closure (squeezing hard enough that friction prevents slipping) constraints under friction. If a policy commands tangential shear forces outside the friction cone ($F_{\text{tangential}} > \mu F_{\text{normal}}$), slip occurs instantly; conversely, if an unexpected rigid obstacle of stiffness $k$ is struck, contact force spikes at $F = k \Delta x$.
 
@@ -392,6 +413,28 @@ If a learned policy commands a $3.0\text{ s}$ peak torque burst to brace against
 
 Because thermal accumulation is an integral state with time constants spanning hundreds of seconds, an agent trained in simulation has no intrinsic incentive to preserve winding health. The systems engineer must implement a real-time thermal observer directly on the deterministic microcontroller, tracking estimated coil hotspot temperatures by continually integrating measured phase currents. If the estimated temperature crosses a safety ceiling, the microcontroller dynamically throttles the current limits (derating). If the limit is severely breached, it triggers an emergency thermal shutdown, vetoing the learned policy before dielectric breakdown occurs.
 
+::: {#chk-body-thermal-stall .callout-checkpoint title="Thermal runaway and stall derating under gravity hold"}
+An articulated robot arm elbow must hold a static torque $\tau_{\text{hold}} = 42.5\text{ N}\cdot\text{m}$ to suspend an end-effector tool against gravity at stall ($\omega = 0$). The joint uses a brushless motor ($K_t = 0.10\text{ N}\cdot\text{m/A}$, baseline cold resistance $R_0 = 0.80\ \Omega$ at $T_0 = 20^\circ\text{C}$, thermal resistance $\theta_{JA} = 1.80\text{ K/W}$) coupled through an $N = 50:1$ cycloidal gearbox ($\eta = 0.85$).
+
+* **Stator current required at motor shaft:**
+  $$\tau_{\text{motor}} = \frac{\tau_{\text{hold}}}{\eta N} = \frac{42.5\text{ N}\cdot\text{m}}{0.85 \times 50} = 1.0\text{ N}\cdot\text{m}$$
+  $$I = \frac{\tau_{\text{motor}}}{K_t} = \frac{1.0\text{ N}\cdot\text{m}}{0.10\text{ N}\cdot\text{m/A}} = 10.0\text{ A}$$
+* **Cold power dissipation at $20^\circ\text{C}$:**
+  $$P_0 = I^2 R_0 = (10.0\text{ A})^2 \times 0.80\ \Omega = 80.0\text{ W}$$
+* **Self-amplified steady-state winding temperature:** With copper temperature coefficient $\alpha_{\text{Cu}} = 0.00393\text{ K}^{-1}$ and ambient $T_{\text{amb}} = 40^\circ\text{C}$ in an unventilated limb, the steady-state temperature rise satisfies:
+  $$\Delta T = P(T) \theta_{JA} = I^2 R_0 [1 + \alpha_{\text{Cu}}(T_{\text{amb}} - T_0 + \Delta T)] \theta_{JA}$$
+  $$\Delta T = (80.0\text{ W}) [1 + 0.00393(20 + \Delta T)] (1.80\text{ K/W}) = 144.0 [1.0786 + 0.00393 \Delta T] = 155.32 + 0.5659 \Delta T$$
+  $$\Delta T (1 - 0.5659) = 155.32 \implies \Delta T = \frac{155.32}{0.4341} \approx 357.8\text{ K}$$
+  $$T_{\text{winding}} = T_{\text{amb}} + \Delta T = 40^\circ\text{C} + 357.8^\circ\text{C} = 397.8^\circ\text{C}$$
+  Because $T_{\text{winding}} \gg 155^\circ\text{C}$ (Class F insulation ceiling), the winding will suffer catastrophic dielectric breakdown within minutes.
+* **Maximum sustainable holding torque ($\Delta T_{\max} = 155^\circ\text{C} - 40^\circ\text{C} = 115\text{ K}$):**
+  $$R(155^\circ\text{C}) = 0.80 [1 + 0.00393(155 - 20)] = 0.80 [1 + 0.5306] \approx 1.224\ \Omega$$
+  $$P_{\max} = \frac{\Delta T_{\max}}{\theta_{JA}} = \frac{115\text{ K}}{1.80\text{ K/W}} = 63.89\text{ W}$$
+  $$I_{\max, \text{cont}} = \sqrt{\frac{P_{\max}}{R(155^\circ\text{C})}} = \sqrt{\frac{63.89}{1.224}} \approx 7.22\text{ A}$$
+  $$\tau_{\text{hold, max}} = \eta N K_t I_{\max, \text{cont}} = 0.85 \times 50 \times 0.10 \times 7.22 \approx 30.7\text{ N}\cdot\text{m}$$
+* **Systems lesson:** Continuous stall holding torque must be derated by over $27\%$ relative to cold ratings due to thermal resistance and positive copper feedback. Static poses in physical AI must be held using mechanical brakes or counterweights rather than continuous electromagnetic stall current.
+:::
+
 Delivering the large current pulses that generate these thermal loads simultaneously stresses the upstream electrical supply, transferring the physical burden from thermal dissipation in copper to transient current delivery across the power bus.
 
 ## Power and Electrical Faults {#sec-body-2-6}
@@ -413,6 +456,23 @@ When bus voltage crosses an undervoltage threshold under peak acceleration, the 
 Power removal is an unmanaged state transition rather than an automatic return to safety. Engineers frequently assume that dropping bus power or tripping an undervoltage circuit brings a machine to a safe halt. In physical reality, cutting electrical power leaves an actuator in one of three unpowered states, namely free coasting, phase-short dynamic braking, or spring-engaged mechanical braking. Each state enforces a distinct mechanical behavior. An electromechanical friction brake requires $30\text{ ms}$ to $80\text{ ms}$ for its mechanical spring to overcome magnetic coil decay and engage its friction pads, during which gravity accelerates an overhead arm downward. Phase-short dynamic braking acts like viscous fluid damping, providing resistance proportional to velocity but generating zero holding torque at zero speed. Free coasting simply allows gravity to accelerate unconstrained joints without any resistance. The actual trajectory a machine follows after an electrical cutoff must be measured under full mechanical payload rather than deduced from circuit diagrams. The choice of which safe fallback state the machine should enter belongs to system safety architecture in @sec-enforcement, but the physical dynamics of an unpowered joint are unalterable mechanical constraints of the body.
 
 For the physical AI systems engineer, power integrity is a foundational architectural constraint bridging software planning and electrical physics. Rather than treating power rails as infinite voltage sources, the engineer must enforce coordinated power budgets and current slew-rate limits across compute accelerators and motor drives. The deterministic real-time safety layer must arbitrate simultaneous multi-axis acceleration commands to prevent compound $dI/dt$ transients (rapid, overlapping spikes in current demand), while dynamic brake choppers protect inverter electronics from regenerative feedback during emergency stops. Crucially, because power loss leaves actuators in unpowered physical states governed by gravity and momentum, the engineer must empirically characterize every unpowered fallback trajectory under full mechanical payload, ensuring that electrical trips resolve into controlled, predictable deceleration rather than unguided kinetic collisions. Characterizing these dynamic electrical and mechanical failure boundaries cannot rely on nominal catalog specs or idealized CAD models; it demands disciplined bench measurement.
+
+::: {#chk-body-bus-droop-regen .callout-checkpoint title="DC bus voltage droop and regenerative braking surge"}
+A mobile delivery robot ($m = 80.0\text{ kg}$, traveling at $v_0 = 2.5\text{ m/s}$) operates on a nominal $48.0\text{ V}$ battery bus with wiring harness resistance $R_{\text{bus}} = 70\text{ m}\Omega$, bus parasitic inductance $L_{\text{bus}} = 15\,\mu\text{H}$, and local inverter capacitance $C_{\text{bus}} = 2200\,\mu\text{F}$. The onboard perception computer has an undervoltage lockout (UVLO) threshold of $41.0\text{ V}$, while the motor inverter MOSFETs are rated for $60.0\text{ V}$ maximum breakdown.
+
+* **Transient bus sag under multi-axis acceleration:** When transitioning from rest to high-speed crawl, four hub motors command an aggregate current step of $\Delta I = 60.0\text{ A}$ in $\Delta t = 0.5\text{ ms}$ ($dI/dt = 1.2 \times 10^5\text{ A/s}$):
+  $$\Delta V_{\text{droop}} \approx \Delta I R_{\text{bus}} + L_{\text{bus}} \frac{dI}{dt} + \frac{\Delta I \Delta t}{2 C_{\text{bus}}}$$
+  $$\Delta V_{\text{droop}} = (60.0 \times 0.070) + (15 \times 10^{-6} \times 1.2 \times 10^5) + \frac{60.0 \times 0.5 \times 10^{-3}}{2 \times 2200 \times 10^{-6}} = 4.20\text{ V} + 1.80\text{ V} + 6.82\text{ V} = 12.82\text{ V}$$
+  $$V_{\text{bus, min}} = 48.0\text{ V} - 12.82\text{ V} = 35.18\text{ V}$$
+  Because $35.18\text{ V} < 41.0\text{ V}$, the perception computer trips its UVLO brownout reset, rebooting the brain mid-acceleration.
+* **Regenerative overvoltage surge during emergency braking:** The robot executes an emergency stop, dissipating kinetic energy $E_k = \frac{1}{2} m v_0^2 = \frac{1}{2}(80.0)(2.5)^2 = 250.0\text{ J}$. If the battery BMS disconnects charge input to protect cold lithium cells and $75\%$ of kinetic energy is regenerated ($\eta_{\text{regen}} = 0.75$, $E_{\text{regen}} = 187.5\text{ J}$):
+  $$V_{\text{final}} = \sqrt{V_{\text{initial}}^2 + \frac{2 E_{\text{regen}}}{C_{\text{bus}}}} = \sqrt{48.0^2 + \frac{2 \times 187.5}{2200 \times 10^{-6}}} = \sqrt{2304 + 170{,}454} = \sqrt{172{,}758} \approx 415.6\text{ V}$$
+  This massive overvoltage surge obliterates the $60.0\text{ V}$ inverter MOSFETs within microseconds.
+* **Dynamic brake chopper sizing:** To clamp bus voltage to $V_{\text{clamp}} = 54.0\text{ V}$ during a $\Delta t_{\text{stop}} = 0.3\text{ s}$ emergency stop ($P_{\text{regen, peak}} \approx 2 \times E_{\text{regen}} / \Delta t_{\text{stop}} = 1250\text{ W}$):
+  $$R_{\text{brake}} \le \frac{V_{\text{clamp}}^2}{P_{\text{regen, peak}}} = \frac{54.0^2}{1250\text{ W}} \approx 2.33\ \Omega$$
+  A $2.2\ \Omega$, $1500\text{ W}$ pulse-rated power resistor switched by a dedicated brake chopper MOSFET safely shunts the regenerated energy as heat, preserving silicon survival.
+* **Systems lesson:** In Physical AI, mechanical motion and electrical power are bidirectionally coupled. Acceleration requires capacitive hold-up to prevent brownouts; deceleration requires active dynamic braking to prevent silicon overvoltage destruction.
+:::
 
 ## Measuring a Machine's Own Limits {#sec-body-2-7}
 
