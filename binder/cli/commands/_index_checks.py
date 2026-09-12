@@ -335,3 +335,101 @@ def check_makeindex_encap_conflicts(root: Path) -> list[IndexIssue]:
                 f"Term '{c}' has direct \\index on line {terms[c]} and '|see' index on line {see_terms[c][0]} (causes makeindex error)",
             ))
     return issues
+
+
+def check_bold_definitions(root: Path) -> list[IndexIssue]:
+    """Enforce the Iron Law of Bolding from emphasis-bold.md:
+
+    1. Any \\index{Term!definition} in body prose must be immediately preceded
+       by a bold term (**Term** or ***Term***).
+    2. Any bold term in body prose followed by \\index{} must be a formal
+       definition (!definition) or appendix refresher (!appendix refresher).
+    3. Each \\index{Term!definition} headword must occur at most once per volume.
+
+    Args:
+        root: Target directory or file path to check.
+
+    Returns:
+        List of discovered IndexIssue instances.
+    """
+    target_root = _find_volume_root(root) or root
+    vol_definitions: dict[str, list[tuple[Path, int]]] = {}
+
+    # Pass 1: Collect volume-wide definition sites for uniqueness check
+    for f in _iter_qmd_files(target_root):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        in_code = False
+        for idx, line in enumerate(text.splitlines(), 1):
+            if line.strip().startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code:
+                continue
+            for m in re.finditer(r"\\index\{([^}]+)!definition\}", line):
+                term = m.group(1).split("@")[-1].strip()
+                if term in vol_definitions:
+                    vol_definitions[term].append((f, idx))
+                else:
+                    vol_definitions[term] = [(f, idx)]
+
+    issues: list[IndexIssue] = []
+
+    # Pass 2: Inspect requested files for bold-definition invariants
+    for f in _iter_qmd_files(root):
+        rel = _rel_path(f, root)
+        text = f.read_text(encoding="utf-8", errors="replace")
+        in_code = False
+        for idx, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code or not stripped or stripped.startswith("|") or stripped.startswith("#"):
+                continue
+
+            # Check 1: \index{Term!definition} must be preceded by bold or triple-bold term
+            for m in re.finditer(r"\\index\{([^}]+)!definition\}", line):
+                term = m.group(1)
+                before = line[:m.start()]
+                # Strip preceding chained \index{...} tags and whitespace
+                before = re.sub(r"(?:\s*\\index\{[^}]+\})*\s*$", "", before)
+                has_bold = bool(re.search(r"(?:\*{2,3}[^*]+\*{2,3}|\])\s*$", before))
+                if not has_bold:
+                    issues.append(IndexIssue(
+                        rel, idx, "def_missing_bold",
+                        f"\\index{{{term}!definition}} in body prose not preceded by bold term (**Term** or ***Term***)",
+                    ))
+
+            # Check 2: duplicate formal definition within volume
+            for m in re.finditer(r"\\index\{([^}]+)!definition\}", line):
+                term = m.group(1).split("@")[-1].strip()
+                sites = vol_definitions.get(term, [])
+                if len(sites) > 1 and sites[0] != (f, idx):
+                    first_file = _rel_path(sites[0][0], root)
+                    issues.append(IndexIssue(
+                        rel, idx, "dup_definition",
+                        f"Duplicate formal definition of '{term}' (first defined at {first_file}:{sites[0][1]})",
+                    ))
+
+            # Check 3: bold term with index must have !definition or !appendix refresher
+            # Exclude captions (: **Title**: or fig-cap="..."), footnote definitions ([^fn]: **Term**:),
+            # summary takeaway bullets (* **Takeaway**:), and standard callout labels (**Role**:)
+            if (
+                not stripped.startswith(":")
+                and not stripped.startswith("[^")
+                and not re.match(r"^(?:[\*\-\d\.]+\s+)?\*\*([^*]+)\*\*(?:\s*\\index\{[^}]+\})*:", stripped)
+                and "fig-cap=" not in line
+                and "tbl-cap=" not in line
+                and "lst-cap=" not in line
+            ):
+                for m in re.finditer(r"\*\*([^*]+)\*\*(?:\s*\\index\{([^}]+)\})+", line):
+                    bold_word = m.group(1).strip()
+                    tags = re.findall(r"\\index\{([^}]+)\}", m.group(0))
+                    has_def = any("!definition" in t or "!appendix refresher" in t for t in tags)
+                    if not has_def:
+                        issues.append(IndexIssue(
+                            rel, idx, "bold_index_not_def",
+                            f"**{bold_word}** has index tag '\\index{{{tags[0]}}}' without !definition",
+                        ))
+
+    return issues
