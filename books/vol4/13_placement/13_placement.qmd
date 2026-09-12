@@ -146,6 +146,35 @@ Crucially, modern DRAM memory controllers employ **First-Ready First-Come-First-
 Average memory bus bandwidth is a vanity metric; real-time safety is dictated entirely by worst-case burst length, DRAM bank conflict precharge latencies, and non-preemptive crossbar queue depths.
 :::
 
+::: {#chk-placement-dram-burst-queuing-delay .callout-checkpoint title="Worst-case DRAM burst queuing delay and real-time control overrun"}
+A mobile robot runs a learned vision-language-action (VLA) policy on an integrated accelerator and a $1000\text{ Hz}$ safety enforcement reflex loop on a real-time microcontroller core. Both share a 64-bit LPDDR4 memory subsystem with peak bandwidth of $12.8\text{ GB/s}$. The safety reflex operates with period $T_{\text{ctrl}} = 1.0\text{ ms}$ and an allocated computation budget of $120.0\,\mu\text{s}$ ($100.0\,\mu\text{s}$ baseline computation plus $20.0\,\mu\text{s}$ timing slack). Unloaded, reading the $64\text{ KB}$ sensor history buffer requires $t_{\text{sensor,nom}} = 64\text{ KB} / (12.8\text{ GB/s}) = 5.0\,\mu\text{s}$.
+
+During operation, the accelerator transfers weight tiles in $256\text{ KB}$ non-preemptive AXI bursts. When the enforcer initiates its read, the memory controller queue holds an in-flight $256\text{ KB}$ tile burst, a pending $64\text{ KB}$ camera DMA stream, and a pending $32\text{ KB}$ telemetry write. Each of these three transactions targets a different row in the same DRAM bank as the safety buffer, incurring precharge ($t_{\text{RP}} = 14\text{ ns}$) and activate ($t_{\text{RCD}} = 14\text{ ns}$) penalties ($28\text{ ns}$ per conflict).
+
+1. Calculate the transmission time of each competing transaction and the total non-preemptive queuing latency $t_{\text{queue}}$ before the enforcer's request is serviced.
+2. Compute the loaded sensor read duration $t_{\text{sensor,loaded}}$ and total enforcement execution time $t_{\text{exec,loaded}}$.
+3. Determine whether the safety reflex breaches its $120.0\,\mu\text{s}$ execution budget.
+4. Calculate the minimum capacity of on-chip Tightly-Coupled Memory (TCM) SRAM required to isolate the $64\text{ KB}$ sensor buffer and an $8\text{ KB}$ safety state table, and state its latency impact.
+
+*Solution*:
+
+1. Bus transmission time for each queued burst at $12.8\text{ GB/s}$:
+   - Neural accelerator tile ($256\text{ KB}$): $t_{\text{tile}} = \frac{256 \times 10^3\text{ B}}{12.8 \times 10^9\text{ B/s}} = 20.0\,\mu\text{s}$
+   - Camera DMA buffer ($64\text{ KB}$): $t_{\text{cam}} = \frac{64 \times 10^3\text{ B}}{12.8 \times 10^9\text{ B/s}} = 5.0\,\mu\text{s}$
+   - Telemetry logging record ($32\text{ KB}$): $t_{\text{telem}} = \frac{32 \times 10^3\text{ B}}{12.8 \times 10^9\text{ B/s}} = 2.5\,\mu\text{s}$
+   The sum of transmission times is $20.0 + 5.0 + 2.5 = 27.5\,\mu\text{s}$.
+   Bank conflict overhead across the 3 transactions is:
+   $$t_{\text{conflict}} = 3 \times (t_{\text{RP}} + t_{\text{RCD}}) = 3 \times (14 + 14)\text{ ns} = 84\text{ ns} = 0.084\,\mu\text{s}$$
+   Total non-preemptive queuing latency is:
+   $$t_{\text{queue}} = 27.5\,\mu\text{s} + 0.084\,\mu\text{s} \approx 27.6\,\mu\text{s}$$
+2. Loaded sensor read duration is the sum of queuing delay and transfer time:
+   $$t_{\text{sensor,loaded}} = t_{\text{queue}} + t_{\text{sensor,nom}} = 27.584\,\mu\text{s} + 5.0\,\mu\text{s} \approx 32.6\,\mu\text{s}$$
+   Total loaded execution time is:
+   $$t_{\text{exec,loaded}} = t_{\text{compute}} + t_{\text{sensor,loaded}} = 100.0\,\mu\text{s} + 32.6\,\mu\text{s} = 132.6\,\mu\text{s}$$
+3. The allocated execution budget is $120.0\,\mu\text{s}$. The loaded task requires $132.6\,\mu\text{s}$, consuming the entire $20.0\,\mu\text{s}$ timing slack and overrunning the budget by $12.6\,\mu\text{s}$ (a $10.5\%$ budget violation), delaying actuator update dispatch.
+4. Total required storage is $64\text{ KB} + 8\text{ KB} = 72\text{ KB}$. Provisioning a $128\text{ KB}$ on-chip dual-port TCM SRAM partition mapped to the real-time core eliminates external DRAM arbitration entirely, reducing read latency from $32.6\,\mu\text{s}$ to zero-wait-state access ($< 5\text{ ns}$), guaranteeing microsecond determinism.
+:::
+
 Contention extends to the power distribution network, where claimants compete for charge rather than bandwidth (@fig-13-soc-contention-droop b). When the neural accelerator starts a matrix multiply across thousands of parallel multiply-accumulate units, its current draw spikes rapidly. Across a shared power distribution network with an effective loop inductance and equivalent series resistance, this transient voltage disturbance causes a significant rail droop.[^fn-math-rail-droop]
 
 **PDN voltage droop coupling**\index{PDN voltage droop coupling!definition} is the instantaneous electrical rail collapse induced across shared on-die power distribution networks. Physically, this is akin to the water pressure dropping across a house when multiple heavy appliances are abruptly turned on: when fast, large current steps from parallel neural execution units suddenly deplete local decoupling capacitance, the operating voltage sags. This voltage sag stretches logic gate propagation delays and triggers clock frequency degradation, timing closure violations, or brownout resets across co-located real-time cores.
@@ -166,6 +195,34 @@ For the rigorous mathematical derivation of inductive rail droop and the alpha-p
 
 ::: {#fig-13-soc-contention-droop fig-env="figure" fig-pos="t" fig-cap="**Heterogeneous SoC Resource Contention and Power-Rail Interference**: A proposal engine streaming dense parameter tensors evicts safety state from shared cache and saturates the DRAM queue, inflating the enforcer's sensor read from $5.0\,\mu\text{s}$ to $32.6\,\mu\text{s}$ and overrunning a $120\,\mu\text{s}$ budget. The second panel shows the same interference through the power rail, where a fast current step induces $138\text{ mV}$ of droop. Neither path crosses a software interface, which is why co-location on one SoC is a safety decision rather than a packaging one." fig-alt="Heterogeneous SoC Resource Contention and Power-Rail Interference. (a) On-chip memory bus and cache contention. A high-throughput proposal engine (NPU/MPU) streams dense parameter tensors (180 MB, 256 kB bursts at 12.0 GB/s), evicting safety state tables from shared L3 cache and saturating the non-preemptive DRAM controller queue (twait = 27.6 mus). In the timing waterfall below, queuing stalls inflate the real-time enforcer's sensor read latency from 5.0 mus to 32.6 mus, consuming available timing slack (+20 mus) and overrunning the 120 mus compute budget by 7.6 mus within the 1.0 ms control loop. (b) Power Distribution Network (PDN) transient voltage droop and clock degradation. Fast current steps (Delta I = 6.0 A, dI/dt = 3.0 A/ns) excite package loop parasitics (L = 30 pH, R = 8.0 mOmega), inducing an instantaneous rail droop Delta V = L(dI/dt) + IR = 138 mV (16.2% collapse on 0.85 V rail). The resulting voltage sag breaches Vmin = 0.78 V, stretching gate propagation delays by +38% and triggering DVFS emergency clock halving (1.2 GHz -> 600 MHz) that expands enforcement execution beyond physical deadlines. Attribution: Original diagram created for this textbook (CC BY 4.0)."}
 ![](images/svg/fig13_soc_contention_droop.svg){width="95%"}
+:::
+
+::: {#chk-placement-pdn-voltage-droop-gate-stretch .callout-checkpoint title="PDN inductive voltage droop and logic gate propagation stretch"}
+A heterogeneous SoC powers a systolic array neural accelerator and a real-time safety processor ($f_{\text{clk}} = 1.0\text{ GHz}$, clock period $T_{\text{clk}} = 1.0\text{ ns}$) from a shared $V_{\text{core}} = 0.85\text{ V}$ power distribution network (PDN). The PDN package loop exhibits parasitic inductance $L = 30\text{ pH}$ and equivalent series resistance $R = 8.0\text{ m}\Omega$.
+
+When the neural accelerator starts a matrix multiply, its current demand surges by $\Delta I = 6.0\text{ A}$ with rise time $t_r = 2.0\text{ ns}$ ($dI/dt = 3.0\text{ A/ns}$). In the safety core, the critical ALU path has nominal propagation delay $t_{\text{prop,nom}} = 0.70\text{ ns}$ and requires flip-flop setup time $t_{\text{setup}} = 0.15\text{ ns}$ (leaving nominal setup slack $T_{\text{clk}} - t_{\text{prop,nom}} - t_{\text{setup}} = 0.15\text{ ns}$). Transistor delay follows the alpha-power law $t_{\text{prop}}(V) \propto V / (V - V_{\text{th}})^\alpha$ with threshold voltage $V_{\text{th}} = 0.35\text{ V}$ and saturation exponent $\alpha = 1.30$.
+
+1. Compute the instantaneous rail voltage droop $\Delta V_{\text{droop}} = L \frac{dI}{dt} + \Delta I \cdot R$ and resulting supply voltage $V_{\text{droop}}$.
+2. Calculate the ratio of gate propagation delay under droop to nominal delay, and find the percentage delay stretch.
+3. Determine the loaded propagation delay $t_{\text{prop,droop}}$ and evaluate whether the safety processor suffers a setup timing violation.
+
+*Solution*:
+
+1. Computing inductive and resistive rail collapse:
+   $$\Delta V_{\text{ind}} = L \frac{dI}{dt} = (30 \times 10^{-12}\text{ H}) \times (3.0 \times 10^9\text{ A/s}) = 0.090\text{ V} = 90.0\text{ mV}$$
+   $$\Delta V_{\text{res}} = \Delta I \cdot R = 6.0\text{ A} \times 0.008\,\Omega = 0.048\text{ V} = 48.0\text{ mV}$$
+   $$\Delta V_{\text{droop}} = 90.0\text{ mV} + 48.0\text{ mV} = 138.0\text{ mV} = 0.138\text{ V}$$
+   The drooped core voltage is $V_{\text{droop}} = 0.850\text{ V} - 0.138\text{ V} = 0.712\text{ V}$ (a $16.2\%$ drop).
+2. Using the alpha-power law ratio with $V_{\text{th}} = 0.35\text{ V}$ and $\alpha = 1.30$:
+   $$\frac{t_{\text{prop}}(V_{\text{droop}})}{t_{\text{prop}}(V_{\text{nom}})} = \frac{V_{\text{droop}}}{V_{\text{nom}}} \left( \frac{V_{\text{nom}} - V_{\text{th}}}{V_{\text{droop}} - V_{\text{th}}} \right)^\alpha = \frac{0.712}{0.850} \left( \frac{0.850 - 0.350}{0.712 - 0.350} \right)^{1.30} = 0.8376 \times \left( \frac{0.500}{0.362} \right)^{1.30}$$
+   Evaluating the quotient: $0.500 / 0.362 \approx 1.3812$. Raising to the power $1.30$: $(1.3812)^{1.30} \approx 1.5238$.
+   $$\frac{t_{\text{prop}}(V_{\text{droop}})}{t_{\text{prop}}(V_{\text{nom}})} = 0.8376 \times 1.5238 \approx 1.2764$$
+   Propagation delay increases by $27.6\%$.
+3. The stretched path delay is:
+   $$t_{\text{prop,droop}} = 0.70\text{ ns} \times 1.2764 \approx 0.8935\text{ ns}$$
+   Evaluating the timing closure constraint:
+   $$t_{\text{total}} = t_{\text{prop,droop}} + t_{\text{setup}} = 0.8935\text{ ns} + 0.15\text{ ns} = 1.0435\text{ ns}$$
+   Since $1.0435\text{ ns} > 1.00\text{ ns}$ ($T_{\text{clk}}$), setup slack is negative ($-0.0435\text{ ns} = -43.5\text{ ps}$). The safety processor experiences a timing closure violation, corrupting pipeline register state unless protected by isolated power domains or on-die deep-trench decoupling capacitors.
 :::
 
 Detecting these interactions requires dedicated hardware instrumentation, because software running on a core that has been stalled cannot record the duration of its own stall. Memory-controller performance counters log queue occupancy, bank conflicts, and per-master read and write transaction counts. Performance monitoring units on the real-time core record cache miss counts and stall cycles against an invariant free-running counter. On the electrical side, on-die analog-to-digital converters and fast comparator circuits record voltage excursions on internal rails, thermal diodes log junction temperature gradients across the floorplan, and power-management logs record dynamic frequency throttling states. When an uncommanded reset occurs, reset-cause registers distinguish a software watchdog expiration from an under-voltage brownout or a thermal emergency trip.
@@ -272,6 +329,35 @@ Thermal throttling introduces **state-dependent hysteresis**\index{Hysteresis!st
 
 ::: {#psp-placement-thermal-mass-latency .callout-perspective title="Thermal mass as latency memory"}
 Thermal mass acts as a low-pass filter on power, but a long-duration memory on execution timing: once a heavy cognitive workload trips thermal clock throttling, the real-time core remains trapped at degraded clock frequencies for multiple seconds after the cognitive workload has halted.
+:::
+
+::: {#chk-placement-thermal-throttling-hysteresis .callout-checkpoint title="Junction temperature rise, clock throttling, and thermal cooling hysteresis"}
+An edge robotics SoC is enclosed in a conduction-cooled chassis with effective junction-to-ambient thermal resistance $\theta_{\text{JA}} = 2.0\text{ K/W}$ and thermal time constant $\tau_{\text{th}} = 8.0\text{ s}$, operating at ambient temperature $T_A = 45.0^\circ\text{C}$. Baseline computing and memory dissipation is $P_{\text{base}} = 4.0\text{ W}$.
+
+When a continuous vision-language-action (VLA) policy begins running, total dissipation steps to $P_{\text{total}} = 26.0\text{ W}$. The on-die thermal governor enforces a trip threshold $T_{\text{trip}} = 95.0^\circ\text{C}$ and a clearance threshold $T_{\text{clear}} = 85.0^\circ\text{C}$. When $T_j \ge T_{\text{trip}}$, the governor cuts the real-time core clock from $f_{\text{nom}} = 1.20\text{ GHz}$ to $f_{\text{throt}} = 600\text{ MHz}$. A safety task requires $N_{\text{cycles}} = 8.4 \times 10^5\text{ cycles}$ per $1.0\text{ ms}$ control tick ($T_{\text{tick}} = 1.00\text{ ms}$).
+
+1. Calculate the steady-state junction temperature $T_{j,\text{ss}}$ under full VLA load and verify that it triggers thermal throttling.
+2. Calculate safety task execution times $t_{\text{exec,nom}}$ and $t_{\text{exec,throt}}$, and determine the period overrun under throttled execution.
+3. If the host architecture detects the deadline overrun and immediately shuts down the VLA policy (returning power to $P_{\text{base}} = 4.0\text{ W}$), use Newton's law of cooling $T_j(t) = T_{j,\text{target}} + (T_{j,\text{start}} - T_{j,\text{target}}) e^{-t/\tau_{\text{th}}}$ to find the recovery duration $t_{\text{recov}}$ required to cool from $95.0^\circ\text{C}$ to $T_{\text{clear}} = 85.0^\circ\text{C}$. How many consecutive control cycles are violated during this cooling window?
+
+*Solution*:
+
+1. Steady-state junction temperature under $26.0\text{ W}$ total power:
+   $$T_{j,\text{ss}} = T_A + P_{\text{total}} \theta_{\text{JA}} = 45.0^\circ\text{C} + 26.0\text{ W} \times 2.0\text{ K/W} = 45.0^\circ\text{C} + 52.0^\circ\text{C} = 97.0^\circ\text{C}$$
+   Because $97.0^\circ\text{C} > 95.0^\circ\text{C}$ ($T_{\text{trip}}$), the substrate temperature crosses the trip point, triggering emergency clock throttling.
+2. Computing execution times:
+   $$t_{\text{exec,nom}} = \frac{8.4 \times 10^5\text{ cycles}}{1.20 \times 10^9\text{ cycles/s}} = 0.70\text{ ms}$$
+   Within the $1.00\text{ ms}$ tick, nominal execution leaves $0.30\text{ ms}$ of slack.
+   Under throttled execution ($600\text{ MHz}$):
+   $$t_{\text{exec,throt}} = \frac{8.4 \times 10^5\text{ cycles}}{600 \times 10^6\text{ cycles/s}} = 1.40\text{ ms}$$
+   The task overruns the $1.00\text{ ms}$ control period by $0.40\text{ ms}$ (a $40\%$ period overrun), causing missed deadlines and dropped actuation cycles.
+3. When the VLA policy terminates, the target equilibrium temperature at $P_{\text{base}} = 4.0\text{ W}$ is:
+   $$T_{j,\text{target}} = 45.0^\circ\text{C} + 4.0\text{ W} \times 2.0\text{ K/W} = 53.0^\circ\text{C}$$
+   Cooling from $T_{j,\text{start}} = 95.0^\circ\text{C}$ to $T_{\text{clear}} = 85.0^\circ\text{C}$ with $\tau_{\text{th}} = 8.0\text{ s}$:
+   $$85.0 = 53.0 + (95.0 - 53.0) e^{-t_{\text{recov}} / 8.0}$$
+   $$32.0 = 42.0 e^{-t_{\text{recov}} / 8.0} \implies e^{-t_{\text{recov}} / 8.0} = \frac{32.0}{42.0} \approx 0.7619$$
+   $$-\frac{t_{\text{recov}}}{8.0} = \ln(0.7619) \approx -0.2719 \implies t_{\text{recov}} = 8.0 \times 0.2719 \approx 2.18\text{ s}$$
+   Because the control loop operates at $1000\text{ Hz}$ ($1.0\text{ ms}$ per cycle), the real-time core remains trapped in the throttled state for $2.18\text{ s} / 0.001\text{ s} = 2,175\text{ consecutive control cycles}$, demonstrating that thermal mass acts as multi-second latency memory.
 :::
 
 Diagnosing execution-time expansion requires separating thermal degradation from **electrical power-rail coupling**\index{Power-rail coupling}. Both failure modes originate in heavy accelerator activity, but they operate on distinct physical timescales. Power-rail coupling physically manifests as sudden voltage sags—similar to house lights dimming when a large appliance starts—across shared power distribution networks within microseconds of a matrix multiplication burst. If the supply voltage sags below minimum operating margins, logic gates lack the energy to switch states fast enough. This causes pipeline timing violations or triggers immediate **brownout resets**\index{Brownout resets}, where the processor abruptly reboots to prevent data corruption. Thermal coupling develops over hundreds of milliseconds to several seconds as heat diffuses through silicon and packaging. Correlating execution-time drift against high-frequency oscilloscope captures of core supply voltage $V_{\text{core}}(t)$ and low-frequency telemetry from on-die thermal diodes $T_j(t)$ isolates the root cause. A timing fault that tracks the envelope of temperature rather than instantaneous current transients confirms thermal throttling rather than rail collapse.

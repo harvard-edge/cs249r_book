@@ -11,12 +11,41 @@ To enforce these deadlines physically, systems use **Watchdog Timers**. A watchd
 $$W(t_k) = W_{init}$$
 If at any time $t$, $W(t) \le 0$, the hardware triggers a non-maskable interrupt (NMI) or system reset. This guarantees that if a system hangs or a task exceeds its WCET indefinitely, the hardware will safely reboot the platform.
 
-## Inductive Voltage Droop ($L \frac{di}{dt}$)
+## Inductive Voltage Droop and Alpha-Power Gate Delay
 
-When a heavy ML workload (like a large matrix multiplication) suddenly begins on an accelerator, the current draw $i(t)$ increases dramatically over a tiny time window $\Delta t$.
-Every power delivery network has inherent inductance, $L$. According to Faraday's law of induction, a change in current through an inductor induces a voltage drop $V_{droop}$:
-$$V_{droop} = L \frac{di}{dt}$$
-If $\frac{di}{dt}$ is too large, $V_{droop}$ can cause the supply voltage to drop below the minimum required voltage for the transistors to operate correctly, leading to bit flips or a sudden system crash. Systems engineers mitigate this by adding decoupling capacitors (to provide local charge and smooth $\frac{di}{dt}$) or by throttling the ramp-up rate of compute-intensive kernels.
+When a heavy neural accelerator workload (such as a systolic matrix multiplication) suddenly begins on a shared system-on-chip, the current draw $i(t)$ increases dramatically over a nanosecond switching window.
+Every power delivery network (PDN) exhibits inherent loop inductance $L$ across package bond wires, package balls, and printed circuit board traces, as well as equivalent series resistance $R$. According to Faraday's law of induction and Ohm's law, a rapid transient current step $\Delta I$ with rise time $t_r$ (giving current slew rate $dI/dt \approx \Delta I / t_r$) induces an instantaneous supply voltage collapse $\Delta V_{\text{droop}}$:
+$$\Delta V_{\text{droop}} = L \frac{dI}{dt} + \Delta I \cdot R$$
+
+If the supply voltage $V(t) = V_{\text{nom}} - \Delta V_{\text{droop}}$ sags below the minimum operating threshold $V_{\min}$, digital CMOS logic suffers severe timing degradation. In sub-micron CMOS circuits, logic gate propagation delay $t_{\text{prop}}$ is governed by the Sakurai-Newton **alpha-power law**:
+$$t_{\text{prop}}(V) \propto \frac{C_L \cdot V}{(V - V_{\text{th}})^\alpha}$$
+where $C_L$ is the load capacitance, $V_{\text{th}}$ is the transistor threshold voltage, and $\alpha \in [1.2, 1.5]$ is the velocity saturation index (compared to $\alpha = 2.0$ in classical long-channel MOSFET theory).
+
+When rail voltage droops from $V_{\text{nom}}$ to $V_{\text{droop}}$, the ratio of stretched propagation delay to nominal delay is:
+$$\frac{t_{\text{prop}}(V_{\text{droop}})}{t_{\text{prop}}(V_{\text{nom}})} = \frac{V_{\text{droop}}}{V_{\text{nom}}} \left( \frac{V_{\text{nom}} - V_{\text{th}}}{V_{\text{droop}} - V_{\text{th}}} \right)^\alpha$$
+
+In a synchronous digital pipeline with clock period $T_{\text{clk}}$, flip-flop setup time $t_{\text{setup}}$, and clock skew $t_{\text{skew}}$, timing closure requires:
+$$t_{\text{prop}} + t_{\text{setup}} + t_{\text{skew}} \le T_{\text{clk}}$$
+If $\Delta V_{\text{droop}}$ stretches $t_{\text{prop}}$ beyond this threshold, setup slack becomes negative, corrupting state registers or triggering hardware brownout resets. On-package deep-trench decoupling capacitors (DTCs) and current-slew limiters mitigate this rail collapse by supplying charge during high-frequency transients.
+
+## DRAM Contention and Bank-Conflict Queuing
+
+In a shared memory subsystem, direct memory access (DMA) transfers and accelerator weight prefetching compete with real-time safety monitors for memory controller command queues and physical DRAM banks.
+
+A DRAM chip is organized into multiple independent banks. Each bank possesses a single row buffer. Memory access proceeds through three primitive operations:
+
+1. **Row activate** ($t_{\text{RCD}}$): Loads a row of storage cells into the bank's row buffer.
+2. **Column access** ($t_{\text{CAS}}$): Reads or writes data from the active row buffer onto the data bus.
+3. **Row precharge** ($t_{\text{RP}}$): Restores charge to the storage cells and closes the active row.
+
+When consecutive transactions target the same bank but different rows (a *bank conflict* or *row-buffer miss*), the memory controller must precharge the active row and activate the requested row before column access can proceed, adding an access penalty of $t_{\text{RP}} + t_{\text{RCD}}$ ($28\text{--}40\text{ ns}$).
+
+Furthermore, on-chip interconnect crossbars (e.g., AMBA AXI) schedule traffic in packet-atomic bursts. If a non-preemptive burst of size $B_{\text{burst}}$ (bytes) is in flight over a shared memory bus with bandwidth $\text{BW}_{\text{bus}}$ (bytes per second), an incoming real-time safety read must wait for the full remaining burst duration:
+$$t_{\text{burst}} = \frac{B_{\text{burst}}}{\text{BW}_{\text{bus}}}$$
+
+In the worst case where $K$ competing transactions are queued ahead of the real-time request and each induces a bank conflict, total queuing latency expands to:
+$$t_{\text{queue}} = \sum_{k=1}^K \frac{B_k}{\text{BW}_{\text{bus}}} + K (t_{\text{RP}} + t_{\text{RCD}}) + t_{\text{CAS}}$$
+This latency inflation operates beneath the visibility of operating system scheduling, demonstrating why real-time safety state must be isolated in SRAM-based Tightly-Coupled Memory (TCM).
 
 ## Clock Synchronization (IEEE 1588 PTP)
 
