@@ -133,6 +133,11 @@ def _check_page(page, base_url: str, page_path: str, vp: tuple[int, int], scheme
     url = base_url.rstrip("/") + page_path
     console_errors: list[str] = []
     page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+    # 2026-09-12: the browser's 404 console message omits the URL, so record
+    # failed responses to name the missing resource in the report.
+    failed_urls: list[str] = []
+    page.on("response", lambda r: failed_urls.append(f"{r.status} {r.url.replace(base_url, '')}")
+            if r.status >= 400 else None)
 
     page.goto(url, wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(250)
@@ -163,9 +168,10 @@ def _check_page(page, base_url: str, page_path: str, vp: tuple[int, int], scheme
     # attached above; any errors during the goto/networkidle window are now
     # in console_errors.)
     if console_errors:
-        report.add(page_path, vp, scheme, "NO_CONSOLE_ERRORS",
-                   f"{len(console_errors)} console error(s): " +
-                   "; ".join(console_errors[:2]))
+        detail = f"{len(console_errors)} console error(s): " + "; ".join(console_errors[:2])
+        if failed_urls:
+            detail += " | failed: " + ", ".join(sorted(set(failed_urls))[:5])
+        report.add(page_path, vp, scheme, "NO_CONSOLE_ERRORS", detail)
 
     # 3. PAGE_HAS_HEIGHT — body taller than 1.5× viewport. We only enforce
     # this on the homepage of each site to avoid false positives on

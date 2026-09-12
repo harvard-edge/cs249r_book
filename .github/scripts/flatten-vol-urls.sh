@@ -10,8 +10,9 @@
 # deploy at:
 #   mlsysbook.ai/vol{N}/{chapter}/{chapter}.html
 #
-# Every relative href/src is resolved against the page's original location
-# and re-expressed from its new location, so pages at any depth stay correct.
+# Every relative href/src and inline CSS url() is resolved against the page's
+# original location and re-expressed from its new location, so pages at any
+# depth stay correct.
 # Links to vol{N}/index.qmd (Quarto's sidebar "Homepage") point at the site
 # root. search.json and sitemap.xml are rewritten to the clean paths.
 #
@@ -55,6 +56,7 @@ REDIRECT_TITLE = "<title>Redirecting...</title>"
 STUB_ROOTS = (f"{vol}/", f"contents/{vol}/")
 
 ATTR = re.compile(r"""(\s(?:href|src|action|poster)=)(["'])(.*?)\2""", re.S)
+CSS_URL = re.compile(r"""url\((["']?)([^"')\s]+)\1\)""")
 NOT_RELATIVE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*:|//|/|#)")
 
 if not nested.is_dir():
@@ -98,22 +100,21 @@ def rewrite(text: str, old_rel: str) -> str:
     new_dir = posixpath.dirname(flat(old_rel))
     moved = new_dir != old_dir
 
-    def fix(m: re.Match) -> str:
-        lead, q, url = m.group(1), m.group(2), m.group(3)
+    def relink(url: str) -> str:
         if not url or NOT_RELATIVE.match(url):
-            return m.group(0)
+            return url
         path, suffix = split_url(url)
         if not path:
-            return m.group(0)
+            return url
         target = site_target(old_dir, path)
         if target is None:
-            return m.group(0)
+            return url
         dir_link = path.endswith("/")
         if target == "index.qmd" or target.endswith("/index.qmd"):
             target, dir_link = posixpath.dirname(target), True
         mapped = flat(target)
         if not moved and mapped == target and not dir_link:
-            return m.group(0)
+            return url
         rel = posixpath.relpath(mapped or ".", new_dir or ".")
         if rel == ".":
             rel = "./"
@@ -121,9 +122,22 @@ def rewrite(text: str, old_rel: str) -> str:
             rel += "/"
         if path.startswith("./") and not rel.startswith("."):
             rel = "./" + rel
-        return f"{lead}{q}{rel}{suffix}{q}"
+        return rel + suffix
+
+    def fix(m: re.Match) -> str:
+        lead, q, url = m.group(1), m.group(2), m.group(3)
+        new = relink(url)
+        return m.group(0) if new == url else f"{lead}{q}{new}{q}"
+
+    # 2026-09-12: inline <style> blocks carry url() references (callout icons)
+    # that break when pages move up a level, just like href/src.
+    def fix_css(m: re.Match) -> str:
+        q, url = m.group(1), m.group(2)
+        new = relink(url)
+        return m.group(0) if new == url else f"url({q}{new}{q})"
 
     text = ATTR.sub(fix, text)
+    text = CSS_URL.sub(fix_css, text)
     for legacy in (f"{BASE}/{vol}/contents/{vol}/", f"{BASE}/{vol}/{vol}/"):
         text = text.replace(legacy, f"{BASE}/{vol}/")
     return text
