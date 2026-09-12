@@ -1,10 +1,10 @@
-"""Unit tests for mlsysim.embodied registry, EmbodiedPlatform models, and Robotics alias."""
+"""Unit tests for mlsysim.embodied registry and EmbodiedPlatform models."""
 
 from __future__ import annotations
 
 import pytest
-from mlsysim import Embodied, Robotics, Hardware
-from mlsysim.embodied.types import EmbodiedPlatform, RobotPlatform
+from mlsysim import Embodied, Hardware
+from mlsysim.embodied.types import EmbodiedPlatform
 
 
 def test_embodied_registry_platforms_exist():
@@ -15,12 +15,6 @@ def test_embodied_registry_platforms_exist():
     assert Embodied.Drone.DJI_Matrice.name == "DJI Matrice 350 RTK"
     assert Embodied.AMR.LogisticsAMR.name == "Industrial Logistics AMR"
     assert Embodied.Vehicle.Robotaxi.name == "Autonomous Vehicle / Robotaxi"
-
-
-def test_robotics_compatibility_alias():
-    assert Robotics is Embodied
-    assert Robotics.AMR.LogisticsAMR is Embodied.AMR.LogisticsAMR
-    assert issubclass(RobotPlatform, EmbodiedPlatform)
 
 
 def test_embodied_registry_units():

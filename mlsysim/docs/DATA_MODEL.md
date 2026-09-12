@@ -16,7 +16,7 @@ that populate Layers A–D of that stack.
 | Zoo | Registry | Role |
 |-----|----------|------|
 | Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Embodied.*`, … | Chip/board/appliance specs (datasheet truth). **Canonical paths only** — no bare `Hardware.H100`. |
-| Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*` (alias `Robotics.*`) | Cyber-physical machine platforms and archetypes across the four Physical AI classes. |
+| Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*` | Cyber-physical machine platforms and archetypes across the four Physical AI classes. |
 | Agents | `Agents.Coding.*`, `Agents.Deliberation.*`, `Agents.MultiAgent.*`, `Agents.Interactive.*` | Agentic ML system profiles, execution harnesses, and test-time search architectures. |
 | Models | `Models.*` | Workloads and architectures (parameters, layers, FLOPs). |
 | Datasets | `Datasets.*` | Data zoo — ImageNet, MNIST, CIFAR, etc. |

@@ -61,5 +61,3 @@ class EmbodiedPlatform(BaseModel):
         return require_dimensionality(v, ureg.watt, "nominal_power")
 
 
-# Backward-compatibility alias
-RobotPlatform = EmbodiedPlatform

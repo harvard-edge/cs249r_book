@@ -141,7 +141,3 @@ class Embodied(Registry):
     Drone = Drones
     AMR = AMRs
     Vehicle = Vehicles
-
-
-# Compatibility alias
-Robotics = Embodied
