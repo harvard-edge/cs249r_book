@@ -21,7 +21,7 @@ from rich.text import Text
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cli.core.config import ConfigManager
-from cli.core.discovery import ChapterDiscovery, AmbiguousChapterError
+from cli.core.discovery import ChapterDiscovery, VOLUME_DIRS
 from cli.commands.build import BuildCommand
 from cli.commands.preview import PreviewCommand
 from cli.commands.doctor import DoctorCommand
@@ -111,6 +111,8 @@ class MLSysBookCLI:
         fast_table.add_column("Example", style="dim", width=30)
 
         fast_table.add_row(_cmd("build [fmt] [chapter[,ch2,...]]"), "Build HTML/PDF/EPUB by format", _cmd("./binder/binder build pdf intro"))
+        fast_table.add_row(_cmd("build <fmt> <ch1,ch2> --volN --parallel [N]"), "Build chapters side by side in worktrees", _cmd("./binder/binder build pdf intro,training --vol1 --parallel"))
+        fast_table.add_row(_cmd("build <fmt> --volN --each-chapter --parallel [N]"), "Build every chapter on its own", _cmd("./binder/binder build pdf --vol1 --each-chapter --parallel 4"))
         fast_table.add_row(_cmd("preview [chapter[,ch2,...]]"), "Start live dev server with hot reload", _cmd("./binder/binder preview intro"))
 
         # Volume Commands
@@ -140,10 +142,11 @@ class MLSysBookCLI:
         full_table.add_column("Example", style="dim", width=30)
 
         full_table.add_row(_cmd("build"), "Build entire book as static HTML", _cmd("./binder/binder build"))
-        full_table.add_row(_cmd("build html --all"), "Build ALL chapters using HTML config", _cmd("./binder/binder build html --all"))
+        full_table.add_row(_cmd("build html --all"), "Build every volume website, in turn", _cmd("./binder/binder build html --all"))
         full_table.add_row(_cmd("preview"), "Start live dev server for entire book", _cmd("./binder/binder preview"))
-        full_table.add_row(_cmd("build pdf --all"), "Build full book (both volumes)", _cmd("./binder/binder build pdf --all"))
-        full_table.add_row(_cmd("build epub --all"), "Build full book (both volumes)", _cmd("./binder/binder build epub --all"))
+        full_table.add_row(_cmd("build pdf --all"), "Build every volume PDF, in turn", _cmd("./binder/binder build pdf --all"))
+        full_table.add_row(_cmd("build epub --all"), "Build every volume EPUB, in turn", _cmd("./binder/binder build epub --all"))
+        full_table.add_row(_cmd("build <fmt,...> --all --parallel [N]"), "Build volumes and formats side by side", _cmd("./binder/binder build html,pdf --all --parallel 4"))
 
         # Quality Commands
         quality_table = Table(show_header=True, header_style="bold yellow", box=None)
@@ -189,7 +192,7 @@ class MLSysBookCLI:
         mgmt_table.add_column("Description", style="white", width=30)
         mgmt_table.add_column("Example", style="dim", width=28)
 
-        mgmt_table.add_row(_cmd("debug <fmt> --vol1|--vol2"), "Find failing chapter + section", _cmd("./binder/binder debug pdf --vol1"))
+        mgmt_table.add_row(_cmd("debug <fmt> --volN [--parallel N]"), "Find failing chapter + section", _cmd("./binder/binder debug pdf --vol1 --parallel 4"))
         mgmt_table.add_row(_cmd("reset <fmt|all> [--vol1|--vol2]"), "Reset build YAML configs", _cmd("./binder/binder reset pdf --vol1"))
         mgmt_table.add_row(_cmd("clean [html|pdf|epub|artifacts]"), "Clean generated artifacts", _cmd("./binder/binder clean artifacts"))
         mgmt_table.add_row(_cmd("switch <format>"), "Switch active config", _cmd("./binder/binder switch pdf"))
@@ -217,7 +220,9 @@ class MLSysBookCLI:
         examples.append("  ./binder/binder build pdf vol1/intro ", style="cyan")
         examples.append("# Build specific chapter (disambiguate with vol prefix)\n", style="dim")
         examples.append("  ./binder/binder build pdf --all ", style="cyan")
-        examples.append("# Build entire book as PDF (both volumes)\n", style="dim")
+        examples.append("# Build every volume as PDF, one after another\n", style="dim")
+        examples.append("  ./binder/binder build pdf --all --parallel 4 ", style="cyan")
+        examples.append("# Build every volume at once, each in its own worktree\n", style="dim")
         examples.append("  ./binder/binder list --vol1 ", style="cyan")
         examples.append("# List only Volume I chapters\n", style="dim")
 
@@ -355,6 +360,148 @@ class MLSysBookCLI:
             print_marks,
         )
 
+    @staticmethod
+    def _extract_parallel_options(args):
+        """Separate parallel-build flags from the rest of a ``build`` or ``debug`` argument list.
+
+        Recognizes ``--parallel`` (optionally followed by a worker count, or
+        written ``--parallel=N``), ``--each-chapter``, and ``--keep-workspaces``.
+        The last two imply the worktree runner with one worker when
+        ``--parallel`` is absent.
+
+        Args:
+            args: Raw arguments after the command name.
+
+        Returns:
+            Tuple of (worker count, or None when none of the flags is present;
+            keep_workspaces; each_chapter; remaining arguments).
+
+        Raises:
+            ValueError: If the worker count is not a positive integer.
+        """
+        from cli.core.parallel import DEFAULT_WORKERS
+
+        workers = None
+        keep_workspaces = each_chapter = False
+        remaining = []
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            lower = arg.lower()
+            if lower == "--parallel" or lower.startswith("--parallel="):
+                value = lower.partition("=")[2] or None
+                if value is None and index + 1 < len(args) and args[index + 1].isdigit():
+                    index += 1
+                    value = args[index]
+                if value is not None and (not value.isdigit() or int(value) < 1):
+                    raise ValueError(f"--parallel expects a positive worker count, got {value!r}")
+                workers = int(value) if value is not None else DEFAULT_WORKERS
+            elif lower == "--keep-workspaces":
+                keep_workspaces = True
+            elif lower == "--each-chapter":
+                each_chapter = True
+            else:
+                remaining.append(arg)
+            index += 1
+        if workers is None and (keep_workspaces or each_chapter):
+            workers = 1
+        return workers, keep_workspaces, each_chapter, remaining
+
+    def _run_parallel_build(self, args, workers, keep_workspaces, each_chapter, json_output, status_console):
+        """Run a ``binder build`` request with the worktree runner.
+
+        The request becomes one job per format, volume, and chapter, and each
+        job builds in its own disposable git worktree of the working tree (see
+        ``cli.core.parallel``). Formats may be comma-separated, several volume
+        flags may be given, and ``--all`` selects every volume. Logs and output
+        are collected under ``books/_build/parallel/<run-id>/``.
+
+        Args:
+            args: Build arguments with the parallel flags already removed.
+            workers: Maximum number of builds running at once.
+            keep_workspaces: Leave the worktrees on disk for inspection.
+            each_chapter: Build every chapter of each selected volume on its own.
+            json_output: Print a JSON summary on stdout.
+            status_console: Console for progress output.
+
+        Returns:
+            True when every job succeeded.
+        """
+        import json
+        from cli.core.parallel import new_run_id, plan_build_jobs, results_table, run_jobs
+
+        formats, volumes, chapter_words, extra_args, volume_pdf_args = [], [], [], [], []
+        for arg in args:
+            lower = arg.lower()
+            volume_match = re.match(r"^(?:--|-)?vol(\d+)$", lower) or re.match(r"^-(\d+)$", lower)
+            if lower and all(part in ("html", "pdf", "epub") for part in lower.split(",")):
+                formats.extend(lower.split(","))
+            elif volume_match:
+                volumes.append(f"vol{volume_match.group(1)}")
+            elif lower == "--all":
+                volumes.extend(VOLUME_DIRS)
+            elif lower in ("--skip-hygiene", "--skip-validate"):
+                extra_args.append(lower)
+            elif lower in ("--no-cover", "--print-marks"):
+                volume_pdf_args.append(lower)
+            elif lower == "--json":
+                continue
+            elif lower.startswith("-"):
+                status_console.print(f"[red]❌ {_rich_escape(arg)} is not supported with --parallel[/red]")
+                return False
+            else:
+                chapter_words.append(arg)
+        chapters = [name.strip() for name in " ".join(chapter_words).split(",") if name.strip()]
+
+        try:
+            jobs = plan_build_jobs(
+                self.chapter_discovery, formats or ["html"], volumes, chapters,
+                each_chapter=each_chapter, extra_args=extra_args, volume_pdf_args=volume_pdf_args,
+            )
+        except Exception as error:
+            status_console.print(f"[red]❌ {_rich_escape(str(error))}[/red]")
+            return False
+
+        run_dir = self.config_manager.book_dir / "_build" / "parallel" / new_run_id()
+        status_console.print(
+            f"[green]🏗️ {len(jobs)} build(s), up to {min(workers, len(jobs))} at a time, "
+            f"each in its own worktree[/green]"
+        )
+        status_console.print(f"[dim]Logs and output: {run_dir}[/dim]")
+
+        def started(job):
+            """Print a dim line naming a parallel job as it starts."""
+            status_console.print(f"[dim]▶ {_rich_escape(job.name)}[/dim]")
+
+        def finished(result):
+            """Print a pass or fail mark, job name, duration, and failure note."""
+            mark = "[green]✓[/green]" if result.ok else "[red]✗[/red]"
+            detail = "" if result.ok else f" [dim]{_rich_escape(result.note)}[/dim]"
+            status_console.print(f"{mark} {_rich_escape(result.job.name)} ({result.seconds:.0f}s){detail}")
+
+        started_at = time.time()
+        try:
+            results = run_jobs(
+                self.config_manager.book_dir.parent, jobs, run_dir, workers=workers,
+                keep_workspaces=keep_workspaces, on_start=started, on_finish=finished,
+            )
+        except KeyboardInterrupt:
+            status_console.print("[yellow]Parallel build interrupted; running builds were stopped.[/yellow]")
+            return False
+
+        status_console.print(results_table(results))
+        ok = all(result.ok for result in results)
+        if json_output:
+            payload = {
+                "success": ok,
+                "elapsed_seconds": round(time.time() - started_at, 2),
+                "run_dir": str(run_dir),
+                "jobs": [result.to_dict() for result in results],
+            }
+            sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+            sys.stdout.flush()
+        return ok
+
     def handle_build_command(self, args):
         """Handle the unified build command.
 
@@ -380,7 +527,7 @@ class MLSysBookCLI:
             return False
 
         if "-h" in args or "--help" in args:
-            console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks] [--json]", markup=False)
+            console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks] [--json] [--parallel [N]] [--each-chapter] [--keep-workspaces]", markup=False)
             console.print("[dim]Build renders source artifacts. For PDF layout polish, add --layout to a full-volume PDF build.[/dim]")
             console.print("[dim]Examples:[/dim]")
             console.print("[dim]  ./binder/binder build[/dim]")
@@ -398,11 +545,24 @@ class MLSysBookCLI:
             console.print("[dim]  ./binder/binder build epub --vol1 --skip-validate   # bypass post-render validation[/dim]")
             console.print("[dim]  ./binder/binder build pdf --vol1                  # runs pdftotext cross-ref scan after render[/dim]")
             console.print("[dim]  ./binder/binder build html intro --vol1 --json    # machine-readable build summary[/dim]")
+            console.print("[dim]  ./binder/binder build pdf intro,training --vol1 --parallel    # each chapter in its own worktree[/dim]")
+            console.print("[dim]  ./binder/binder build pdf --vol1 --each-chapter --parallel 4  # every chapter on its own, 4 at a time[/dim]")
+            console.print("[dim]  ./binder/binder build html,pdf --all --parallel 4              # every volume and format at once[/dim]")
+            console.print("[dim]Parallel builds run in disposable git worktrees of your working tree; logs and output land in books/_build/parallel/<run-id>/.[/dim]")
             console.print("[dim]Layout rule: --layout is accepted only for `build pdf --vol1|--vol2`; it runs the same planner as `binder layout --vol1|--vol2 --no-build`.[/dim]")
             return True
 
         json_output = any(a.lower() == "--json" for a in args) if args else False
         status_console = Console(stderr=True) if json_output else console
+
+        try:
+            workers, keep_workspaces, each_chapter, args = self._extract_parallel_options(args)
+        except ValueError as error:
+            status_console.print(f"[red]❌ {error}[/red]")
+            return False
+        if workers is not None:
+            return self._run_parallel_build(
+                args, workers, keep_workspaces, each_chapter, json_output, status_console)
 
         def _emit_json(
             success: bool,
@@ -497,20 +657,17 @@ class MLSysBookCLI:
                 )
             return False
 
-        if no_cover and (
-            format_type != "pdf" or not volume or build_all or chapters_arg
-        ):
+        whole_volume_pdf = format_type == "pdf" and bool(volume or build_all) and not chapters_arg
+        if no_cover and not whole_volume_pdf:
             status_console.print(
-                "[yellow]⚠️ `--no-cover` is honored only for full-volume PDF builds "
-                "(or --vol2, --vol3, --vol4).[/yellow]"
+                "[yellow]⚠️ `--no-cover` is honored only for whole-volume PDF builds "
+                "(--volN or --all).[/yellow]"
             )
 
-        if print_marks and (
-            format_type != "pdf" or not volume or build_all or chapters_arg
-        ):
+        if print_marks and not whole_volume_pdf:
             status_console.print(
-                "[yellow]⚠️ `--print-marks` is honored only for full-volume PDF builds "
-                "(or --vol2, --vol3, --vol4).[/yellow]"
+                "[yellow]⚠️ `--print-marks` is honored only for whole-volume PDF builds "
+                "(--volN or --all).[/yellow]"
             )
 
         t0 = time.time()
@@ -522,12 +679,21 @@ class MLSysBookCLI:
         try:
             with stdout_redirect:
                 if build_all:
-                    if format_type == "html":
-                        status_console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
-                        ok = self.build_command.build_html_only()
-                    else:
-                        status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-                        ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+                    # Every volume in turn; --parallel runs them side by side instead.
+                    ok = True
+                    for each_volume in VOLUME_DIRS:
+                        status_console.print(
+                            f"[magenta]🏗️ Building {format_volume_display_name(each_volume)} "
+                            f"({format_type.upper()})...[/magenta]"
+                        )
+                        ok = self.build_command.build_volume(
+                            each_volume,
+                            format_type,
+                            skip_hygiene=skip_hygiene,
+                            skip_validate=skip_validate,
+                            no_cover=no_cover,
+                            print_marks=print_marks,
+                        ) and ok
                 elif volume and not chapters_arg:
                     volume_name = format_volume_display_name(volume)
                     status_console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
@@ -856,14 +1022,27 @@ class MLSysBookCLI:
 
         Usage:
             ./binder/binder debug pdf --vol1
+            ./binder/binder debug pdf --vol1 --parallel 4
             ./binder/binder debug html --vol2 --chapter training
         """
         if args and args[0].lower() in ("help", "-h", "--help"):
-            console.print("Usage: ./binder/binder debug <pdf|html|epub> --vol1|--vol2 [--chapter <name>]", markup=False)
+            console.print("Usage: ./binder/binder debug <pdf|html|epub> --volN [--chapter <name>] [--parallel [N]] [--keep-workspaces]", markup=False)
+            console.print("[dim]Builds each chapter on its own, then bisects failing chapters section by section. "
+                          "Every build runs in a disposable git worktree, so your files are never edited.[/dim]")
             console.print("[dim]Examples:[/dim]")
             console.print("[dim]  ./binder/binder debug pdf --vol1[/dim]")
+            console.print("[dim]  ./binder/binder debug pdf --vol1 --parallel 4[/dim]")
             console.print("[dim]  ./binder/binder debug html --vol2 --chapter training[/dim]")
             return True
+
+        try:
+            workers, keep_workspaces, each_chapter, args = self._extract_parallel_options(args)
+        except ValueError as error:
+            console.print(f"[red]{error}[/red]")
+            return False
+        if each_chapter:
+            console.print("[red]--each-chapter belongs to `binder build`; debug always scans every chapter.[/red]")
+            return False
 
         # Parse args: first positional is format, then flags
         format_type = None
@@ -899,7 +1078,8 @@ class MLSysBookCLI:
             console.print("[yellow]Usage: ./binder/binder debug <pdf|html|epub> --volN [--chapter <name>][/yellow]")
             return False
 
-        return self.debug_command.debug_build(format_type, volume, chapter)
+        return self.debug_command.debug_build(
+            format_type, volume, chapter, workers=workers or 1, keep_workspaces=keep_workspaces)
 
     def handle_list_command(self, args):
         """Handle list chapters command to display discovered chapters and metadata.

@@ -1,121 +1,54 @@
-"""
-Debug command implementation for MLSysBook CLI.
+"""Isolate build failures chapter by chapter, then section by section.
 
-Two-phase build debugger that isolates build failures:
-  Phase 1: Scan chapters one-by-one to find which chapter(s) fail
-  Phase 2: Binary search within a failing chapter to find the exact section
+``binder debug <fmt> --volN`` runs two phases:
 
-Usage via binder:
-    ./binder/binder debug pdf --vol1                    # Full debug: find chapter + section
-    ./binder/binder debug pdf --vol1 --chapter training # Skip to section-level debug
-    ./binder/binder debug html --vol2 -v                # Verbose output
+1. **Chapter scan.** Every chapter in the volume's PDF order is built on its
+   own. With ``--parallel N`` the builds run N at a time.
+2. **Section bisection.** Each failing chapter (or the one named with
+   ``--chapter``) is truncated to a growing number of ``##`` sections and
+   rebuilt, binary-searching for the first section that breaks the build.
+
+Every build runs in a disposable git worktree (see ``cli.core.parallel``), so
+the truncated chapters in phase 2 never touch the files in your checkout.
+Chapter builds pass ``--skip-validate``: the question here is whether a
+chapter renders, and references to chapters outside an isolated build would
+otherwise always fail validation.
+
+Logs and artifacts land in ``books/_build/debug/<vol>/<fmt>/<run-id>/``.
+
+Usage:
+    ./binder/binder debug pdf --vol1                      # scan, then bisect failures
+    ./binder/binder debug pdf --vol1 --parallel 4         # scan four chapters at a time
+    ./binder/binder debug html --vol2 --chapter training  # bisect one chapter
 """
+
+from __future__ import annotations
 
 import re
-import signal
-import shutil
-import subprocess
 import sys
-import time
-from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from ..core.discovery import AmbiguousChapterError, format_volume_display_name
+from ..core.parallel import BuildJob, BuildSession, JobResult, new_run_id, run_jobs
+from ..core.workspace import take_snapshot
 
 console = Console()
 
-# Path to section_splitter (in content scripts)
+#: Location of ``section_splitter.py``, which parses a chapter into sections.
 CONTENT_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "tools" / "scripts" / "content"
-LEGACY_DEBUG_LOG_ROOT = (
-    Path(__file__).resolve().parents[2]
-    / "tools" / "scripts" / "testing" / "logs"
-)
 
+#: Flags for every debug build: rendering is the question, not validation.
+CHAPTER_BUILD_ARGS = ("--skip-validate",)
 
-def _assimilate_legacy_debug_logs(book_dir: Path) -> List[Tuple[Path, Path]]:
-    """Move legacy debug logs into the new _build/debug structure.
-
-    Returns:
-        List of (source_path, destination_path) moves performed.
-    """
-    if not LEGACY_DEBUG_LOG_ROOT.exists():
-        return []
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    migrated: List[Tuple[Path, Path]] = []
-    legacy_target_root = book_dir / "_build" / "debug" / "_legacy"
-
-    for volume_dir in sorted(LEGACY_DEBUG_LOG_ROOT.glob("vol*")):
-        legacy_debug_dir = volume_dir / "debug"
-        if not legacy_debug_dir.exists():
-            continue
-        if not any(legacy_debug_dir.rglob("*.log")):
-            continue
-
-        destination = legacy_target_root / volume_dir.name / f"migrated-{timestamp}"
-        suffix = 1
-        while destination.exists():
-            destination = legacy_target_root / volume_dir.name / f"migrated-{timestamp}-{suffix}"
-            suffix += 1
-
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(legacy_debug_dir), str(destination))
-        migrated.append((legacy_debug_dir, destination))
-
-    return migrated
-
-
-
-def _find_chapter_qmd(book_dir: Path, chapter: str, volume: str) -> Path:
-    """Locate the .qmd file for a chapter.
-
-    Searches the volume directory first, then falls back to the shared
-    directory (e.g. contents/shared/notation.qmd).
-    """
-    contents_dir = book_dir
-    # Search volume dir and shared dir (covers frontmatter, parts, shared files)
-    for matches in [
-        list((contents_dir / volume).rglob(f"{chapter}.qmd")),
-        list((contents_dir / "shared").rglob(f"{chapter}.qmd")),
-    ]:
-        if matches:
-            return matches[0]
-    raise FileNotFoundError(
-        f"Chapter '{chapter}' not found under {contents_dir / volume} "
-        f"or {contents_dir / 'shared'}"
-    )
-
-
-def _get_output_dir(book_dir: Path, format_type: str, volume: str) -> Optional[Path]:
-    """Return the build output directory (same for all formats: PDF, EPUB, HTML)."""
-    if format_type in ("pdf", "epub", "html"):
-        return book_dir / "_build" / f"{format_type}-{volume}"
-    return None
-
-
-def _safe_artifact_stem(stem: str) -> str:
-    """Convert arbitrary labels into filesystem-safe artifact names."""
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
-    return cleaned or "artifact"
-
-
-def _print_step_result(success: bool, duration: float, warnings: List[str]) -> None:
-    """Print PASS/WARN status and any Quarto warnings for a build step."""
-    if warnings:
-        console.print(f"[yellow]WARN[/yellow] ({duration:.1f}s)")
-        for w in warnings:
-            console.print(f"         [yellow]⚠ {w}[/yellow]")
-    else:
-        console.print(f"[green]PASS[/green] ({duration:.1f}s)")
-
-
-# Quarto warning patterns to surface even when the build succeeds.
-# Each entry is (pattern, human_label).
+# Quarto warnings worth surfacing even when a build succeeds, as
+# (pattern, human-readable label) pairs.
 _QUARTO_WARN_PATTERNS: List[Tuple[re.Pattern, str]] = [
     (
         re.compile(r"Duplicate note reference '([^']+)'", re.IGNORECASE),
@@ -129,272 +62,147 @@ _QUARTO_WARN_PATTERNS: List[Tuple[re.Pattern, str]] = [
 
 
 def _extract_quarto_warnings(output: str) -> List[str]:
-    """Scan build output for known Quarto warning patterns.
-
-    Returns a deduplicated list of human-readable warning strings.
-    """
+    """Return the known Quarto warnings found in *output*, deduplicated, in order of appearance."""
     found: List[str] = []
-    seen: set = set()
     for pattern, label in _QUARTO_WARN_PATTERNS:
-        for m in pattern.finditer(output):
-            # Include the captured group (e.g., fn ID) if present
-            detail = m.group(1) if m.lastindex else ""
-            msg = f"{label}: {detail}" if detail else label
-            if msg not in seen:
-                seen.add(msg)
-                found.append(msg)
+        for match in pattern.finditer(output):
+            detail = match.group(1) if match.lastindex else ""
+            message = f"{label}: {detail}" if detail else label
+            if message not in found:
+                found.append(message)
     return found
 
 
-def _build_and_check(
-    book_dir: Path,
-    chapter_name: str,
-    volume: str,
-    format_type: str,
-    log_file: Path,
-    verbose: bool = False,
-    artifact_dir: Optional[Path] = None,
-    artifact_stem: Optional[str] = None,
-) -> Tuple[bool, float, str, List[str]]:
-    """Run a single chapter build and check if output was created.
+def _failure_excerpt(result: JobResult, lines: int = 20) -> str:
+    """Return the failure note plus the last *lines* lines of a job's log."""
+    text = result.log_text().strip()
+    tail = "\n".join(text.splitlines()[-lines:]) if text else ""
+    return f"{result.note}\n{tail}".strip()
 
-    Returns:
-        (success, duration_seconds, error_snippet, quarto_warnings)
-    """
-    cmd = [
-        "./binder/binder",
-        "build",
-        format_type,
-        chapter_name,
-        f"--{volume}",
-        "-v",
-    ]
 
-    output_dir = _get_output_dir(book_dir, format_type, volume)
-    if not output_dir:
-        log_file.write_text("Unknown format type\n")
-        return False, 0.0, "Unknown format type", []
-
-    # Delete previous output to ensure clean test (same rule: any .pdf, any .epub, index.html)
-    from ..core.config import get_output_file, get_chapter_output_file
-    existing = get_chapter_output_file(output_dir, format_type, chapter_name, volume) or get_output_file(output_dir, format_type)
-    if existing is not None:
-        try:
-            existing.unlink()
-        except Exception:
-            pass
-
-    start = time.time()
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=book_dir.parent,  # Run from book/ directory
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        duration = time.time() - start
-
-        # Write full log
-        full_output = f"=== COMMAND ===\n{' '.join(cmd)}\n\n"
-        full_output += f"=== TIMESTAMP ===\n{datetime.now().isoformat()}\n\n"
-        full_output += f"=== STDOUT ===\n{result.stdout}\n\n"
-        full_output += f"=== STDERR ===\n{result.stderr}\n\n"
-        full_output += f"=== EXIT CODE ===\n{result.returncode}\n"
-        full_output += f"=== DURATION ===\n{duration:.1f}s\n"
-        log_file.write_text(full_output)
-
-        # Success = output file present (any .pdf, any .epub, or index.html)
-        resolved = get_chapter_output_file(output_dir, format_type, chapter_name, volume) or get_output_file(output_dir, format_type)
-        combined = result.stdout + result.stderr
-        quarto_warnings = _extract_quarto_warnings(combined)
-
-        if resolved is not None and resolved.exists():
-            if artifact_dir is not None:
-                try:
-                    artifact_dir.mkdir(parents=True, exist_ok=True)
-                    stem = _safe_artifact_stem(artifact_stem or chapter_name)
-                    artifact_ext = resolved.suffix or ".artifact"
-                    artifact_path = artifact_dir / f"{stem}{artifact_ext}"
-                    shutil.copy2(resolved, artifact_path)
-                    console.print(f"[dim]Saved debug artifact: {artifact_path}[/dim]")
-                except Exception as exc:
-                    console.print(
-                        f"[yellow]⚠️ Failed to save debug artifact for {chapter_name}: {exc}[/yellow]"
-                    )
-            return True, duration, "", quarto_warnings
-        else:
-            error_lines = combined.strip().split("\n")[-20:]
-            return False, duration, "\n".join(error_lines), quarto_warnings
-
-    except subprocess.TimeoutExpired:
-        duration = time.time() - start
-        log_file.write_text(f"TIMEOUT after {duration:.0f}s\nCommand: {' '.join(cmd)}")
-        return False, duration, "TIMEOUT: Build exceeded 10 minutes", []
-    except Exception as e:
-        duration = time.time() - start
-        log_file.write_text(f"EXCEPTION: {e}\nCommand: {' '.join(cmd)}")
-        return False, duration, f"EXCEPTION: {e}", []
+def _print_result(result: JobResult, verbose: bool = False) -> None:
+    """Print PASS, WARN, or FAIL for a finished build, with warnings and, if verbose, the log tail."""
+    warnings = _extract_quarto_warnings(result.log_text())
+    if not result.ok:
+        console.print(f"[red]FAIL[/red] ({result.seconds:.1f}s)")
+    elif warnings:
+        console.print(f"[yellow]WARN[/yellow] ({result.seconds:.1f}s)")
+    else:
+        console.print(f"[green]PASS[/green] ({result.seconds:.1f}s)")
+    for warning in warnings:
+        console.print(f"         [yellow]⚠ {escape(warning)}[/yellow]")
+    if verbose and not result.ok:
+        for line in _failure_excerpt(result).splitlines()[-3:]:
+            console.print(f"         [dim]{escape(line)}[/dim]")
 
 
 class DebugCommand:
-    """Two-phase build debugger for MLSysBook."""
+    """Two-phase build debugger for the book volumes."""
 
     def __init__(self, config_manager, chapter_discovery, verbose: bool = False):
+        """Store the shared configuration and discovery objects.
+
+        Args:
+            config_manager: ``ConfigManager`` for the checkout being debugged.
+            chapter_discovery: ``ChapterDiscovery`` used to list and resolve chapters.
+            verbose: Print the tail of each failed build's log.
+        """
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
         self.verbose = verbose
         self.book_dir = config_manager.book_dir
+        self.repo_root = config_manager.book_dir.parent
 
     def debug_build(
         self,
         format_type: str,
         volume: str,
         chapter: Optional[str] = None,
+        workers: int = 1,
+        keep_workspaces: bool = False,
     ) -> bool:
-        """Main entry point for the debug command.
+        """Run the debugger for one volume and format.
 
         Args:
-            format_type: Build format (pdf, html, epub)
-            volume: Volume to debug (vol1, vol2)
-            chapter: If provided, skip to section-level debug for this chapter
+            format_type: ``pdf``, ``html``, or ``epub``.
+            volume: Volume to debug, such as ``vol1``.
+            chapter: Skip the chapter scan and bisect this chapter.
+            workers: Chapter builds to run at once during the scan.
+            keep_workspaces: Leave the build worktrees on disk for inspection.
 
         Returns:
-            True if debugging completed (regardless of findings)
+            True once debugging has finished, whatever it found; False when it
+            could not run.
         """
-        volume_label = "Volume I" if volume == "vol1" else "Volume II"
-
-        banner = Panel(
+        console.print(Panel(
             f"[bold red]Build Debugger[/bold red]\n"
-            f"[dim]{volume_label} / {format_type.upper()}[/dim]",
+            f"[dim]{format_volume_display_name(volume)} / {format_type.upper()}[/dim]",
             border_style="red",
-        )
-        console.print(banner)
-
-        migrated_legacy = _assimilate_legacy_debug_logs(self.book_dir)
-        if migrated_legacy:
-            console.print(
-                f"[dim]Migrated {len(migrated_legacy)} legacy debug log folder(s) "
-                "to books/_build/debug/_legacy/[/dim]"
-            )
-
-        run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
-        log_dir = (
-            self.book_dir
-            / "_build" / "debug"
-            / volume / format_type
-            / run_id
-        )
-        log_dir.mkdir(parents=True, exist_ok=True)
-        console.print(f"[dim]Debug logs: {log_dir}[/dim]")
+        ))
+        run_dir = self.book_dir / "_build" / "debug" / volume / format_type / new_run_id()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        console.print(f"[dim]Debug logs: {run_dir}[/dim]")
 
         if chapter:
-            # Skip Phase 1, go directly to section debug
-            console.print(f"\n[bold]Skipping to Phase 2: section-level debug for [cyan]{chapter}[/cyan][/bold]\n")
-            return self._phase2_section_debug(chapter, volume, format_type, log_dir)
-        else:
-            # Phase 1: find failing chapters
-            console.print("\n[bold]Phase 1:[/bold] Scanning chapters for build failures...\n")
-            failures = self._phase1_chapter_scan(volume, format_type, log_dir)
+            console.print(f"\n[bold]Section-level debug for [cyan]{escape(chapter)}[/cyan][/bold]\n")
+            return self._bisect_chapter(chapter, volume, format_type, run_dir, keep_workspaces)
 
-            if not failures:
-                console.print(Panel(
-                    "[bold green]All chapters build successfully.[/bold green]\n"
-                    "[dim]No failures to debug.[/dim]",
-                    border_style="green",
-                ))
-                return True
-
-            # Report Phase 1 results
-            console.print(f"\n[bold red]Found {len(failures)} failing chapter(s):[/bold red]")
-            for ch_name, error in failures:
-                console.print(f"  [red]x[/red] {ch_name}")
-
-            # Phase 2: drill into each failure
-            for i, (ch_name, _) in enumerate(failures):
-                console.print(f"\n[bold]Phase 2 ({i+1}/{len(failures)}):[/bold] "
-                              f"Section-level debug for [cyan]{ch_name}[/cyan]\n")
-                self._phase2_section_debug(ch_name, volume, format_type, log_dir)
-
+        console.print("\n[bold]Phase 1:[/bold] Building each chapter on its own...\n")
+        failures = self._scan_chapters(volume, format_type, run_dir, workers, keep_workspaces)
+        if failures is None:
+            return False
+        if not failures:
+            console.print(Panel(
+                "[bold green]All chapters build successfully.[/bold green]\n"
+                "[dim]No failures to debug.[/dim]",
+                border_style="green",
+            ))
             return True
 
-    def _phase1_chapter_scan(
-        self,
-        volume: str,
-        format_type: str,
-        log_dir: Path,
-    ) -> List[Tuple[str, str]]:
-        """Phase 1: Build each chapter individually, collect failures.
+        console.print(f"\n[bold red]Found {len(failures)} failing chapter(s):[/bold red]")
+        for result in failures:
+            console.print(f"  [red]x[/red] {escape(result.job.chapter or result.job.name)}")
+        for index, result in enumerate(failures, 1):
+            console.print(f"\n[bold]Phase 2 ({index}/{len(failures)}):[/bold] "
+                          f"Section-level debug for [cyan]{escape(result.job.chapter)}[/cyan]\n")
+            self._bisect_chapter(result.job.chapter, volume, format_type, run_dir, keep_workspaces)
+        return True
 
-        Returns:
-            List of (chapter_name, error_snippet) for each failure
+    def _scan_chapters(
+        self, volume: str, format_type: str, run_dir: Path, workers: int, keep_workspaces: bool
+    ) -> Optional[List[JobResult]]:
+        """Build every chapter of *volume* on its own and return the failed results.
+
+        Returns ``None`` when the volume has no chapters to build.
         """
         chapters = self.chapter_discovery.get_chapters_from_config(volume)
-
         if not chapters:
             console.print("[red]No chapters found.[/red]")
-            return []
+            return None
+        jobs = [BuildJob(format_type, volume, stem, CHAPTER_BUILD_ARGS, label=f"{index:02d}_{stem}")
+                for index, stem in enumerate(chapters, 1)]
+        console.print(f"[dim]{len(jobs)} chapters, {workers} build(s) at a time[/dim]\n")
 
-        console.print(f"[dim]Testing {len(chapters)} chapters...[/dim]\n")
+        def report(result: JobResult) -> None:
+            """Print a finished chapter's name followed by its build result."""
+            console.print(f"  {escape(result.job.chapter):<32s}", end=" ")
+            _print_result(result, self.verbose)
 
-        failures = []
-        passed = 0
-
-        for i, chapter_name in enumerate(chapters, 1):
-            console.print(
-                f"  [{i:2d}/{len(chapters)}] {chapter_name:<30s}",
-                end="",
-            )
-
-            chapter_log_dir = log_dir / "phase1"
-            chapter_log_dir.mkdir(parents=True, exist_ok=True)
-            log_file = chapter_log_dir / f"{chapter_name}.log"
-
-            success, duration, error, warnings = _build_and_check(
-                self.book_dir,
-                chapter_name,
-                volume,
-                format_type,
-                log_file,
-                self.verbose,
-                artifact_dir=log_dir / "phase1" / "artifacts",
-                artifact_stem=f"{i:02d}_{chapter_name}",
-            )
-
-            if success:
-                if warnings:
-                    console.print(f" [yellow]WARN[/yellow] ({duration:.1f}s)")
-                    for w in warnings:
-                        console.print(f"         [yellow]⚠ {w}[/yellow]")
-                else:
-                    console.print(f" [green]PASS[/green] ({duration:.1f}s)")
-                passed += 1
-            else:
-                console.print(f" [red]FAIL[/red] ({duration:.1f}s)")
-                failures.append((chapter_name, error))
-                if warnings:
-                    for w in warnings:
-                        console.print(f"         [yellow]⚠ {w}[/yellow]")
-                if self.verbose and error:
-                    for line in error.strip().split("\n")[-3:]:
-                        console.print(f"         [dim]{line}[/dim]")
-
-        console.print(f"\n[dim]Results: {passed} passed, {len(failures)} failed[/dim]")
+        results = run_jobs(self.repo_root, jobs, run_dir / "phase1", workers=workers,
+                           keep_workspaces=keep_workspaces, on_finish=report)
+        failures = [result for result in results if not result.ok]
+        console.print(f"\n[dim]Results: {len(results) - len(failures)} passed, {len(failures)} failed[/dim]")
         return failures
 
-    def _phase2_section_debug(
-        self,
-        chapter_name: str,
-        volume: str,
-        format_type: str,
-        log_dir: Path,
+    def _bisect_chapter(
+        self, chapter_name: str, volume: str, format_type: str, run_dir: Path, keep_workspaces: bool
     ) -> bool:
-        """Phase 2: Binary search within a chapter to find the failing section.
+        """Binary-search one chapter for the first section that breaks its build.
 
         Returns:
-            True if debugging completed
+            True once the search has finished; False when the chapter cannot
+            be found or parsed.
         """
-        # Import section_splitter
         sys.path.insert(0, str(CONTENT_SCRIPTS_DIR))
         try:
             from section_splitter import split_chapter
@@ -403,212 +211,118 @@ class DebugCommand:
             console.print(f"[dim]Expected at: {CONTENT_SCRIPTS_DIR / 'section_splitter.py'}[/dim]")
             return False
 
-        # Find the chapter .qmd file
+        spec = chapter_name if "/" in chapter_name else f"{volume}/{chapter_name}"
         try:
-            qmd_path = _find_chapter_qmd(self.book_dir, chapter_name, volume)
-        except FileNotFoundError as e:
-            console.print(f"[red]{e}[/red]")
+            qmd_path = self.chapter_discovery.find_chapter_file(spec, allow_fuzzy=True)
+        except AmbiguousChapterError as error:
+            console.print(f"[red]Ambiguous chapter {escape(chapter_name)}:[/red] "
+                          f"{escape(', '.join(error.locations))}")
+            return False
+        if qmd_path is None:
+            console.print(f"[red]Chapter not found: {escape(chapter_name)}[/red]")
             return False
 
-        # Parse into sections
         console.print(f"[dim]Parsing {qmd_path.name} into sections...[/dim]")
         chapter = split_chapter(str(qmd_path))
-        num_sections = len(chapter.sections)
-
-        if num_sections == 0:
+        if not chapter.sections:
             console.print("[yellow]No ## sections found in chapter.[/yellow]")
             return False
 
-        # Show section map
         section_table = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
         section_table.add_column("#", style="dim", width=4)
         section_table.add_column("Section", width=50)
         section_table.add_column("Lines", style="dim", width=12)
-        for sec in chapter.sections:
-            section_table.add_row(
-                str(sec.index),
-                sec.title,
-                f"L{sec.start_line}-{sec.end_line}",
-            )
+        for section in chapter.sections:
+            section_table.add_row(str(section.index), escape(section.title),
+                                  f"L{section.start_line}-{section.end_line}")
         console.print(section_table)
         console.print()
 
-        # Set up log directory for section debug
-        section_log_dir = log_dir / "phase2" / chapter_name
-        section_log_dir.mkdir(parents=True, exist_ok=True)
+        steps_dir = run_dir / "phase2" / qmd_path.stem
+        relative = qmd_path.resolve().relative_to(self.repo_root.resolve())
+        with BuildSession(take_snapshot(self.repo_root), steps_dir, name=f"bisect-{qmd_path.stem}",
+                          run_id=new_run_id(), keep=keep_workspaces) as session:
+            failing = self._binary_search_sections(session, chapter, qmd_path.stem, volume,
+                                                   format_type, relative)
 
-        # Back up original file
-        backup_path = qmd_path.with_suffix(".qmd.debug_backup")
-        shutil.copy2(qmd_path, backup_path)
-
-        def restore_original(signum=None, frame=None):
-            if backup_path.exists():
-                shutil.copy2(backup_path, qmd_path)
-                backup_path.unlink()
-            if signum is not None:
-                console.print("\n[yellow]Interrupted. Original file restored.[/yellow]")
-                sys.exit(1)
-
-        # Register signal handlers for safe cleanup
-        old_sigint = signal.getsignal(signal.SIGINT)
-        old_sigterm = signal.getsignal(signal.SIGTERM)
-        signal.signal(signal.SIGINT, restore_original)
-        signal.signal(signal.SIGTERM, restore_original)
-
-        try:
-            failing_idx = self._binary_search_sections(
-                chapter_name, volume, format_type, chapter,
-                qmd_path, section_log_dir,
-            )
-        finally:
-            restore_original()
-            signal.signal(signal.SIGINT, old_sigint)
-            signal.signal(signal.SIGTERM, old_sigterm)
-
-        # Report results
         console.print()
-        if failing_idx is None:
+        if failing is None:
             console.print(Panel(
-                f"[bold green]All {num_sections} sections in {chapter_name} build successfully.[/bold green]",
+                f"[bold green]All {len(chapter.sections)} sections in {escape(qmd_path.stem)} "
+                "build successfully.[/bold green]",
                 border_style="green",
             ))
-        elif failing_idx == -1:
+        elif failing == -1:
             console.print(Panel(
                 "[bold red]Preamble itself fails to build.[/bold red]\n"
                 "[dim]The issue is in the YAML frontmatter or content before the first ## section.[/dim]",
                 border_style="red",
             ))
         else:
-            sec = chapter.sections[failing_idx]
-            result_text = Text()
-            result_text.append("Build breaks at section ", style="bold red")
-            result_text.append(f"{failing_idx}", style="bold cyan")
-            result_text.append(": ", style="bold red")
-            result_text.append(f'"{sec.title}"', style="bold white")
-            result_text.append(f"\n\nFile:   {qmd_path.name}", style="dim")
-            result_text.append(f"\nLines:  {sec.start_line}-{sec.end_line}", style="dim")
-            if sec.section_id:
-                result_text.append(f"\nID:     #{sec.section_id}", style="dim")
-            result_text.append(f"\nLogs:   {section_log_dir}", style="dim")
-
-            console.print(Panel(result_text, title="Result", border_style="red"))
-
+            section = chapter.sections[failing]
+            text = Text()
+            text.append("Build breaks at section ", style="bold red")
+            text.append(f"{failing}", style="bold cyan")
+            text.append(": ", style="bold red")
+            text.append(f'"{section.title}"', style="bold white")
+            text.append(f"\n\nFile:   {qmd_path.name}", style="dim")
+            text.append(f"\nLines:  {section.start_line}-{section.end_line}", style="dim")
+            if section.section_id:
+                text.append(f"\nID:     #{section.section_id}", style="dim")
+            text.append(f"\nLogs:   {steps_dir}", style="dim")
+            console.print(Panel(text, title="Result", border_style="red"))
         return True
 
     def _binary_search_sections(
-        self,
-        chapter_name: str,
-        volume: str,
-        format_type: str,
-        chapter,  # ChapterStructure
-        qmd_path: Path,
-        log_dir: Path,
+        self, session: BuildSession, chapter, stem: str, volume: str, format_type: str, relative: Path
     ) -> Optional[int]:
-        """Binary search for the first section that breaks the build.
+        """Find the first section whose inclusion breaks the build.
+
+        Each step writes a truncated chapter into the session's workspace and
+        builds it there.
 
         Returns:
-            Section index that causes failure, -1 if preamble fails, None if all pass.
+            The failing section index, -1 if the preamble alone fails, or
+            ``None`` if the whole chapter builds.
         """
-        num_sections = len(chapter.sections)
+        def builds(label: str, up_to_section: int) -> bool:
+            """Build the chapter truncated after *up_to_section* and return whether it succeeded."""
+            content = self._assemble_content(chapter, up_to_section)
+            job = BuildJob(format_type, volume, stem, CHAPTER_BUILD_ARGS, label=label)
+            result = session.run(
+                job, prepare=lambda root: (root / relative).write_text(content, encoding="utf-8"))
+            _print_result(result, self.verbose)
+            return result.ok
 
-        # Step 1: Test preamble only
-        console.print(f"  [dim][pre][/dim]  Preamble only", end="  ")
-        content = self._assemble_content(chapter, -1)
-        qmd_path.write_text(content, encoding="utf-8")
-        log_file = log_dir / "binary_preamble.log"
-        success, duration, _, warnings = _build_and_check(
-            self.book_dir,
-            chapter_name,
-            volume,
-            format_type,
-            log_file,
-            self.verbose,
-            artifact_dir=log_dir / "artifacts",
-            artifact_stem="preamble",
-        )
-        if not success:
-            console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
+        count = len(chapter.sections)
+        console.print("  [dim]\\[pre][/dim]  Preamble only", end="  ")
+        if not builds("preamble", -1):
             return -1
-        _print_step_result(success, duration, warnings)
-
-        # Step 2: Test full chapter (confirm it actually fails)
-        console.print(f"  [dim][full][/dim] All {num_sections} sections", end="  ")
-        content = self._assemble_content(chapter, num_sections - 1)
-        qmd_path.write_text(content, encoding="utf-8")
-        log_file = log_dir / "binary_full.log"
-        success, duration, _, warnings = _build_and_check(
-            self.book_dir,
-            chapter_name,
-            volume,
-            format_type,
-            log_file,
-            self.verbose,
-            artifact_dir=log_dir / "artifacts",
-            artifact_stem="full",
-        )
-        if success:
-            _print_step_result(success, duration, warnings)
+        console.print(f"  [dim]\\[full][/dim] All {count} sections", end="  ")
+        if builds("full", count - 1):
             return None
-        console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
-        for w in warnings:
-            console.print(f"         [yellow]⚠ {w}[/yellow]")
 
-        # Step 3: Binary search
-        lo, hi = 0, num_sections - 1
-        build_count = 2
-
-        while lo < hi:
-            mid = (lo + hi) // 2
-            sec = chapter.sections[mid]
+        low, high, build_count = 0, count - 1, 2
+        while low < high:
+            middle = (low + high) // 2
             build_count += 1
-
-            label = f'Up to #{mid}: "{sec.title[:40]}"'
-            console.print(f"  [dim][bisect {build_count}][/dim] {label}", end="  ")
-
-            content = self._assemble_content(chapter, mid)
-            qmd_path.write_text(content, encoding="utf-8")
-            log_file = log_dir / f"binary_step_{build_count:02d}_upto_{mid}.log"
-            success, duration, _, warnings = _build_and_check(
-                self.book_dir,
-                chapter_name,
-                volume,
-                format_type,
-                log_file,
-                self.verbose,
-                artifact_dir=log_dir / "artifacts",
-                artifact_stem=f"step_{build_count:02d}_upto_{mid}",
-            )
-
-            if success:
-                _print_step_result(success, duration, warnings)
-                lo = mid + 1
+            title = escape(chapter.sections[middle].title[:40])
+            console.print(f'  [dim]\\[bisect {build_count}][/dim] Up to #{middle}: "{title}"', end="  ")
+            if builds(f"step_{build_count:02d}_upto_{middle}", middle):
+                low = middle + 1
             else:
-                console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
-                for w in warnings:
-                    console.print(f"         [yellow]⚠ {w}[/yellow]")
-                hi = mid
-
+                high = middle
         console.print(f"\n[dim]Isolated in {build_count} builds (binary search).[/dim]")
-        return lo
+        return low
 
     @staticmethod
     def _assemble_content(chapter, up_to_section: int) -> str:
-        """Build chapter content including sections 0..up_to_section.
+        """Return the chapter's frontmatter and preamble plus sections 0 through *up_to_section*.
 
         Args:
-            chapter: Parsed ChapterStructure
-            up_to_section: Include sections with index <= this value (-1 = preamble only)
+            chapter: ``ChapterStructure`` from ``section_splitter.split_chapter``.
+            up_to_section: Highest section index to include; -1 keeps only the preamble.
         """
-        parts = []
-
-        if chapter.frontmatter:
-            parts.append(chapter.frontmatter)
-
-        if chapter.pre_content:
-            parts.append(chapter.pre_content)
-
-        for section in chapter.sections:
-            if section.index <= up_to_section:
-                parts.append(section.content)
-
+        parts = [part for part in (chapter.frontmatter, chapter.pre_content) if part]
+        parts.extend(section.content for section in chapter.sections if section.index <= up_to_section)
         return "\n".join(parts)
