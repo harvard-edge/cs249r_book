@@ -12,10 +12,14 @@ The `./binder/binder` CLI is the **single source of truth** for building, checki
 cli/
 ├── main.py                  # CLI router, help system (Rich UI)
 ├── core/
-│   ├── config.py            # Quarto config management (symlinks, switching)
-│   └── discovery.py         # Chapter/file discovery, fuzzy matching
+│   ├── config.py            # Quarto config management (generated _quarto.yml, switching)
+│   ├── discovery.py         # Chapter/file discovery, fuzzy matching
+│   ├── process.py           # Renderer process groups, PYTHONPATH, signal handling
+│   ├── workspace.py         # Disposable git worktrees built from a working-tree snapshot
+│   └── parallel.py          # Build jobs, per-worker build sessions, the --parallel runner
 ├── commands/
-│   ├── build.py             # Build HTML/PDF/EPUB (full book or chapters)
+│   ├── build.py             # Build HTML/PDF/EPUB (volumes or selected chapters)
+│   ├── debug.py             # Chapter scan + section bisection, built on core/parallel.py
 │   ├── preview.py           # Live dev server with hot reload
 │   ├── validate.py          # Check router: dispatches scopes → cli/checks or inline
 │   ├── formatting.py        # Auto-formatters (format group)
@@ -116,9 +120,11 @@ there is a migration plan and a removal date.
 ./binder/binder build pdf --vol1          # Build Volume I PDF
 ./binder/binder build pdf --vol1 --layout # Build Volume I PDF, then emit auto-layout plan
 ./binder/binder build html --vol2         # Build Volume II website
-./binder/binder build pdf intro           # Single chapter PDF
-./binder/binder reset pdf --vol1          # Reset Volume I PDF YAML after scoped builds
-./binder/binder reset all                 # Reset all build YAML configs
+./binder/binder build pdf intro --vol1    # Selected chapter PDF
+./binder/binder build pdf --all           # Every volume PDF, one after another
+./binder/binder build html,pdf --all --parallel 4             # Volumes and formats at once, one worktree each
+./binder/binder build pdf --vol1 --each-chapter --parallel 4  # Every chapter on its own
+./binder/binder reset pdf --vol1          # Recover a config older binder versions left commented out
 ./binder/binder preview                   # Live dev server (full book)
 ./binder/binder preview intro             # Live dev server (single chapter)
 ```
@@ -228,7 +234,7 @@ Flipping `default=False → default=True` once dev is clean is a one-line edit i
 ./binder/binder render plots --vol1       # Render matplotlib plots to PNG
 ./binder/binder clean                     # Remove build artifacts
 ./binder/binder doctor                    # Comprehensive health check
-./binder/binder debug pdf --vol1          # Find failing chapter in PDF build
+./binder/binder debug pdf --vol1 --parallel 4  # Find the failing chapter, then section
 ```
 
 ## Pre-commit Integration

@@ -286,12 +286,24 @@ The **recommended way** to build the book is using the Book Binder CLI:
 ./binder/binder build epub             # Complete e-book (EPUB)
 ```
 
+#### Build a Volume
+```sh
+./binder/binder build pdf --vol1                        # One volume (PDF)
+./binder/binder build html --all                        # Every volume website, one after another
+./binder/binder build html,pdf --all --parallel 4       # Every volume and format at once, one worktree each
+```
+
 #### Build Specific Chapter(s)
 ```sh
-./binder/binder build intro                    # Single chapter (HTML)
-./binder/binder build intro,ml_systems         # Multiple chapters (HTML)
-./binder/binder build pdf intro                # Single chapter (PDF, selective build)
+./binder/binder build html intro --vol1                 # Single chapter (HTML)
+./binder/binder build html intro,ml_systems --vol1      # Several chapters in one build
+./binder/binder build pdf intro --vol1                  # Single chapter (PDF, selective build)
+./binder/binder build pdf --vol1 --each-chapter --parallel 4  # Every chapter on its own, four at a time
 ```
+
+Builds in one checkout run one at a time; `--parallel` gives each build its own
+git worktree. See [Parallel builds](BINDER.md#parallel-builds) and
+[Debugging a failing build](BINDER.md#debugging-a-failing-build).
 
 #### Preview Mode (Live Reload)
 ```sh
@@ -310,9 +322,9 @@ The **recommended way** to build the book is using the Book Binder CLI:
 ```
 
 **Output Locations:**
-- **HTML:** `build/html/`
-- **PDF:** `build/pdf/`
-- **EPUB:** `build/epub/`
+- **Volume builds:** `books/_build/<format>-<volume>/` (for example `books/_build/pdf-vol1/`)
+- **Chapter builds:** `books/_build/<format>-<volume>/chapters/<chapter>/`
+- **Parallel runs:** `books/_build/parallel/<run-id>/<job>/`
 
 ---
 
@@ -349,7 +361,7 @@ quarto render --to epub
 - ✅ Manages build artifacts and cleanup
 - ✅ Provides progress indicators
 - ✅ Validates system health
-- ✅ Supports fast/selective builds
+- ✅ Supports selective chapter builds and parallel builds in separate worktrees
 
 ---
 
