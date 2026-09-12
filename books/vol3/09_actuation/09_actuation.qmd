@@ -1,6 +1,6 @@
 # Tool Actuation & The Environment Interface {#sec-vol3-actuation}
 
-The actuation boundary is the architectural demarcation where a non-deterministic, probabilistic neural processor operating over continuous token distributions crosses into the discrete, stateful, and deterministic realm of external software execution. While classical machine learning models act as passive oracles whose outputs terminate at the inference boundary, agentic systems are active actors whose token sequences are interpreted as operational commands that mutate filesystems, execute shell binaries, query relational databases, invoke remote microservices, and allocate physical cloud infrastructure. This chapter formalizes the tool actuation boundary as the definitive bridge between stochastic neural reasoning and deterministic environment mutation. We examine why external tools cannot be treated as prompt-engineered conveniences, but must instead be engineered as unprivileged user-space traps into a deterministic operating system supervisor kernel. We formalize typed Application Binary Interfaces (ABIs), wire transport contracts, and grammar-constrained logit decoding at the GPU tensor layer; establish capability-based security to abolish ambient authority and contain indirect prompt injection; and construct distributed cryptographic nonce pipelines to guarantee mathematical idempotency across stochastic retry loops. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries to guarantee system integrity.
+The actuation boundary is the architectural demarcation where a non-deterministic, probabilistic neural processor operating over continuous token distributions crosses into the discrete, stateful, and deterministic realm of external software execution. While classical machine learning models act as passive oracles whose outputs terminate at the inference boundary, agentic systems are active actors whose token sequences are interpreted as operational commands that mutate filesystems, execute shell binaries, query relational databases, invoke remote microservices, and allocate physical cloud infrastructure. Just as a central processing unit (CPU) interacts with external peripherals through Memory-Mapped I/O (MMIO) registers and hardware device drivers rather than unmediated electrical signals, an agentic runtime must mediate between the neural inference engine and external tools through structured contracts, typed schemas, and supervisor traps. This chapter formalizes the tool actuation boundary as the definitive bridge between stochastic neural reasoning and deterministic environment mutation. We examine why external tools cannot be treated as prompt-engineered conveniences, but must instead be engineered as unprivileged user-space traps into a deterministic operating system supervisor kernel. We formalize typed Application Binary Interfaces (ABIs), wire transport contracts, and grammar-constrained logit decoding at the GPU tensor layer; establish capability-based security to abolish ambient authority and contain indirect prompt injection; and construct distributed cryptographic nonce pipelines to guarantee mathematical idempotency across stochastic retry loops. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries to guarantee system integrity.
 
 ## Purpose {.unnumbered .unlisted}
 
@@ -20,11 +20,12 @@ When an autonomous agent attempts to execute an action in the physical or digita
 :::
 
 ::: {.callout-learning-objectives}
-* **Analyze** the architectural asymmetry between stochastic token generation and deterministic execution environments, framing tool actuation as an operating system privilege trap.
-* **Design** wire transport protocols and typed Application Binary Interfaces using the Model Context Protocol to decouple agent deliberation from external tool implementations.
-* **Formulate** grammar-constrained logit decoding pipelines at the GPU tensor layer, proving mathematically that deterministic finite automata bitmasks eliminate runtime parsing failures.
+* **Analyze** the architectural asymmetry between stochastic token generation and deterministic execution environments, framing tool actuation through the computer architecture lens of Memory-Mapped I/O, device drivers, and operating system privilege traps.
+* **Design** wire transport protocols and typed Application Binary Interfaces using the Model Context Protocol to decouple agent deliberation from external tool implementations, quantifying payload serialization overhead and wire bandwidth.
+* **Evaluate** grammar-constrained logit decoding pipelines at the GPU tensor layer, contrasting sub-millisecond bitmask operations against the latency and FLOP penalties of host-side schema validation and multi-turn error recovery.
 * **Implement** capability-based security models enforcing the Monotonic Capability Attenuation Principle to neutralize confused deputy exploits and indirect prompt injections.
 * **Architect** distributed idempotency gateways and write-ahead logs using trajectory nonces to reconcile at-least-once stochastic retry loops with at-most-once physical mutations.
+* **Model** multimodal tool execution latencies and compound error propagation across multi-step trajectories, analyzing how tail stragglers and unhandled exceptions dictate system reliability.
 * **Evaluate** dynamic tool discovery mechanisms, schema vector indexing, and tool-result memoization to minimize prompt token tax and maximize accelerator working-set capacity.
 :::
 
@@ -34,7 +35,9 @@ During an automated maintenance cycle on a multi-tenant cloud cluster, an autono
 
 This incident exposes the catastrophic fragility of treating tool actuation as an exercise in unstructured natural language text generation. In classical deep learning applications [@he2016; @vaswani2017], a machine learning model operates strictly as an **oracle**\index{Oracle}—a pure mathematical function mapping an input tensor to an output tensor. The forward pass computes activations through transformer layers, normalizes logits across a fixed vocabulary $\mathcal{V}$, and samples a token. Whether the model generates poetry, code, or erroneous gibberish, the physical world outside the device activation memory remains completely invariant: storage sectors are unmodified, memory outside the model's transient buffers is untouched, and zero network packets are dispatched to external hosts.
 
-Agentic systems shatter this physical isolation. In an autonomous agent architecture, inference is not the termination of computation; it is merely the deliberative proposal phase of a closed control loop $\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{O}, \pi_\theta, \mathcal{T}, \Omega, \mathcal{R} \rangle$. When the neural policy $\pi_\theta(a_t \mid h_t)$ emits tokens corresponding to an external action $a_t \in \mathcal{A}$, those tokens cross the **actuation boundary**\index{Actuation boundary}—the physical demarcation line separating the continuous, probabilistic space of neural representations from the discrete, causal space of deterministic software environments.
+Agentic systems shatter this physical isolation. In an autonomous agent architecture, inference is not the termination of computation; it is merely the deliberative proposal phase of a closed control loop across environment states, actions, and observations.[^fn-actuation-pomdp-definition] When the neural policy $\pi_\theta(a_t \mid h_t)$ emits tokens corresponding to an external action $a_t \in \mathcal{A}$, those tokens cross the **actuation boundary**\index{Actuation boundary}—the physical demarcation line separating the continuous, probabilistic space of neural representations from the discrete, causal space of deterministic software environments.
+
+[^fn-actuation-pomdp-definition]: For a formal Partially Observable Markov Decision Process (POMDP) definition of the agent control tuple $\langle \mathcal{S}, \mathcal{A}, \mathcal{T}, \mathcal{R}, \Omega, \mathcal{O}, \gamma \rangle$, see @sec-vol3-appendix-math-pomdp.
 
 ### Continuous sampling vs. discrete mutation
 
@@ -51,6 +54,18 @@ Both the operational leverage and the systemic risk of an autonomous agent scale
 
 $$P_{\text{integrity}}(N) = \prod_{k=1}^N p_k \le p^N \xrightarrow[N \to \infty]{} 0$$
 
+To see the mathematical severity of this decay from first principles, consider an agent operating with a seemingly high per-step validity probability of $p = 0.98$ (a 98 percent success rate). Over a moderate trajectory horizon of $N = 30$ steps, the compound probability of surviving without a single corrupting mutation drops to $0.98^{30} \approx 0.545$—barely better than a coin flip. If per-step validity falls to $p = 0.95$, survival at 30 steps collapses to $0.95^{30} \approx 0.215$, and by 50 steps it plummets to $0.95^{50} \approx 0.077$—fewer than one in twelve runs completes safely. Unconstrained natural language generation simply cannot maintain compounding integrity over multi-step horizons.
+
+::: {#chk-vol3-09-action-boundary-integrity .callout-checkpoint title="The action boundary and compounding integrity"}
+
+Before analyzing AI system calls and protection rings, verify your understanding of the actuation boundary:
+
+- [ ] **Continuous sampling vs. discrete mutation**: explain why treating external tool invocations as raw natural language strings violates software integrity over multi-step horizons.
+- [ ] **Compounding integrity decay**: calculate the survival probability of a 30-step tool trajectory when per-step validity is $p = 0.98$ versus $p = 0.95$.
+- [ ] **AI system call analogy**: map an unprivileged application invoking an OS kernel via `syscall` to a stochastic foundation model invoking an external tool through an agent supervisor.
+
+:::
+
 To construct production-grade agentic systems, software engineers cannot rely on the model to "behave" through prompt persuasion. Instead, the actuation boundary must be engineered with the same mechanical rigor that classical operating systems apply to untrusted user-space applications. The runtime must enforce typed contracts, mediate authority via unforgeable cryptographic capabilities, and isolate side effects through mathematical idempotency.
 
 ### The AI system call privilege boundary
@@ -66,6 +81,16 @@ An application running in Ring 3 cannot directly alter page tables, manipulate h
 In an agentic machine learning system, the foundation model is the exact conceptual equivalent of an **unprivileged user-space process**\index{Unprivileged user-space process}. The weights of the model constitute an untrusted execution core. Because modern foundation models process instructions (system prompts) and data (external observations, retrieved documents, user inputs) within a single unified token sequence, they fundamentally violate the classical $W \oplus X$ (Write XOR Execute) security paradigm. An agent reading an untrusted web page or parsing an incoming email can be hijacked via indirect prompt injection [@greshake2023not].
 
 Consequently, **tools are not prompts**. Treating a tool invocation as a natural language suggestion embedded within a prompt string is an architectural error. A tool invocation is an **AI System Call**\index{AI System Call}—a deliberate, unprivileged trap instruction emitted by the neural engine that demands interception, authorization, and execution by a hardened, deterministic runtime kernel.
+
+### The computer architecture analogy: MMIO and device drivers
+
+To build intuitive systems engineering models for agent actuation, we can map the agent runtime directly onto the classical computer architecture stack:
+
+1. **The Model as CPU:** The foundation model acts as the central processor, executing deliberative reasoning loops, planning sub-goals, and scheduling actions. However, like a CPU core, it has no native physical arms or direct network wires; its only interface to reality is through bus transactions.
+2. **Tools as Hardware Peripherals:** External software tools—relational databases, bash shells, Git repositories, third-party REST APIs—function as external hardware peripherals (disks, network interface cards, display controllers, and physical actuators).
+3. **Parameter Binding as Memory-Mapped I/O (MMIO):** In modern computer architectures, a CPU interacts with peripherals via Memory-Mapped I/O, where dedicated memory addresses correspond to device command and data registers. When software instructs a network card to transmit a packet, it does not send random voltages; it writes a structured command descriptor (containing buffer pointers, packet lengths, and checksum flags) into the device's MMIO register ring. In an agent runtime, structured parameter binding plays the exact same role: the model serializes its intent into typed parameter buffers (JSON-RPC or OpenAPI frames) conforming to a strict schema specification.
+4. **Tool Protocols as Device Drivers:** An operating system device driver encapsulates the physical quirks of a peripheral, presenting a clean, abstract interface (such as a POSIX block device or socket) to user space while managing electrical timings, status registers, and interrupts below. In agentic runtimes, tool protocols like the Model Context Protocol (MCP) act as device drivers: they validate parameter constraints, manage wire transport framing, poll for execution status, and isolate the deliberative core from underlying API changes.
+5. **Tool Observations as Status Registers and DMA Buffers:** When a peripheral completes an I/O operation, it writes status codes to an MMIO register and transfers data payloads into host memory via Direct Memory Access (DMA). Similarly, when a tool completes execution, the supervisor runtime captures exit codes, error streams, and return payloads, packaging them into standardized observation frames injected back into the model's context.
 
 ### The mechanical lifecycle of an AI system call
 
@@ -114,13 +139,11 @@ Instead of trusting probabilities, **Grammar-constrained decoding**\index{Gramma
 ![](images/svg/grammar_constrained_decoding_fsm.svg){width=100%}
 :::
 
-Mathematically, let the model's forward pass at step $t$ produce an unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$, where $|\mathcal{V}|$ is the vocabulary size. Let the tool schema be represented by a Deterministic Finite Automaton (DFA) $\mathcal{D} = \langle Q, \Sigma, \delta, q_0, F \rangle$, where $Q$ is the finite set of parser states, $\Sigma$ is the alphabet of byte sequences or character tokens, $\delta: Q \times \Sigma \to Q$ is the transition function, $q_0 \in Q$ is the start state, and $F \subseteq Q$ is the set of accept states.
+Ahead of time, the tool schema is compiled into a Deterministic Finite Automaton (DFA)—a state machine where each state represents the parser's syntactic expectation (e.g., expecting a property key, a colon, an open bracket, or a floating-point digit).[^fn-actuation-dfa-specification] At generation step $t$, after consuming the prefix tokens $x_{<t} = (x_1, \dots, x_{t-1})$, the parser resides in state $q_t$. From this state, only a specific subset of vocabulary tokens $\mathcal{V}_{\text{valid}}(q_t) \subseteq \mathcal{V}$ contains byte sequences that legally advance the automaton.
 
-Let $q_t \in Q$ denote the active automaton state after consuming prefix tokens $x_{<t} = (x_1, \dots, x_{t-1})$. The set of valid next tokens $\mathcal{V}_{\text{valid}}(q_t) \subseteq \mathcal{V}$ comprises all tokens $v \in \mathcal{V}$ such that the token's byte sequence $s(v) = (b_1, \dots, b_m)$ induces a valid path in $\mathcal{D}$ starting from $q_t$:
+[^fn-actuation-dfa-specification]: For the formal 5-tuple automaton specification, transition closures, and inductive proof of syntax error elimination, see @sec-vol3-appendix-math-dfa.
 
-$$\mathcal{V}_{\text{valid}}(q_t) = \left\{ v \in \mathcal{V} \;\middle|\; \exists q' \in Q \text{ s.t. } \delta^*(q_t, s(v)) = q' \right\}$$
-
-Prior to executing the GPU softmax normalization, a specialized CUDA kernel modifies the logit vector elementwise:
+Prior to executing the GPU softmax normalization, a custom CUDA kernel applies elementwise logit masking directly to the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$:
 
 $$z_{t, v}' = \begin{cases} z_{t, v} & \text{if } v \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } v \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$
 
@@ -132,17 +155,25 @@ Because $\exp(-\infty) = 0$, any token that would produce a syntax violation has
 
 $$\forall v \notin \mathcal{V}_{\text{valid}}(q_t), \quad \Pr(x_t = v \mid x_{<t}) = 0$$
 
-Upon sampling token $x_t$, the automaton transitions deterministically:
+Upon sampling token $x_t$, the automaton transitions deterministically to state $q_{t+1}$. To execute this masking at hardware line rate without stalling GPU streaming multiprocessors (SMs), the runtime compiles the DFA into a compressed vocabulary bitmask tensor $\mathbf{M} \in \{0, 1\}^{|Q| \times \lceil |\mathcal{V}| / 32 \rceil}$ ahead of time. Inside the decode sampling kernel, each warp executes a 32-bit bitwise AND operation (`__ballot_sync` and bitmask lookup) in a single clock cycle, completing logit masking in under $0.4\,\text{ms}$ per token.
 
-$$q_{t+1} = \delta^*(q_t, s(x_t))$$
+### Systems trade-off: Host CPU validation vs. tensor-layer masking
 
-To execute this masking at hardware line rate without stalling the GPU streaming multiprocessors (SMs), the runtime compiles the DFA into a compressed vocabulary bitmask tensor $\mathbf{M} \in \{0, 1\}^{|Q| \times \lceil |\mathcal{V}| / 32 \rceil}$ ahead of time. Inside the decode sampling kernel, each warp executes a 32-bit bitwise AND operation (`__ballot_sync` and bitmask lookup) in a single clock cycle, completing logit masking in under $0.4\,\text{ms}$ per token.
+To appreciate the systems engineering advantage of tensor-layer masking, consider the alternative: unconstrained generation followed by host-side CPU schema validation.
 
-Contrast this tensor-layer enforcement with unconstrained sampling. If an unconstrained model exhibits an error rate $p_{\text{err}} \in [0.05, 0.15]$ on complex nested schemas, every syntax failure forces a complete multi-turn correction loop:
+In a host-side validation architecture, the model generates an unconstrained text string. The host CPU parses the string into an Abstract Syntax Tree (AST) and recursively checks types, required fields, and value bounds using tools like Pydantic or `jsonschema`. For a moderately complex tool schema (30–50 properties with nested objects), CPU validation consumes $2\,\text{ms} \text{ to } 15\,\text{ms}$ of host processing time.
 
-$$\tau_{\text{unmasked}} = \tau_{\text{gen}} + p_{\text{err}} \left( \tau_{\text{prefill}}(S_{\text{context}} + S_{\text{error}}) + \tau_{\text{gen}} \right)$$
+However, the dominant cost is not the CPU validation itself, but the **failure penalty** when validation fails. Without logit masking, models exhibit a schema error rate $p_{\text{err}} \in [0.05, 0.15]$ on nested parameters. Every failure triggers an error reflection loop: the runtime appends an error traceback ($S_{\text{error}} \approx 150\text{ tokens}$) to the context and prompts the model to correct its mistake.
 
-where $\tau_{\text{prefill}}$ is the prompt re-evaluation latency and $S_{\text{context}}$ is the accumulated context length. Because re-prefilling thousands of tokens takes hundreds of milliseconds and burns millions of floating-point operations, tensor-layer logit masking provides a strict order-of-magnitude systems win in end-to-end latency and compute efficiency.
+Let us evaluate the latency and FLOP penalty of this retry loop from first principles. Let the accumulated context length be $S_{\text{context}} = 16,000$ tokens, and let a tool invocation take $T_{\text{gen}} = 60$ tokens to generate at an autoregressive decode speed of $20\,\text{ms/token}$ ($\tau_{\text{gen}} = 1,200\,\text{ms}$). On an NVIDIA H100 GPU, prefilling a 16,000-token prompt takes $\tau_{\text{prefill}} \approx 240\,\text{ms}$ and requires:
+
+$$\text{FLOPs}_{\text{prefill}} \approx 2 \cdot P \cdot S_{\text{context}} = 2 \cdot (70 \times 10^9) \cdot 16,000 \approx 2.24 \times 10^{15} \text{ FLOPs } (2.24\text{ PFLOPs})$$
+
+for a 70B parameter model. With an error rate of $p_{\text{err}} = 0.10$, the expected latency penalty per tool invocation is:
+
+$$\mathbb{E}[\Delta \tau_{\text{retry}}] = p_{\text{err}} \left( \tau_{\text{prefill}}(S_{\text{context}} + S_{\text{error}}) + \tau_{\text{gen}} \right) \approx 0.10 \cdot (240\,\text{ms} + 1,200\,\text{ms}) = 144\,\text{ms}$$
+
+In an unconstrained architecture, every tool call pays an average tax of $144\,\text{ms}$ of latency and burns $224\text{ TFLOPs}$ of accelerator compute solely recovering from syntax errors. By contrast, tensor-layer masking compiles the DFA once ahead of time ($10\text{ to }30\,\text{ms}$ during tool startup) and pays $< 0.4\,\text{ms}$ per token during sampling. Because $p_{\text{err}} = 0.00\%$, multi-turn repair loops are eliminated entirely, saving petascale compute across an enterprise deployment.
 
 Once the system guarantees that token sequences compile deterministically into valid system calls, the next architectural challenge is structuring the wire protocol that connects the agent runtime to heterogeneous external services.
 
@@ -229,6 +260,38 @@ A widespread architectural fallacy in agent systems engineering is the assumptio
 When an external tool server exposes a schema with an argument `query: string`, the protocol layer verifies only that the model emitted a valid string. It provides zero verification of whether that string contains `rm -rf /` or `DROP TABLE users`. All privilege validation, capability checks, and sandboxing must be enforced by the host supervisor kernel *below* the wire protocol boundary.
 :::
 
+### Payload serialization size, wire bandwidth, and context bloat
+
+In computer architecture, data transfers between the CPU and peripherals are governed by bus width and cache line granularity (typically 64 bytes). In an agent runtime, tool invocations transfer over JSON-RPC wire frames. While JSON provides human readability and structural flexibility, it imposes substantial **payload serialization overhead** that directly degrades accelerator performance.
+
+#### The byte-to-token inflation factor
+
+JSON is structurally verbose: every field requires delimiter quotes, colons, brackets, and repeated key strings (`"jsonrpc"`, `"method"`, `"arguments"`). In production tokenizers (e.g., Byte-Pair Encoding with 32K–128K vocabularies), raw text data exhibits an average token density of approximately $1\,\text{KB} \approx 250 \text{ to } 300\text{ tokens}$.
+
+Consider an agent querying a SQL database, inspecting a directory tree, or retrieving a Git diff:
+
+- A modest $12\,\text{KB}$ tabular database query result converts into roughly $3,000\text{ to }3,600\text{ tokens}$.
+- If an agent executes an $N = 20$ step trajectory with an average tool response size of $5\,\text{KB}$ ($1,250\text{ tokens}$), the cumulative observation payload alone injects:
+  $$\mathcal{S}_{\text{observations}} = 20 \times 1,250 = 25,000\text{ tokens}$$
+  directly into the model's prompt context.
+
+#### Wire transport vs. accelerator memory impact
+
+From a networking perspective, transmitting $12\,\text{KB}$ over local `stdio` IPC takes less than $1.2\,\mu\text{s}$ through Linux pipe buffers (operating at $> 10\,\text{GB/s}$ memory bandwidth). Over remote HTTP/SSE connections, JSON serialization, TLS encryption, and TCP packet segmentation add an acceptable $5\,\text{ms} \text{ to } 25\,\text{ms}$.
+
+The critical systems bottleneck is not the wire transport—it is **accelerator Key-Value (KV) cache memory**. In an autoregressive agent, every token received from an external tool remains resident in the KV cache across all subsequent trajectory steps. For a 70B parameter model utilizing Grouped-Query Attention (GQA) with $H_{kv} = 8$ key-value heads, head dimension $d_h = 128$, and $L = 80$ layers in FP16 precision ($2\text{ bytes}$ per parameter), the memory consumed solely by storing past tool observation returns is:
+
+$$B_{\text{obs}} = 2 \cdot L \cdot H_{kv} \cdot d_h \cdot \mathcal{S}_{\text{observations}} \cdot 2 \text{ bytes}$$
+$$B_{\text{obs}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 25,000 \cdot 2 \text{ bytes} \approx 8.19 \times 10^9 \text{ bytes } (8.19\,\text{GB})$$
+
+Over $8\,\text{GB}$ of physical High-Bandwidth Memory (HBM) is permanently stranded per active agent stream solely retaining verbose JSON formatting strings.
+
+To mitigate this context bloat, high-performance agent runtimes implement three architectural controls:
+
+1. **Windowed Pagination:** Tools like `FileView` enforce strict `offset` and `limit` boundaries (e.g., returning at most 100 lines or $2\,\text{KB}$ per call).
+2. **Differential Compression:** Instead of dumping complete file contents upon mutation, tools emit unified diff hunks (as seen in Listing 9.1).
+3. **Out-of-Band Artifact Descriptors:** Payloads exceeding a threshold (e.g., $> 4\,\text{KB}$) are written to local NVMe scratch space or an object store. The tool returns a lightweight cryptographic descriptor (`uri: "artifact://run12/build.log"`, `sha256: "..."`, `preview: "...first 10 lines..."`), mimicking DMA buffer descriptors in operating systems.
+
 ### Tool definition economics: The prompt token tax
 
 Every tool exposed to an agent imposes an inescapable economic, latency, and memory penalty: the **Prompt Token Tax**\index{Prompt Token Tax}.
@@ -250,9 +313,9 @@ $$\Phi_{\text{catalog}} = 30 \times 35,000 = 1,050,000 \text{ prefill tokens}$$
 solely re-reading its capability definitions. This overhead produces three severe systems failures:
 
 1. **Inference Latency & Financial Cost:** Over a million prefill tokens are processed repeatedly, driving up the Cost-per-Verified-Goal (CPVG) and saturating accelerator prefill compute.
-2. **Context Working Set Displacement:** The static schema footprint consumes physical GPU High-Bandwidth Memory (HBM) allocated to Key-Value (KV) cache activations. For a model with $L$ layers, $H$ attention heads, and head dimension $d_h$ using 16-bit precision, the memory consumed solely by tool schemas is:
-   $$B_{\text{tax}} = 2 \cdot L \cdot H \cdot d_h \cdot \mathcal{T}_{\text{tax}} \cdot 2 \text{ bytes}$$
-   For a 70B parameter model ($L=80, H=64, d_h=128$), $35,000$ tokens strand $91.7\,\text{GB}$ of KV-cache memory across the serving cluster, crowding out the episodic memory and codebase context required for actual task deliberation.
+2. **Context Working Set Displacement:** The static schema footprint consumes physical GPU HBM allocated to Key-Value (KV) cache activations. For a 70B parameter model ($L=80, d_h=128$), under standard Multi-Head Attention ($H=64$), $35,000$ tokens strand $91.7\,\text{GB}$ of KV-cache memory across the serving cluster:
+   $$B_{\text{tax}} = 2 \cdot L \cdot H \cdot d_h \cdot \mathcal{T}_{\text{tax}} \cdot 2 \text{ bytes} \approx 91.7\,\text{GB}$$
+   Even under modern Grouped-Query Attention (GQA) with $H_{kv}=8$ heads, the static catalog permanently strands $11.5\,\text{GB}$ of HBM per request stream, crowding out episodic memory and codebase context.
 3. **Attention Distraction & Tool Confusion:** As the catalog size $M$ exceeds 30, the attention distribution over parameter definitions flattens. The entropy of the attention distribution across tool descriptions increases:
    $$\mathcal{H}(\boldsymbol{\alpha}) = -\sum_{i=1}^M \alpha_i \log \alpha_i$$
    This attention dispersion sharply increases the probability of hallucinated tool names and parameter cross-talk.
@@ -311,9 +374,13 @@ where $\text{AID}$ is the unique agent identifier, $\mathcal{R}_{\text{URI}}$ is
 
 When an agent decomposes a complex objective into sub-tasks, it spawns child subagents. A foundational security invariant of agentic runtimes is the **Monotonic Capability Attenuation Principle**\index{Monotonic Capability Attenuation Principle}:
 
-Authority narrows monotonically down the delegation tree. A parent agent cannot grant a child subagent any privilege, resource access, parameter latitude, or temporal lifetime that the parent does not itself possess (@fig-vol3-actuation-capability-attenuation):
+Authority narrows monotonically down the delegation tree. A parent agent cannot grant a child subagent any privilege, resource access, parameter latitude, or temporal lifetime that the parent does not itself possess (@fig-vol3-actuation-capability-attenuation):[^fn-actuation-lattice-structure]
+
+[^fn-actuation-lattice-structure]: For the formal algebraic lattice structure governing capability ordering and taint propagation, see @sec-vol3-appendix-math-lattice.
 
 $$\mathcal{K}_{\text{child}} \sqsubseteq \mathcal{K}_{\text{parent}} \iff \begin{cases} \mathcal{R}_{\text{child}} \subseteq \mathcal{R}_{\text{parent}} \\ \mathcal{O}_{\text{child}} \subseteq \mathcal{O}_{\text{parent}} \\ \mathcal{C}_{\text{child}} \supseteq \mathcal{C}_{\text{parent}} \\ t_{\text{expire}}^{\text{child}} \le t_{\text{expire}}^{\text{parent}} \end{cases}$$
+
+Notice that while resources and operations narrow as subsets ($\mathcal{R}_{\text{child}} \subseteq \mathcal{R}_{\text{parent}}$ and $\mathcal{O}_{\text{child}} \subseteq \mathcal{O}_{\text{parent}}$), the argument constraint predicates expand as a superset ($\mathcal{C}_{\text{child}} \supseteq \mathcal{C}_{\text{parent}}$). In capability systems, accumulating additional constraint predicates strictly restricts the agent's operational latitude (e.g., adding a constraint that paths must reside under `/workspace/tests/` further binds the child relative to a parent that could write to `/workspace/`).
 
 ::: {#fig-vol3-actuation-capability-attenuation fig-env="figure" fig-pos="htb" fig-cap="**Monotonic Capability Attenuation across Hierarchical Subagent Delegations**: Delegation tree enforcing the Dennis and Van Horn capability security model. Authority narrows monotonically ($\mathcal{K}_{\text{child}} \sqsubseteq \mathcal{K}_{\text{parent}}$) across operational rights, accessible filesystem URIs, execution timeouts, and token expenditure quotas. An indirect prompt injection compromising an unprivileged leaf subagent remains strictly contained within that leaf's attenuated lease, preventing privilege escalation to root capabilities. Source: Adapted from Dennis and Van Horn [@dennis1966]." fig-alt="Tree diagram showing monotonic capability attenuation from Root Orchestrator down to Research Subagent, Implementation Subagent, and Test Runner Subagent, highlighting URI restrictions, operation subsets, and blast radius boundaries."}
 ![](images/svg/capability_attenuation_tree.svg){width=100%}
@@ -440,6 +507,66 @@ In agent saga architecture, an uncompensable action is classified as a **Pivot T
 
 Once execution successfully passes the pivot step, backward recovery is abolished; the runtime must drive forward to completion.
 
+### Tool execution latencies and compound error propagation
+
+While model inference latency is relatively deterministic and bounded by memory bandwidth (generating tokens at $15\text{ to }30\,\text{ms}$ per token), tool execution latencies are fundamentally **heterogeneous, multimodal, and heavy-tailed**.
+
+#### The multimodal tool latency spectrum
+
+In production agent runtimes, tool execution times span five orders of magnitude:
+
+1. **In-Memory Operations ($0.1 - 2\,\text{ms}$):** String transformations, regex matching (`GrepSearch`), and cryptographic hashing.
+2. **Local POSIX Operations ($5 - 50\,\text{ms}$):** Reading local files (`FileView`), querying local git status, or spawning lightweight child processes.
+3. **Remote RPC & Database Queries ($100 - 800\,\text{ms}$):** Querying external PostgreSQL clusters or invoking third-party REST APIs over the wide-area network (WAN).
+4. **Heavy Build & Test Pipelines ($5 - 120\,\text{s}$):** Compiling large codebases (`cargo build`), launching container sandboxes, or executing unit test suites.
+
+In a sequential trajectory of $N$ steps, total execution latency is the direct sum of model deliberation time and tool execution time:
+
+$$\mathcal{T}_{\text{trajectory}} = \sum_{k=1}^N \left( \tau_{\text{delib}, k} + \tau_{\text{tool}, k} \right)$$
+
+Because external tool latencies follow heavy-tailed distributions (often exhibiting Pareto-distributed tail behavior; see @sec-vol3-appendix-math-pareto), tail events dominate the end-to-end critical path.
+
+Consider an external API with an average latency of $300\,\text{ms}$, but with a 95th-percentile tail latency of $8\,\text{s}$ due to periodic rate-limiting and connection backoffs ($p_{\text{straggler}} = 0.05$). For an agent executing a sequence of $N = 25$ tool calls, the probability of encountering at least one severe tool straggler is:
+
+$$P(\ge 1\text{ straggler}) = 1 - (1 - p_{\text{straggler}})^N = 1 - (0.95)^{25} \approx 1 - 0.277 = 72.3\%$$
+
+Nearly three out of four agent trajectories will be stalled by an external tool straggler. If the serving runtime holds the model's KV-cache pinned in GPU HBM throughout an 8-second external stall, it incurs a severe Tool-Wait memory tax, blocking other concurrent requests from utilizing the accelerator. Runtimes must deploy asynchronous execution loops, context paging to host DRAM, and deterministic execution timeouts.
+
+#### Compound error propagation across trajectory steps
+
+Tool execution is not only prone to latency variance; it is also prone to execution errors. At each step $k$, an action can fail at two distinct layers:
+
+1. **Model Actuation Error ($\epsilon_{\text{model}}$):** The model emits valid syntax, but selects an incorrect tool or provides semantically invalid parameters (e.g., querying a non-existent database column).
+2. **Environment & Infrastructure Error ($\epsilon_{\text{tool}}$):** The external service encounters a network timeout, concurrency conflict, permission denial, or transient 500 error.
+
+The joint probability of completing a single step successfully is:
+
+$$p_k = (1 - \epsilon_{\text{model}})(1 - \epsilon_{\text{tool}})$$
+
+If execution failures are unhandled or trigger cascading misinterpretations, the compound probability of surviving an $N$-step trajectory without error collapses exponentially:
+
+$$P_{\text{success}}(N) = \prod_{k=1}^N p_k = \left( (1 - \epsilon_{\text{model}})(1 - \epsilon_{\text{tool}}) \right)^N$$
+
+To appreciate this vulnerability from first principles, assume high reliability at both layers: an actuation failure rate of only $\epsilon_{\text{model}} = 0.02$ and a tool infrastructure error rate of $\epsilon_{\text{tool}} = 0.03$ (yielding a $95.06\%$ single-step success rate):
+
+- Over $N = 10$ steps: $P_{\text{success}} = (0.9506)^{10} \approx 60.1\%$
+- Over $N = 25$ steps: $P_{\text{success}} = (0.9506)^{25} \approx 28.0\%$
+- Over $N = 50$ steps: $P_{\text{success}} = (0.9506)^{50} \approx 7.9\%$
+
+Fewer than one in twelve 50-step workflows will finish without encountering an environmental or semantic tool failure.
+
+This compounding fragility explains why naive retry loops are fatal: an agent that blindly retries a failed operation without idempotency nonces duplicates mutations, while an agent that halts upon the first failure completes fewer than 8 percent of complex tasks. The runtime must decouple the failure from the trajectory outcome: structured error frames (Listing 9.1 Frame 3) provide unambiguous diagnostic feedback, idempotency nonces permit safe retries, and the Saga pattern executes compensating actions to maintain transactional integrity.
+
+::: {#chk-vol3-09-tool-sagas-stragglers .callout-checkpoint title="Tool latencies, Sagas, and compound failure"}
+
+Before examining dynamic schema discovery and vector tool indexing, verify your understanding of tool execution reliability:
+
+- [ ] **Pivot transaction invariant**: explain why uncompensable actions (e.g., sending an external email or charging a payment card) must serve as the terminal pivot transaction in an agent Saga.
+- [ ] **Tool straggler probability**: if an external API has a 5 percent tail straggler rate ($p = 0.05$), calculate the probability that a 25-step agent trajectory is stalled by at least one straggler.
+- [ ] **Two-layer error compounding**: calculate the probability of an agent completing a 25-step workflow without failure when model error is $\epsilon_{\text{model}} = 0.02$ and tool infrastructure error is $\epsilon_{\text{tool}} = 0.03$.
+
+:::
+
 ## Dynamic Tool Discovery and Schema Selection {#sec-vol3-actuation-discovery}
 
 An autonomous enterprise assistant was deployed across an organization's internal infrastructure, granted access to an internal API catalog encompassing 3,200 microservices across billing, inventory, customer support, and IT infrastructure. The engineers naively injected all 3,200 OpenAPI schema specifications into the model's system prompt. The resulting prompt prefill payload consumed 780,000 tokens—instantly triggering an Out-of-Memory (OOM) abort on an 80 GB HBM GPU serving node before the model generated a single token. Even when testing on specialized models with 1M+ context windows, the model suffered catastrophic attention dispersion: when asked to check a customer's shipping address, the model became confused among 40 different address-related tools, ultimately hallucinating parameters from an internal warehouse packaging API.
@@ -450,7 +577,7 @@ This failure demonstrates the **Scalability Wall of Static Tool Catalogs**\index
 
 As derived in @sec-vol3-actuation-protocols, static schema injection imposes a prefill tax that scales linearly with catalog size: $\mathcal{T}_{\text{tax}} = \sum_{i=1}^M S(T_i)$. When $M > 10^3$, static injection fails across three systems axes:
 
-1. **Accelerator Memory Exhaustion:** Prefilling hundreds of thousands of schema tokens saturates GPU High-Bandwidth Memory (HBM) with KV-cache allocations, stranding compute capacity and preventing concurrent request batching.
+1. **Accelerator Memory Exhaustion:** Prefilling hundreds of thousands of schema tokens saturates GPU HBM with KV-cache allocations, stranding compute capacity and preventing concurrent request batching.
 2. **Exponential Compute Latency:** The computational complexity of the initial attention prefill scales quadratically with prompt length $S$: $\mathcal{O}(S^2 \cdot d_{\text{model}})$. Evaluating an 800,000-token prompt imposes seconds or minutes of Time-To-First-Token (TTFT) latency.
 3. **Attention Degradation (Needle-in-a-Haystack Failure):** Empirical studies demonstrate that as context windows fill with homogeneous technical schemas, retrieval and selection accuracy decay exponentially [@patil2023gorilla]:
    $$\Pr(\text{SelectCorrectTool} \mid M) \propto M^{-\gamma} \quad (\gamma > 0)$$
@@ -562,13 +689,15 @@ When an agent issues a tool call matching an active entry in the result cache, t
 
 The integration of tool-result memoization with modern GPU serving engines (e.g., vLLM, SGLang) creates a powerful systems synergy with **Prompt Prefix Caching** [@kwon2023vllm; @zheng2023sglang].
 
-Modern LLM serving engines organize KV-caches in radix trees. If an incoming request shares an identical token prefix with a previously executed request, the engine skips the compute-bound prefill phase for that prefix, reading the precomputed KV activations directly from GPU memory.
+Modern large language model (LLM) serving engines organize KV-caches in radix trees. If an incoming request shares an identical token prefix with a previously executed request, the engine skips the compute-bound prefill phase for that prefix, reading the precomputed KV activations directly from GPU memory.
 
 When a tool output is memoized, the exact observation string returned across the actuation boundary is byte-for-byte identical across runs:
 
 $$\text{Observation}_{\text{cached}} = \text{Observation}_{\text{original}}$$
 
 Because the serialized context prefix remains invariant, the serving engine achieves a **100 percent KV-cache prefix hit** for the multi-thousand-token history up to that step. As demonstrated in @fig-vol3-actuation-prefix-synergy, this prefix reuse cuts Time-To-First-Token (TTFT) by $70\text{ to }90\%$ and slashes accelerator energy consumption, transforming what would be an expensive physical tool wait and prefill compute spike into an instantaneous memory lookup.
+
+To ground this synergy in numbers: consider an agent that repeatedly executes a unit test suite via `pytest`. Executing the test runner inside an isolated container sandbox takes $12\,\text{seconds}$. Upon subsequent invocations with identical repository state ($\text{EnvHash}$), the content-addressed result cache returns the cached test output in $< 0.8\,\text{ms}$. Crucially, because the returned observation string is byte-for-byte identical, the GPU serving engine's Radix KV-cache achieves a 100 percent prefix hit across the preceding $14,000$ context tokens. Instead of waiting $12\,\text{s}$ for the test suite plus $210\,\text{ms}$ for context re-prefill ($2.9\text{ PFLOPs}$ on an H100), the step transitions in under $15\,\text{ms}$—an $800\times$ speedup that transforms an expensive physical I/O stall into an in-memory L1 cache hit.
 
 ::: {#fig-vol3-actuation-prefix-synergy fig-env="figure" fig-pos="htb" fig-cap="**Synergistic Acceleration between Tool-Result Caching and Radix Prefix Caching**: When a deterministic tool invocation matches an existing content-addressed cache key, the actuation gateway avoids external sandbox execution. Because the returned observation text matches previous executions byte-for-byte, the serving engine's Radix KV-cache achieves a 100 percent prefix hit for the entire preceding trajectory context, eliminating the compute-bound prefill phase and reducing token generation latency from seconds to milliseconds." fig-alt="Diagram showing tool result caching leading directly to radix tree KV cache hit on GPU."}
 ![](images/svg/tool_result_prefix_cache_synergy.svg){width=100%}
@@ -591,7 +720,7 @@ When an unconstrained model generates malformed JSON or invalid parameter types,
 ::: {.fallacy-pitfall}
 **Fallacy:** *Exposing large catalogs of fine-grained micro-tools maximizes agent intelligence.*
 
-Providing an agent with hundreds of specialized, single-purpose tools (e.g., `git_add`, `git_commit`, `git_push`, `git_status`) degrades rather than enhances agent capability. Every registered tool imposes a prompt token tax that must be re-evaluated on every trajectory step. When catalogs exceed 30 tools, cross-attention over parameter descriptions degrades, inducing tool hallucination and parameter cross-talk. Empirical evaluations on SWE-bench demonstrate that exposing four universal deep modules (`BashExecute`, `FileView`, `FileEdit`, `GrepSearch`) outperforms catalogs of 80+ micro-tools by $4.2\times$ in task completion while reducing prefill token consumption by over $95\%$.
+Providing an agent with hundreds of specialized, single-purpose tools (e.g., `git_add`, `git_commit`, `git_push`, `git_status`) degrades rather than enhances agent capability. Every registered tool imposes a prompt token tax that must be re-evaluated on every trajectory step. When catalogs exceed 30 tools, cross-attention over parameter descriptions degrades, inducing tool hallucination and parameter cross-talk. Empirical evaluations on SWE-bench demonstrate that exposing four universal deep modules (`BashExecute`, `FileView`, `FileEdit`, `GrepSearch`) outperforms catalogs of 80+ micro-tools by $4.2\times$ in task completion while reducing prefill token consumption by over 95 percent.
 :::
 
 ::: {.fallacy-pitfall}
@@ -617,11 +746,11 @@ Attempting to implement distributed Two-Phase Commit (2PC) across heterogeneous 
 The actuation boundary marks the definitive transition where non-deterministic neural token proposals become binding, discrete environment mutations. Treating tool actuation as unmediated prompt text generation results in catastrophic operational failures, ranging from unintended file deletion to injection-driven confused deputy exploits. Production-grade agentic architectures demand the rigor of classical operating systems engineering: foundation models must be treated as untrusted user-space processes whose tool intents represent AI system calls intercepted by a supervisor kernel. By implementing typed wire protocols such as MCP, grammar-constrained logit masking at the GPU tensor layer, Dennis and Van Horn capability leases, distributed idempotency nonces, and the Saga transaction pattern, systems architects can construct autonomous agent runtimes that achieve provable safety, low latency, and deterministic reliability.
 
 ::: {.callout-takeaways title="The actuation boundary invariants"}
-1. **The AI System Call Invariant:** Tools are not natural language prompt suggestions; they are unprivileged user-space traps emitted by an untrusted stochastic processor that demand complete mediation by a deterministic supervisor kernel.
-2. **Grammar-Constrained Decoding at the Tensor Layer:** Ahead-of-time compilation of tool schemas into Deterministic Finite Automata (DFAs) enables elementwise CUDA logit masking during sampling, physically eliminating runtime syntax and type errors at sub-millisecond overhead.
-3. **Deep Modules Over Micro-Tool Catalogs:** Adhering to Ousterhout's principle by exposing a compact core of deep, expressive modules (e.g., sandboxed bash, atomic edit, windowed view, grep) slashes the prompt token tax by over 95 percent and prevents attention dispersion.
-4. **Capability-Based Security and Monotonic Attenuation:** Ambient authority and Access Control Lists fail in agent runtimes due to indirect prompt injection and the Confused Deputy problem. Authority must be mediated via unforgeable cryptographic Capability Leases that attenuate monotonically down subagent delegation hierarchies.
-5. **Idempotency and Sagas Across Stochastic Retries:** At-least-once stochastic retry loops must be reconciled with at-most-once physical execution using canonical trajectory nonces, distributed Write-Ahead Logs, and Saga compensating transactions.
+1. **The AI System Call and MMIO Invariant:** Tools are not natural language prompt suggestions; they are unprivileged user-space traps into structured, MMIO-style command descriptors, requiring complete mediation by a supervisor runtime that acts as a secure device driver.
+2. **Grammar-Constrained Decoding at the Tensor Layer:** Ahead-of-time compilation of schemas into Deterministic Finite Automata (DFAs) enables single-cycle CUDA warp logit masking during decode, eliminating runtime syntax errors ($p_{\text{err}} = 0.00\%$) and avoiding petascale FLOP penalties from multi-turn error reflections.
+3. **Deep Modules and Payload Management:** Minimizing context bloat through windowed paging, diff compression, and Ousterhout deep modules slashes the prompt token tax by over 95 percent, recovering gigabytes of stranded GPU KV-cache memory and preventing cross-attention dispersion.
+4. **Capability-Based Security and Monotonic Attenuation:** Ambient authority and Access Control Lists fail in agent runtimes due to indirect prompt injection and the Confused Deputy vulnerability. Authority must be mediated via unforgeable cryptographic Capability Leases that attenuate monotonically ($\mathcal{K}_{\text{child}} \sqsubseteq \mathcal{K}_{\text{parent}}$) down subagent delegation trees.
+5. **Idempotency, Sagas, and Heavy-Tailed Latency:** At-least-once stochastic retry loops must be reconciled with at-most-once physical execution using RFC 8785 canonical trajectory nonces, distributed Write-Ahead Logs, and Saga compensating transactions. Asynchronous scheduling and timeouts prevent heavy-tailed tool stragglers from inducing cluster-wide Tool-Wait memory stalls.
 :::
 
 ::: {.callout-chapter-connection title="From tool actuation to asynchronous interrupts"}

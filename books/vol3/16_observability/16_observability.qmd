@@ -81,7 +81,7 @@ While OpenTelemetry standardizes the structural hierarchy of agent traces, naive
 
 In enterprise distributed tracing backends (such as Jaeger, Zipkin, or commercial SaaS collectors), collector daemons are architected under the assumption that span attributes contain lightweight scalar metadata (integers, booleans, and short strings strictly capped at 64 KB per span). In modern long-context agentic workloads, however, the context window $S_t$ regularly spans $128\text{K}$ to $1\text{M}$ tokens. When an agent reads repository files, inspects multi-megabyte compiler logs, or processes browser DOM trees, the serialized prompt string ($P_t$) and tool observation ($o_t$) consume between $500\text{ KB}$ and $4\text{ MB}$ of raw UTF-8 text per step.
 
-If a runtime naively injects raw token strings directly into OpenTelemetry span attributes (such as `gen_ai.prompt.content` or `tool.execution.stdout`), a 50-step trajectory generates over $100\text{ MB}$ of raw telemetry data. When hundreds of concurrent agents stream these payloads over gRPC to an OpenTelemetry Collector, three physical bottlenecks immediately emerge:
+If a runtime naively injects raw token strings directly into OpenTelemetry span attributes (such as `gen_ai.prompt.content` or `tool.execution.stdout`), a 50-step trajectory generates over $100\text{ MB}$ of raw telemetry data. Consider a modest production cluster of 100 concurrent agents, each completing an average task every 15 minutes (400 tasks per hour, or 9,600 trajectories per day). At $100\text{ MB}$ per trajectory, the fleet generates nearly **$1\text{ TB}$ of raw span JSON per day** ($960\text{ GB/day}$) directed at tracing collectors designed for 4 KB spans! When hundreds of concurrent workers stream these payloads over gRPC to an OpenTelemetry Collector, three physical bottlenecks immediately emerge:
 
 1. **Collector Out-Of-Memory (OOM) Panics:** The in-memory buffering queues of collector instances saturate, triggering Linux kernel OOM-killer invocations.
 2. **gRPC Frame Limit Violations:** Standard gRPC channels enforce a default maximum message size of $4\text{ MB}$ (`max_message_size`). Heavy agent spans exceed this threshold, causing the collector to drop traces with `RESOURCE_EXHAUSTED` errors.
@@ -106,7 +106,7 @@ Under this architecture, the OpenTelemetry span remains strictly lightweight ($<
 - `gen_ai.prompt.payload_uri`: Content-addressed storage pointer (`s3://telemetry-blobs/traces/4bf9.../step_29_prompt.json.zst`).
 - `tool.execution.stdout_uri`: Content-addressed storage pointer for raw execution output.
 
-High-volume unstructured payloads (full prompt tokens, raw system observations, compiler stack traces, and image embeddings) are enqueued into a lock-free, circular in-memory ring buffer. A dedicated background I/O thread drains the ring buffer, compresses payloads using Zstandard (`zstd` level 3), and asynchronously streams them to durable object storage (such as Amazon S3, MinIO, or an optimized columnar database like ClickHouse). The tracing backend retains perfect causal linkability through URI dereferencing while the collector data plane operates entirely within bounded memory and network envelopes.
+High-volume unstructured payloads (full prompt tokens, raw system observations, compiler stack traces, and image embeddings) are enqueued into a lock-free, circular in-memory ring buffer. A dedicated background I/O thread drains the ring buffer, compresses payloads using Zstandard (`zstd` level 3, achieving $4\text{--}6\times$ compression on raw code and JSON text), and asynchronously streams them to durable object storage (such as Amazon S3, MinIO, or an optimized columnar database like ClickHouse). For our 100-agent cluster, compression reduces the daily $960\text{ GB}$ payload volume to approximately $170\text{ GB/day}$, costing mere pennies ($\approx \$0.13/\text{day}$ at standard object storage rates of $\$0.023/\text{GB-month}$). Meanwhile, the high-frequency OTLP span stream is reduced from $100\text{ MB}$ down to under $100\text{ KB}$ per trajectory ($50\text{ steps} \times 2\text{ KB}$), slashing collector network traffic by $99.9\%$. The tracing backend retains perfect causal linkability through URI dereferencing while the collector data plane operates entirely within bounded memory and network envelopes.
 
 The following JSON specification illustrates a production-grade, schema-validated OpenTelemetry span for an agent reasoning and tool-execution step, demonstrating the decoupling of metadata from offloaded payload storage:
 
@@ -143,7 +143,19 @@ The following JSON specification illustrates a production-grade, schema-validate
 }
 ```
 
-By standardizing on these conventions, the systems runtime establishes an invariant causal foundation. However, when an agent spawns autonomous subagents across distributed worker pools, telemetry must propagate context across network boundaries and track non-linear branching topologies.
+By standardizing on these conventions, the systems runtime establishes an invariant causal foundation.
+
+::: {#chk-vol3-16-opentelemetry-spans .callout-checkpoint title="OpenTelemetry spans and payload offloading"}
+
+Before exploring distributed tracing topologies, verify your understanding of trajectory telemetry architecture:
+
+- [ ] **Semantic vs. Syntactic Failure**: Why does a failed agent trajectory frequently exit with an HTTP 200 OK status code, blinding traditional APM dashboards?
+- [ ] **Payload Bloat Mitigations**: In a 50-step agent trajectory generating 100 MB of context payloads, why must telemetry separate scalar span metadata from compressed blob storage?
+- [ ] **Span Hierarchy**: What specific execution metrics are captured at the `agent.trajectory`, `agent.step`, and `tool.execution` span levels?
+
+:::
+
+However, when an agent spawns autonomous subagents across distributed worker pools, telemetry must propagate context across network boundaries and track non-linear branching topologies.
 
 ## Distributed Spans, Causal Tracing, and Token Attribution {#sec-vol3-observability-tracing}
 
@@ -230,6 +242,15 @@ $$
 C_{\text{local}}(v) = p_{\text{prefill}} N_{\text{prefill}}(v) + p_{\text{decode}} N_{\text{decode}}(v) + c_{\text{infra}}(v) \cdot T_{\text{wall}}(v)
 $$ {#eq-vol3-local-span-cost}
 
+To see this equation in practice, consider a concrete systems example: an agent step $v$ evaluates a prompt context of $32{,}000$ tokens ($N_{\text{prefill}}$) and generates an 800-token tool call ($N_{\text{decode}}$), running inside an isolated Firecracker microVM for $1{,}500\text{ ms}$ ($T_{\text{wall}} = 1.5\text{ s}$). At standard enterprise cloud pricing ($p_{\text{prefill}} = \$3.00 \times 10^{-6}$, $p_{\text{decode}} = \$15.00 \times 10^{-6}$, and microVM compute at $c_{\text{infra}} \approx \$0.02/\text{vCPU-hr} \approx \$5.55 \times 10^{-9}/\text{ms}$):
+
+- Prefill cost: $32{,}000 \times \$3.00 \times 10^{-6} = \$0.0960$
+- Decode cost: $800 \times \$15.00 \times 10^{-6} = \$0.0120$
+- MicroVM hosting cost: $1{,}500\text{ ms} \times \$5.55 \times 10^{-9}/\text{ms} = \$0.000008$
+- Total local cost: $C_{\text{local}}(v) \approx \$0.1080$ per step.
+
+This napkin math exposes a fundamental physical reality of agent systems: the compute virtualization cost of the sandboxed microVM ($<\$0.00001$) is four orders of magnitude smaller than the model's token inference cost ($\$0.1080$). In agentic computing, *tokens dominate infrastructure hosting by more than $10{,}000\times$*.
+
 Because node $v$ may asynchronously spawn child worker agents or execute tool sub-processes, the total cumulative cost attributed to the causal subtree rooted at $v$ is recursively defined in @eq-vol3-cumulative-subtree-cost:
 
 $$
@@ -242,7 +263,13 @@ $$
 \eta_{\text{token}} = \frac{C_{\text{winning}}(\tau^*)}{C_{\text{cumulative}}(\text{root})} = \frac{\sum_{v \in \tau^*} C_{\text{local}}(v)}{C_{\text{cumulative}}(\text{root})} \quad \in [0, 1]
 $$ {#eq-vol3-token-efficiency}
 
-where $\tau^* \subset \mathcal{V}$ is the subset of nodes that directly contributed to the verified terminal outcome, and $C_{\text{cumulative}}(\text{root})$ is the total expenditure across all nodes in the execution tree. In unguided multi-agent swarms or deep search topologies ($B \ge 16$), $\eta_{\text{token}}$ frequently drops below $0.15$, indicating that over 85 percent of compute expenditure is consumed by exploratory scaffolding. Tracking $\eta_{\text{token}}$ via distributed trace spans provides the primary systems signal for identifying runaway deliberation and un-converged agent loops.
+where $\tau^* \subset \mathcal{V}$ is the subset of nodes that directly contributed to the verified terminal outcome, and $C_{\text{cumulative}}(\text{root})$ is the total expenditure across all nodes in the execution tree.
+
+For instance, consider a Monte Carlo Tree Search exploring branching factor $B=4$ across depth 3 ($4^3 = 64$ leaf rollouts). If 63 candidate rollouts are pruned and only 1 winning trajectory $\tau^*$ of 15 steps is committed, the total cumulative expenditure might reach $C_{\text{cumulative}}(\text{root}) \approx \$12.50$, while the winning path consumed only $C_{\text{winning}}(\tau^*) \approx \$1.62$. The token efficiency is:
+
+$$\eta_{\text{token}} = \frac{\$1.62}{\$12.50} \approx 0.13 \quad (13\%)$$
+
+Over 87 percent of the financial expenditure was consumed by exploratory scaffolding. In unguided multi-agent swarms or deep search topologies ($B \ge 16$), $\eta_{\text{token}}$ frequently drops below $0.10$. Tracking $\eta_{\text{token}}$ via distributed trace spans provides the primary systems signal for identifying runaway deliberation and un-converged agent loops.
 
 ### Tail-based sampling vs. head-based sampling
 
@@ -273,7 +300,12 @@ During execution, worker nodes stream all spans into a fast, local NVMe or in-me
 - If end-to-end wall-clock latency exceeds the 95th percentile service level agreement (SLA): **Retain 100 percent**.
 - If the trajectory was a nominal, un-flagged success: Apply downsampling at $\beta = 0.01$ (retaining only 1 percent of routine executions for baseline drift tracking).
 
-Tail-based sampling guarantees that 100 percent of anomalous and failed trajectories are preserved in full causal detail while cutting fleet telemetry storage overhead by up to 90 percent.
+To quantify the storage savings of this design, consider an enterprise fleet running $10{,}000$ agent trajectories per day, averaging 25 steps per run ($250{,}000$ total step spans). Without payload offloading, uncompressed prompts and tool logs would generate over $250\text{ GB/day}$ ($250{,}000 \times 1\text{ MB}$). With payload offloading, the OTLP span metadata index consumes only $500\text{ MB/day}$ ($250{,}000 \times 2\text{ KB}$). Applying tail-based sampling reduces this index footprint even further:
+
+- **Anomalies and failures** ($4\%$ failure rate $\implies 400$ trajectories/day) are retained at $100\%$, generating $400 \times 25 \times 2\text{ KB} = 20\text{ MB/day}$ of index spans (with their compressed payloads stored in object storage).
+- **Routine nominal successes** ($96\% \implies 9{,}600$ trajectories/day) are downsampled at $\beta = 0.01$ (retaining 96 runs), generating $96 \times 25 \times 2\text{ KB} \approx 4.8\text{ MB/day}$.
+
+The active distributed tracing index stores less than $25\text{ MB/day}$—a **$95\%$ reduction** compared to full metadata ingestion—while guaranteeing that 100 percent of production incidents, security policy trips, and cost overruns are preserved with complete causal fidelity.
 
 ## Hermetic Evaluation Gyms and Benchmark Drift {#sec-vol3-observability-eval-gyms}
 
@@ -352,7 +384,17 @@ $$ {#eq-vol3-pass-at-k}
 
 where $n$ is the total number of evaluated rollouts per task, $c$ is the number of rollouts that passed the verification oracle, and $\binom{n}{k}$ is the standard binomial coefficient.
 
-In production evaluation systems where $n$ can be large (e.g., $n = 100$), evaluating the binomial coefficients directly using factorials causes immediate floating-point overflow. Systems runtimes implement the numerically stable, logarithmic evaluation formulation shown in @eq-vol3-pass-at-k-stable:
+The physical intuition behind @eq-vol3-pass-at-k is rooted in hyper-geometric sampling without replacement. If an agent generates $n$ candidate trajectories for a task and $c$ of them pass the verification oracle, the pool contains $n - c$ failing trajectories. If a deployment system randomly selects $k$ candidates to run, the probability that *all $k$ selections fail* is the number of ways to pick $k$ failures from $n - c$ ($\binom{n - c}{k}$) divided by the total ways to pick $k$ candidates from $n$ ($\binom{n}{k}$). Subtracting this joint failure probability from 1 yields the probability that at least one of the $k$ chosen rollouts succeeds.
+
+To see how this behaves in practice, suppose an agent generates $n = 10$ rollouts for a SWE-bench task, and $c = 2$ pass the unit test suite ($n - c = 8$ failures):
+
+- **Pass@1 ($k=1$):** $1 - \frac{8}{10} = 0.20 \quad (20.0\%)$.
+- **Pass@3 ($k=3$):** The chance that all 3 draws fail is $\frac{\binom{8}{3}}{\binom{10}{3}} = \frac{56}{120} \approx 0.467$. Thus, $\text{Pass}@3 = 1 - 0.467 = 0.533 \quad (53.3\%)$.
+- **Pass@5 ($k=5$):** The chance that all 5 draws fail is $\frac{\binom{8}{5}}{\binom{10}{5}} = \frac{56}{252} \approx 0.222$. Thus, $\text{Pass}@5 = 1 - 0.222 = 0.778 \quad (77.8\%)$.
+
+In production evaluation systems where $n$ can be large (e.g., $n = 100$ or $1{,}000$), evaluating binomial coefficients directly using factorials triggers floating-point overflow because factorials exceed 64-bit IEEE 754 limits at $171! \approx 7.26 \times 10^{306}$. Systems runtimes implement the numerically stable, logarithmic evaluation formulation shown in @eq-vol3-pass-at-k-stable:[^fn-observability-passk-combinatorics]
+
+[^fn-observability-passk-combinatorics]: For the formal combinatorial derivation and proof of numerical stability, see @sec-vol3-appendix-math-pass-at-k.
 
 $$
 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} = 1 - \exp\left( \sum_{i=1}^k \ln\left( \frac{n - c - k + i}{n - k + i} \right) \right)
@@ -370,7 +412,13 @@ $$
 N \ge \frac{\left( z_{\alpha/2}\sqrt{2\bar{p}(1 - \bar{p})} + z_\beta\sqrt{p_1(1 - p_1) + p_2(1 - p_2)} \right)^2}{(p_1 - p_2)^2}
 $$ {#eq-vol3-sample-size}
 
-where $\bar{p} = (p_1 + p_2) / 2$, $z_{\alpha/2} = 1.96$ for a 95 percent confidence level, and $z_\beta = 0.84$ for 80 percent power. For an agent baseline pass rate of $p_1 = 0.30$ and a targeted capability shift of $5\%$ ($p_2 = 0.35$), @eq-vol3-sample-size dictates a minimum sample size of $N \approx 1{,}430$ independent task evaluations. Benchmarking suites evaluating on fewer than 200 tasks cannot reliably detect a $5\%$ regression, routinely passing degraded models into production.
+where $\bar{p} = (p_1 + p_2) / 2$, $z_{\alpha/2} = 1.96$ for a 95 percent confidence level, and $z_\beta = 0.84$ for 80 percent power. For an agent baseline pass rate of $p_1 = 0.30$ and a targeted capability shift of $5\%$ ($p_2 = 0.35$), @eq-vol3-sample-size dictates a minimum sample size of $N \approx 1{,}430$ independent task evaluations.
+
+To appreciate why this sample size presents a major systems challenge, consider the physical compute footprint: in SWE-bench, evaluating a single task instance takes approximately 10 minutes of container execution and consumes 50,000 prompt and tool tokens. Running 1,430 independent task evaluations requires $14{,}300$ container-minutes ($\approx 238$ CPU-hours) and over $71$ million tokens ($\approx \$215$ on a frontier model).
+
+When engineering teams attempt to cut CI/CD costs by evaluating on only $N = 30$ tasks, a measured gain of $+6.6\%$ (e.g., solving 16 tasks instead of 14) has a $95\%$ confidence interval spanning from $34\%$ to $72\%$. The observed "improvement" is pure statistical noise. Reliable evaluation demands either budgeting for full sample sizes or employing sequential testing to detect regressions dynamically.[^fn-observability-twoprop-montecarlo] Benchmarking suites evaluating on fewer than 200 tasks cannot reliably detect a $5\%$ regression, routinely passing degraded models into production.
+
+[^fn-observability-twoprop-montecarlo]: For the formal two-proportion hypothesis derivation and non-parametric Monte Carlo bootstrap confidence intervals, see @sec-vol3-appendix-math-bootstrap.
 
 Furthermore, evaluation gyms must continuously monitor **Benchmark Drift**:
 
@@ -465,13 +513,30 @@ $$
 A = \frac{1 - \beta}{\alpha}, \quad B = \frac{\beta}{1 - \alpha}
 $$
 
-The sequential canary routing decision rule operates continuously as follows:
+To see the mechanics of this sequential test in production, consider concrete operational parameters: let baseline acceptable failure rate be $p_0 = 0.05$ ($5\%$) and unacceptable degraded rate be $p_1 = 0.15$ ($15\%$), with $\alpha = 0.01$ and $\beta = 0.05$:
+
+- **Abort Boundary:** $A = \frac{1 - 0.05}{0.01} = 95 \implies \ln A = \ln(95) \approx 4.55$
+- **Promote Boundary:** $B = \frac{0.05}{1 - 0.01} = \frac{0.05}{0.99} \approx 0.0505 \implies \ln B = \ln(0.0505) \approx -2.99$
+- **Incremental update per failure ($X_i = 1$):** $\ln\left( \frac{p_1}{p_0} \right) = \ln\left( \frac{0.15}{0.05} \right) = \ln(3) \approx +1.099$
+- **Incremental update per success ($X_i = 0$):** $\ln\left( \frac{1 - p_1}{1 - p_0} \right) = \ln\left( \frac{0.85}{0.95} \right) \approx -0.111$
+
+Notice the asymmetric systems leverage in these numbers: a single trajectory failure ($+1.10$) carries nearly **ten times the weight** of a success ($-0.11$). A healthy model requires approximately 27 consecutive successful tasks to drive $\ln \Lambda_m$ below $-2.99$ to trigger traffic promotion.
+
+However, if a candidate checkpoint suffers an undiscovered regression resulting in a $40\%$ failure rate, and encounters 5 failures across its first 8 production tasks ($k = 5, m - k = 3$):
+
+$$
+\ln \Lambda_8 = 5(+1.099) + 3(-0.111) = 5.495 - 0.333 = +5.162 \ge 4.55
+$$
+
+The cumulative log-likelihood ratio breaches the abort threshold $\ln A$ on the eighth execution! The sequential canary routing decision rule operates continuously as follows:
 
 1. **Reject $H_0$ and Abort Canary ($\ln \Lambda_m \ge \ln A$):** The data provides overwhelming statistical evidence that the canary policy is degraded. The runtime immediately trips an automated circuit-breaker, isolates the canary worker pool, reroutes 100 percent of traffic back to the stable baseline policy, and alerts on-call engineers.
 2. **Accept $H_0$ and Promote Canary ($\ln \Lambda_m \le \ln B$):** The data proves that the canary policy meets or exceeds reliability targets. The runtime automatically increments canary traffic allocation from $10\% \to 25\% \to 50\% \to 100\%$.
 3. **Continue Sampling ($\ln B < \ln \Lambda_m < \ln A$):** Evidence is currently inconclusive; continue routing the current canary traffic allocation.
 
-Because SPRT evaluates likelihood ratios sequentially after every individual trajectory, a severely broken model (e.g., true failure rate $p = 0.40$) trips the abort boundary $A$ in fewer than 15 trajectories, minimizing customer blast radius by orders of magnitude compared to fixed-batch evaluation schemes.
+Because SPRT evaluates likelihood ratios sequentially after every individual trajectory, a severely broken model is aborted in single-digit trials, capping user blast radius by over 99 percent compared to fixed-batch evaluation schemes that would have subjected hundreds of users to the faulty model before calculating metrics.[^fn-observability-wald-stopping]
+
+[^fn-observability-wald-stopping]: For the formal derivation of Wald's stopping boundaries and Average Sample Number (ASN), see @sec-vol3-appendix-math-sprt.
 
 ## Fleet-Wide SRE Metrics: Goodput, Trajectory Timeouts, and Error Budgets {#sec-vol3-observability-sre-metrics}
 
@@ -507,6 +572,21 @@ $$ {#eq-vol3-cpvg}
 
 CPVG exposes the true economic cost of agent unreliability: if an agent achieves a Pass@1 accuracy of only 25 percent and costs $\$1.00$ per run, its CPVG is not $\$1.00$; it is $\$4.00$ per verified outcome.
 
+To see how CPVG governs architectural decisions, compare two serving strategies for an enterprise workflow where each attempt consumes 20,000 tokens:
+
+- **Option A (Compact Model, $P_{\text{active}} = 8\text{B}$):** Token pricing is $\$0.20/\text{1M tokens}$, yielding a raw execution cost of $20{,}000 \times \$0.20 \times 10^{-6} = \$0.004$ per attempt. If the standalone single-trajectory pass rate is $p = 0.40$ ($40\%$), the CPVG is:
+  $$\text{CPVG}_A = \frac{\$0.004}{0.40} = \$0.010 \quad (\text{1.0 cent per verified goal})$$
+- **Option B (Frontier Model, $P_{\text{active}} = 70\text{B}$):** Token pricing is $\$3.00/\text{1M tokens}$, costing $20{,}000 \times \$3.00 \times 10^{-6} = \$0.060$ per attempt. With a higher single-trajectory pass rate of $p = 0.65$ ($65\%$), the CPVG is:
+  $$\text{CPVG}_B = \frac{\$0.060}{0.65} \approx \$0.092 \quad (\text{9.2 cents per verified goal})$$
+
+Even though the frontier model is significantly more capable ($65\%$ vs $40\%$), its CPVG is **$9.2\times$ higher**! The compact model delivers nearly an order of magnitude higher Economic Goodput ($G_{\$}$).
+
+Furthermore, consider applying Best-of-3 parallel sampling with the compact model: the probability that at least one of 3 independent rollouts succeeds is $1 - (1 - 0.40)^3 = 1 - 0.216 = 0.784$ ($78.4\%$). The total compute cost is $3 \times \$0.004 = \$0.012$. The resulting CPVG is:
+
+$$\text{CPVG}_{A,\text{Best-of-3}} = \frac{\$0.012}{0.784} \approx \$0.0153 \quad (\text{1.5 cents per verified goal})$$
+
+Best-of-3 on the compact model delivers **higher reliability than the single frontier model** ($78.4\%$ vs $65.0\%$) at **one-sixth the cost** ($\$0.015$ vs $\$0.092$). This trade-off is the exact mechanism driving the Pareto frontier in @fig-vol3-goodput-pareto.
+
 @Fig-vol3-goodput-pareto maps the empirical Pareto frontier of Trajectory Goodput across competing model families, sparse Mixture-of-Experts (MoE) cascades, and test-time search topologies, illustrating the economic trade-off between task success rate and compute expenditure.
 
 ::: {#fig-vol3-goodput-pareto fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Goodput Pareto Frontier**: Accuracy vs. inference compute economics. The chart plots task success rate against Cost-per-Goal across dense baselines, sparse MoE cascades, best-of-N sampling, and unguided swarms. Peak Goodput occurs at the balanced knee of the curve; pushing into unguided swarms yields diminishing returns while multiplying token costs by $4\\times$." fig-alt="Economic frontier plot showing benchmark success rate on the vertical axis against log-scaled cost per goal on the horizontal axis, comparing greedy dense models, sparse MoE cascades, best-of-N sampling, MCTS search, and unbounded swarms."}
@@ -527,6 +607,16 @@ The hardware footprints, active parameter counts, and serving economics governin
 | **Trajectory Goodput ($G_{\$}$) Efficiency**          | Moderate; unit costs ($\$0.60\text{--}\$2.50\text{ / 1M}$) compress fleet goodput | High; lower active compute costs ($\$0.15\text{--}\$0.50\text{ / 1M}$) deliver $3\text{--}4\times$ higher $G_{\$}$ |
 
 : **Dense vs. Sparse MoE Systems Economics for Agent Trajectories**: Physical hardware footprints, active compute scaling, interconnect demands, and Trajectory Goodput trade-offs across long-horizon serving regimes. {#tbl-vol3-serving-dense-vs-moe tbl-colwidths="[22,39,39]"}
+
+::: {#chk-vol3-16-benchmarks-pareto-frontier .callout-checkpoint title="Trajectory goodput and cost-per-verified-goal"}
+
+Before analyzing latency decomposition and Amdahl's Law, test your grasp of agent SRE economics:
+
+- [ ] **Trajectory Goodput vs. Token TPS**: Why is raw token throughput a misleading health metric for an autonomous agent fleet experiencing conversational thrashing?
+- [ ] **Cost-per-Verified-Goal (CPVG)**: If Model A has a 40 percent pass rate at \$0.004/attempt and Model B has a 65 percent pass rate at \$0.060/attempt, which model delivers higher economic efficiency?
+- [ ] **Best-of-$N$ Pareto Leverage**: How can parallel sampling on a compact model surpass both the accuracy and cost profile of a single frontier model invocation?
+
+:::
 
 ### Trajectory latency decomposition and Amdahl's Law
 
@@ -596,7 +686,9 @@ $$
 T_{\text{budget}}(t) = T_{\text{base}} + \sum_{i=1}^t T_{\text{tool\_allowance}}(a_i) - \Delta T_{\text{penalty}}(\text{entropy}_t)
 $$
 
-where $T_{\text{tool\_allowance}}(a_i)$ dynamically credits time when an agent invokes known long-running operations (such as compiling a C++ binary or running an integration test suite), and $\Delta T_{\text{penalty}}$ deducts time when the agent's output token entropy spikes or when tool return codes indicate repetitive loop flapping.
+where $T_{\text{tool\_allowance}}(a_i)$ dynamically credits time when an agent invokes known long-running operations, and $\Delta T_{\text{penalty}}$ deducts time when output token entropy collapses or when tool return codes indicate repetitive loop flapping.
+
+For example, a scheduler initializes a task with base budget $T_{\text{base}} = 120\text{ s}$. When the agent issues `cargo test --workspace`, the runtime inspects the tool registry and dynamically credits $T_{\text{tool\_allowance}} = +180\text{ s}$, extending the deadline to accommodate legitimate compiler and test suite latency. Conversely, if the agent executes three identical failing bash commands consecutively, or if token generation entropy drops below an anomalous threshold (signaling that the model has collapsed into an infinite conversational apology loop), the scheduler levies a penalty $\Delta T_{\text{penalty}} = 60\text{ s}$. This early-termination heuristic traps unproductive loops within seconds rather than stranding GPU memory for the remainder of a static timeout.
 
 ### Non-deterministic error budgets and SRE alerting
 
@@ -615,7 +707,11 @@ In classical site reliability engineering, service-level objectives (SLOs) are d
    \text{SLI}_{\text{eff}} = \mathbb{E}\left[ \frac{N_{\text{actual}}}{N_{\text{optimal}}} \right] \le 1.35
    $$
 
-Because agent execution is stochastic, traditional single-threshold alerting triggers intolerable alert fatigue: a temporary cluster dip to $87\%$ accuracy across 10 tasks is frequently a statistical artifact. SRE teams deploy **Multi-Window Multi-Burn-Rate Alerting**: tracking error budget consumption across short-term ($1\text{ hr}$) and long-term ($24\text{ hr}$) rolling windows. An on-call engineer is paged if and only if the 1-hour burn rate exceeds $14.4\times$ (consuming 2 percent of the 30-day error budget in 1 hour) or the 6-hour burn rate exceeds $6\times$, guaranteeing high-fidelity detection of genuine fleet-wide policy regressions.
+Because agent execution is stochastic, traditional single-threshold alerting triggers intolerable alert fatigue: a temporary cluster dip to $87\%$ accuracy across 10 tasks is frequently a statistical artifact. SRE teams deploy **Multi-Window Multi-Burn-Rate Alerting**: tracking error budget consumption across short-term ($1\text{ hr}$) and long-term ($24\text{ hr}$) rolling windows.
+
+To see why burn-rate alerting is essential, consider the physical arithmetic: over a standard 30-day billing month ($720\text{ hours}$), an SLO target of $90\%$ ($\text{SLI}_{\text{res}} \ge 0.90$) allows a total error budget of $10\%$. A $1\times$ burn rate consumes the budget evenly over 720 hours ($10\% / 720 \approx 0.0139\%$ of budget per hour). A **$14.4\times$ burn rate** accelerates failure consumption to $14.4 \times (1 / 720) = 2.0\%$ of the monthly budget consumed in just a single hour. At that burn velocity, the organization's entire monthly error allowance will be completely depleted in only $720 / 14.4 = 50\text{ hours}$ (roughly two days).
+
+By paging on-call engineers only when the 1-hour burn rate exceeds $14.4\times$ or the 6-hour burn rate exceeds $6\times$, the telemetry system guarantees rapid alerting during catastrophic policy degradation while completely ignoring transient, single-task statistical blips.
 
 ## Fallacies and Pitfalls {#sec-vol3-observability-fallacies}
 

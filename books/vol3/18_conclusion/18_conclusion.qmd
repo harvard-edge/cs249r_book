@@ -41,13 +41,13 @@ This production failure demonstrates that an autonomous agent cannot be engineer
 ![](images/svg/five_part_agent_runtime_architecture.svg){width="100%"}
 :::
 
-The progression across modern machine learning systems reflects an expanding scope of engineering abstractions. Single-accelerator systems anchored ML in the individual chip: optimizing dense linear algebra kernels, maximizing arithmetic intensity along the hardware Roofline, and balancing tensor memory access under the Data-Algorithm-Machine ($D \cdot A \cdot M$) framework. Distributed cluster systems expanded that boundary to the data center: coordinating tens of thousands of accelerators across high-speed InfiniBand fabrics, partitioning multi-billion-parameter models across tensor, pipeline, and data parallel axes, and serving concurrent inference streams under the Compute-Communication-Coordination ($C^3$) taxonomy.
+The historical progression across machine learning systems reflects an expanding scope of engineering abstractions. Single-accelerator systems anchored ML in the individual chip: optimizing dense linear algebra kernels, maximizing arithmetic intensity along the hardware Roofline, and balancing tensor memory access under the Data-Algorithm-Machine ($D \cdot A \cdot M$) framework. Distributed cluster systems and high-throughput inference runtimes expanded that boundary to the data center: coordinating tens of thousands of accelerators across high-speed fabrics, partitioning multi-billion-parameter models across tensor, pipeline, and data parallel axes, and serving concurrent inference streams under the Compute-Communication-Coordination ($C^3$) taxonomy.
 
 This book completes this progression by introducing state, feedback, and agency. The computational substrate is no longer evaluated solely on how many floating-point operations it delivers per second ($\text{TFLOPS}$), but on how efficiently and reliably it resolves multi-step goals per unit of energy and economic expenditure:
 
 $$C_{\text{goal}} = \frac{\mathbb{E}[C_{\text{tokens}}] + \mathbb{E}[C_{\text{compute}}]}{\mathbb{E}[R_{\text{success}}]} < C_{\text{human}}$$ {#eq-vol3-economic-equilibrium}
 
-In @eq-vol3-economic-equilibrium, $C_{\text{goal}}$ defines the fully loaded systems cost to reliably resolve a user task, integrating stochastic token consumption, sandbox virtualization compute, and empirical trajectory success rate $R_{\text{success}}$. @Tbl-vol3-five-part-synthesis formalizes how the five subsystems co-design stochastic models with deterministic systems infrastructure to optimize this objective.
+In @eq-vol3-economic-equilibrium, $C_{\text{goal}}$ defines the fully loaded systems cost to reliably resolve a user task, integrating stochastic token consumption, sandbox virtualization compute, and empirical trajectory success rate $R_{\text{success}}$. To see why reliability dominates economics, consider an autonomous coding agent tasked with fixing an integration test failure. Suppose each trial consumes $\$0.50$ in model tokens and $\$0.10$ in microVM execution time. If an unverified agent succeeds on only $20\%$ of its attempts ($\mathbb{E}[R_{\text{success}}] = 0.20$), achieving one success requires an average of five independent attempts ($1 / 0.20 = 5$), inflating the true systems cost to $(\$0.50 + \$0.10) / 0.20 = \$3.00$ per resolved task.[^fn-conclusion-economic-pareto] If an engineer resolves the same issue for $\$2.50$, the autonomous deployment operates at a net financial loss despite the agent's nominal $\$0.60$ single-run inference price tag. In autonomous systems, task reliability is not a cosmetic accuracy score—it is the economic denominator. @Tbl-vol3-five-part-synthesis formalizes how the five subsystems co-design stochastic models with deterministic systems infrastructure to optimize this objective.
 
 | Subsystem Tier                              | Core Architectural Abstraction                                                | Silicon & Hardware Bottleneck                                                       | Primary Invariant / Systems Contract                                            | Characteristic Failure Mode                                              |
 |:--------------------------------------------|:------------------------------------------------------------------------------|:------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------|:-------------------------------------------------------------------------|
@@ -62,15 +62,29 @@ To understand how these subsystems interlock during execution, consider the life
 
 1. **Scheduling and Allocation (Part V):** The fleet orchestrator ingests the objective, initializes an Agent Control Block (ACB) containing a unique trajectory identifier, cryptographic capability leases, and a monetary spend budget. The scheduler assigns the task to a supervisor agent, consulting Little's Law queues to ensure cluster capacity.
 2. **Context Assembly and Prefill (Part II):** The runtime constructs the initial context window. It queries episodic L3 vector and knowledge-graph stores to retrieve relevant domain heuristics, indexes the prompt using a Radix tree to maximize prefix cache hits, and maps the prompt tokens into logical memory pages using PagedAttention.
-3. **Deliberation and Action Synthesis (Part I):** The stochastic processor executes an autoregressive prefill pass, followed by multi-turn decoding. When complex planning is required, a budget-aware deliberation scheduler allocates test-time compute to Monte Carlo Tree Search (MCTS), expanding candidate reasoning paths and scoring intermediate thoughts using a learned Process Reward Model (PRM). The final action tokens are emitted through a pushdown automaton (PDA) logit mask that guarantees syntactic conformance to the target tool's schema.
+3. **Deliberation and Action Synthesis (Part I):** The stochastic processor executes an autoregressive prefill pass, followed by multi-turn decoding. When complex planning is required, a budget-aware deliberation scheduler allocates test-time compute to Monte Carlo Tree Search (MCTS), expanding candidate reasoning paths and scoring intermediate thoughts using a learned Process Reward Model (PRM). The final action tokens are emitted through a pushdown automaton (PDA) logit mask that guarantees syntactic conformance to the target tool's schema.[^fn-conclusion-grammar-dfa]
 4. **Boundary Validation and Isolated Execution (Part III):** The emitted action crosses the actuation boundary. The Model Context Protocol (MCP) host validates the arguments against a strict JSON Schema, checks that the agent's capability lease for the requested resource has not expired, and dispatches the payload to an isolated Firecracker microVM. The tool executes against an ephemeral Copy-on-Write (CoW) filesystem overlay, while an eBPF network filter restricts egress traffic strictly to allowlisted internal endpoints.
 5. **Observation Ingestion and Verification (Parts II & IV):** The tool execution produces an observation $o_t$ (e.g., test suite output, compiler logs, or database query results). A deterministic verification oracle evaluates the state transition. If the assertion passes, the observation is appended to the ACB event log. If the assertion fails, the runtime initiates a local retry or invokes a compensating transaction from its Saga log. Cold KV blocks are asynchronously paged out to host RAM via Compute Express Link (CXL) to eliminate tool-wait HBM stranding.
 6. **Telemetry and Continuous Compilation (Parts IV & V):** Every step emits OpenTelemetry (OTel) spans capturing token counts, kernel execution times, tool I/O latency, and verification outcomes. Completed trajectories are routed to trajectory data flywheels: successful rollouts are distilled into synthetic demonstration datasets for Supervised Fine-Tuning (SFT), while failed rollouts are mined for negative recovery traces to train verifier fleets and optimize policies via Group Relative Policy Optimization (GRPO).
+
+[^fn-conclusion-economic-pareto]: For independent, identically distributed task trials terminated upon the first verified success, the number of attempts follows a geometric distribution with mean $1 / R_{\text{success}}$. Under heavy-tailed error distributions where recovery costs diverge, unmitigated retries induce unbounded tail expenditure; see @sec-vol3-appendix-math-pareto for the formal Pareto distribution of trajectory lengths.
+
+[^fn-conclusion-grammar-dfa]: Grammar-constrained decoding compiles the target tool's context-free grammar or JSON schema into a deterministic finite automaton (DFA). The GPU executes a parallel bitwise AND against precomputed validity masks prior to the softmax kernel, driving invalid token probabilities to identically zero in $\mathcal{O}(1)$ warp time without host-side parser round-trips; see @sec-vol3-appendix-math-dfa for the complete formal transition derivation.
 
 @Fig-vol3-curriculum-arc illustrates how this integrated systems architecture forms the structural bridge across the machine learning systems curriculum, linking single-node kernel execution, distributed data-center serving, multi-step digital agent runtimes, and physical robot actuation.
 
 ::: {#fig-vol3-curriculum-arc fig-env="figure" fig-pos="htb" fig-cap="**Invariant Evolution Across the Machine Learning Systems Paradigm**: Computational abstractions, governing physics, fundamental triads, and systems boundaries across the complete MLSys curriculum. Read down a column rather than across a row: the abstraction changes at every volume while the governing physics does not, which is why an architectural principle established at one scale maintains its structural force at the next." fig-alt="Four-panel diagram illustrating the MLSys curriculum across single-node systems (The Model), fleet-scale systems (The Fleet), agentic systems (The Agent), and embodied physical AI."}
 ![](images/svg/mlsys_curriculum_arc.svg){width="100%"}
+:::
+
+::: {#chk-vol3-18-von-neumann-synthesis .callout-checkpoint title="Synthesis of the five-part architecture"}
+
+Before exploring timeless systems invariants, verify your mental model of the agent runtime stack:
+
+- [ ] **Five-Part Mapping**: How do the Stochastic Processor, Memory Hierarchy, Actuation Boundary, Policy Compiler, and Distributed Fleets map to classical computer architecture?
+- [ ] **Reliability as Economic Denominator**: If an unverified coding agent costs \$0.60 per attempt but succeeds only 20 percent of the time, why is its true cost-per-goal \$3.00 rather than \$0.60?
+- [ ] **Physical Subsystem Bottlenecks**: What distinct hardware bottleneck governs the Stochastic Processor compared to the Context Memory Hierarchy?
+
 :::
 
 ## The Timeless Systems Invariants of Agent Runtimes {#sec-vol3-conclusion-invariants}
@@ -93,7 +107,9 @@ In 1984, Saltzer, Reed, and Clark formulated the **End-to-End Argument** in syst
 
 Industry teams frequently attempt to enforce safety and budgeting invariants inside the neural model: training weights to refuse malicious queries via Reinforcement Learning from Human Feedback (RLHF), adding logit bias masks to suppress specific tokens, or applying rate limits to individual HTTP requests. While valuable as defense-in-depth, these intermediate checks can never guarantee system invariants.
 
-Consider monetary expenditure: an agent tasked with automated code refactoring might execute 100 individual API calls, each costing $\$0.02$, for an expected spend of $\$2.00$. Every single call passes per-request rate limits and token quotas. However, if the agent enters an unterminated hallucination loop that executes 5,000 calls, it incurs a $\$100.00$ cost overrun against the exact same per-call limits. Similarly, an indirect prompt injection payload ingested at Step 3 may lie dormant in the context window until Step 42, where it combines with a privileged file-write tool call to exfiltrate database credentials. Because taint propagates across multi-turn state and capability leases expire across wall-clock time, invariants can only be evaluated, closed, and enforced by the outer systems runtime across the full trajectory $\tau$.
+Consider monetary expenditure: an agent tasked with automated code refactoring might execute 100 individual API calls, each costing $\$0.02$, for an expected spend of $\$2.00$. Every single call passes per-request rate limits and token quotas. However, if the agent enters an unterminated hallucination loop that executes 5,000 calls, it incurs a $\$100.00$ cost overrun against the exact same per-call limits. Similarly, an indirect prompt injection payload ingested at Step 3 may lie dormant in the context window until Step 42, where it combines with a privileged file-write tool call to exfiltrate database credentials. Because taint propagates across multi-turn state and capability leases expire across wall-clock time, invariants can only be evaluated, closed, and enforced by the outer systems runtime across the full trajectory $\tau$.[^fn-conclusion-lattice-taint]
+
+[^fn-conclusion-lattice-taint]: In information flow control (IFC), dynamic taint propagation is modeled as an algebraic security lattice $\mathcal{L} = \langle S, \sqsubseteq, \sqcup, \sqcap \rangle$. Because autoregressive self-attention computes an all-to-all token dependency graph, ingesting a single untrusted document tags the cumulative context $\tau(C_t) = \text{Untrusted}$, mathematically requiring the outer runtime to revoke ambient network and write capabilities; see @sec-vol3-appendix-math-lattice for the formal lattice definition.
 
 ### 2. The sovereign law of agency
 
@@ -105,7 +121,7 @@ If execution proceeds open-loop without intermediate verification or rollback, t
 
 $$P(\tau_{\text{open}}) = \prod_{t=1}^H p_t = (1 - \epsilon)^H \approx \exp(-\epsilon H)$$ {#eq-vol3-sovereign-law-horizon}
 
-@Eq-vol3-sovereign-law-horizon exposes the mathematical ceiling of unverified autonomy. Consider an enterprise deploying a frontier model with an exceptional per-step accuracy of $p = 0.98$ ($\epsilon = 0.02$):
+@Eq-vol3-sovereign-law-horizon exposes the mathematical ceiling of unverified autonomy.[^fn-conclusion-exponential-decay] Consider an enterprise deploying a frontier model with an exceptional per-step accuracy of $p = 0.98$ ($\epsilon = 0.02$):
 
 - Over a short 5-step task ($H = 5$), the trajectory success rate is $P(\tau) = 0.98^5 \approx 90.4\%$.
 - Over a moderate 30-step task ($H = 30$), the success rate drops to $P(\tau) = 0.98^{30} \approx 54.5\%$.
@@ -121,13 +137,31 @@ The only systems mechanism that counteracts exponential decay is **Intermediate 
 
 $$P(\tau_{\text{verified}}) = \prod_{t=1}^H \left( 1 - \epsilon (1 - v_t) \right) \approx \exp\left(-\epsilon \sum_{t=1}^H (1 - v_t)\right)$$
 
-When $v_t \to 1$ (complete verification), $P(\tau_{\text{verified}}) \to 1$, independent of the horizon $H$. Verification fundamentally breaks the exponent: raising base model accuracy merely adjusts the slope of exponential collapse, whereas inserting verification oracles changes the structural nature of trajectory survival.
+When $v_t \to 1$ (complete verification), $P(\tau_{\text{verified}}) \to 1$, independent of the horizon $H$. Verification fundamentally breaks the exponent: raising base model accuracy merely adjusts the slope of exponential collapse, whereas inserting verification oracles changes the structural nature of trajectory survival.[^fn-conclusion-checkpoint-cadence]
+
+To see how intermediate verification breaks exponential decay in practice, consider that same 100-step workflow ($H = 100$) executed with single-step error rate $\epsilon = 0.02$ (where unverified execution collapses to $13.3\%$). If the runtime couples each action with an automated compiler or linter oracle that detects and rolls back $90\%$ of faults ($v_t = 0.90$), the unmitigated error rate drops by a full order of magnitude:
+
+$$\epsilon_{\text{effective}} = \epsilon (1 - v_t) = 0.02 \times (1 - 0.90) = 0.002$$
+
+The end-to-end trajectory success probability surges from $13.3\%$ to:
+
+$$P(\tau_{\text{verified}}) = (1 - 0.002)^{100} \approx 81.9\%$$
+
+If verification recall reaches $99\%$ ($v_t = 0.99$, catching 99 out of 100 bad state mutations), trajectory completion reaches $(1 - 0.0002)^{100} \approx 98.0\%$. Intermediate verification oracles transform an unusable $13\%$ prototype into a production-grade $98\%$ service without modifying a single model weight.
 
 Simultaneously, the agent's context working set $L_t$ accumulates with every interaction step:
 
 $$L_t = L_{\text{prompt}} + \sum_{i=1}^t \left( |a_i| + |o_i| \right)$$
 
-Because standard multi-head self-attention compute scales quadratically $\mathcal{O}(L_t^2)$ and physical KV-cache memory scales linearly $\mathcal{O}(L_t)$ per active agent, unmanaged context growth inevitably exhausts GPU accelerator memory. Furthermore, feeding uncurated historical observations into the active attention buffer induces attention dispersion and the "lost-in-the-middle" degradation, increasing the step error rate $\epsilon$ as $t$ advances. Systems runtimes must enforce Denning's working set model, sliding-window observation eviction, and prefix-preserving compaction to bound $L_t$.
+To quantify the physical memory wall imposed by context accumulation, consider an agent executing an $H = 50$ step debugging task. If each turn generates an action and ingests an environmental observation ($|a_i| + |o_i| \approx 1{,}500$ tokens of compiler diagnostics, stack traces, and code diffs), the context swells by $75{,}000$ tokens. For a 70-billion-parameter model using Grouped-Query Attention (GQA, 8 KV heads, head dimension 128, 80 layers in 16-bit precision), each token consumes:
+
+$$2 \times 2 \text{ bytes} \times 80 \text{ layers} \times 8 \text{ heads} \times 128 \text{ dim} = 327{,}680 \text{ bytes/token} \approx 328 \text{ KB/token}$$
+
+A single active trajectory demands $75{,}000 \times 328 \text{ KB} \approx 24.6 \text{ GB}$ of GPU HBM purely for its KV cache. Serving a concurrent fleet of 30 autonomous agents would require nearly $740 \text{ GB}$ of HBM—exhausting the physical memory capacity of an entire 8-GPU node before loading a single parameter weight. Furthermore, feeding uncurated historical observations into the active attention buffer induces attention dispersion and the "lost-in-the-middle" degradation, increasing the step error rate $\epsilon$ as $t$ advances. Systems runtimes must enforce Denning's working set model, sliding-window observation eviction, and prefix-preserving compaction to bound $L_t$.
+
+[^fn-conclusion-exponential-decay]: For small single-step error probabilities $\epsilon \ll 1$, the first-order Taylor expansion yields $\ln(1 - \epsilon) \approx -\epsilon$. Exponentiating both sides gives $(1 - \epsilon)^H = \exp(H \ln(1 - \epsilon)) \approx \exp(-\epsilon H)$, formalizing the continuous Poisson-process death rate of unverified autonomous execution.
+
+[^fn-conclusion-checkpoint-cadence]: Because running a verification oracle incurs compute and latency overhead ($C_{\text{ver}}$), continuous verification after every micro-token is economically prohibitive. The optimal checkpoint interval $N / K^* = \sqrt{2 C_{\text{ver}} / (\lambda_{\text{error}} C_{\text{gen}})}$ balances verification cost against discarded forward progress; see @sec-vol3-appendix-math-verification for the continuous cost derivation.
 
 ### 3. The reversibility boundary law
 
@@ -179,12 +213,16 @@ In 1967, Gene Amdahl formulated the physical law of parallel speedup: the maximu
 
 In agentic workflows, these principles manifest as fundamental systems bottlenecks:
 
-1. **Amdahl's I/O Bottleneck:** While hardware accelerator throughput (tokens per second) increases with newer GPU architectures, autonomous agent workflows are fundamentally constrained by sequential environmental I/O. Let an agent spend a fraction $f_{\text{I/O}}$ of its wall-clock time blocked on external compilers, database queries, and microVM network calls. The maximum achievable speedup from accelerating the neural processor ($S_{\text{compute}} \to \infty$) follows:
-   $$S_{\text{latency}} = \frac{1}{(1 - f_{\text{I/O}}) + \frac{f_{\text{I/O}}}{S_{\text{compute}}}} \quad\xrightarrow[S_{\text{compute}} \to \infty]{}\quad \frac{1}{f_{\text{I/O}}}$$ {#eq-vol3-amdahls-agent}
-   If an agent spends $60\%$ of its wall-clock execution time waiting for external build tools or integration test runners ($f_{\text{I/O}} = 0.60$), an infinitely fast GPU cluster can achieve at most a $1 / 0.60 \approx 1.67\times$ end-to-end task speedup. System-level performance gains require asynchronous execution dispatch, overlapping speculative deliberation with tool I/O, and proactive cache prefetching.
+1. **Amdahl's I/O Bottleneck:** While hardware accelerator throughput (tokens per second) increases with newer GPU architectures, autonomous agent workflows are fundamentally constrained by sequential environmental I/O. Let an agent spend a fraction $f_{\text{I/O}}$ of its wall-clock time blocked on external compilers, database queries, and microVM network calls, leaving $(1 - f_{\text{I/O}})$ as the fraction spent on neural processor computation. The maximum achievable speedup from accelerating the neural processor ($S_{\text{compute}} \to \infty$) follows:
+   $$S_{\text{latency}} = \frac{1}{f_{\text{I/O}} + \frac{1 - f_{\text{I/O}}}{S_{\text{compute}}}} \quad\xrightarrow[S_{\text{compute}} \to \infty]{}\quad \frac{1}{f_{\text{I/O}}}$$ {#eq-vol3-amdahls-agent}
+   If an agent spends $60\%$ of its wall-clock execution time waiting for external build tools or integration test runners ($f_{\text{I/O}} = 0.60$), an infinitely fast GPU cluster ($S_{\text{compute}} \to \infty$) can achieve at most a $1 / 0.60 \approx 1.67\times$ end-to-end task speedup. Even if next-generation tensor cores reduce neural inference latency to zero, the system remains $60\%$ as slow as baseline. Realizing system-level performance gains requires asynchronous execution dispatch, overlapping speculative deliberation with tool I/O, and proactive cache prefetching.
 2. **The Agentic Tail at Scale:** When an orchestrator agent fans out sub-tasks across $M$ parallel worker agents, the orchestrator cannot proceed until the slowest worker completes its assignment:
    $$T_{\text{fanout}} = \max_{1 \le m \le M} T_m$$ {#eq-vol3-tail-fanout}
-   Because autoregressive token generation exhibits high variance in sequence length, and because GPU memory paging incurs heavy-tailed eviction delays, the P99 latency of an agent swarm scales pathologically with cluster size $M$. Runtimes must employ speculative hedging, deadline-aware preemption, and dynamic straggler pruning to prevent distributed multi-agent workflows from stalling.
+   Because autoregressive token generation exhibits high variance in sequence length, and because GPU memory paging incurs heavy-tailed eviction delays, the P99 latency of an agent swarm scales pathologically with cluster size $M$.[^fn-conclusion-queue-tail] To see how tail latency compounds across distributed agent swarms, suppose each worker has an independent $5\%$ probability of encountering a tail straggler event (e.g., a slow database lock, an external rate limit, or a CXL memory page-fault that takes $30\text{ s}$ instead of the median $2\text{ s}$). For a single worker ($M = 1$), the probability of completing on schedule is $95\%$. But for an orchestrator fanning out sub-tasks across $M = 20$ parallel workers, the probability that *at least one* worker stalls and holds up the barrier is:
+   $$P(\text{at least one straggler}) = 1 - (1 - 0.05)^{20} = 1 - (0.95)^{20} \approx 64.2\%$$
+   For a swarm of $M = 50$ workers, this probability surges to $1 - (0.95)^{50} \approx 92.3\%$. The swarm's total execution time is virtually guaranteed to match the P99 tail latency of its slowest member. Runtimes must employ speculative hedging, deadline-aware preemption, and dynamic straggler pruning to prevent distributed multi-agent workflows from stalling.
+
+[^fn-conclusion-queue-tail]: Under heavy-tailed Pareto service distributions ($\alpha \le 2$), variance is infinite ($\operatorname{Var}(N) \to \infty$), causing classical $M/G/1$ Pollaczek-Khinchine FIFO queues to suffer catastrophic head-of-line blocking; see @sec-vol3-appendix-math-queueing and @sec-vol3-appendix-math-pareto for the complete queueing derivations.
 
 ### 7. The autonomous improvement ladder
 
@@ -268,7 +306,9 @@ Consequently, embodied runtimes cannot rely on ex-post error recovery. Safety in
 
 $$\dot{B}(\mathbf{x}) + \alpha(B(\mathbf{x})) \ge 0$$ {#eq-vol3-cbf-safety}
 
-In @eq-vol3-cbf-safety, $B(\mathbf{x}) \ge 0$ defines the safe set of physical robot states. The low-level execution engine evaluates @eq-vol3-cbf-safety as a real-time quadratic program (QP), filtering neural model outputs and overriding any action that would steer the mechanical system outside its provably safe operational envelope. Safety becomes an architectural contract enforced by physical dynamics, not a prompt instruction.
+In @eq-vol3-cbf-safety, $B(\mathbf{x}) \ge 0$ defines the safe set of physical robot states, and $\alpha(\cdot)$ is an extended class-$\mathcal{K}$ bounding function (typically a positive scalar gain $\gamma B(\mathbf{x})$). Intuitively, if $B(\mathbf{x})$ measures physical clearance to an obstacle (where $B(\mathbf{x}) > 0$ defines safe operating space), $\dot{B}(\mathbf{x})$ is the time rate of change of that clearance. As the robot approaches the safety boundary ($B(\mathbf{x}) \to 0$), the function $\alpha(B(\mathbf{x}))$ shrinks to zero, mathematically compelling $\dot{B}(\mathbf{x}) \ge 0$—which strictly prohibits any control command that would further reduce clearance. The low-level execution engine evaluates @eq-vol3-cbf-safety as a real-time quadratic program (QP) executing at kilohertz frequencies, filtering neural model outputs and overriding any action that would steer the mechanical system outside its provably safe operational envelope.[^fn-conclusion-cbf-invariance] Safety becomes an architectural contract enforced by physical dynamics, not a prompt instruction.
+
+[^fn-conclusion-cbf-invariance]: By Nagumo's Theorem, satisfying $\dot{B}(\mathbf{x}) + \alpha(B(\mathbf{x})) \ge 0$ renders the forward superlevel set $\mathcal{C} = \{\mathbf{x} \mid B(\mathbf{x}) \ge 0\}$ forward invariant: if the state begins inside the safe operating envelope, no admissible control input $\mathbf{u}(t)$ can ever drive it out.
 
 ### 3. Continuous sensorimotor bandwidth vs. edge memory walls
 
@@ -287,6 +327,16 @@ Furthermore, while cloud agent clusters operate within $800\text{ W}$ thermal de
 The transition from digital software agents to embodied physical AI bridges two software engineering paradigms. In digital agents, the runtime interfaces with POSIX system calls, HTTP endpoints, and the Model Context Protocol (MCP). In embodied systems, the runtime interfaces with the Robot Operating System (ROS2), Data Distribution Service (DDS) real-time pub/sub middleware, and hardware communication buses (EtherCAT, CAN FD).
 
 Understanding the digital systems principles established in this book—trajectory checkpointing, capability-based security, grammar-constrained sampling, and distributed consensus—provides the necessary foundation for engineering physical intelligence, paving the way for systems that confront continuous physical dynamics, multi-modal perception pipelines, sensor fusion, and safety-critical real-time actuation.
+
+::: {#chk-vol3-18-frontier-invariants .callout-checkpoint title="Embodied frontiers and system invariants"}
+
+Before examining grand challenges in long-horizon autonomous computing, test your grasp of the frontier boundaries:
+
+- [ ] **The Real-Time Wall**: Why can a cloud LLM tolerate a 1.5-second deliberation pause during an SQL query while a physical robotic manipulator faces catastrophic mechanical failure under the same delay?
+- [ ] **Newtonian Irreversibility**: Why are software isolation mechanisms like Copy-on-Write snapshots and database rollbacks structurally inapplicable to physical world actuation?
+- [ ] **Amdahl's I/O Law**: If an autonomous agent spends 70 percent of its wall-clock time blocked on external compilers and microVM tests, what is the maximum speedup achievable by making neural inference infinitely fast?
+
+:::
 
 ## Grand Challenges in Long-Horizon Autonomous Computing {#sec-vol3-conclusion-challenges}
 
@@ -307,7 +357,15 @@ As trajectory lengths extend to $H \ge 10^4$ steps, the sequence length exceeds 
 - **Attention Dilution:** As the denominator of the softmax function sums over millions of token positions, the probability distribution over historical keys flattens, diluting the attention weight assigned to critical early instructions.
 - **KV Cache Bandwidth Saturation:** Streaming gigabytes of historical KV tensors from accelerator HBM for every decoded token drops arithmetic intensity below unity, bottlenecking inference clusters at the memory bus.
 
-The grand challenge is engineering **Hierarchical State Compaction Runtimes**: architectures that dynamically compile linear token histories into structured, hierarchical state representations (such as persistent executable knowledge graphs and recurrent latent state blocks) that maintain infinite memory horizons with $\mathcal{O}(1)$ query complexity.
+To understand why long contexts hit a physical memory bandwidth wall rather than an arithmetic ceiling, consider generating tokens at a context horizon of $L = 1{,}000{,}000$ tokens. For a 70B parameter model using GQA ($164\text{ KB/token}$ in FP8/FP16), streaming $10^6$ historical tokens from HBM requires transferring:
+
+$$1{,}000{,}000 \text{ tokens} \times 164 \text{ KB/token} \approx 164 \text{ GB of memory per generated token}$$
+
+Even on an accelerator with $3.35 \text{ TB/s}$ HBM3 memory bandwidth (such as an NVIDIA H100 SXM), transferring $164\text{ GB}$ across the memory bus consumes:
+
+$$\frac{164 \text{ GB}}{3{,}350 \text{ GB/s}} \approx 49 \text{ milliseconds per token}$$
+
+This memory bus transfer caps single-stream generation throughput to barely $20 \text{ tokens/s}$, regardless of the thousands of TFLOPS available on the chip's tensor cores. Arithmetic intensity collapses below $0.01\text{ FLOP/byte}$. The grand challenge is engineering **Hierarchical State Compaction Runtimes**: architectures that dynamically compile linear token histories into structured, hierarchical state representations (such as persistent executable knowledge graphs and recurrent latent state blocks) that maintain infinite memory horizons with $\mathcal{O}(1)$ query complexity.
 
 ### 2. Zero-drift episodic memory consolidation
 
@@ -318,13 +376,17 @@ In agentic systems, background consolidation remains an open systems challenge. 
 - **Representation Drift:** As foundation models are updated or fine-tuned, embedding spaces drift, rendering historical vector indices semantically misaligned.
 - **Context Poisoning:** Hallucinated reasoning steps or transient error traces stored in episodic databases are retrieved as factual precedents during subsequent tasks, causing self-reinforcing failure cascades.
 
-Runtimes require formal **Consolidation and Pruning Engines**: offline background processes that verify historical trajectories against ground-truth outcomes, extract generalized operational heuristics, resolve contradictions, and prune superseded facts while maintaining cryptographic provenance.
+Runtimes require formal **Consolidation and Pruning Engines**: offline background processes that verify historical trajectories against ground-truth outcomes, extract generalized operational heuristics, resolve contradictions, and prune superseded facts while maintaining cryptographic provenance.[^fn-conclusion-pagerank-graphs]
+
+[^fn-conclusion-pagerank-graphs]: Rather than storing flat raw text chunks, structured repository memory constructs directed symbol definition-reference graphs and applies personalized PageRank to prioritize central architectural abstractions within bounded token budgets; see @sec-vol3-appendix-math-pagerank for the mathematical formulation.
 
 ### 3. Autonomous self-healing software & continuous policy evolution
 
 Today, autonomous agents operate under static policy weights and pre-configured tool registries. If an agent encounters a novel library bug or an undocumented API change, it must navigate the challenge using frozen weights.
 
-The frontier of autonomous computing lies in **Continuous, Closed-Loop Policy Evolution**: runtimes where agents autonomously update their own prompt templates, synthesize new tool definitions, and trigger local reinforcement learning updates (RLVR) based on production outcomes. The central systems challenge is guaranteeing stability: preventing policy drift, reward hacking, and catastrophic forgetting without requiring human supervision. This requires coupling policy optimization with formal verification engines (such as Lean, Coq, or symbolic SMT solvers) that mathematically prove that an updated policy adheres to invariant safety specifications before deployment.
+The frontier of autonomous computing lies in **Continuous, Closed-Loop Policy Evolution**: runtimes where agents autonomously update their own prompt templates, synthesize new tool definitions, and trigger local reinforcement learning updates (RLVR) based on production outcomes. The central systems challenge is guaranteeing stability: preventing policy drift, reward hacking, and catastrophic forgetting without requiring human supervision. This requires coupling policy optimization with formal verification engines (such as Lean, Coq, or symbolic SMT solvers) that mathematically prove that an updated policy adheres to invariant safety specifications before deployment.[^fn-conclusion-rlvr-kl]
+
+[^fn-conclusion-rlvr-kl]: During continuous policy optimization, reward hacking is bounded by constraining policy shift using token-level Kullback-Leibler (KL) divergence penalties against a frozen reference model; see @sec-vol3-appendix-math-rl for the analytical GAE and KL divergence formulation.
 
 ### 4. Byzantine fault tolerance in heterogeneous stochastic fleets
 
@@ -404,7 +466,7 @@ Modifying parametric weights incurs substantial financial compute costs ($\$10^4
 
 Profiling production agent deployments reveals that autonomous workflows spend between $50\%$ and $75\%$ of their total wall-clock execution time blocked on external environments: executing shell scripts, running compiler test suites, querying remote APIs, or waiting for human approval.
 
-If an agent runtime holds the agent's Key-Value (KV) cache resident in GPU High-Bandwidth Memory (HBM) while blocked on external I/O, it commits the **Tool-Wait Memory Stranding** anti-pattern. Stranding 80 GB of HBM across dozens of idle agent sessions starves concurrent requests, causing GPU compute utilization to collapse below $15\%$. Systems runtimes must adopt asynchronous prefill-decode disaggregation, PagedAttention block swapping, and CXL-attached host memory tiering to page out idle trajectory caches during external wait states.
+If an agent runtime holds the agent's Key-Value (KV) cache resident in GPU HBM while blocked on external I/O, it commits the **Tool-Wait Memory Stranding** anti-pattern. Stranding 80 GB of HBM across dozens of idle agent sessions starves concurrent requests, causing GPU compute utilization to collapse below $15\%$. Systems runtimes must adopt asynchronous prefill-decode disaggregation, PagedAttention block swapping, and CXL-attached host memory tiering to page out idle trajectory caches during external wait states.
 
 :::
 
@@ -414,7 +476,7 @@ If an agent runtime holds the agent's Key-Value (KV) cache resident in GPU High-
 
 Deploying large swarms of peer agents that communicate through unconstrained conversational dialogue suffers from severe distributed systems pathologies. As fleet size $M$ grows, peer-to-peer communication overhead scales quadratically ($\mathcal{O}(M^2)$), driving the **Token Amplification Factor** ($A_{\text{tokens}}$) to extreme levels where simple tasks consume millions of tokens in redundant conversational chatter.
 
-Furthermore, unconstrained peer swarms are vulnerable to semantic deadlocks, Byzantine cascades (where one agent's hallucination is amplified and accepted as truth by peer models), and severe tail-at-scale latency variance (@eq-vol3-tail-fanout). Dependable distributed scale requires formal Actor-model isolation, bounded directed acyclic communication graphs (DAGs), and hierarchical supervisor trees equipped with automated circuit breakers.
+Furthermore, unconstrained peer swarms are vulnerable to semantic deadlocks, Byzantine cascades (where one agent's hallucination is amplified and accepted as truth by peer models), and severe tail-at-scale latency variance (@eq-vol3-tail-fanout). Dependable distributed scale requires formal Actor-model isolation, bounded directed acyclic graph (DAG) communication topologies, and hierarchical supervisor trees equipped with automated circuit breakers.
 
 :::
 

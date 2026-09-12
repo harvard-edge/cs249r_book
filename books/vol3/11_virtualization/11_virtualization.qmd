@@ -55,12 +55,16 @@ To permanently neutralize this vulnerability class, microprocessor architects in
 
 $$\text{Memory Permissions: } \text{Writable} \cap \text{Executable} = \emptyset$$
 
-A physical memory page may be writable (permitting state mutations in stack, heap, and `.data` segments) or executable (permitting instruction decoding in `.text` segments), but never both simultaneously. If an adversary injects shellcode into a writable stack page and diverts the instruction pointer to that address, the MMU raises a hardware page-fault interrupt in zero CPU cycles, terminating the process with a segmentation violation (`SIGSEGV`). Furthermore, hardware architectures establish strict **Privilege Rings**:
+A physical memory page may be writable (permitting state mutations in stack, heap, and `.data` segments) or executable (permitting instruction decoding in `.text` segments), but never both simultaneously. If an adversary injects shellcode into a writable stack page and diverts the instruction pointer to that address, the MMU raises a hardware page-fault interrupt in zero CPU cycles, terminating the process with a segmentation violation (`SIGSEGV`).
 
-- **Ring 3 (User Space):** Unprivileged application code executing with constrained instruction sets and virtual address spaces.
-- **Ring 0 (Supervisor Kernel):** Operating system kernel code executing privileged instructions (e.g., page table manipulation, interrupt handling).
+Furthermore, hardware architectures establish a strict hierarchy of **Execution Isolation Boundaries**:
 
-Transitions between Ring 3 and Ring 0 cannot occur through arbitrary jumps; they must traverse atomic, hardware-validated gates (`syscall` and `sysenter` instructions) that enforce parameter validation and privilege boundaries.
+- **Ring 3 (User Space):** Unprivileged application code (such as the Python interpreter, language runtimes, and developer scripts) executing with virtual memory translation and restricted CPU instructions.
+- **Ring 0 (Supervisor / Guest Kernel):** Operating system kernel code executing privileged CPU instructions (such as page table manipulation and hardware interrupt handling). In standard containers, Ring 0 is shared with the host; in microVMs, guest Ring 0 is partitioned inside hardware virtualization extensions.
+- **Ring -1 / VMX Root (Host Hypervisor):** Hardware virtualization silicon (Intel VT-x / AMD-V) operating in VMX root mode. Transitions between guest code (VMX non-root) and hypervisor host code (VMX root) occur strictly through hardware-enforced `VMENTRY` and `VMEXIT` controls governed by Extended Page Tables (EPT).
+- **Capability-Based Sandboxing (Software Fault Isolation):** In architectures such as WebAssembly (WASI), hardware privilege rings are replaced by compiler-enforced linear memory bounds and explicit capability handles, where sandboxed bytecode cannot address memory or invoke system interfaces outside its declared import table.
+
+In classical hardware, transitions between privilege levels cannot occur through arbitrary memory jumps; they must traverse atomic, hardware-validated gates (`syscall` instructions or `VMEXIT` traps) that enforce strict parameter validation and boundary isolation.
 
 In transformer-based neural processors [@vaswani2017], this foundational protection boundary collapses entirely. Consider an autoregressive model processing an input sequence of tokens $X = (x_1, x_2, \dots, x_N)$. The context window contains a heterogeneous mixture of semantic sources:
 
@@ -68,17 +72,21 @@ In transformer-based neural processors [@vaswani2017], this foundational protect
 - $X_{\text{user}}$: Direct task instructions from the human operator (e.g., `"Diagnose the compilation failure in pull request #402."`).
 - $X_{\text{env}}$: Untrusted environmental data retrieved via tool execution (e.g., lines from a git diff, README files, HTTP response bodies, database records, or compiler error streams).
 
-In a classical computer, $X_{\text{sys}}$ would reside in an immutable, execute-only code segment (`.text`), while $X_{\text{env}}$ would reside in a non-executable data segment (`.data`). In a transformer, however, all tokens are projected into an identical continuous vector embedding space $\mathbb{R}^{d_{\text{model}}}$. When self-attention is computed across the sequence, token projections interact symmetrically:
+In a classical computer, supervisory logic $X_{\text{sys}}$ would reside in an immutable, execute-only code segment (`.text`), while untrusted external text $X_{\text{env}}$ would reside in a non-executable data segment (`.data`). In a transformer, however, all tokens are projected into an identical continuous vector embedding space $\mathbb{R}^{d_{\text{model}}}$. When scaled dot-product attention is computed across the context sequence:
 
-$$q_i = W_Q h_i, \quad k_j = W_K h_j, \quad v_j = W_V h_j$$
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{Q K^\top}{\sqrt{d_k}}\right) V$$
+
+every token position $i$ attends to every token position $j$ through continuous inner products:
 
 $$A_{i,j} = \frac{\exp\left(\frac{q_i^\top k_j}{\sqrt{d_k}}\right)}{\sum_{m=1}^S \exp\left(\frac{q_i^\top k_m}{\sqrt{d_k}}\right)}$$
 
-$$h_i^{(l+1)} = \sum_{j=1}^S A_{i,j} v_j$$
+Because attention weights are continuous scalar projections, an untrusted token $x_{\text{adv}} \in X_{\text{env}}$ retrieved from a malicious repository README participates in the identical matrix multiplications as the supervisory token $x_{\text{sys}} \in X_{\text{sys}}$. The adversary's token directly modulates the hidden activations that determine the model's next-token emission. If the dot-product similarity $\frac{q_i^\top k_{\text{adv}}}{\sqrt{d_k}}$ dominates the attention row, the adversary's instructions override supervisory intent.
 
-$$P(x_{t+1} \mid x_{1:t}) = \text{softmax}(W_U h_t^{(L)})$$
+Unlike a physical Memory Management Unit that evaluates:
 
-Because every token attends to every other token across all $L$ layers, an untrusted token $x_{\text{adv}} \in X_{\text{env}}$ retrieved from a malicious repository README participates in the identical linear and non-linear projections as the supervisory token $x_{\text{sys}} \in X_{\text{sys}}$. The adversary's token directly modulates the hidden states $h_t^{(L)}$ that determine the model's next-token output distribution. There is no physical, logical, or mathematical mechanism within standard transformer self-attention to mark a tensor dimension as "non-executable." Because instructions and data share a unified attention space, **prompt injection is the direct semantic equivalent of a stack buffer overflow on an architecture that lacks $W \oplus X$** [@greshake2023not].
+$$\text{Instruction Fetch Valid} \iff \text{page.flags} \ \& \ \text{PROT\_EXEC}$$
+
+there is no hardware bitmask, no capability descriptor, and no MMU trap in dense linear algebra to mark an embedding dimension as "non-executable." Because instructions and data share a unified, unsegmented attention space, **prompt injection is the direct semantic equivalent of a stack buffer overflow on an architecture that lacks $W \oplus X$** [@greshake2023not].
 
 ### The confused deputy and ambient authority
 
@@ -122,14 +130,30 @@ Under this defense-in-depth architecture, the probability of catastrophic host c
 
 $$P_{\text{breach}} = P(\text{inject}) \cdot P(\text{escape} \mid \text{inject}) \cdot P(\text{exfil} \mid \text{escape})$$
 
+Why are these terms modeled as conditionally independent? In classical systems reliability, multiplicative risk models fail when sub-components share common failure modes (correlated failures). Here, however, each ring is implemented in an entirely disjoint software and hardware domain:
+
+- **Injection ($P(\text{inject})$)** is an adversarial NLP challenge operating within the continuous embedding space of neural weights.
+- **Escape ($P(\text{escape} \mid \text{inject})$)** is an operating systems challenge operating in the Linux KVM hypervisor and hardware CPU silicon (VMX/EPT). An adversary cannot escape hardware virtualization using prompt tokens.
+- **Exfiltration ($P(\text{exfil} \mid \text{escape})$)** is a networking challenge operating in kernel eBPF packet filters and transparent TLS SNI proxies. Even if an injected payload compromises the guest kernel, outbound raw IP connections and cloud metadata calls are dropped at line rate by the host network stack.
+
 Even if an adversary achieves universal prompt injection ($P(\text{inject}) \approx 1.0$) using automated gradient-based suffix optimization [@zou2023], the hardware hypervisor boundary ensures that escaping the virtual machine requires an unpatched hardware virtualization zero-day ($P(\text{escape} \mid \text{inject}) \le 10^{-6}$). Simultaneously, multi-layer egress mediation ensures that exfiltrating extracted data past SNI allowlists, regex credential scanners, and DNS entropy filters is near impossible ($P(\text{exfil} \mid \text{escape}) \le 10^{-4}$). The aggregate system compromise probability satisfies:
 
 $$P_{\text{breach}} \le 1.0 \times 10^{-6} \times 10^{-4} = 10^{-10}$$
 
-By moving security enforcement from probabilistic neural weights into deterministic systems software, the host remains secure even when the agent is fully co-opted.
+By moving security enforcement from probabilistic neural weights into deterministic systems software, the host remains secure even when the agent policy is fully co-opted.
 
 ::: {#fig-vol3-virtualization-defense-rings fig-env="figure" fig-pos="htb" fig-cap="**The Three Defense-in-Depth Rings for Autonomous Agent Execution**: Complete mediation model dividing sandbox security into Protocol-level API schema and capability leases, OS-level microVM hardware containment and ephemeral CoW overlays, and Perimeter-level zero-trust egress mediation." fig-alt="Architectural diagram illustrating the three defense-in-depth rings for autonomous agent sandboxes: Ring 1 API capability leases, Ring 2 microVM virtualization and ephemeral overlays, and Ring 3 zero-trust network egress perimeter."}
 ![](images/svg/defense_in_depth_rings.svg){width="100%"}
+:::
+
+::: {#chk-vol3-11-threat-model-isolation .callout-checkpoint title="Threat models and defense-in-depth isolation"}
+
+Before exploring microVMs, containers, and WebAssembly runtimes, verify your understanding of sandboxing invariants:
+
+- [ ] **$W \oplus X$ violation in LLMs**: explain why prompt injection is functionally equivalent to an executable buffer overflow on a computer architecture that lacks memory protection.
+- [ ] **Ambient authority vs. capabilities**: describe how granting ambient shell authority to an agent enables Confused Deputy exploits during repository triage.
+- [ ] **Defense-in-depth multiplication**: calculate the system compromise probability $P_{\text{breach}}$ when prompt injection succeeds with probability $1.0$, hypervisor escape is $10^{-6}$, and network exfiltration breach is $10^{-4}$.
+
 :::
 
 With the threat model formalized, we now turn to the foundational systems mechanism of Ring 2: the virtualization runtime that isolates untrusted execution from the host hardware.
@@ -189,21 +213,27 @@ MicroVMs combine the isolation strength of hardware-assisted virtualization with
 
 ### The per-call boot budget
 
-In an autonomous agent trajectory, tool invocations occur iteratively across dozens of sequential steps. To guarantee zero cross-turn state contamination, the execution runtime must provision an ephemeral sandbox for every individual tool invocation and destroy it immediately upon completion.
+In an autonomous agent trajectory, tool invocations occur iteratively across dozens of sequential steps. Why is per-invocation sandboxing mandatory? If an agent executes a 40-step trajectory inside a single persistent, mutable container, an indirect prompt injection encountered at step 3 permanently compromises the environment for all subsequent 37 steps. Ephemeral per-turn sandboxes guarantee that each step starts from a cryptographically clean slate.
 
-Let $N$ represent the number of tool execution steps in a trajectory, and let $t_{\text{prod}}$ represent the productive execution duration of a single tool invocation (e.g., executing a test script or compiling a binary). If the systems service level agreement (SLA) specifies that isolation overhead must not exceed a fraction $s$ (e.g., $s = 0.05$, or $5\%$) of total wall-clock execution time, we derive the maximum allowable per-call boot latency ($T_{\text{boot}}$):
+However, ephemeral isolation introduces a systems tax. Let $N$ represent the number of tool execution steps in a trajectory, and let $t_{\text{prod}}$ represent the productive execution duration of a single tool invocation (e.g., executing a test script or compiling a binary). The total trajectory wall-clock time is:
 
-$$\frac{T_{\text{boot}}}{T_{\text{boot}} + t_{\text{prod}}} \le s \implies T_{\text{boot}} \le \frac{s \cdot t_{\text{prod}}}{1 - s}$$
+$$T_{\text{trajectory}} = N \cdot (T_{\text{boot}} + t_{\text{prod}})$$
 
-For an interactive developer turn where $t_{\text{prod}} = 3.5\text{ s}$ and $s = 0.05$:
+If the systems service level agreement (SLA) specifies that isolation overhead must not exceed a fraction $s$ (e.g., $s = 0.05$, or $5\%$) of total wall-clock execution time, the overhead ratio must satisfy:
 
-$$T_{\text{boot}} \le \frac{0.05 \times 3.5}{0.95} \approx 184.2\text{ ms}$$
+$$\frac{N \cdot T_{\text{boot}}}{N \cdot (T_{\text{boot}} + t_{\text{prod}})} = \frac{T_{\text{boot}}}{T_{\text{boot}} + t_{\text{prod}}} \le s \implies T_{\text{boot}} \le \frac{s}{1 - s} \cdot t_{\text{prod}}$$
 
-For high-throughput synthetic data generation where $t_{\text{prod}} = 1.0\text{ s}$ and $s = 0.05$:
+We evaluate this bound across two representative production regimes:
 
-$$T_{\text{boot}} \le \frac{0.05 \times 1.0}{0.95} \approx 52.6\text{ ms}$$
+- **Interactive Developer Assistant ($t_{\text{prod}} = 3.5\text{ s}$, $s = 0.05$):**
+  $$T_{\text{boot}} \le \frac{0.05}{0.95} \times 3.5\text{ s} \approx 184.2\text{ ms}$$
+  To remain within human interactive perception thresholds ($\le 200\text{ ms}$), the sandbox must boot in under $184\text{ ms}$.
 
-As evaluated in @tbl-vol3-boot-budget-feasibility, provisioning latency dictates whether an isolation technology is operationally viable. Legacy virtual machines (QEMU, $T_{\text{boot}} \approx 30\text{ s}$) exceed the budget by over two orders of magnitude, spending more than $85\%$ of the entire trajectory wall-clock time waiting on machine boots. Standard Docker containers ($T_{\text{boot}} \approx 250\text{ ms}$) violate the tight 50 ms budget of high-throughput pipelines. Firecracker microVMs ($T_{\text{boot}} \le 25\text{ ms}$) comfortably satisfy both regimes with a $2\times$ to $7\times$ engineering safety margin.
+- **High-Throughput Synthetic Generation / Deliberation ($t_{\text{prod}} = 1.0\text{ s}$, $s = 0.05$):**
+  $$T_{\text{boot}} \le \frac{0.05}{0.95} \times 1.0\text{ s} \approx 52.6\text{ ms}$$
+  In autonomous training flywheels generating millions of rollouts, the per-call boot budget drops to a razor-thin $53\text{ ms}$.
+
+As evaluated in @tbl-vol3-boot-budget-feasibility, provisioning latency dictates whether an isolation technology is operationally viable. Legacy virtual machines (QEMU, $T_{\text{boot}} \approx 30\text{ s}$) exceed the budget by over two orders of magnitude, spending $89\%\text{--}97\%$ of the entire trajectory wall-clock time waiting on machine boots—in a 40-step trajectory, the system wastes 20 full minutes booting VMs for barely 2.3 minutes of actual computation. Standard Docker containers ($T_{\text{boot}} \approx 250\text{ ms}$) violate the tight 53 ms budget of high-throughput pipelines. Firecracker microVMs ($T_{\text{boot}} \le 25\text{ ms}$) comfortably satisfy both regimes with a $2\times$ to $7\times$ engineering safety margin.
 
 | Isolation Technology          | Typical Boot ($T_{\text{boot}}$) | Trajectory Boot Time ($N = 40$)        | Share of Interactive Turn ($t_{\text{prod}} = 3.5\,\text{s}$) | Share of Fast Turn ($t_{\text{prod}} = 1.0\,\text{s}$) | 5% Budget Compliance ($s \le 0.05$)                         | Operational Feasibility Verdict                  |
 |:------------------------------|:---------------------------------|:---------------------------------------|:--------------------------------------------------------------|:-------------------------------------------------------|:------------------------------------------------------------|:-------------------------------------------------|
@@ -257,15 +287,23 @@ Because this translation is enforced by physical silicon, if guest code attempts
 
 #### Multi-tenant memory density
 
-Because each microVM requires minimal baseline overhead, host servers achieve massive tenant packing density. The total memory consumed by $K$ concurrent agent sandboxes on a host is modeled by:
+Because each microVM requires minimal baseline overhead, host servers achieve massive tenant packing density. The total physical memory consumed by $K$ concurrent agent sandboxes on a host is modeled by:
 
 $$M_{\text{host}} = M_{\text{OS}} + K \cdot (M_{\text{base}} + M_{\text{guest\_RAM}})$$
 
-On an enterprise server with 512 GB of DRAM ($M_{\text{host}} = 512\text{ GB}$) and 16 GB reserved for the host OS ($M_{\text{OS}} = 16\text{ GB}$), provisioning lightweight microVMs with $M_{\text{base}} = 5\text{ MB}$ and $M_{\text{guest\_RAM}} = 512\text{ MB}$ permits:
+On an enterprise server equipped with 512 GB of DRAM ($M_{\text{host}} = 512\text{ GB}$) and 16 GB reserved for the host OS ($M_{\text{OS}} = 16\text{ GB}$), the allocatable memory budget is:
 
-$$K = \left\lfloor \frac{512 - 16}{0.517} \right\rfloor = \left\lfloor \frac{496}{0.517} \right\rfloor = 959 \text{ concurrent microVMs}$$
+$$M_{\text{alloc}} = 512\text{ GB} - 16\text{ GB} = 496\text{ GB} = 507{,}904\text{ MB}$$
 
-In contrast, legacy QEMU VMs requiring $M_{\text{base}} = 120\text{ MB}$ and $M_{\text{guest\_RAM}} = 4096\text{ MB}$ support barely 120 instances—an **$8\times$ reduction in multi-tenant density**.
+For a lightweight Firecracker microVM, the baseline hypervisor memory overhead is $M_{\text{base}} \approx 5\text{ MB}$, and the guest kernel is provisioned with $M_{\text{guest\_RAM}} = 512\text{ MB}$, yielding a per-tenant footprint of $517\text{ MB}$ ($0.505\text{ GB}$). The maximum concurrent capacity is:
+
+$$K = \left\lfloor \frac{507{,}904\text{ MB}}{517\text{ MB/microVM}} \right\rfloor = 982 \text{ concurrent microVMs}$$
+
+In contrast, a legacy QEMU virtual machine requires $M_{\text{base}} \approx 120\text{ MB}$ to emulate motherboard peripherals and demands $M_{\text{guest\_RAM}} \ge 4096\text{ MB}$ for a standard distribution kernel, consuming $4216\text{ MB}$ per instance:
+
+$$K_{\text{QEMU}} = \left\lfloor \frac{507{,}904\text{ MB}}{4216\text{ MB/VM}} \right\rfloor = 120 \text{ concurrent VMs}$$
+
+Firecracker delivers an **$8.2\times$ density multiplier** over legacy VMs while preserving full hardware KVM isolation. Furthermore, because microVM root filesystems and memory snapshots are mapped with read-only page-cache sharing, clean guest pages are backed by the host's existing physical page frames rather than duplicated, allowing production fleets to overcommit memory safely and pack well over 1,200 sandboxes per host.
 
 Containing the agent's computation within a microVM secures the host's memory and CPU. However, agents do not merely compute; they read, write, compile, and delete files. Providing high-performance, isolated storage for thousands of ephemeral agent sessions requires extending this virtualization to the filesystem layer.
 
@@ -293,7 +331,12 @@ Because `LowerDir` is mounted strictly read-only (`O_RDONLY`), the host Linux ke
 
 $$M_{\text{storage}} = S_{\text{base}} + \sum_{k=1}^K S_{\text{mut}, k}$$
 
-where $S_{\text{base}}$ is the size of the shared base rootfs, and $S_{\text{mut}, k}$ is the small volume of file mutations generated by sandbox $k$. For a 10 GB repository and base image, supporting 500 concurrent sandboxes consumes 10 GB of host RAM for the base image, rather than 5,000 GB. The memory amplification factor across co-tenants is zero.
+where $S_{\text{base}}$ is the size of the shared base rootfs, and $S_{\text{mut}, k}$ is the small volume of file mutations generated by sandbox $k$.
+
+To appreciate the systems economics, consider 500 concurrent agent sandboxes triaging pull requests against a 10 GB monolithic repository:
+
+- **Naive Full Disk Copying:** Instantiating 500 independent raw disk images requires $500 \times 10\text{ GB} = 5{,}000\text{ GB} = 5\text{ TB}$ of storage writes and NVMe wear, imposing $5\text{--}15\text{ s}$ of provisioning delay per turn.
+- **OverlayFS CoW on tmpfs:** The 10 GB `LowerDir` is loaded into host DRAM page cache *once*. When an agent compiles code or edits files, mutations accumulate in `UpperDir` on in-memory `tmpfs`. If each agent mutates an average of $S_{\text{mut}} \approx 20\text{ MB}$ of source code and test logs, the aggregate mutation storage across all 500 sandboxes is $500 \times 20\text{ MB} = 10{,}000\text{ MB} \approx 9.77\text{ GB}$. Total host footprint: $10\text{ GB} + 9.77\text{ GB} \approx 19.8\text{ GB}$—a **$250\times$ physical storage reduction** with zero NVMe write traffic on unmutated files.
 
 #### Mechanics of file mutation and whiteouts
 
@@ -309,7 +352,7 @@ When an agent tool invocation concludes, the runtime executes workspace teardown
 
 $$T_{\text{teardown}} = t_{\text{umount}} + t_{\text{unlink}} < 2\text{ ms}$$
 
-Because all mutations, temporary build artifacts, and adversary scripts reside strictly within `UpperDir` on `tmpfs`, unmounting `MergedFS` and deleting `UpperDir` purges 100 percent of the session's mutations in under 2 milliseconds. The underlying `LowerDir` remains cryptographically pristine. The subsequent agent invocation mounts a fresh, empty `UpperDir` over `LowerDir`, guaranteeing zero cross-session state leakage or residual contamination.
+Why is teardown sub-millisecond? Unmounting `MergedFS` (`t_{\text{umount}}`) simply detaches the VFS mount node from the kernel namespace table—an $O(1)$ pointer update in the kernel mount tree. Recursively deleting `UpperDir` (`t_{\text{unlink}}`) on `tmpfs` frees page table entries directly in DRAM without issuing flash erase-block commands to NVMe or waiting on filesystem journal commits. Because all mutations, temporary build artifacts, and adversary scripts reside strictly within `UpperDir` on `tmpfs`, teardown purges 100 percent of the session's mutations in under 2 milliseconds. The underlying `LowerDir` remains cryptographically pristine. The subsequent agent invocation mounts a fresh, empty `UpperDir` over `LowerDir`, guaranteeing zero cross-session state leakage or residual contamination.
 
 @Tbl-vol3-storage-isolation-comparison evaluates candidate storage architectures across provisioning latency, teardown duration, memory efficiency, and state hygiene.
 
@@ -349,11 +392,15 @@ void *guest_mem = mmap(NULL, guest_mem_size, PROT_READ | PROT_WRITE,
 
 Under `MAP_PRIVATE`, the operating system does not copy the memory file into RAM. Instead, it maps the page table entries to the file's disk pages. When the guest vCPU resumes execution and writes to a memory page, the host CPU raises a write-protect page fault, copying only the mutated $4\,\text{KB}$ page into private host RAM.
 
-The total restoration latency ($T_{\text{restore}}$) is dominated by register restoration and initial page faults:
+The total restoration latency ($T_{\text{restore}}$) is governed by three concrete systems operations:
 
 $$T_{\text{restore}} = T_{\text{mmap}} + T_{\text{vCPU\_resume}} + \sum_{p \in \mathcal{P}_{\text{init}}} t_{\text{pagefault}}(p) \le 5\text{ ms}$$
 
-This achieves a **$300\times$ speedup** over cold boot sequences, enabling sub-5 ms sandbox instantiation.
+- $T_{\text{mmap}} \approx 20\,\mu\text{s}$: An $O(1)$ kernel Virtual Memory Area (VMA) registration that sets up page table descriptors without reading physical data into RAM.
+- $T_{\text{vCPU\_resume}} \approx 1.5\text{ ms}$: Restores register state (RIP, RSP, segment registers, MSRs) from the 50 KB `snapshot.vmstate` file.
+- Demand Paging ($\sum t_{\text{pagefault}} \approx 1.0\text{ ms}$): The guest only faults in pages it actively touches during initialization. A pre-warmed Python process touches approximately 200 pages ($4\,\text{KB}$ each) during resume; at $\sim 5\,\mu\text{s}$ per hardware page fault, demand paging consumes roughly 1 ms.
+
+Total restoration completes in $2.5\text{--}4.0\text{ ms}$—delivering a **$6\times\text{--}10\times$ speedup** over Firecracker cold boot ($25\text{--}45\text{ ms}$) and an astounding **$6{,}000\times$ speedup** over legacy PC hypervisors ($30\text{ s}$), enabling sub-5 ms sandbox instantiation.
 
 #### Enabling speculative search and deliberation trees
 
@@ -375,30 +422,23 @@ To prevent exfiltration, the runtime must enforce **Information Flow Control (IF
 ![](images/svg/network_egress_defense_in_depth.svg){width="100%"}
 :::
 
-### Information flow control (IFC) and the security lattice
+### Information flow control (IFC) and dynamic capability attenuation
 
-Classical operating systems formalize information security using the **Lattice Model of Secure Information Flow** [@krohn2007information]. In an agent runtime, context integrity is modeled as a partially ordered security lattice $(\mathcal{L}, \sqsubseteq, \sqcup)$:
+To prevent prompt injection from escalating into data exfiltration, the execution runtime treats the agent's context window through the lens of **Dynamic Information Flow Control (DIFC)** and taint tracking [@krohn2007information]. Just as web frameworks track untrusted user input to prevent cross-site scripting and SQL injection, an agent supervisor tracks the provenance of every token entering the model's context:
 
-$$\mathcal{L} = \{\text{Trusted}, \text{Untrusted}\}, \quad \text{where } \text{Trusted} \sqsubseteq \text{Untrusted}$$
+- **Trusted Input ($\tau = \text{Trusted}$):** Supervisory system instructions authored by platform engineers ($X_{\text{sys}}$) and verified task instructions provided by the authenticated operator ($X_{\text{user}}$).
+- **Untrusted Input ($\tau = \text{Untrusted}$):** Any external text ingested from tools or external environments ($X_{\text{env}}$)—such as web pages, pull request diffs, issue comments, compiler logs, or database rows.
 
-The join operator ($\sqcup$) defines information flow when data streams combine:
+Because transformer self-attention mixes token representations across all layers, context taint is **absorbing**: the moment a single untrusted token enters the context window, the cumulative execution state irrevocably transitions to $\tau_{\text{state}} = \text{Untrusted}$.[^fn-virtualization-lattice-taint]
 
-$$\text{Trusted} \sqcup \text{Trusted} = \text{Trusted}$$
-$$\text{Trusted} \sqcup \text{Untrusted} = \text{Untrusted}$$
-$$\text{Untrusted} \sqcup \text{Untrusted} = \text{Untrusted}$$
+[^fn-virtualization-lattice-taint]: @sec-vol3-appendix-math-lattice formalizes this taint propagation mathematically as a partially ordered security lattice $(\mathcal{L}, \sqsubseteq, \sqcup)$ where $\text{Trusted} \sqsubset \text{Untrusted}$ and the cumulative state taint is the join across all constituent tokens: $\tau(C_t) = \bigsqcup_{i=1}^{|C_t|} \tau(x_i)$.
 
-The taint lifecycle is governed by three formal invariants:
+Once the context state is marked `Untrusted`, the runtime enforces **Dynamic Capability Attenuation**:
 
-1. **Input Taint Assignment:** System instructions ($X_{\text{sys}}$) and verified human operator queries ($X_{\text{user}}$) carry label $\tau = \text{Trusted}$. Any external text ingested from tools ($X_{\text{env}}$)—including web pages, git diffs, issue comments, compiler logs, and database rows—carries label $\tau = \text{Untrusted}$.
-2. **Autoregressive Taint Propagation:** Because self-attention mixes all context tokens, the ingestion of even a single untrusted token irrevocably taints the entire execution state:
-
-$$\tau_{\text{state}} \leftarrow \tau_{\text{state}} \sqcup \tau(x_t)$$
-
-3. **Dynamic Capability Attenuation:** Tools are partitioned into two privilege classes:
-   - **Read-Only / Non-Mutating Tools ($\mathcal{T}_{\text{read}}$):** for example, `grep_search`, `read_file`, `list_directory`.
-   - **Privileged / Mutating Tools ($\mathcal{T}_{\text{priv}}$):** for example, `bash_exec`, `send_network_request`, `git_push`.
-
-If $\tau_{\text{state}} = \text{Untrusted}$, execution of any tool $t \in \mathcal{T}_{\text{priv}}$ is automatically blocked by the runtime until an authorized human supervisor inspects the trajectory and explicitly declassifies the state.
+1. **Tool Partitioning:** Available tools are divided into two privilege tiers:
+   - **Read-Only / Non-Mutating Tools ($\mathcal{T}_{\text{read}}$):** for example, `grep_search`, `read_file`, `list_directory`. These remain accessible because reading local data inside a disposable sandbox cannot alter host infrastructure or exfiltrate state.
+   - **Privileged / Mutating Tools ($\mathcal{T}_{\text{priv}}$):** for example, `bash_exec`, `send_network_request`, `git_push`. These mutate persistent state or cross network boundaries.
+2. **Deterministic Interception:** If $\tau_{\text{state}} = \text{Untrusted}$, any attempt by the agent to invoke a tool $t \in \mathcal{T}_{\text{priv}}$ is intercepted by the runtime supervisor *before* execution. The call is either terminated with a capability violation error or routed to a human-in-the-loop cryptographic escrow queue. The agent can continue reading files and reasoning about code, but its ambient authority to actuate the outside world is revoked.
 
 ### Multi-layer zero-trust network egress defense
 
@@ -459,8 +499,14 @@ Even if outbound HTTP traffic is blocked, recursive DNS resolvers propagate the 
 
 $$H(X) = -\sum_{i=1}^k P(c_i) \log_2 P(c_i)$$
 
-where $P(c_i)$ is the empirical frequency of character $c_i$ in the label. While standard domain names exhibit entropy values between $2.2$ and $3.5$, Base64 ciphertext yields $H(X) > 4.2$. The resolver drops any DNS query where $H(X) > 4.2$.
+where $P(c_i)$ is the empirical frequency of character $c_i$ in the label.
 
+Why does a threshold of $H(X) > 4.2$ reliably separate covert exfiltration from legitimate developer DNS traffic?
+
+- **Theoretical Bounds:** In an alphabet of size $A$, maximum entropy occurs under a uniform character distribution: $H_{\max} = \log_2 A$. For Base64 ($A = 64$), $H_{\max} = \log_2(64) = 6.0\text{ bits/character}$; for hex encoding ($A = 16$), $H_{\max} = \log_2(16) = 4.0\text{ bits/character}$.
+- **Natural Language Domains:** Legitimate hostnames (such as `registry` in `registry.npmjs.org` or `pypi` in `pypi.org`) use natural English words with highly skewed letter frequencies dominated by vowels and common consonants. Their empirical Shannon entropy typically falls between $2.2$ and $3.2\text{ bits/character}$.
+- **Exfiltration Payloads:** Encrypted secrets or Base64-encoded tarballs (`SECRET=$(cat ~/.aws/credentials | base64)`) have near-uniform character distributions, routinely producing $H(X) \ge 4.3\text{ bits/character}$ on labels longer than 20 characters.
+- **Compute Cost:** Computing $H(X)$ across a 50-character DNS label requires an $O(L)$ character frequency count and a 64-element sum—consuming fewer than 500 CPU instructions ($< 0.2\,\mu\text{s}$). The internal DNS proxy evaluates every query at wire speed, dropping exfiltration channels before packets ever escape the host.
 3. **Internal Sinkholing:** Direct queries to public external DNS resolvers (`8.8.8.8`, `1.1.1.1`) are blocked at Layer 1; all lookups must route through an internal caching resolver that sinkholes Newly Registered Domains (NRDs $< 30$ days old).
 
 @Tbl-vol3-network-egress-defense details the multi-layer network egress defense stack.
@@ -501,6 +547,16 @@ For high-security enterprise environments and large-scale synthetic data generat
 - When an agent interacts with web services, the runtime routes HTTP requests to a synthetic mock internet proxy that replays pre-recorded HTTP archives (WARC / HAR files), eliminating live internet dependency while providing deterministic, repeatable tool returns.
 
 With network perimeters sealed, the final defense layer must govern the physical hardware resources consumed by the sandbox itself.
+
+::: {#chk-vol3-11-network-egress-tunneling .callout-checkpoint title="Network egress perimeters and covert tunneling"}
+
+Before examining Linux cgroups v2, seccomp filters, and host defense envelopes, verify your understanding of network containment:
+
+- [ ] **DNS covert exfiltration**: calculate why a Shannon entropy threshold of $H(X) > 4.2\text{ bits/char}$ separates Base64 exfiltration payloads from natural domain names.
+- [ ] **Instance metadata drop**: why must the link-local address `169.254.169.254` be dropped at wire rate via kernel eBPF rather than relying on application-level HTTP proxies?
+- [ ] **Open URL preview relays**: analyze the EchoLeak vulnerability (CVE-2025-32711) and explain why destination allowlists alone fail when an allowlisted domain acts as a reflection proxy.
+
+:::
 
 ## Resource Limiting: cgroups, seccomp, and Sandbox Telemetry {#sec-vol3-virtualization-cgroups}
 
@@ -594,7 +650,13 @@ The runtime constructs an empirical system call frequency vector $\mathbf{v}_{\t
 
 $$D_{\text{drift}}(\mathbf{v}_{\text{obs}}, \mathbf{v}_{\text{baseline}}) = 1 - \frac{\mathbf{v}_{\text{obs}} \cdot \mathbf{v}_{\text{baseline}}}{\|\mathbf{v}_{\text{obs}}\|_2 \|\mathbf{v}_{\text{baseline}}\|_2}$$
 
-If an injected agent begins scanning `/etc/shadow` or generating anomalous network connection probes, $D_{\text{drift}}$ spikes above an established threshold (e.g., $D_{\text{drift}} > 0.45$). The eBPF collector emits a telemetry event directly to the Agent Control Block supervisor (@sec-vol3-processor), triggering an immediate execution trap (`SIGPAUSE` or `SIGKILL`), terminating the trajectory before data exfiltration can occur.
+Why is cosine distance preferred over complex neural anomaly detectors?
+
+1. **Low Dimension and Fixed Footprint:** Although the Linux kernel exposes over 450 system calls, typical software engineering tasks (such as compiling code or executing unit tests) exercise a stable subset of only $D \approx 50$ distinct syscalls. The vector $\mathbf{v} \in \mathbb{R}^{50}$ is an array of 64-bit integer counters updated by an eBPF per-CPU array map at line rate ($< 15\text{ ns}$ per event).
+2. **Sub-Microsecond Evaluation:** Over a sliding window of $\Delta t = 1.0\text{ s}$, computing the inner product and $L_2$ norms requires $2D = 100$ floating-point operations. On modern single instruction, multiple data (SIMD) vector hardware (such as AVX-512), this evaluates in under $50\text{ nanoseconds}$, consuming zero measurable host CPU bandwidth.
+3. **Physical Profile Shifts:** During benign execution, $\mathbf{v}_{\text{baseline}}$ is heavily concentrated in filesystem I/O and memory management (`read`, `write`, `fstat`, `mmap`, `futex`). When an adversary injects a shell payload, the execution profile shifts abruptly to reconnaissance and network calls (`connect`, `socket`, `openat` on `/etc`, `execve`). This swings the vector angle away from baseline: the dot product collapses, driving $D_{\text{drift}} > 0.45$.
+
+If $D_{\text{drift}}$ breaches the threshold, the eBPF telemetry daemon emits an out-of-band signal directly to the Agent Control Block supervisor (@sec-vol3-processor), triggering an immediate execution trap (`SIGPAUSE` or `SIGKILL`), terminating the trajectory before data exfiltration can occur.
 
 @Tbl-vol3-cgroup-seccomp-telemetry synthesizes the host containment and telemetry matrix.
 

@@ -79,6 +79,18 @@ To eliminate these runtime penalties, modern architectures apply **Context Compi
 
 By fine-tuning the model on curated execution traces, the model internalizes the schema grammars and invocation rules directly into its feedforward weight projections ($W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$). The runtime prompt prefix collapses from $16\text{K}$ tokens to a compact $128$-token task objective. This yields an $80\text{--}85\%$ reduction in prefill latency, frees gigabytes of accelerator memory per instance, and eliminates attention dispersion.
 
+To evaluate whether context compilation is economically justified, we compare the one-time training compute against recurring inference savings using first-principles training FLOPs napkin math. Under the standard transformer scaling rule of thumb, the forward pass requires $2 N_{\text{params}}$ floating-point operations per token, and the backward pass requires $4 N_{\text{params}}$ FLOPs per token (accounting for activation and weight gradient projections), totaling $\approx 6 N_{\text{params}}$ FLOPs per training token.
+
+Suppose an engineering team fine-tunes a 70B parameter model ($N_{\text{params}} = 70 \times 10^9$) on a curated dataset of $100{,}000$ multi-turn agent trajectories averaging $4{,}096$ tokens ($D_{\text{train}} \approx 4.1 \times 10^8$ total tokens):
+
+$$\text{FLOPs}_{\text{train}} \approx 6 \cdot N_{\text{params}} \cdot D_{\text{train}} \approx 6 \cdot (70 \times 10^9) \cdot (4.1 \times 10^8) \approx 1.72 \times 10^{20} \text{ FLOPs} \approx 172 \text{ PFLOPs}$$
+
+On an 8-GPU H100 SXM node ($8 \times 989\text{ TFLOP/s}$ dense 16-bit tensor peak $\approx 7.91\text{ PFLOP/s}$), operating at a realistic model FLOPs utilization (MFU) of $40\%$ yields an effective cluster throughput of $3.16\text{ PFLOP/s}$. The entire trajectory fine-tuning run completes in:
+
+$$t_{\text{train}} \approx \frac{1.72 \times 10^{20} \text{ FLOPs}}{3.16 \times 10^{15} \text{ FLOPs/s}} \approx 54{,}400 \text{ s} \approx 15.1 \text{ hours}$$
+
+At standard cloud rental pricing ($\approx \$24/\text{hour}$ for an 8-H100 node), compiling the agent policy requires less than $\$365$ of accelerator compute. In contrast, serving uncompiled $16\text{K}$-token prompt prefixes across an active agent fleet handling $100{,}000$ daily multi-turn queries wastes millions of dollars annually in quadratic prefill FLOPs and idle accelerator memory.
+
 The end-to-end data pipeline that synthesizes, verifies, and stages these trajectories for fine-tuning is illustrated in @fig-vol3-sft-pipeline.
 
 ::: {#fig-vol3-sft-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Synthesis, Rejection Sampling, and Curation Pipeline**: The post-training data curation pipeline operates across five coordinated stages. Task prompts $x \sim \mathcal{D}_{\text{tasks}}$ seed multi-turn stochastic rollouts by a high-capacity frontier teacher policy $\pi^*_\theta$ within isolated execution sandboxes. Deterministic execution verifiers evaluate unit test suites, compiler return codes, and environment state diffs to filter completions. Passing traces are partitioned into minimal-step golden paths and fault-injection error-recovery traces, which are then processed by a selective loss-masking engine before batch compilation into policy weights. Source: Adapted from Zelikman et al. [@zelikman2022star] and Ouyang et al. [@ouyang2022instructgpt]." fig-alt="System flow diagram detailing the five stages of agent trajectory synthesis, execution verification, rejection sampling, and loss-masking."}
@@ -140,13 +152,13 @@ When introducing dedicated control tokens into an existing foundation model toke
 
 $$W_e' = \begin{bmatrix} W_e \\ \Delta W_e \end{bmatrix}, \quad W_u' = \begin{bmatrix} W_u \\ \Delta W_u \end{bmatrix}$$
 
-Initializing $\Delta W_e$ and $\Delta W_u$ with random Gaussian noise ($\mathcal{N}(0, \sigma^2)$) creates extreme optimization instability. During initial training steps, the uninitialized control embeddings produce massive logit variances, generating steep cross-entropy gradients that destabilize adjacent attention and feedforward layers.
+Initializing $\Delta W_e$ and $\Delta W_u$ with random Gaussian noise ($\mathcal{N}(0, \sigma^2)$) creates extreme optimization instability. In an $8{,}192$-dimensional hidden space ($d_{\text{model}} = 8{,}192$), unconstrained random embeddings produce unnormalized logit variances that deviate by dozens of units ($z_v = W_u h$). At step 1, the softmax probability for the true control token approaches zero ($P_\theta(x) \to 0$), driving cross-entropy loss to extreme values ($-\log P_\theta(x) \gg 10$). The resulting logit error gradient $\nabla_z \mathcal{L} = P_\theta(v) - y \approx -1.0$ generates massive parameter gradient norms that detonate through the residual stream, knocking pretrained attention heads and feedforward projections out of their calibrated basins.
 
 To prevent gradient shock, production pipelines apply **Centroid Mean Initialization**:
 
-$$\Delta W_{e, k} = \frac{1}{|S_{\text{semantic}}|} \sum_{v \in S_{\text{semantic}}} W_{e, v}$$
+$$\Delta W_{e, k} = \frac{1}{|S_{\text{semantic}}|} \sum_{v \in S_{\text{semantic}}} W_{e, v}, \quad \Delta W_{u, k} = \frac{1}{|S_{\text{semantic}}|} \sum_{v \in S_{\text{semantic}}} W_{u, v}$$
 
-where $S_{\text{semantic}}$ is a curated subset of existing syntactic tokens (e.g., punctuation symbols, brackets, and structural delimiters). Initializing new tokens at the geometric center of existing syntactic representations ensures that initial forward activations remain bounded within the layer normalization operating envelope.
+where $S_{\text{semantic}}$ is a curated subset of existing syntactic tokens (e.g., punctuation symbols, brackets, and structural delimiters). Initializing new tokens at the geometric center of existing syntactic representations ensures that initial forward activations remain bounded within the layer normalization operating envelope, keeping cross-entropy gradients smooth from the first optimizer step.
 
 Furthermore, serialization pipelines must enforce minified, whitespace-compacted formatting for emitted tool arguments. Pretty-printed JSON payloads containing spaces and line breaks inflate token counts by $25\text{--}40\%$ relative to compact representations (`{"k":"v"}`). In long-horizon trajectories spanning dozens of turns, compact serialization saves thousands of context tokens, directly curbing quadratic prefill overhead and delaying context window exhaustion.
 
@@ -244,15 +256,49 @@ The trajectory-level Supervised Fine-Tuning objective is formulated as the maske
 
 $$\mathcal{L}_{\text{SFT}}(\theta) = - \frac{1}{\sum_{i=1}^T M_i} \sum_{i=1}^T M_i \log P_\theta(x_i \mid x_{<i})$$ {#eq-masked-loss-active}
 
-During backpropagation, the gradient of the loss with respect to the network weights $\theta$ evaluates to:
+During backpropagation, the loss gradient with respect to output logits $z_{i} \in \mathbb{R}^{|V|}$ evaluates to:
 
-$$\nabla_\theta \mathcal{L}_{\text{SFT}}(\theta) = - \frac{1}{\sum_{i=1}^T M_i} \sum_{i=1}^T M_i \left( \nabla_\theta z_{i, x_i} - \sum_{v \in V} P_\theta(v \mid x_{<i}) \nabla_\theta z_{i, v} \right)$$
+$$\frac{\partial \mathcal{L}_{\text{SFT}}}{\partial z_{i}} = \begin{cases} \frac{1}{\sum M_j} \left( P_\theta(\cdot \mid x_{<i}) - \mathbf{y}_i \right), & \text{if } M_i = 1 \\ \mathbf{0}, & \text{if } M_i = 0 \end{cases}$$
 
-where $z_{i} \in \mathbb{R}^{|V|}$ represents the unnormalized logits emitted by the model at token position $i$. For any token where $M_i = 0$, the gradient is identically zero:
+where $\mathbf{y}_i$ is the one-hot target vector. For any token where $M_i = 0$, the logit gradient is identically zero.
 
-$$\frac{\partial \mathcal{L}_{\text{SFT}}}{\partial z_{i}} = \mathbf{0} \quad \forall i \text{ such that } M_i = 0$$
+At the GPU execution level, this condition executes zero memory writes: fused cross-entropy kernels skip the vocabulary-wide softmax reduction for positions marked with `ignore_index = -100`. In the subsequent backward projection through the unembedding layer $W_u$, zero gradients bypass backward matrix multiplications, eliminating unnecessary memory bandwidth traffic.
 
-Observation tokens act purely as conditioning context in the self-attention key-value states, influencing future action representations without receiving gradient updates.
+A critical systems distinction separates forward execution from backward propagation:
+
+* **Forward Pass:** The model must compute hidden states and KV-cache representations for all tokens, including exogenous observations $o_t$. This is required because subsequent agent thoughts and actions causally attend to past observation tokens.
+* **Backward Pass:** Parameter gradients are gated strictly to zero for observation tokens. Observations serve as immutable conditioning context, influencing future action representations without receiving gradient updates that could memorize external environment noise.
+
+### Loss weighting dynamics: Balancing thought vs. action tokens
+
+In an agent control step $a_t = (c_t, \alpha_t)$, the emitted text decomposes into two distinct operational regimes:
+
+1. **Deliberative Reasoning Tokens ($c_t$):** Free-form natural language thoughts analyzing system state, comparing potential execution strategies, and diagnosing previous tool errors.
+2. **Action Syntax Tokens ($\alpha_t$):** Rigid tool invocation schemas, including the tool identifier, JSON delimiter syntax, parameter names, and typed arguments.
+
+In multi-turn engineering tasks, these two regimes exhibit an acute **token volume imbalance**. A complex reasoning step may require $400$ tokens of deliberative scratchpad analysis preceding a compact $25$-token tool call (a $16:1$ token ratio).
+
+If an SFT pipeline weights all active tokens equally ($w(x_i) = 1$ for all $x_i \in a_t$), over $94\%$ of the backpropagated gradient updates are spent fitting natural language vocabulary and conversational phrasing. Less than $6\%$ of parameter updates optimize tool invocation syntax, parameter typing, and schema compliance. In smaller models ($\le 14\text{B}$ parameters), this token disparity produces an insidious failure mode: the agent becomes an *eloquent planner that cannot execute*. The model deliberates brilliantly in its scratchpad, but then fails at the final step by emitting malformed JSON, omitting closing brackets, or hallucinating invalid parameter names.
+
+To maintain gradient balance between deliberation and execution, production runtimes apply **differential token loss weighting**:
+
+$$\mathcal{L}_{\text{weighted}}(\theta) = - \frac{\sum_{i=1}^T M_i \cdot w(x_i) \log P_\theta(x_i \mid x_{<i})}{\sum_{i=1}^T M_i \cdot w(x_i)}$$ {#eq-weighted-sft-loss}
+
+where:
+
+$$w(x_i) = \begin{cases} w_{\text{thought}}, & \text{if } x_i \in c_t \\ w_{\text{action}}, & \text{if } x_i \in \alpha_t \end{cases}$$
+
+In @eq-weighted-sft-loss, setting the ratio $w_{\text{action}} / w_{\text{thought}} \in [1.5, 3.0]$ amplifies the gradient magnitude on action tokens, ensuring the optimizer treats schema violations and parameter errors with high priority. In specialized execution-only adapters where test-time deliberation is pruned for low-latency serving, setting $w_{\text{thought}} = 0$ trains the policy to map directly from observation history to tool invocation syntax.
+
+::: {#chk-vol3-13-loss-masking-efficiency .callout-checkpoint title="Loss masking and causality boundaries"}
+
+Before analyzing sequence packing and normalization dynamics, verify your understanding of trajectory loss masking:
+
+- [ ] **Observation Masking Necessity**: Why does computing gradient updates over compiler stdout or API responses cause an agent to hallucinate outputs rather than waiting for external execution?
+- [ ] **Forward vs. Backward Pass**: If observation tokens have their loss masked ($M_i = 0$), why must they still participate in the attention forward pass?
+- [ ] **Weighting Imbalance**: In a trajectory where 400 thought tokens precede a 20-token tool call, why does unweighted loss cause the model to plan eloquently while failing on basic JSON argument formatting?
+
+:::
 
 ### Normalization dynamics: Active-token vs. sequence-length normalization
 
@@ -340,9 +386,29 @@ class MaskedTrajectoryLoss(nn.Module):
         return normalized_loss
 ```
 
-To eliminate memory fragmentation from padding tokens in variable-length multi-turn trajectories, production data loaders pack multiple trajectories into a single contiguous 1D sequence array using FlashAttention-2 varlen primitives [@dao2022]. Cumulative sequence length offset pointers (`cu_seqlens`) guide the attention kernel, allowing batches to achieve $100\%$ tensor core arithmetic occupancy without padding waste.
+To eliminate memory fragmentation from padding tokens in variable-length multi-turn trajectories, production data loaders pack multiple trajectories into a single contiguous 1D sequence array using FlashAttention-2 varlen primitives [@dao2022]. Cumulative sequence length offset pointers (`cu_seqlens`) guide the attention kernel, allowing batches to achieve near-$100\%$ tensor core arithmetic occupancy without padding waste.
+
+We can quantify the systems value of packed sequence training via first-principles **Sequence Packing Efficiency ($\eta_{\text{pack}}$)** napkin math. In standard batching, variable-length sequences are padded with dummy tokens to the maximum sequence length $T_{\max}$ (e.g., $16{,}384$ tokens). In an agent training corpus where trajectories vary from 2-step quick queries to 30-step debugging loops, the average trajectory length is often $\bar{T} = 3{,}200$ tokens. Under naive padding, the packing efficiency evaluates to:
+
+$$\eta_{\text{naive}} = \frac{\bar{T}}{T_{\max}} = \frac{3{,}200}{16{,}384} \approx 19.5\%$$
+
+Over $80\%$ of GPU memory bandwidth and tensor core FLOPs are completely wasted multiplying attention weights against pad-token zeros! By concatenating multiple variable-length trajectories into a continuous $16\text{K}$-token sequence buffer with `cu_seqlens` boundary indices:
+
+$$\eta_{\text{packed}} = \frac{\sum_{j=1}^m T_j}{T_{\text{buffer}}} \ge 98\%$$
+
+Packed sequence training achieves a $5\times$ increase in effective training throughput (tokens processed per second) on the exact same accelerator cluster, slashing training time from days to hours.
 
 While masked cross-entropy isolates the policy from environment noise, updating the full parameter weights of massive foundation models for specialized agent tools remains economically and computationally prohibitive.
+
+::: {#chk-vol3-13-sequence-packing-waste .callout-checkpoint title="Sequence packing and normalization invariants"}
+
+Before exploring parameter-efficient fine-tuning, test your understanding of batching and loss normalization:
+
+- [ ] **Active-Token Normalization**: Why does normalizing batch loss by total sequence length rather than active action tokens cause the optimizer to ignore learning signals from verbose tool outputs?
+- [ ] **FlashAttention Varlen**: In a dataset where mean trajectory length is 3,200 tokens and maximum context is 16,384 tokens, what proportion of GPU compute is wasted under naive padding compared to packed sequence batching?
+- [ ] **Cross-GPU Synchronization**: Why does active-token normalization require an `all_reduce` sum across all distributed data-parallel ranks before computing the optimizer step?
+
+:::
 
 ## Parameter-Efficient Fine-Tuning (PEFT) and LoRA Adapter Swapping {#sec-vol3-sft-peft-lora}
 
@@ -372,11 +438,21 @@ $$h_{\text{out}} = h W_0 + \frac{\alpha}{r} h A^T B^T$$
 
 Because $B$ is initialized to zero, $\Delta W = 0$ at the onset of training, guaranteeing that the model's initial behavior is completely identical to the frozen base model.
 
-During backward propagation, gradients are computed exclusively with respect to low-rank matrices $A$ and $B$:
+During backward propagation, parameter gradients are computed exclusively for low-rank matrices $A$ and $B$, while base weights $W_0$ remain completely frozen.[^lora-gradient-derivation]
 
-$$\frac{\partial \mathcal{L}}{\partial A} = \frac{\alpha}{r} B^T \left( \frac{\partial \mathcal{L}}{\partial h_{\text{out}}} \right) h, \quad \frac{\partial \mathcal{L}}{\partial B} = \frac{\alpha}{r} \left( \frac{\partial \mathcal{L}}{\partial h_{\text{out}}} \right) (h A^T)$$
+[^lora-gradient-derivation]: For the formal matrix calculus derivation of adapter parameter gradients $\frac{\partial \mathcal{L}}{\partial A}$ and $\frac{\partial \mathcal{L}}{\partial B}$, see @sec-vol3-appendix-math-lora.
 
-The frozen base weights $W_0$ receive zero gradient updates, eliminating the memory overhead of storing optimizer states (e.g., Adaptive Moment Estimation (Adam) momentum and variance tensors) for the base model parameters.
+Grounding this decomposition in physical systems constraints reveals three fundamental engineering advantages over full-parameter training:
+
+1. **Parameter Compression:** For a 70B parameter model ($d=8{,}192$) adapting the query, key, value, and output attention projections ($Q, K, V, O$) at rank $r=16$, each adapted projection requires $2 \cdot r \cdot d = 2 \times 16 \times 8{,}192 = 262{,}144$ parameters. Across 4 projections and 80 layers, the total adapter parameter count is:
+   $$N_{\text{adapter}} = 4 \times 80 \times 262{,}144 \approx 83.9 \times 10^6 \text{ parameters } (\approx 84\text{M})$$
+   This represents just $0.12\%$ of the base model's static capacity.
+2. **Optimizer Memory Elimination:** In standard AdamW optimization, each trainable parameter requires 16 bytes of accelerator memory (4 bytes for FP32 first moment $m_t$, 4 bytes for second moment $v_t$, 4 bytes for FP32 master weights, and 2 bytes for gradients). For full-parameter fine-tuning of a 70B model, optimizer states alone consume:
+   $$M_{\text{opt, full}} = 70 \times 10^9 \times 16\text{ bytes} \approx 1{,}120\text{ GB (1.12 TB)}$$
+   Holding these optimizer states requires distributed parameter sharding (FSDP or DeepSpeed ZeRO-3) across a cluster of 16 to 32 80 GB GPUs. In contrast, storing optimizer states for a rank-16 LoRA adapter consumes:
+   $$M_{\text{opt, LoRA}} = 83.9 \times 10^6 \times 16\text{ bytes} \approx 1.34\text{ GB}$$
+   The entire optimizer state fits in the memory headroom of a single workstation GPU, eliminating cross-node optimizer communication.
+3. **Training FLOPs Reduction:** During the backward pass, LoRA skips computing parameter gradients for the frozen base weights ($\frac{\partial \mathcal{L}}{\partial W_0}$, saving $2 \cdot d \cdot k$ FLOPs per token). To propagate error gradients to preceding layers, the backward kernel still computes activation gradients through the frozen base weights ($\frac{\partial \mathcal{L}}{\partial h} = \frac{\partial \mathcal{L}}{\partial h_{\text{out}}} W_0^T$, requiring $2 \cdot d \cdot k$ FLOPs). As a result, LoRA cuts backward compute from $\approx 4 N_{\text{base}}$ to $\approx 2 N_{\text{base}}$ FLOPs per token, delivering an overall $33\%$ reduction in total training compute ($4N$ vs $6N$ FLOPs per token).
 
 ### Quantized low-rank adaptation (qlora)
 
@@ -455,43 +531,35 @@ $$P_{\text{training}}(s_t) = d_{\text{expert}}(s_t) \quad \neq \quad P_{\text{de
 
 As long as the policy matches the expert perfectly, the agent remains on the demonstration manifold. However, the moment the agent commits a minor mistake, selects a sub-optimal tool argument, or encounters an unexpected environment exception, the resulting state $s_{t+1}$ falls outside the support of the expert demonstration distribution ($s_{t+1} \notin \text{supp}(d_{\text{expert}})$). Because the model was never trained on recovery actions from error states, its probability of failure spikes, compounding deviations across the remainder of the trajectory.
 
-### Mathematical proof of quadratic compounding error
+### First-principles analysis of quadratic compounding error
 
-The mathematical consequences of exposure bias in sequential imitation learning were formally proven by @ross2011reduction. Here, we derive the quadratic compounding error bound for autonomous agent policies.
+The fatal vulnerability of behavioral cloning over extended horizons stems from how errors compound across autoregressive steps [@ross2011reduction].[^compounding-error-formal]
 
-Let the environment be a discrete-time Markov Decision Process with horizon $H$. Assume the agent policy $\pi_\theta$ has an average per-step error probability of $\epsilon$ with respect to an optimal expert policy $\pi^*$ under the state distribution generated by the expert:
+[^compounding-error-formal]: For the complete measure-theoretic proof bounding Total Variation distance $D_{\text{TV}}(d_{\pi_\theta}^t, d_{\pi^*}^t) \le t \epsilon$ under Markov decision processes, see @sec-vol3-appendix-math-compounding-error.
 
-$$\mathbb{E}_{s \sim d_{\pi^*}} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right] \le \epsilon$$
+Consider an agent operating over a discrete horizon of $H$ sequential decision steps. Suppose the policy achieves an apparently outstanding per-step accuracy of $1 - \epsilon = 0.98$ (an error probability of $\epsilon = 0.02$).
 
-When the agent commits an error at time step $t$, it transitions into an out-of-distribution state. In the worst-case scenario, the policy makes errors on all subsequent time steps ($t' > t$) with probability $1$.
+If step decisions were statistically independent, the compound probability of completing the entire $H$-step trajectory without a single error would be:
 
-Let $d_{\pi_\theta}^t$ denote the state distribution induced by running policy $\pi_\theta$ up to time step $t$, and let $d_{\pi^*}^t$ denote the distribution induced by the expert. At step $t$, the Total Variation distance between the two distributions is bounded by the probability that $\pi_\theta$ has deviated from $\pi^*$ at any prior step $\tau < t$:
+$$P_{\text{success}} = (1 - \epsilon)^H$$
 
-$$D_{\text{TV}}\left( d_{\pi_\theta}^t, d_{\pi^*}^t \right) \le 1 - (1 - \epsilon)^t \le t \epsilon$$
+For a 30-step workflow ($H=30$):
 
-The expected 0-1 task loss over the full trajectory of horizon $H$ evaluates to the sum of error probabilities across all time steps:
+$$P_{\text{success}} = (1 - 0.02)^{30} \approx 0.545 \quad (54.5\%)$$
 
-$$\mathcal{J}(\pi_\theta) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=1}^H \mathbb{I}\left( \pi_\theta(s_t) \neq \pi^*(s_t) \right) \right]$$
+A model with $98\%$ single-step accuracy fails almost half the time on a standard 30-step engineering task!
 
-Expanding this expectation across the distribution shift:
+In physical agent runtimes, however, errors are not independent—they are causally absorbing. When the agent commits an error at step $k$, it enters an unobserved state $s_k \notin \text{supp}(d_{\text{expert}})$. Because the policy was fine-tuned exclusively on flawless golden paths, it has zero training signal for recovering from that state. In the absence of recovery mechanisms, the agent fails on all remaining $H - k$ steps of the execution loop.
 
-$$\begin{aligned}
-\mathcal{J}(\pi_\theta) &= \sum_{t=1}^H \mathbb{E}_{s \sim d_{\pi_\theta}^t} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right] \\
-&\le \sum_{t=1}^H \left( \mathbb{E}_{s \sim d_{\pi^*}^t} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right] + D_{\text{TV}}\left( d_{\pi_\theta}^t, d_{\pi^*}^t \right) \right) \\
-&\le \sum_{t=1}^H \left( \epsilon + t \epsilon \right) \\
-&= \epsilon H + \epsilon \frac{H(H+1)}{2} \\
-&= \mathcal{O}\left( \epsilon H^2 \right)
-\end{aligned}$$
+Summing the expected error steps across the trajectory yields quadratic accumulation:
 
-The total expected error under pure behavioral cloning scales **quadratically** with the trajectory horizon:
+$$\mathbb{E}[\text{Errors}] \approx \sum_{t=1}^H t \cdot \epsilon \approx \epsilon \frac{H(H+1)}{2} = \mathcal{O}\left( \epsilon H^2 \right)$$
 
-$$\mathbb{E}[\text{Errors}] \le \mathcal{O}\left( \epsilon H^2 \right)$$
-
-This quadratic scaling reveals why behavioral cloning collapses on extended agent workflows. If an agent executes a 30-step task ($H=30$) with an apparently outstanding per-step accuracy of $98\%$ ($\epsilon = 0.02$), the expected cumulative error does not scale as $30 \times 0.02 = 0.6$. It scales quadratically:
+Evaluating this quadratic penalty for our 30-step task:
 
 $$\mathbb{E}[\text{Errors}] \approx 0.02 \times \frac{30 \times 31}{2} = 9.3 \text{ error-steps}$$
 
-The agent spends nearly a third of its operational lifetime trapped in compounding out-of-distribution failure loops.
+Rather than experiencing $30 \times 0.02 = 0.6$ error steps as naive linear intuition suggests, the agent spends over $9$ steps—nearly a third of its operational lifespan—trapped in compounding, out-of-distribution failure loops.
 
 The architectural contrast between naive golden-path imitation and closed-loop fault-tolerant training is illustrated in @fig-vol3-sft-covariate-shift.
 
@@ -546,6 +614,25 @@ The resulting bifurcated dataset is structured to contain:
 
 By compiling thousands of fault-recovery trajectories into policy weights, the agent learns that environment errors are not fatal exceptions, but standard informational control signals that guide trajectory navigation.
 
+### Curriculum staging and progressive trajectory compilation
+
+Attempting to fine-tune an unadapted base model on complex 50-step agent trajectories from the very first optimization step induces severe training instability. When exposed to long, noisy trajectories containing hundreds of lines of shell scripts, compiler dumps, and git diffs, the model faces conflicting optimization gradients: it must simultaneously learn basic control-token delimiters, JSON grammar compliance, multi-turn state tracking, and complex error-recovery heuristics. The resulting loss surfaces exhibit steep gradient cliffs and early catastrophic forgetting.
+
+To ensure stable convergence and preserve general foundation capabilities, production agent engineering deploys a **three-stage curriculum**:
+
+1. **Stage 1: Syntax and Schema Compliance (Format Warmup):**
+   * *Dataset Composition:* Short, 1-to-2 turn atomic tool calls ($T \le 1{,}024$ tokens) verifying grammar adherence across diverse APIs.
+   * *Learning Focus:* Internalizing delimiter tokens (`<|tool_call_start|>`, `<|tool_call_end|>`), strict JSON formatting, and typed parameter serialization.
+   * *Optimization Configuration:* Action tokens are weighted heavily over thoughts ($w_{\text{action}} / w_{\text{thought}} \approx 2.0$) with small batch sizes and low learning rates to establish rigid syntax boundaries without corrupting semantic representations.
+2. **Stage 2: Multi-Turn Deliberation and State Tracking (Golden Trajectories):**
+   * *Dataset Composition:* Intermediate 5-to-15 turn minimal-step trajectories ($T \le 8{,}192$ tokens) solving clean programming, database, and system administration tasks.
+   * *Learning Focus:* Co-adapting deliberative thought tokens ($c_t$) with action execution ($\alpha_t$), updating the internal belief state ($s_{t+1}$), and synthesizing tool observation outputs into coherent next-step plans.
+   * *Optimization Configuration:* Balanced loss weighting ($w_{\text{thought}} = w_{\text{action}} = 1.0$) with FlashAttention-2 sequence packing to maximize GPU tensor core utilization across variable trajectory lengths.
+3. **Stage 3: Fault Injection and Horizon Scaling (DAgger Recovery):**
+   * *Dataset Composition:* Extended 20-to-50 turn workflows ($T \le 32{,}768$ tokens) comprising $70\%$ golden paths and $30\%$ synthetic fault-recovery paths.
+   * *Learning Focus:* Recovering from execution failures, parsing compiler stderr streams, performing exponential backoffs, and breaking semantic livelocks.
+   * *Optimization Configuration:* Full mixed-batch anchor replay ($15\text{--}20\%$ general reasoning data) and KL divergence regularization to bound drift and eliminate catastrophic forgetting.
+
 ### Capability preservation and catastrophic forgetting
 
 A persistent hazard in trajectory fine-tuning is **Catastrophic Forgetting**\index{Catastrophic Forgetting} [@mccloskey1989catastrophic]. When a base foundation model undergoes extensive fine-tuning on specialized agent trajectories (e.g., shell automation or SQL manipulation), the optimizer updates weight matrices to minimize loss on the domain-specific format.
@@ -584,7 +671,7 @@ Curating synthetic datasets that contain only minimal, error-free execution path
 ::: {.fallacy-pitfall}
 **Pitfall**: *Sequence-length loss normalization instead of active-token normalization.*
 
-Normalizing masked trajectory cross-entropy loss by the total sequence length $T$ rather than the active action token count $\sum M_i$ scales the parameter gradient inversely by environment verbosity. In a batch where one trajectory returns a $100$-token output and another returns an $8{,}000$-token compiler dump, the gradient contribution of the action in the second trajectory is attenuated by a factor of 80. The optimizer fails to update weights on complex tasks interacting with verbose tools. Training pipelines must normalize loss strictly by the global sum of active action tokens.
+Normalizing masked trajectory cross-entropy loss by the total sequence length $T$ rather than the active action token count $\sum M_i$ scales the parameter gradient inversely by environment verbosity. In a batch where Trajectory A has total length $T_A = 300$ and Trajectory B encounters an $8{,}000$-token compiler dump ($T_B = 8{,}250$), the gradient contribution of Trajectory B's actions is attenuated by a factor of $27.5$. The optimizer fails to update weights on complex tasks interacting with verbose tools. Training pipelines must normalize loss strictly by the global sum of active action tokens.
 :::
 
 ::: {.fallacy-pitfall}
