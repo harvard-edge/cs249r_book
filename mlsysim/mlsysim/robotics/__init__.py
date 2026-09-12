@@ -1,6 +1,5 @@
-"""Robotics package for physical AI platforms and archetypes."""
+"""Robotics compatibility alias package for mlsysim.embodied."""
 
-from .types import RobotPlatform
-from .registry import Robotics
+from ..embodied import EmbodiedPlatform, RobotPlatform, Embodied, Robotics
 
-__all__ = ["RobotPlatform", "Robotics"]
+__all__ = ["EmbodiedPlatform", "RobotPlatform", "Embodied", "Robotics"]

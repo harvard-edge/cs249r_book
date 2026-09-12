@@ -14,6 +14,7 @@ from . import infrastructure
 from . import systems
 from . import sim
 from . import physics
+from . import embodied
 from . import robotics
 from . import agents
 
@@ -29,7 +30,7 @@ from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
 # Non-executable sourced anchors used by examples and external analyses.
 from .reference_stats.registry import ReferenceStats
-from .robotics.registry import Robotics
+from .embodied.registry import Embodied, Robotics
 from .agents.registry import Agents
 from .ops import Ops
 from .engine import calibration
