@@ -4,8 +4,8 @@ audit_mlsysim_drift.py — find hand-coded values in chapter QMDs that should
 come from mlsysim's canonical constants.
 
 Approach:
-  1. Build a registry of (canonical_name, numeric_value, magnitude_tolerance)
-     from mlsysim.core.units.
+  1. Use the hand-curated CANONICAL table of (name_fragment, numeric_value,
+     fractional_tolerance, mlsysim_path) mirroring mlsysim registry values.
   2. Walk every chapter QMD's Python cells. For each numeric literal
      assignment, check if (a) the variable name resembles a canonical name
      fragment AND (b) the literal matches the canonical value (within
@@ -169,6 +169,7 @@ def python_cells(qmd_text: str):
             yield i, line
 
 def parse_literal(s: str) -> float | None:
+    """Parse a numeric literal, ignoring `_` separators; return None if it is not a number."""
     try:
         return float(s.replace("_", ""))
     except ValueError:
@@ -190,7 +191,13 @@ def matches_canonical(var_name: str, value: float):
     return matches
 
 def audit_file(path: Path) -> list:
-    text = path.read_text(encoding="utf-8", errors="ignore")
+    """Return drift findings for numeric literal assignments in one QMD's Python cells.
+
+    Each finding is `(path, lineno, line, var, value, canonical_matches)`.
+    Comment lines and assignments whose value is not a plain number are
+    skipped.
+    """
+    text =path.read_text(encoding="utf-8", errors="ignore")
     findings = []
     for lineno, line in python_cells(text):
         # Skip comments (a bare assignment in a comment shouldn't fire)
@@ -209,6 +216,11 @@ def audit_file(path: Path) -> list:
     return findings
 
 def main():
+    """Audit every `*.qmd` under `books/` and print drift candidates grouped by file.
+
+    Must be run from the repo root; exits with status 2 if `books/` is not
+    found. Returns 0 when nothing matches, 1 when drift candidates exist.
+    """
     root = Path("books")
     if not root.exists():
         print(f"ERROR: run from MLSysBook root (expected {root})", file=sys.stderr)

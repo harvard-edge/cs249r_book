@@ -460,11 +460,14 @@ Low-level commands still expose `layout_strategy`:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `build [html\|pdf\|epub] [chapter[,…]]` | Build book or chapter(s) | `./binder/binder build pdf --vol1 vol1/intro` |
-| `reset [html\|pdf\|epub\|all] [--vol1\|--vol2]` | Reset build YAML configs to full-book state | `./binder/binder reset pdf --vol1` |
+| `build [html\|pdf\|epub] [chapter[,…]] --volN` | Build a volume, or selected chapters of one volume | `./binder/binder build pdf intro --vol1` |
+| `build <fmt[,fmt…]> [chapters] --volN\|--all --parallel [N]` | Run several builds at once, each in its own git worktree | `./binder/binder build html,pdf --all --parallel 4` |
+| `debug <fmt> --volN [--chapter X] [--parallel N]` | Find the chapter, then the section, that breaks a build | `./binder/binder debug pdf --vol1 --parallel 4` |
 | `preview [chapter]` | Live dev server | `./binder/binder preview vol1/intro` |
+| `reset [html\|pdf\|epub\|all] [--vol1\|--vol2]` | Recover configs that older binder versions left partly commented out | `./binder/binder reset pdf --vol1` |
 
-See [BUILD.md](BUILD.md) and [DEVELOPMENT.md](DEVELOPMENT.md) for full build workflows.
+See [BUILD.md](BUILD.md) and [DEVELOPMENT.md](DEVELOPMENT.md) for full build workflows, and
+[Chapter, parallel, and debug builds](#chapter-parallel-and-debug-builds) below.
 
 ### Management commands
 
@@ -495,10 +498,15 @@ Use `./binder/binder list` to see all available chapters.
 
 ## Build Outputs
 
-| Format | Output Location | Description |
-|--------|-----------------|-------------|
-| HTML | `build/html/` | Website format with navigation |
-| PDF | `build/pdf/` | Academic book format |
+All output lands under `books/_build/`, which is gitignored:
+
+| Build | Output location |
+|-------|-----------------|
+| One volume, one format | `books/_build/<format>-<volume>/` (for example `pdf-vol1/Machine-Learning-Systems-Vol1.pdf`) |
+| Selected chapters | `books/_build/<format>-<volume>/chapters/<chapter>/` |
+| `--parallel` run | `books/_build/parallel/<run-id>/<job>/` holding `build.log` and `output/`, plus `summary.json` for the run |
+| `debug` run | `books/_build/debug/<volume>/<format>/<run-id>/` with `phase1/` (chapter scan) and `phase2/<chapter>/` (bisection) |
+| Last renderer output | `books/_build/last-build.log` |
 
 ## Publishing
 
@@ -583,101 +591,79 @@ When called with arguments, `publish` triggers the GitHub Actions workflow direc
 
 ## Advanced Features
 
-### Unified Multi-Chapter Builds
+### Chapter, parallel, and debug builds
 
-The binder supports building multiple chapters together in a single Quarto render command:
+#### Selected chapters
+
+`./binder/binder build <fmt> <chapter>[,<chapter>…] --volN` renders the volume's
+generated `index.qmd` plus the selected chapters into
+`books/_build/<format>-<volume>/chapters/<chapter>/`. Binder writes a temporary
+`_quarto.yml` for the build and restores the previous `_quarto.yml` and
+`index.qmd` afterwards, even when the render fails or is interrupted. The
+canonical configs under `books/config/` are never edited. Chapters named without
+`--volN` must all belong to one volume. See
+[Iterate on one chapter](../README.md#iterate-on-one-chapter) for name matching
+and validation notes.
+
+#### Parallel builds
+
+A build rewrites files at the Quarto project root, so two builds cannot share a
+checkout. `--parallel [N]` runs several builds at once by giving each worker its
+own disposable git worktree:
 
 ```bash
-# Build multiple chapters together (HTML)
-./binder/binder build intro,ml_systems
+# Several chapters of one volume, each as its own build
+./binder/binder build pdf intro,training --vol1 --parallel
 
-# Build multiple chapters together (PDF)
-./binder/binder build pdf intro,ml_systems
+# Every chapter of a volume on its own, four at a time
+./binder/binder build pdf --vol1 --each-chapter --parallel 4
 
-# Preview multiple chapters together
-./binder/binder preview intro,ml_systems
+# Every volume and format at once
+./binder/binder build html,pdf,epub --all --parallel 6
 ```
 
-**Benefits:**
-- ✅ **Faster builds**: Single Quarto process instead of multiple
-- ✅ **Shared context**: Dependencies loaded once
-- ✅ **Unified processing**: Cross-references and quizzes processed together
-- ✅ **Better UX**: Single browser window opens with complete site
+How it works:
 
-### Fast Build Mode
+- Binder snapshots the working tree: staged and unstaged edits through
+  `git stash create`, which leaves the shared stash list alone, plus copies of
+  untracked files. Every worktree builds what is on disk, not only what is
+  committed.
+- Each worker checks the snapshot out under the system temporary directory
+  (`binder-workspaces/`) and runs `./binder/binder build` there, reusing its
+  worktree for every job it picks up.
+- Each job's log and output move to `books/_build/parallel/<run-id>/<job>/`, and
+  `summary.json` lists every job. The worktrees are removed at the end;
+  `--keep-workspaces` leaves them for inspection.
+- Workers running side by side each get a private `XDG_CACHE_HOME`, because the
+  diagram filter's cache is not safe for concurrent writers.
+- Ctrl-C stops every running build (SIGTERM, then SIGKILL after 15 seconds) and
+  removes the worktrees.
+- The default worker count is a quarter of the CPU cores, clamped to 1–4. Each
+  worker renders a whole Quarto project and each worktree is a full checkout
+  (about 1 GB), so raise `N` with care.
+- `--skip-validate`, `--skip-hygiene`, `--json`, and the whole-volume PDF flags
+  `--no-cover` and `--print-marks` pass through to the builds. `--layout` does
+  not, and output is not opened automatically.
 
-Fast builds use selective rendering to only build essential files plus target chapters:
+#### Debugging a failing build
 
-**HTML Fast Build** (project.render):
-```yaml
-render:
-  - index.qmd
-  - 404.qmd
-  - contents/frontmatter/
-  - contents/core/target-chapter.qmd
-```
+`./binder/binder debug <fmt> --volN` finds what breaks a build in two phases:
 
-**PDF Fast Build** (comments out unused chapters):
-```yaml
-chapters:
-  - index.qmd
-  - contents/frontmatter/foreword.qmd
-  - contents/core/target-chapter.qmd
-  # - contents/core/other-chapter.qmd  # Commented for fast build
-```
+1. **Chapter scan.** Every chapter in the volume's PDF order is built on its own
+   with `--skip-validate`, since references to omitted chapters would otherwise
+   always fail. `--parallel N` builds N chapters at a time.
+2. **Section bisection.** Each failing chapter is rebuilt from its preamble alone,
+   then with growing numbers of `##` sections, until the first breaking section
+   is found. `--chapter <name>` skips the scan and bisects one chapter.
 
-#### Selective PDF Chapter Building
+Debug builds run in worktrees through the same machinery as `--parallel`, so the
+truncated chapters never touch your files. Logs land under
+`books/_build/debug/<volume>/<format>/<run-id>/`.
 
-When you run `./binder/binder build pdf intro`, the system automatically:
-
-1. **Creates a backup** of the original PDF configuration
-2. **Comments out all chapters** except the target chapter and essential files
-3. **Builds only the selected content**:
-   - ✅ `index.qmd` (always included)
-   - ✅ `books/vol1/01_introduction/01_introduction.qmd` (target chapter)
-   - ❌ `contents/backmatter/glossary/glossary.qmd` (commented out)
-   - ❌ `contents/backmatter/references.qmd` (commented out)
-4. **Restores the original configuration** after build completion
-
-**Example output:**
 ```bash
-./binder/binder build pdf intro
-
-📄 Building chapter(s) as PDF: intro
-🚀 Building 1 chapters (pdf)
-⚡ Setting up fast build mode...
-📋 Files to build: 2 files
-✓ - index.qmd
-✓ - books/vol1/01_introduction/01_introduction.qmd
-✓ Fast build mode configured (PDF/EPUB)
+./binder/binder debug pdf --vol1 --parallel 4
+./binder/binder debug html --vol2 --chapter training
 ```
-
-This ensures that in Binder environments, you get exactly what you need: a PDF containing only the index and your target chapter, with all other chapters automatically commented out during the build process.
-
-#### Cloud Binder Compatibility
-
-The selective PDF build system works seamlessly in cloud environments like [mybinder.org](https://mybinder.org):
-
-**For cloud Binder users:**
-```bash
-# In a Jupyter terminal or notebook cell
-!./binder/binder build pdf intro
-
-# Or using the Python CLI directly
-!python binder build pdf intro
-```
-
-**Key benefits for cloud environments:**
-- ✅ **Reduced memory usage** - Only builds essential chapters
-- ✅ **Faster build times** - Skips unnecessary content
-- ✅ **Automatic cleanup** - Restores configuration after build
-- ✅ **No manual editing** - Everything is automated
-
-**What gets built:**
-- Always includes `index.qmd` for proper book structure
-- Includes your target chapter (e.g., `introduction.qmd`)
-- Comments out all other chapters automatically
-- Comments out backmatter (glossary, references) for minimal builds
 
 ### Configuration Management
 
@@ -702,11 +688,11 @@ Use `./binder/binder switch <format>` to change the active configuration.
 
 # 2. Make edits, save files (auto-rebuild in preview mode)
 
-# 3. Build multiple related chapters together
-./binder/binder build intro,ml_systems html
+# 3. Build the chapters you touched
+./binder/binder build pdf intro,ml_systems --vol1 --skip-validate
 
-# 4. Check full book before committing
-./binder/binder build * pdf
+# 4. Build the whole volume before committing
+./binder/binder build pdf --vol1
 ```
 
 ### Before Committing
@@ -718,9 +704,8 @@ Use `./binder/binder switch <format>` to change the active configuration.
 # Run health check
 ./binder/binder doctor
 
-# Build full book to ensure everything works
-./binder/binder build
-./binder/binder build pdf
+# Build every volume and format to ensure everything works
+./binder/binder build html,pdf,epub --all --parallel 4
 ```
 
 ## Troubleshooting
@@ -736,20 +721,21 @@ Use `./binder/binder switch <format>` to change the active configuration.
 - Run `./binder/binder clean` to remove temporary files
 - Use `./binder/binder doctor` to verify system health
 
-**"Config not clean"**
-- The binder detected a previous fast build configuration
-- Run `./binder/binder clean` to restore normal configuration
-
 **"Wrong or missing `_quarto.yml`"**
 - Check which configuration is active: `head -1 books/_quarto.yml`
 - Regenerate it: `./binder/binder switch html` (or `pdf`, `epub`)
 - Never edit `books/_quarto.yml` directly; the next build overwrites it
 
+**Leftover build worktrees**
+- An interrupted `--parallel` or `debug` run that was killed outright can leave
+  worktrees in the system temporary directory; `git worktree prune` clears
+  registrations whose directories are gone, and `git worktree list` shows the rest
+
 ### Performance Tips
 
-- Use fast builds (`./binder/binder build chapter html`) for development
-- Use unified builds (`./binder/binder build ch1,ch2 html`) for multiple chapters
-- Only use full builds (`./binder/binder build * format`) for final verification
+- Build selected chapters (`./binder/binder build pdf intro --vol1 --skip-validate`) while iterating
+- Use `--parallel` to build several chapters, volumes, or formats at once
+- Use `./binder/binder debug <fmt> --volN --parallel N` to find a failing chapter quickly
 - Preview mode auto-rebuilds on file changes
 
 ## Further reading

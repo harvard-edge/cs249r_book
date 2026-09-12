@@ -53,6 +53,13 @@ REGISTRY_RHS = re.compile(
 
 
 def _is_bare_physical_value(name: str, rhs: str) -> bool:
+    """Return True when a ``*_value`` assignment binds a bare number that should carry units.
+
+    Dimensionless names never match. A name with a ``rate`` token matches only
+    if it also mentions a cost, energy, data, or compute unit and the RHS is a
+    bare literal. Any other name matches when the RHS is a bare literal with no
+    registry, ``ureg``, or conversion reference.
+    """
     if DIMENSIONLESS.search(name):
         return False
     if re.search(r"(?:^|_)rate(?:_|$)", name, re.I):
@@ -67,6 +74,11 @@ def _is_bare_physical_value(name: str, rhs: str) -> bool:
 
 
 def _lego_cell_blocks(path: Path) -> list[tuple[int, str]]:
+    """Return ``(fence_line, code)`` for each LEGO-marked ``{python}`` cell.
+
+    ``fence_line`` is the 1-based QMD line of the opening fence. An
+    unterminated cell runs to end of file.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     blocks: list[tuple[int, str]] = []
     i = 0
@@ -86,6 +98,13 @@ def _lego_cell_blocks(path: Path) -> list[tuple[int, str]]:
 
 
 def check_file(path: Path) -> list[tuple[int, str, list[str]]]:
+    """Return ``(line, snippet, messages)`` for bare-literal physical ``*_value`` assignments.
+
+    Only indented assignments inside LEGO cells are checked. The reported line
+    is the fence line plus the number of newlines before the match, which
+    lands at least one line above the assignment itself (further when blank
+    lines precede it). Results are sorted by line.
+    """
     issues: list[tuple[int, str, list[str]]] = []
     for cell_line, code in _lego_cell_blocks(path):
         for m in VALUE_ASSIGN.finditer(code):
@@ -106,6 +125,12 @@ def check_file(path: Path) -> list[tuple[int, str, list[str]]]:
 
 
 def main() -> int:
+    """Command-line entry point.
+
+    Checks the given QMD files or directories (all of ``books/`` by default),
+    prints violations grouped by file, and returns 1 if any file has
+    violations, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, help="QMD files (default: all contents)")
     args = parser.parse_args()

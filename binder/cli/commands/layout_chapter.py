@@ -54,14 +54,9 @@ CUSTOM_REF_RE = re.compile(
 
 def _local_render_env(config_manager: Any) -> dict[str, str]:
     """Return an environment that imports Python sources from this worktree."""
-    env = os.environ.copy()
-    root_dir = Path(config_manager.root_dir).resolve()
-    local_paths = [str(root_dir), str((root_dir / "mlsysim").resolve())]
-    current_pythonpath = env.get("PYTHONPATH")
-    if current_pythonpath:
-        local_paths.append(current_pythonpath)
-    env["PYTHONPATH"] = os.pathsep.join(local_paths)
-    return env
+    from ..core.process import local_render_env
+
+    return local_render_env(config_manager.root_dir)
 
 
 def _braced_fields(payload: str) -> list[str]:
@@ -156,11 +151,13 @@ def _inject_folio_after_h1(source: str, start_page: int, *, roman: bool) -> str:
 
 
 def _configured_sources(config: dict[str, Any], key: str) -> list[str]:
+    """Return the plain-string entries under ``book.<key>`` in a Quarto config."""
     values = config.get("book", {}).get(key, []) or []
     return [value for value in values if isinstance(value, str)]
 
 
 def _fragment_owner(source_path: Path, volume_root: Path) -> Path | None:
+    """Return the front-matter wrapper that includes a known fragment file, or None."""
     owners = {
         "_conventions.qmd": volume_root / "frontmatter" / "about.qmd",
         "_notation_body.qmd": volume_root / "frontmatter" / "notation.qmd",
@@ -178,6 +175,7 @@ def _volume_citekeys(quarto_dir: Path, configured: list[str]) -> list[str]:
     xref_prefixes = ("sec-", "fig-", "tbl-", "eq-", "lst-", "alg-", "vid-")
 
     def collect(path: Path) -> None:
+        """Add non-xref citekeys from a QMD file and recurse into its includes once."""
         path = path.resolve()
         if path in visited or not path.is_file() or path.suffix != ".qmd":
             return
@@ -200,6 +198,10 @@ def _plain_toc_title(value: str) -> str:
 
 
 def _h1_metadata(source: str) -> tuple[str, str]:
+    """Return the first level-one heading's title and raw attribute string.
+
+    Raises ValueError when the source has no level-one heading.
+    """
     match = H1_LINE_RE.search(source)
     if match is None:
         raise ValueError("Could not find a level-one heading")
@@ -209,6 +211,10 @@ def _h1_metadata(source: str) -> tuple[str, str]:
 def _toc_record_for_title(
     records: list[dict[str, str]], title: str
 ) -> dict[str, str]:
+    """Return the single AUX chapter TOC record whose plain title equals ``title``.
+
+    Raises ValueError when no record or more than one record matches.
+    """
     matches = [record for record in records if _plain_toc_title(record["title"]) == title]
     if len(matches) != 1:
         detail = "none" if not matches else ", ".join(record["anchor"] for record in matches)
@@ -217,6 +223,11 @@ def _toc_record_for_title(
 
 
 def _display_text(kind_token: str, record: dict[str, str]) -> str:
+    """Return the resolved reference text, such as ``figure 3.2``, joined by a no-break space.
+
+    ``sec`` references become "chapter" when the AUX anchor is a chapter anchor.
+    The noun is capitalized when the source token was (``@Fig-`` vs ``@fig-``).
+    """
     kind = kind_token.lower()
     if kind == "sec":
         noun = "chapter" if record["anchor"].startswith("chapter.") else "section"
@@ -255,6 +266,7 @@ def _replace_prose_segment(
     count = 0
 
     def replace(match: re.Match[str]) -> str:
+        """Replace an external xref with its AUX display text, recording unknown labels."""
         nonlocal count
         kind_token = match.group("kind")
         label = f"{kind_token.lower()}-{match.group('rest')}"
@@ -331,6 +343,12 @@ def _mainmatter_counter_hook(
     *,
     lock_first_numbered: bool = True,
 ) -> dict[str, str]:
+    """Build a LaTeX header include that restores chapter and page counters at ``\\mainmatter``.
+
+    The chapter counter is set to ``chapter_number - 1`` so the next chapter
+    heading receives ``chapter_number``. With ``lock_first_numbered`` the hook
+    also clears ``\\@firstnumbered`` so the class does not reset the folio.
+    """
     first_numbered = (
         "    \\@firstnumberedfalse% preserve the mapped folio\n"
         if lock_first_numbered
@@ -393,6 +411,12 @@ def _worktree_lock(lock_path: Path) -> Iterator[None]:
 
 
 def _resolve_chapter(quarto_dir: Path, volume: str, spec: str) -> Path:
+    """Resolve a chapter spec to an absolute QMD path inside the volume directory.
+
+    Accepts an absolute path, a path relative to ``quarto_dir``, or a stem that
+    matches exactly one ``<stem>.qmd`` under the volume. Raises ValueError when
+    the stem is ambiguous or missing, or when the file lies outside the volume.
+    """
     supplied = Path(spec)
     direct = supplied if supplied.is_absolute() else quarto_dir / supplied
     if direct.is_file():
@@ -428,6 +452,7 @@ def _correct_custom_callout_tex(
     reference_count = 0
 
     def replace_reference(match: re.Match[str]) -> str:
+        """Rewrite a callout ``\\hyperref`` whose number differs from its corrected target."""
         nonlocal reference_count
         number = target_numbers.get(match.group("id"))
         if number is None or number == match.group("number"):

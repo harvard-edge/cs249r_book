@@ -160,6 +160,7 @@ def process_file(filepath: Path, dry_run: bool = False) -> int:
 
 
 def main():
+    """Convert ``%`` to "percent" in one ``.qmd`` file or every ``.qmd`` under a directory; ``--dry-run`` only reports counts."""
     parser = argparse.ArgumentParser(description="Convert % to 'percent' in body prose")
     parser.add_argument("path", type=Path, help="Directory or file to process")
     parser.add_argument("--dry-run", action="store_true", help="Preview without applying")

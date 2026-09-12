@@ -172,6 +172,14 @@ HARDWARE_WORKLOAD_FLOPS_WORD = re.compile(
 
 @dataclass(frozen=True)
 class Finding:
+    """One LOAD-stage value that likely belongs in an MLSysIM registry.
+
+    ``file`` is repo-relative and ``line`` is the 1-based QMD line. ``cell`` is
+    the LEGO class name, ``rhs`` the whitespace-collapsed right-hand side,
+    ``target`` the suggested registry home, and ``confidence`` one of
+    ``high``, ``medium``, or ``low``.
+    """
+
     file: str
     line: int
     chapter: str
@@ -186,6 +194,7 @@ class Finding:
 
 
 def _repo_rel(path: Path) -> str:
+    """Return ``path`` relative to the repo root, or as given if it lies outside."""
     try:
         return str(path.resolve().relative_to(REPO_ROOT))
     except ValueError:
@@ -193,12 +202,23 @@ def _repo_rel(path: Path) -> str:
 
 
 def _chapter_key(path: Path) -> str:
+    """Return a grouping key such as ``vol1/training`` for a QMD path.
+
+    Backmatter files keep their file name (``vol1/backmatter/<file>``). Paths
+    outside ``books/vol1`` or ``books/vol2`` fall back to the repo-relative path.
+    """
     rel = _repo_rel(path)
     match = re.search(r"books/(vol[12]/(?:backmatter/)?[^/]+)", rel)
     return match.group(1) if match else rel
 
 
 def _resolve_paths(paths: list[Path]) -> list[Path]:
+    """Expand CLI paths into a sorted, de-duplicated list of QMD files.
+
+    With no paths, returns every ``.qmd`` under ``books/``. Relative paths are
+    resolved against the repo root, directories are searched recursively, and
+    non-QMD files are dropped.
+    """
     if not paths:
         return sorted(CONTENTS.rglob("*.qmd"))
     out: list[Path] = []
@@ -212,6 +232,12 @@ def _resolve_paths(paths: list[Path]) -> list[Path]:
 
 
 def _python_cells(path: Path) -> list[tuple[int, str, bool]]:
+    """Return ``(first_code_line, code, is_lego)`` for each ``{python}`` cell.
+
+    ``first_code_line`` is the 1-based QMD line just inside the opening fence.
+    ``is_lego`` is True when the code carries a LEGO header or OUTPUT marker.
+    A cell left unterminated at end of file is dropped.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     cells: list[tuple[int, str, bool]] = []
     in_cell = False
@@ -235,6 +261,12 @@ def _python_cells(path: Path) -> list[tuple[int, str, bool]]:
 
 
 def _stage_by_line(code: str) -> dict[int, str]:
+    """Map each 1-based cell line to the most recent LEGO stage marker.
+
+    A comment containing LOAD, EXECUTE, GUARD, or OUTPUT (case-insensitive)
+    sets the stage for that line and those after it. Lines before the first
+    marker map to an empty string.
+    """
     current = ""
     stages: dict[int, str] = {}
     for idx, line in enumerate(code.splitlines(), start=1):
@@ -245,11 +277,13 @@ def _stage_by_line(code: str) -> dict[int, str]:
 
 
 def _class_name(code: str) -> str:
+    """Return the name of the first ``class`` statement in the cell, or ``""``."""
     match = CLASS_RE.search(code)
     return match.group(1) if match else ""
 
 
 def _source_for(code: str, node: ast.AST) -> str:
+    """Return the node's source text with whitespace collapsed, or ``""`` if unavailable."""
     segment = ast.get_source_segment(code, node)
     if segment:
         return " ".join(segment.strip().split())
@@ -257,6 +291,7 @@ def _source_for(code: str, node: ast.AST) -> str:
 
 
 def _node_name(node: ast.AST) -> str | None:
+    """Return a dotted name for a Name/Attribute chain, or None for other nodes."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -266,6 +301,7 @@ def _node_name(node: ast.AST) -> str | None:
 
 
 def _call_names(node: ast.AST) -> set[str]:
+    """Collect the dotted names of every call made anywhere inside ``node``."""
     names: set[str] = set()
     for child in ast.walk(node):
         if isinstance(child, ast.Call):
@@ -276,6 +312,7 @@ def _call_names(node: ast.AST) -> set[str]:
 
 
 def _has_numeric(node: ast.AST) -> bool:
+    """Return True if ``node`` contains an int or float literal (booleans excluded)."""
     for child in ast.walk(node):
         if isinstance(child, ast.Constant) and isinstance(child.value, (int, float)):
             if isinstance(child.value, bool):
@@ -285,10 +322,18 @@ def _has_numeric(node: ast.AST) -> bool:
 
 
 def _is_registry_sourced(rhs: str) -> bool:
+    """Return True if the RHS references a registry root such as ``Hardware.``."""
     return bool(REGISTRY_ROOT.search(rhs))
 
 
 def _is_safe_local(name: str, rhs: str) -> bool:
+    """Return True for presentation or indexing values that should stay in the QMD.
+
+    Matches when the name or RHS contains a keep-local token (index, seed,
+    plot, label, precision, width, ...) and no unit token, or when the RHS is a
+    plain numeric literal or list assigned to a label, tick, color, plot, axis,
+    bar, or range name.
+    """
     text = f"{name} {rhs}"
     if KEEP_LOCAL_NAME.search(text) and not UNIT_TOKEN.search(text):
         return True
@@ -299,6 +344,15 @@ def _is_safe_local(name: str, rhs: str) -> bool:
 
 
 def _classify(name: str, rhs: str, calls: set[str]) -> tuple[str, str, str]:
+    """Suggest a registry home for an assigned value.
+
+    Applies keyword heuristics to the target name, RHS text, and called names
+    in priority order: ``type()``-built Dummy objects, known registry
+    constructors, pricing, storage, unit-bearing hardware specs, system and
+    fabric topology, infrastructure, models, datasets, workload policy, and
+    finally any unit token. Returns ``(target, confidence, reason)`` where
+    confidence is ``high``, ``medium``, or ``low``.
+    """
     text = f"{name} {rhs}"
     lower = text.lower()
 
@@ -380,6 +434,13 @@ def _downgrade_scenario_comment(
     confidence: str,
     reason: str,
 ) -> tuple[str, str, str]:
+    """Downgrade a high-confidence finding whose line has a scenario-style comment.
+
+    A comment mentioning scenario, hypothetical, illustrative, reference,
+    baseline, or budget marks a deliberate scenario input, so the target is
+    widened to include ``Scenarios.*`` and confidence drops to ``medium``.
+    Other findings are returned unchanged.
+    """
     if confidence != "high" or not SCENARIO_COMMENT_WORD.search(line):
         return target, confidence, reason
     if target.startswith("Infrastructure.Pricing"):
@@ -396,6 +457,10 @@ def _downgrade_scenario_comment(
 
 
 def _target_names(node: ast.AST) -> Iterable[str]:
+    """Yield names bound by an assignment target, recursing into tuples and lists.
+
+    Attribute targets yield the attribute name; other targets yield nothing.
+    """
     if isinstance(node, ast.Name):
         yield node.id
     elif isinstance(node, ast.Attribute):
@@ -406,6 +471,16 @@ def _target_names(node: ast.AST) -> Iterable[str]:
 
 
 def _findings_for_cell(path: Path, cell_start: int, code: str) -> list[Finding]:
+    """Return scenario-input findings for one LEGO cell.
+
+    Reports every class whose name starts with ``dummy`` regardless of stage,
+    plus LOAD-stage assignments whose value contains a numeric literal or a
+    known constructor or ``type()`` call and does not already reference a
+    registry. Skips formatted-output names (``_str``, ``_math``, ``_eq``,
+    ``_frac``), safe local values, and low-confidence values with no unit token
+    or constructor. Line numbers are translated to QMD lines. A cell that fails
+    to parse yields no findings.
+    """
     findings: list[Finding] = []
     stages = _stage_by_line(code)
     cell = _class_name(code)
@@ -496,6 +571,7 @@ def _findings_for_cell(path: Path, cell_start: int, code: str) -> list[Finding]:
 
 
 def check_file(path: Path) -> list[Finding]:
+    """Return sorted findings for every LEGO cell in one QMD file; other cells are ignored."""
     findings: list[Finding] = []
     for cell_start, code, is_lego in _python_cells(path):
         if not is_lego:
@@ -505,6 +581,7 @@ def check_file(path: Path) -> list[Finding]:
 
 
 def _print_summary(findings: list[Finding]) -> None:
+    """Print the finding total, counts by target, and the top 20 chapters and reasons."""
     by_target = Counter(f.target for f in findings)
     by_chapter = Counter(f.chapter for f in findings)
     by_reason = Counter(f.reason for f in findings)
@@ -521,6 +598,10 @@ def _print_summary(findings: list[Finding]) -> None:
 
 
 def _print_markdown(findings: list[Finding]) -> None:
+    """Print a Markdown report: the summary, then one findings table per chapter.
+
+    RHS text is pipe-escaped and truncated to 120 characters.
+    """
     grouped: dict[str, list[Finding]] = defaultdict(list)
     for finding in findings:
         grouped[finding.chapter].append(finding)
@@ -550,6 +631,15 @@ def _print_markdown(findings: list[Finding]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Command-line entry point.
+
+    Scans the given QMD files or directories (all of ``books/`` by default) and
+    renders findings as text, JSON, Markdown, or a grouped summary; ``--format``
+    json or markdown takes precedence over ``--summary``. ``--output`` writes to
+    a file (relative to the repo root, parent directories created) instead of
+    stdout. Returns 1 only when ``--fail-on-findings`` is set and findings
+    exist, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, help="QMD files or directories")
     parser.add_argument("--format", choices=("text", "json", "markdown"), default="text")

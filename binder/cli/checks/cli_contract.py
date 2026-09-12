@@ -42,6 +42,8 @@ ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 @dataclass(frozen=True)
 class ContractCase:
+    """One Binder invocation and the exit code and output substrings it must produce."""
+
     name: str
     argv: tuple[str, ...]
     expected_exit: int
@@ -52,6 +54,8 @@ class ContractCase:
 
 @dataclass(frozen=True)
 class Violation:
+    """One broken contract expectation, with an output excerpt as context."""
+
     file: str
     line: int
     code: str
@@ -83,8 +87,29 @@ CASES: tuple[ContractCase, ...] = (
             "./binder/binder build pdf intro,training --vol1",
             "--no-cover",
             "--print-marks",
+            # 2026-09-12: worktree-isolated parallel builds are part of the surface.
+            "--parallel",
+            "--each-chapter",
+            "--keep-workspaces",
         ),
         must_not_include=("build reset",),
+    ),
+    ContractCase(
+        name="debug help documents worktree debugging",
+        argv=("debug", "--help"),
+        expected_exit=0,
+        must_include=(
+            "Usage: ./binder/binder debug",
+            "--chapter",
+            "--parallel",
+            "./binder/binder debug pdf --vol1 --parallel 4",
+        ),
+    ),
+    ContractCase(
+        name="parallel build rejects flags it cannot pass through",
+        argv=("build", "pdf", "--vol1", "--layout", "--parallel"),
+        expected_exit=1,
+        must_include=("--layout is not supported with --parallel",),
     ),
     ContractCase(
         name="bare reset is help-only",
@@ -223,14 +248,17 @@ CASES: tuple[ContractCase, ...] = (
 
 
 def _repo_root() -> Path:
+    """Return the repository root, three directories above this module's package."""
     return Path(__file__).resolve().parents[3]
 
 
 def _clean_output(text: str) -> str:
+    """Strip ANSI escape sequences and normalize line endings to ``\\n``."""
     return ANSI_ESCAPE.sub("", text).replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _excerpt(text: str, limit: int = 1400) -> str:
+    """Return the non-blank lines of *text*, truncated to *limit* characters with a ``...`` marker."""
     lines = [line.rstrip() for line in text.strip().splitlines()]
     compact = "\n".join(line for line in lines if line)
     if len(compact) <= limit:
@@ -239,10 +267,19 @@ def _excerpt(text: str, limit: int = 1400) -> str:
 
 
 def _command_label(argv: Iterable[str]) -> str:
+    """Return the command as a user would type it, for messages."""
     return "./binder/binder " + " ".join(argv)
 
 
 def run_contract(repo_root: Path | None = None) -> list[Violation]:
+    """Run every contract case as a subprocess and return the violations.
+
+    Each case invokes ``binder/binder`` from the repository root with color
+    disabled and its own timeout. A case can produce a timeout violation, or
+    any of an exit-code, missing-output, or retired-output violation.
+    If the entry point is missing, a single violation is returned and no
+    commands run.
+    """
     root = repo_root or _repo_root()
     binder = root / "binder" / "binder"
     if not binder.exists():
@@ -349,6 +386,10 @@ def run_contract(repo_root: Path | None = None) -> list[Violation]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: run the contract and print violations (JSON with ``--json``).
+
+    Returns 1 if any violation was found, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     args = parser.parse_args(argv)

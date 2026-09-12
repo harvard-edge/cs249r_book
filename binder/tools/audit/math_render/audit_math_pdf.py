@@ -73,6 +73,8 @@ FIXED_CHAPTERS = [
 
 @dataclass
 class Leak:
+    """One leak-pattern hit in extracted PDF text, with about 40 characters of context per side."""
+
     pattern: str
     match: str
     context: str
@@ -80,6 +82,12 @@ class Leak:
 
 @dataclass
 class PdfReport:
+    """Per-chapter result of the PDF math audit, serialized into the JSON report.
+
+    Paths are repo-relative. ``build_ok`` is also cleared when no PDF can be
+    found, and ``error`` then holds the reason or the tail of the build output.
+    """
+
     name: str
     volume: str
     qmd_path: str
@@ -94,6 +102,10 @@ class PdfReport:
 
 
 def list_all_chapters() -> list[tuple[str, str, Path]]:
+    """Return ``(stem, volume, qmd_path)`` for every ``books/<vol>/*/*.qmd`` in vol1 and vol2.
+
+    Files whose names start with ``_`` are skipped, except the two notation partials.
+    """
     chapters = []
     for vol in ("vol1", "vol2"):
         contents = REPO  / "books" / vol
@@ -108,6 +120,14 @@ def list_all_chapters() -> list[tuple[str, str, Path]]:
 
 
 def build_pdf(name: str, volume: str) -> tuple[bool, float, str]:
+    """Build one chapter PDF through the binder CLI and return ``(ok, seconds, output)``.
+
+    Side effect: replaces ``books/index.qmd`` (unlinking it first if it is a
+    symlink) with a copy of ``books/index-<volume>.qmd``; copy errors are
+    ignored. Runs ``python3 binder/binder build pdf <name> --<volume>`` with a
+    900-second timeout. ``ok`` requires a zero exit code and a completion phrase
+    in the combined output; a timeout returns False instead of raising.
+    """
     # Per-volume index: PDF builds need `index.qmd` to hold the content of
     # `index-vol1.qmd` or `index-vol2.qmd`. CI copies it per job; we do the
     # same here.
@@ -141,6 +161,13 @@ def build_pdf(name: str, volume: str) -> tuple[bool, float, str]:
 
 
 def find_pdf(name: str, volume: str, qmd_path: Path) -> Path | None:
+    """Locate the built PDF for a chapter, or return None.
+
+    Searches the volume's build directory, then both per-volume PDF directories.
+    In the first existing directory that contains any PDF it returns the
+    chapter-named or book-named PDF, else the most recently modified ``*.pdf``
+    there, which may be stale. ``qmd_path`` is unused.
+    """
     candidate_dirs = [BUILD_DIRS[volume],
                       REPO  / "books" / "_build" / "pdf-vol1",
                       REPO  / "books" / "_build" / "pdf-vol2"]
@@ -163,6 +190,7 @@ def find_pdf(name: str, volume: str, qmd_path: Path) -> Path | None:
 
 
 def pdf_pages(pdf: Path) -> int:
+    """Return the page count reported by ``pdfinfo``, or 0 if it fails or reports none."""
     try:
         out = subprocess.run(
             ["pdfinfo", str(pdf)], capture_output=True, text=True, timeout=30
@@ -176,6 +204,7 @@ def pdf_pages(pdf: Path) -> int:
 
 
 def extract_text(pdf: Path) -> str:
+    """Return the layout-preserving text of ``pdf`` from ``pdftotext``, or "" on failure."""
     try:
         return subprocess.run(
             ["pdftotext", "-layout", str(pdf), "-"],
@@ -186,6 +215,7 @@ def extract_text(pdf: Path) -> str:
 
 
 def scan_text(text: str) -> list[Leak]:
+    """Return the ``LEAK_PATTERNS`` hits in ``text``, stopping once more than 200 are found."""
     leaks: list[Leak] = []
     for label, pat in LEAK_PATTERNS:
         for m in pat.finditer(text):
@@ -198,6 +228,11 @@ def scan_text(text: str) -> list[Leak]:
 
 
 def render_images(pdf: Path, dest: Path, max_pages: int) -> int:
+    """Render pages to 150-dpi ``page-*.png`` files under ``dest`` and return how many exist.
+
+    ``max_pages`` of 0 renders every page; otherwise only the first
+    ``max_pages``. Prints the error and returns 0 if ``pdftoppm`` fails.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     args = ["pdftoppm", "-r", "150", "-png", str(pdf), str(dest / "page")]
     if max_pages > 0:
@@ -212,6 +247,13 @@ def render_images(pdf: Path, dest: Path, max_pages: int) -> int:
 
 def audit_chapter(name: str, volume: str, qmd_path: Path,
                   max_pages: int, build: bool) -> PdfReport:
+    """Optionally build, then locate and scan one chapter's PDF.
+
+    The PDF is copied to ``audit-pdf-output/<volume>/<name>/<name>.pdf`` (the
+    chapter directory is deleted and recreated first) so the next build cannot
+    overwrite it; page count, leaks, and PNG renders are then recorded. Returns
+    early with ``error`` set when the build fails or no PDF is found.
+    """
     rep = PdfReport(
         name=name, volume=volume,
         qmd_path=str(qmd_path.relative_to(REPO)),
@@ -252,6 +294,12 @@ def audit_chapter(name: str, volume: str, qmd_path: Path,
 
 
 def main():
+    """Audit the selected chapters and write the JSON and Markdown reports.
+
+    Targets come from ``--fixed``, else ``--all``, else positional
+    ``vol/<chapter>`` tokens (unknown tokens are silently dropped); giving none
+    is a usage error. Exits 0 only when no chapter leaked or failed to build.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("chapters", nargs="*", help="vol/<chap> tokens")
     ap.add_argument("--fixed", action="store_true", help="audit only chapters we patched")

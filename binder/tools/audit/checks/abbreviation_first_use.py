@@ -741,6 +741,13 @@ _KIND = {CATEGORY: "under", CATEGORY_OVER: "over"}
 
 
 def _self_test() -> int:
+    """Run `check` on each `_TESTS` corpus and compare the flagged abbreviations.
+
+    Each issue is reduced to a `under:ABBR` or `over:ABBR` key (the
+    abbreviation is taken from the first single-quoted token in the issue
+    reason) and the resulting set must equal the expected set. Prints a
+    pass/fail summary and returns 0 when all cases pass, 1 otherwise.
+    """
     passed = 0
     failed = 0
     failures: list[str] = []

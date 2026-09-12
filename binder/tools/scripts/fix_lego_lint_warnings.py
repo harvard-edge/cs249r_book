@@ -38,6 +38,11 @@ RATE_FIX = re.compile(
 
 
 def fix_python_block(block: str) -> tuple[str, int]:
+    """Apply the unit rewrites to each non-comment line of a python cell body.
+
+    Returns the rewritten body and the number of lines changed. Lines are
+    rejoined with ``\\n``, so a trailing newline in ``block`` is dropped.
+    """
     changes = 0
     lines: list[str] = []
     for line in block.splitlines():
@@ -58,10 +63,12 @@ def fix_python_block(block: str) -> tuple[str, int]:
 
 
 def fix_file(path: Path) -> int:
+    """Fix every ```` ```{python} ```` cell in ``path``; write the file only if a line changed and return that count."""
     text = path.read_text(encoding="utf-8")
     total = 0
 
     def repl(match: re.Match[str]) -> str:
+        """Rewrite one matched cell and add its change count to ``total``."""
         nonlocal total
         body, n = fix_python_block(match.group(1))
         total += n
@@ -74,6 +81,7 @@ def fix_file(path: Path) -> int:
 
 
 def main() -> int:
+    """Fix the QMD files named on the command line, or every ``.qmd`` under the repo's ``books/``, printing per-file counts."""
     root = Path(__file__).resolve().parents[3]  / "books"
     paths = sorted(root.rglob("*.qmd"))
     if len(sys.argv) > 1:

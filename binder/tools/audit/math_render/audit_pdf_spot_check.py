@@ -49,6 +49,7 @@ TARGETS = [
 
 
 def page_text(pdf: Path, page_no: int) -> str:
+    """Return the layout text of one 1-indexed page via ``pdftotext``, or "" on failure."""
     try:
         out = subprocess.run(
             ["pdftotext", "-layout", "-f", str(page_no), "-l", str(page_no),
@@ -61,6 +62,7 @@ def page_text(pdf: Path, page_no: int) -> str:
 
 
 def total_pages(pdf: Path) -> int:
+    """Return the page count reported by ``pdfinfo``, or 0 on failure."""
     try:
         out = subprocess.run(["pdfinfo", str(pdf)], capture_output=True,
                              text=True, timeout=30).stdout
@@ -73,7 +75,11 @@ def total_pages(pdf: Path) -> int:
 
 
 def find_pages(pdf: Path, pattern: str) -> list[int]:
-    pat = re.compile(pattern, re.I)
+    """Return the 1-indexed pages whose text matches ``pattern``, ignoring case.
+
+    Runs ``pdftotext`` once per page.
+    """
+    pat =re.compile(pattern, re.I)
     matches: list[int] = []
     n = total_pages(pdf)
     for p in range(1, n + 1):
@@ -83,7 +89,13 @@ def find_pages(pdf: Path, pattern: str) -> list[int]:
 
 
 def main():
-    lines = ["# Math Rendering — Visual Spot-Check Map", "",
+    """Write ``audit-pdf-spot-check.md`` at the repo root, locating each ``TARGETS`` entry.
+
+    Lists up to eight matching pages per chapter with their expected PNG paths,
+    and marks chapters whose saved PDF is missing. The PNG paths are computed
+    from the page numbers, not checked for existence.
+    """
+    lines =["# Math Rendering — Visual Spot-Check Map", "",
              "For each chapter we patched, the relevant PDF pages and PNG ",
              "filenames are listed below. Open the PNG in Preview to verify ",
              "math renders correctly.", "",

@@ -14,7 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def main() -> int:
-    binder = REPO_ROOT / "binder" / "binder"
+    """Run `binder check registry` from the repo root and return its exit code."""
+    binder =REPO_ROOT / "binder" / "binder"
     proc = subprocess.run([str(binder), "check", "registry"], cwd=REPO_ROOT)
     return proc.returncode
 

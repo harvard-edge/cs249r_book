@@ -32,6 +32,7 @@ class BibCommand:
     """Native ``binder bib`` command group."""
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store the shared config manager and chapter discovery helpers."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
 
@@ -40,6 +41,14 @@ class BibCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        """Parse ``binder bib`` arguments and dispatch to the chosen subcommand.
+
+        ``mechanical`` works on the positional .bib files. ``normalize`` with no
+        ``--path``/``--vol1``/``--vol2`` covers the whole repo; every other
+        subcommand needs the resolved path to exist. With no subcommand (or
+        ``help``) prints help and returns True. Returns False on an argparse
+        error (True for ``-h``/``--help``), a missing path, or subcommand failure.
+        """
         if args == ["help"]:
             self._print_help()
             return True
@@ -119,6 +128,7 @@ class BibCommand:
     # ------------------------------------------------------------------
 
     def _print_help(self) -> None:
+        """Print the subcommand table and usage examples."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=50)
@@ -153,6 +163,11 @@ class BibCommand:
     # ------------------------------------------------------------------
 
     def _resolve_path(self, path_arg: Optional[str], vol1: bool, vol2: bool) -> Path:
+        """Return ``--path`` (relative paths resolve against the cwd) or the book directory.
+
+        ``--vol1``/``--vol2`` are legacy aliases that also resolve to the book
+        directory, which holds the shared bibliography.
+        """
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else Path.cwd() / p
@@ -222,6 +237,7 @@ class BibCommand:
         return None
 
     def _relative(self, path: Path) -> str:
+        """Return ``path`` relative to the book dir, or the full path if it lies outside."""
         try:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:

@@ -46,6 +46,8 @@ WIN = 28
 
 @dataclass
 class Violation:
+    """One prose-contract finding for an inline ref (``ref``) or export name."""
+
     code: str
     file: str
     line: int
@@ -81,16 +83,19 @@ def extract_python_cells(text: str):
 
 
 def _const_str(node) -> str | None:
+    """Return the value of an AST string constant, or None for any other node."""
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
 def _has_mult_token(name: str) -> bool:
+    """Return True if a ``*_str`` name contains ``mult`` as an underscore-separated token."""
     if not name.endswith("_str"):
         return False
     return "mult" in name[:-4].split("_")
 
 
 def _target_names(node: ast.AST) -> list[str]:
+    """Return names assigned by an ``Assign``/``AnnAssign`` (bare names and attribute names only)."""
     targets = []
     if isinstance(node, ast.Assign):
         targets = list(node.targets)
@@ -106,6 +111,7 @@ def _target_names(node: ast.AST) -> list[str]:
 
 
 def _call_name(node: ast.AST) -> str | None:
+    """Return the called function's bare name (``f`` or ``obj.f``), or None if *node* is not such a call."""
     if not isinstance(node, ast.Call):
         return None
     fn = node.func
@@ -113,6 +119,11 @@ def _call_name(node: ast.AST) -> str | None:
 
 
 def _kwargs(call: ast.Call) -> dict:
+    """Map keyword names to literal string values (None when not a string literal).
+
+    Adds a ``__has_scale__`` marker whenever a ``scale=`` keyword is present,
+    whatever its value.
+    """
     kwargs = {kw.arg: _const_str(kw.value) for kw in call.keywords if kw.arg}
     if any(kw.arg == "scale" for kw in call.keywords):
         kwargs["__has_scale__"] = "1"
@@ -158,6 +169,7 @@ def build_formatter_map(cells_text: str) -> dict:
                for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
 
     def _qual(lineno: int) -> str:
+        """Return ``"Class."`` for the innermost class spanning *lineno*, or ``""``."""
         best = None
         for nm, s, e in classes:
             if s <= lineno <= e and (best is None or s > best[1]):
@@ -194,6 +206,7 @@ def build_formatter_records(text: str) -> dict[str, tuple[str, dict, int, str]]:
         ]
 
         def _qual(lineno: int) -> str:
+            """Return ``"Class."`` for the innermost class spanning *lineno*, or ``""``."""
             best = None
             for nm, s, e in classes:
                 if s <= lineno <= e and (best is None or s > best[1]):
@@ -257,6 +270,7 @@ _HW_AFTER_MULT_RE = re.compile(
 
 
 def _percent_style_default(fname: str) -> str:
+    """Return the implied ``style`` when none is passed: ``"prose"`` for ``fmt_percent_range``/``fmt_pp``, else ``"number"``."""
     if fname == "fmt_percent":
         return "number"
     if fname in {"fmt_percent_range", "fmt_pp"}:
@@ -275,10 +289,20 @@ def _usage_context(line: str) -> str:
 
 
 def _is_percent_family(fname: str) -> bool:
+    """Return True for the percent and percentage-point formatters."""
     return fname in {"fmt_percent", "fmt_percent_range", "fmt_pp"}
 
 
 def check_file(path: Path) -> list[Violation]:
+    """Return prose-contract violations for one QMD file.
+
+    Flags ``fmt_multiple`` exports whose names lack a ``mult`` token, then,
+    for each inline ref outside Python cells whose formatter resolves
+    unambiguously, glyphs that prose repeats or misuses (``percent_dup``,
+    ``pp_dup``, ``usd_dup``, ``scale_dup``, ``mult_double_glyph``,
+    ``mult_wrong_formatter``) and percent styles used in the wrong lane
+    (table vs. prose or caption).
+    """
     text = path.read_text(encoding="utf-8", errors="replace")
     records = build_formatter_records(text)
     fmap = {name: (fname, kwargs) for name, (fname, kwargs, _, _) in records.items()}
@@ -362,6 +386,11 @@ def check_file(path: Path) -> list[Violation]:
 
 
 def main() -> int:
+    """CLI entry point: check the given QMD files and/or every ``.qmd`` under ``--root``.
+
+    Exits with an argument error when no files are given. Returns 1 if any
+    violation was found, otherwise 0.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("qmd", nargs="*", help="chapter .qmd file(s)")
     ap.add_argument("--root", help="scan all .qmd under this dir")

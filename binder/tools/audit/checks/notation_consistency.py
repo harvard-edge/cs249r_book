@@ -37,6 +37,7 @@ _NOTATION_PATHS = (
 
 
 def _strip_md(cell: str) -> str:
+    """Strip whitespace and leading/trailing bold or italic asterisks from a table cell."""
     s = cell.strip()
     # Remove bold/italic wrappers used in the tables.
     s = re.sub(r"^\*{1,3}", "", s)
@@ -45,6 +46,7 @@ def _strip_md(cell: str) -> str:
 
 
 def _strip_math_dollars(s: str) -> str:
+    """Remove one enclosing pair of `$` delimiters, if present, and strip whitespace."""
     s = s.strip()
     if s.startswith("$") and s.endswith("$") and len(s) >= 2:
         return s[1:-1].strip()
@@ -112,6 +114,12 @@ _DEF_CACHE: set[str] | None = None
 
 
 def _load_definition_registry(repo_root: Path) -> set[str]:
+    """Return the canonical symbols defined in the Notations chapter tables.
+
+    Reads each file in `_NOTATION_PATHS` under `repo_root` (missing files
+    are skipped) and caches the union in the module-level `_DEF_CACHE`,
+    so later calls return the first result regardless of `repo_root`.
+    """
     global _DEF_CACHE
     if _DEF_CACHE is not None:
         return _DEF_CACHE
@@ -149,6 +157,8 @@ def _display_delim_count(line: str) -> int:
 
 @dataclass(frozen=True)
 class MathOccurrence:
+    """One inline or display math span found in a QMD source, with its 1-indexed line and nearby prose."""
+
     line_num: int
     raw_math: str
     context: str  # nearby prose for heuristic disambiguation
@@ -214,6 +224,7 @@ def _extract_math_occurrences(text: str) -> list[MathOccurrence]:
 
 
 def _context_window(lines: list[str], line_num_1idx: int, radius: int = 1) -> str:
+    """Return the 1-indexed line plus `radius` lines on each side, joined by newlines."""
     i = line_num_1idx - 1
     start = max(0, i - radius)
     end = min(len(lines), i + radius + 1)
@@ -221,6 +232,7 @@ def _context_window(lines: list[str], line_num_1idx: int, radius: int = 1) -> st
 
 
 def _canon_math(s: str) -> str:
+    """Remove all whitespace from a math string and rewrite `\\mathrm{...}` as `\\text{...}`."""
     s = s.strip()
     s = re.sub(r"\s+", "", s)
     s = re.sub(r"\\mathrm\{([^}]*)\}", r"\\text{\1}", s)
@@ -228,6 +240,7 @@ def _canon_math(s: str) -> str:
 
 
 def _has_defined_symbol(defs: set[str], sym: str) -> bool:
+    """Return True if `sym`, once canonicalized, is in the definition set."""
     return _canonical_symbol(sym) in defs
 
 
@@ -269,6 +282,7 @@ _HAS_SINGLE = {
 
 
 def _ctx_has_any(ctx: str, patterns: list[re.Pattern[str]]) -> bool:
+    """Return True if any of the regex patterns matches the context text."""
     return any(p.search(ctx) for p in patterns)
 
 
@@ -339,6 +353,24 @@ def check(
     scope: str,
     start_counter: int = 0,
 ) -> tuple[list[Issue], int]:
+    """Scan one QMD source for notation-convention violations in its math.
+
+    Files that define the notation (`notation.qmd`, `_notation_body.qmd`,
+    `_notation_distributed.qmd`) are skipped. Each inline or display math
+    span is tested against the book conventions, using nearby prose to
+    decide whether a bare symbol is likely the conflicting meaning:
+
+      - bare `BW` instead of `\\text{BW}` (DEFERRED)
+      - bare `B` for bandwidth, bare `D` for bytes moved, bare `P` for
+        peak rate, bare `L` for latency (open, needs review)
+      - any `\\eta`, `\\lambda`, `\\alpha`, or bare `d` as a context-dependent
+        collision (DEFERRED, report-only)
+
+    Math containing `\\cap` is ignored. The definition registry is loaded
+    (and cached) but does not currently affect the findings.
+
+    Returns the issues found and the next issue counter value.
+    """
     issues: list[Issue] = []
     counter = start_counter
 

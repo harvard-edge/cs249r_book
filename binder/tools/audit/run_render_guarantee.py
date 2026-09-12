@@ -23,6 +23,11 @@ ARTIFACTS = REPO / "binder/tools/audit/artifacts"
 
 @dataclass
 class LayerResult:
+    """Pass/fail tally for one verification layer, serialized into the ledger.
+
+    ``failures`` holds one dict per failing chapter describing what went wrong.
+    """
+
     layer: str
     ok: bool
     passed: int = 0
@@ -31,7 +36,11 @@ class LayerResult:
 
 
 def _latest_debug_artifacts(vol: str) -> Path:
-    root = REPO / "books/_build/debug" / vol / "html"
+    """Return ``phase1/artifacts`` of the newest binder debug HTML run for ``vol``.
+
+    Runs are ordered by directory name; exits when no run exists.
+    """
+    root =REPO / "books/_build/debug" / vol / "html"
     runs = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
     if not runs:
         raise SystemExit(f"No binder debug HTML run for {vol}")
@@ -39,10 +48,15 @@ def _latest_debug_artifacts(vol: str) -> Path:
 
 
 def _stem(name: str) -> str:
+    """Strip the extension and any leading ``NN_`` order prefix from an artifact file name."""
     return re.sub(r"^\d+_", "", Path(name).stem)
 
 
 def sync_artifacts_to_html_audit(vol: str, artifact_dir: Path) -> Path:
+    """Copy debug HTML artifacts into ``books/_build/html-audit/<vol>`` and return that directory.
+
+    Leading ``NN_`` order prefixes are removed from the copied file names.
+    """
     dest_root = REPO / "books/_build/html-audit" / vol
     dest_root.mkdir(parents=True, exist_ok=True)
     for html in artifact_dir.glob("*.html"):
@@ -51,6 +65,10 @@ def sync_artifacts_to_html_audit(vol: str, artifact_dir: Path) -> Path:
 
 
 def _chapters_with_inline_python(vol: str) -> list[Path]:
+    """Return each QMD under ``books/<vol>`` with an inline ``{python}`` reference.
+
+    Underscore-prefixed partials are skipped unless their name contains ``notation``.
+    """
     base = REPO / "books" / vol
     out = []
     for qmd in sorted(base.rglob("*.qmd")):
@@ -62,6 +80,12 @@ def _chapters_with_inline_python(vol: str) -> list[Path]:
 
 
 def run_prose_layer(vol: str) -> LayerResult:
+    """Layer 1: run ``fmt/audit_prose.py --flagged-only`` on each chapter with inline Python.
+
+    Each chapter runs in a subprocess with ``mlsysim`` on ``PYTHONPATH`` and the
+    Agg matplotlib backend. A non-zero exit records the first 300 characters of
+    its output as a failure; the 300-second timeout is not caught.
+    """
     res = LayerResult(layer="audit_prose", ok=True)
     env = {**os.environ, "PYTHONPATH": str(REPO / "mlsysim"), "MPLBACKEND": "Agg"}
     script = REPO / "binder/tools/audit/fmt/audit_prose.py"
@@ -81,6 +105,13 @@ def run_prose_layer(vol: str) -> LayerResult:
 
 
 def run_static_html_layer(vol: str, html_dir: Path) -> LayerResult:
+    """Layer 2: static checks on every HTML file in ``html_dir``.
+
+    For each page it runs ``fmt/audit_html.py`` (anything but a zero exit with
+    ``CLEAN`` output counts as a spurious ``.0`` finding), scans visible text for
+    LaTeX leaks, and searches for literal ``{python}``, tracebacks, and
+    ``NameError:``. ``vol`` is unused.
+    """
     res = LayerResult(layer="static_html", ok=True)
     audit_html = REPO / "binder/tools/audit/fmt/audit_html.py"
     html_files = sorted(html_dir.glob("*.html"))
@@ -107,6 +138,13 @@ def run_static_html_layer(vol: str, html_dir: Path) -> LayerResult:
 
 
 def run_lego_html_layer(vol: str) -> LayerResult:
+    """Layer 3: run ``fmt/audit_lego_html.py`` and tally its JSON report rows for ``vol``.
+
+    The audit writes ``artifacts/lego_html_<vol>.json``. Each row whose status
+    is not ``PASS`` becomes a failure listing up to six failed references, and a
+    non-zero exit also fails the layer unless every row passed. A missing
+    report yields zero rows and a passing layer.
+    """
     res = LayerResult(layer="audit_lego_html", ok=True)
     env = {**os.environ, "PYTHONPATH": str(REPO / "mlsysim"), "MPLBACKEND": "Agg"}
     report_path = ARTIFACTS / f"lego_html_{vol}.json"
@@ -132,6 +170,13 @@ def run_lego_html_layer(vol: str) -> LayerResult:
 
 
 def run_playwright_layer(vol: str, artifact_dir: Path) -> LayerResult:
+    """Layer 4: run ``render_playwright_verify.py`` under ``uv`` and tally its report.
+
+    The script runs through ``uv run --with playwright``. Reads
+    ``artifacts/playwright_<vol>.json``; each row that is not ``ok``
+    becomes a failure with its leak count and reference-mismatch count. As in
+    layer 3, a missing report yields zero rows and a passing layer.
+    """
     res = LayerResult(layer="playwright", ok=True)
     report = ARTIFACTS / f"playwright_{vol}.json"
     proc = subprocess.run(
@@ -157,6 +202,13 @@ def run_playwright_layer(vol: str, artifact_dir: Path) -> LayerResult:
 
 
 def main() -> int:
+    """Run the layers for the selected volumes and write ``artifacts/render_guarantee.json``.
+
+    Defaults to vol1 when neither ``--vol1`` nor ``--vol2`` is given. HTML comes
+    from ``--artifact-dir`` or the newest binder debug run, and
+    ``--sync-artifacts`` also copies it into ``books/_build/html-audit``.
+    Returns 0 only when every executed layer passed.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--vol1", action="store_true")
     ap.add_argument("--vol2", action="store_true")

@@ -244,12 +244,12 @@ def test_interruption_stops_renderer_group_before_restoration(tmp_path, monkeypa
     renderer.wait.assert_called_once()
 
 
-@pytest.mark.parametrize('build_kind', ('full', 'volume', 'chapters', 'selective'))
+@pytest.mark.parametrize('build_kind', ('full', 'volume', 'selective'))
 @pytest.mark.parametrize('verbose', (False, True))
 @pytest.mark.parametrize('signum', (signal.SIGINT, signal.SIGTERM))
 def test_build_signal_stops_renderer_before_shared_file_restoration(
         tmp_path, monkeypatch, build_kind, verbose, signum):
-    """Real build ownership handlers must stop children before restoring files."""
+    """An interrupted build kills the renderer group, then restores shared files and handlers."""
     import os
     from binder.cli.commands import build as build_module
 
@@ -260,30 +260,12 @@ def test_build_signal_stops_renderer_before_shared_file_restoration(
     index = books / 'index.qmd'
     active.write_bytes(b'# Prior config\n')
     index.write_bytes(b'# Prior index\n')
-    header = books / 'tex/header-includes.tex'
-    header.parent.mkdir()
+    header = books / 'shared/tex/header-includes.tex'
+    header.parent.mkdir(parents=True)
     header.write_text('\\CropMarksfalse\n')
     events = []
     previous_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
-
-    def prepare_config(*args):
-        canonical.with_suffix('.backup').write_bytes(original)
-        canonical.write_bytes(original + b'\n# Temporary render config\n')
-
-    original_restore = command._restore_config
-
-    def restore_config(path):
-        events.append('restore')
-        original_restore(path)
-
     monkeypatch.setattr(command.config_manager, 'get_config_file', lambda *args: canonical)
-    monkeypatch.setattr(command, '_uncomment_all_chapters', prepare_config)
-    monkeypatch.setattr(command, '_setup_fast_build_mode', prepare_config)
-    monkeypatch.setattr(command, '_restore_config', restore_config)
-    if build_kind == 'chapters':
-        # Keep this on the legacy combined/shared-chapter ownership path.
-        monkeypatch.setattr(command.chapter_discovery, '_get_volume_from_path', lambda path: None)
-        monkeypatch.setattr(command.chapter_discovery, 'validate_chapters', lambda names: [chapter])
 
     renderer = Mock(pid=987654321)
     renderer.poll.return_value = None
@@ -293,11 +275,7 @@ def test_build_signal_stops_renderer_before_shared_file_restoration(
 
     def wait_for_renderer(*args, **kwargs):
         events.append('wait')
-        if build_kind == 'selective':
-            assert active.read_bytes() != b'# Prior config\n'
-            assert index.read_bytes() == source.read_bytes()
-        else:
-            assert canonical.read_bytes() != original
+        assert active.read_bytes() != b'# Prior config\n'
         if build_kind == 'volume':
             assert header.read_text() == '\\CropMarkstrue\n'
 
@@ -313,22 +291,67 @@ def test_build_signal_stops_renderer_before_shared_file_restoration(
     try:
         if build_kind == 'selective':
             assert not command.build_chapters_with_volume(['01_boundary'], 'pdf', 'vol4')
-            assert events == ['kill', 'wait']
             assert active.read_bytes() == b'# Prior config\n'
             assert index.read_bytes() == b'# Prior index\n'
-            assert all(signal.getsignal(sig) == handler for sig, handler in previous_handlers.items())
+        elif build_kind == 'full':
+            assert not command.build_full('pdf')
         else:
-            with pytest.raises(SystemExit) as stopped:
-                if build_kind == 'full':
-                    command.build_full('pdf')
-                elif build_kind == 'volume':
-                    command.build_volume('vol4', 'pdf', print_marks=True)
-                else:
-                    command.build_chapters(['01_boundary'], 'pdf')
-            assert stopped.value.code == 0
-            assert events == ['kill', 'wait', 'restore']
+            assert not command.build_volume('vol4', 'pdf', print_marks=True)
+        assert events == ['kill', 'wait']
+        assert all(signal.getsignal(sig) == handler for sig, handler in previous_handlers.items())
         assert canonical.read_bytes() == original
         assert header.read_text() == '\\CropMarksfalse\n'
     finally:
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
+
+
+def test_no_cover_edits_the_generated_config_not_the_source(tmp_path):
+    """--no-cover used to edit the source YAML after it was copied, so it never took effect (2026-09-12)."""
+    books, source, chapter, canonical, command = fixture_book(tmp_path)
+    original = canonical.read_bytes()
+    active = books / '_quarto.yml'
+
+    def render(cmd, *, cwd, description):
+        assert '    coverpage: false' in active.read_text()
+        assert canonical.read_bytes() == original
+        return True
+
+    command._run_command = Mock(side_effect=render)
+    assert command.build_volume('vol4', 'pdf', skip_validate=True, no_cover=True)
+    assert command._run_command.call_count == 1
+    assert canonical.read_bytes() == original
+
+
+def test_print_marks_toggles_the_shared_header_and_restores_it(tmp_path):
+    books, source, chapter, canonical, command = fixture_book(tmp_path)
+    header = books / 'shared/tex/header-includes.tex'
+    header.parent.mkdir(parents=True)
+    header.write_text('\\newif\\ifCropMarks\n\\CropMarksfalse\n')
+
+    def render(cmd, *, cwd, description):
+        assert '\\CropMarkstrue' in header.read_text()
+        return True
+
+    command._run_command = Mock(side_effect=render)
+    assert command.build_volume('vol4', 'pdf', skip_validate=True, print_marks=True)
+    assert header.read_text() == '\\newif\\ifCropMarks\n\\CropMarksfalse\n'
+
+
+def test_presentation_flags_are_rejected_for_non_pdf_volume_builds(tmp_path):
+    books, source, chapter, canonical, command = fixture_book(tmp_path, format_type='html')
+    command._run_command = Mock()
+    assert not command.build_volume('vol4', 'html', no_cover=True)
+    command._run_command.assert_not_called()
+
+
+def test_chapters_from_several_volumes_are_rejected(tmp_path):
+    books, source, chapter, canonical, command = fixture_book(tmp_path)
+    other = books / 'vol3/05_memory/05_memory.qmd'
+    other.parent.mkdir(parents=True)
+    other.write_text('# Memory Hierarchy\n')
+    command._run_command = Mock()
+    command.build_chapters_with_volume = Mock(return_value=True)
+    assert not command.build_chapters(['vol4/01_boundary', 'vol3/05_memory'], 'pdf')
+    command.build_chapters_with_volume.assert_not_called()
+    command._run_command.assert_not_called()

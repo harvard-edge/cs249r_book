@@ -273,6 +273,13 @@ class GitHubCLIWorkflowCleaner:
 
 
 def main():
+    """Show a run summary (``--summary``) or delete all but the ``--keep`` newest runs per workflow.
+
+    Uses the ``gh`` CLI for the current repository; ``--dry-run`` deletes
+    nothing, and ``--workflow`` keeps only workflows whose name contains the
+    given text. Exits 1 if ``gh`` is not authenticated or the repository
+    cannot be determined.
+    """
     parser = argparse.ArgumentParser(
         description="Clean up old GitHub workflow runs using GitHub CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -220,12 +220,21 @@ class LineWalker:
         return 0
 
     def __init__(self, text: str):
+        """Split ``text`` on newlines and start from a fresh, all-false ``LineState``."""
         # Preserve trailing newlines so byte counts match the source
         self.lines = text.split("\n")
         self.state = LineState()
         self._yaml_seen = 0  # 0 = no ---, 1 = inside frontmatter, 2 = closed
 
     def __iter__(self) -> Iterator[tuple[str, LineState, int]]:
+        """Yield ``(line, state, line_num)`` for each line while tracking block context.
+
+        The same ``LineState`` object is yielded every time and mutated in
+        place, so a caller that keeps it must copy it. Delimiter lines (code
+        fences, frontmatter ``---``, ``$$``, div fences, comment and style
+        openers) are reported as inside the block they open or close, and
+        single-line comments or display math are flagged for that line only.
+        """
         for i, line in enumerate(self.lines):
             stripped = line.strip()
 

@@ -66,6 +66,8 @@ MULT_AFTER = re.compile(r"^\s*(\$\\times\$|\\times|×|x\b)")
 
 @dataclass(frozen=True)
 class Violation:
+    """One multiplier or ``\\times`` style finding at a file line."""
+
     file: str
     line: int
     code: str
@@ -75,6 +77,7 @@ class Violation:
 
 
 def _qmd_files(paths: Iterable[Path]) -> list[Path]:
+    """Expand files and directories into a sorted, deduplicated list of existing ``.qmd`` files."""
     files: list[Path] = []
     for path in paths:
         if path.is_dir():
@@ -85,6 +88,11 @@ def _qmd_files(paths: Iterable[Path]) -> list[Path]:
 
 
 def _attribute_intervals(line: str, names: tuple[str, ...]) -> list[tuple[int, int]]:
+    """Return character spans of the quoted values of ``name="..."`` attributes on a line.
+
+    Backslash-escaped quotes are skipped; an unterminated value runs to the
+    end of the line.
+    """
     intervals: list[tuple[int, int]] = []
     for name in names:
         for match in re.finditer(rf"\b{re.escape(name)}\s*=\s*(['\"])", line):
@@ -107,6 +115,7 @@ def _attribute_intervals(line: str, names: tuple[str, ...]) -> list[tuple[int, i
 
 
 def _all_positions_in_intervals(line: str, needle: str, intervals: list[tuple[int, int]]) -> bool:
+    """Return True if every occurrence of *needle* lies inside an interval (True when there are none)."""
     positions = [match.start() for match in re.finditer(re.escape(needle), line)]
     if not positions:
         return True
@@ -114,6 +123,7 @@ def _all_positions_in_intervals(line: str, needle: str, intervals: list[tuple[in
 
 
 def _next_nonspace(line: str, start: int) -> tuple[int, str] | None:
+    """Return ``(index, char)`` of the first non-whitespace character at or after *start*, or None."""
     for idx in range(start, len(line)):
         if not line[idx].isspace():
             return idx, line[idx]
@@ -121,6 +131,7 @@ def _next_nonspace(line: str, start: int) -> tuple[int, str] | None:
 
 
 def _prev_nonspace(line: str, start: int) -> tuple[int, str] | None:
+    """Return ``(index, char)`` of the last non-whitespace character before *start*, or None."""
     for idx in range(start - 1, -1, -1):
         if not line[idx].isspace():
             return idx, line[idx]
@@ -128,10 +139,12 @@ def _prev_nonspace(line: str, start: int) -> tuple[int, str] | None:
 
 
 def _is_right_product_operand(ch: str) -> bool:
+    """Return True if *ch* can start a product's right operand (backtick, ``$``, backslash, ``(``, or digit)."""
     return ch in "`$\\(" or ch.isdigit()
 
 
 def _has_mult_token(ref: str) -> bool:
+    """Return True if a ref's last component is a ``*_str`` name containing a ``mult`` token."""
     bare = ref.split(".")[-1]
     if not bare.endswith("_str"):
         return False
@@ -139,6 +152,13 @@ def _has_mult_token(ref: str) -> bool:
 
 
 def _audit_file(path: Path) -> list[Violation]:
+    """Return multiplier style violations for one QMD file.
+
+    Inside Python cells it flags ``body_multiplier_suffix`` and
+    ``fmt_sci_math_context``; other fenced blocks are skipped. In prose it
+    flags ``unicode_times_in_prose`` (outside plain-text attributes),
+    ``mult_double_glyph``, and ``times_product_spacing``.
+    """
     violations: list[Violation] = []
     lines = path.read_text(encoding="utf-8").splitlines()
     in_fence = False
@@ -286,6 +306,7 @@ def _audit_file(path: Path) -> list[Violation]:
 
 
 def audit(paths: Iterable[Path]) -> list[Violation]:
+    """Audit every QMD file under *paths*, skipping files that cannot be read or decoded."""
     violations: list[Violation] = []
     for path in _qmd_files(paths):
         try:
@@ -296,6 +317,12 @@ def audit(paths: Iterable[Path]) -> list[Violation]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: audit the given paths (default ``books``) and print the result.
+
+    Output is a per-violation report by default, a JSON list with ``--json``,
+    or per-file counts by code with ``--by-file``. Returns 1 if any violation
+    was found, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, default=[Path("books")])
     parser.add_argument("--json", action="store_true", help="Emit JSON")

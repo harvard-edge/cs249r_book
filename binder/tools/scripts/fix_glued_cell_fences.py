@@ -8,6 +8,11 @@ from pathlib import Path
 
 
 def fix_text(text: str) -> tuple[str, int]:
+    """Move a trailing ```` ``` ```` glued to any line onto its own line; return the text and the fix count.
+
+    Bare fence lines and opening ```` ```{ ```` lines are left alone, and the
+    original trailing newline is preserved.
+    """
     fixes = 0
     out: list[str] = []
     for line in text.splitlines():
@@ -23,6 +28,7 @@ def fix_text(text: str) -> tuple[str, int]:
 
 
 def main() -> int:
+    """Fix every ``.qmd`` under ``--root`` (default ``books``, relative to the current directory); ``--dry-run`` skips writes."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--root",

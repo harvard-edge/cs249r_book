@@ -62,6 +62,8 @@ from typing import Iterable, Iterator
 
 @dataclass
 class EpubIssue:
+    """One hygiene or epubcheck finding, shaped for conversion to ``ValidationIssue``."""
+
     file: str          # repo-relative path
     line: int          # 1-indexed line number (0 = unknown)
     col: int           # 1-indexed column (0 = unknown)
@@ -101,23 +103,38 @@ def _line_of(text: str, offset: int) -> int:
     return text.count('\n', 0, offset) + 1
 
 
+def _is_generated(path: Path, root: Path) -> bool:
+    """True when *path* lies in a generated tree (``.quarto``, ``_build``, ``*_files``) under *root*."""
+    try:
+        from cli.checks.generated_paths import is_generated
+    except ImportError:
+        from binder.cli.checks.generated_paths import is_generated
+    return is_generated(path, root)
+
+
 def _iter_svgs(contents_dir: Path) -> Iterator[Path]:
-    # Skip Quarto's per-chapter render output under `<chapter>_files/`.
-    # Those SVGs are gitignored (.gitignore: `books/**/*_files/`),
-    # regenerated on every render, and already sanitized in the final
-    # EPUB by books/shared/scripts/epub_postprocess.py. The source-level
-    # check should only inspect authored SVGs.
+    """Yield authored SVGs under *contents_dir*, skipping generated trees.
+
+    Render output (``<chapter>_files/``, ``_build/``) and Quarto's cache
+    (``.quarto/``, including frozen ``mediabag`` copies) hold regenerated
+    SVGs that are gitignored and sanitized in the final EPUB by
+    ``books/shared/scripts/epub_postprocess.py``. The source-level check only
+    inspects authored SVGs. 2026-09-12: stale ``.quarto/_freeze`` copies used
+    to fail every local EPUB build while CI, starting clean, passed.
+    """
     if not contents_dir.is_dir():
         return
     for svg in contents_dir.rglob('*.svg'):
-        if any(p.endswith('_files') for p in svg.parts):
-            continue
-        yield svg
+        if not _is_generated(svg, contents_dir):
+            yield svg
 
 
 def _iter_bibs(quarto_dir: Path) -> Iterator[Path]:
+    """Yield authored ``.bib`` files under *quarto_dir*, skipping generated trees."""
     if quarto_dir.is_dir():
-        yield from quarto_dir.rglob('*.bib')
+        for bib in quarto_dir.rglob('*.bib'):
+            if not _is_generated(bib, quarto_dir):
+                yield bib
 
 
 def _read(path: Path) -> str | None:
@@ -259,6 +276,7 @@ def _fix_svg_aria_label_c0(svg_file: Path) -> int:
     removed = 0
 
     def strip(m):
+        """Rewrite one aria-label without C0 control chars, adding to the removed count."""
         nonlocal removed
         value = m.group(1)
         cleaned = _C0_CONTROL_RE.sub('', value)
@@ -291,6 +309,7 @@ def _fix_svg_duplicate_markers(svg_file: Path) -> int:
     removed = 0
 
     def dedup(m):
+        """Keep the first marker block for each id and drop later repeats."""
         nonlocal removed
         mid = m.group(1)
         if mid in seen:
@@ -316,6 +335,7 @@ def _fix_bibtex_url_escapes(bib_file: Path) -> int:
     fixes = 0
 
     def sanitize(m):
+        r"""Unescape \_ and \%, and percent-encode < >, in a URL-like field; count each fix."""
         nonlocal fixes
         prefix, field, eq, value, close = m.groups()
         is_urlish = 'http' in value.lower() or field == 'url'

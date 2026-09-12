@@ -39,6 +39,10 @@ CELL_RE = re.compile(r"^```\{python\}\n(.*?)^```$", re.S | re.M)
 
 
 def contents_dir(start: Path) -> Path:
+    """Return the nearest ``books`` directory at or above `start`.
+
+    Exits with an error message when none exists.
+    """
     for base in (start, *start.parents):
         candidate = base / "books"
         if candidate.is_dir():
@@ -47,6 +51,7 @@ def contents_dir(start: Path) -> Path:
 
 
 def volume_of(path: Path, contents: Path) -> str:
+    """Return the volume directory name of `path` under `contents`, or "?" when it lies outside."""
     try:
         rel = path.relative_to(contents)
     except ValueError:
@@ -71,6 +76,7 @@ def scan(contents: Path):
 
 
 def prefixes(symbol: str):
+    """Return the set of dotted prefixes of `symbol`, including the symbol itself."""
     parts = symbol.split(".")
     return {".".join(parts[: i + 1]) for i in range(len(parts))}
 
@@ -99,6 +105,10 @@ def report_symbol(hits, symbol: str) -> int:
 
 
 def report_all(hits, only_volume: str | None) -> None:
+    """Print each symbol with its consuming volumes and read count, most-read first.
+
+    With `only_volume`, only symbols that volume reads are listed.
+    """
     rows = []
     for symbol, per_vol in hits.items():
         vols = sorted(per_vol)
@@ -113,7 +123,13 @@ def report_all(hits, only_volume: str | None) -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    """Scan the book found from the current directory and print the requested report.
+
+    `--json` dumps the full map, `--symbol` lists one symbol's consumers, and
+    otherwise every symbol is listed; `--json` takes precedence over `--symbol`.
+    Returns 1 only when `--symbol` names something Volume I reads; otherwise 0.
+    """
+    ap =argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--symbol", help="registry path to check before editing it")
     ap.add_argument("--volume", help="restrict the full listing to one volume")
     ap.add_argument("--json", action="store_true", help="emit the full map as JSON")

@@ -39,6 +39,7 @@ MARK_E = "<!-- ALL-CONTRIBUTORS-LIST:END"
 
 
 def _in_contributors_block(text: str, pos: int) -> bool:
+    """Return True if ``pos`` lies between the nearest preceding ALL-CONTRIBUTORS start marker and its end marker."""
     s = text.rfind(MARK_S, 0, pos)
     if s == -1:
         return False
@@ -47,12 +48,21 @@ def _in_contributors_block(text: str, pos: int) -> bool:
 
 
 def _style_th(line: str) -> str:
+    """Add header background and alignment attributes to the first ``<th `` tag on a line that has no ``bgcolor`` yet."""
     if "<th " in line and "bgcolor=" not in line:
         return line.replace("<th ", '<th bgcolor="#eef2f7" align="left" valign="top" ', 1)
     return line
 
 
 def _wrap_pass(text: str, needle: str, inner_replace: tuple[str, str]) -> tuple[str, int]:
+    """Wrap each table starting with ``needle`` (through ``</tbody></table>``) in the outer frame.
+
+    ``inner_replace`` swaps the bare opening tag for the styled inner table,
+    and ``<thead>`` tables also get styled header cells. Tables inside an
+    ALL-CONTRIBUTORS block are skipped, and a table with no closing tag ends
+    the pass with the rest of the text unchanged. Returns the new text and
+    the number of tables wrapped.
+    """
     old, new_open = inner_replace
     pos = 0
     parts: list[str] = []
@@ -84,12 +94,14 @@ def _wrap_pass(text: str, needle: str, inner_replace: tuple[str, str]) -> tuple[
 
 
 def process(text: str) -> tuple[str, int]:
+    """Wrap every ``<thead>`` table, then every body-only ``<tbody>`` table; return the text and total count."""
     text, n1 = _wrap_pass(text, NEEDLE, ("<table>\n  <thead>", INNER_OPEN))
     text, n2 = _wrap_pass(text, NEEDLE_TBODY, ("<table>\n  <tbody>", INNER_TBODY))
     return text, n1 + n2
 
 
 def main(argv: list[str]) -> int:
+    """Rewrite each README in ``argv[1:]`` in place and print per-file counts; return 2 when no path is given."""
     if len(argv) < 2:
         print("usage: wrap_readme_data_tables.py README.md [...]", file=sys.stderr)
         return 2

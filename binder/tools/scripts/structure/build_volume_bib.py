@@ -150,6 +150,13 @@ def render(vol: str) -> tuple[str, list[str]]:
 
 
 def main() -> int:
+    """Write ``references-<vol>.bib`` for one dedicated volume, or for all of them when none is named.
+
+    With ``--check`` nothing is written; the key set on disk is compared with
+    the key set that would be generated. Returns 1 if any citation resolves
+    nowhere (the file is still written) or, in check mode, a file is stale;
+    otherwise 0.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("volume", nargs="?", choices=DEDICATED, help="omit to do all")
     ap.add_argument("--check", action="store_true", help="fail if a bib is stale or a citation is unresolved")

@@ -48,6 +48,13 @@ REF_PART = re.compile(r"^([A-Za-z_]\w*)(?:\[(-?\d+)\])?$")
 
 @dataclass
 class ProsePreview:
+    """One prose line with its inline refs substituted.
+
+    ``line`` is 1-based, ``refs`` lists the inline refs on the line, ``preview``
+    is the substituted text with light markdown stripped, and ``flags`` holds
+    the defect labels from ``_flag_preview``.
+    """
+
     line: int
     refs: list[str]
     preview: str
@@ -119,6 +126,11 @@ def _strip_light_markdown(text: str) -> str:
 
 
 def _flag_preview(preview: str) -> list[str]:
+    """Return ``spurious_.0`` and/or ``missing_ref`` flags for a preview.
+
+    ``spurious_.0`` is added at most once, for the first spurious-zero match
+    whose surrounding 20 characters are not a known false positive.
+    """
     flags: list[str] = []
     for m in SPURIOUS_ZERO.finditer(preview):
         start = max(0, m.start() - 20)
@@ -138,6 +150,12 @@ def audit_prose_previews(
     *,
     class_filter: str | None = None,
 ) -> list[ProsePreview]:
+    """Build substituted previews for every inline-ref prose line in a chapter.
+
+    Executes all python cells first, so a failing cell raises ``RuntimeError``.
+    With *class_filter*, only lines with a ref whose first dotted component
+    equals that name are kept. Unresolvable refs appear as ``<MISSING:ref>``.
+    """
     lines = qmd_path.read_text(encoding="utf-8").splitlines()
     ns = _exec_python_cells(lines)
     out: list[ProsePreview] = []
@@ -174,6 +192,12 @@ def audit_prose_previews(
 
 
 def main() -> int:
+    """Print prose previews for one chapter.
+
+    Returns 1 when the file is missing, a cell fails to execute, or any printed
+    preview is flagged; ``--json`` prints the previews and returns 0 regardless
+    of flags.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("qmd", type=Path, help="Chapter .qmd file")
     parser.add_argument(

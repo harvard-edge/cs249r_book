@@ -37,6 +37,7 @@ _SKIP_PATH_PARTS = ("/glossary/",)
 
 
 def should_skip_file(path) -> bool:
+    """Return True for files exempt from the dictionary (glossary sources)."""
     return any(part in str(path).replace("\\", "/") for part in _SKIP_PATH_PARTS)
 
 # (regex, replacement-template) — spelling / hyphenation fixes. `\1` carries an
@@ -65,6 +66,8 @@ _CASE_PATTERNS = [(re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE), t) for t i
 
 @dataclass(frozen=True)
 class Hit:
+    """One non-canonical term: 1-based line, matched text, canonical form, and excerpt."""
+
     line: int
     match: str
     replacement: str
@@ -74,6 +77,7 @@ class Hit:
 def _mask(line: str) -> str:
     """Blank (with equal-length spaces) spans where a term is verbatim."""
     def blank(m):
+        """Return spaces matching the length of the matched span."""
         return " " * len(m.group())
     # "Limited data set" is the defined HIPAA term in 45 C.F.R. § 164.514(e),
     # so it must not be normalized to the general-purpose spelling "dataset."
@@ -135,6 +139,7 @@ def _iter_text_lines(lines: List[str]):
 
 
 def find_in_text(text: str) -> List[Hit]:
+    """Return a Hit for every non-canonical spelling or capitalization in prose lines."""
     lines = text.splitlines()
     hits: List[Hit] = []
     for idx, line in _iter_text_lines(lines):
@@ -146,6 +151,15 @@ def find_in_text(text: str) -> List[Hit]:
 
 
 def fix_text(text: str) -> Tuple[str, int]:
+    """Rewrite every flagged term to its canonical form.
+
+    Applies the same edits ``find_in_text`` reports, right to left per line so
+    offsets stay valid, and preserves original line endings.
+
+    Returns:
+        ``(new_text, n_lines_changed)``; the input is returned unchanged with
+        0 when nothing needs fixing.
+    """
     lines = text.splitlines(keepends=True)
     raw = [ln.rstrip("\n") for ln in lines]
     eols = [ln[len(r):] for ln, r in zip(lines, raw)]
@@ -166,6 +180,10 @@ def fix_text(text: str) -> Tuple[str, int]:
 
 
 def audit(paths) -> List[tuple]:
+    """Return ``(file, line, match, replacement)`` tuples for QMD files under *paths*.
+
+    Directories are searched recursively; glossary files are skipped.
+    """
     out: List[tuple] = []
     for rawp in paths:
         p = Path(rawp)

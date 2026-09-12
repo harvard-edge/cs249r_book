@@ -59,6 +59,7 @@ def strip_html_for_text_scan(html: str) -> str:
 
 
 def collect_imgs_with_bs4(soup) -> List[Dict]:
+    """Return ``src`` and stripped ``alt`` for every ``<img>`` in a parsed soup."""
     out = []
     for img in soup.find_all("img"):
         out.append(
@@ -71,6 +72,7 @@ def collect_imgs_with_bs4(soup) -> List[Dict]:
 
 
 def collect_imgs_with_regex(html: str) -> List[Dict]:
+    """Return ``src`` and stripped ``alt`` for every ``<img>`` tag, reading only double-quoted attributes."""
     out = []
     for m in RE_IMG.finditer(html):
         attrs = dict(RE_ATTR.findall(m.group(1)))
@@ -86,6 +88,7 @@ def collect_figures_caption_status(html: str, soup=None) -> List[bool]:
 
 
 def collect_internal_anchors(html: str, soup=None) -> List[str]:
+    """Return the fragment targets of ``href="#..."`` links, using ``soup`` when given and regex otherwise."""
     if soup is not None:
         return [
             a.get("href", "")[1:]
@@ -96,16 +99,19 @@ def collect_internal_anchors(html: str, soup=None) -> List[str]:
 
 
 def collect_ids(html: str, soup=None) -> set:
+    """Return the set of element ``id`` values, using ``soup`` when given and regex otherwise."""
     if soup is not None:
         return {tag.get("id") for tag in soup.find_all(id=True) if tag.get("id")}
     return set(RE_ID_ATTR.findall(html))
 
 
 def has_math_container(html: str) -> bool:
+    """Return True if any element carries a ``math`` class."""
     return bool(RE_MATH_CONTAINER.search(html))
 
 
 def chapter_name_from_path(html_path: Path, html_root: Path) -> str:
+    """Return a chapter label: the HTML file's parent directory name when nested under ``html_root``, else its stem."""
     rel = html_path.relative_to(html_root)
     parts = list(rel.parts)
     # Typical path: contents/<vol>/<group>/<chapter>/<chapter>.html
@@ -116,6 +122,7 @@ def chapter_name_from_path(html_path: Path, html_root: Path) -> str:
 
 
 def gather_global_ids(html_files: List[Path]) -> set:
+    """Collect element ids across all HTML files, skipping unreadable ones, so anchors can resolve site-wide."""
     ids = set()
     for f in html_files:
         try:
@@ -131,6 +138,15 @@ def gather_global_ids(html_files: List[Path]) -> set:
 
 
 def check_chapter(html_path: Path, html_root: Path, global_ids: set, vol: str) -> Dict:
+    """Run the structural checks on one HTML file and return its JSONL record.
+
+    Checks that local images exist and are non-empty, every image (remote
+    included) has alt text, every ``<figure>`` has a ``<figcaption>``, no
+    LaTeX or Quarto reference tokens leak outside code and math, ``#`` links
+    resolve to an id in ``global_ids``, and raw math markup comes with a math
+    container. ``ok`` is True only when every check passes; a read error
+    yields a record with ``ok`` False and the error message.
+    """
     try:
         html = html_path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -217,6 +233,12 @@ def check_chapter(html_path: Path, html_root: Path, global_ids: set, vol: str) -
 
 
 def main() -> int:
+    """Check each HTML file under ``--html-dir`` and overwrite ``--out`` with one JSON line per file.
+
+    Scans ``contents/**/*.html`` when present, otherwise every HTML file,
+    then prints ok/bad counts. Returns 2 if the directory is missing,
+    otherwise 0 regardless of the results.
+    """
     p = argparse.ArgumentParser()
     p.add_argument("--vol", required=True, choices=["vol1", "vol2"])
     p.add_argument("--html-dir", required=True, help="abs path to built HTML root")

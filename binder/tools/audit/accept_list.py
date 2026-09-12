@@ -107,6 +107,7 @@ class AcceptEntry:
 
     @property
     def key(self) -> MatchKey:
+        """The (category, file, before) match key for this entry; `line` is excluded."""
         return MatchKey(self.category, self.file, self.before)
 
 

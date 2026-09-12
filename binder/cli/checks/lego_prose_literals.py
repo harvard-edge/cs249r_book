@@ -194,6 +194,11 @@ CALLOUT_QUANTITY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def _strip_allowed_fragments(line: str) -> str:
+    """Remove fragments whose numbers are legitimate before literal matching.
+
+    Strips tensor dimensions, percent ranges, GPU SKU memory names, powers of
+    ten, ``{python}`` refs, cross-reference ids, HTML comments, and inline math.
+    """
     out = line
     while TENSOR_DIM.search(out):
         out = TENSOR_DIM.sub("", out)
@@ -210,6 +215,7 @@ def _strip_allowed_fragments(line: str) -> str:
 
 
 def _is_excluded_prose(line: str) -> bool:
+    """Return True for lines never checked: blanks, tables, headings, footnotes, captions, insight bullets, and TikZ."""
     stripped = line.lstrip()
     if not stripped or stripped.startswith("|") or "fig-cap=" in line:
         return True
@@ -229,6 +235,12 @@ def _is_excluded_prose(line: str) -> bool:
 
 
 def _is_walkthrough_line(line: str, in_callout: bool) -> bool:
+    """Return True for a Tier 1 calc line.
+
+    That is a bold walkthrough marker (``**Step``, ``**Math``, ...), or a line
+    mixing a ``{python}`` ref with arithmetic that is either a list item
+    inside a callout or contains ``=``, ``≈``, ``\\approx``, or `` / ``.
+    """
     stripped = line.lstrip()
     if _is_excluded_prose(line):
         return False
@@ -242,6 +254,7 @@ def _is_walkthrough_line(line: str, in_callout: bool) -> bool:
 
 
 def _is_setup_line(line: str) -> bool:
+    """Return True for a Tier 2 setup line: a scenario bold head, a scenario opener, or a bold-led list item."""
     if _is_excluded_prose(line):
         return False
     stripped = line.lstrip()
@@ -257,6 +270,7 @@ def _is_setup_line(line: str) -> bool:
 
 
 def _literal_hits(line: str, patterns: tuple[tuple[re.Pattern[str], str], ...]) -> list[str]:
+    """Return the label of each pattern that matches the line after allowed fragments are stripped."""
     stripped = _strip_allowed_fragments(line)
     hits: list[str] = []
     for pattern, label in patterns:
@@ -273,6 +287,14 @@ def _line_violations(
     strict: bool = False,
     suppress_strict: bool = False,
 ) -> list[str]:
+    """Return violation labels for one prose line under the three-tier policy.
+
+    An inline LEGO suppression comment yields only ``"inline LEGO
+    suppression"``; other lines containing ``<!-- lego-ok`` yield nothing.
+    Tier 1 applies to calc lines, Tier 2 to setup lines in a Python-backed
+    callout, and Tier 3 (only with ``strict``, outside a ``lego-ok-block``,
+    and only when Tiers 1 and 2 found nothing) to any line in such a callout.
+    """
     if _is_excluded_prose(line):
         return []
     if INLINE_LEGO_OK.search(line):
@@ -360,6 +382,14 @@ def _iter_callout_blocks(lines: list[str]):
 
 
 def check_file(path: Path, *, strict: bool = False) -> list[tuple[int, str, list[str]]]:
+    """Return ``(lineno, snippet, labels)`` violations for one QMD file, sorted by line.
+
+    A first pass checks every line outside fenced blocks without callout
+    context (and flags inline suppression comments anywhere, including
+    inside code cells). A second pass re-checks each callout's prose with
+    callout context, honoring ``lego-ok-block`` regions for Tier 3. A line
+    can therefore appear once per pass.
+    """
     issues: list[tuple[int, str, list[str]]] = []
     lines = path.read_text(encoding="utf-8").splitlines()
 
@@ -410,6 +440,11 @@ def check_file(path: Path, *, strict: bool = False) -> list[tuple[int, str, list
 
 
 def main() -> int:
+    """Check the given QMD files or directories (default: all of ``books/``) and print violations per file.
+
+    Relative paths resolve against the repository root; ``--strict`` enables
+    Tier 3. Returns 1 if any file has a violation, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, help="QMD files (default: all contents)")
     parser.add_argument(

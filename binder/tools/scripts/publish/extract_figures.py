@@ -313,6 +313,13 @@ def generate_markdown_output(chapters_data: list[dict], output_path: Path,
 
 
 def main():
+    """Write ``books/FIGURE_LIST_VOL<N>.md`` listing each chapter's figures for ``--vol``.
+
+    Chapter order, including commented-out entries, comes from
+    ``books/config/_quarto-pdf-vol<N>.yml``; missing chapter files are warned
+    about and skipped. Without ``--caption`` or ``--alt-text`` both fields are
+    included. Exits 1 if the config file is missing.
+    """
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description='Extract figure information from book chapters for MIT Press.',

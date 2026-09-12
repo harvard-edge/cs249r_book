@@ -287,8 +287,10 @@ points are restored when the command finishes or is interrupted.
 Outputs are isolated under
 `books/_build/<format>-<volume>/chapters/<chapter>/`, for example
 `books/_build/pdf-vol4/chapters/01_boundary/01_boundary.pdf`. A selective build
-does not overwrite the full-volume PDF. Run builds sequentially within a
-checkout because Quarto uses a shared active config and index.
+does not overwrite the full-volume PDF. Builds in one checkout must run one at
+a time because Quarto uses a shared active config and index; to build several
+chapters at once, add `--parallel`, which runs each build in its own git
+worktree (see [Parallel builds](docs/BINDER.md#parallel-builds)).
 
 Isolated chapters have local numbering and may have unresolved references to
 omitted chapters. `--skip-validate` supports these layout iterations; finish

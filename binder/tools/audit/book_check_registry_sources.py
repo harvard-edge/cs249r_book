@@ -213,6 +213,7 @@ HARDCODED_REGISTRY = re.compile(
 
 
 def _parse_imported_names(import_clause: str) -> set[str]:
+    """Return the names in a ``from ... import`` clause, dropping ``as`` aliases and ``*``."""
     names: set[str] = set()
     for part in import_clause.split(","):
         part = part.strip()
@@ -225,6 +226,7 @@ def _parse_imported_names(import_clause: str) -> set[str]:
 
 
 def _strip_export_suffix(name: str) -> str:
+    """Remove one trailing ``_val_str``, ``_unit_str``, or ``_str`` suffix from a name."""
     for suffix in ("_val_str", "_unit_str", "_str"):
         if name.endswith(suffix):
             return name[: -len(suffix)]
@@ -232,6 +234,7 @@ def _strip_export_suffix(name: str) -> str:
 
 
 def _is_legacy_export_name(name: str) -> bool:
+    """Return True if the name, minus any export suffix, is a legacy constant or matches a forbidden pattern."""
     base = _strip_export_suffix(name)
     if base in LEGACY_IMPORT_NAMES:
         return True
@@ -239,6 +242,10 @@ def _is_legacy_export_name(name: str) -> bool:
 
 
 def python_cells(path: Path) -> list[str]:
+    """Return the source of every ``{python}`` cell in the file, in order.
+
+    An unterminated cell runs to end of file.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     blocks: list[str] = []
     i = 0
@@ -255,6 +262,16 @@ def python_cells(path: Path) -> list[str]:
 
 
 def check_file(path: Path) -> list[str]:
+    """Return violation messages for one QMD file, each prefixed with its 1-based cell number.
+
+    Every Python cell is checked, not only LEGO cells. Flags banned legacy
+    aliases, registry scalars re-exported under flat uppercase names, legacy
+    symbols imported from ``mlsysim.core.constants`` (star imports skipped),
+    assignments to legacy export names, ``constants.<SYM>`` access to
+    non-physics legacy symbols, and hardcoded hardware, grid carbon, dataset,
+    and registry literals. The alias, re-export, and hardcoded-literal checks
+    report at most once per cell; the others report each occurrence.
+    """
     issues: list[str] = []
     for idx, block in enumerate(python_cells(path), start=1):
         if ALIAS_BANNED.search(block):
@@ -309,6 +326,12 @@ def check_file(path: Path) -> list[str]:
 
 
 def main() -> int:
+    """Command-line entry point.
+
+    Scans the given QMD files or directories (all of ``books/`` by default),
+    prints violations grouped by file, and returns 1 if any file has
+    violations, otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "paths",

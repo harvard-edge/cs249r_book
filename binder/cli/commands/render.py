@@ -102,6 +102,7 @@ class RenderCommand:
     """Handles ``binder render`` operations."""
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store shared managers and the book directory used for scanning and output."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
         self.book_dir = config_manager.book_dir
@@ -111,6 +112,11 @@ class RenderCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        """Parse ``binder render`` arguments and dispatch; only ``plots`` is implemented.
+
+        With no subcommand (or ``help``) prints help and returns True. Returns
+        False on an argparse error (True for ``-h``/``--help``).
+        """
         if args == ["help"]:
             self._print_help()
             return True
@@ -149,6 +155,7 @@ class RenderCommand:
     # ------------------------------------------------------------------
 
     def _print_help(self) -> None:
+        """Print the subcommand table and usage examples."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=55)
@@ -209,6 +216,15 @@ class RenderCommand:
     # ------------------------------------------------------------------
 
     def _render_plots(self, ns: argparse.Namespace) -> bool:
+        """Execute every ``fig-`` labeled Python cell in-process and save each figure as PNG.
+
+        Output goes to ``<book_dir>/_output/plots/<chapter>/<fig-label>.png``.
+        The working directory is switched to the book directory during rendering
+        and ``.`` is prepended to ``sys.path``. Prints a per-chapter summary,
+        notes TikZ and static figures that need a full build, and opens the
+        output folder on macOS. Returns False when no QMD files are found or any
+        figure fails to render.
+        """
         qmd_files = self._resolve_qmd_files(ns)
         if not qmd_files:
             console.print("[yellow]No QMD files found.[/yellow]")

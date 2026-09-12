@@ -28,7 +28,10 @@ _LITERATURE_REF = re.compile(
 
 
 def _appendix_text() -> str:
-    """Reads the content of an appendix .qmd file with caching to prevent redundant disk I/O."""
+    """Return the text of both volumes' assumption appendices joined by newlines.
+
+    Missing files are skipped. The files are re-read on every call.
+    """
     parts: list[str] = []
     for path in APPENDIX_ASSUMPTIONS_QMD:
         if path.is_file():
@@ -37,6 +40,13 @@ def _appendix_text() -> str:
 
 
 def provenance_for_value(value: Any) -> Provenance | None:
+    """Return the provenance attached to a registry value, or None.
+
+    Checks, in order: the value itself being ``Sourced``, a ``Sourced``
+    ``mttf_hours`` field, the first ``Sourced`` recovery field (heartbeat
+    timeout, reschedule time, checkpoint write bandwidth), and finally
+    ``metadata.provenance``.
+    """
     if isinstance(value, Sourced):
         return value.provenance
     if hasattr(value, "mttf_hours") and isinstance(value.mttf_hours, Sourced):
@@ -62,6 +72,11 @@ def audit_appendix_defaults() -> list[str]:
 
 
 def audit_appendix_pricing() -> list[str]:
+    """Check ``Infrastructure.Pricing.*`` references in the assumption appendices.
+
+    Returns one issue per referenced entry that is undefined in its pricing
+    section or has no provenance.
+    """
     from mlsysim.infrastructure.registry import Infrastructure
 
     issues: list[str] = []
@@ -85,6 +100,12 @@ def audit_appendix_pricing() -> list[str]:
 
 
 def audit_appendix_reliability() -> list[str]:
+    """Check provenance for reliability components named in the assumption appendices.
+
+    Only a fixed set is checked (Gpu, Nic, Psu, PcieSwitch, Cable, TorSwitch,
+    Hbm, and Recovery), each only when the appendix text mentions it. Returns
+    one issue per component without provenance.
+    """
     from mlsysim.systems.reliability import Reliability
 
     issues: list[str] = []
@@ -103,6 +124,13 @@ def audit_appendix_reliability() -> list[str]:
 
 
 def audit_appendix_literature() -> list[str]:
+    """Check ``Literature.*`` references in the assumption appendices.
+
+    Only the Training, Chinchilla, and Communication sections are resolved, so
+    a reference into any other section the pattern accepts (Scaling,
+    Overheads) is reported as undefined. Also reports ``Sourced`` values whose
+    provenance is None.
+    """
     from mlsysim.literature.registry import Literature
 
     issues: list[str] = []

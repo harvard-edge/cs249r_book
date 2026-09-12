@@ -305,12 +305,14 @@ class Entry:
     start_line: int  # 1-indexed
 
     def get(self, name: str) -> Optional[Field]:
+        """Return the first field whose name matches case-insensitively, or None."""
         for f in self.fields:
             if f.name.lower() == name.lower():
                 return f
         return None
 
     def has(self, name: str) -> bool:
+        """Return True if the entry has a field with this name (case-insensitive)."""
         return self.get(name) is not None
 
 
@@ -991,6 +993,16 @@ def find_all_bib_files() -> list[Path]:
 
 
 def main() -> int:
+    """Command-line entry point for linting, fixing, and baselining .bib files.
+
+    Targets are the positional files, or every git-tracked ``.bib`` with
+    ``--all``; with neither, help is printed and 2 is returned. ``--fix``
+    rewrites non-canonical files in place. ``--baseline`` and
+    ``--style-baseline`` write their allow-list files and return 0.
+    ``--check`` reports only errors absent from the baseline allow-list and
+    returns 1 if any remain. The default report mode prints every violation
+    and returns 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("files", nargs="*", help=".bib files to process")
     parser.add_argument("--all", action="store_true",

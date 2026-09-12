@@ -51,11 +51,13 @@ class VisibleTextExtractor(HTMLParser):
     """Collect user-visible text while skipping HTML/MathJax code zones."""
 
     def __init__(self) -> None:
+        """Start with an empty skip stack and text buffer, decoding character references."""
         super().__init__(convert_charrefs=True)
         self._skip_stack: list[str] = []
         self._chunks: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Open a skip zone for code, script, style, MathJax, and ``span.math`` elements."""
         tag = tag.lower()
         attr_map = {name.lower(): value or "" for name, value in attrs}
         classes = set(attr_map.get("class", "").split())
@@ -63,19 +65,23 @@ class VisibleTextExtractor(HTMLParser):
             self._skip_stack.append(tag)
 
     def handle_endtag(self, tag: str) -> None:
+        """Close the innermost skip zone when its tag ends."""
         tag = tag.lower()
         if self._skip_stack and self._skip_stack[-1] == tag:
             self._skip_stack.pop()
 
     def handle_data(self, data: str) -> None:
+        """Keep text only while no skip zone is open."""
         if not self._skip_stack:
             self._chunks.append(data)
 
     def text(self) -> str:
+        """Return the collected text chunks joined with single spaces."""
         return " ".join(self._chunks)
 
 
 def visible_text_from_html(html: str) -> str:
+    """Return the user-visible text of an HTML document, excluding code and math zones."""
     parser = VisibleTextExtractor()
     parser.feed(html)
     parser.close()
@@ -84,6 +90,12 @@ def visible_text_from_html(html: str) -> str:
 
 @dataclass
 class Leak:
+    """One leak-pattern hit in visible HTML text.
+
+    ``char_offset`` is the match position within the extracted visible text,
+    not within the raw HTML.
+    """
+
     pattern: str
     match: str
     context: str
@@ -92,6 +104,8 @@ class Leak:
 
 @dataclass
 class ChapterReport:
+    """Per-chapter result of the HTML math audit, serialized into the JSON report."""
+
     name: str
     volume: str
     qmd_path: str
@@ -149,6 +163,10 @@ def find_html(name: str, volume: str, qmd_path: Path) -> Path | None:
 
 
 def scan_html(html: str) -> list[Leak]:
+    """Return the ``LEAK_PATTERNS`` hits in the visible text of ``html``.
+
+    Stops once more than 200 leaks have been collected.
+    """
     text = visible_text_from_html(html)
 
     leaks: list[Leak] = []
@@ -164,6 +182,12 @@ def scan_html(html: str) -> list[Leak]:
 
 
 def audit_chapter(name: str, volume: str, qmd_path: Path, skip_build: bool) -> ChapterReport:
+    """Build (unless ``skip_build``), locate, and scan one chapter's rendered HTML.
+
+    A build timeout, build failure, missing HTML file, or read error is recorded
+    in ``error`` and ends the chapter early; only build problems clear
+    ``build_ok``.
+    """
     rep = ChapterReport(
         name=name,
         volume=volume,
@@ -199,6 +223,13 @@ def audit_chapter(name: str, volume: str, qmd_path: Path, skip_build: bool) -> C
 
 
 def main():
+    """Audit the selected chapters and write the JSON and Markdown reports.
+
+    Positional tokens match ``vol/<chapter>`` or a bare chapter stem; with none,
+    every chapter is audited. An exception while auditing a chapter is recorded
+    as a build failure and the run continues. Exits 1 when any chapter leaked or
+    failed to build; other errors, such as missing HTML, leave the exit code 0.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("chapters", nargs="*", help="vol1/<chap> tokens to audit; default = all")
     ap.add_argument("--skip-build", action="store_true", help="reuse existing _build HTML")

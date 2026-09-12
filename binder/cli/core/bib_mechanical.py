@@ -23,6 +23,8 @@ from cli.checks.bib_lint import (  # noqa: E402
 
 @dataclass(frozen=True)
 class MechanicalFileResult:
+    """Outcome for one .bib file; ``error`` is set when the file could not be read."""
+
     path: Path
     changed: bool
     error: str | None = None
@@ -50,6 +52,7 @@ def _project_root(start: Path) -> Path:
 
 
 def _abbrev_pairs() -> list[tuple[re.Pattern[str], str]]:
+    """Compile the lint's journal-abbreviation patterns, except ``Phys`` ones using ``[A-Z]``."""
     out: list[tuple[re.Pattern[str], str]] = []
     for pattern, replacement in JOURNAL_ABBREV_PATTERNS:
         if "Phys" in pattern and r"[A-Z]" in pattern:
@@ -68,6 +71,7 @@ _TITLE_U_S = re.compile(r"\.[A-Z]\.$")
 
 
 def fix_doi(value: str) -> str:
+    """Strip whitespace and a leading ``doi.org`` or ``dx.doi.org`` URL prefix from a DOI."""
     text = (value or "").strip()
     for prefix in (
         "https://doi.org/",
@@ -82,6 +86,12 @@ def fix_doi(value: str) -> str:
 
 
 def fix_title(value: str) -> str:
+    """Drop one trailing period from a title.
+
+    Returns the original value unchanged when there is no trailing period, the
+    title ends in an ellipsis, or the period belongs to a known abbreviation
+    (``Inc.``, ``e.g.``, ``U.S.``, and similar).
+    """
     title = (value or "").rstrip()
     if not title.endswith(".") or title.endswith("..."):
         return value
@@ -91,6 +101,7 @@ def fix_title(value: str) -> str:
 
 
 def fix_pages(value: str) -> str:
+    """Remove a ``p.``/``pp.`` prefix and turn a single-hyphen range into a ``--`` range."""
     text = (value or "").strip()
     text = re.sub(r"^(?:p|pp)\.\s*", "", text, flags=re.IGNORECASE)
     if (
@@ -104,6 +115,7 @@ def fix_pages(value: str) -> str:
 
 
 def fix_journal(value: str) -> str:
+    """Apply every matching journal-abbreviation replacement to a journal name."""
     text = value or ""
     for pattern, replacement in _ABBREV:
         if pattern.search(text):
@@ -112,6 +124,7 @@ def fix_journal(value: str) -> str:
 
 
 def _fix_year_field(field: Field) -> None:
+    """Strip a four-digit ``year`` value in place and switch its quote style to braces."""
     if field.name.lower() != "year":
         return
     text = field.value.strip()
@@ -121,6 +134,11 @@ def _fix_year_field(field: Field) -> None:
 
 
 def _apply_to_entry_fields(entry) -> int:
+    """Apply the DOI, title, pages, journal, and year fixes in place.
+
+    Returns the number of fields whose value changed; a year quote-style change
+    alone is not counted.
+    """
     changed = 0
     for field in entry.fields:
         name = field.name.lower()
@@ -180,6 +198,7 @@ def apply_mechanical_fixes_to_file(
 
 
 def _resolve_explicit_file(path: Path, repo: Path) -> Path:
+    """Resolve a user-supplied path: absolute as-is, else cwd if it exists, else repo-relative."""
     if path.is_absolute():
         return path.resolve()
     cwd_candidate = (Path.cwd() / path).resolve()

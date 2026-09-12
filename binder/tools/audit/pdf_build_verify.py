@@ -19,6 +19,12 @@ BOOK_DIR = REPO_ROOT  / "books"
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Verify one built volume PDF and print a failure report for any issues found.
+
+    The target is ``--pdf``, else ``--vol1``, else ``--vol2``; giving none is a
+    usage error. ``--log`` adds a Quarto render log to the scan and ``--quiet``
+    suppresses the success line. Returns 0 when no issues were found, else 1.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Verify a built volume PDF for render defects.")

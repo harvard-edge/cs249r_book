@@ -154,12 +154,14 @@ _EXEMPT_PATH_FRAGMENTS = (
 
 
 def _is_path_exempt(file_path: Path) -> bool:
+    """Return True for frontmatter, backmatter, parts, glossary, or appendix paths."""
     posix = file_path.as_posix()
     return any(frag in posix for frag in _EXEMPT_PATH_FRAGMENTS)
 
 
 def _heading_level(line: str) -> int | None:
-    m = _HEADING_RE.match(line)
+    """Return the ATX heading level (1-6) of the line, or None if it is not a heading."""
+    m =_HEADING_RE.match(line)
     if not m:
         return None
     return len(m.group(1))

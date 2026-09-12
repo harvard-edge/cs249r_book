@@ -59,7 +59,12 @@ HARDWARE_MAP = {
 }
 
 def load_map_constants() -> dict[str, str]:
-    spec = importlib.util.spec_from_file_location("map_constants", MAP_PATH)
+    """Return the ``mapping`` dict defined in ``scripts/map_constants.py``.
+
+    The file is loaded by path without an existence check, so a missing file
+    raises ``FileNotFoundError``.
+    """
+    spec =importlib.util.spec_from_file_location("map_constants", MAP_PATH)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -147,6 +152,12 @@ TRAINING_MAP = {
 }
 
 def merged_mapping() -> dict[str, str]:
+    """Return the combined symbol-to-registry mapping, built once and cached.
+
+    Entries from ``map_constants.py`` are overridden, in order, by the
+    interconnect, hardware, defaults, datasets, and training maps. Keys are
+    ordered from longest to shortest.
+    """
     global _MAPPING_CACHE
     if _MAPPING_CACHE is None:
         out = {**load_map_constants(), **INTERCONNECT_MAP, **HARDWARE_MAP, **DEFAULTS_MAP, **DATASETS_MAP, **TRAINING_MAP}
@@ -154,6 +165,12 @@ def merged_mapping() -> dict[str, str]:
     return _MAPPING_CACHE
 
 def substitute_cell(cell: str, mapping: dict[str, str]) -> tuple[str, list[str]]:
+    """Replace legacy symbols in one cell body with their registry expressions.
+
+    For each symbol, ``constants.<SYM>`` references are rewritten when present;
+    otherwise bare ``SYM`` tokens not preceded by a dot or word character are.
+    Returns the new text and the symbols that were replaced.
+    """
     replaced: list[str] = []
     out = cell
     for sym, target in mapping.items():
@@ -169,6 +186,13 @@ def substitute_cell(cell: str, mapping: dict[str, str]) -> tuple[str, list[str]]
     return out, replaced
 
 def ensure_registry_imports(cell: str) -> str:
+    """Add ``from mlsysim import *`` to a cell that uses a registry root without importing it.
+
+    Triggers on ``Hardware.``, ``Systems.``, ``Models.`` or ``Datasets.`` usage.
+    The import is inserted after the last ``#|``, ``# `` or ``#┌`` header line
+    that precedes the first code line. Cells that already contain the star
+    import are returned unchanged.
+    """
     needs_hardware = "Hardware." in cell and "import Hardware" not in cell and "from mlsysim import *" not in cell
     needs_systems = "Systems." in cell and "import Systems" not in cell and "from mlsysim import *" not in cell
     needs_models = "Models." in cell and "import Models" not in cell and "from mlsysim import *" not in cell
@@ -189,6 +213,13 @@ def ensure_registry_imports(cell: str) -> str:
     return "\n".join(lines[:insert_at] + prefix + lines[insert_at:])
 
 def migrate_file(path: Path, mapping: dict[str, str], dry_run: bool) -> dict:
+    """Rewrite every ``{python}`` cell in a QMD file through ``mapping``.
+
+    Returns the cell count, the number of cells with replacements, and the
+    sorted replaced symbols. The import fix-up runs on every cell, so a cell can
+    gain an import without being counted as changed. The file is written only
+    when the text changed and ``dry_run`` is false.
+    """
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     out_lines: list[str] = []
@@ -221,7 +252,11 @@ def migrate_file(path: Path, mapping: dict[str, str], dry_run: bool) -> dict:
     return stats
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    """Migrate one QMD file and print the symbols replaced; returns 0.
+
+    A relative path is resolved against the repo root.
+    """
+    parser =argparse.ArgumentParser(description=__doc__)
     parser.add_argument("qmd", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

@@ -36,6 +36,7 @@ RATE_SUFFIX_GROUPS = {
 
 
 def _call_name(node: ast.AST) -> str | None:
+    """Return the called name (bare or attribute) if *node* is a call, else None."""
     if isinstance(node, ast.Call):
         func = node.func
         if isinstance(func, ast.Name):
@@ -46,6 +47,7 @@ def _call_name(node: ast.AST) -> str | None:
 
 
 def _classes(tree: ast.AST) -> list[tuple[str, int, int]]:
+    """Return ``(name, start_line, end_line)`` for every class in *tree*, nested included."""
     out = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
@@ -54,6 +56,7 @@ def _classes(tree: ast.AST) -> list[tuple[str, int, int]]:
 
 
 def _qualifier(classes: list[tuple[str, int, int]], lineno: int) -> str:
+    """Return ``"Class."`` for the innermost class spanning *lineno*, or ``""``."""
     best = None
     for name, start, end in classes:
         if start <= lineno <= end and (best is None or start > best[1]):
@@ -62,6 +65,7 @@ def _qualifier(classes: list[tuple[str, int, int]], lineno: int) -> str:
 
 
 def _target_names(node: ast.AST) -> list[str]:
+    """Return simple and attribute target names of an assignment; other targets are ignored."""
     targets = []
     if isinstance(node, ast.Assign):
         targets = list(node.targets)
@@ -84,6 +88,7 @@ def _has_mult_token(name: str) -> bool:
 
 
 def _line(lines: list[str], lineno: int) -> str:
+    """Return the stripped 1-based source line, or ``""`` when out of range."""
     if 1 <= lineno <= len(lines):
         return lines[lineno - 1].strip()
     return ""
@@ -101,6 +106,17 @@ def _inline_math_context(line: str, pos: int) -> bool:
 
 
 def _scan_python(qmd: Path, *, include_context: bool) -> tuple[list[dict], list[dict]]:
+    """Collect multiplier and rate-name exports from one chapter's python cells.
+
+    Considers every assignment whose value is a direct call. Each target becomes
+    a record (file line, name, class-qualified name, called function). Records
+    whose call is ``fmt_multiple``/``fmt_multiple_range`` go into the multiplier
+    list with a ``has_mult_token`` flag; ``*_str`` names matching a
+    ``RATE_SUFFIX_GROUPS`` pattern go into the rate list once per matching
+    group, whatever function was called. Cells that fail to parse are skipped.
+
+    Returns ``(mult_exports, rate_exports)``.
+    """
     text = qmd.read_text(encoding="utf-8", errors="replace")
     raw_lines = text.splitlines()
     mult_exports: list[dict] = []
@@ -145,6 +161,14 @@ def _scan_python(qmd: Path, *, include_context: bool) -> tuple[list[dict], list[
 def _scan_refs(
     qmd: Path, mult_by_qualified: set[str], *, include_context: bool
 ) -> list[dict]:
+    """Collect prose refs to multiplier exports in one chapter.
+
+    Scans lines outside python cells for inline refs whose text is in
+    *mult_by_qualified*. Each record notes whether a compact times token
+    (``$\\times$``, ``\\times``, ``×``, or ``x``) follows within 36 characters and
+    whether the ref sits in display math (tracked across lines by ``$$``
+    markers), inline math (best effort, same line only), or neither.
+    """
     text = qmd.read_text(encoding="utf-8", errors="replace")
     refs: list[dict] = []
     in_cell = False
@@ -194,6 +218,13 @@ def _scan_refs(
 
 
 def inventory(root: Path, *, include_context: bool = False) -> dict:
+    """Build the full inventory for every ``.qmd`` under *root*.
+
+    Exports are gathered from all chapters first, and prose refs are then
+    matched against the union of multiplier export names across the corpus.
+    Returns a dict with ``root``, a ``summary`` of counts, and the
+    ``mult_exports``, ``mult_refs``, and ``rate_exports`` record lists.
+    """
     qmds = sorted(root.rglob("*.qmd"))
     mult_exports: list[dict] = []
     rate_exports: list[dict] = []
@@ -239,6 +270,7 @@ def inventory(root: Path, *, include_context: bool = False) -> dict:
 
 
 def main() -> int:
+    """Print the inventory summary as JSON and optionally write the full payload to ``--json``."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("books"))
     parser.add_argument("--json", type=Path)

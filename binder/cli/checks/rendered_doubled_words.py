@@ -72,6 +72,16 @@ def check_file(path: Path) -> list[tuple[int, str, str]]:
 
 
 def main() -> int:
+    """Scan QMD files for doubled words after inline substitution.
+
+    Positional paths may be files or directories (relative paths resolve
+    against the repository root); with none, every ``.qmd`` under ``books/``
+    is scanned. Files without a ``{python}`` cell are skipped. Hits are
+    printed per file.
+
+    Returns:
+        1 if any file has a doubled word, otherwise 0.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("paths", nargs="*", help="QMD file(s) or directories")
     args = ap.parse_args()

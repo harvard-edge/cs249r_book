@@ -31,10 +31,12 @@ BROKEN_XREF_RE = re.compile(r"\?\?+|\b(?:Figure|Table|Section|Equation)\s+\?\?+"
 
 
 def have(cmd: str) -> bool:
+    """Return True if ``cmd`` is on ``PATH``."""
     return shutil.which(cmd) is not None
 
 
 def run(cmd, **kw) -> subprocess.CompletedProcess:
+    """Run ``cmd`` capturing text output, without raising on a nonzero exit."""
     return subprocess.run(
         cmd,
         check=False,
@@ -45,6 +47,7 @@ def run(cmd, **kw) -> subprocess.CompletedProcess:
 
 
 def pdf_page_count(pdf: Path) -> int:
+    """Return the page count from ``mutool info``, else ``pdfinfo``; -1 if neither reports one."""
     if have("mutool"):
         cp = run(["mutool", "info", str(pdf)])
         m = re.search(r"Pages:\s*(\d+)", cp.stdout)
@@ -59,6 +62,7 @@ def pdf_page_count(pdf: Path) -> int:
 
 
 def pdf_text(pdf: Path) -> str:
+    """Return the ``pdftotext -layout`` text of ``pdf`` via a temp file, or ``""`` when the tool is missing."""
     if have("pdftotext"):
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
             out_txt = Path(tmp.name)
@@ -71,6 +75,7 @@ def pdf_text(pdf: Path) -> str:
 
 
 def pdf_image_count(pdf: Path) -> int:
+    """Return the number of images listed by ``pdfimages -list``, or -1 if the tool is missing or fails."""
     if not have("pdfimages"):
         return -1
     cp = run(["pdfimages", "-list", str(pdf)])
@@ -82,6 +87,7 @@ def pdf_image_count(pdf: Path) -> int:
 
 
 def pdf_has_toc(pdf: Path, text: str) -> bool:
+    """Return True if ``mutool`` reports a non-empty outline or the first 8000 characters of ``text`` mention Contents."""
     if have("mutool"):
         cp = run(["mutool", "show", str(pdf), "outline"])
         if cp.returncode == 0 and cp.stdout.strip():
@@ -90,6 +96,13 @@ def pdf_has_toc(pdf: Path, text: str) -> bool:
 
 
 def main() -> int:
+    """Measure one PDF, append the record as a JSON line to ``--out``, and print it.
+
+    ``ok`` requires zero broken cross-references and raw ref/cite leaks, a
+    table of contents, and (when both counts are known) at least half as many
+    PDF images as QMD figures. Returns 2 if the PDF is missing, otherwise 0
+    even when ``ok`` is false.
+    """
     p = argparse.ArgumentParser()
     p.add_argument("--vol", required=True, choices=["vol1", "vol2"])
     p.add_argument("--pdf", required=True)

@@ -38,6 +38,10 @@ ABS_TOL = 0.05
 
 
 def _exec_python_cells(lines: list[str]) -> dict:
+    """Execute every ``{python}`` cell in order in one shared namespace and return it.
+
+    Exceptions raised by a cell propagate to the caller.
+    """
     ns = make_exec_namespace()
     in_cell = False
     buf: list[str] = []
@@ -56,6 +60,10 @@ def _exec_python_cells(lines: list[str]) -> dict:
 
 
 def _resolve_ref(ref: str, ns: dict) -> str:
+    """Resolve a dotted inline ref against the namespace and return it as a string.
+
+    Raises KeyError or AttributeError when the ref does not resolve.
+    """
     parts = ref.split(".")
     obj = ns[parts[0]]
     for part in parts[1:]:
@@ -81,6 +89,13 @@ def _resolve_number(ref: str, ns: dict) -> float | None:
 
 
 def _parse_numeric(text: str) -> float | None:
+    """Parse a number from a formatted display string.
+
+    Strips leading tildes, dollar signs, thousands separators, one trailing
+    unit word (ms, GB, hours, tokens, ...), a trailing ``x``, and ``%``, then
+    falls back to the first numeric run. Returns None for empty or
+    ``<MISSING`` values or when no number is found.
+    """
     s = text.strip()
     s = re.sub(r"^~+", "", s)
     s = re.sub(r"^\$|\\?\$", "", s)
@@ -119,6 +134,13 @@ def _ratio_scale(a_ref: str, b_ref: str, c_ref: str) -> float:
 
 
 def _find_div_equations(line: str) -> list[tuple[str, str, str]]:
+    """Return ``(A, B, C)`` ref triples written as ``A / B = C`` on one line.
+
+    Considers each run of three consecutive inline refs and requires a ``/``
+    between the first two and an ``=`` between the last two. Note that the
+    "no ref in between" filter also counts the middle ref ``B``, so every
+    candidate is currently skipped and the result is always empty.
+    """
     refs = list(PY_REF.finditer(line))
     if len(refs) < 3:
         return []
@@ -137,6 +159,7 @@ def _find_div_equations(line: str) -> list[tuple[str, str, str]]:
 
 
 def _approx_equal(a: float, b: float) -> bool:
+    """Return True when values differ by at most ``ABS_TOL`` or ``REL_TOL`` of the larger magnitude (floored at 1)."""
     if a == b:
         return True
     scale = max(abs(a), abs(b), 1.0)
@@ -144,6 +167,14 @@ def _approx_equal(a: float, b: float) -> bool:
 
 
 def check_file(path: Path) -> list[tuple[int, str, list[str]]]:
+    """Check one QMD file's ``A / B = C`` prose equations against executed cell values.
+
+    Returns ``(line, snippet, messages)`` tuples. Cells are executed only when
+    some line contains an equation; if execution raises, a single issue at
+    line 0 is returned. Lines inside Python cells, other code fences, or
+    carrying a ``<!-- lego-ok`` marker are skipped. Reports unresolved refs,
+    non-numeric operands, division by zero, and quotients outside tolerance.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     # Most chapters contain no A/B=C prose contract. Avoid executing every
     # notebook cell (and importing unrelated plotting/data dependencies) when
@@ -221,6 +252,12 @@ def check_file(path: Path) -> list[tuple[int, str, list[str]]]:
 
 
 def main() -> int:
+    """Command-line entry point.
+
+    Checks the given QMD files or directories (all of ``books/`` by default),
+    prints issues grouped by file, and returns 1 if any file has issues,
+    otherwise 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path, help="QMD files (default: all contents)")
     args = parser.parse_args()

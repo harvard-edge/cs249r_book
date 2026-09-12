@@ -12,11 +12,21 @@ MLSYSIM = (REPO / "mlsysim").resolve()
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> int:
+    """Echo ``cmd`` with a ``+`` prefix and run it, returning its exit code.
+
+    ``cwd`` defaults to the repo root.
+    """
     print("+", " ".join(cmd), flush=True)
     return subprocess.call(cmd, cwd=cwd or REPO)
 
 
 def main() -> int:
+    """Run every registry-migration gate in sequence and return 1 if any failed.
+
+    Gates: the book registry-sources check, appendix LEGO cell verification,
+    the strict mlsysim provenance audit, and the migration pytest files (run
+    from the ``mlsysim`` directory). Later gates still run after a failure.
+    """
     steps: list[tuple[str, list[str], Path | None]] = [
         ("book registry sources", [sys.executable, "binder/tools/audit/book_check_registry_sources.py"], REPO),
         ("appendix LEGO cells", [sys.executable, "binder/tools/audit/generate_appendix_constants.py", "--verify"], REPO),

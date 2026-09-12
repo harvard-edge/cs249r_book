@@ -34,7 +34,8 @@ DROP_ATTR = re.compile(
 
 
 def strip_chrome(doc: str) -> str:
-    doc = DROP_BLOCK.sub(" ", doc)
+    """Drop script, style, head, nav, and footer blocks, then keep only ``<main>`` when present."""
+    doc =DROP_BLOCK.sub(" ", doc)
     # keep it simple: remove obvious nav containers by cutting to <main> if present
     m = re.search(r"<main\b.*?</main>", doc, re.S | re.I)
     if m:
@@ -62,7 +63,14 @@ HEADING = re.compile(r"<(h[1-6])\b[^>]*>(.*?)</\1>", re.S | re.I)
 
 
 def to_text(doc: str) -> str:
-    doc = mathml_to_tex(doc)
+    """Flatten chapter HTML to plain text.
+
+    Math spans are reduced to their source, headings become ``@@H<n>@@`` marker
+    lines, table cells are joined with `` | ``, block ends and ``<br>`` become
+    newlines, remaining tags are removed, entities are unescaped, and runs of
+    whitespace and blank lines are collapsed.
+    """
+    doc =mathml_to_tex(doc)
     # mark headings so the outline survives flattening
     doc = HEADING.sub(
         lambda m: f"\n\n@@H{m.group(1)[1]}@@ " + re.sub(r"<[^>]+>", "", m.group(2)).strip() + "\n",
@@ -79,6 +87,11 @@ def to_text(doc: str) -> str:
 
 
 def split_sections(text: str) -> list[tuple[str, str]]:
+    """Split flattened text into ``(title, body)`` sections at H1-H3 markers.
+
+    Text before the first such heading is titled ``(front)``, and H4-H6 markers
+    inside a body are rewritten as Markdown ``#`` headings.
+    """
     parts: list[tuple[str, str]] = []
     cur_title, buf = "(front)", []
     for line in text.splitlines():
@@ -95,7 +108,13 @@ def split_sections(text: str) -> list[tuple[str, str]]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    """Print the reader view of one built HTML file.
+
+    Prints every section by default, the outline with ``--list``, or a single
+    section with ``--section``. Returns 1 when the section index is out of
+    range, else 0.
+    """
+    ap =argparse.ArgumentParser()
     ap.add_argument("path")
     ap.add_argument("--section", type=int)
     ap.add_argument("--list", action="store_true")

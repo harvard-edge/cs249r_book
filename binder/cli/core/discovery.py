@@ -144,6 +144,7 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
         return []
 
     def _is_testable(path_str: str) -> bool:
+        """Return True unless the path's stem is in ``SKIP_STEMS``."""
         return Path(path_str).stem not in SKIP_STEMS
 
     # --- YAML-aware path (preferred) ---
@@ -205,6 +206,7 @@ class AmbiguousChapterError(Exception):
     """Raised when a query identifies more than one chapter."""
 
     def __init__(self, chapter_name: str, locations: List[str]):
+        """Record the query and its candidate locations and build the error message."""
         self.chapter_name = chapter_name
         self.locations = locations
         super().__init__(
@@ -219,7 +221,7 @@ class ChapterDiscovery:
         """Initialize chapter discovery.
 
         Args:
-            book_dir: Path to the book directory (usually 'quarto')
+            book_dir: Path to the book directory (``books/``)
         """
         self.book_dir = Path(book_dir)
         self.contents_dir = self.book_dir
@@ -232,8 +234,8 @@ class ChapterDiscovery:
         """Return the ordered list of testable chapter stems for a volume.
 
         Delegates to the module-level ``get_chapters_from_config`` function so
-        that all CLI commands share a single implementation.  Call this instead
-        of ``get_volume_chapters`` whenever the canonical build order matters.
+        that all CLI commands share a single implementation. Use it whenever
+        the canonical build order matters.
 
         Args:
             volume: Volume name (e.g. ``"vol1"``, ``"vol2"``, etc.).
@@ -344,7 +346,8 @@ class ChapterDiscovery:
             candidates.extend(sorted(shared_dir.rglob("*.qmd")))
 
         def choose(matches):
-            matches = list(dict.fromkeys(matches))
+            """Return the single distinct match or None; raise AmbiguousChapterError for several."""
+            matches =list(dict.fromkeys(matches))
             if len(matches) > 1:
                 raise AmbiguousChapterError(chapter_spec, [
                     p.relative_to(self.contents_dir).as_posix().removesuffix(".qmd")
@@ -437,18 +440,6 @@ class ChapterDiscovery:
         # Sort by path for consistent ordering
         chapters.sort(key=lambda x: str(x["relative_path"]))
         return chapters
-
-    def get_volume_chapters(self, volume: str) -> List[Path]:
-        """Get all chapter file paths for a specific volume.
-
-        Args:
-            volume: Volume to get chapters for (e.g., 'vol1', 'vol2', 'vol4')
-
-        Returns:
-            List of chapter file paths
-        """
-        chapters = self.get_all_chapters(volume=volume)
-        return [ch["path"] for ch in chapters]
 
     def show_chapters(self, volume: Optional[str] = None) -> None:
         """Display available chapters in a formatted table.
@@ -557,6 +548,7 @@ class ChapterDiscovery:
         seen = set()
 
         def _append(spec: str) -> None:
+            """Add *spec* to the expanded list unless it is already present."""
             if spec not in seen:
                 expanded.append(spec)
                 seen.add(spec)
@@ -597,43 +589,3 @@ class ChapterDiscovery:
                 _append(spec)
 
         return expanded
-
-    def get_chapter_dependencies(self, chapter_file: Path) -> List[Path]:
-        """Get dependencies for a chapter (images, includes, etc.).
-
-        Args:
-            chapter_file: Path to the chapter file
-
-        Returns:
-            List of dependency file paths
-        """
-        dependencies = []
-
-        if not chapter_file.exists():
-            return dependencies
-
-        try:
-            content = chapter_file.read_text(encoding='utf-8')
-
-            # Find image references
-            image_pattern = r'!\[.*?\]\((.*?)\)'
-            for match in re.finditer(image_pattern, content):
-                image_path = match.group(1)
-                if not image_path.startswith('http'):
-                    # Resolve relative to chapter file
-                    full_path = (chapter_file.parent / image_path).resolve()
-                    if full_path.exists():
-                        dependencies.append(full_path)
-
-            # Find include references
-            include_pattern = r'{{< include (.*?) >}}'
-            for match in re.finditer(include_pattern, content):
-                include_path = match.group(1)
-                full_path = (chapter_file.parent / include_path).resolve()
-                if full_path.exists():
-                    dependencies.append(full_path)
-
-        except Exception as e:
-            console.print(f"[yellow]⚠️  Error reading chapter dependencies: {e}[/yellow]")
-
-        return dependencies

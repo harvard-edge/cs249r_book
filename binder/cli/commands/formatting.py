@@ -44,6 +44,7 @@ class FormatCommand:
     TARGETS = ["blanks", "python", "lists", "divs", "percent-tables", "mitpress-terms", "tables", "prettify", "all"]
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store the shared config manager and chapter discovery helpers."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
 
@@ -122,6 +123,7 @@ class FormatCommand:
     # ------------------------------------------------------------------
 
     def _print_help(self) -> None:
+        """Print the format targets and usage examples."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Target", style="cyan", width=12)
         table.add_column("Description", style="white", width=45)
@@ -154,6 +156,12 @@ class FormatCommand:
     # ------------------------------------------------------------------
 
     def _run_all(self, files: List[str], check_only: bool) -> bool:
+        """Run every formatter in a fixed order and print a summary table.
+
+        All formatters run even after one reports changes, and
+        ``--include-display`` is not forwarded to the Python formatter. Returns
+        True only when every formatter reports its files clean.
+        """
         results = []
         for target in ("blanks", "lists", "divs", "python", "percent-tables", "mitpress-terms", "tables", "prettify"):
             dispatch = {

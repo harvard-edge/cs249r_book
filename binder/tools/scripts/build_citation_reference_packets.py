@@ -17,6 +17,7 @@ from typing import Any
 
 
 def find_repo_root() -> Path:
+    """Return the nearest ancestor of this file that contains ``books``; raise ``RuntimeError`` if none does."""
     for parent in Path(__file__).resolve().parents:
         if (parent  / "books").exists():
             return parent
@@ -139,10 +140,12 @@ FIELDS_TO_SUMMARIZE = (
 
 
 def rel(path: Path) -> str:
+    """Return ``path`` as a POSIX path relative to the repo root; raise ``ValueError`` outside it."""
     return path.relative_to(ROOT).as_posix()
 
 
 def display_path(path: Path) -> str:
+    """Return ``path`` relative to the repo root when possible, otherwise its POSIX form unchanged."""
     try:
         return path.relative_to(ROOT).as_posix()
     except ValueError:
@@ -150,6 +153,7 @@ def display_path(path: Path) -> str:
 
 
 def find_scope(rel_path: str) -> dict[str, Any] | None:
+    """Return the first ``SCOPES`` entry with a path prefix matching ``rel_path``, or None."""
     for scope in SCOPES:
         if any(rel_path.startswith(prefix) for prefix in scope["paths"]):
             return scope
@@ -157,6 +161,12 @@ def find_scope(rel_path: str) -> dict[str, Any] | None:
 
 
 def discover_qmds(all_qmd: bool) -> list[Path]:
+    """Return the sorted ``.qmd`` files to scan.
+
+    Build, vendor, and cache directories (``EXCLUDE_PARTS``) and ``_shelved*``
+    files are skipped. With ``all_qmd`` the whole repo is walked; otherwise
+    only files under ``QMD_ROOTS`` that fall inside a ``SCOPES`` entry count.
+    """
     roots = [ROOT] if all_qmd else [ROOT / root for root in QMD_ROOTS]
     files: list[Path] = []
     for root in roots:
@@ -174,12 +184,19 @@ def discover_qmds(all_qmd: bool) -> list[Path]:
 
 
 def strip_inline_protected(line: str) -> str:
+    """Remove inline code spans and single-line HTML comments so their ``@`` tokens are not read as citations."""
     line = re.sub(r"`[^`]*`", "", line)
     line = re.sub(r"<!--.*?-->", "", line)
     return line
 
 
 def should_skip_key(key: str) -> bool:
+    """Return True for ``@`` tokens that are not citekeys.
+
+    Skips empty keys, cross-reference labels (``NON_CITE_PREFIXES``), known
+    CSS at-rule and Python decorator words, capital initials, and
+    version-like numbers.
+    """
     key = key.rstrip(".,;:)")
     lower_key = key.lower()
     return (
@@ -192,6 +209,7 @@ def should_skip_key(key: str) -> bool:
 
 
 def paragraph_at(lines: list[str], line_no: int, max_chars: int) -> str:
+    """Return the blank-line-delimited paragraph around 1-based ``line_no``, joined onto one line and cut to ``max_chars``."""
     idx = max(0, min(line_no - 1, len(lines) - 1))
     start = idx
     while start > 0 and lines[start - 1].strip():
@@ -204,6 +222,14 @@ def paragraph_at(lines: list[str], line_no: int, max_chars: int) -> str:
 
 
 def citation_occurrences(path: Path, max_context_chars: int) -> list[dict[str, Any]]:
+    """Return one record per ``@key`` citation found in a QMD file.
+
+    YAML front matter, HTML comments, ``<style>``/``<script>`` blocks, fenced
+    code, inline code, and tokens rejected by ``should_skip_key`` are skipped.
+    Each record carries an ``occurrence_id``, the key, the 1-based line and
+    column (the column is measured after inline code is removed), the
+    stripped line text, and the enclosing paragraph as ``context``.
+    """
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
     occurrences: list[dict[str, Any]] = []
@@ -267,6 +293,12 @@ def citation_occurrences(path: Path, max_context_chars: int) -> list[dict[str, A
 
 
 def extract_bib_value(entry_text: str, field: str) -> str | None:
+    """Return one field's value from raw BibTeX entry text, or None.
+
+    Handles brace-delimited (including nested) and double-quoted values,
+    collapses whitespace, and strips all braces. Bare values such as
+    ``year = 2020`` are not matched and return None.
+    """
     match = re.search(rf"(?im)^\s*{re.escape(field)}\s*=\s*([{{\"])", entry_text)
     if not match:
         return None
@@ -302,6 +334,12 @@ def extract_bib_value(entry_text: str, field: str) -> str | None:
 
 
 def parse_bib_entries(bib_paths: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """Index the entries of repo-relative ``.bib`` files by citekey.
+
+    Missing files are skipped. A key maps to every entry defining it (across
+    files), each a dict with the entry type, defining file, the
+    ``FIELDS_TO_SUMMARIZE`` values that were found, and the raw BibTeX.
+    """
     by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for bib_rel in bib_paths:
         bib_path = ROOT / bib_rel
@@ -332,15 +370,29 @@ def parse_bib_entries(bib_paths: list[str]) -> dict[str, list[dict[str, Any]]]:
 
 
 def slug(value: str) -> str:
+    """Turn a unit id into a file-name stem: trim slashes, ``/`` becomes ``__``, ``.`` becomes ``_``."""
     return value.strip("/").replace("/", "__").replace(".", "_")
 
 
 def qmd_packet_name(rel_path: str) -> str:
+    """Return the packet file name for one QMD path, with ``/`` replaced by ``__``."""
     name = rel_path.removesuffix(".qmd").replace("/", "__")
     return f"{name}.citation-packet.json"
 
 
 def audit_unit_for_path(rel_path: str, granularity: str) -> dict[str, str]:
+    """Map a repo-relative QMD path to the audit unit its citations are grouped under.
+
+    At ``qmd`` granularity every file is its own unit. Otherwise files in a
+    ``books/vol1`` or ``books/vol2`` chapter directory group by chapter;
+    their frontmatter, backmatter, and parts files become per-file sections
+    (a backmatter subdirectory counts as one section, and ``_``-prefixed
+    files are filed under ``includes/``); ``books/shared`` front and back
+    matter group by first child; anything else is a per-file unit.
+
+    Returns:
+        A dict with ``id``, ``label``, ``root``, and ``kind``.
+    """
     if granularity == "qmd":
         unit_id = rel_path.removesuffix(".qmd")
         return {
@@ -399,12 +451,23 @@ def audit_unit_for_path(rel_path: str, granularity: str) -> dict[str, str]:
 
 
 def packet_name_for_unit(unit: dict[str, str], granularity: str) -> str:
+    """Return a unit's packet file name: per-QMD naming at ``qmd`` granularity, else the slugged unit id."""
     if granularity == "qmd":
         return qmd_packet_name(unit["root"])
     return f"{slug(unit['id'])}.citation-packet.json"
 
 
 def build_packets(out_dir: Path, *, all_qmd: bool, granularity: str, max_context_chars: int) -> dict[str, Any]:
+    """Write one citation packet JSON per audit unit and return the run summary.
+
+    Existing ``*.citation-packet.json`` files in ``out_dir/packets`` are
+    deleted first. Each occurrence is annotated with its scope, allowed
+    bibliographies, and matching BibTeX entries (entries from the scope's
+    bibliographies are preferred, any definition is the fallback, and the
+    status is ``missing`` when none exists). Units without citations get no
+    packet. Also writes ``summary.json`` and ``agent_manifest.md`` into
+    ``out_dir``.
+    """
     all_bibs = sorted({bib for scope in SCOPES for bib in scope["bibs"]})
     bib_entries = parse_bib_entries(all_bibs)
     packet_dir = out_dir / "packets"
@@ -526,6 +589,7 @@ def build_packets(out_dir: Path, *, all_qmd: bool, granularity: str, max_context
 
 
 def write_agent_manifest(out_dir: Path, summary: dict[str, Any]) -> None:
+    """Write ``agent_manifest.md`` to ``out_dir``: fixed reviewer instructions and finding schema, then one bullet per packet."""
     lines = [
         "# Citation Reference Audit Agent Manifest",
         "",
@@ -584,6 +648,7 @@ def write_agent_manifest(out_dir: Path, summary: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    """Build packets under ``--out-dir`` (relative paths resolve against the repo root), print a summary line, and return 0."""
     parser = argparse.ArgumentParser(description="Build citation-reference validation packets.")
     parser.add_argument(
         "--out-dir",

@@ -200,12 +200,19 @@ _TESTS = [
 
 
 def _self_test() -> int:
+    """Run the single-line `_TESTS` cases and compare hit counts.
+
+    Replays the matching logic of `check` against a fresh `LineState`
+    (not the `LineWalker`), prints a pass/fail summary, and returns 0 when
+    every case matches its expected count, 1 otherwise.
+    """
     from audit.protected_contexts import LineState
 
     state = LineState()
     pos_fail: list[str] = []
 
     def count_hits(line: str) -> int:
+        """Count the capitalized concept terms `check` would flag in one line's alt-text."""
         if _skip_line_for_alt(line, state):
             return 0
         hits = 0

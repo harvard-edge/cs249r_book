@@ -59,6 +59,8 @@ CONFIG_REL = ".pre-commit-config.yaml"
 
 @dataclass(frozen=True)
 class Violation:
+    """One pre-commit hook that violates the Binder front-door rule."""
+
     file: str
     line: int
     code: str
@@ -77,10 +79,12 @@ def _hook_line(raw_lines: List[str], hook_id: str) -> int:
 
 
 def _targets_book_content(files_pattern: str) -> bool:
+    """Return True if a hook's ``files:`` pattern mentions the book content marker."""
     return BOOK_CONTENT_MARKER in (files_pattern or "")
 
 
 def _dispatches_through_binder(entry: str) -> bool:
+    """Return True if a hook's ``entry:`` starts with the ``binder`` launcher path."""
     return bool(BINDER_ENTRY_RE.match((entry or "").strip()))
 
 

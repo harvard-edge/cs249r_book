@@ -309,6 +309,11 @@ _TESTS = [
 
 
 def _self_test() -> int:
+    """Run `check` on each `_TESTS` BibTeX snippet and compare issue counts.
+
+    Prints a pass/fail summary and returns 0 when every case matches its
+    expected count, 1 otherwise.
+    """
     passed = 0
     failed = 0
     failures: list[str] = []
@@ -317,10 +322,12 @@ def _self_test() -> int:
         """Pretend to be a Path so `check` accepts us; pose as .bib."""
 
         def __init__(self, name: str):
+            """Record the test-case name and report a `.bib` suffix."""
             self.suffix = ".bib"
             self.name = name
 
         def __str__(self) -> str:
+            """Return a `<test:NAME>` label used as the issue file path."""
             return f"<test:{self.name}>"
 
     for name, text, expected in _TESTS:

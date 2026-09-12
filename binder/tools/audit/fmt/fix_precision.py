@@ -17,6 +17,7 @@ REMOVE_KWARGS = re.compile(r",?\s*(?:drop_zero|allow_zero)\s*=\s*(?:True|False)"
 
 
 def _clean_fmt_args(rest: str) -> str:
+    """Strip ``drop_zero``/``allow_zero`` and ``precision=0`` kwargs from fmt argument text and tidy leftover commas."""
     rest = REMOVE_KWARGS.sub("", rest)
     rest = re.sub(r",?\s*precision\s*=\s*0", "", rest)
     rest = re.sub(r",\s*,", ",", rest).strip(", ")
@@ -24,6 +25,14 @@ def _clean_fmt_args(rest: str) -> str:
 
 
 def _fix_fmt_call(call: str, msg: str) -> str | None:
+    """Adjust the ``precision=`` kwarg of one fmt call to satisfy a precision-error message.
+
+    Rules are tried in order on substrings of ``msg``: "integer-like" with a
+    nonzero precision sets it to 0; "not integer-like" with ``precision=0``
+    raises it to 1; "formatted as '0'" increments precision by one (a call
+    without a precision kwarg comes back unchanged). Returns None when no rule
+    matches.
+    """
     if "integer-like" in msg and re.search(r"precision\s*=\s*[1-9]", call):
         return re.sub(r"precision\s*=\s*\d+", "precision=0", call)
     if "not integer-like" in msg and re.search(r"precision\s*=\s*0", call):
@@ -36,6 +45,7 @@ def _fix_fmt_call(call: str, msg: str) -> str | None:
 
 
 def _fmt_call_expr(call: str) -> str | None:
+    """Return the source of the first positional argument of a ``fmt(...)`` or ``fmt_percent(...)`` call, or None."""
     m = re.match(r"fmt(?:_percent)?\(\s*(.+)\)\s*$", call)
     if not m:
         return None
@@ -52,6 +62,17 @@ def _fmt_call_expr(call: str) -> str | None:
 
 
 def _apply_fix(line: str, msg: str, ns: dict | None = None) -> str | None:
+    """Rewrite one source line so the fmt call named in a precision-error message stops raising.
+
+    When ``ns`` is given and the line holds several fmt calls, each call's first
+    argument is evaluated in ``ns`` and only the call whose value matches the
+    message's ``Value`` is adjusted via ``_fix_fmt_call``. Otherwise the whole
+    line is edited: "integer-like" with a nonzero precision forces
+    ``precision=0``; "not integer-like" on a ``precision=0`` line rewrites a
+    single-line ``*_str = fmt(...)``/``fmt_percent(...)`` assignment to
+    ``fmt_int(...)`` and otherwise raises precision to 1; "formatted as '0'"
+    bumps precision by one. Returns None when no rule applies.
+    """
     vm = re.search(r"Value ([^\s]+)", msg)
     err_val = float(vm.group(1)) if vm else None
     if err_val is not None and ns is not None:
@@ -97,6 +118,7 @@ def _apply_fix(line: str, msg: str, ns: dict | None = None) -> str | None:
 
 
 def _preprocess(content: str) -> str:
+    """Drop ``drop_zero``/``allow_zero`` kwargs file-wide and turn ``fmt(int(x), precision=0`` into ``fmt_int(x``."""
     content = REMOVE_KWARGS.sub("", content)
     content = re.sub(
         r"fmt\(\s*int\(([^)]+)\)\s*,\s*precision\s*=\s*0",
@@ -107,7 +129,8 @@ def _preprocess(content: str) -> str:
 
 
 def _error_lineno(exc: BaseException) -> int | None:
-    tb = traceback.extract_tb(exc.__traceback__)
+    """Return the line number of the innermost traceback frame in code compiled as ``<string>``, or None."""
+    tb =traceback.extract_tb(exc.__traceback__)
     for frame in reversed(tb):
         if frame.filename == "<string>":
             return frame.lineno
@@ -115,6 +138,7 @@ def _error_lineno(exc: BaseException) -> int | None:
 
 
 def _fresh_ns(prior_cells: list[str]) -> dict:
+    """Build a namespace by executing the prior cells in order; their exceptions propagate."""
     ns: dict = {"__builtins__": __builtins__}
     for prior in prior_cells:
         exec(compile(prior, "<string>", "exec"), ns)  # noqa: S102
@@ -152,6 +176,16 @@ def _apply_fix_block(block: str, msg: str, ns: dict | None = None) -> str | None
 
 
 def _fix_cell(code: str, prior_cells: list[str]) -> tuple[str, int, dict]:
+    """Execute a cell repeatedly, fixing one fmt precision error per attempt until it runs cleanly.
+
+    Each attempt executes ``prior_cells`` into a fresh namespace and then the
+    cell. On a "Formatting Precision Error" the offending statement (possibly
+    multiline) is rewritten via ``_apply_fix_block`` or ``_apply_fix``, and
+    ``fmt_int`` is added to the cell's mlsysim import when the code now uses it.
+    Returns ``(fixed_code, fix_count, namespace)``. Other exceptions propagate;
+    raises ValueError when an error has no usable line number or cannot be
+    fixed, and RuntimeError after 500 attempts.
+    """
     fixes = 0
     lines = code.splitlines()
     for _ in range(500):
@@ -199,6 +233,14 @@ def _fix_cell(code: str, prior_cells: list[str]) -> tuple[str, int, dict]:
 
 
 def fix_file(path: Path) -> int:
+    """Fix precision errors in every python cell of a ``.qmd`` file and rewrite it in place.
+
+    The content is preprocessed, then cells are fixed in document order with
+    the already-fixed earlier cells executed first. The file is rewritten (with
+    a trailing newline) even when no fixes were made, but an exception from
+    ``_fix_cell`` propagates before anything is written. Returns the total
+    number of fixes.
+    """
     content = _preprocess(path.read_text(encoding="utf-8"))
     lines = content.splitlines()
     prior_cells: list[str] = []
@@ -228,6 +270,7 @@ def fix_file(path: Path) -> int:
 
 
 def main() -> int:
+    """Run ``fix_file`` on each path in ``sys.argv[1:]``, reporting failures on stderr; returns 1 if any file failed."""
     files = [Path(a) for a in sys.argv[1:]]
     failed = 0
     total = 0

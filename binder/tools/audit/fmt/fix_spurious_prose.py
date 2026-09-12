@@ -19,6 +19,7 @@ SPURIOUS = re.compile(r"^\d[\d,]*\.0$")
 
 
 def _fresh_ns(prior: list[str]) -> dict:
+    """Build a namespace by executing the prior cells in order; their exceptions propagate."""
     ns: dict = {"__builtins__": __builtins__}
     for code in prior:
         exec(compile(code, "<string>", "exec"), ns)  # noqa: S102
@@ -26,7 +27,14 @@ def _fresh_ns(prior: list[str]) -> dict:
 
 
 def _rendered_spurious(line: str, ns: dict, prior_lines: list[str]) -> bool:
-    m = FMT_ASSIGN.match(line)
+    """Return True if a ``*_str = fmt(...)``/``fmt_percent(...)`` line renders a number ending in ``.0``.
+
+    Executes the cell's preceding lines and then the call on a shallow copy of
+    ``ns``, strips the non-numeric prefix and trailing text from the result,
+    and matches it against ``SPURIOUS``. ``fmt_int`` lines, non-matching lines,
+    and any execution error return False.
+    """
+    m =FMT_ASSIGN.match(line)
     if not m or m.group(3) == "fmt_int":
         return False
     indent, var, fn, inner, comment = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5) or ""
@@ -44,7 +52,8 @@ def _rendered_spurious(line: str, ns: dict, prior_lines: list[str]) -> bool:
 
 
 def _to_fmt_int(line: str) -> str | None:
-    m = FMT_ASSIGN.match(line)
+    """Rewrite a single-line ``*_str = fmt(...)`` assignment to ``fmt_int(...)`` without its ``precision=`` kwarg; None for other lines."""
+    m =FMT_ASSIGN.match(line)
     if not m or m.group(3) != "fmt":
         return None
     indent, var, _, inner, comment = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5) or ""
@@ -59,6 +68,15 @@ def _to_fmt_int(line: str) -> str | None:
 
 
 def fix_file(path: Path) -> int:
+    """Convert spurious-``.0`` fmt assignments to ``fmt_int`` in every python cell of a ``.qmd`` file, in place.
+
+    Cells are processed in document order with earlier cells executed first.
+    Within a cell, one line is converted per pass until a pass converts
+    nothing; ``fmt_int`` is then added to a ``from mlsysim.fmt import`` line
+    when the name does not already appear in the cell's first five lines. The
+    file is always rewritten. Returns the number of lines converted; exceptions
+    from executing cells propagate.
+    """
     content = path.read_text(encoding="utf-8")
     lines = content.splitlines()
     prior: list[str] = []
@@ -113,6 +131,7 @@ def fix_file(path: Path) -> int:
 
 
 def main() -> int:
+    """Run ``fix_file`` on each path in ``sys.argv[1:]`` and print per-file and total counts; always returns 0."""
     files = [Path(a) for a in sys.argv[1:]]
     total = 0
     for f in files:

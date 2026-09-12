@@ -53,6 +53,13 @@ def _is_skippable(stripped: str) -> bool:
 
 @dataclass
 class Hit:
+    """One prose-integrity finding.
+
+    ``line`` is 1-based, ``match`` is the flagged excerpt, ``context`` is the
+    raw line truncated to 140 characters, and ``detail`` carries the
+    detector-specific token (the offending word, surname, or phrase).
+    """
+
     line: int
     match: str
     context: str
@@ -116,6 +123,12 @@ _SENTENCE_BREAK = re.compile(r"[.!?](?:\*\*|\*|_)* {1,2}([a-z][\w-]*)")
 
 
 def find_bad_sentence_starts(text: str) -> List[Hit]:
+    """Flag sentences in body prose that begin with a lowercase word.
+
+    A lowercase word after ``.``, ``!``, or ``?`` and one or two spaces is
+    reported unless the word is on the lowercase allowlist or the period
+    belongs to an abbreviation, a multi-dot abbreviation, or an ellipsis.
+    """
     hits: List[Hit] = []
     for line_no, masked, raw in _scan_prose(text):
         for m in _SENTENCE_BREAK.finditer(masked):
@@ -157,6 +170,11 @@ _SUPPRESSED_CITE = re.compile(r"\[-@[\w:.-]+\]")
 
 
 def find_manual_et_al(text: str) -> List[Hit]:
+    """Flag hand-typed "Surname et al." in body prose.
+
+    An occurrence followed within 60 characters by a suppressed-author
+    citation (``[-@key]``) is exempt, since that pairing renders correctly.
+    """
     hits: List[Hit] = []
     for line_no, masked, raw in _scan_prose(text):
         for m in _ET_AL.finditer(masked):

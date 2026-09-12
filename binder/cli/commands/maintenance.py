@@ -989,6 +989,11 @@ class MaintenanceCommand:
 
     @staticmethod
     def _target_size_for_image(image_path: str) -> str:
+        """Pick an ImageMagick resize geometry from substrings of the lowercased filename.
+
+        Hardware keywords map to 1200x900, then screenshot keywords to 1000x750,
+        then diagram keywords to 800x600; anything else gets 1000x750.
+        """
         filename = os.path.basename(image_path).lower()
         if any(keyword in filename for keyword in ["setup", "kit", "board", "hardware", "assembled"]):
             return "1200x900"
@@ -1038,6 +1043,7 @@ class MaintenanceCommand:
             resize_out = Path(f"{src}.resized")
 
             def run_magick(cmd):
+                """Run an ImageMagick command and return True if it exits 0."""
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 return result.returncode == 0
 
@@ -1108,6 +1114,7 @@ class MaintenanceCommand:
         repo_root = self.config_manager.root_dir
 
         def run(cmd):
+            """Run a git command in the repo root; return (succeeded, stripped stdout or stderr)."""
             result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
             return result.returncode == 0, result.stdout.strip() if result.stdout else result.stderr.strip()
 

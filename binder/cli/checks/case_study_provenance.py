@@ -53,6 +53,16 @@ NOT_A_CITEKEY = re.compile(r"^(fig|sec|tbl|eq|lst|thm|def|pri|nbk|exm|cs|ws|chk|
 
 @dataclass(frozen=True)
 class Finding:
+    """One provenance problem found in a case-study callout.
+
+    Attributes:
+        file: Repository-relative path of the scanned file (or bibliography).
+        line: 1-based line of the callout opener, or 0 for file-level findings.
+        code: Short finding code, such as ``no-citation``.
+        message: Human-readable explanation.
+        severity: ``"error"`` or ``"warning"``.
+    """
+
     file: str
     line: int
     code: str

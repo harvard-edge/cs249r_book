@@ -1,3 +1,11 @@
+"""Convert the war-story callout icons from PNG to 300 DPI PDF.
+
+Every ``icon_callout_war_story*.png`` in
+``books/shared/assets/images/icons/callouts/`` (resolved against the current
+directory, so run from the repo root) is saved as a PDF beside it, with any
+transparency flattened onto white. Per-file failures are printed and skipped.
+The conversion runs at import time; there is no ``main`` guard.
+"""
 import os
 from PIL import Image
 

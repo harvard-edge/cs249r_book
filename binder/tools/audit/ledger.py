@@ -139,10 +139,12 @@ class Ledger:
     issues: list[Issue] = field(default_factory=list)
 
     def __post_init__(self):
+        """Stamp ``scan_date`` with the current UTC time when none was supplied."""
         if not self.scan_date:
             self.scan_date = datetime.now(timezone.utc).isoformat()
 
     def add(self, issue: Issue) -> None:
+        """Append an issue to the ledger."""
         self.issues.append(issue)
 
     def summary(self) -> dict[str, Any]:
@@ -176,11 +178,18 @@ class Ledger:
         )
 
     def save(self, path: Path) -> None:
+        """Write the ledger JSON, followed by a newline, to ``path``."""
         path.write_text(self.to_json() + "\n", encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> "Ledger":
-        data = json.loads(path.read_text(encoding="utf-8"))
+        """Read a ledger JSON file written by ``save``.
+
+        The stored ``summary`` block is ignored because it is recomputed on
+        output. An issue entry with a key ``Issue`` does not define raises
+        ``TypeError``.
+        """
+        data =json.loads(path.read_text(encoding="utf-8"))
         issues = [Issue(**raw) for raw in data.get("issues", [])]
         return cls(
             scope=data["scope"],
@@ -193,15 +202,19 @@ class Ledger:
     # ── Query helpers ──
 
     def open_issues(self) -> list[Issue]:
+        """Return the issues whose status is still ``open``."""
         return [i for i in self.issues if i.status == STATUS_OPEN]
 
     def issues_by_category(self, category: str) -> list[Issue]:
+        """Return every issue in ``category``, regardless of status."""
         return [i for i in self.issues if i.category == category]
 
     def issues_by_file(self, file: str) -> list[Issue]:
+        """Return every issue whose ``file`` string equals ``file`` exactly."""
         return [i for i in self.issues if i.file == file]
 
     def open_by_category(self) -> dict[str, list[Issue]]:
+        """Group the open issues by category."""
         result: dict[str, list[Issue]] = {}
         for issue in self.open_issues():
             result.setdefault(issue.category, []).append(issue)

@@ -54,6 +54,8 @@ _CAPTION_ATTRS = ("fig-cap=", "tbl-cap=", "fig-alt=", "tbl-alt=", "alt=", "title
 
 @dataclass(frozen=True)
 class Hit:
+    """One number-followed-by-``%`` found in running prose, with its suggested fix."""
+
     line: int            # 1-based line number
     match: str           # the matched text, e.g. "98.5%"
     replacement: str     # the exact fix, e.g. "98.5 percent"

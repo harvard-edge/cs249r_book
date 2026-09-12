@@ -27,10 +27,17 @@ from cli.commands.validate import (  # noqa: E402
 
 
 class _Config:
+    """Minimal stand-in for the binder config manager; provides only ``book_dir``."""
+
     book_dir = BOOK_DIR  / "books"
 
 
 def main() -> int:
+    """Rerun the three caption scopes with the baseline disabled and overwrite ``CAPTIONS_BASELINE_PATH``.
+
+    Prints per-scope totals and writes per-file violation counts with
+    today's date.
+    """
     vc = ValidateCommand(config_manager=_Config(), chapter_discovery=None)
     vc._load_captions_baseline = lambda: {}
     root = _Config.book_dir

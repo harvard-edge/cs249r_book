@@ -59,6 +59,8 @@ CODE_FENCE_RE = re.compile(r"^\s*```")
 
 @dataclass(frozen=True)
 class Violation:
+    """One ``<number> percent`` table cell, shaped for the validator's issue output."""
+
     file: str
     line: int
     code: str
@@ -154,6 +156,7 @@ def fix_text(text: str) -> Tuple[str, int]:
 # ----------------------------------------------------------------------------
 
 def iter_target_files(paths: Iterable[Path]) -> List[Path]:
+    """Expand files and directories into a sorted, deduplicated list of ``.qmd`` files."""
     files: List[Path] = []
     for raw_path in paths:
         path = Path(raw_path)
@@ -165,6 +168,7 @@ def iter_target_files(paths: Iterable[Path]) -> List[Path]:
 
 
 def audit(paths: Iterable[Path]) -> List[Violation]:
+    """Return a ``percent_in_table`` Violation for every Hit in the target QMD files."""
     violations: List[Violation] = []
     for path in iter_target_files(paths):
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -185,6 +189,16 @@ def audit(paths: Iterable[Path]) -> List[Violation]:
 
 
 def main(argv: List[str] | None = None) -> int:
+    """Standalone CLI: report and fix ``<number> percent`` in table rows.
+
+    Without ``--check`` the fixed text is written back to each file. With
+    ``--check`` nothing is written. Prints the module docstring and returns 2
+    when no paths are given.
+
+    Returns:
+        1 in ``--check`` mode when any row would change, 2 for missing
+        arguments, otherwise 0.
+    """
     argv = list(sys.argv[1:] if argv is None else argv)
     check = "--check" in argv
     targets = [a for a in argv if not a.startswith("--")]

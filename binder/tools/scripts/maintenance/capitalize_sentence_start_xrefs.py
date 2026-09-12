@@ -262,6 +262,11 @@ def process_file(filepath: Path, dry_run: bool) -> dict:
 
 
 def main():
+    """Capitalize sentence-start cross-references in the given ``.qmd`` files and directories, printing changes and totals.
+
+    Directories are searched recursively; other paths are warned about and
+    skipped. With ``--dry-run`` the changes are only reported.
+    """
     parser = argparse.ArgumentParser(description="Capitalize sentence-start cross-references")
     parser.add_argument("paths", nargs="+", help="QMD files or directories to process")
     parser.add_argument("--dry-run", action="store_true", help="Report only, don't modify files")

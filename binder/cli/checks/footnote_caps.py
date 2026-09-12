@@ -36,6 +36,12 @@ def load_allowlist(path: pathlib.Path) -> set[str]:
 
 @dataclass
 class Violation:
+    """One footnote definition line to capitalize.
+
+    ``prefix`` is the ``[^id]: `` marker and ``body`` the text after it;
+    ``kind`` selects the fix applied by ``apply_fix``.
+    """
+
     path: pathlib.Path
     line_no: int
     raw_line: str
@@ -47,6 +53,10 @@ class Violation:
 
 
 def first_meaningful_char(body: str) -> tuple[str, int]:
+    """Return the first letter of a footnote body and its offset, skipping a leading ``**``.
+
+    Returns ``("", -1)`` when the first non-space character is not a letter.
+    """
     stripped = body
     offset = 0
     m = BOLD_OPENER.match(stripped)
@@ -63,6 +73,12 @@ def first_meaningful_char(body: str) -> tuple[str, int]:
 
 
 def _is_protected_term_token(term: str, start: int, end: int, token: str) -> bool:
+    """Return True if a term-head word must keep its case.
+
+    Protected words are single letters, words with inner capitals, words
+    touching ``.``, a backtick, ``_``, or a digit, and words whose hyphenated
+    prefix segment is a single capital letter (as in ``K-means``).
+    """
     if len(token) == 1:
         return True
     if any(ch.isupper() for ch in token[1:]):
@@ -82,6 +98,12 @@ def _is_protected_term_token(term: str, start: int, end: int, token: str) -> boo
 
 
 def term_head_case_issues(term: str) -> list[tuple[int, str]]:
+    """Return ``(offset, word)`` for each title-case problem in a bold term head.
+
+    Code spans and ``$...$`` math are skipped. Flags a lowercase first word
+    that is a minor word, a capitalized minor word after the first word, and
+    any other word starting lowercase, unless the word is protected.
+    """
     issues: list[tuple[int, str]] = []
     i = 0
     is_first_word = True
@@ -118,6 +140,7 @@ def term_head_case_issues(term: str) -> list[tuple[int, str]]:
 
 
 def leading_term_head(body: str) -> tuple[str, int] | None:
+    """Return the text and offset of a leading ``**Term**:`` head, or None if absent."""
     m = TERM_HEAD.match(body)
     if not m:
         return None
@@ -125,6 +148,11 @@ def leading_term_head(body: str) -> tuple[str, int] | None:
 
 
 def scan_file(path: pathlib.Path, allowlist: set[str]) -> list[Violation]:
+    """Return lowercase-first-letter violations for footnote definitions in one file.
+
+    Footnote ids in *allowlist* are exempt. Files that are not valid UTF-8
+    yield no violations. Term-head case is not checked here.
+    """
     violations: list[Violation] = []
     try:
         text = path.read_text(encoding="utf-8")
@@ -155,6 +183,11 @@ def scan_file(path: pathlib.Path, allowlist: set[str]) -> list[Violation]:
 
 
 def _fix_term_head_case(body: str) -> str:
+    """Uppercase the first letter of each flagged word in a leading ``**Term**:`` head.
+
+    Capitalized minor words are also flagged, but uppercasing leaves them
+    unchanged, so only lowercase problems are actually fixed.
+    """
     m = TERM_HEAD.match(body)
     if not m:
         return body

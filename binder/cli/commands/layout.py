@@ -80,6 +80,12 @@ TABLE_MARKER_RE = re.compile(r"\b(?P<idx>\d{3})\s+(?P<label>tbl-[A-Za-z0-9_-]+)\
 
 @dataclass
 class PageReport:
+    """One main-column page flagged for excessive bottom whitespace.
+
+    Holds the measured gap, the best-effort guess at the next-page element that forced the break,
+    and, once the page crosses the threshold, the source location, class, action, and layout
+    strategy filled in by ``_collect_whitespace_reports``.
+    """
     sheet: int                    # 1-indexed PDF sheet number
     label: str                    # printed page number ("59", "iii", etc.)
     chapter: str                  # enclosing top-level outline title
@@ -164,6 +170,7 @@ class TableAuditEntry:
     warnings: List[str] = field(default_factory=list)
 
     def to_report_dict(self) -> Dict[str, Any]:
+        """Return this table's JSON/CSV report row with rendered widths rounded."""
         return {
             "index": self.index,
             "label": self.label,
@@ -186,6 +193,7 @@ class LayoutCommand:
     """Diagnose PDF page-break whitespace issues."""
 
     def __init__(self, config_manager, chapter_discovery):
+        """Store the config manager and chapter discovery helper used by the subcommands."""
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
 
@@ -194,6 +202,14 @@ class LayoutCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        """Parse ``binder layout`` arguments and dispatch to the planner or a subcommand.
+
+        With no subcommand, ``--vol1``/``--vol2`` runs the high-level auto-layout planner; otherwise
+        the named diagnostic (chapter, collisions, check, margins, overlaps, release, tables, or
+        purpose) runs. Prints help and returns False when called with no arguments, or with neither
+        a subcommand nor a volume. Invalid arguments exit through argparse. Returns the selected
+        command's pass/fail result.
+        """
         parser = argparse.ArgumentParser(
             prog="binder layout",
             description=(
@@ -854,6 +870,11 @@ class LayoutCommand:
         return render_ok
 
     def _repo_root(self) -> Path:
+        """Return the resolved ``config_manager.root_dir`` as the repository root.
+
+        Both checks test the same ``books/`` path, so the ``root.parent`` branch is never taken and
+        every path returns the resolved root directory.
+        """
         root = Path(self.config_manager.root_dir).resolve()
         if (root  / "books").is_dir():
             return root
@@ -866,6 +887,15 @@ class LayoutCommand:
         volume: str,
         chapter_filter: Optional[List[str]] = None,
     ) -> List[Path]:
+        """Return the QMD files to include in a table audit, deduplicated in order.
+
+        With a chapter filter, each entry is resolved fuzzily through chapter discovery, prefixed
+        with the volume unless it already starts with ``vol1/`` or ``vol2/``; unresolved entries are
+        reported and skipped. Without a filter, the chapters and appendices listed in
+        ``config/_quarto-pdf-<volume>.yml`` come first (excluding ``index.qmd`` and
+        ``references.qmd``), followed by every other ``.qmd`` under the volume directory so moved
+        chapters stay covered. A config that fails to parse is reported and skipped.
+        """
         if chapter_filter:
             out = []
             for raw in chapter_filter:
@@ -916,6 +946,7 @@ class LayoutCommand:
 
     @staticmethod
     def _dedupe_paths(paths: List[Path]) -> List[Path]:
+        """Resolve paths and drop duplicates, keeping first-seen order."""
         seen = set()
         out = []
         for path in paths:
@@ -927,6 +958,13 @@ class LayoutCommand:
         return out
 
     def _extract_pipe_tables(self, qmd_path: Path) -> List[TableAuditEntry]:
+        """Extract captioned pipe tables from one QMD file as audit entries.
+
+        A table is a run of ``|`` lines whose second line is a separator row, followed (after
+        optional blank lines) by a ``:`` caption whose attribute block carries a ``#tbl-`` label.
+        Tables without such a caption are skipped. Entries get index 0 (the caller numbers them)
+        plus static size and colwidths warnings. Returns an empty list when the file cannot be read.
+        """
         try:
             lines = qmd_path.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -995,6 +1033,7 @@ class LayoutCommand:
         return entries
 
     def _source_rel(self, qmd_path: Path) -> str:
+        """Return a path relative to the book directory, else the repo root, else unchanged."""
         try:
             return str(qmd_path.relative_to(self.config_manager.book_dir))
         except ValueError:
@@ -1005,6 +1044,7 @@ class LayoutCommand:
 
     @classmethod
     def _is_pipe_table_start(cls, lines: List[str], idx: int) -> bool:
+        """True when ``lines[idx]`` is a pipe row and the next line is a separator row."""
         return (
             idx + 1 < len(lines)
             and lines[idx].lstrip().startswith("|")
@@ -1013,6 +1053,7 @@ class LayoutCommand:
 
     @staticmethod
     def _is_pipe_separator(line: str) -> bool:
+        """True when a line is a pipe-table separator made only of dashes, colons, and spaces."""
         stripped = line.strip()
         if "|" not in stripped or "-" not in stripped:
             return False
@@ -1024,10 +1065,15 @@ class LayoutCommand:
 
     @staticmethod
     def _pipe_column_count(separator_line: str) -> int:
+        """Return the column count implied by a pipe-table separator row."""
         return len(separator_line.strip().strip("|").split("|"))
 
     @staticmethod
     def _pipe_table_cells(table_lines: List[str]) -> List[str]:
+        """Return non-empty cell texts with whitespace collapsed and markup characters removed.
+
+        Separator rows are skipped. The result feeds the longest-cell measurement.
+        """
         cells: List[str] = []
         for line in table_lines:
             if LayoutCommand._is_pipe_separator(line):
@@ -1041,16 +1087,19 @@ class LayoutCommand:
 
     @staticmethod
     def _table_label_from_caption(caption_line: str) -> str:
+        """Return the ``tbl-`` label from a caption's attribute block, or an empty string."""
         match = re.search(r"\{[^}]*#(tbl-[A-Za-z0-9_-]+)[^}]*\}", caption_line)
         return match.group(1) if match else ""
 
     @staticmethod
     def _table_colwidths_from_caption(caption_line: str) -> str:
+        """Return the quoted ``tbl-colwidths`` value in a caption line, or an empty string."""
         match = re.search(r'tbl-colwidths=(["\'])(.*?)\1', caption_line)
         return match.group(2) if match else ""
 
     @staticmethod
     def _caption_text(caption_line: str) -> str:
+        """Return caption prose without the leading colon or trailing ``{#tbl-...}`` block."""
         text = caption_line.lstrip(":").strip()
         text = re.sub(r"\s*\{[^}]*#tbl-[^}]*\}\s*$", "", text).strip()
         text = re.sub(r"\s+", " ", text)
@@ -1063,6 +1112,12 @@ class LayoutCommand:
         max_cell_chars: int,
         has_colwidths: bool,
     ) -> List[str]:
+        """Return source-only warnings about table density and ``tbl-colwidths`` use.
+
+        Flags wide, dense tables (at least 4 columns, 4 rows, and a 36-character cell) and tables
+        with 5 or more columns that lack explicit column widths, plus small tables (at most 2
+        columns and 5 rows) that set them anyway.
+        """
         warnings: List[str] = []
         if columns >= 4 and rows >= 4 and max_cell_chars >= 36 and not has_colwidths:
             warnings.append("wide-dense-table-without-colwidths")
@@ -1078,6 +1133,14 @@ class LayoutCommand:
         entries: List[TableAuditEntry],
         volume: str,
     ) -> None:
+        """Write the standalone table-only QMD that Quarto renders for the audit.
+
+        The front matter targets a two-sided ``scrbook`` LuaLaTeX PDF with the volume theme colors
+        and shared header includes, code execution disabled, and the shared bibliography attached
+        when it exists. Each table starts on a new page with a ``NNN tbl-label`` marker line (read
+        back by ``_measure_table_pdf``) and its source location, followed by the original table and
+        caption Markdown. Overwrites ``qmd_path``.
+        """
         theme = (self.config_manager.book_dir / "tex" / f"theme-colors-{volume}.tex").resolve()
         header = (self.config_manager.book_dir / "tex" / "header-includes.tex").resolve()
         bib = (
@@ -1131,6 +1194,12 @@ class LayoutCommand:
         qmd_path.write_text("\n".join(lines), encoding="utf-8")
 
     def _render_table_audit_pdf(self, qmd_path: Path, render_log: Path) -> bool:
+        """Render the audit QMD to PDF with ``quarto render`` from the repository root.
+
+        Returns False when Quarto is not on PATH. Otherwise the combined stdout and stderr are
+        written to ``render_log``; on a non-zero exit the last 20 log lines are printed and False is
+        returned.
+        """
         if shutil.which("quarto") is None:
             console.print("[red]quarto not found on PATH.[/red]")
             return False
@@ -1152,6 +1221,7 @@ class LayoutCommand:
 
     @staticmethod
     def _count_overfull_hboxes(log_path: Path) -> int:
+        """Count LaTeX overfull hbox warnings in a log; 0 when it is missing or unreadable."""
         if not log_path.exists():
             return 0
         try:
@@ -1166,6 +1236,15 @@ class LayoutCommand:
         entries: List[TableAuditEntry],
         min_width: float,
     ) -> None:
+        """Measure each table's rendered width in the audit PDF and refresh its warnings.
+
+        Pages are matched to entries by the ``NNN tbl-label`` marker in the first 600 characters of
+        page text. For each matched entry the static warnings are dropped except the
+        colwidths-necessity note, the width comes from the widest horizontal rule or else the text
+        extent, and ``narrow-render`` and ``colwidths-may-be-unnecessary`` warnings are added.
+        Entries are updated in place; the step is skipped with a notice when pdfplumber is
+        unavailable.
+        """
         try:
             import pdfplumber  # type: ignore
         except ImportError:
@@ -1208,6 +1287,10 @@ class LayoutCommand:
 
     @staticmethod
     def _page_table_rule_width(page) -> float:
+        """Return the widest horizontal rule of at least 30pt below the top 95pt of a page.
+
+        Returns 0.0 when the page has no such rule.
+        """
         widths = []
         for line in list(getattr(page, "lines", []) or []):
             x0, x1 = line.get("x0", 0.0), line.get("x1", 0.0)
@@ -1220,6 +1303,10 @@ class LayoutCommand:
 
     @staticmethod
     def _page_table_text_width(page) -> float:
+        """Return the horizontal span of characters between 115pt and 94% of page height.
+
+        Returns 0.0 when no characters fall in that band.
+        """
         chars = [
             c for c in getattr(page, "chars", []) or []
             if c.get("top", 0) >= 115 and c.get("bottom", 0) <= page.height * 0.94
@@ -1236,6 +1323,12 @@ class LayoutCommand:
         rows: int = 4,
         dpi: int = 110,
     ) -> List[Path]:
+        """Rasterize the audit PDF into PNG contact sheets of labeled page thumbnails.
+
+        Existing ``sheet-*.png`` files in ``out_dir`` are deleted first. Each sheet holds up to
+        ``cols`` by ``rows`` thumbnails rendered at ``dpi``. Returns the written paths, or an empty
+        list with a notice when pypdfium2 or Pillow is not installed.
+        """
         try:
             import pypdfium2 as pdfium  # type: ignore
             from PIL import Image, ImageDraw  # type: ignore
@@ -1294,6 +1387,7 @@ class LayoutCommand:
         json_path: Path,
         csv_path: Path,
     ) -> None:
+        """Write the table audit rows to JSON and to CSV, joining warnings with semicolons."""
         rows = [entry.to_report_dict() for entry in entries]
         json_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
         with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -1332,6 +1426,10 @@ class LayoutCommand:
         overfull_count: int,
         rendered: bool,
     ) -> None:
+        """Print the table audit summary panel, output paths, and up to 20 warned tables.
+
+        The overfull hbox count is shown only when the audit PDF was rendered.
+        """
         warned = [e for e in entries if e.warnings]
         narrow = [e for e in entries if any(w.startswith("narrow-render") for w in e.warnings)]
         explicit = [e for e in entries if e.has_colwidths]
@@ -1450,6 +1548,10 @@ class LayoutCommand:
         return (not plan["items"]) and purpose_ok
 
     def _build_volume_pdf(self, volume: str) -> bool:
+        """Run ``binder build pdf --<volume>`` in a subprocess and return True on exit code 0.
+
+        The command is printed first; False is returned when it cannot be launched.
+        """
         binder = self._repo_root() / "binder" / "binder"
         cmd = [str(binder), "build", "pdf", f"--{volume}"]
         console.print(f"[blue]💻 Command: {' '.join(cmd)}[/blue]")
@@ -1461,6 +1563,7 @@ class LayoutCommand:
         return proc.returncode == 0
 
     def _default_volume_pdf(self, volume: str) -> Path:
+        """Return the expected built PDF path for a volume under the book ``_build`` directory."""
         try:
             from cli.commands._pdf_checks import default_pdf_path
         except ImportError:
@@ -1476,6 +1579,16 @@ class LayoutCommand:
         pages_scanned: int,
         page_count: int,
     ) -> Dict[str, Any]:
+        """Build the strategy-routed auto-layout plan from whitespace and margin findings.
+
+        Whitespace rows become ``1-main-flow`` items and margin-geometry rows become
+        ``2-margin-calibration`` items, each with a strategy, confidence, automatable flag, and
+        suggested fix. Margin items are deferred while any main-flow item has a strategy other than
+        ``accept-*``, and an item is ``ready`` only when it is automatable, high confidence, and not
+        deferred. Items sort by phase, chapter, descending sheet, and channel. Returns a
+        JSON-serializable dict with the volume, PDF path, page counts, workflow state including
+        ``next_phase``, the items, and aggregate counts.
+        """
         main_items: List[Dict[str, Any]] = []
         for r in whitespace_rows:
             strategy = r.layout_strategy or self._layout_strategy(r)
@@ -1575,6 +1688,11 @@ class LayoutCommand:
         }
 
     def _render_layout_plan(self, plan: Dict[str, Any]) -> None:
+        """Print the auto-layout plan as a clean panel, or a summary panel and item table.
+
+        The table lists up to 80 items with phase, channel, strategy, sheet, confidence, a
+        ready/deferred/review state, and the source location with its suggested fix.
+        """
         items = plan["items"]
         counts = plan["counts"]
         if not items:
@@ -1648,6 +1766,11 @@ class LayoutCommand:
 
     @staticmethod
     def _layout_strategy_confidence(strategy: str, report: PageReport) -> str:
+        """Return high, medium, or low confidence for a main-flow strategy.
+
+        ``callout-tcbbreak`` with a known source file and line and every ``accept-*`` strategy are
+        high, the source-flow strategies are medium, and anything else is low.
+        """
         if strategy == "callout-tcbbreak" and report.source_file and report.source_line:
             return "high"
         if strategy in {
@@ -1663,6 +1786,7 @@ class LayoutCommand:
 
     @staticmethod
     def _layout_strategy_automatable(strategy: str, report: PageReport) -> bool:
+        """True only for ``callout-tcbbreak`` findings that have a source file and line."""
         return (
             strategy == "callout-tcbbreak"
             and bool(report.source_file)
@@ -1674,6 +1798,11 @@ class LayoutCommand:
         strategy: str,
         row: Dict[str, Any],
     ) -> str:
+        """Return high, medium, or low confidence for a margin-geometry strategy.
+
+        ``margin-offset`` and ``margin-vspace`` are high with a source file and line and medium
+        without, ``margin-stack-solve`` is medium, and anything else is low.
+        """
         if strategy in {"margin-offset", "margin-vspace"}:
             return "high" if row.get("source_file") and row.get("source_line") else "medium"
         if strategy == "margin-stack-solve":
@@ -1687,6 +1816,15 @@ class LayoutCommand:
         limit: int = 0,
         chapter_filter: Optional[List[str]] = None,
     ) -> Optional[Tuple[List[PageReport], int]]:
+        """Scan a PDF for main-column pages whose bottom gap meets the threshold.
+
+        Only the first ``limit`` pages are scanned (all when 0), and pages outside the chapter
+        filter are skipped without being counted. Each flagged page records whether the next sheet
+        opens a chapter, its source QMD, the matching source line and section when the repository
+        root is found, and its class, action, and layout strategy. Returns ``(flagged_reports,
+        pages_scanned)``, or None after printing an error when the PDF is missing or pdfplumber is
+        not installed.
+        """
         if not pdf_path.exists():
             console.print(f"[red]PDF not found:[/red] {pdf_path}")
             return None
@@ -1756,6 +1894,12 @@ class LayoutCommand:
         csv: bool = False,
         chapter_filter: Optional[List[str]] = None,
     ) -> bool:
+        """Run the ``layout check`` whitespace scan and print a rich report or CSV.
+
+        Frontmatter and culprit filters are applied after collection so the report can show the
+        unfiltered count. Returns False only when the scan cannot run; flagged pages do not fail the
+        command.
+        """
         if not csv:
             console.print(
                 f"[bold blue]Scanning[/bold blue] {pdf_path.name} "
@@ -1923,6 +2067,7 @@ class LayoutCommand:
     def _render_collisions_csv(
         self, findings: List[CollisionFinding]
     ) -> None:
+        """Write header and footer collision findings to stdout as CSV."""
         import csv as _csv
         import sys
         writer = _csv.writer(sys.stdout)
@@ -1939,6 +2084,7 @@ class LayoutCommand:
 
     @staticmethod
     def _line_text(line_chars: list) -> str:
+        """Return a clustered line's characters in x order as text, cut to 60 characters."""
         line_chars = sorted(line_chars, key=lambda c: c["x0"])
         return "".join(c.get("text", "") for c in line_chars).strip()[:60]
 
@@ -2014,6 +2160,13 @@ class LayoutCommand:
         limit: int = 0,
         chapter_filter: Optional[List[str]] = None,
     ) -> Optional[Tuple[List[Dict[str, Any]], int, int]]:
+        """Run the PyMuPDF margin-geometry scan and attach page, chapter, and source context.
+
+        Each finding becomes a row dict holding the finding, the printed page label, the chapter
+        title, and the source file, line, and section located from the finding's snippet. Findings
+        outside the chapter filter are dropped. Returns ``(rows, pages_scanned, page_count)``, or
+        None after printing an error when the PDF is missing or the scanner cannot be imported.
+        """
         if not pdf_path.exists():
             console.print(f"[red]PDF not found:[/red] {pdf_path}")
             return None
@@ -2120,6 +2273,7 @@ class LayoutCommand:
 
     @staticmethod
     def _release_blocking_issue(issue: str) -> bool:
+        """True for release-blocking issues: body-frame bottom overflow or trim-edge overflow."""
         return (
             issue == "body-overflow-bottom"
             or issue.startswith("trim-overflow-")
@@ -2172,6 +2326,12 @@ class LayoutCommand:
         page_count: int,
         release_policy: bool = False,
     ) -> None:
+        """Print the margin-geometry findings table and per-issue totals.
+
+        Rows show page, chapter, colored issue, side, detail, repair strategy, source location, and
+        suggested fix. With ``release_policy``, release-blocking issues are red and the rest yellow;
+        otherwise only overlaps are red.
+        """
         by_issue = Counter(row["finding"].issue for row in rows)
         overlaps = by_issue.get("overlap", 0)
         body_overflows = by_issue.get("body-overflow-bottom", 0)
@@ -2234,6 +2394,10 @@ class LayoutCommand:
         return "red" if issue == "overlap" else "yellow"
 
     def _render_margin_geometry_csv(self, rows: List[Dict[str, Any]]) -> None:
+        """Write margin-geometry rows to stdout as CSV with strategy and suggested fix.
+
+        Source paths become terminal hyperlinks when stdout is a TTY.
+        """
         import csv as _csv
 
         repo_root = self._repo_root()
@@ -2261,6 +2425,13 @@ class LayoutCommand:
             ])
 
     def _margin_geometry_strategy(self, row: Dict[str, Any]) -> str:
+        """Return the repair strategy for a margin-geometry row.
+
+        Body-frame overflow routes to ``main-flow-tighten``. Otherwise a footnote source line routes
+        to ``margin-offset`` and a ``.column-margin`` source to ``margin-vspace``; remaining
+        overlaps get ``margin-stack-solve``, top or bottom overflows ``margin-geometry-review``, and
+        anything else ``manual-review``.
+        """
         f = row["finding"]
         if f.issue == "body-overflow-bottom":
             return "main-flow-tighten"
@@ -2279,6 +2450,13 @@ class LayoutCommand:
         return "manual-review"
 
     def _source_layout_context(self, source_file: str, source_line: int) -> str:
+        """Classify a source line as ``footnote``, ``column-margin``, or an empty string.
+
+        A line starting with ``[^`` is a footnote and a line mentioning ``.column-margin`` is a
+        margin block. Otherwise the file is scanned upward: an opening ``.column-margin`` div fence
+        means the line sits inside a margin block, and a bare closing fence ends the search.
+        Missing, unreadable, or out-of-range sources return an empty string.
+        """
         if not source_file or source_line <= 0:
             return ""
         try:
@@ -2413,6 +2591,11 @@ class LayoutCommand:
         source_line: int,
         delta_mm: int,
     ) -> str:
+        """Return a hint to shift a line's ``[offset=Nmm]`` by ``delta_mm``, or an empty string.
+
+        The hint is empty when the source file, line, or delta is missing, the file cannot be read,
+        or the line has no offset marker.
+        """
         if not source_file or not source_line or not delta_mm:
             return ""
         try:
@@ -2528,6 +2711,7 @@ class LayoutCommand:
 
     @staticmethod
     def _substantial_margin_text(text: str) -> bool:
+        """True when text contains at least six ASCII letters or digits."""
         return len(re.findall(r"[A-Za-z0-9]", text or "")) >= 6
 
     @classmethod
@@ -2721,6 +2905,12 @@ class LayoutCommand:
         chapter: str,
         line_texts: List[str],
     ) -> Tuple[str, int, str]:
+        """Find the source file, line, and section for margin text on a chapter's page.
+
+        Candidate texts are tried longest first against the chapter's QMD. Returns ``("", 0, "")``
+        when the chapter has no mapped source, and the file with line 0 and no section when nothing
+        matches or the repository root is unknown.
+        """
         qmd = source_map.get(chapter)
         if qmd is None:
             return "", 0, ""
@@ -2740,6 +2930,11 @@ class LayoutCommand:
     def _render_margins(
         self, findings: List[MarginFinding], scanned: int, pdf_path: Path
     ) -> None:
+        """Print the legacy margin-overflow report as a clean panel or a findings table.
+
+        Errors come first, then larger overflows; off-page findings are marked, and a closing note
+        lists the repair options.
+        """
         if not findings:
             console.print(Panel(
                 f"No margin overflow across {scanned} pages — every margin "
@@ -2800,6 +2995,7 @@ class LayoutCommand:
         )
 
     def _render_margins_csv(self, findings: List[MarginFinding]) -> None:
+        """Write legacy margin findings to stdout as CSV with a suggested fix per row."""
         import csv as _csv
         repo_root = self._repo_root()
         writer = _csv.writer(sys.stdout)
@@ -2897,6 +3093,10 @@ class LayoutCommand:
     # ------------------------------------------------------------------
 
     def _render_csv(self, flagged: List[PageReport]) -> None:
+        """Write flagged whitespace pages to stdout as CSV with strategy and suggested fix.
+
+        Source paths become terminal hyperlinks when stdout is a TTY.
+        """
         import csv as _csv
         repo_root = self._repo_root()
         writer = _csv.writer(sys.stdout)
@@ -3051,6 +3251,7 @@ class LayoutCommand:
 
     @staticmethod
     def _repo_root_for(pdf_path: Path) -> Optional[Path]:
+        """Return the nearest of up to eight PDF ancestors that contains ``books/``, or None."""
         cur = Path(pdf_path).resolve().parent
         for _ in range(8):
             if (cur  / "books").is_dir():
@@ -3062,6 +3263,10 @@ class LayoutCommand:
 
     @staticmethod
     def _volume_from_pdf_path(pdf_path: Path) -> Optional[str]:
+        """Infer ``vol1`` to ``vol4`` from the deepest path component naming a volume.
+
+        Returns None when no component names a volume.
+        """
         # Prefer the artifact/nearest output directory over a worktree name
         # that may mention a different volume (2026-09-11).
         for component in reversed(Path(pdf_path).parts):
@@ -3072,10 +3277,12 @@ class LayoutCommand:
 
     @staticmethod
     def _parse_chapter_filter(raw: str) -> List[str]:
+        """Split a comma-separated chapter filter into trimmed, non-empty entries."""
         return [part.strip() for part in (raw or "").split(",") if part.strip()]
 
     @staticmethod
     def _chapter_key(text: str) -> str:
+        """Normalize text to lowercase alphanumeric words separated by single spaces."""
         return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
     @classmethod
@@ -3084,6 +3291,11 @@ class LayoutCommand:
         chapter: str,
         chapter_filter: Optional[List[str]],
     ) -> bool:
+        """True when a chapter title passes the filter; an empty filter matches everything.
+
+        An entry matches the normalized title, its hyphenated slug, or a substring of the normalized
+        title.
+        """
         if not chapter_filter:
             return True
         chapter_key = cls._chapter_key(chapter)
@@ -3244,6 +3456,7 @@ class LayoutCommand:
         qmd_path: Path,
         line_num: int,
     ) -> Optional[CalloutBlock]:
+        """Return the innermost callout block in a QMD file that contains a line, or None."""
         if line_num <= 0:
             return None
         containing = [
@@ -3371,6 +3584,7 @@ class LayoutCommand:
         return "manual-review"
 
     def _report_source_inside_callout(self, report: PageReport) -> bool:
+        """True when a whitespace finding's source line is inside a callout block."""
         if not report.source_file or report.source_line <= 0:
             return False
         qmd_path = self._repo_root() / report.source_file
@@ -3439,6 +3653,13 @@ class LayoutCommand:
     def _scan_page(
         self, page, next_page, sheet: int, label: str, chapter: str
     ) -> Optional[PageReport]:
+        """Measure bottom whitespace in a page's main column and guess the next-page culprit.
+
+        Body text is every character left of the main-column boundary and outside the header and
+        footer bands. The gap runs from the lowest body character to the footer band and is
+        normalized by the usable column height. Returns None when the page has no body text; the
+        caller applies the threshold.
+        """
         chars = page.chars
         if not chars:
             return None
@@ -3732,6 +3953,7 @@ class LayoutCommand:
 
     @staticmethod
     def _truncate(s: str, n: int) -> str:
+        """Strip soft hyphens and shorten text to ``n`` characters with a trailing ellipsis."""
         s = s.replace("­", "").strip()  # strip soft hyphens
         if len(s) <= n:
             return s
@@ -3749,6 +3971,13 @@ class LayoutCommand:
         pdf_path: Path,
         total_flagged: int = 0,
     ) -> None:
+        """Print the rich whitespace report grouped by chapter.
+
+        Chapters appear in order of their first flagged sheet, and pages within a chapter run back
+        to front to match the recommended fix order. Summary lines count findings by culprit, fix
+        hint, and strategy, and note when filters hid rows. A clean panel is printed when nothing is
+        flagged.
+        """
         if not flagged:
             extra = ""
             if total_flagged and total_flagged != len(flagged):

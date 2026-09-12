@@ -29,18 +29,26 @@ class MarkdownListSpacingIssue:
 
     @property
     def context(self) -> str:
+        """Return the lead-in and list lines joined as a one-line excerpt."""
         return f"{self.previous_line} / {self.list_line}"
 
     @property
     def suggestion(self) -> str:
+        """Return a before/after text showing the blank line to insert."""
         return f"{self.previous_line}\n{self.list_line} -> {self.previous_line}\n\n{self.list_line}"
 
 
 def _is_list_item(line: str) -> bool:
+    """Return True if the line starts a bullet or numbered list item."""
     return bool(LIST_ITEM_RE.match(line))
 
 
 def _is_skippable_previous_line(line: str) -> bool:
+    """Return True for lines that cannot be a lead-in paragraph.
+
+    Blank lines, list items, headings, cell options, table rows, fenced
+    div and code markers, HTML comments, and YAML delimiters are skipped.
+    """
     stripped = line.strip()
     if not stripped:
         return True
@@ -54,6 +62,7 @@ def _is_skippable_previous_line(line: str) -> bool:
 
 
 def _is_bold_leadin(line: str) -> bool:
+    """Return True for a non-skippable paragraph line containing unescaped ``**bold**``."""
     if _is_skippable_previous_line(line):
         return False
     return bool(BOLD_RE.search(line))

@@ -157,6 +157,7 @@ REPLACEMENTS = [
 def _regex_pass(text: str) -> str:
     """Replace remaining .m_as(...) on non-comment lines (incl. multiline)."""
     def repl(match: re.Match[str]) -> str:
+        """Return the ``.to(...).magnitude`` form, or the match unchanged when its line is a comment."""
         start = match.start()
         line_start = text.rfind("\n", 0, start) + 1
         prefix = text[line_start:start]
@@ -169,6 +170,11 @@ def _regex_pass(text: str) -> str:
 
 
 def migrate_file(path: Path) -> int:
+    """Migrate ``.m_as(...)`` calls in one file in place and return how many were removed.
+
+    Applies the literal ``REPLACEMENTS`` table, then the regex fallback. The
+    file is rewritten whenever it contains any ``.m_as(`` call.
+    """
     text = path.read_text()
     before = text.count(".m_as(")
     if before == 0:
@@ -181,6 +187,10 @@ def migrate_file(path: Path) -> int:
 
 
 def main() -> int:
+    """Migrate every ``.qmd`` under ``Path(__file__).parents[2] / "books"`` and list files with leftovers.
+
+    Returns 1 if any ``.m_as(`` call survives, else 0.
+    """
     root = Path(__file__).resolve().parents[2]  / "books"
     paths = sorted(root.rglob("*.qmd"))
     total_fixed = 0

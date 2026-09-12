@@ -60,6 +60,8 @@ RATE_VALUES = {
 
 @dataclass
 class Violation:
+    """One ``fmt()``/``fmt_int()`` call whose ``suffix=`` encodes a value kind."""
+
     file: str
     line: int
     code: str
@@ -95,6 +97,7 @@ def _iter_python_cells(text: str):
 
 
 def _literal_str(node):
+    """Return the value of an AST string constant, or None for any other node."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     return None
@@ -144,6 +147,11 @@ def _classify(suffix: str):
 
 
 def _audit_file(qmd_path: Path) -> list[Violation]:
+    """Return violations for every inspected call with a semantic literal ``suffix=`` in one QMD.
+
+    Each ``{python}`` cell is parsed with ``ast``; cells with syntax errors
+    are skipped, as are non-literal suffix arguments.
+    """
     out: list[Violation] = []
     rel = str(qmd_path)
     text = qmd_path.read_text(encoding="utf-8", errors="replace")
@@ -191,6 +199,7 @@ def _audit_file(qmd_path: Path) -> list[Violation]:
 
 
 def audit(paths: list[Path]) -> list[Violation]:
+    """Audit each file path, or every ``.qmd`` under each directory path."""
     all_v: list[Violation] = []
     for p in paths:
         files = [p] if p.is_file() else sorted(p.rglob("*.qmd"))
@@ -200,6 +209,11 @@ def audit(paths: list[Path]) -> list[Violation]:
 
 
 def main() -> int:
+    """CLI entry point: audit the given paths (default ``books``) and print violations.
+
+    ``--json`` prints the violations as a JSON list instead of text.
+    Returns 1 if any violation was found, otherwise 0.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("paths", nargs="*", type=Path)
     ap.add_argument("--json", action="store_true")
