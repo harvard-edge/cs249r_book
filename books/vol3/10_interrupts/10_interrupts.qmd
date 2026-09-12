@@ -287,6 +287,10 @@ class AgentInterruptRuntime:
         """
         Evacuate volatile accelerator KV cache to host DRAM / NVMe storage.
         Releases GPU High-Bandwidth Memory (HBM) frames unconditionally.
+
+        In production inference runtimes (e.g., vLLM or SGLang), this initiates
+        an asynchronous PCIe DMA transfer via vllm.BlockManager.swap_out(seq_group),
+        migrating physical KV blocks from GPU HBM to pinned host DRAM or remote SSD.
         """
         snapshot = {
             "agent_id": acb.agent_id,
@@ -296,11 +300,13 @@ class AgentInterruptRuntime:
             "dehydrated_at": datetime.now(timezone.utc).isoformat(),
         }
         self.storage[acb.agent_id] = json.dumps(snapshot)
-        acb.kv_cache_handle = None  # Release accelerator memory pointer
+        # Production runtime calls BlockManager.free() to release physical GPU memory
+        acb.kv_cache_handle = None
 
     def rehydrate_agent_memory(self, agent_id: str) -> AgentControlBlock:
         """
         Restore Agent Control Block and re-allocate accelerator memory frames.
+        In production runtimes, this calls vllm.BlockManager.swap_in(seq_group).
         """
         raw_data = self.storage.get(agent_id)
         if not raw_data:

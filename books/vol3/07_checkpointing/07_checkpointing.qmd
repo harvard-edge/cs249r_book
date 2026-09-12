@@ -670,6 +670,26 @@ Let us compare the latency profiles:
 
 This derivation establishes an essential systems architectural rule: **Schedule distributed tool operations in ascending order of reliability ($p_i$) and descending order of compensation cost ($T_{\text{comp}}$) to minimize cumulative compensation debt upon failure.**
 
+### Production durable execution: Temporal and compensation debt
+
+In real-world production systems, executing an agent saga cannot rely on an in-memory Python script. If the host process running the agent crashes due to an out-of-memory (OOM) error, node preemption, or network partition midway through an 80-step trajectory, pure in-memory state is wiped out. The system loses track of which forward transactions completed and which compensating actions were pending, leaking orphaned cloud infrastructure and leaving external databases in corrupted, half-mutated states.
+
+To prevent this failure mode, modern agent runtimes rely on **Durable Execution Engines**\index{Durable Execution} such as Temporal [@temporal2024] and Cadence. In a durable execution model, the agent's control flow is structured as a deterministic workflow orchestrating external **Activities** (the tool calls):
+
+1. **Deterministic Event History:** The runtime logs every activity invocation, input payload, execution status, and returned result to an append-only distributed event store.
+2. **Replay-Based State Reconstruction:** When a worker process fails or migrates to a different cluster node, a replacement worker reconstructs the exact thread state, call stack, and local variables by replaying the logged event history. Completed activities are intercepted by the replay engine and resolved immediately from cached history rather than re-executing against external services.
+3. **Durable Compensation Chains:** Compensating transactions $C_i$ are registered as durable workflow compensation steps. If forward execution terminates abnormally at step $k$, the workflow orchestrator guarantees that the compensation sequence $C_{k-1} \dots C_1$ is durably enqueued and executed to completion regardless of intervening worker crashes.
+
+#### Secondary compensation failures and compensation debt
+
+A dangerous fallacy in naive saga implementations is assuming that compensating transactions are infallible. In distributed environments, compensation actions $C_i$ are themselves subject to network timeouts, third-party API rate limits, and transient infrastructure outages. When a compensating transaction fails, the runtime incurs **Compensation Debt**\index{Compensation Debt}.
+
+To prevent secondary compensation failures from corrupting state, production architectures enforce three defensive guarantees:
+
+* **Strict Idempotency:** Every compensating activity must accept an idempotency key (e.g., a deterministic hash of the forward transaction ID and resource UUID). If a network timeout occurs during a rollback call, the orchestrator can safely retry the compensation without creating duplicate mutations.
+* **Exponential Backoff with Jitter:** Compensating activities are executed with bounded exponential backoff policies. Because the goal is restoring global consistency, retries continue across minutes or hours rather than failing immediately.
+* **Dead-Letter Queues (DLQs) and Escalation Traps:** If a compensating transaction exhausts its maximum retry threshold (e.g., due to an unrecoverable authentication rejection or cloud provider outage), the failure is routed to a persistent Dead-Letter Queue. The runtime triggers an asynchronous interrupt (trapping to an SRE intervention workflow as detailed in @sec-vol3-interrupts-hitl), ensuring that no orphaned resource remains unmonitored.
+
 ### Fork-on-error and counterfactual remediation
 
 Certain real-world actuations lack a mathematical or operational inverse:

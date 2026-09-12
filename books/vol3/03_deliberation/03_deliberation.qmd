@@ -988,23 +988,23 @@ Over-verification increases end-to-end task execution latency by nearly **$4\tim
 
 Deploying multi-branch deliberation (Best-of-$N$, Beam Search, MCTS) on top of naive, stateless large language model (LLM) serving endpoints causes immediate High-Bandwidth Memory exhaustion.
 
-Consider serving $N = 64$ parallel candidate rollouts on an 80-layer, 70B parameter model ($d_{\text{model}} = 8192, H = 64, d_h = 128$) where each branch shares a $16{,}000$-token prompt prefix and generates 500 output tokens.
+Consider serving $N = 64$ parallel candidate rollouts on an 80-layer, 70B parameter model using Grouped-Query Attention ($d_{\text{model}} = 8192, H_{\text{KV}} = 8, d_h = 128$, yielding $328\text{ KB/token}$) where each branch shares a $16{,}000$-token prompt prefix and generates 500 output tokens.
 
-In naive serving, the prefix is recomputed or duplicated across all 64 branches. The memory consumed by the KV cache alone is:
+In naive serving, the prefix is recomputed or duplicated across all 64 branches ($16{,}500$ tokens per branch, or $1{,}056{,}000$ total tokens). The memory consumed by the KV cache alone is:
 
 $$
-M_{\text{naive}} = 64 \times (16{,}000 + 500) \times 2 \times 80 \times 64 \times 128 \times 2 \text{ bytes} \approx \mathbf{2{,}214\text{ GB } (2.21\text{ TB})}
+M_{\text{naive}} = 64 \times (16{,}000 + 500) \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} \approx \mathbf{346.0\text{ GB}}
 $$
 
-This requires an entire cluster of 28x H100 GPUs purely to store the KV cache.
+Storing $346.0\text{ GB}$ of KV cache alone requires partitioning across at least five 80 GB GPUs before accounting for model weights or activation memory.
 
 Under RadixAttention prefix sharing, the 16,000-token prompt is stored **once**:
 
 $$
-M_{\text{shared}} = \left[16{,}000 + (64 \times 500)\right] \times 2 \times 80 \times 64 \times 128 \times 2 \text{ bytes} \approx \mathbf{644\text{ GB}}
+M_{\text{shared}} = \left[16{,}000 + (64 \times 500)\right] \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} = 48{,}000 \times 327{,}680 \text{ bytes} \approx \mathbf{15.73\text{ GB}}
 $$
 
-Prefix sharing achieves an immediate **$3.44\times$ memory reduction**, allowing the entire batch to fit comfortably on 8 GPUs. Failing to integrate radix prefix caching into search engines turns deliberation into an operational non-starter.
+Prefix sharing achieves an immediate **$22.0\times$ memory reduction**, allowing the KV cache for all 64 parallel branches to fit easily within a single accelerator alongside model weights. Failing to integrate radix prefix caching into search runtimes turns multi-branch deliberation into an operational non-starter.
 
 :::
 

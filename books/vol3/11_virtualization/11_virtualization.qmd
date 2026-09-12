@@ -126,21 +126,15 @@ To eliminate reliance on fragile model-level guardrails, systems engineers struc
 2. **Ring 2: Hypervisor and Ephemeral Storage Isolation (OS Level):** Confining untrusted code execution within hardware-assisted microVMs equipped with independent guest kernels, backed by disposable Copy-on-Write (CoW) filesystem overlays that guarantee instantaneous, zero-residual state teardown.
 3. **Ring 3: Zero-Trust Network Egress Mediation (Perimeter Level):** Routing all outbound network frames through transparent TLS SNI proxies, eBPF packet filters, payload credential regex scanners, and Shannon entropy DNS mitigators.
 
-Under this defense-in-depth architecture, the probability of catastrophic host compromise ($P_{\text{breach}}$) is the product of conditional breach probabilities across independent enforcement boundaries:
+Under this defense-in-depth architecture, security is modeled across three disjoint failure domains:
 
-$$P_{\text{breach}} = P(\text{inject}) \cdot P(\text{escape} \mid \text{inject}) \cdot P(\text{exfil} \mid \text{escape})$$
+1. **Injection Domain ($P(\text{inject})$):** An adversarial machine learning challenge operating within the continuous embedding space of neural weights.
+2. **Containment Domain ($P(\text{escape} \mid \text{inject})$):** An operating systems challenge operating in the Linux KVM hypervisor and hardware CPU silicon (VMX/EPT). An adversary cannot escape hardware virtualization using prompt tokens.
+3. **Exfiltration Domain ($P(\text{exfil} \mid \text{escape})$):** A networking challenge operating in kernel eBPF packet filters and transparent TLS SNI proxies. Even if an injected payload compromises the guest kernel, outbound raw IP connections and cloud metadata calls are dropped at line rate by the host network stack.
 
-Why are these terms modeled as conditionally independent? In classical systems reliability, multiplicative risk models fail when sub-components share common failure modes (correlated failures). Here, however, each ring is implemented in an entirely disjoint software and hardware domain:
+Because these enforcement domains share zero common software mechanisms or failure modes, an adversary who achieves prompt injection ($P(\text{inject}) \approx 1.0$) using automated gradient-based suffix optimization [@zou2023] is still confronted with the hardware virtualization barrier. Escaping the microVM requires an unpatched hypervisor zero-day, and even in that event, outbound data exfiltration is blocked by the independent network perimeter filter.
 
-- **Injection ($P(\text{inject})$)** is an adversarial NLP challenge operating within the continuous embedding space of neural weights.
-- **Escape ($P(\text{escape} \mid \text{inject})$)** is an operating systems challenge operating in the Linux KVM hypervisor and hardware CPU silicon (VMX/EPT). An adversary cannot escape hardware virtualization using prompt tokens.
-- **Exfiltration ($P(\text{exfil} \mid \text{escape})$)** is a networking challenge operating in kernel eBPF packet filters and transparent TLS SNI proxies. Even if an injected payload compromises the guest kernel, outbound raw IP connections and cloud metadata calls are dropped at line rate by the host network stack.
-
-Even if an adversary achieves universal prompt injection ($P(\text{inject}) \approx 1.0$) using automated gradient-based suffix optimization [@zou2023], the hardware hypervisor boundary ensures that escaping the virtual machine requires an unpatched hardware virtualization zero-day ($P(\text{escape} \mid \text{inject}) \le 10^{-6}$). Simultaneously, multi-layer egress mediation ensures that exfiltrating extracted data past SNI allowlists, regex credential scanners, and DNS entropy filters is near impossible ($P(\text{exfil} \mid \text{escape}) \le 10^{-4}$). The aggregate system compromise probability satisfies:
-
-$$P_{\text{breach}} \le 1.0 \times 10^{-6} \times 10^{-4} = 10^{-10}$$
-
-By moving security enforcement from probabilistic neural weights into deterministic systems software, the host remains secure even when the agent policy is fully co-opted.
+By shifting security enforcement from probabilistic neural weights into deterministic operating systems software, the host infrastructure remains protected even when the agent policy is fully compromised.
 
 ::: {#fig-vol3-virtualization-defense-rings fig-env="figure" fig-pos="htb" fig-cap="**The Three Defense-in-Depth Rings for Autonomous Agent Execution**: Complete mediation model dividing sandbox security into Protocol-level API schema and capability leases, OS-level microVM hardware containment and ephemeral CoW overlays, and Perimeter-level zero-trust egress mediation." fig-alt="Architectural diagram illustrating the three defense-in-depth rings for autonomous agent sandboxes: Ring 1 API capability leases, Ring 2 microVM virtualization and ephemeral overlays, and Ring 3 zero-trust network egress perimeter."}
 ![](images/svg/defense_in_depth_rings.svg){width="100%"}
@@ -152,7 +146,7 @@ Before exploring microVMs, containers, and WebAssembly runtimes, verify your und
 
 - [ ] **$W \oplus X$ violation in LLMs**: explain why prompt injection is functionally equivalent to an executable buffer overflow on a computer architecture that lacks memory protection.
 - [ ] **Ambient authority vs. capabilities**: describe how granting ambient shell authority to an agent enables Confused Deputy exploits during repository triage.
-- [ ] **Defense-in-depth multiplication**: calculate the system compromise probability $P_{\text{breach}}$ when prompt injection succeeds with probability $1.0$, hypervisor escape is $10^{-6}$, and network exfiltration breach is $10^{-4}$.
+- [ ] **Defense-in-depth disjoint domains**: explain why hypervisor isolation and network perimeter filtering remain effective even when prompt injection succeeds with probability $1.0$.
 
 :::
 
@@ -195,9 +189,13 @@ WebAssembly provides mathematical software fault isolation (SFI) [@haas2017bring
 
 The limitation is POSIX compatibility. Wasm requires software to be specifically compiled to the `wasm32-wasi` target. An autonomous agent cannot execute arbitrary bash scripts, run pre-compiled native binaries, debug processes with `gdb` or `strace`, or execute Python packages that rely on uncompiled C-extensions inside a standard Wasm runtime.
 
-#### Hardware-assisted microvms (AWS Firecracker)
+#### Hardware-assisted microvms (AWS Firecracker and E2B)
 
-MicroVMs combine the isolation strength of hardware-assisted virtualization with the agility of lightweight containers. By eliminating legacy PC hardware emulation and running atop the Linux Kernel-based Virtual Machine (KVM), microVMs boot an independent, stripped-down guest Linux kernel with sub-50 ms cold-boot times and minimal baseline memory footprints ($\sim 5\text{ MB}$) [@agache2020firecracker].
+MicroVMs combine the isolation strength of hardware-assisted virtualization with the agility of lightweight containers. By eliminating legacy PC hardware emulation and running atop the Linux Kernel-based Virtual Machine (KVM), microVMs boot an independent, stripped-down guest Linux kernel with sub-50 ms cold-boot times and minimal baseline memory footprints ($\sim 5\text{ MB}$) [@agache2020firecracker]. In production agent infrastructure, frameworks like **E2B** [@e2b2024] and Modal operationalize Firecracker at scale, managing pools of warm microVMs, Copy-on-Write memory templates, and isolated network namespaces tailored specifically for agentic code execution and evaluation.
+
+::: {.callout-tip title="Systems insight: The tax of nested virtualization"}
+In cloud deployments, running Firecracker inside standard virtualized cloud instances (e.g., standard AWS EC2 virtual machines) requires **nested virtualization** (KVM on top of Xen or Nitro). Nested virtualization introduces an extra layer of Second-Level Address Translation (EPT) walk latency and doubles VM-entry/VM-exit overheads on privileged instructions. For latency-critical agent workloads requiring sub-20 ms sandbox instantiation, production infrastructures typically deploy Firecracker directly onto bare-metal cloud instances (`.metal` instance families), bypassing nested hypervisor translation entirely.
+:::
 
 @Tbl-vol3-isolation-comparison quantifies the operational characteristics of these isolation primitives.
 
