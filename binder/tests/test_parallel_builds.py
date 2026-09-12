@@ -116,9 +116,27 @@ def test_snapshot_carries_uncommitted_and_untracked_files(repo):
     finally:
         workspace.remove_workspace(created)
     assert not created.path.exists()
+    assert not created.path.parent.exists()
     assert registered_worktrees(repo) == 1
     assert git(repo, "stash", "list") == ""
     assert (repo / "books" / "marker.txt").read_text() == "uncommitted\n"
+
+
+def test_run_directory_goes_with_its_last_workspace(repo):
+    snapshot = workspace.take_snapshot(repo)
+    first = workspace.create_workspace(snapshot, workspace.workspace_path("run", "w1"))
+    second = workspace.create_workspace(snapshot, workspace.workspace_path("run", "w2"))
+    workspace.remove_workspace(first)
+    assert (second.path.parent / ".no-hooks").is_dir()
+    workspace.remove_workspace(second)
+    assert not second.path.parent.exists()
+
+
+def test_a_failed_checkout_leaves_no_run_directory(repo):
+    path = workspace.workspace_path("run", "w1")
+    with pytest.raises(RuntimeError):
+        workspace.create_workspace(workspace.Snapshot(repo, "0" * 40), path)
+    assert not path.parent.exists()
 
 
 def test_workspaces_cannot_point_outside_the_workspace_root(repo, tmp_path):
@@ -151,6 +169,7 @@ def test_run_jobs_collects_output_and_logs_then_removes_worktrees(repo, tmp_path
     summary = json.loads((tmp_path / "run" / "summary.json").read_text())
     assert [job["job"] for job in summary["jobs"]] == ["vol1-pdf", "vol2-html", "vol1-pdf-broken"]
     assert registered_worktrees(repo) == 1
+    assert list(workspace.WORKSPACE_ROOT.iterdir()) == []
     assert (repo / "books" / "marker.txt").read_text() == "uncommitted\n"
 
 
@@ -171,7 +190,7 @@ def test_session_reuses_one_workspace_and_prepare_never_touches_the_checkout(rep
     assert edited.ok and edited.artifact.read_text().startswith("edited in workspace\n")
     assert plain.ok
     assert (repo / "books" / "marker.txt").read_text() == "committed\n"
-    assert not first_path.exists()
+    assert not first_path.parent.exists()
     assert registered_worktrees(repo) == 1
 
 

@@ -23,6 +23,10 @@ from typing import Tuple
 #: refuse paths outside it.
 WORKSPACE_ROOT = Path(tempfile.gettempdir()) / "binder-workspaces"
 
+#: Empty hooks directory, shared by a run's workspaces, that ``git worktree add``
+#: is pointed at so repository hooks do not run in a throwaway checkout.
+_NO_HOOKS = ".no-hooks"
+
 
 def workspace_path(run_id: str, name: str) -> Path:
     """Return the directory for workspace *name* of run *run_id* under :data:`WORKSPACE_ROOT`."""
@@ -91,10 +95,14 @@ def create_workspace(snapshot: Snapshot, path: Path) -> Workspace:
         RuntimeError: If ``git worktree add`` fails.
     """
     path = _checked_path(path)
-    no_hooks = path.parent / ".no-hooks"
+    no_hooks = path.parent / _NO_HOOKS
     no_hooks.mkdir(parents=True, exist_ok=True)
-    _git(snapshot.repo_root, "-c", f"core.hooksPath={no_hooks}",
-         "worktree", "add", "--detach", "--force", str(path), snapshot.commit)
+    try:
+        _git(snapshot.repo_root, "-c", f"core.hooksPath={no_hooks}",
+             "worktree", "add", "--detach", "--force", str(path), snapshot.commit)
+    except RuntimeError:
+        _remove_empty_run_dir(path.parent)
+        raise
     for relative in snapshot.untracked:
         source = snapshot.repo_root / relative
         if source.is_file():
@@ -108,7 +116,8 @@ def remove_workspace(workspace: Workspace) -> None:
     """Delete a workspace directory and its worktree registration.
 
     Anything left inside the workspace, including build output, is discarded;
-    callers collect what they need first.
+    callers collect what they need first. The run directory holding the
+    workspace goes too once its last workspace is removed.
 
     Raises:
         ValueError: If the workspace path is not inside :data:`WORKSPACE_ROOT`.
@@ -119,6 +128,25 @@ def remove_workspace(workspace: Workspace) -> None:
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
     _git(repo_root, "worktree", "prune", check=False)
+    _remove_empty_run_dir(path.parent)
+
+
+def _remove_empty_run_dir(run_dir: Path) -> None:
+    """Delete *run_dir* once it holds nothing but the shared hooks directory.
+
+    Every workspace of a run shares the hooks directory, so it is removed with
+    the last one. The workspace root itself stays, since other runs may be
+    creating directories in it.
+    """
+    if run_dir == WORKSPACE_ROOT.resolve() or not run_dir.is_dir():
+        return
+    if any(entry.name != _NO_HOOKS for entry in run_dir.iterdir()):
+        return
+    for directory in (run_dir / _NO_HOOKS, run_dir):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 def _checked_path(path: Path) -> Path:
