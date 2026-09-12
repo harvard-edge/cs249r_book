@@ -1104,8 +1104,7 @@ def _apply_cell_edits(text: str, edits: list[MultEdit]) -> str:
 def cmd_multiple(args) -> int:
     print(
         "codemod_fmt.py multiple is retired. Design B makes fmt_multiple own "
-        "$\\times$ and uses *_mult_str exports; use "
-        "codemod_design_b_multipliers.py for current migrations.",
+        "$\\times$ and uses *_mult_str exports.",
         file=sys.stderr,
     )
     return 2

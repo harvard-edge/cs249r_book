@@ -117,9 +117,9 @@ Every component connects. The textbook gives you the mental models. The labs let
         <br>• <a href="https://mlsysbook.ai/vol2/"><b>Vol II: Scaling Machine Learning Systems</b></a> <i>(Preview)</i><br>&nbsp;&nbsp;&nbsp;Distributed computation, accelerators, memory, communication, parallelism, serving, reliability, and efficiency.
         <br>• <a href="books/vol3/"><b>Vol III: Agentic Machine Learning Systems</b></a> <i>(In Development)</i><br>&nbsp;&nbsp;&nbsp;Reasoning and acting loops, memory, tools, planning, search, orchestration, evaluation, security, and multi-agent systems.
         <br>• <a href="books/vol4/"><b>Vol IV: Physical AI Systems</b></a> <i>(In Development)</i><br>&nbsp;&nbsp;&nbsp;Sensing, perception, world models, control, robotics, embodiment, real-time constraints, safety, and hardware.
-        <br><br>⚠️ <i>Volumes III and IV are unfinished drafts that I am actively writing. Please do not cite or teach from them yet. Feedback is welcome through the <a href="https://github.com/harvard-edge/cs249r_book/issues/new/choose">Book feedback</a> issue forms.</i>
+        <br><br>⚠️ <i>Volumes III and IV are in development and change quickly as I iterate. Please do not cite or teach from them yet. Feedback is welcome through the <a href="https://github.com/harvard-edge/cs249r_book/issues/new/choose">Book feedback</a> issue forms.</i>
       </td>
-      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II (Preview)</a> · <a href="books/vol3/">Vol III (Draft)</a> · <a href="books/vol4/">Vol IV (Draft)</a></td>
+      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II (Preview)</a> · <a href="books/vol3/">Vol III (In Dev)</a> · <a href="books/vol4/">Vol IV (In Dev)</a></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
@@ -282,14 +282,14 @@ The textbook series follows a comprehensive systems progression across four core
     </tr>
     <tr>
       <td align="center">🟣</td>
-      <td><b>Volume III</b><br><i>Agentic (Notebook)</i></td>
+      <td><b>Volume III</b><br><i>Agentic (In Dev)</i></td>
       <td><b>The Trajectory</b></td>
       <td>How do we govern intelligence acting autonomously over long horizons?</td>
       <td>Compounding trajectory drift and unauthorized side-effects.</td>
     </tr>
     <tr>
       <td align="center">🌲</td>
-      <td><b>Volume IV</b><br><i>Physical AI (Notebook)</i></td>
+      <td><b>Volume IV</b><br><i>Physical AI (In Dev)</i></td>
       <td><b>The Physical Plant</b></td>
       <td>How do we let intelligence act safely on matter and physical systems?</td>
       <td>Irreversible physical damage in the real world.</td>
@@ -297,7 +297,7 @@ The textbook series follows a comprehensive systems progression across four core
   </tbody>
 </table>
 
-> *Note: Volumes III and IV are currently active research notebooks as these disciplines rapidly evolve. Over time, they may mature into formal textbooks—for now, they are where I explore first principles and separate durable systems foundations from noise. You are welcome to follow along as they take shape.*
+> *Note: Volumes III and IV are in development. They change quickly as I iterate, so expect chapters to be added, reorganized, and rewritten. You are welcome to follow along as they take shape.*
 
 #### How the Volumes Connect
 
@@ -548,7 +548,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">💼</td>
       <td><b>Improve assessment or career-readiness content</b></td>
-      <td><a href="staffml/README.md">StaffML guide</a> · <a href="binder/tools/scripts/quizzes/README.md">quiz generation guide</a></td>
+      <td><a href="staffml/README.md">StaffML guide</a></td>
     </tr>
     <tr>
       <td align="center">🧠</td>

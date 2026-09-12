@@ -51,17 +51,6 @@ Current figure-tool structure:
 binder/tools/
   figures/
     style.py        # COLORS, set_book_style(), setup_plot(), web DPI
-    margin/         # margin SVG devices and inline-ready drawing helpers
-  scripts/
-    margin_figures/ # generation, inventory, insertion, QA script entrypoints
-```
-
-Recommended next migration:
-
-```text
-binder/tools/
-  figures/margin/
-    inline.py       # optional Quarto-facing margin_svg() helper
 ```
 
 Compatibility policy:
@@ -69,8 +58,6 @@ Compatibility policy:
 1. New and migrated book code imports book style from `book.tools.figures.style`.
 2. `mlsysim.viz` may continue to re-export the style helpers only as a
    compatibility bridge for older snippets and standalone simulator tutorials.
-3. Add an inline margin helper only if the book starts rendering margin figures
-   from executable cells instead of committed SVG assets.
 
 This keeps simulator-object plotting in `mlsysim` while keeping book publication
 policy in Book Tools.

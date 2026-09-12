@@ -64,8 +64,8 @@ Fast single-chapter builds overwrite `_build/html-vol1/`; the render script
 
 Archived output: `books/_build/html-audit/<vol>/<chapter>.html`
 
-Legacy wrappers at `binder/tools/audit/render_vol1_audit.sh` and
-`render_html_audit.sh` forward to this script.
+The legacy wrapper `binder/tools/audit/render_html_audit.sh` forwards to
+this script.
 
 ## Tool reference
 

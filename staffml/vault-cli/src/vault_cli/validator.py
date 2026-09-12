@@ -304,9 +304,8 @@ def structural_tier(
     # #15: applicability matrix respected — no questions in excluded (track, topic) cells (B.8).
     failures.extend(_check_applicability(loaded, vault_dir))
 
-    # #19 (Phase 6, 2026-05-04): published YAMLs follow the AUTHORING.md
-    # marker convention on common_mistake / napkin_math. Lifts gate_format
-    # from validate_drafts.py / _judges.py to a corpus-wide invariant.
+    # #19 (2026-05-04): published YAMLs follow the AUTHORING.md marker
+    # convention on common_mistake / napkin_math, as a corpus-wide invariant.
     # Drafts are exempt — author-in-progress drafts may not yet be marker-
     # compliant, and `vault check --strict` runs against the published set.
     failures.extend(_check_format_markers(loaded))

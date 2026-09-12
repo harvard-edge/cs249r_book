@@ -132,20 +132,12 @@ VALID_TOPICS: frozenset[str] = frozenset({
 # soft-constraint warnings (paper line 397).
 
 ZONE_LEVEL_AFFINITY: dict[str, set[str]] = {
-    # Widened 2026-04-25 per expert consensus
-    # (staffml/vault/docs/lint_calibration/consensus.yaml + user arbitration).
-    # Each zone admits the levels that experts agreed are pedagogically
-    # meaningful for that zone × level pairing.
-    #
-    # Phase B post-generation widening (2026-04-25, second pass):
-    # B.5's loop targeted under-filled cells the analyzer flagged as
-    # gaps. The judge passed items at extreme-edge (zone, level) pairs
-    # that the consensus rule didn't cover (e.g. realization@L1 for
-    # scaffolded firmware build tasks; recall@L5 for staff-level
-    # foundational-reference recall; mastery@L2-L3 for associate-level
-    # integrative tasks). Widening to admit these — they have <10
-    # supporting items each, all judge-PASS, all internally consistent
-    # via the ZONE_BLOOM_AFFINITY matrix.
+    # Widened 2026-04-25 after expert review. Each zone admits the levels
+    # reviewers agreed are pedagogically meaningful for that zone × level
+    # pairing, including edge pairs such as realization@L1 (scaffolded
+    # firmware build tasks), recall@L5 (staff-level foundational-reference
+    # recall), and mastery@L2-L3 (associate-level integrative tasks). Items
+    # at those pairs stay consistent with the ZONE_BLOOM_AFFINITY matrix.
     "recall":         {"L1", "L2", "L3", "L4", "L5", "L6+"},
     "fluency":        {"L1", "L2", "L3", "L4", "L5", "L6+"},
     "analyze":        {"L2", "L3", "L4", "L5", "L6+"},

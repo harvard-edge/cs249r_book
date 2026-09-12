@@ -82,7 +82,6 @@ The project uses a modern Python packaging setup with `pyproject.toml`. Core dep
 - `Pillow>=9.0.0` - Image processing
 
 **Additional Tools:**
-- `openai>=1.0.0` - AI-assisted content tools
 - `gradio>=4.0.0` - Interactive interfaces
 - `ghostscript>=0.7` - PDF compression
 - `pre-commit>=3.0.0` - Code quality hooks
@@ -582,14 +581,8 @@ mlsysbook build  # Alternative command name
 
 **With Optional Dependencies:**
 ```sh
-# Install with AI features
-pip install -e ".[ai]"
-
 # Install with development tools
 pip install -e ".[dev]"
-
-# Install everything
-pip install -e ".[ai,dev]"
 ```
 
 ### Key Features

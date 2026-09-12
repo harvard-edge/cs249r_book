@@ -25,7 +25,7 @@ export interface ChainBadgeProps {
   position: number;    // 1-indexed
   total: number;
   /**
-   * Chain tier (Phase 2 of CHAIN_ROADMAP.md). When "secondary", the badge
+   * Chain tier. When "secondary", the badge
    * renders an "alt path" pill so the learner knows this is a coverage
    * chain rather than the canonical Bloom progression. Defaults to
    * "primary" so existing callers don't need updating.

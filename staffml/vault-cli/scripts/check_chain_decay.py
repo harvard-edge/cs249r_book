@@ -2,7 +2,7 @@
 """Detect chain decay — questions that have drifted semantically away from
 their chain mates after an edit.
 
-Phase 4.7 of CHAIN_ROADMAP.md. **Advisory, not blocking** on first ship.
+**Advisory, not blocking.**
 Run as a manual gut-check after editing chain-member questions, or wire
 into pre-commit if you want it on every change to vault YAMLs.
 

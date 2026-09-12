@@ -120,8 +120,7 @@ On mismatch (`match: false`, exit 1), `errors` enumerates the first 10 differing
       { "check": "registry-integrity", "status": "pass", "detail": "9199 entries, all files exist" },
       { "check": "release-integrity", "status": "pass", "detail": "release 1.0.0 manifest verified" },
       { "check": "d1-connectivity", "status": "skip", "detail": "no D1 credentials configured" },
-      { "check": "content-hash-sample", "status": "pass", "detail": "20/20 sampled hashes match" },
-      { "check": "llm-spend-ledger", "status": "pass", "detail": "$4.22 used today; ceiling $50.00" }
+      { "check": "content-hash-sample", "status": "pass", "detail": "20/20 sampled hashes match" }
     ]
   }
 }
@@ -370,23 +369,6 @@ On failure:
     "env": "production",
     "restored_to": "0.9.0",
     "duration_seconds": 87
-  }
-}
-```
-
-### `vault generate --json`  _(Phase 7, deferred)_
-
-Schema TBD. Placeholder shape:
-
-```json
-{
-  "ok": true,
-  "data": {
-    "drafts_written": 3,
-    "model": "claude-opus-4-6",
-    "exemplar_ids": ["...", "..."],
-    "prompt_hash": "<hex>",
-    "cost_usd": 0.12
   }
 }
 ```

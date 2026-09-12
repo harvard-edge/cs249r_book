@@ -129,7 +129,6 @@ Scope: end-to-end Typer CliRunner invocations.
 - `test_vault_deploy.py`: pre-deploy R2 snapshot synchronous; POP propagation probe blocks on unverified stale.
 - `test_vault_rollback.py`: snapshot method restores to verified state; sql method works on content-only release.
 - `test_vault_verify.py`: exit 0 on match, exit 1 on any divergence (id-registry, content-hash, release_hash).
-- `test_vault_generate.py`: exemplar-pool enforcement (refuses <3 eligible); dry-run emits cost estimate without API call; cap `--count ≤25`; secrets file mode 0600 enforced; daily ledger refuses over-ceiling.
 - `test_vault_api.py`: local shim mirrors Worker endpoint surface; schemas match shared-types codegen.
 - `test_vault_doctor.py`: each subcheck runnable independently; `--json` emits stable schema.
 - `test_exit_code_taxonomy.py`: each failure mode returns the correct exit code per §4.6.
@@ -290,7 +289,7 @@ jobs:
   slow-checks:
     runs-on: ubuntu-latest
     steps:
-      - run: vault check --tier slow     # link rot, LLM math, Pint units
+      - run: vault check --tier slow     # link rot, napkin math, Pint units
       - run: vault doctor --check-links  # updates vault/link-rot.yaml
       - run: vault stats --format prometheus > /tmp/metrics.prom
       - run: curl -X POST "$PROMETHEUS_PUSHGATEWAY" --data-binary @/tmp/metrics.prom

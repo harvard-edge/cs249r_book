@@ -49,12 +49,11 @@ export interface Question {
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
   /**
-   * Per-membership tier label. "primary" chains came out of the strict
-   * Bloom-progression sweep and are surfaced by default; "secondary"
-   * chains came out of the lenient second-pass coverage build and are
-   * deprioritized in default UI surfaces. Mirrors chain_positions in
-   * shape — one entry per chain_id this question is in. See
-   * CHAIN_ROADMAP.md Phase 1/2 for the mechanism.
+   * Per-membership tier label. "primary" chains follow a strict Bloom
+   * progression and are surfaced by default; "secondary" chains are
+   * looser coverage chains and are deprioritized in default UI surfaces.
+   * Mirrors chain_positions in shape — one entry per chain_id this
+   * question is in.
    */
   chain_tiers?: Record<string, "primary" | "secondary">;
 

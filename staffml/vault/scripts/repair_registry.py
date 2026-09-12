@@ -43,14 +43,14 @@ REBUILD_HEADER = """\
 # ─────────────────────────────────────────────────────────────────────────
 # Registry rebuild — 2026-04-25
 # Reason: commit 8a5c3ff3c renamed 4,754 cohort-tagged IDs to clean
-#   <track>-NNNN form, and several generation runs wrote YAMLs without
+#   <track>-NNNN form, and several batches of YAMLs were written without
 #   appending to this registry. Both events left disk YAMLs unregistered.
 # Action: this block appends every disk-YAML ID not previously in the
 #   registry. The earlier orphan entries (e.g. tinyml-exp2-desi-0184,
 #   cloud-fill-04027) are the historical names of those questions and
 #   remain as audit trail; we do NOT delete them.
-# Future: ``vault build`` and ``promote_validated.py`` should append to
-#   this registry on every new write so this rebuild is one-time only.
+# Future: every tool that writes a new question should append to this
+#   registry on write so this rebuild is one-time only.
 # ─────────────────────────────────────────────────────────────────────────
 """
 

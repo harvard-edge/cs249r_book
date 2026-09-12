@@ -11,9 +11,9 @@ import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
 import { ScenarioSkeleton } from "@/components/ScenarioSkeleton";
 import NapkinCalc from "@/components/NapkinCalc";
-// Legacy ID redirect map (cloud-balance-* → cloud-NNNN, etc.). Built by
-// rename_legacy_ids.py on 2026-04-25; preserves shareable links to the
-// 4,754 cohort-tagged IDs that were renamed to the clean form.
+// Legacy ID redirect map (cloud-balance-* → cloud-NNNN, etc.). Preserves
+// shareable links to the 4,754 cohort-tagged IDs renamed to the clean
+// form on 2026-04-25.
 import idRedirects from "@/data/id-redirects.json";
 import AskInterviewer from "@/components/AskInterviewer";
 import MarkdownText from "@/components/MarkdownText";

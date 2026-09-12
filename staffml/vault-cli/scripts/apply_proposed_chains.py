@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Apply a Gemini-proposed chains.json to replace the live registry.
+"""Validate a proposed chains.json and apply it as the live registry.
 
-Reads `staffml/vault/chains.proposed.json` (output of
-build_chains_with_gemini.py), validates it against the YAML corpus and
+Reads a proposed chain file, validates it against the YAML corpus and
 chain invariants, and on success replaces `staffml/vault/chains.json`.
+With ``--dry-run`` it only validates, which CI uses as the structural
+gate on the committed registry.
 
 Validation:
   - Every member id exists in the YAML corpus and is published
   - Levels in array order are non-decreasing (Bloom-monotonic) — Δ=0 IS
-    allowed at this layer; the strict Δ ∈ {1,2} rule is enforced upstream
-    in build_chains_with_gemini.py based on its --mode setting
+    allowed at this layer
   - 2 ≤ chain size ≤ 6
   - Single-topic
   - No qid in more than 2 chains, and Δ=2 only allowed for L1/L2 anchors
   - chain_id unique
 
-The optional ``tier`` field on a chain entry (``primary``/``secondary``,
-added in Phase 1.3 of CHAIN_ROADMAP.md) is intentionally not validated
-here — it's a UI-routing hint, not a structural invariant.
+The optional ``tier`` field on a chain entry (``primary``/``secondary``)
+is intentionally not validated here — it's a UI-routing hint, not a
+structural invariant.
 
 Always run `vault check --strict` after this script — that's the final gate.
 """

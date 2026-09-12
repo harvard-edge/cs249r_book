@@ -4,7 +4,6 @@ Scripts for managing, processing, and validating images in the book.
 
 ## Image Processing
 - `compress_images.py` - Compress images to reduce file size
-- `convert_svg_to_png.py` - Convert SVG files to PNG format
 - `remove_bg.py` - Remove backgrounds from images
 
 ## Image Management
