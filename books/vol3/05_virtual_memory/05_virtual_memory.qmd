@@ -127,6 +127,16 @@ $$\Phi_{\text{frag}} = 1 - \frac{\sum_{i=1}^{N} S_i \cdot S_{\text{token}}}{M_{\
 
 where $N$ is the number of active sequences, $S_i$ is the actual token length of sequence $i$, and $M_{\text{allocated}}$ is the total physical memory reserved by the allocator. The physical meaning of $\Phi_{\text{frag}}$ is intuitive: it represents the exact fraction of allocated silicon memory containing zero useful token representations. For instance, if an engine reserves memory for 32 concurrent requests with $S_{\text{max}} = 32\text{,}000$ tokens each, but the average agent task completes in $S_i = 4\text{,}000$ tokens, the active token occupancy is only $12.5\%$. The remaining $87.5\%$ ($\Phi_{\text{frag}} = 0.875$) sits locked in contiguous reservation buffers, completely unusable by any incoming request. Empirical profiling across unpaged production inference clusters demonstrates that $\Phi_{\text{frag}}$ consistently hovers between **$60\%$ and $80\%$** [@kwon2023vllm]. This stranded capacity directly throttles batching concurrency, increasing cluster operating costs by a factor of three to five.
 
+::: {#chk-vol3-05-fragmentation-geometry .callout-checkpoint title="Attention memory geometry and fragmentation"}
+
+Before exploring PagedAttention and block-level address translation, verify your understanding of KV cache geometry:
+
+- [ ] **Geometry comparison**: calculate the memory footprint per token in BF16 precision for an 80-layer, 70B model under MHA ($H_Q=64, H_{\text{KV}}=64$) versus GQA ($H_Q=64, H_{\text{KV}}=8$).
+- [ ] **Internal vs. external fragmentation**: distinguish how static allocation based on $S_{\text{max}}$ causes internal fragmentation, while dynamic buffer resizing causes external fragmentation.
+- [ ] **Fragmentation ratio napkin math**: if an inference server reserves memory for 16 concurrent agents with $S_{\text{max}} = 32{,}000$ tokens but the average task completes in $S = 6{,}000$ tokens, calculate the wasted memory percentage $\Phi_{\text{frag}}$.
+
+:::
+
 ### Trajectory prompt anatomy and monotonic prefix expansion
 
 The memory fragmentation crisis is intensely exacerbated by the operational mechanics of autonomous agent control loops. Unlike conversational chatbots that exchange brief, self-contained text messages, an autonomous software agent executes a stateful perception-action trajectory ($s_0 \xrightarrow{\pi_\theta} a_0 \xrightarrow{\mathcal{E}} o_1 \longrightarrow \dots \longrightarrow s_t$) over dozens or hundreds of discrete environment steps.
@@ -593,6 +603,16 @@ Because the hash of block $k$ depends strictly on preceding state $h_{k-1}$ and 
 2. **Distributed Cache Routing:** A cluster load balancer can hash the prompt's initial block keys and route the request to the specific GPU worker node that already hosts those physical blocks in HBM, maximizing cache hit rates across distributed multi-agent swarms.
 
 > **The Systems Rule of Thumb (Content-Addressed Routing):** For multi-node agent serving clusters, never route requests purely via round-robin or least-connections load balancing. Use content-addressed rolling hash keys ($h_k$) to implement prefix-aware affinity routing, pinning agents with shared system prompts or repository contexts to identical GPU worker nodes. Distributed hash routing transforms cross-node cache hit rates from near-zero to over $85\%$, avoiding petabytes of redundant prefill recomputation across the cluster.
+
+::: {#chk-vol3-05-radix-prefix-caching .callout-checkpoint title="Radix prefix trees and copy-on-write"}
+
+Before analyzing chunked prefill and prefill-decode disaggregation, verify your understanding of prefix caching:
+
+- [ ] **Copy-on-Write branch scaling**: calculate why Copy-on-Write block aliasing expands concurrent search branches by nearly $40\times$ compared to naive contiguous memory replication.
+- [ ] **Radix tree traversal**: trace the operations executed by a serving runtime when an incoming prompt matches an intermediate prefix, including edge splitting and reference count increments.
+- [ ] **Leaf-only LRU eviction**: why can an engine evict only unpinned leaf nodes ($\text{ref\_count} = 0$) in a Radix prefix tree rather than intermediate internal nodes?
+
+:::
 
 ### Chunked prefill and pipeline interference
 

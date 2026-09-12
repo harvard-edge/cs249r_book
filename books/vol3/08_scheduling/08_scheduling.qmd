@@ -111,6 +111,16 @@ The compute-dense GEMM kernel of the prefill request claims all available Stream
 
 > **The Systems Rule of Thumb (The Arithmetic Intensity Divergence):** Prefill and decode occupy diametrically opposed hardware regimes: prompt prefill is compute-bound ($\mathcal{I}_{\text{prefill}} \approx S \ge 512\text{ FLOP/byte}$), while autoregressive decode is memory-bus bound ($\mathcal{I}_{\text{decode}} \le B_{\text{dec}} \le 64\text{ FLOP/byte} \ll \mathcal{I}_{\text{knee}}$). Co-scheduling an unchunked prefill alongside active decode streams causes severe phase contention: the compute-dense GEMM monopolizes accelerator streaming multiprocessors, serializing memory-bound decode iterations and inducing tail latency spikes of 150 to 200 milliseconds.
 
+::: {#chk-vol3-08-roofline-phase-contention .callout-checkpoint title="The arithmetic intensity divergence and phase contention"}
+
+Before examining chunked prefill and physical cluster disaggregation, verify your understanding of serving physics:
+
+- [ ] **Machine ridge point**: calculate the ridge point $\mathcal{I}_{\text{knee}} = P_{\text{peak}} / B_{\text{mem}}$ for an accelerator with $989\text{ TFLOP/s}$ compute and $3.35\text{ TB/s}$ HBM bandwidth.
+- [ ] **Operational intensity divergence**: explain why prompt prefill is compute-bound ($\mathcal{I}_{\text{prefill}} \approx S$) while autoregressive decode is memory-bandwidth bound ($\mathcal{I}_{\text{decode}} \le B_{\text{dec}}$).
+- [ ] **Phase contention**: describe how co-locating an unchunked 64k prefill with active decodes on the same GPU destroys Inter-Token Latency (ITL) service-level objectives.
+
+:::
+
 [^fn-scheduling-intensity-divergence]: Total prefill operations equal $2 N_{\text{params}} S + 4 L d_{\text{model}} S^2$ FLOPs while streaming $2 N_{\text{params}}$ bytes of weights in half precision; for $S \ll N_{\text{params}} / (2 L d_{\text{model}})$, this simplifies to $\mathcal{I}_{\text{prefill}} \approx S$. Decode evaluates $2 N_{\text{params}} B_{\text{dec}}$ FLOPs while streaming all weights and historical Key-Value caches from HBM, capping operational intensity at $B_{\text{dec}}$.
 
 ### Chunked prefill and iteration piggybacking
@@ -522,6 +532,16 @@ The dispatch and promotion policies operate under strict invariants:
 > **The Systems Rule of Thumb (The MLFQ Demotion Invariant):** Multi-Level Feedback Queues discretize Least Attained Service without incurring continuous preemption overhead. By admitting all new agent tasks into highest priority ($Q_0$) and demoting them across service quantum thresholds ($s \ge T_{i+1}$), interactive developer requests complete with near-zero queueing latency while long-running reasoning loops are gracefully isolated into lower-priority queues without starving the cluster.
 
 While MLFQ governs the temporal prioritization of compute across heavy-tailed workloads, how should an orchestrator distribute requests spatially across a distributed cluster when multiple agents share identical prompt prefixes? This requires cache-aware load balancing.
+
+::: {#chk-vol3-08-pareto-mlfq-scheduling .callout-checkpoint title="Heavy-tailed Pareto scheduling and MLFQ"}
+
+Before examining cache-aware prefix routing and distributed load balancing, verify your understanding of multi-turn scheduling:
+
+- [ ] **Decreasing hazard rate**: explain why agent trajectories governed by a Pareto distribution exhibit a decreasing hazard rate ($d h(x) / dx < 0$), and why this makes FIFO scheduling vulnerable to queue collapse.
+- [ ] **MLFQ priority demotion**: how does a Multi-Level Feedback Queue isolate long-running background reasoning loops without starving interactive developer suggestions?
+- [ ] **Chunked prefill budget napkin math**: derive how an iteration token budget $T_{\text{budget}} = B_{\text{dec}} + C$ maintains a stable $25\text{ ms}$ Inter-Token Latency upper bound.
+
+:::
 
 ## Cache-Aware Load Balancing and Prefix Routing {#sec-vol3-scheduling-prefix-routing}
 
