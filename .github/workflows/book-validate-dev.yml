@@ -42,15 +42,21 @@ on:
   pull_request:
     branches: [dev]  # Render gate: catch book breakage before it lands
     paths:
-      - 'book/**'
+      - 'books/**'
+      - 'binder/**'
       - '.github/workflows/book-validate-dev.yml'
+      - '.github/workflows/book-build-container.yml'
       - '.github/workflows/book-preview-dev.yml'
+      - '.github/workflows/update-contributors.yml'
   push:
     branches: [dev]  # Auto-trigger for dev branch
     paths:
-      - 'book/**'
+      - 'books/**'
+      - 'binder/**'
       - '.github/workflows/book-validate-dev.yml'
+      - '.github/workflows/book-build-container.yml'
       - '.github/workflows/book-preview-dev.yml'
+      - '.github/workflows/update-contributors.yml'
   workflow_dispatch:  # Manual trigger for testing
     inputs:
       test_branch:
@@ -66,6 +72,18 @@ on:
         options:
           - dev
           - main
+      # Target selection
+      build_target:
+        description: '📦 Build target (vol1, vol2, vol3, vol4, all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - vol1
+          - vol2
+          - vol3
+          - vol4
       # Format & OS selection
       build_formats:
         description: '📦 Build formats (all, html, pdf, epub)'
@@ -141,20 +159,32 @@ jobs:
           pip install pre-commit
           echo "📦 Installing project dependencies for custom hooks..."
           pip install -r requirements.txt || echo "⚠️ Could not install all requirements, continuing..."
+          # 2026-09-12: tinytorch-reference-correctness exports src/ with jupytext
+          # and nbdev whenever TinyTorch sources change; without these the hook
+          # fails on import instead of testing anything.
+          pip install -r tinytorch/requirements.txt || echo "⚠️ Could not install TinyTorch requirements, continuing..."
           echo "📦 Installing fallback hook dependencies..."
           pip install rich requests pillow pint pandas pytest || echo "⚠️ Could not install one or more fallback deps, continuing..."
           
           echo "🔧 Installing pre-commit hooks..."
           pre-commit install --install-hooks
 
-          echo "🔄 Running pre-commit on all files..."
           echo "Python version: $(python --version)"
-          if pre-commit run --all-files --verbose; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔄 Running pre-commit on PR changes (origin/${{ github.base_ref }}..HEAD)..."
+            CMD="pre-commit run --from-ref origin/${{ github.base_ref }} --to-ref HEAD --verbose"
+          elif [ "${{ github.event_name }}" = "push" ] && git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            echo "🔄 Running pre-commit on push changes (HEAD~1..HEAD)..."
+            CMD="pre-commit run --from-ref HEAD~1 --to-ref HEAD --verbose"
+          else
+            echo "🔄 Running pre-commit on all files..."
+            CMD="pre-commit run --all-files --verbose"
+          fi
+
+          if eval "$CMD"; then
             echo "✅ Pre-commit checks: PASSED"
           else
             echo "❌ Pre-commit checks: FAILED"
-            echo "📋 Showing detailed output:"
-            pre-commit run --all-files --verbose || true
             exit 1
           fi
 
@@ -170,7 +200,7 @@ jobs:
       container_registry: 'ghcr.io'
       container_tag: 'latest'
 
-  # Step 3: Update contributors (after validation passes, before build matrix)
+  # Step 3: Update contributors (runs in parallel with builds after pre-commit passes)
   update-contributors:
     name: '👥 Update Contributors'
     needs: [pre-commit]
@@ -180,7 +210,7 @@ jobs:
   # Step 4: Determine build configuration (shared logic)
   build-config:
     name: '🎯 Build Configuration'
-    needs: [pre-commit, update-contributors]
+    needs: [pre-commit]
     if: always() && needs.pre-commit.result == 'success'
     runs-on: ubuntu-latest
     outputs:
@@ -189,39 +219,73 @@ jobs:
       build_epub: ${{ steps.config.outputs.build_epub }}
       build_linux: ${{ steps.config.outputs.build_linux }}
       build_windows: ${{ steps.config.outputs.build_windows }}
+      build_target: ${{ steps.config.outputs.build_target }}
       container_registry: ${{ steps.config.outputs.container_registry }}
       container_tag: ${{ steps.config.outputs.container_tag }}
       target: ${{ steps.config.outputs.target }}
 
     steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
       - name: 🎯 Determine build configuration
         id: config
         run: |
           echo "🎯 === BUILD CONFIGURATION ==="
 
           # Determine what to build based on inputs (individual format flags)
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # Auto-trigger: build Linux only. Windows validate-dev is temporarily
-            # disabled on push — the Windows container itself is still built by
-            # infra-container-windows.yml on its own schedule/path triggers.
-            # Re-enable by flipping BUILD_WINDOWS back to "true" below.
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "pull_request" ]; then
             BUILD_HTML="true"
             BUILD_PDF="true"
             BUILD_EPUB="true"
             BUILD_LINUX="true"
             BUILD_WINDOWS="false"
-            TARGET="dev" # For push events, always target dev
-            echo "📊 Trigger: Automatic (dev branch push)"
-            echo "📊 HTML: $BUILD_HTML (mandatory)"
-            echo "📊 PDF: $BUILD_PDF (mandatory)"
-            echo "📊 EPUB: $BUILD_EPUB (mandatory)"
-            echo "📊 Linux: $BUILD_LINUX (mandatory)"
-            echo "📊 Windows: $BUILD_WINDOWS (temporarily disabled on dev push)"
-            echo "📊 Method: container-only"
-            echo "📊 Target: $TARGET"
+            TARGET="dev"
+
+            # Selective auto-detection of modified volume paths
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD 2>/dev/null || echo "")
+            else
+              CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+            fi
+            echo "📝 Changed files: $CHANGED_FILES"
+
+            HAS_VOL1=false
+            HAS_VOL2=false
+            HAS_VOL3=false
+            HAS_VOL4=false
+            HAS_SHARED=false
+
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              if [[ "$file" =~ ^books/vol1/ ]]; then HAS_VOL1=true; fi
+              if [[ "$file" =~ ^books/vol2/ ]]; then HAS_VOL2=true; fi
+              if [[ "$file" =~ ^books/vol3/ ]]; then HAS_VOL3=true; fi
+              if [[ "$file" =~ ^books/vol4/ ]]; then HAS_VOL4=true; fi
+              if [[ "$file" =~ ^binder/binder ]] || [[ "$file" =~ ^shared/ ]] || [[ "$file" =~ ^\.github/ ]]; then HAS_SHARED=true; fi
+            done <<< "$CHANGED_FILES"
+
+            if [ "$HAS_SHARED" = true ]; then
+              BUILD_TARGET="all"
+            elif [ "$HAS_VOL1" = true ] && [ "$HAS_VOL2" = false ] && [ "$HAS_VOL3" = false ] && [ "$HAS_VOL4" = false ]; then
+              BUILD_TARGET="vol1"
+            elif [ "$HAS_VOL2" = true ] && [ "$HAS_VOL1" = false ] && [ "$HAS_VOL3" = false ] && [ "$HAS_VOL4" = false ]; then
+              BUILD_TARGET="vol2"
+            elif [ "$HAS_VOL3" = true ] && [ "$HAS_VOL1" = false ] && [ "$HAS_VOL2" = false ] && [ "$HAS_VOL4" = false ]; then
+              BUILD_TARGET="vol3"
+            elif [ "$HAS_VOL4" = true ] && [ "$HAS_VOL1" = false ] && [ "$HAS_VOL2" = false ] && [ "$HAS_VOL3" = false ]; then
+              BUILD_TARGET="vol4"
+            else
+              BUILD_TARGET="all"
+            fi
+
+            echo "📊 Trigger: Automatic ($BUILD_TARGET detected)"
           else
             # Manual trigger: respect choices
-            echo "📊 Trigger: Manual workflow dispatch"
+            BUILD_TARGET="${{ inputs.build_target || 'all' }}"
+            echo "📊 Trigger: Manual workflow dispatch ($BUILD_TARGET)"
             BUILD_HTML="false"
             if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "html" ]]; then
               BUILD_HTML="true"
@@ -245,11 +309,6 @@ jobs:
             fi
 
             TARGET="${{ inputs.target }}"
-
-            echo "📊 Formats: ${{ inputs.build_formats }} (HTML: $BUILD_HTML, PDF: $BUILD_PDF)"
-            echo "📊 OS: ${{ inputs.build_os }} (Linux: $BUILD_LINUX, Windows: $BUILD_WINDOWS)"
-            echo "📊 Method: container-only"
-            echo "📊 Target: $TARGET"
           fi
 
           # Container configuration
@@ -257,16 +316,18 @@ jobs:
           CONTAINER_TAG="${{ inputs.container_tag || 'latest' }}"
 
           echo "📊 Final Configuration:"
+          echo "  Target Volume: $BUILD_TARGET"
           echo "  HTML: $BUILD_HTML"
           echo "  PDF: $BUILD_PDF"
+          echo "  EPUB: $BUILD_EPUB"
           echo "  Linux: $BUILD_LINUX"
           echo "  Windows: $BUILD_WINDOWS"
-          echo "  Method: container"
           echo "  Registry: $CONTAINER_REGISTRY"
           echo "  Tag: $CONTAINER_TAG"
           echo "  Target: $TARGET"
 
-          # Set outputs (individual format flags for matrix-driven approach)
+          # Set outputs
+          echo "build_target=$BUILD_TARGET" >> $GITHUB_OUTPUT
           echo "build_html=$BUILD_HTML" >> $GITHUB_OUTPUT
           echo "build_pdf=$BUILD_PDF" >> $GITHUB_OUTPUT
           echo "build_epub=$BUILD_EPUB" >> $GITHUB_OUTPUT
@@ -275,7 +336,6 @@ jobs:
           echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
           echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
-
 
   # Step 4: Matrix-driven build calls (clean and simple!)
   build-container:
@@ -291,7 +351,7 @@ jobs:
       build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
       build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
       build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
-      build_target: all
+      build_target: ${{ needs.build-config.outputs.build_target }}
       target: ${{ needs.build-config.outputs.target }}
       container_registry: ${{ needs.build-config.outputs.container_registry }}
       container_tag: ${{ needs.build-config.outputs.container_tag }}
@@ -390,17 +450,17 @@ jobs:
     env:
       # Ratchet baseline — fails if epubcheck counts exceed recorded
       # per-volume ceilings. Update with
-      #   ./binder check epub --scope epubcheck \
-      #       --baseline book/tools/audit/epubcheck-baseline.json \
+      #   ./binder/binder check epub --scope epubcheck \
+      #       --baseline binder/tools/audit/epubcheck-baseline.json \
       #       --update-baseline
       # after a cleanup lands, and commit the changed file in the
       # same PR as the cleanup. This replaces the older flat
       # MAX_FATAL/MAX_ERRORS approach: a ratchet prevents regression
       # without cliff-failing during incremental cleanup.
       #
-      # Path is relative to book/ because the run step does `cd book`
-      # before invoking the binder CLI.
-      BASELINE_PATH: 'tools/audit/epubcheck-baseline.json'
+      # Path is relative to the repository root, where the run step invokes
+      # the binder CLI.
+      BASELINE_PATH: 'binder/tools/audit/epubcheck-baseline.json'
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v6
@@ -416,14 +476,14 @@ jobs:
           name: ${{ needs.collect-results.outputs.linux_epub_vol1_artifact }}
           # Materialize into the canonical location the binder CLI
           # discovers (_discover_built_epubs walks
-          # book/quarto/_build/epub-vol*/).
-          path: book/quarto/_build/epub-vol1
+          # books/_build/epub-vol*/).
+          path: books/_build/epub-vol1
 
       - name: 📥 Download vol2 EPUB artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ needs.collect-results.outputs.linux_epub_vol2_artifact }}
-          path: book/quarto/_build/epub-vol2
+          path: books/_build/epub-vol2
 
       - name: ☕ Set up Java (for the epubcheck jar)
         uses: actions/setup-java@v5
@@ -433,12 +493,12 @@ jobs:
 
       - name: ⬇️ Install book Python dependencies
         # Installs the `epubcheck` PyPI wrapper (declared in
-        # book/tools/dependencies/requirements.txt) alongside rich,
+        # binder/tools/dependencies/requirements.txt) alongside rich,
         # pyyaml, and the rest of the binder runtime. The wrapper
         # bundles the epubcheck jar and exposes it on PATH.
         run: |
           python -m pip install --upgrade pip
-          pip install -r book/tools/dependencies/requirements.txt
+          pip install -r binder/tools/dependencies/requirements.txt
 
       - name: 📘 Run `binder check epub --scope epubcheck` with baseline ratchet
         # Both source-level hygiene and post-build epubcheck validation
@@ -455,22 +515,21 @@ jobs:
           BASELINE_PATH: ${{ env.BASELINE_PATH }}
         run: |
           set -euo pipefail
-          cd book
           # JSON pass: machine-readable artifact (uploaded below).
           # GITHUB_ACTIONS=true is set automatically, so _epub_checks
           # emits `::error` annotations inline on the PR diff.
-          ./binder check epub --scope epubcheck \
+          ./binder/binder check epub --scope epubcheck \
               --baseline "${BASELINE_PATH}" \
               --json > epubcheck-report.json || true
           # Human pass: exit code gates the CI job via the ratchet.
-          ./binder check epub --scope epubcheck --baseline "${BASELINE_PATH}"
+          ./binder/binder check epub --scope epubcheck --baseline "${BASELINE_PATH}"
 
       - name: 📤 Upload epubcheck report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: epubcheck-report
-          path: book/epubcheck-report.json
+          path: epubcheck-report.json
           retention-days: 14
 
   # Step 4b: Link integrity (Tier 2 — non-blocking baseline)
@@ -483,8 +542,8 @@ jobs:
     if: always() && needs.pre-commit.result == 'success'
     uses: ./.github/workflows/infra-link-check.yml
     with:
-      path_pattern: './book/quarto/contents/**/*.qmd'
-      lycheeignore_path: 'book/config/linting/.lycheeignore'
+      path_pattern: './books/**/*.qmd'
+      lycheeignore_path: 'binder/config/linting/.lycheeignore'
       fail_on_broken: false
       max_concurrency: 10
 
@@ -496,6 +555,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
       - name: 🎯 Generate validation summary
         run: |
           echo "🎯 === VALIDATION SUMMARY ==="
@@ -610,3 +672,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🔗 Link Check (non-blocking)" >> $GITHUB_STEP_SUMMARY
           echo "- Result: \`${{ needs.check-links.result }}\` (see job for detail)" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🏷️ Update and Publish per-volume status badges
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 site/scripts/update_volume_status.py --publish-gh-pages

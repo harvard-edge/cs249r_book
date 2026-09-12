@@ -179,7 +179,7 @@ def merge_email_addresses(row, col1, col2):
 def main(_):
     token = os.environ["GITHUB_TOKEN"]
     # Get BOOK_QUARTO from environment variable, fallback to default
-    book_quarto = os.environ.get("BOOK_QUARTO", "book/quarto")
+    book_quarto = os.environ.get("BOOK_QUARTO", "books/")
     headers = {"Authorization": f"token {token}"}
     data = []
     next_page = f"https://api.github.com/repos/{OWNER}/{REPO}/commits?sha={BRANCH}&per_page={RESULTS_PER_PAGE}"
@@ -449,7 +449,14 @@ def main(_):
     final_result = dict(
         projectName=REPO,
         projectOwner=OWNER,
-        files=[f"{book_quarto}/contents/frontmatter/acknowledgements/acknowledgements.qmd", "README.md"],
+        files=[
+            # The rendered acknowledgements are the per-volume files; a shared
+            # contents/frontmatter/acknowledgements/ copy existed but no Quarto config
+            # rendered it, so contributor updates never reached the book (fixed 2026-09-07).
+            f"{book_quarto}/vol1/frontmatter/acknowledgements.qmd",
+            f"{book_quarto}/vol2/frontmatter/acknowledgements.qmd",
+            "README.md",
+        ],
         contributors=[
             dict(
                 login=(
