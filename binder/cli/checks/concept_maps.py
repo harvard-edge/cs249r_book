@@ -8,6 +8,11 @@ from typing import Any, List
 
 import yaml
 
+try:
+    from cli.checks.generated_paths import is_generated
+except ImportError:  # pragma: no cover - package-relative import path
+    from binder.cli.checks.generated_paths import is_generated
+
 LIST_FIELDS = {
     "primary_concepts",
     "secondary_concepts",
@@ -134,7 +139,8 @@ def _validate_concept_map_file(
 def check_concept_maps(contents_dir: Path, repo_root: Path) -> List[ConceptMapIssue]:
     """Validate all concept maps in contents_dir."""
     findings: List[ConceptMapIssue] = []
-    qmd_files = sorted(contents_dir.glob("**/*.qmd"))
+    # 2026-09-12: stale _build copies of chapters failed the push hook.
+    qmd_files = sorted(p for p in contents_dir.glob("**/*.qmd") if not is_generated(p, contents_dir))
     qmd_frontmatter = {path: _frontmatter(path) for path in qmd_files}
 
     referenced_maps: dict[Path, Path] = {}
@@ -154,7 +160,9 @@ def check_concept_maps(contents_dir: Path, repo_root: Path) -> List[ConceptMapIs
             findings.append(ConceptMapIssue("error", qmd_rel, f"frontmatter concepts file is not YAML: {concepts_ref}"))
         referenced_maps[concept_path.resolve()] = qmd_path
 
-    for concept_path in sorted(contents_dir.glob("**/*_concepts.y*ml")):
+    for concept_path in sorted(
+        p for p in contents_dir.glob("**/*_concepts.y*ml") if not is_generated(p, contents_dir)
+    ):
         _validate_concept_map_file(concept_path, qmd_frontmatter, repo_root, findings)
         if concept_path.resolve() not in referenced_maps:
             concept_rel = str(concept_path.relative_to(repo_root)) if concept_path.is_relative_to(repo_root) else str(concept_path)

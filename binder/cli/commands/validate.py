@@ -11636,15 +11636,19 @@ class ValidateCommand:
         """Validate image file formats using Pillow."""
         try:
             from cli.checks.image_formats import check_file
+            from cli.checks.generated_paths import is_generated
         except ImportError:
             from binder.cli.checks.image_formats import check_file
+            from binder.cli.checks.generated_paths import is_generated
 
         t0 = time.time()
         image_files: List[Path] = []
         for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"):
+            # 2026-09-12: stale _build copies of covers failed the push hook;
+            # only tracked-content trees are checked.
             image_files.extend([
                 f for f in sorted(root.rglob(ext))
-                if "_files/mediabag/" not in str(f)
+                if not is_generated(f, root)
             ])
 
         issues: List[ValidationIssue] = []
