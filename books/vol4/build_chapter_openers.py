@@ -162,11 +162,12 @@ labels_training = [
 
 # Chapter 07: Closed-Loop Evaluation & Metrology
 labels_evaluation = [
-    {'text': 'mocap array', 'pill': (530, 70), 'targ': (530, 160)},
-    {'text': 'tracking constellation', 'pill': (360, 220), 'targ': (660, 310)},
-    {'text': 'dynamometer plate', 'pill': (690, 690), 'targ': (690, 480)},
-    {'text': 'confidence ledger', 'pill': (1150, 180), 'targ': (1020, 310)},
-    {'text': 'safety envelope', 'pill': (240, 560), 'targ': (350, 440), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'optical mocap tower', 'pill': (200, 180), 'targ': (348, 275)},
+    {'text': 'retroreflective constellation', 'pill': (480, 80), 'targ': (618, 290), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'dynamometer baseplate', 'pill': (260, 640), 'targ': (570, 440), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'safety perimeter rail', 'pill': (190, 480), 'targ': (380, 480), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'confidence ledger cylinder', 'pill': (1160, 520), 'targ': (875, 520), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'tracking ray cone', 'pill': (1160, 240), 'targ': (850, 310)},
 ]
 
 # Chapter 08: Sensor Perception
@@ -269,7 +270,7 @@ if __name__ == '__main__':
     process_chapter('04_nervous', 'vol4_nervous_bridge_1789296675456.jpg', labels_nervous)
     process_chapter('05_data', 'vol4_ch05_teleop_cell_1789298090568.jpg', labels_data)
     process_chapter('06_training', 'test_ch06_gemini_opt2_1789246590824.jpg', labels_training)
-    process_chapter('07_evaluation', 'vol4_ch07_eval_vibrant_1789292406547.jpg', labels_evaluation)
+    process_chapter('07_evaluation', 'vol4_ch07_mocap_cell_1789299882214.jpg', labels_evaluation)
     process_chapter('08_perception', 'vol4_ch08_perception_base_1789293224660.jpg', labels_perception)
     process_chapter('09_memory', 'vol4_ch09_memory_base_1789293246965.jpg', labels_memory)
     process_chapter('10_intent', 'vol4_ch10_intent_base_1789293267152.jpg', labels_intent)
