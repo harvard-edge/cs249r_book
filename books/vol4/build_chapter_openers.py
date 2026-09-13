@@ -59,9 +59,8 @@ def process_chapter(slug, base_filename, labels):
     dy = (800 - im_base.height) // 2
     canvas.paste(im_base, (dx, dy))
     
-    # Blend with isometric grid
-    grid = create_isometric_grid(1400, 800)
-    unlabeled = ImageChops.multiply(canvas, grid)
+    # Clean pure white background (preserve base lighting and plinth shadow without synthetic full-canvas grid)
+    unlabeled = canvas.copy()
     
     labeled = unlabeled.copy()
     draw = ImageDraw.Draw(labeled)
@@ -109,30 +108,35 @@ def process_chapter(slug, base_filename, labels):
 
 # Chapter 02: The Body
 labels_body = [
-    {'text': 'stator windings', 'pill': (320, 160), 'targ': (595, 225)},
-    {'text': 'rotor inertia', 'pill': (470, 75), 'targ': (520, 230)},
-    {'text': 'planetary gearset', 'pill': (1080, 180), 'targ': (780, 410)},
-    {'text': 'optical encoder', 'pill': (1140, 360), 'targ': (880, 440)},
-    {'text': 'output drive', 'pill': (1100, 550), 'targ': (980, 520)},
-    {'text': 'heatsink radiator', 'pill': (320, 570), 'targ': (550, 550)},
+    {'text': 'stator windings', 'pill': (300, 520), 'targ': (620, 455)},
+    {'text': 'planetary gearset', 'pill': (240, 390), 'targ': (590, 385)},
+    {'text': 'harmonic drive transmission', 'pill': (260, 260), 'targ': (560, 275)},
+    {'text': 'optical encoder disc', 'pill': (440, 100), 'targ': (675, 155)},
+    {'text': 'kinematic arm linkage', 'pill': (880, 80), 'targ': (820, 210)},
+    {'text': 'stopping envelope', 'pill': (1180, 150), 'targ': (1110, 210), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'contact friction cones', 'pill': (1220, 310), 'targ': (1100, 310), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'parallel jaw gripper', 'pill': (1200, 460), 'targ': (1030, 310)},
 ]
 
 # Chapter 03: The Brain
 labels_brain = [
-    {'text': 'token lattice', 'pill': (1120, 140), 'targ': (770, 180)},
-    {'text': 'npu tensor core', 'pill': (280, 260), 'targ': (670, 355)},
-    {'text': 'stacked hbm dies', 'pill': (260, 430), 'targ': (550, 380)},
-    {'text': 'weights streaming bus', 'pill': (1120, 370), 'targ': (800, 430)},
-    {'text': 'heat dissipation', 'pill': (340, 620), 'targ': (605, 575)},
+    {'text': 'multimodal perception rays', 'pill': (240, 140), 'targ': (420, 190)},
+    {'text': 'cognitive token lattice', 'pill': (260, 360), 'targ': (640, 270), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'beveled glass housing', 'pill': (680, 70), 'targ': (760, 210)},
+    {'text': 'proposal aperture', 'pill': (1120, 360), 'targ': (800, 360)},
+    {'text': 'prospective action chunk', 'pill': (1160, 600), 'targ': (990, 510), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'thermal dissipation fins', 'pill': (440, 700), 'targ': (760, 520)},
 ]
 
 # Chapter 04: The Nervous System
 labels_nervous = [
-    {'text': 'real-time mcu', 'pill': (280, 160), 'targ': (510, 240)},
-    {'text': 'jitter monitor', 'pill': (1100, 160), 'targ': (740, 260)},
-    {'text': 'deterministic bus', 'pill': (240, 350), 'targ': (380, 330)},
-    {'text': 'seqlock mailbox', 'pill': (1100, 520), 'targ': (870, 485)},
-    {'text': 'reflex filter', 'pill': (360, 570), 'targ': (580, 410), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'deterministic 1 khz clock', 'pill': (440, 80), 'targ': (710, 220)},
+    {'text': 'jitter-bound envelope', 'pill': (960, 90), 'targ': (830, 160)},
+    {'text': 'seqlock proposal mailbox', 'pill': (200, 480), 'targ': (420, 400), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'cbf reflex filter', 'pill': (420, 660), 'targ': (690, 372), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'shielded fieldbus ring', 'pill': (1180, 210), 'targ': (1050, 260)},
+    {'text': 'machined heatsink fins', 'pill': (1180, 440), 'targ': (850, 400)},
+    {'text': 'sensor feedback return', 'pill': (960, 720), 'targ': (750, 560)},
 ]
 
 # Chapter 05: Physical Data
@@ -259,9 +263,9 @@ labels_frontier = [
 ]
 
 if __name__ == '__main__':
-    process_chapter('02_body', 'vol4_ch02_body_base_1789242698098.jpg', labels_body)
-    process_chapter('03_brain', 'vol4_ch03_brain_base_1789242713788.jpg', labels_brain)
-    process_chapter('04_nervous', 'vol4_ch04_nervous_base_1789242728948.jpg', labels_nervous)
+    process_chapter('02_body', 'vol4_body_anatomy_1789296638170.jpg', labels_body)
+    process_chapter('03_brain', 'vol4_brain_cognitive_1789296655524.jpg', labels_brain)
+    process_chapter('04_nervous', 'vol4_nervous_bridge_1789296675456.jpg', labels_nervous)
     process_chapter('05_data', 'vol4_ch05_data_clean_1789245664081.jpg', labels_data)
     process_chapter('06_training', 'test_ch06_gemini_opt2_1789246590824.jpg', labels_training)
     process_chapter('07_evaluation', 'vol4_ch07_eval_vibrant_1789292406547.jpg', labels_evaluation)
