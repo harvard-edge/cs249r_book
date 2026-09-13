@@ -2,7 +2,7 @@
 engine: markdown
 ---
 
-# Asynchronous Interrupts and Human-in-the-Loop {#sec-vol3-interrupts}
+# Interrupts, Signals, and Human-in-the-Loop Escrow {#sec-vol3-interrupts}
 
 When an autonomous agent transitions from pure deliberative reasoning to real-world environment mutation, it encounters execution horizons spanning minutes, hours, or days. Unlike classical machine learning models that terminate at the inference boundary, an agentic loop continuously dispatches actions into external software environments, waits for external tool outcomes, and requests supervisory guidance when confronting high-blast-radius operations. If the execution runtime treats these long-horizon trajectories as synchronous run-to-completion batch processes, it forfeits operational control, leaves infrastructure vulnerable to runaway failure cascades, and pins volatile accelerator memory during human deliberation. Maintaining authoritative control over autonomous agents demands an asynchronous runtime architecture modeled on classical operating system principles: hardware-like interrupt lines, preemptive signal handling, non-blocking event loops, cryptographic capability escrow across the Reversibility Boundary, and hard real-time watchdog timers that prevent distributed deadlocks.
 
@@ -58,6 +58,14 @@ where:
    $$T_{\text{prefill}} \approx \frac{2 \cdot P \cdot S}{P_{\text{peak}}}$$
    For $S = 4{,}096$ prompt tokens on an 8-way accelerator node with aggregate throughput $P_{\text{peak}} \approx 8 \times 989\text{ TFLOP/s} \approx 7.9\text{ PFLOP/s}$, prefill compute time is $\approx \frac{2 \times 70 \times 10^9 \times 4{,}096}{7.9 \times 10^{15}} \approx 72.6\text{ ms}$.
    Crucially, whether decoding or prefilling, neural inference steps are physically bounded and finish in milliseconds. But if the agent is blocked in a synchronous external tool call (e.g., executing a remote shell script or querying an unindexed database table), $T_{\text{drain}} = T_{\text{tool\_step}}$, which is unbounded unless bounded by hard real-time kernel preemption.
+
+   #### Inter-token interrupt polling overhead
+   To intercept execution between token iterations, the serving engine must check for pending signals without stalling GPU compute pipelines. Naive implementations issue a synchronous barrier (`cudaStreamSynchronize` or blocking host-device RPC), which imposes a $10\text{--}50\,\mu\text{s}$ CPU-GPU synchronization penalty on every generated token, draining Tensor Core execution queues and destroying decode throughput. In production runtimes (e.g., vLLM or TensorRT-LLM), the scheduler polls a lock-free atomic flag resident in host memory prior to batch dispatch. This asynchronous check incurs negligible overhead ($\approx 10\text{--}50\text{ ns}$ per iteration), preserving full hardware utilization while maintaining sub-step interrupt sensitivity.
+
+   #### Interrupt latency jitter
+   While nominal decode steps finish in $15\text{--}40\text{ ms}$, interrupt latency exhibits heavy-tailed jitter:
+   $$\sigma^2(T_{\text{int}}) \approx \sigma^2(T_{\text{drain}}) + \sigma^2(T_{\text{save}})$$
+   If an interrupt arrives at the start of a large prompt prefill chunk ($S = 4{,}096$), $T_{\text{drain}}$ balloons to $75\text{--}150\text{ ms}$. If the agent is executing an un-sandboxed shell command or remote REST API, $T_{\text{drain}}$ jitters into seconds or minutes. Consequently, production systems report median interrupt latencies of $p50 \approx 25\text{ ms}$ but extreme tail latencies of $p99 > 5{,}000\text{ ms}$ under unconstrained tool actuation, reinforcing the necessity of strict out-of-band kernel traps for high-severity signals.
 3. **State Preservation Latency ($T_{\text{save}}$):** The time required to serialize the Agent Control Block (ACB) to durable storage, including the trajectory event ledger, tool observation history, and token consumption accounting ($T_{\text{save}} \approx 5\text{--}20\text{ ms}$).
 4. **Dispatch Latency ($T_{\text{dispatch}}$):** The latency to look up and execute the registered Agent Interrupt Service Routine (AISR) within the runtime kernel ($T_{\text{dispatch}} < 1\text{ ms}$).
 
@@ -119,6 +127,8 @@ $$T_{\text{int}}^{\text{NMI}} \le \max(T_{\text{socket\_close}}, T_{\text{proces
 The runtime must never permit an unmaskable signal to wait for autoregressive token decoding or tool execution to complete. When an NMI fires, in-flight GPU CUDA streams must be immediately canceled, network sockets severed, and child microVMs destroyed.
 :::
 
+Bounding interrupt latencies to the sub-step and sub-millisecond regime is only possible if the software substrate can detect, multiplex, and route asynchronous signals without busy-waiting or corrupting shared execution state. To bridge physical preemption invariants into software execution, we now examine how the classical Reactor pattern and POSIX signal semantics govern the agent's central event loop.
+
 ## The Event Loop and Signal Handling Architecture {#sec-vol3-interrupts-event-loop}
 
 A common anti-pattern in early agent deployments involves managing concurrency by spawning uncoordinated background threads that communicate via shared memory or raw queues. When an operator attempts to pause such an agent, the parent process may freeze, but child worker threads inside tool containers continue executing, database transactions remain half-committed, and streaming network connections to external foundation model endpoints are dropped via gateway timeouts. When the agent is later resumed, its execution state is hopelessly corrupted: internal token counters mismatch the model server's state, KV cache memory addresses point to unmapped buffers, and the agent hallucinates wildly about actions executed while it was supposedly suspended.
@@ -127,19 +137,20 @@ To maintain deterministic control over execution without corrupting internal sta
 
 ### Adapting POSIX signals to stochastic agentic loops
 
-In POSIX systems, signals are asynchronous notifications dispatched by the kernel to a process to notify it of an event (e.g., `SIGINT`, `SIGTERM`, `SIGSTOP`, `SIGCONT`). We map these semantics directly into the agent runtime control plane. @Tbl-vol3-interrupts-signals defines the authoritative signal specification for agentic operating systems.
+In POSIX systems, signals are asynchronous notifications dispatched by the kernel to a process to notify it of an event (e.g., `SIGINT`, `SIGTERM`, `SIGSTOP`, `SIGCONT`). We map these semantics directly into the agent runtime control plane. POSIX distinguishes between interactive, maskable suspension (`SIGTSTP`), unmaskable kernel-level process suspension (`SIGSTOP`), and irrevocable termination (`SIGKILL`). For autonomous agents, we mirror this distinction: `SIGPAUSE` acts as a cooperative, maskable suspension allowing the agent to reach a safe step boundary before memory evacuation, whereas an administrative `SIGSTOP` immediately suspends CPU thread execution and pauses GPU streams regardless of in-flight step status. @Tbl-vol3-interrupts-signals defines the authoritative signal specification for agentic operating systems.
 
 | Signal Name   | POSIX Equivalent | Trigger Condition                                           | Default Action                                               | Preemption & Masking              | Runtime Target Subsystem                 |
 |:--------------|:-----------------|:------------------------------------------------------------|:-------------------------------------------------------------|:----------------------------------|:-----------------------------------------|
 | `SIGINT`      | `SIGINT` (2)     | Interactive user interjection or steering prompt            | Drain current step; inject steering tokens; resume execution | Maskable during critical sections | Context Realignment Engine / Token Queue |
 | `SIGPAUSE`    | `SIGTSTP` (20)   | Operator pause request or human approval gate               | Drain token step; serialize ACB; evacuate KV cache to DRAM   | Maskable                          | Memory Swapping Engine / PagedAttention  |
+| `SIGSTOP`     | `SIGSTOP` (19)   | Immediate administrative hold without state teardown        | Freeze process threads & GPU streams; keep memory resident   | Unmaskable and non-bypassable     | Process Scheduler / Hypervisor           |
 | `SIGCONT`     | `SIGCONT` (18)   | Human approval granted or pause lifted                      | Rehydrate KV cache; verify state invariants; resume decode   | Unmaskable                        | Scheduler Dispatcher / GPU Allocator     |
 | `SIGKILL`     | `SIGKILL` (9)    | Operator emergency kill switch / invariant breach           | Immediate socket close; kill microVMs; purge state           | Unmaskable and non-bypassable     | Hypervisor / Container Cgroup Manager    |
 | `SIGBUDGET`   | `SIGXCPU` (24)   | Monetary spend cap ($B_{\$}$) or token quota reached        | Flush pending ledger; execute rollback; abort task           | Unmaskable                        | Tokenomics Gateway / Financial Ledger    |
 | `SIGDEADLINE` | `SIGALRM` (14)   | Wall-clock watchdog timer ($\tau_{\text{watchdog}}$) expiry | Revoke leases; trigger backward Sagas; abort trajectory      | Unmaskable                        | Distributed Lock Manager / Sagas Engine  |
 | `SIGESCALATE` | `SYS_TRAP` (5)   | Agent attempts action crossing Reversibility Boundary       | Suspend ACB; emit escalation promise; await lease            | Unmaskable by agent policy        | Capability Authorization Gateway         |
 
-: **Signal Handling Specification**: Formal mapping of classical operating system signal semantics to the agentic control plane. {#tbl-vol3-interrupts-signals tbl-colwidths="[15,15,20,20,15,15]"}
+: **Signal Handling Specification**: Formal mapping of classical operating system signal semantics to the agentic control plane. {#tbl-vol3-interrupts-signals tbl-colwidths="[14,14,20,20,16,16]"}
 
 ### The reactor pattern and asynchronous event demultiplexing
 
@@ -438,6 +449,21 @@ class AgentInterruptRuntime:
             promise.reject(reason)
 ```
 
+### Message queue atomicity and signal delivery guarantees
+
+In distributed multi-agent clusters, signals are rarely dispatched through local OS process interrupts alone; they are routed through message brokers (such as Redis Streams, Apache Kafka, or NATS). This introduces a critical distributed systems failure mode: **Non-Atomic Signal Delivery**.
+
+If an agent process dequeues an incoming `SIGPAUSE` or `SIGKILL` message from a message broker but crashes before committing the state update to its local Write-Ahead Log (WAL), the signal is dropped, leaving the agent running in an orphaned state upon restart. Conversely, if the signal is acknowledged before the handler safely drains in-flight GPU memory transfers, an intermediate crash leaves the broker believing the agent was paused, while downstream services wait on dropped promises.
+
+To prevent signal loss and duplicate execution storms, the runtime enforces **Two-Phase Signal Acknowledgement**:
+
+1. **Transactional Ingestion:** The reactor receives the signal from the transport layer, appends a `SIGNAL_RECEIVED` log record into the agent's durable WAL, and updates the ACB state atomically.
+2. **Execution Ack:** Only after the registered handler completes—either draining the token buffer, issuing direct memory access (DMA) memory evacuation, or terminating tool processes—does the reactor dispatch the message broker acknowledgement (`ACK`).
+
+If the worker node suffers a hardware crash during signal processing, the recovery coordinator inspects the unacknowledged message and the WAL, idempotently reapplying the signal handler during replay.
+
+While the asynchronous event reactor and transactional signal dispatch framework successfully decouple execution from synchronous thread blocking, they immediately surface the ultimate systems bottleneck of human-in-the-loop oversight: the physics of human response latency and the catastrophic memory starvation it induces in accelerator clusters.
+
 ## Human-in-the-Loop as a High-Latency Peripheral {#sec-vol3-interrupts-hitl}
 
 In late 2024, an enterprise software organization deployed a fleet of 80 autonomous coding agents to refactor legacy service endpoints across a monorepo. The agents ran on a dedicated cluster of 10 nodes, each equipped with 8 NVIDIA H100 SXM5 GPUs ($80\,\text{GB}$ HBM3 per device, totaling 80 GPUs and $6{,}400\,\text{GB}$ of accelerator memory). To prevent unintended git pushes, developers implemented a synchronous approval gate: before committing to remote branches, the agent runtime executed a blocking `await human_approval()` call. The runtime lacked memory swapping mechanisms, maintaining each agent's active 32,000-token trajectory context pinned in GPU HBM.
@@ -494,7 +520,7 @@ When an agent execution thread enters a supervisory pause, the runtime must choo
 
 1. **Retain in Accelerator HBM:** Retaining the KV cache in device memory incurs zero latency overhead upon resumption. However, it permanently ties up $21.47\text{ GB}$ of scarce HBM ($26.8\%$ of an 80 GB device). In a shared cluster, this pins capacity, prevents active batches from allocating pages, and risks fatal Out-of-Memory crashes.
 2. **Discard and Recompute:** Evicting the KV cache by dropping it entirely frees HBM immediately. However, when the human supervisor approves the request, the runtime must re-prefill all $S = 65{,}536$ prefix tokens from scratch. For a 70B parameter model, this requires $2 \cdot P \cdot S \approx 2 \times 70 \times 10^9 \times 65{,}536 \approx 9.18 \times 10^{15}\text{ FLOPs}$. On an 8-way accelerator node delivering $7.9\text{ PFLOP/s}$ aggregate tensor throughput, recomputation consumes $\approx 1.16\text{ seconds}$ of dedicated GPU compute and burns substantial energy.
-3. **Hierarchical Swap via Direct Memory Access (DMA):** Evacuate the KV cache to host system DRAM over the PCIe bus and stream it back upon resumption.
+3. **Hierarchical Swap via DMA:** Evacuate the KV cache to host system DRAM over the PCIe bus and stream it back upon resumption.
 
 Let $\mathcal{B}_{\text{bus}}$ represent the effective bidirectional DMA bandwidth of the interconnect (e.g., PCIe Gen5 x16 providing $\approx 54\text{ GB/s}$ real-world throughput, or NVLink providing $\approx 450\text{ GB/s}$), and let $\delta_{\text{kernel}}$ represent driver scheduling overhead. The total round-trip swap latency $T_{\text{swap}}$ is:
 
@@ -526,6 +552,15 @@ As detailed in @fig-vol3-interrupts-memory-swapping, the runtime coordinates DMA
 ::: {#fig-vol3-interrupts-memory-swapping fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical Memory Evacuation and Rehydration across Bus Interconnects**: Direct Memory Access data paths for proactive KV cache swapping between accelerator HBM, host system DRAM, and NVMe SSD tiers." fig-alt="Diagram of hierarchical memory evacuation and rehydration paths across accelerator HBM, host DRAM, and NVMe storage."}
 ![](images/svg/acb_memory_swapping.svg){width=100%}
 :::
+
+#### Physical memory offloading protocol
+When an agent transitions into `SUSPENDED_HUMAN_GATE`, the runtime memory manager executes a non-blocking three-stage offloading pipeline:
+
+1. **Physical Frame Unmapping:** The PagedAttention block manager unbinds the physical GPU page table entries assigned to sequence tokens $0 \dots S-1$, marking the corresponding HBM frames as immediately reallocatable for active decode streams.
+2. **Asynchronous DMA Transfer:** Pinned host DRAM buffers receive the KV tensor pages via non-blocking PCIe DMA (`cudaMemcpyAsync`), completely overlapping memory transfer with active compute on adjacent CUDA streams.
+3. **Secondary NVMe Spill:** If human deliberation exceeds the host DRAM capacity limit (e.g., during overnight suspensions across hundreds of agents), the runtime invokes Linux `io_uring` asynchronous direct I/O, paging KV blocks from host DRAM into encrypted NVMe block devices at $14\text{ GB/s}$ without CPU kernel context switches.
+
+This multi-tier offloading eliminates HBM holding costs during prolonged escrow while ensuring that rehydration latency upon human approval remains strictly bounded by bus transfer speed ($T_{\text{rehydrate}} \le 400\text{ ms}$ from host DRAM).
 
 ### State resumption and context realignment
 
@@ -620,6 +655,8 @@ Before analyzing constitutional safety checks and cryptographic hardware enclave
 
 :::
 
+While calculating optimal escalation thresholds ($P_{\text{threshold}} = C_{\text{human}} / C_{\text{blast}}$) reveals mathematically when human oversight is justified, it introduces a severe operational vulnerability: an autonomous neural model operating in software space cannot be trusted to evaluate its own failure probability or enforce its own escalation gates. Because self-attention processes instructions and untrusted data in the same continuous vector space, an adversarial prompt can trivially override software checks. To guarantee that operations crossing the Reversibility Boundary cannot execute without authentic supervisory consent, the runtime must enforce constitutional safety through hardware-rooted Policy Enforcement Points and cryptographic capability escrow.
+
 ## Constitutional Safety Checks and Hardware Enclaves {#sec-vol3-interrupts-safety-checks}
 
 In early 2025, an enterprise procurement system integrated an autonomous large language model (LLM) agent to review invoices and automate vendor payments via a banking API. An attacker submitted an invoice containing a sophisticated indirect prompt injection hidden within white-on-white text in an attached PDF. The adversarial prompt instructed the model:
@@ -651,6 +688,12 @@ Outside this boundary, in the **Irreversible Domain ($\mathcal{D}_{\text{irrev}}
 
 ::: {.callout-important title="The fundamental law of autonomous agency"}
 **The Actuation Invariant:** No stochastic processor may execute an action crossing the Reversibility Boundary without presenting a verifiable, cryptographically signed capability lease authorized by an authoritative human supervisor or hardware-enforced Policy Enforcement Point.
+:::
+
+As illustrated in @fig-vol3-interrupts-reversibility-boundary, the architecture establishes a physical bifurcation between low-latency, invertible operations within the software sandbox and non-invertible mutations in the external world:
+
+::: {#fig-vol3-interrupts-reversibility-boundary fig-env="figure" fig-pos="htb" fig-cap="**The Reversibility Boundary**: Bifurcation between low-latency invertible software states and high-stakes non-invertible real-world side-effects." fig-alt="Diagram illustrating the Reversibility Boundary separating the reversible internal state domain from the irreversible external actuation domain."}
+![](images/svg/reversibility_boundary.svg){width=100%}
 :::
 
 @Tbl-vol3-interrupts-reversibility-taxonomy classifies candidate agent operations across the Reversibility Boundary, detailing mathematical invertibility, blast radius, rollback mechanics, and required authorization gates.
@@ -712,6 +755,8 @@ By hosting the PEP and lease verification logic within a hardware enclave:
 2. **Hypervisor Isolation:** Even if an attacker achieves root privilege on the host operating system or compromises the Kubernetes worker node via a container breakout, they cannot forge capability signatures, manipulate argument hashes, or bypass actuation barriers.
 3. **Cryptographic Remote Attestation:** Before an agent cluster is permitted to connect to production database or banking gateways, the enclave generates a hardware-signed attestation report proving that the Policy Enforcement Point firmware has not been modified.
 
+While cryptographic capability leases and hardware enclaves guarantee that unverified operations cannot cross the Reversibility Boundary, they create a severe operational vulnerability: the **Human Absence Deadlock**. If an agent enters `SUSPENDED_HUMAN_GATE` while holding external distributed locks, and the designated human supervisor is unavailable or uncommunicative, the entire distributed system can freeze indefinitely. To guarantee cluster liveness, the runtime must enforce timeout budgets, bidirectional heartbeat monitors, and authoritative watchdog preemption.
+
 ## Timeout Budgets, Watchdog Timers, and Deadlock Prevention {#sec-vol3-interrupts-watchdog}
 
 Consider an autonomous Site Reliability Engineering agent responding to a degraded microservice at 17:30 on a Friday. To execute a safe state transition, the agent acquires an exclusive distributed mutex lock on the cluster's deployment registry. Next, the agent determines that rerouting production traffic crosses the Reversibility Boundary. The agent issues a `SYS_ESCALATE` trap, enters `SUSPENDED_HUMAN_GATE`, and dispatches a Slack approval notification to the lead infrastructure engineer.
@@ -764,7 +809,15 @@ Upon expiration:
 2. All ephemeral sandbox environments and temporary credentials are confiscated.
 3. The runtime executes a **Backward-Compensating Saga** [@garciamolina1987sagas]. If the agent had executed partial external operations $A_1, A_2, \dots, A_k$ forward in time, the runtime automatically dispatches the corresponding compensating transactions $C_k, \dots, C_2, C_1$ in reverse chronological order, unwinding external mutations back to a clean invariant checkpoint:
    $$A_{\text{net}} = C_1 \circ C_2 \dots \circ C_k \circ A_k \dots \circ A_2 \circ A_1 \equiv \mathcal{I}$$
-4. The escalation ticket is forwarded to a secondary escalation tier (e.g., paging the secondary on-call engineer via PagerDuty).
+
+As illustrated in @fig-vol3-interrupts-agent-saga-rollback, when a forward step fails or a supervisory watchdog expires, the coordinator walks backward through the compensation DAG, issuing inverse mutations with single-use idempotency nonces:
+
+::: {#fig-vol3-interrupts-agent-saga-rollback fig-env="figure" fig-pos="htb" fig-cap="**Distributed Agent Sagas: Forward Execution and Backward Compensating Actions**: Deterministic forward recovery and reverse compensation restore consistency when heterogeneous tool steps fail or supervisory watchdogs expire." fig-alt="Diagram of distributed agent saga showing forward steps T1 through T4 with failure at T4, followed by backward compensating actions C3, C2, and C1."}
+![](images/svg/agent_saga_rollback.svg){width=100%}
+:::
+
+4. **Heartbeat Timeouts and Supervisor Health Monitoring:** In addition to gross wall-clock timers, supervisory channels maintain bidirectional heartbeat polling ($\Delta t_{\text{heartbeat}} \le 5\text{ s}$). If network partitions sever connectivity between the agent runtime and the human approval interface, the watchdog triggers immediate graceful degradation to a safe standby state before lease expiration.
+5. The escalation ticket is forwarded to a secondary escalation tier (e.g., paging the secondary on-call engineer via PagerDuty).
 
 #### 3. Breaking circular wait via global partial ordering
 To prevent multi-agent deadlocks where multiple agents hold intersecting locks while waiting on each other's outputs, all system resources and approval tiers are assigned a strict, global **Partial Order**:
@@ -782,6 +835,8 @@ To prevent infinite financial and computational loops, runtimes enforce a **Thre
    $$B_{\$} \ge \sum_{i=1}^{N_{\text{steps}}} \left( c_{\text{in}} \cdot N_{\text{in}}^{(i)} + c_{\text{out}} \cdot N_{\text{out}}^{(i)} \right)$$
    Depletion triggers `SIGBUDGET`, preventing runaway billing loops.
 3. **Invocation Retry Budget ($K_{\text{retry}}$):** Bounded retry count per tool failure ($K_{\text{retry}} \le 3$). If an agent attempts the identical failing tool invocation repeatedly, the kernel halts execution via an `InfiniteLoopException` rather than spinning.
+
+While the mathematical formalization of watchdog timers, Saga compensations, and capability attenuation guarantees system liveness in theory, production deployments frequently suffer from subtle operational anti-patterns inherited from conversational chatbot assumptions. We now examine these recurring architectural pitfalls.
 
 ## Fallacies and Pitfalls {#sec-vol3-interrupts-fallacies-pitfalls}
 
@@ -827,6 +882,8 @@ Instructing an LLM in its system prompt: *"Wait 5 seconds before retrying, and r
 Issuing time-bounded JSON Web Tokens (JWTs) as reusable bearer leases without single-use nonces creates severe duplicate execution vulnerabilities. If an agent encounters a transient HTTP gateway timeout ($504\text{ Gateway Timeout}$) while executing a financial disbursement, standard network client retry logic dispatches the identical signed lease a second time. Because the gateway lacks single-use nonce burning, the banking API processes two identical wire disbursements. Every capability lease must bind a single-use cryptographic nonce $\mathcal{N}$ that is atomically burned in a distributed replay cache prior to actuation.
 :::
 
+Avoiding these operational traps requires treating the agent runtime not as a conversational script, but as an asynchronous operating system kernel designed around rigorous systems invariants.
+
 ## Summary {#sec-vol3-interrupts-summary}
 
 Autonomous agents operating over extended execution horizons cannot function as un-interruptible, run-to-completion processes. Modeling human supervisors as high-latency peripherals and grounding the control plane in classical operating system theory establishes deterministic oversight over stochastic execution loops. By decoupling execution via asynchronous event reactors, enforcing preemptive kernel traps, evacuating volatile accelerator memory during supervisory delays, mediating non-invertible mutations through cryptographic capability leases, and eliminating distributed deadlocks via watchdog timers and backward-compensating Sagas, systems architects construct robust, production-grade agentic platforms that preserve safety, cluster efficiency, and operational control.
@@ -841,6 +898,10 @@ Autonomous agents operating over extended execution horizons cannot function as 
 
 :::
 
-::: {.callout-chapter-connection title="From interrupts to ephemeral virtualization"}
-With the runtime control plane for scheduling, asynchronous interrupts, and human supervisory gating established, we have constructed the coordination mechanisms for autonomous execution. However, mediating intent through capability leases is insufficient if the tools themselves execute arbitrary, untrusted code. In @sec-vol3-virtualization, we cross the physical execution boundary: isolating stochastic code execution within hardware-enforced microVMs, implementing Copy-on-Write ephemeral overlay filesystems, and enforcing hypervisor-level network egress filtering to contain malicious or hallucinated agent actions.
+::: {.callout-chapter-connection title="From trajectory interrupts to cluster context scheduling"}
+With the runtime control plane for asynchronous interrupts, POSIX signals, memory offloading, and cryptographic escrow established, we have constructed the coordination mechanisms required to suspend, resume, and safeguard an individual agent trajectory without pinning volatile accelerator memory.
+
+However, resolving the interrupt lifecycle for a single agent is only the first half of the systems equation. In production enterprise platforms, hundreds of heterogeneous agent trajectories execute concurrently across shared GPU clusters. When multiple agents wake simultaneously from supervisory escrow, generate expansive multi-turn reasoning traces, and alternate unpredictably between compute-intensive prefill passes and blocking tool calls, naive first-in-first-out scheduling triggers catastrophic phase interference and cluster-wide queue collapse.
+
+In @sec-vol3-scheduling, we expand our control plane from the single-agent runtime kernel to the distributed cluster: formalizing continuous batching with chunked prefill, prefill-decode physical disaggregation over high-speed remote direct memory access (RDMA) fabrics, non-clairvoyant Least Attained Service (LAS) scheduling, and global cache-aware prefix routing.
 :::

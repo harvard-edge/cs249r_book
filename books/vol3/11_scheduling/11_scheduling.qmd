@@ -1,4 +1,4 @@
-# Context Scheduling & Disaggregated Serving {#sec-vol3-scheduling}
+# Trajectory Scheduling & Cluster Resource Management {#sec-vol3-scheduling}
 
 In classical machine learning inference serving, queries arrive independently, consume a brief burst of compute to ingest a prompt, decode an output sequence one token at a time, and terminate—relinquishing their memory allocations within hundreds of milliseconds. Agentic workloads completely dismantle this operational model: execution trajectories unfold over heavy-tailed Pareto horizons; prompt contexts expand into hundreds of thousands of tokens across iterative reasoning loops; inference forward passes alternate with blocking external tool executions and human approval gates spanning seconds, minutes, or hours; and heterogeneous concurrent processes contend simultaneously for scarce accelerator High-Bandwidth Memory (HBM), Tensor Core compute units, host DRAM, and PCIe or remote direct memory access (RDMA) network bandwidth. Without disciplined context scheduling and architectural disaggregation, multi-agent systems suffer from catastrophic phase interference—where expansive, compute-bound prompt prefills freeze interactive token decoding—and tool-wait memory stranding, where idle contexts lock up accelerator memory and collapse cluster goodput to near zero. This chapter formalizes the systems principles and architectural mechanisms required to schedule, multiplex, and disaggregate context memory and accelerator compute across autonomous agent fleets.
 
@@ -6,7 +6,7 @@ In classical machine learning inference serving, queries arrive independently, c
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{10}{10}{10}{10}{95}{10}
+\mlagentstack{10}{10}{10}{95}{10}{10}
 \caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
@@ -111,7 +111,7 @@ The compute-dense GEMM kernel of the prefill request claims all available Stream
 
 > **The Systems Rule of Thumb (The Arithmetic Intensity Divergence):** Prefill and decode occupy diametrically opposed hardware regimes: prompt prefill is compute-bound ($\mathcal{I}_{\text{prefill}} \approx S \ge 512\text{ FLOP/byte}$), while autoregressive decode is memory-bus bound ($\mathcal{I}_{\text{decode}} \le B_{\text{dec}} \le 64\text{ FLOP/byte} \ll \mathcal{I}_{\text{knee}}$). Co-scheduling an unchunked prefill alongside active decode streams causes severe phase contention: the compute-dense GEMM monopolizes accelerator streaming multiprocessors, serializing memory-bound decode iterations and inducing tail latency spikes of 150 to 200 milliseconds.
 
-::: {#chk-vol3-08-roofline-phase-contention .callout-checkpoint title="The arithmetic intensity divergence and phase contention"}
+::: {#chk-vol3-11-roofline-phase-contention .callout-checkpoint title="The arithmetic intensity divergence and phase contention"}
 
 Before examining chunked prefill and physical cluster disaggregation, verify your understanding of serving physics:
 
@@ -323,7 +323,7 @@ class ChunkedPrefillScheduler:
             self.active_decode_pool.remove(seq)
 ```
 
-While chunked prefill successfully bounds Inter-Token Latency jitter within a single GPU or tensor-parallel group, co-locating prefill and decode phases on the exact same physical silicon remains fundamentally suboptimal. Slicing prefills forces the prefill phase to share the memory bandwidth and register files of the decode phase, and prevents independent scaling of prefill and decode hardware resources. To achieve true hardware specialization and optimal operational efficiency, the runtime must physically disaggregate prefill from decode.
+While chunked prefill successfully bounds Inter-Token Latency jitter within a single GPU or tensor-parallel group, co-locating prefill and decode phases on the exact same physical silicon remains fundamentally suboptimal. Slicing prefills forces compute-dense GEMMs to interleave with memory-bound GEMVs across the same Streaming Multiprocessors, generating severe intra-core contention for L2 cache capacity and shared memory bandwidth. Furthermore, co-location forces both operational phases into a single, coupled Tensor Parallelism degree ($TP$), creating an unresolvable architectural deadlock: prompt prefill requires high tensor parallelism ($TP = 8$) to minimize Time-To-First-Token, while autoregressive decode throughput favors low tensor parallelism ($TP = 1$ or $TP = 2$) to eliminate latency-dominated cross-GPU all-reduce synchronization. To break this hardware gridlock and achieve true hardware specialization, the runtime must physically disaggregate prefill from decode across high-speed interconnects.
 
 ## Disaggregated Serving: Separating Prefill and Decode {#sec-vol3-scheduling-disaggregated}
 
@@ -401,7 +401,7 @@ Rather than waiting for the entire forward pass across all $L$ layers to conclud
 
 Let $\tau_{\text{compute}}(l) \approx (2 N_{\text{params, layer}} S + 4 H d_h S^2) / P_{\text{eff}}$ denote the computation duration of layer $l$, and let $\tau_{\text{transfer}}(l) = (2 H_{\text{KV}} d_h S \cdot b_{\text{elem}}) / B_{\text{RDMA}}$ denote the network transmission duration of layer $l$'s Key-Value activations.
 
-::: {.callout-note title="Lemma 8.1: The KV streaming invariant"}
+::: {.callout-note title="Lemma 11.1: The KV streaming invariant"}
 If the network transmission time of layer $l$'s KV cache is strictly less than or equal to the computation time of layer $l+1$'s forward pass (@eq-kv-streaming-invariant):
 
 $$
@@ -423,7 +423,7 @@ By enforcing the KV streaming invariant, the disaggregated runtime transfers ove
 
 [^fn-scheduling-streaming-overlap]: While layer $l+1$ executes forward-pass matrix multiplications, layer $l$'s Key-Value activations are transmitted concurrently over direct memory access (DMA) channels. Because network transmission finishes before subsequent layer computation concludes, only the terminal layer's transfer remains unoverlapped.
 
-With compute and memory physically specialized, how should a cluster control plane schedule incoming requests across these pools when workloads exhibit extreme priority differences and heavy-tailed execution horizons? This is the domain of priority scheduling.
+Physical disaggregation specializes hardware nodes and neutralizes the KV transfer tax, but physical specialization alone cannot protect cluster stability against workload heterogeneity. When incoming requests originate from diverse agent classes—ranging from low-latency interactive developer completions to multi-hour autonomous debugging loops—a naive cluster control plane suffers from catastrophic queueing interference. Even on physically decoupled pools, admitting long-running, unpredictable reasoning trajectories into unweighted FIFO queues paralyzes the prefill and decode dispatch pipelines. To preserve Quality of Service across the cluster, the runtime must formalize decoupled Service-Level Objectives and deploy priority-aware queueing disciplines grounded in the mathematical realities of heavy-tailed workloads.
 
 ## Priority Scheduling and Service-Level Objectives for Agent Swarms {#sec-vol3-scheduling-priority}
 
@@ -531,17 +531,17 @@ The dispatch and promotion policies operate under strict invariants:
 
 > **The Systems Rule of Thumb (The MLFQ Demotion Invariant):** Multi-Level Feedback Queues discretize Least Attained Service without incurring continuous preemption overhead. By admitting all new agent tasks into highest priority ($Q_0$) and demoting them across service quantum thresholds ($s \ge T_{i+1}$), interactive developer requests complete with near-zero queueing latency while long-running reasoning loops are gracefully isolated into lower-priority queues without starving the cluster.
 
-While MLFQ governs the temporal prioritization of compute across heavy-tailed workloads, how should an orchestrator distribute requests spatially across a distributed cluster when multiple agents share identical prompt prefixes? This requires cache-aware load balancing.
-
-::: {#chk-vol3-08-pareto-mlfq-scheduling .callout-checkpoint title="Heavy-tailed Pareto scheduling and MLFQ"}
+::: {#chk-vol3-11-pareto-mlfq-scheduling .callout-checkpoint title="Heavy-tailed Pareto scheduling and MLFQ"}
 
 Before examining cache-aware prefix routing and distributed load balancing, verify your understanding of multi-turn scheduling:
 
 - [ ] **Decreasing hazard rate**: explain why agent trajectories governed by a Pareto distribution exhibit a decreasing hazard rate ($d h(x) / dx < 0$), and why this makes FIFO scheduling vulnerable to queue collapse.
 - [ ] **MLFQ priority demotion**: how does a Multi-Level Feedback Queue isolate long-running background reasoning loops without starving interactive developer suggestions?
-- [ ] **Chunked prefill budget napkin math**: derive how an iteration token budget $T_{\text{budget}} = B_{\text{dec}} + C$ maintains a stable $25\text{ ms}$ Inter-Token Latency upper bound.
+- [ ] **Decoupled SLOs and Goodput**: explain why evaluating agent serving with a single end-to-end latency metric hides critical failures, and formulate how the goodput metric captures both TTFT and ITL compliance.
 
 :::
+
+While Multi-Level Feedback Queues govern the temporal prioritization of compute across heavy-tailed agent horizons, scheduling compute across time resolves only half the cluster optimization challenge. When dozens of agents in an autonomous swarm collaborate on a shared code repository or tool ecosystem, their prompts contain vast, overlapping token sequences. How should the cluster orchestrator route requests spatially across distributed nodes to eliminate redundant prefill computation without causing memory hot-spotting? This requires cache-aware load balancing and prefix routing.
 
 ## Cache-Aware Load Balancing and Prefix Routing {#sec-vol3-scheduling-prefix-routing}
 
@@ -735,7 +735,7 @@ class CacheAwarePrefixRouter:
             node.cached_prefix_hashes.add(h)
 ```
 
-Having examined how compute and cache affinity are routed across workers, we now address the ultimate systems constraint: what happens when physical accelerator memory is exhausted during extended tool-wait states?
+Prefix-aware routing and bounded consistent hashing maximize spatial KV cache reuse, eliminating terabytes of redundant prefill computation across the cluster. Yet, spatial routing alone cannot mitigate the temporal holding cost of agent execution. When an autonomous agent transitions from autoregressive token generation to external tool execution—waiting seconds for unit tests, minutes for container builds, or hours for human authorization—its accumulated multi-gigabyte KV cache sits completely dormant in physical accelerator memory. If hundreds of concurrent agents pin their context frames during these prolonged latency stalls, accelerator HBM is completely exhausted, and cluster throughput collapses to near zero. Resolving this crisis requires transforming the runtime into a true distributed operating system: formalizing trajectory state via the Agent Control Block and managing physical memory through analytical breakeven swapping and multi-resource fairness.
 
 ## Resource Allocation Under Memory Constraints {#sec-vol3-scheduling-allocation}
 
@@ -758,7 +758,7 @@ To eliminate this memory tax, the agent runtime must operate as an operating sys
 
 Just as the Linux kernel encapsulates an executing process using `struct task_struct` to manage CPU registers, virtual memory page tables, file descriptors, and scheduling state [@ritchie1974], an autonomous agent serving runtime requires a persistent, strongly typed kernel data structure to govern multi-turn execution: the **Agent Control Block (ACB)**\index{Agent Control Block}.
 
-::: {#dfn-acb .callout-definition title="Definition 8.1: Agent Control Block (ACB)"}
+::: {#dfn-acb .callout-definition title="Definition 11.1: Agent Control Block (ACB)"}
 An **Agent Control Block** is a strongly typed, persistent kernel data structure that uniquely encapsulates the complete operational identity, execution authority, memory handles, and lifecycle state of an autonomous agent trajectory:
 $$\text{ACB} = \langle \text{AID}, \, \mathcal{P}_{\text{id}}, \, \mathcal{G}, \, \mathcal{K}_{\text{leases}}, \, \mathcal{Q}_{\text{budget}}, \, \mathcal{M}_{\text{handles}}, \, \mathcal{S}_{\text{fsm}}, \, \mathcal{L}_{\text{lineage}}, \, \mathcal{V}_{\text{clock}} \rangle$$ {#eq-dfn-acb}
 where:
@@ -874,7 +874,7 @@ Single-resource fairness fails because different agent workloads bottleneck on f
 
 To resolve multi-resource contention without stranding hardware capacity, the agent runtime must implement **Dominant Resource Fairness (DRF)** [@ghodsi2011].
 
-::: {#dfn-drf .callout-definition title="Definition 8.2: Dominant resource fairness (DRF)"}
+::: {#dfn-drf .callout-definition title="Definition 11.2: Dominant resource fairness (DRF)"}
 Let $\mathcal{R} = \{1, \dots, m\}$ denote the set of $m$ shared physical resources with total cluster capacities $\mathbf{R} = [R_1, \dots, R_m]^T$. Let $\mathcal{A} = \{1, \dots, n\}$ denote $n$ active agent tenants. Tenant $i$ requires a resource demand vector $\mathbf{c}_i = [c_{i,1}, \dots, c_{i,m}]^T$ to execute one unit trajectory, yielding normalized resource share $s_{i,r} = c_{i,r} / R_r$.
 
 Tenant $i$'s **dominant resource** is the resource for which it claims the largest share of cluster capacity ($r_i^* = \arg\max_{r \in \mathcal{R}} s_{i,r}$), with dominant share $s_i^* = \max_{r \in \mathcal{R}} s_{i,r}$.
@@ -933,6 +933,8 @@ When agents dynamically spawn child subagents, allowing child agents to recursiv
 To guarantee forward progress, the runtime kernel enforces **Banker's Algorithm** [@dijkstra1965] on context memory allocation:
 $$\text{Free Blocks} \ge \sum_{i \in \text{Active}} \text{MaxRemainingTokens}(i) + \Delta_{\text{safety}}$$ {#eq-bankers-condition}
 If admitting a child subagent would violate the safe-state condition in @eq-bankers-condition, admission is gated, and the requesting parent trajectory is forced to swap its context to host DRAM before spawning its child.
+
+By enforcing Banker's Algorithm on shared memory pools, establishing analytical breakeven boundaries for PCIe DMA swapping, and equalizing dominant shares across heterogeneous hardware tiers, the cluster runtime maintains mathematical guarantees of forward progress and memory safety. Yet, in production deployments, engineers frequently bypass these operating system primitives in favor of intuitive, naive heuristics—such as pinning memory during tool waits, assuming FIFO fairness under heavy-tailed workloads, or confusing local GPU capacity with distributed routing topology. In the next section, we identify and dismantle the pervasive architectural fallacies and operational pitfalls that undermine cluster stability in agentic serving infrastructure.
 
 ## Fallacies and Pitfalls {#sec-vol3-scheduling-fallacies}
 
@@ -1044,7 +1046,7 @@ The runtime must encapsulate each turn within the Agent Control Block using Lamp
 
 ## Summary {#sec-vol3-scheduling-summary}
 
-Context scheduling and disaggregated serving transform machine learning infrastructure from stateless request-response engines into distributed operating systems optimized for stateful, asynchronous, multi-agent processes. By parameterizing the fundamental divergence between compute-bound prefill and memory-bandwidth-bound decode on the Roofline model, systems architects can eliminate phase interference through chunked prefill and physical cluster disaggregation. Abstracting trajectory identity into the Agent Control Block enables non-clairvoyant priority scheduling via Multi-Level Feedback Queues, overcoming the mathematical collapse of FIFO under heavy-tailed Pareto workloads. Finally, cache-aware prefix routing and analytical breakeven context swapping bridge the temporal chasm between microsecond token generation and minute-long tool waits, ensuring that scarce accelerator High-Bandwidth Memory is continuously utilized by active compute streams.
+Trajectory scheduling and disaggregated serving transform machine learning infrastructure from stateless request-response engines into distributed operating systems optimized for stateful, asynchronous, multi-agent processes. By parameterizing the fundamental divergence between compute-bound prefill and memory-bandwidth-bound decode on the Roofline model, systems architects can eliminate phase interference through chunked prefill and physical cluster disaggregation. Abstracting trajectory identity into the Agent Control Block enables non-clairvoyant priority scheduling via Multi-Level Feedback Queues, overcoming the mathematical collapse of FIFO under heavy-tailed Pareto workloads. Finally, cache-aware prefix routing and analytical breakeven context swapping bridge the temporal chasm between microsecond token generation and minute-long tool waits, ensuring that scarce accelerator High-Bandwidth Memory is continuously utilized by active compute streams.
 
 ::: {.callout-takeaways title="The agent scheduling invariant"}
 1. **The Roofline Dichotomy Governs Serving Phases:** Prompt prefill is compute-bound ($\mathcal{I} \gg \mathcal{I}_{\text{knee}}$), saturating Tensor Cores; token decode is memory-bandwidth bound ($\mathcal{I} \ll \mathcal{I}_{\text{knee}}$), starving on HBM loads. Co-locating unconstrained prefill with decode induces catastrophic phase interference.
@@ -1054,6 +1056,10 @@ Context scheduling and disaggregated serving transform machine learning infrastr
 5. **Tool-Wait Latency Mandates Context Swapping:** Tool executions block for seconds to minutes, far exceeding the analytical breakeven duration ($T_{\text{wait}} \gg T_{\text{breakeven}} \approx 0.7\text{ s}$). Contexts must be asynchronously DMA-swapped to host DRAM to eliminate the Tool-Wait memory tax.
 :::
 
-::: {.callout-chapter-connection title="From context scheduling to actuation protocols"}
-This chapter completes Part II: The Context Memory Hierarchy by establishing how accelerator compute and context memory are multiplexed, scheduled, and disaggregated across autonomous agent fleets. However, context scheduling merely governs internal cluster resources; an autonomous agent exists to alter the world outside the GPU. In @sec-vol3-actuation, we cross the physical machine boundary into Part III: The Actuation Boundary & Isolation. We examine how unstructured neural token streams are translated into strongly typed, idempotent system calls—formalizing the Model Context Protocol (MCP), schema enforcement, capability-based access control, and side-effect deduplication.
+::: {.callout-chapter-connection title="From cluster scheduling to trajectory harvesting"}
+This chapter completes Part III: The Actuation Boundary, Isolation & Control by establishing how accelerator compute, context memory, and hardware interconnects are multiplexed, scheduled, and disaggregated across autonomous agent fleets. Across Chapters 08 through 11, we have constructed the complete execution substrate: formalizing typed system calls and capability leases (@sec-vol3-actuation), isolating untrusted execution inside ephemeral microVM sandboxes (@sec-vol3-virtualization), handling asynchronous interrupts and human approval gates (@sec-vol3-interrupts), and orchestrating multi-agent compute under heavy-tailed queueing dynamics (this chapter).
+
+Yet, even the most sophisticated cluster scheduler cannot compensate for a fragile, unadapted neural policy. Managing multi-turn execution trajectories through complex runtime scaffolding—paged attention memories, preemptive swapping engines, and extensive prompt engineering—is an expensive palliative for a foundation model that was never trained to act as an autonomous agent. When an un-adapted model encounters an unexpected tool error or an ambiguous environment observation, it rapidly enters pathological retry loops, burning cluster token budgets and driving up operational costs. To achieve true agentic reliability, systems architects must compile operational capabilities directly into the model's neural parameters.
+
+In @sec-vol3-data-flywheel, we transition across the architectural boundary into Part IV: The Policy Compiler. We examine how the execution traces, sandbox verification signals, and scheduler telemetry captured across production clusters are harvested to build closed-loop synthetic data flywheels—generating, filtering, and curating massive corpora of verified trajectories through self-play, execution-based rejection sampling, and negative trace mining to train the next generation of autonomous policies.
 :::

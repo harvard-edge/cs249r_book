@@ -56,7 +56,7 @@ $$P_{\text{integrity}}(N) = \prod_{k=1}^N p_k \le p^N \xrightarrow[N \to \infty]
 
 To see the mathematical severity of this decay from first principles, consider an agent operating with a seemingly high per-step validity probability of $p = 0.98$ (a 98 percent success rate). Over a moderate trajectory horizon of $N = 30$ steps, the compound probability of surviving without a single corrupting mutation drops to $0.98^{30} \approx 0.545$—barely better than a coin flip. If per-step validity falls to $p = 0.95$, survival at 30 steps collapses to $0.95^{30} \approx 0.215$, and by 50 steps it plummets to $0.95^{50} \approx 0.077$—fewer than one in twelve runs completes safely. Unconstrained natural language generation simply cannot maintain compounding integrity over multi-step horizons.
 
-::: {#chk-vol3-09-action-boundary-integrity .callout-checkpoint title="The action boundary and compounding integrity"}
+::: {#chk-vol3-08-action-boundary-integrity .callout-checkpoint title="The action boundary and compounding integrity"}
 
 Before analyzing AI system calls and protection rings, verify your understanding of the actuation boundary:
 
@@ -157,13 +157,13 @@ Because $\exp(-\infty) = 0$, any token that would produce a syntax violation has
 
 $$\forall v \notin \mathcal{V}_{\text{valid}}(q_t), \quad \Pr(x_t = v \mid x_{<t}) = 0$$
 
-Upon sampling token $x_t$, the automaton transitions deterministically to state $q_{t+1}$. To execute this masking at hardware line rate without stalling GPU streaming multiprocessors (SMs), the runtime compiles the DFA into a compressed vocabulary bitmask tensor $\mathbf{M} \in \{0, 1\}^{|Q| \times \lceil |\mathcal{V}| / 32 \rceil}$ ahead of time. Inside the decode sampling kernel, each warp executes a 32-bit bitwise AND operation (`__ballot_sync` and bitmask lookup) in a single clock cycle, completing logit masking in under $0.4\,\text{ms}$ per token.
+Upon sampling token $x_t$, the automaton transitions deterministically to state $q_{t+1}$. To execute this masking at hardware line rate without stalling GPU streaming multiprocessors (SMs), the runtime compiles the DFA into a compressed vocabulary bitmask tensor $\mathbf{M} \in \{0, 1\}^{|Q| \times \lceil |\mathcal{V}| / 32 \rceil}$ ahead of time. For a realistic 500-state JSON schema and a 128,000-token vocabulary, $\mathbf{M}$ occupies only $500 \times 4{,}000\,\text{bytes} \approx 8\,\text{MB}$—fitting entirely within the $50\,\text{MB}$ dedicated L2 cache of an NVIDIA H100 GPU. Inside the decode sampling kernel, each warp executes a 32-bit bitwise AND operation (`__ballot_sync` and bitmask lookup) in a single clock cycle, completing logit masking in under $0.4\,\text{ms}$ per token with zero off-chip memory traffic.
 
 ### Systems trade-off: Host CPU validation vs. tensor-layer masking
 
-To appreciate the systems engineering advantage of tensor-layer masking, consider the alternative: unconstrained generation followed by host-side CPU schema validation.
+To appreciate the systems engineering advantage of tensor-layer masking, consider the two common host-side alternatives: post-generation abstract syntax tree (AST) parsing and per-token CPU-guided decoding.
 
-In a host-side validation architecture, the model generates an unconstrained text string. The host CPU parses the string into an Abstract Syntax Tree (AST) and recursively checks types, required fields, and value bounds using tools like Pydantic or `jsonschema`. For a moderately complex tool schema (30–50 properties with nested objects), CPU validation consumes $2\,\text{ms} \text{ to } 15\,\text{ms}$ of host processing time.
+In post-hoc host validation, the model generates an unconstrained text string. The host CPU parses the string into an AST and recursively checks types, required fields, and value bounds using tools like Pydantic or `jsonschema`. For a moderately complex tool schema (30–50 properties with nested objects), CPU validation consumes $2\,\text{ms} \text{ to } 15\,\text{ms}$ of host processing time. Alternatively, runtimes attempting per-token guided decoding on the host CPU must synchronize device state on every sampled token via `cudaStreamSynchronize`, transfer sampled token IDs over the PCIe bus ($2\text{ to }5\,\mu\text{s}$ raw transfer), evaluate regex transitions in host Python, and DMA updated logit mask buffers back to the GPU. This host-device synchronization ping-pong induces massive streaming multiprocessor execution bubbles, collapsing autoregressive decode throughput from $> 50\,\text{tokens/s}$ to $< 5\,\text{tokens/s}$.
 
 However, the dominant cost is not the CPU validation itself, but the **failure penalty** when validation fails. Without logit masking, models exhibit a schema error rate $p_{\text{err}} \in [0.05, 0.15]$ on nested parameters. Every failure triggers an error reflection loop: the runtime appends an error traceback ($S_{\text{error}} \approx 150\text{ tokens}$) to the context and prompts the model to correct its mistake.
 
@@ -203,13 +203,13 @@ As formalized in @fig-vol3-actuation-mcp, an enterprise wire architecture partit
 
 The wire transport between the Client Gateway and the Tool Server must support two distinct deployment topologies depending on locality and security requirements:
 
-- **Local Standard Input/Output (`stdio`) Transport:** The host spawns the tool server as an unprivileged child process on the local operating system. Communication flows over standard OS anonymous pipes (`stdin` and `stdout`). Messages are framed as newline-delimited JSON-RPC 2.0 objects. Because this transport operates entirely through kernel memory buffers, IPC latency is sub-millisecond ($t_{\text{IPC}} < 0.2\,\text{ms}$), memory bandwidth exceeds $10\,\text{GB/s}$, and the server binds no network ports, eliminating remote network attack vectors.
-- **Remote HTTP with Server-Sent Events (SSE) / WebSocket Transport:** In distributed, cloud-native deployments where tools run inside isolated container clusters or serverless functions, the client establishes an HTTP/2 or HTTP/3 connection. The tool server streams continuous events, logs, and progress notifications to the client over an SSE stream (`text/event-stream`), while the client transmits remote procedure call requests via independent HTTP `POST` requests carrying a cryptographic session identifier.
+- **Local Standard Input/Output (`stdio`) Transport:** The host spawns the tool server as an unprivileged child process on the local operating system. Communication flows over standard OS anonymous pipes (`stdin` and `stdout`). Messages are framed as newline-delimited JSON-RPC 2.0 objects. Because this transport operates entirely through kernel memory buffers, IPC latency is sub-millisecond ($t_{\text{IPC}} < 0.2\,\text{ms}$), memory bandwidth exceeds $10\,\text{GB/s}$, and the server binds no network ports, eliminating remote network attack vectors. However, runtimes must account for the operating system pipe buffer capacity (`F_SETPIPE_SZ`, typically $64\,\text{KB}$ on Linux): if a child process emits verbose tool outputs that fill the circular pipe buffer without the host draining it via asynchronous non-blocking event loops (`epoll`/`kqueue`), the child process blocks on `write()`, inducing a permanent execution deadlock.
+- **Remote HTTP with Server-Sent Events (SSE) / WebSocket Transport:** In distributed, cloud-native deployments where tools run inside isolated container clusters or serverless functions, the client establishes an HTTP/2 or HTTP/3 connection. The tool server streams continuous events, logs, and progress notifications to the client over an SSE stream (`text/event-stream`), while the client transmits remote procedure call requests via independent HTTP `POST` requests carrying a cryptographic session identifier. Across wide-area networks (WAN), each round trip adds $50\text{ to }150\,\text{ms}$ of transit latency; over an $N = 10$ tool-call sequence, network RTT alone accounts for $> 1\,\text{second}$ of idle wall-clock time during which the model's KV cache sits pinned in GPU high-bandwidth memory (HBM).
 
-All communication frames adhere strictly to the JSON-RPC 2.0 specification [@jsonrpc2010]. Listing 9.1 demonstrates an authoritative request-response transaction across the MCP boundary.
+All communication frames adhere strictly to the JSON-RPC 2.0 specification [@jsonrpc2010]. Listing 8.1 demonstrates an authoritative request-response transaction across the MCP boundary.
 
 ```json
-// Listing 9.1: Authoritative JSON-RPC 2.0 Wire Frames for Tool Actuation
+// Listing 8.1: Authoritative JSON-RPC 2.0 Wire Frames for Tool Actuation
 
 // 1. Client-to-Server Tool Invocation Frame
 {
@@ -286,12 +286,12 @@ The critical systems bottleneck is not the wire transport—it is **accelerator 
 $$B_{\text{obs}} = 2 \cdot L \cdot H_{kv} \cdot d_h \cdot \mathcal{S}_{\text{observations}} \cdot 2 \text{ bytes}$$
 $$B_{\text{obs}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 25,000 \cdot 2 \text{ bytes} \approx 8.19 \times 10^9 \text{ bytes } (8.19\,\text{GB})$$
 
-Over $8\,\text{GB}$ of physical High-Bandwidth Memory (HBM) is permanently stranded per active agent stream solely retaining verbose JSON formatting strings.
+Over $8\,\text{GB}$ of physical HBM is permanently stranded per active agent stream solely retaining verbose JSON formatting strings.
 
 To mitigate this context bloat, high-performance agent runtimes implement three architectural controls:
 
 1. **Windowed Pagination:** Tools like `FileView` enforce strict `offset` and `limit` boundaries (e.g., returning at most 100 lines or $2\,\text{KB}$ per call).
-2. **Differential Compression:** Instead of dumping complete file contents upon mutation, tools emit unified diff hunks (as seen in Listing 9.1).
+2. **Differential Compression:** Instead of dumping complete file contents upon mutation, tools emit unified diff hunks (as seen in Listing 8.1).
 3. **Out-of-Band Artifact Descriptors:** Payloads exceeding a threshold (e.g., $> 4\,\text{KB}$) are written to local NVMe scratch space or an object store. The tool returns a lightweight cryptographic descriptor (`uri: "artifact://run12/build.log"`, `sha256: "..."`, `preview: "...first 10 lines..."`), mimicking DMA buffer descriptors in operating systems.
 
 ### Tool definition economics: The prompt token tax
@@ -346,6 +346,17 @@ Empirical frontier software agents [@yang2024sweagent] converge on an optimal co
 4. `GrepSearch(pattern: str, path: str, glob: str)`: A high-performance regex search module for rapid repository-scale code indexing.
 
 By collapsing hundreds of shallow API wrappers into four deep modules, the agent runtime slashes its schema prefill tax from 35,000 tokens to under 1,200 tokens, maximizing accelerator throughput and preserving context memory for problem-solving.
+
+::: {#chk-vol3-08-protocols-capabilities .callout-checkpoint title="Wire protocols, KV-cache bloat, and capability attenuation"}
+
+Before analyzing distributed idempotency and transaction sagas, verify your understanding of tool protocols and security boundaries:
+
+- [ ] **Transport layer trade-offs**: contrast local `stdio` IPC against remote HTTP/SSE across latency, bandwidth, and failure modes (including pipe buffer deadlocks).
+- [ ] **KV-cache footprint of tool observations**: calculate the HBM consumed solely by storing 25,000 observation tokens for a 70B parameter model using Grouped-Query Attention ($H_{kv}=8, d_h=128, L=80$).
+- [ ] **Deep module prefill savings**: explain how collapsing a 100-tool micro-catalog into 4 deep modules reduces prefill token expenditure by over 96 percent across a 30-step trajectory.
+- [ ] **Monotonic capability attenuation**: explain why argument constraint predicates expand as a superset ($\mathcal{C}_{\text{child}} \supseteq \mathcal{C}_{\text{parent}}$) while resource URIs narrow as a subset ($\mathcal{R}_{\text{child}} \subseteq \mathcal{R}_{\text{parent}}$).
+
+:::
 
 ### Capability-based security and the dennis & van horn architecture
 
@@ -557,9 +568,9 @@ To appreciate this vulnerability from first principles, assume high reliability 
 
 Fewer than one in twelve 50-step workflows will finish without encountering an environmental or semantic tool failure.
 
-This compounding fragility explains why naive retry loops are fatal: an agent that blindly retries a failed operation without idempotency nonces duplicates mutations, while an agent that halts upon the first failure completes fewer than 8 percent of complex tasks. The runtime must decouple the failure from the trajectory outcome: structured error frames (Listing 9.1 Frame 3) provide unambiguous diagnostic feedback, idempotency nonces permit safe retries, and the Saga pattern executes compensating actions to maintain transactional integrity.
+This compounding fragility explains why naive retry loops are fatal: an agent that blindly retries a failed operation without idempotency nonces duplicates mutations, while an agent that halts upon the first failure completes fewer than 8 percent of complex tasks. The runtime must decouple the failure from the trajectory outcome: structured error frames (Listing 8.1 Frame 3) provide unambiguous diagnostic feedback, idempotency nonces permit safe retries, and the Saga pattern executes compensating actions to maintain transactional integrity.
 
-::: {#chk-vol3-09-tool-sagas-stragglers .callout-checkpoint title="Tool latencies, Sagas, and compound failure"}
+::: {#chk-vol3-08-tool-sagas-stragglers .callout-checkpoint title="Tool latencies, Sagas, and compound failure"}
 
 Before examining dynamic schema discovery and vector tool indexing, verify your understanding of tool execution reliability:
 
@@ -568,6 +579,8 @@ Before examining dynamic schema discovery and vector tool indexing, verify your 
 - [ ] **Two-layer error compounding**: calculate the probability of an agent completing a 25-step workflow without failure when model error is $\epsilon_{\text{model}} = 0.02$ and tool infrastructure error is $\epsilon_{\text{tool}} = 0.03$.
 
 :::
+
+Even when an agent runtime achieves mathematical idempotency, distributed lock safety, and transactional Saga compensations, it still confronts an inescapable architectural constraint: catalog scale. The resilient execution pipelines developed thus far assume a modest, statically configured catalog of tools. However, enterprise software environments do not operate on four static primitives; they encompass thousands of heterogeneous microservices, cloud APIs, and enterprise databases. Statically injecting thousands of tool schemas into the model's system prompt crashes accelerator memory and induces severe attention confusion. To reconcile large-scale tool availability with bounded context memory, the runtime must transition from static registration to dynamic, just-in-time tool discovery.
 
 ## Dynamic Tool Discovery and Schema Selection {#sec-vol3-actuation-discovery}
 
@@ -629,7 +642,7 @@ To ensure long-term stability, tool interfaces must implement **Semantic Version
 During MCP session initialization, the client gateway and tool server execute a formal **Capability Negotiation Handshake**\index{Capability Negotiation Handshake}:
 
 ```json
-// Listing 9.2: Capability Negotiation Handshake during MCP Initialization
+// Listing 8.2: Capability Negotiation Handshake during MCP Initialization
 
 // 1. Client Initialize Request Frame
 {
@@ -701,9 +714,17 @@ Because the serialized context prefix remains invariant, the serving engine achi
 
 To ground this synergy in numbers: consider an agent that repeatedly executes a unit test suite via `pytest`. Executing the test runner inside an isolated container sandbox takes $12\,\text{seconds}$. Upon subsequent invocations with identical repository state ($\text{EnvHash}$), the content-addressed result cache returns the cached test output in $< 0.8\,\text{ms}$. Crucially, because the returned observation string is byte-for-byte identical, the GPU serving engine's Radix KV-cache achieves a 100 percent prefix hit across the preceding $14,000$ context tokens. Instead of waiting $12\,\text{s}$ for the test suite plus $210\,\text{ms}$ for context re-prefill ($2.9\text{ PFLOPs}$ on an H100), the step transitions in under $15\,\text{ms}$—an $800\times$ speedup that transforms an expensive physical I/O stall into an in-memory L1 cache hit.
 
+#### The counterpart hazard: KV-cache prefix busting
+
+While deterministic memoization unlocks 100 percent prefix cache hits, the inverse reality represents one of the most pervasive performance killers in agent serving: **non-deterministic observation returns**.
+
+If an external tool observation returns volatile, un-sanitized strings—such as ISO wall-clock timestamps (`[2026-09-13T14:20:01.204Z]`), ephemeral operating system process IDs (`[PID: 49102]`), fluctuating temporary scratch paths (`/tmp/scratch_8fa3b/`), or elapsed duration strings (`Executed in 4.12s`)—the observation token sequence diverges on every invocation. In modern Radix-tree KV caches, attention keys and values are indexed by strict token-level prefix identity. A single non-deterministic token injected at step $k$ instantly **busts the prefix cache** for the entire accumulated context. For all subsequent trajectory steps $k+1, \dots, N$, the serving engine cannot reuse precomputed activations and must re-evaluate the full multi-thousand-token prompt history through the prefill pipeline. To preserve prefix cache residency, high-performance agent runtimes must enforce **deterministic observation canonicalization**: volatile timestamps, process IDs, and memory addresses must be stripped or redirected to out-of-band telemetry logs before observation strings cross the actuation boundary.
+
 ::: {#fig-vol3-actuation-prefix-synergy fig-env="figure" fig-pos="htb" fig-cap="**Synergistic Acceleration between Tool-Result Caching and Radix Prefix Caching**: When a deterministic tool invocation matches an existing content-addressed cache key, the actuation gateway avoids external sandbox execution. Because the returned observation text matches previous executions byte-for-byte, the serving engine's Radix KV-cache achieves a 100 percent prefix hit for the entire preceding trajectory context, eliminating the compute-bound prefill phase and reducing token generation latency from seconds to milliseconds." fig-alt="Diagram showing tool result caching leading directly to radix tree KV cache hit on GPU."}
 ![](images/svg/tool_result_prefix_cache_synergy.svg){width=100%}
 :::
+
+Synthesizing typed ABIs, wire transport framing, capability leases, distributed idempotency nonces, and dynamic schema discovery establishes a robust foundation for autonomous actuation. However, translating these theoretical principles into production deployments exposes subtle, catastrophic traps where intuitive software design patterns conflict with physical systems realities. We now examine the classical fallacies and pitfalls that compromise agent actuation runtimes.
 
 ## Fallacies and Pitfalls {#sec-vol3-actuation-fallacies}
 
@@ -743,6 +764,20 @@ Instructing a model in its system prompt "Never write to files outside `/workspa
 Attempting to implement distributed Two-Phase Commit (2PC) across heterogeneous external tool APIs (e.g., Stripe, GitHub, Jira) causes catastrophic lock stranding. External APIs do not implement transaction coordinators or expose `PREPARE` and `ROLLBACK` hooks. Holding locks while awaiting foundation model inference loops or remote network packets exhausts connection pools and triggers widespread system deadlocks. Runtimes must implement the Saga pattern, pairing every forward mutating action with an explicit, compensating transaction.
 :::
 
+::: {.fallacy-pitfall}
+**Pitfall:** *Injecting unmasked volatile metadata into tool observation returns, busting GPU KV-cache prefix reuse.*
+
+Runtimes that allow tool returns to include un-sanitized wall-clock timestamps (`[14:20:02.12]`), process identifiers (`PID 8192`), or execution durations (`finished in 2.1s`) inadvertently destroy accelerator serving efficiency. Because radix-tree KV caches require exact token-level prefix identity, a single differing token at step $k$ invalidates the cached KV blocks for the entire multi-thousand-token prompt prefix across all subsequent steps $k+1, \dots, N$. This forces the serving engine to re-prefill the entire prompt history on every step, driving up Time-To-First-Token latency by $5\times \text{ to } 10\times$ and burning megawatts of redundant accelerator compute. All volatile metadata must be stripped or routed to out-of-band telemetry before injecting tool observations into context.
+:::
+
+::: {.fallacy-pitfall}
+**Pitfall:** *Synchronous OS pipe buffering deadlocks during local tool execution.*
+
+When executing local tools over `stdio` IPC, relying on default OS pipe buffers without asynchronous non-blocking draining introduces catastrophic deadlocks. Standard Linux anonymous pipes provide a fixed $64\,\text{KB}$ circular buffer (`F_SETPIPE_SZ`). If a child process tool emits voluminous output (such as compiler warnings, test traces, or database dumps) exceeding $64\,\text{KB}$, the child process blocks inside `write()` waiting for buffer space. If the parent agent runtime synchronously awaits child process exit before reading stdout, both processes deadlock permanently, stranding accelerator KV-cache memory until external timeout mechanisms trip. Runtimes must implement asynchronous `epoll`/`kqueue` event loops to continuously drain pipe buffers.
+:::
+
+By systematically avoiding these architectural pitfalls and adhering to hardware-grounded interface design, agent runtimes transform stochastic neural reasoning into verifiable, deterministic environment actions. We conclude with the definitive architectural invariants governing the actuation boundary.
+
 ## Summary {#sec-vol3-actuation-summary}
 
 The actuation boundary marks the definitive transition where non-deterministic neural token proposals become binding, discrete environment mutations. Treating tool actuation as unmediated prompt text generation results in catastrophic operational failures, ranging from unintended file deletion to injection-driven confused deputy exploits. Production-grade agentic architectures demand the rigor of classical operating systems engineering: foundation models must be treated as untrusted user-space processes whose tool intents represent AI system calls intercepted by a supervisor kernel. By implementing typed wire protocols such as MCP, grammar-constrained logit masking at the GPU tensor layer, Dennis and Van Horn capability leases, distributed idempotency nonces, and the Saga transaction pattern, systems architects can construct autonomous agent runtimes that achieve provable safety, low latency, and deterministic reliability.
@@ -755,6 +790,10 @@ The actuation boundary marks the definitive transition where non-deterministic n
 5. **Idempotency, Sagas, and Heavy-Tailed Latency:** At-least-once stochastic retry loops must be reconciled with at-most-once physical execution using RFC 8785 canonical trajectory nonces, distributed Write-Ahead Logs, and Saga compensating transactions. Asynchronous scheduling and timeouts prevent heavy-tailed tool stragglers from inducing cluster-wide Tool-Wait memory stalls.
 :::
 
-::: {.callout-chapter-connection title="From tool actuation to asynchronous interrupts"}
-Even with typed ABIs, capability leases, and idempotency guarantees, an agent runtime cannot operate under a naive synchronous request-response loop. In real-world environments, external tools may execute for minutes or hours, network connections may hang, and mutations may cross critical risk thresholds that require human approval. In @sec-vol3-interrupts, we explore how the supervisor kernel handles asynchronous signals, pauses inflight execution without stranding GPU memory, demultiplexes streaming event loops, and implements execution traps to transfer authority cleanly between stochastic models and human overseers.
+::: {.callout-chapter-connection title="From tool actuation to microvm virtualization"}
+Even when an agent runtime enforces typed schemas via grammar-constrained logit masking, verifies Dennis and Van Horn capability leases, guarantees idempotency nonces, and retrieves tools dynamically, it confronts an inescapable systems reality: **where does the code physically execute?**
+
+When an agent issues a `BashExecute` call or runs an ad-hoc Python script, executing that untrusted, model-generated command directly on the host operating system is an existential security threat. A single hallucinated parameter or an indirect prompt injection exploit can initiate Remote Code Execution (RCE), launch Server-Side Request Forgery (SSRF) against cloud metadata services (`169.254.169.254`), spawn fork-bomb denial-of-service loops, or exfiltrate host credentials. Complete mediation cannot end at parameter validation; the physical mutation must be quarantined within an immutable, disposable execution envelope.
+
+In @sec-vol3-virtualization, we cross from the logical actuation protocol to physical execution isolation. We analyze the Pareto trade-offs between Linux containers, userspace kernels (gVisor), WebAssembly runtimes, and hardware-assisted microVMs (Firecracker); architect copy-on-write (OverlayFS) ephemeral storage with sub-millisecond memory-snapshot fast-forking; and implement kernel-level eBPF network perimeters to guarantee that even a totally compromised agent remains strictly contained within a disposable sandbox.
 :::
