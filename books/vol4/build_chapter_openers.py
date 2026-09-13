@@ -192,12 +192,13 @@ labels_memory = [
 
 # Chapter 10: Grounded Intent
 labels_intent = [
-    {'text': 'task token prism', 'pill': (200, 80), 'targ': (364, 135), 'border': '#0090B0', 'color': '#0090B0'},
-    {'text': 'deliberative projection', 'pill': (480, 240), 'targ': (508, 264)},
-    {'text': 'reachability manifold', 'pill': (460, 690), 'targ': (608, 504)},
-    {'text': 'tolerance cylinder', 'pill': (700, 710), 'targ': (694, 434), 'border': '#D97706', 'color': '#D97706'},
-    {'text': 'countdown lease ring', 'pill': (880, 160), 'targ': (694, 294), 'border': '#D97706', 'color': '#D97706'},
-    {'text': 'expiration tripwire', 'pill': (1180, 160), 'targ': (1003, 239), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'task token projection', 'pill': (740, 60), 'targ': (735, 120), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'kinematic reachability dome', 'pill': (200, 160), 'targ': (380, 180)},
+    {'text': 'spatial tolerance cylinder', 'pill': (200, 440), 'targ': (690, 380), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'aerospace bracket workpiece', 'pill': (320, 680), 'targ': (640, 500)},
+    {'text': 'countdown lease ring dial', 'pill': (1180, 160), 'targ': (765, 265), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'insertion affordance cone', 'pill': (1180, 360), 'targ': (886, 280), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'optical expiration tripwire beam', 'pill': (1180, 560), 'targ': (940, 500), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
 # Chapter 11: Trajectory Planning
@@ -275,7 +276,7 @@ if __name__ == '__main__':
     process_chapter('07_evaluation', 'vol4_ch07_mocap_cell_1789299882214.jpg', labels_evaluation)
     process_chapter('08_perception', 'vol4_ch08_opt_b_bench_1789300399870.jpg', labels_perception)
     process_chapter('09_memory', 'vol4_ch09_memory_base_1789293246965.jpg', labels_memory)
-    process_chapter('10_intent', 'vol4_ch10_intent_base_1789293267152.jpg', labels_intent)
+    process_chapter('10_intent', 'vol4_ch10_opt_b_stage_1789301044832.jpg', labels_intent)
     process_chapter('11_planning', 'vol4_ch11_planning_base_1789293290135.jpg', labels_planning)
     process_chapter('12_enforcement', 'vol4_ch12_enforcement_base_1789293313920.jpg', labels_enforcement)
     process_chapter('13_placement', 'vol4_ch13_placement_base_1789293408508.jpg', labels_placement)
