@@ -150,14 +150,14 @@ labels_data = [
     {'text': 'timestamp sync logger', 'pill': (700, 740), 'targ': (710, 600), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
-# Chapter 06: Policy Training (Sim-to-Real)
+# Chapter 06: Policy Training (Sim-to-Real Quadruped)
 labels_training = [
-    {'text': 'virtual twin', 'pill': (160, 200), 'targ': (298, 344), 'border': '#0090B0', 'color': '#0090B0'},
-    {'text': 'friction cones', 'pill': (600, 80), 'targ': (718, 314), 'border': '#D97706', 'color': '#D97706'},
-    {'text': 'actuator lag', 'pill': (620, 710), 'targ': (668, 484), 'border': '#1A4D3E', 'color': '#1A4D3E'},
-    {'text': 'parameter ranges', 'pill': (380, 690), 'targ': (568, 514), 'border': '#1A4D3E', 'color': '#1A4D3E'},
-    {'text': 'contact mismatch', 'pill': (1220, 260), 'targ': (1098, 434), 'border': '#9B2226', 'color': '#9B2226'},
-    {'text': 'physical plant', 'pill': (990, 740), 'targ': (978, 614), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+    {'text': 'virtual physics digital twin', 'pill': (240, 160), 'targ': (420, 310), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'randomized friction cones', 'pill': (240, 480), 'targ': (440, 520), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'domain randomization prism', 'pill': (700, 80), 'targ': (700, 320), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'physical quadruped plant', 'pill': (1160, 200), 'targ': (1000, 360)},
+    {'text': 'dynamometer treadmill', 'pill': (1180, 480), 'targ': (940, 600), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+    {'text': 'real-time sensor telemetry', 'pill': (760, 740), 'targ': (770, 560), 'border': '#2EC4B6', 'color': '#2EC4B6'},
 ]
 
 # Chapter 07: Closed-Loop Evaluation & Metrology
@@ -201,24 +201,25 @@ labels_intent = [
     {'text': 'optical expiration tripwire beam', 'pill': (1180, 560), 'targ': (940, 500), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
-# Chapter 11: Trajectory Planning
+# Chapter 11: Trajectory Planning (Aerial Quadrotor Drone)
 labels_planning = [
-    {'text': 'actuator origin', 'pill': (240, 140), 'targ': (368, 224)},
-    {'text': 'executed spline', 'pill': (380, 520), 'targ': (534, 285), 'border': '#0090B0', 'color': '#0090B0'},
-    {'text': 'prospective chunk', 'pill': (700, 680), 'targ': (795, 341), 'border': '#D97706', 'color': '#D97706'},
-    {'text': 'continuity calipers', 'pill': (650, 100), 'targ': (648, 204)},
-    {'text': 'stopping suffix', 'pill': (1160, 360), 'targ': (1034, 478), 'border': '#9B2226', 'color': '#9B2226'},
-    {'text': 'terminal buffer pad', 'pill': (1160, 720), 'targ': (1068, 624)},
+    {'text': 'bldc outrunner cutaway', 'pill': (220, 180), 'targ': (380, 285)},
+    {'text': 'executed 3d polynomial spline', 'pill': (240, 440), 'targ': (540, 350), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'aerodynamic thrust cones', 'pill': (400, 720), 'targ': (560, 520), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+    {'text': 'spatial obstacle ring', 'pill': (740, 80), 'targ': (730, 170)},
+    {'text': 'prospective waypoint chunk', 'pill': (1180, 180), 'targ': (880, 205), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'hover-recovery stopping suffix', 'pill': (1180, 360), 'targ': (1010, 260), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'terminal landing perch', 'pill': (1180, 540), 'targ': (1020, 360)},
 ]
 
-# Chapter 12: Safety Enforcement
+# Chapter 12: Safety Enforcement (Autonomous Mobile Robot CBF-QP)
 labels_enforcement = [
-    {'text': 'neural proposal flow', 'pill': (220, 80), 'targ': (396, 208), 'border': '#0090B0', 'color': '#0090B0'},
-    {'text': 'cbf-qp projection filter', 'pill': (744, 80), 'targ': (732, 284)},
-    {'text': 'admissible permission gate', 'pill': (1120, 140), 'targ': (937, 274), 'border': '#D97706', 'color': '#D97706'},
-    {'text': 'actuator motor drive', 'pill': (1200, 260), 'targ': (1048, 204)},
-    {'text': 'unsafe vector sump', 'pill': (1020, 730), 'targ': (868, 624), 'border': '#9B2226', 'color': '#9B2226'},
-    {'text': 'emergency interlock', 'pill': (420, 680), 'targ': (568, 464), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'forward-invariant safe set', 'pill': (240, 200), 'targ': (450, 400), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+    {'text': 'omnidirectional mecanum base', 'pill': (240, 420), 'targ': (520, 450)},
+    {'text': 'emergency brake interlock', 'pill': (280, 640), 'targ': (635, 470), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'prohibited hazard boundary', 'pill': (1160, 180), 'targ': (948, 244), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'candidate proposal vector', 'pill': (1160, 340), 'targ': (923, 269), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'cbf-qp projected vector', 'pill': (1160, 500), 'targ': (913, 374), 'border': '#D97706', 'color': '#D97706'},
 ]
 
 # Chapter 13: Silicon Placement
@@ -231,13 +232,16 @@ labels_placement = [
     {'text': 'qos isolation trench', 'pill': (720, 750), 'targ': (588, 564), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
-# Chapter 14: Supervisory Intervention
+# Chapter 14: Supervisory Intervention (Autonomous Vehicle Steer-by-Wire)
 labels_intervention = [
-    {'text': 'autonomous policy', 'pill': (180, 260), 'targ': (335, 353), 'border': '#0090B0', 'color': '#0090B0'},
-    {'text': 'haptic master console', 'pill': (550, 70), 'targ': (568, 154)},
-    {'text': 'kinetic authority arbiter', 'pill': (850, 220), 'targ': (738, 344), 'border': '#D97706', 'color': '#D97706'},
-    {'text': 'unified drive shaft', 'pill': (1150, 320), 'targ': (1038, 404)},
-    {'text': 'intervention event logger', 'pill': (460, 720), 'targ': (657, 575), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'vehicle perception mast', 'pill': (260, 140), 'targ': (595, 180)},
+    {'text': 'independent double-wishbone', 'pill': (220, 340), 'targ': (470, 390)},
+    {'text': 'steer-by-wire rack & pinion', 'pill': (240, 520), 'targ': (540, 410)},
+    {'text': 'tire contact friction ellipses', 'pill': (360, 720), 'targ': (690, 540), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'electric traction motor', 'pill': (1160, 160), 'targ': (825, 240)},
+    {'text': 'timestamped intervention relay', 'pill': (1180, 300), 'targ': (900, 280), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'human steering override', 'pill': (1180, 440), 'targ': (730, 275)},
+    {'text': 'kinetic authority clutch', 'pill': (1180, 580), 'targ': (685, 310), 'border': '#D97706', 'color': '#D97706'},
 ]
 
 # Chapter 15: Adversarial Verification
@@ -272,15 +276,15 @@ if __name__ == '__main__':
     process_chapter('03_brain', 'vol4_brain_cognitive_1789296655524.jpg', labels_brain)
     process_chapter('04_nervous', 'vol4_nervous_bridge_1789296675456.jpg', labels_nervous)
     process_chapter('05_data', 'vol4_ch05_teleop_cell_1789298090568.jpg', labels_data)
-    process_chapter('06_training', 'test_ch06_gemini_opt2_1789246590824.jpg', labels_training)
+    process_chapter('06_training', 'vol4_ch06_sim2real_quadruped_1789303933889.jpg', labels_training)
     process_chapter('07_evaluation', 'vol4_ch07_mocap_cell_1789299882214.jpg', labels_evaluation)
     process_chapter('08_perception', 'vol4_ch08_opt_b_bench_1789300399870.jpg', labels_perception)
     process_chapter('09_memory', 'vol4_ch09_memory_base_1789293246965.jpg', labels_memory)
     process_chapter('10_intent', 'vol4_ch10_opt_b_stage_1789301044832.jpg', labels_intent)
-    process_chapter('11_planning', 'vol4_ch11_planning_base_1789293290135.jpg', labels_planning)
-    process_chapter('12_enforcement', 'vol4_ch12_enforcement_base_1789293313920.jpg', labels_enforcement)
+    process_chapter('11_planning', 'vol4_alt_quadrotor_planning_1789302134527.jpg', labels_planning)
+    process_chapter('12_enforcement', 'vol4_ch12_amr_cbf_enforcer_1789304388503.jpg', labels_enforcement)
     process_chapter('13_placement', 'vol4_ch13_placement_base_1789293408508.jpg', labels_placement)
-    process_chapter('14_intervention', 'vol4_ch14_intervention_base_1789294696657.jpg', labels_intervention)
+    process_chapter('14_intervention', 'vol4_alt_av_chassis_1789302169515.jpg', labels_intervention)
     process_chapter('15_verification', 'vol4_ch15_verification_base_1789294730403.jpg', labels_verification)
     process_chapter('16_release', 'vol4_ch16_release_base_1789294762541.jpg', labels_release)
     process_chapter('17_frontier', 'vol4_ch17_frontier_base_1789294795242.jpg', labels_frontier)
