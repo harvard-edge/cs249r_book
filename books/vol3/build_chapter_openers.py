@@ -3,10 +3,12 @@
 Generate high-resolution labeled and unlabeled isometric blueprint chapter openers
 for Volume 3 (Agentic Machine Learning Systems) Chapters 01 - 18.
 Standard: Wave 1 Instrument-Grade Cute Robot Hero Mascots on Floating Plinths.
+Guaranteed 100% Pure White (#FFFFFF) seamless bleed for print and PDF publication.
 """
 
 import os
 import math
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +17,49 @@ BRAIN = '/Users/VJ/.gemini/antigravity-cli/brain/6702a6d9-86c1-48b2-93d2-f2c949a
 FONT_PATH = '/System/Library/Fonts/Supplemental/Arial Bold.ttf'
 if not os.path.exists(FONT_PATH):
     FONT_PATH = '/System/Library/Fonts/Helvetica.ttc'
+
+def whiten_image_adaptive(im):
+    """
+    Seamless background whitening for print & PDF publishing:
+    1. Measures corner background levels dynamically.
+    2. Applies a smoothstep S-curve highlight rolloff so that off-white background
+       pixels (RGB 230-248) smoothly transition to 100% pure white (#FFFFFF / 255, 255, 255).
+    3. Preserves soft ambient occlusion ground contact shadows without clipping.
+    4. Applies a subtle 15px boundary feather to guarantee 0 seam artifact when placed
+       on a white canvas or PDF book page.
+    """
+    arr = np.array(im, dtype=float)
+    h, w, _ = arr.shape
+    
+    corners = np.concatenate([
+        arr[:50, :50].reshape(-1, 3),
+        arr[:50, -50:].reshape(-1, 3),
+        arr[-50:, :50].reshape(-1, 3),
+        arr[-50:, -50:].reshape(-1, 3),
+    ])
+    
+    corner_p10 = np.percentile(corners, 10, axis=0)
+    t_high = float(np.min(corner_p10)) - 1.0
+    t_high = min(t_high, 250.0)
+    t_high = max(t_high, 226.0)
+    t_low = t_high - 40.0
+    
+    mask = arr >= t_low
+    prog = np.clip((arr - t_low) / (t_high - t_low), 0.0, 1.0)
+    smooth = 3.0 * (prog ** 2) - 2.0 * (prog ** 3)
+    arr[mask] = t_low + smooth[mask] * (255.0 - t_low)
+    
+    border_px = 15
+    y = np.arange(h)
+    x = np.arange(w)
+    dist_y = np.minimum(y, h - 1 - y)
+    dist_x = np.minimum(x, w - 1 - x)
+    min_dist = np.minimum(dist_x[None, :], dist_y[:, None])
+    feather = np.clip(min_dist / float(border_px), 0.0, 1.0)[:, :, None]
+    
+    arr = arr * feather + 255.0 * (1.0 - feather)
+    arr = np.clip(arr, 0.0, 255.0).astype(np.uint8)
+    return Image.fromarray(arr)
 
 def draw_pill(draw, text, cx, cy, border_color='#0F172A', text_color='#0F172A'):
     try:
@@ -40,9 +85,10 @@ def process_chapter(slug, base_filename, labels):
     base_path = os.path.join(BRAIN, base_filename)
     if not os.path.exists(base_path):
         raise FileNotFoundError(f"Missing base image: {base_path}")
-    im_base = Image.open(base_path).convert('RGB')
+    im_raw = Image.open(base_path).convert('RGB')
+    im_base = whiten_image_adaptive(im_raw)
     
-    # Standard 1400 x 800 blueprint canvas
+    # Standard 1400 x 800 blueprint canvas (pure white #FFFFFF)
     canvas = Image.new('RGB', (1400, 800), (255, 255, 255))
     dx = (1400 - im_base.width) // 2
     dy = (800 - im_base.height) // 2
@@ -345,7 +391,7 @@ chapters = [
 ]
 
 if __name__ == '__main__':
-    print('Starting Volume 3 Chapter Opener Generation (All 18 Chapters)...')
+    print('Starting Volume 3 Chapter Opener Generation (All 18 Chapters with Pure White Bleed)...')
     for ch in chapters:
         process_chapter(ch['slug'], ch['image'], ch['labels'])
     print('Finished generating all 18 Volume 3 chapter openers!')
