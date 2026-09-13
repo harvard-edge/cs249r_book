@@ -11,9 +11,9 @@ In an autonomous machine learning system, the transformer's attention mechanism 
 \end{marginfigure}
 :::
 
-_Why does an agent swarm with shared instructions waste 80 percent of accelerator memory?_
+_Why does static contiguous memory allocation waste 80 percent of accelerator HBM under dynamic agent workloads, and why must runtime memory adopt virtual paging and prefix sharing?_
 
-This chapter establishes the systems architecture required to transform volatile accelerator memory into a virtualized, demand-paged context substrate for autonomous agents. While context working sets govern what tokens must reside in attention from an algorithmic perspective, virtual context memory governs the physical silicon mechanics of allocating, addressing, paging, sharing, and disaggregating Key-Value (KV) activation tensors across accelerator HBM, host DRAM, and remote network tiers. We analyze the physical tensor geometry of attention architectures, formulate the virtual-to-physical address translation mechanics of PagedAttention, evaluate dynamic prefix indexing and eviction via Radix trees, architect prefill-decode disaggregated clusters over remote direct memory access (RDMA) networks, and design hardware-aware KV cache compression pipelines. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+Treating the context window as an active attention working set determines *what* tokens to keep, but it does not solve the physical challenge of *where* to store them in accelerator silicon. In naive serving runtimes, memory for an agent's KV cache is allocated as a contiguous, fixed-capacity buffer sized for the model's maximum possible sequence length. Because multi-turn agents generate outputs incrementally across unpredictable horizons, this static allocation strands up to 80 percent of expensive High-Bandwidth Memory (HBM) in unusable internal and external fragmentation. Furthermore, when multiple agents share identical system prompts, or when an agent explores branching deliberation paths, static buffers duplicate identical KV activations, paralyzing batch throughput. Just as classical operating systems solved memory fragmentation in the 1960s by introducing paged virtual memory, modern agent runtimes require PagedAttention and Radix-tree prefix indexing. By mapping non-contiguous physical blocks to logical token sequences, the runtime eliminates external fragmentation, bounds internal tail waste, and enables zero-copy prefix sharing. This chapter formalizes the virtual memory architecture of agent serving, analyzing block-level paging, copy-on-write branching, and hierarchical memory swapping across accelerator clusters.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -305,9 +305,9 @@ class VirtualMemoryTtftCollapse:
 
 :::
 
-The arithmetic necessity of retaining the Key-Value cache reveals an inescapable hardware trade-off: an inference engine cannot eliminate redundant prefill without physically storing multi-gigabyte activation tensors across long temporal horizons. Solving this challenge without succumbing to the contiguous allocation fragmentation crisis requires virtualizing the memory addressing architecture.
-
 > **The Systems Rule of Thumb (The TTFT Collapse Invariant):** Multi-turn agents cannot tolerate stateless inference. When prompt history expands beyond $N \ge 10$ turns, stateless prefill causes interactive Time-to-First-Token to explode from sub-second responses into multi-second stalls ($> 8\text{ seconds}$), starving client runtimes and trapping Tensor Cores in quadratic recomputation loops. Serving engines must implement prefix block virtualization to collapse incremental TTFT down to the raw per-turn delta latency ($\tau_{\text{delta}} = \Delta S \cdot \tau_{\text{token}}$).
+
+The arithmetic necessity of retaining the Key-Value cache reveals an inescapable hardware trade-off: an inference engine cannot eliminate redundant prefill without physically storing multi-gigabyte activation tensors across long temporal horizons. Solving this challenge without succumbing to the contiguous allocation fragmentation crisis requires virtualizing the memory addressing architecture.
 
 [^fn-virtualmem-stateless-summation]: Summing across all $T$ turns gives $\sum_{t=1}^T [L_{\text{root}} + (t-1)\Delta S] = T \cdot L_{\text{root}} + \Delta S \sum_{t=1}^T (t-1) = T \cdot L_{\text{root}} + \Delta S \frac{T(T-1)}{2}$.
 
@@ -440,6 +440,106 @@ $$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}
 as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in contiguous, unpaged architectures.
 :::
 
+To illustrate how physical block aliasing and Copy-on-Write are orchestrated by the serving engine, @lst-vol3-vm-pagedattention-block-allocator implements a complete `PagedMemoryManager` executing zero-copy sequence branching and token-append Copy-on-Write mutations.
+
+::: {#lst-vol3-vm-pagedattention-block-allocator lst-cap="**PagedAttention Block Allocation and Copy-on-Write Execution Engine**: Python reference implementation of physical block allocation, logical-to-physical block table translation, zero-copy sequence branching, and Copy-on-Write mutation under PagedAttention."}
+```python
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+import numpy as np
+
+
+@dataclass
+class PhysicalBlock:
+    """Represents a fixed-capacity physical memory frame in accelerator HBM."""
+    block_id: int
+    block_size: int = 16
+    token_dim: int = 128
+    ref_count: int = 0
+    num_tokens: int = 0
+    keys: np.ndarray = field(init=False)
+    values: np.ndarray = field(init=False)
+
+    def __post_init__(self):
+        self.keys = np.zeros((self.block_size, self.token_dim), dtype=np.float32)
+        self.values = np.zeros((self.block_size, self.token_dim), dtype=np.float32)
+
+
+class PagedMemoryManager:
+    """Orchestrates non-contiguous physical block allocation, address translation, and CoW."""
+
+    def __init__(self, num_blocks: int, block_size: int = 16, token_dim: int = 128):
+        self.block_size = block_size
+        self.token_dim = token_dim
+        self.blocks = [PhysicalBlock(i, block_size, token_dim) for i in range(num_blocks)]
+        self.free_pool: List[int] = list(range(num_blocks))
+        # Logical sequence ID -> list of physical block IDs
+        self.block_tables: Dict[str, List[int]] = {}
+
+    def allocate_block(self) -> int:
+        """Pops an unallocated physical block from the free list in O(1) time."""
+        if not self.free_pool:
+            raise MemoryError("HBM exhaustion: No free physical blocks available.")
+        bid = self.free_pool.pop()
+        self.blocks[bid].ref_count = 1
+        self.blocks[bid].num_tokens = 0
+        return bid
+
+    def free_block(self, bid: int):
+        """Decrements reference count; reclaims block to free pool if unreferenced."""
+        block = self.blocks[bid]
+        block.ref_count -= 1
+        if block.ref_count <= 0:
+            block.ref_count = 0
+            block.num_tokens = 0
+            self.free_pool.append(bid)
+
+    def fork_sequence(self, parent_seq_id: str, child_seq_id: str):
+        """Creates a zero-copy child sequence by aliasing parent physical blocks (ref_count++)."""
+        parent_table = self.block_tables[parent_seq_id]
+        self.block_tables[child_seq_id] = list(parent_table)
+        for bid in parent_table:
+            self.blocks[bid].ref_count += 1
+
+    def append_token(self, seq_id: str, k_vec: np.ndarray, v_vec: np.ndarray):
+        """Appends a new KV activation, triggering Copy-on-Write if the tail block is shared."""
+        table = self.block_tables[seq_id]
+        if not table:
+            bid = self.allocate_block()
+            table.append(bid)
+
+        tail_bid = table[-1]
+        tail_block = self.blocks[tail_bid]
+
+        # Case 1: Tail block is saturated; allocate fresh unshared block
+        if tail_block.num_tokens == self.block_size:
+            new_bid = self.allocate_block()
+            table.append(new_bid)
+            tail_bid = new_bid
+            tail_block = self.blocks[tail_bid]
+
+        # Case 2: Tail block is shared with parent/sibling (ref_count > 1) -> Copy-on-Write
+        elif tail_block.ref_count > 1:
+            cow_bid = self.allocate_block()
+            cow_block = self.blocks[cow_bid]
+            # Copy active tokens from shared block into private block
+            cow_block.keys[:tail_block.num_tokens] = tail_block.keys[:tail_block.num_tokens]
+            cow_block.values[:tail_block.num_tokens] = tail_block.values[:tail_block.num_tokens]
+            cow_block.num_tokens = tail_block.num_tokens
+
+            # Detach from shared block and update child table
+            self.free_block(tail_bid)
+            table[-1] = cow_bid
+            tail_block = cow_block
+
+        # Append activation into unshared tail block
+        idx = tail_block.num_tokens
+        tail_block.keys[idx] = k_vec
+        tail_block.values[idx] = v_vec
+        tail_block.num_tokens += 1
+```
+:::
+
 ```{python}
 #| label: calc-vm-branch-capacity
 #| echo: false
@@ -528,9 +628,9 @@ class SpeculativeBranchCapacity:
 
 :::
 
-PagedAttention resolves the physical memory addressing problem: it allows arbitrary non-contiguous physical blocks to back a logical sequence and enables zero-copy sharing across known, explicitly forked branches. However, PagedAttention assumes the serving system already knows which requests share memory. In an autonomous multi-agent swarm where dozens of heterogeneous agents submit requests asynchronously, the runtime requires a dynamic indexing data structure to discover, match, and reuse shared prefixes automatically.
-
 > **The Systems Rule of Thumb (The Test-Time Deliberation Multiplier):** Copy-on-Write transforms test-time search from a memory-prohibitive extravagance into a lightweight scheduling primitive. By isolating private memory allocation strictly to divergent branch steps ($L_{\text{branch}} \ll L_{\text{prefix}}$), CoW expands concurrent speculative search capacity by over $35\times$ on identical GPU hardware. Runtimes supporting Tree-of-Thoughts or Monte Carlo Tree Search must deploy physical block aliasing to prevent shared context replication from choking accelerator HBM.
+
+PagedAttention resolves the physical memory addressing problem: it allows arbitrary non-contiguous physical blocks to back a logical sequence and enables zero-copy sharing across known, explicitly forked branches. However, PagedAttention assumes the serving system already knows which requests share memory. In an autonomous multi-agent swarm where dozens of heterogeneous agents submit requests asynchronously, the runtime requires a dynamic indexing data structure to discover, match, and reuse shared prefixes automatically.
 
 ## Memory Defragmentation, Page Tables, and Block Allocation {#sec-vol3-virtualmem-defrag}
 
@@ -586,6 +686,119 @@ Because accelerator High-Bandwidth Memory is strictly bounded, the Radix tree ca
 - **Eviction Under Memory Pressure:** When a new request requires fresh physical blocks and the free pool is exhausted, the allocator triggers eviction. Just as an operating system kernel maintains active and inactive page queues, the serving engine maintains a doubly linked LRU queue tracking unreferenced leaf nodes ($\text{ref\_count} = 0$). Internal tree nodes cannot be evicted because doing so would orphan their descendants; **only unpinned leaf nodes are eligible for eviction**. Under memory pressure, the allocator pops the least recently accessed leaf from the LRU queue in $\mathcal{O}(1)$ time, frees its physical blocks back to the global free list, and detaches the leaf from its parent. If the parent node is left with only one surviving child, the runtime automatically merges the parent and child edges to keep the radix tree compact.
 
 If an agent returns for its next execution turn before memory pressure forces eviction, the system achieves a **$100\%$ cache hit** on its historical prefix, resuming execution with zero prefill latency.
+
+To demonstrate the mechanics of prefix matching, edge splitting, and reference-counted leaf eviction, @lst-vol3-vm-radix-prefix-tree implements a complete `RadixPrefixCache` in Python.
+
+::: {#lst-vol3-vm-radix-prefix-tree lst-cap="**RadixAttention Prefix Cache Engine**: Python reference implementation of compressed prefix trie indexing, dynamic edge splitting, prefix lookup, and reference-counted leaf-only LRU eviction for PagedAttention blocks."}
+```python
+from dataclasses import dataclass, field
+import time
+from typing import Dict, List, Optional, Tuple
+
+
+@dataclass
+class RadixTreeNode:
+    """Compressed trie node mapping a token sequence to resident physical PagedAttention blocks."""
+    tokens: List[int]
+    physical_blocks: List[int] = field(default_factory=list)
+    children: Dict[int, 'RadixTreeNode'] = field(default_factory=dict)
+    parent: Optional['RadixTreeNode'] = None
+    ref_count: int = 0
+    last_accessed: float = field(default_factory=time.time)
+
+    @property
+    def is_leaf(self) -> bool:
+        return len(self.children) == 0
+
+
+class RadixPrefixCache:
+    """Manages dynamic prefix sharing, edge splitting, and leaf LRU eviction."""
+
+    def __init__(self):
+        # Root node matches empty prefix with no physical blocks
+        self.root = RadixTreeNode(tokens=[])
+
+    def match_prefix(self, prompt_tokens: List[int]) -> Tuple[List[int], List[int], RadixTreeNode]:
+        """Traverses the radix tree to discover the longest cached token prefix."""
+        curr = self.root
+        matched_blocks: List[int] = []
+        token_offset = 0
+
+        while token_offset < len(prompt_tokens):
+            first_token = prompt_tokens[token_offset]
+            if first_token not in curr.children:
+                break
+
+            child = curr.children[first_token]
+            edge_tokens = child.tokens
+            match_len = 0
+            while (
+                match_len < len(edge_tokens)
+                and token_offset + match_len < len(prompt_tokens)
+                and edge_tokens[match_len] == prompt_tokens[token_offset + match_len]
+            ):
+                match_len += 1
+
+            if match_len == len(edge_tokens):
+                # Full edge matched; accumulate blocks and descend
+                matched_blocks.extend(child.physical_blocks)
+                token_offset += match_len
+                curr = child
+                curr.last_accessed = time.time()
+            else:
+                # Partial edge match terminates prefix traversal
+                break
+
+        remaining_tokens = prompt_tokens[token_offset:]
+        return matched_blocks, remaining_tokens, curr
+
+    def split_edge(
+        self, parent: RadixTreeNode, child: RadixTreeNode, split_idx: int, prefix_blocks: List[int], suffix_blocks: List[int]
+    ) -> RadixTreeNode:
+        """Splits an edge into a shared parent node and a downstream suffix child node."""
+        first_token = child.tokens[0]
+        # Create intermediate node holding the matched prefix
+        split_node = RadixTreeNode(
+            tokens=child.tokens[:split_idx],
+            physical_blocks=prefix_blocks,
+            parent=parent,
+            ref_count=child.ref_count,
+            last_accessed=time.time()
+        )
+        # Update original child to hold remaining suffix
+        child.tokens = child.tokens[split_idx:]
+        child.physical_blocks = suffix_blocks
+        child.parent = split_node
+
+        split_node.children[child.tokens[0]] = child
+        parent.children[first_token] = split_node
+        return split_node
+
+    def evict_lru_leaf(self) -> Optional[List[int]]:
+        """Finds and evicts the least-recently-used unpinned (ref_count == 0) leaf node."""
+        candidate_leaf: Optional[RadixTreeNode] = None
+        oldest_time = float("inf")
+
+        def find_leaves(node: RadixTreeNode):
+            nonlocal candidate_leaf, oldest_time
+            if node.is_leaf and node.ref_count == 0 and node != self.root:
+                if node.last_accessed < oldest_time:
+                    oldest_time = node.last_accessed
+                    candidate_leaf = node
+            for child in node.children.values():
+                find_leaves(child)
+
+        find_leaves(self.root)
+        if candidate_leaf is None:
+            return None  # All resident nodes are pinned by active requests
+
+        parent = candidate_leaf.parent
+        first_token = candidate_leaf.tokens[0]
+        freed_blocks = candidate_leaf.physical_blocks
+        del parent.children[first_token]
+        return freed_blocks
+```
+:::
 
 ### Content-addressed hash chains
 
@@ -735,10 +948,11 @@ Consider transferring a 32,000-token prompt KV cache for Llama-3 70B ($S_{\text{
 | Dual-Rail InfiniBand / RoCE v2 | $800\text{ Gbps}$ | $100.0\text{ GB/s}$            | $105\text{ ms}$                      | 🟢 Production (fully hidden via RDMA)  |
 : **KV Cache Transfer Latency Across Network Fabrics**: Serialization delay for transferring a 32,000-token Llama-3 70B KV cache ($10.49\text{ GB}$) from Prefill to Decode instances across standard cluster interconnects. {#tbl-vol3-virtualmem-rdma-transport}
 
-To eliminate this network serialization overhead, modern disaggregated runtimes (such as Mooncake [@qin2024mooncake]) implement **Pipelined Layer-by-Layer Streaming via RDMA Write**\index{RDMA Write}:
+To eliminate this network serialization overhead, modern disaggregated runtimes (such as Mooncake [@qin2024mooncake]) implement **Pipelined Layer-by-Layer Streaming via One-Sided RDMA Write**\index{RDMA Write}:
 
-- Rather than waiting for all $n_{\text{layers}}$ to complete before initiating network transfer, the $P$-instance initiates an asynchronous **RDMA Write** transfer for layer $l$'s physical PagedAttention blocks immediately after layer $l$ completes its forward pass.
-- In our 80-layer Llama-3 70B example, each layer produces $10.49\text{ GB} / 80 \approx 131\text{ MB}$ of KV state. Over an $800\text{ Gbps}$ ($100\text{ GB/s}$) fabric, transferring $131\text{ MB}$ takes only $1.31\text{ ms}$. Because computing the subsequent layer's forward pass on an H100 takes $5 - 10\text{ ms}$, the network transfer ($1.31\text{ ms}$) completes well before the next layer finish computation.
+- Rather than waiting for all $n_{\text{layers}}$ to complete before initiating network transfer, the $P$-instance posts asynchronous one-sided RDMA Write work requests (`IBV_WR_RDMA_WRITE`) for layer $l$'s physical PagedAttention blocks immediately after layer $l$ completes its forward pass.
+- Using hardware-offloaded NIC Memory Translation Tables (MTT) and GPUDirect RDMA, the network interface card bypasses host CPUs and operating system networking stacks entirely, transferring bytes directly from the local GPU's HBM across the InfiniBand/RoCE fabric into the remote $D$-instance's registered GPU physical page frames.
+- In our 80-layer Llama-3 70B example, each layer produces $10.49\text{ GB} / 80 \approx 131\text{ MB}$ of KV state. Over an $800\text{ Gbps}$ ($100\text{ GB/s}$) fabric, transferring $131\text{ MB}$ takes only $1.31\text{ ms}$. Because computing the subsequent layer's forward pass on an H100 takes $5 - 10\text{ ms}$, the network transfer ($1.31\text{ ms}$) completes well before the next layer finishes computation.
 - Consequently, the entire network transfer is completely overlapped with prefill computation ($T_{\text{effective\_transfer}} = \max(0, T_{\text{network}} - T_{\text{prefill}}) \approx 0$).
 
 [^fn-virtualmem-rdma-overlap]: In pipelined RDMA streaming, transfer begins at $t = T_{\text{layer}}$, so the net pipeline bubble is $\Delta T = \max(0, T_{\text{network\_layer}} - T_{\text{compute\_layer}})$. When $B_{\text{network}} \ge 50\text{ GB/s}$, layer transfer latency ($<3.5\text{ ms}$) is strictly less than layer GEMM prefill execution ($>5\text{ ms}$), hiding 100 percent of network transit.

