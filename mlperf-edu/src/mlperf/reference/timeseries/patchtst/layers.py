@@ -71,6 +71,10 @@ def PositionalEncoding(q_len, d_model, normalize=True):
 
 SinCosPosEncoding = PositionalEncoding
 
+def pv(msg, verbose=True):
+    if verbose:
+        print(msg)
+
 def Coord2dPosEncoding(q_len, d_model, exponential=False, normalize=True, eps=1e-3, verbose=False):
     x = .5 if exponential else 1
     i = 0
