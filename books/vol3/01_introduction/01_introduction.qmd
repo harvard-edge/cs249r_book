@@ -168,118 +168,61 @@ To understand how these five phases translate into software, @lst-vol3-intro-min
 ::: {#lst-vol3-intro-minimal-runtime lst-cap="**The Minimal Closed-Loop Agent Runtime**: Python implementation of the foundational agent control loop, featuring the Agent Control Block (ACB) state structure, strict budget enforcement, Compute vs. I/O action classification, and runtime invariant verification."}
 ```python
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, Dict, List, Tuple
-
-
-class StepType(Enum):
-  COMPUTE = "internal_deliberation"
-  IO_SYSCALL = "external_actuation"
+from typing import Any, Callable
 
 
 @dataclass
 class AgentControlBlock:
-  """Runtime control block tracking agent execution state and resource bounds."""
-
   task_id: str
   objective: str
   turn: int = 0
   max_turns: int = 50
-  token_budget: int = 100_000
   tokens_consumed: int = 0
-  history: List[Dict[str, Any]] = field(default_factory=list)
+  token_budget: int = 100_000
+  history: list[dict[str, Any]] = field(default_factory=list)
   is_terminal: bool = False
   status: str = "INITIALIZED"
 
 
 class MinimalAgentRuntime:
-  """The canonical closed-loop execution harness for autonomous agents."""
 
-  def __init__(
-      self,
-      policy_fn: Callable[[str], Tuple[str, int]],
-      tool_dispatcher: Callable[[str, Dict[str, Any]], Dict[str, Any]],
-      verifier_fn: Callable[[Dict[str, Any]], bool],
-  ):
+  def __init__(self, policy_fn, tool_dispatcher, verifier_fn):
     self.policy = policy_fn
     self.tools = tool_dispatcher
     self.verifier = verifier_fn
 
   def step(self, acb: AgentControlBlock) -> AgentControlBlock:
-    # Guard against infinite trajectory loops and runaway budget exhaustion
+    # Watchdog budget enforcement
     if acb.turn >= acb.max_turns or acb.tokens_consumed >= acb.token_budget:
       acb.is_terminal = True
       acb.status = "BUDGET_EXHAUSTED"
       return acb
 
-    # Phase 1: Context Assembly - serialize working context buffer h_t
-    context_prompt = self._assemble_context(acb)
+    # Phase 1 & 2: Context Assembly & Neural Dispatch
+    prompt = f"Task: {acb.objective}\nHistory: {acb.history}"
+    output, tokens = self.policy(prompt)
+    acb.tokens_consumed += tokens
 
-    # Phase 2: Neural Dispatch - forward pass on stochastic processor
-    raw_output, tokens_used = self.policy(context_prompt)
-    acb.tokens_consumed += tokens_used
-
-    # Early exit on explicit goal completion token
-    if "<task_complete>" in raw_output:
-      acb.is_terminal = True
-      acb.status = "SUCCESS"
-      return acb
-
-    # Phase 3: Action Classification - Compute vs. I/O Boundary
-    step_type, payload = self._classify_action(raw_output)
-
-    if step_type == StepType.COMPUTE:
-      # Zero-cost internal scratchpad: mutate context memory only
+    # Phase 3: Action Classification (Compute vs. I/O Boundary)
+    is_tool, payload = self._classify_action(output)
+    if not is_tool:
+      # Reversible internal deliberation: mutate working context only
       acb.history.append({"role": "thought", "content": payload})
     else:
-      # Irreversible external actuation: execute in sandbox
-      tool_name = payload["name"]
-      tool_args = payload["arguments"]
-
-      # Pre-actuation capability verification (privileged boundary)
-      self._check_capabilities(acb, tool_name)
-
-      # Phase 4: Environment Observation - execute via tool dispatcher
-      observation = self.tools(tool_name, tool_args)
-
-      # Phase 5: Runtime Verification - audit environmental invariants
-      if not self.verifier(observation):
-        observation["verification_status"] = "INVARIANT_VIOLATION_FLAGGED"
-
-      acb.history.append({
-          "role": "action",
-          "tool": tool_name,
-          "observation": observation,
-      })
+      # Irreversible external actuation: execute in sandbox with verification
+      obs = self.tools(payload["name"], payload["arguments"])
+      if not self.verifier(obs):
+        obs["verification_status"] = "INVARIANT_VIOLATION_FLAGGED"
+      acb.history.append(
+          {"role": "action", "tool": payload["name"], "obs": obs}
+      )
 
     acb.turn += 1
     return acb
-
-  def run(self, acb: AgentControlBlock) -> AgentControlBlock:
-    """Execute trajectory until completion, budget exhaustion, or interrupt."""
-    while not acb.is_terminal:
-      acb = self.step(acb)
-    return acb
-
-  def _check_capabilities(self, acb: AgentControlBlock, tool_name: str) -> None:
-    # Verify agent credentials/privileges before syscall execution
-    pass
-
-  def _assemble_context(self, acb: AgentControlBlock) -> str:
-    return f"Task: {acb.objective}\nHistory: {acb.history}"
-
-  def _classify_action(self, output: str) -> Tuple[StepType, Any]:
-    if "<tool_call>" in output:
-      # Parsed via structured grammar or regex into typed invocation
-      return StepType.IO_SYSCALL, {
-          "name": "shell_exec",
-          "arguments": {"cmd": "pytest"},
-      }
-    return StepType.COMPUTE, output
 ```
 :::
 
-This 60-line harness represents the bare minimum kernel of autonomous agency. As we progress through this book, we will replace each simplistic component with production systems architecture: replacing prompt string concatenation with paged virtual memory (@sec-vol3-virtual-memory), unconstrained token generation with grammar-constrained decoding (@sec-vol3-processor), naive shell execution with microVM sandboxes (@sec-vol3-virtualization), and synchronous waiting with asynchronous trajectory schedulers (@sec-vol3-scheduling).
+This minimal harness represents the bare minimum kernel of autonomous agency. As we progress through this book, we will replace each simplistic component with production systems architecture: replacing prompt string concatenation with paged virtual memory (@sec-vol3-virtual-memory), unconstrained token generation with grammar-constrained decoding (@sec-vol3-processor), naive shell execution with microVM sandboxes (@sec-vol3-virtualization), and synchronous waiting with asynchronous trajectory schedulers (@sec-vol3-scheduling).
 
 ### The causal feedback inversion: Endogenous distribution shift
 

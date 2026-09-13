@@ -695,130 +695,46 @@ To translate this theoretical formulation into a production runtime, @lst-vol3-d
 ::: {#lst-vol3-deliberation-mcts-prefix lst-cap="**Monte Carlo Tree Search with Radix Prefix Cache Management**: Production implementation of PUCT tree search coupling node exploration to copy-on-write KV-cache prefix allocation."}
 ```python
 import math
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 
-class RadixCacheHandle:
-    """Models a reference-counted physical KV-cache page in a Radix prefix tree."""
-    _id_counter = 0
-
-    def __init__(self, parent: Optional["RadixCacheHandle"] = None, token_count: int = 0):
-        RadixCacheHandle._id_counter += 1
-        self.node_id = RadixCacheHandle._id_counter
-        self.parent = parent
-        self.token_count = token_count
-        self.ref_count = 1  # Active reference count for copy-on-write
-
-    def fork(self, delta_tokens: int) -> "RadixCacheHandle":
-        """Forks a child node sharing this prefix, incrementing parent reference count."""
-        self.ref_count += 1
-        return RadixCacheHandle(parent=self, token_count=delta_tokens)
-
-    def release(self):
-        """Decrements reference count; recursively frees ancestral pages when unreferenced."""
-        self.ref_count -= 1
-        if self.ref_count == 0 and self.parent is not None:
-            self.parent.release()
-
-
-@dataclass
 class MCTSNode:
-    """Represents a state node in the test-time deliberate search tree."""
-    state_tokens: List[int]
-    parent: Optional["MCTSNode"] = None
-    action_from_parent: Optional[str] = None
-    prior_prob: float = 1.0
-    cache_handle: Optional[RadixCacheHandle] = None
-    children: Dict[str, "MCTSNode"] = field(default_factory=dict)
-    visit_count: int = 0
-    total_value: float = 0.0
+    """Deliberation tree node backed by a copy-on-write KV-cache page handle."""
+
+    def __init__(self, parent: Optional["MCTSNode"] = None, prior: float = 1.0, cache_handle=None):
+        self.parent, self.prior = parent, prior
+        self.cache_handle = cache_handle  # Reference-counted physical page in Radix cache
+        self.children: Dict[str, "MCTSNode"] = {}
+        self.visits, self.value = 0, 0.0
 
     @property
     def q_value(self) -> float:
-        """Computes empirical mean action-value Q(s, a)."""
-        return self.total_value / self.visit_count if self.visit_count > 0 else 0.0
+        return self.value / self.visits if self.visits > 0 else 0.0
+
+    def puct(self, c: float = 1.414) -> float:
+        u = c * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
+        return self.q_value + u
 
 
-class PUCTSearchPlanner:
-    """Asynchronous MCTS search planner with RadixAttention prefix caching."""
+def search_step(root: MCTSNode, expand_fn, eval_fn) -> None:
+    """Executes a 4-phase MCTS iteration with CoW prefix cache fork & backpropagation."""
+    # 1. Select: traverse path maximizing PUCT
+    curr, path = root, [root]
+    while curr.children:
+        curr = max(curr.children.values(), key=lambda n: n.puct())
+        path.append(curr)
 
-    def __init__(self, c_puct: float = 1.414):
-        self.c_puct = c_puct
+    # 2. Expand: fork candidate children sharing parent's KV prefix handle
+    if not curr.children:
+        for action, prior in expand_fn(curr).items():
+            child_handle = curr.cache_handle.fork() if curr.cache_handle else None
+            curr.children[action] = MCTSNode(parent=curr, prior=prior, cache_handle=child_handle)
 
-    def puct_score(self, parent: MCTSNode, child: MCTSNode) -> float:
-        """Evaluates Upper Confidence Bound: Q(s, a) + U(s, a)."""
-        exploration = (
-            self.c_puct
-            * child.prior_prob
-            * (math.sqrt(parent.visit_count) / (1 + child.visit_count))
-        )
-        return child.q_value + exploration
-
-    def select(self, root: MCTSNode) -> Tuple[MCTSNode, List[MCTSNode]]:
-        """Phase 1: Descends tree selecting child nodes that maximize PUCT score."""
-        path = [root]
-        curr = root
-        while curr.children:
-            best_action = max(
-                curr.children,
-                key=lambda act: self.puct_score(curr, curr.children[act])
-            )
-            curr = curr.children[best_action]
-            path.append(curr)
-        return curr, path
-
-    def expand(
-        self, leaf: MCTSNode, action_priors: Dict[str, float], delta_tokens: int = 32
-    ):
-        """Phase 2: Expands leaf with candidate tool actions via copy-on-write cache fork."""
-        for action_name, prior in action_priors.items():
-            child_cache = (
-                leaf.cache_handle.fork(delta_tokens) if leaf.cache_handle else None
-            )
-            child = MCTSNode(
-                state_tokens=leaf.state_tokens + [hash(action_name) % 10000],
-                parent=leaf,
-                action_from_parent=action_name,
-                prior_prob=prior,
-                cache_handle=child_cache,
-            )
-            leaf.children[action_name] = child
-
-    def backpropagate(self, path: List[MCTSNode], value: float):
-        """Phase 4: Recursively propagates leaf evaluation score back up the tree."""
-        for node in reversed(path):
-            node.visit_count += 1
-            node.total_value += value
-
-    def prune_branch(self, node: MCTSNode):
-        """Prunes an unviable search branch, detaches pointers, and frees KV pages."""
-        if node.parent and node.action_from_parent in node.parent.children:
-            del node.parent.children[node.action_from_parent]
-        if node.cache_handle:
-            node.cache_handle.release()
-            node.cache_handle = None
-        for child in list(node.children.values()):
-            self.prune_branch(child)
-        node.children.clear()
-
-    def search(
-        self,
-        root: MCTSNode,
-        iterations: int,
-        propose_fn,
-        evaluate_fn,
-    ) -> MCTSNode:
-        """Driver loop: executes MCTS search phases and returns the optimal action node."""
-        for _ in range(iterations):
-            leaf, path = self.select(root)
-            if not leaf.children:
-                candidate_actions = propose_fn(leaf)
-                self.expand(leaf, candidate_actions)
-            val = evaluate_fn(leaf)
-            self.backpropagate(path, val)
-        # Select child with highest visit count (robust child policy)
-        return max(root.children.values(), key=lambda n: n.visit_count)
+    # 3. Evaluate & 4. Backpropagate: update visit counts and Q-values along search path
+    val = eval_fn(curr)
+    for node in reversed(path):
+        node.visits += 1
+        node.value += val
 ```
 :::
 
@@ -1049,111 +965,51 @@ To formalize both the mathematical verification scheduler and the out-of-band wa
 ```python
 import math
 from enum import Enum, auto
-from typing import List, Optional, Tuple
-import numpy as np
 
 
 class CircuitState(Enum):
-    CLOSED = auto()     # Normal execution: autonomous tool invocation permitted
-    HALF_OPEN = auto()  # Degraded remediation: canary retry under isolated context
-    OPEN = auto()       # Tripped safe abort: execution halted, rollbacks executed
+    CLOSED = auto()
+    HALF_OPEN = auto()
+    OPEN = auto()
 
 
-class VerificationScheduler:
-    """Calculates optimal verification cadence m* under the Young-Daly Square-Root Law."""
-
-    def __init__(self, t_step: float, t_ver: float, single_step_p: float):
-        self.t_step = t_step          # Wall-clock generation time per action step (seconds)
-        self.t_ver = t_ver            # Wall-clock time per verification check (seconds)
-        self.p = single_step_p        # Single-step semantic execution reliability
-
-    def compute_optimal_cadence(self) -> int:
-        """Evaluates m* = sqrt(2 * T_ver / ((1 - p) * T_step))."""
-        failure_rate = max(1.0 - self.p, 1e-4)
-        ratio = (2.0 * self.t_ver) / (failure_rate * self.t_step)
-        return max(1, round(math.sqrt(ratio)))
+def compute_optimal_cadence(t_step: float, t_ver: float, reliability_p: float) -> int:
+    """Evaluates Young-Daly verification cadence: m* = sqrt(2 * T_ver / ((1 - p) * T_step))."""
+    ratio = (2.0 * t_ver) / (max(1.0 - reliability_p, 1e-4) * t_step)
+    return max(1, round(math.sqrt(ratio)))
 
 
 class WatchdogCircuitBreaker:
     """Out-of-band kernel watchdog monitoring agent trajectory health invariants."""
 
-    def __init__(
-        self,
-        max_steps: int = 30,
-        max_token_budget: int = 50_000,
-        error_thresh: int = 3,
-        delta_thresh: float = 0.05,
-        window: int = 5,
-        min_env_delta: float = 0.0,
-    ):
+    def __init__(self, max_steps: int = 30, max_tokens: int = 50_000, error_thresh: int = 3):
         self.max_steps = max_steps
-        self.max_token_budget = max_token_budget
+        self.max_tokens = max_tokens
         self.error_thresh = error_thresh
-        self.delta_thresh = delta_thresh
-        self.window = window
-        self.min_env_delta = min_env_delta
         self.state = CircuitState.CLOSED
-        self.step_count = 0
-        self.token_burn = 0
+        self.steps = 0
+        self.tokens = 0
         self.consecutive_errors = 0
-        self.recent_embeddings: List[np.ndarray] = []
 
-    def check_invariants(
-        self,
-        new_tokens: int,
-        embedding: np.ndarray,
-        error_occurred: bool = False,
-        delta_env: float = 1.0,
-    ) -> Tuple[CircuitState, str]:
-        """Evaluates trajectory health invariants on every agent control block turn."""
-        self.step_count += 1
-        self.token_burn += new_tokens
-        self.consecutive_errors = self.consecutive_errors + 1 if error_occurred else 0
-        self.recent_embeddings.append(embedding)
+    def step(self, tokens_used: int, error: bool = False, delta_env: float = 1.0) -> CircuitState:
+        """Evaluates trajectory health invariants on each agent control step."""
+        self.steps += 1
+        self.tokens += tokens_used
+        self.consecutive_errors = (self.consecutive_errors + 1) if error else 0
 
-        # Invariant 1: Hard Step Ceiling
-        if self.step_count > self.max_steps:
+        # Hard invariant violations trip immediately to OPEN
+        if (
+            self.steps > self.max_steps
+            or self.tokens > self.max_tokens
+            or self.consecutive_errors >= self.error_thresh
+        ):
             self.state = CircuitState.OPEN
-            return self.state, f"Step ceiling breached ({self.step_count}/{self.max_steps})"
+        elif delta_env <= 0.0:  # Stagnation trips to HALF_OPEN degraded remediation
+            self.state = CircuitState.HALF_OPEN if self.state == CircuitState.CLOSED else CircuitState.OPEN
+        elif self.state == CircuitState.HALF_OPEN and not error:
+            self.state = CircuitState.CLOSED  # Remediated progress restores normal operation
 
-        # Invariant 2: Hard Token Budget
-        if self.token_burn > self.max_token_budget:
-            self.state = CircuitState.OPEN
-            return self.state, f"Token budget exhausted ({self.token_burn}/{self.max_token_budget})"
-
-        # Invariant 3: Semantic Stagnation & Multi-Turn Period-K Cycle Detection
-        if len(self.recent_embeddings) > 1:
-            # Check against sliding window of prior states to detect A -> B -> A livelocks
-            history_window = self.recent_embeddings[-(self.window + 1):-1]
-            min_delta_s = min(
-                1.0 - float(
-                    np.dot(embedding, past)
-                    / (np.linalg.norm(embedding) * np.linalg.norm(past) + 1e-12)
-                )
-                for past in history_window
-            )
-            # Livelock trips if semantic distance stagnates without exogenous environment progress
-            if min_delta_s < self.delta_thresh and delta_env <= self.min_env_delta:
-                if self.state == CircuitState.CLOSED:
-                    self.state = CircuitState.HALF_OPEN
-                    return (
-                        self.state,
-                        f"Semantic livelock / cycle detected (delta_s={min_delta_s:.4f} < {self.delta_thresh}); entering HALF_OPEN remediation",
-                    )
-                elif self.state == CircuitState.HALF_OPEN:
-                    self.state = CircuitState.OPEN
-                    return self.state, "Remediation failed to break cycle; safe abort to OPEN"
-            else:
-                # Successful recovery transition from HALF_OPEN back to CLOSED
-                if self.state == CircuitState.HALF_OPEN and not error_occurred:
-                    self.state = CircuitState.CLOSED
-
-        # Invariant 4: Tool Error Burst Ceiling
-        if self.consecutive_errors >= self.error_thresh:
-            self.state = CircuitState.OPEN
-            return self.state, f"Error burst ceiling breached ({self.consecutive_errors} consecutive failures)"
-
-        return self.state, f"All invariants satisfied ({self.state.name})"
+        return self.state
 ```
 :::
 

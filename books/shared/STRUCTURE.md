@@ -129,11 +129,11 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 5 | chapter | `05_virtual_memory/05_virtual_memory.qmd` |
 | 6 | chapter | `06_episodic_memory/06_episodic_memory.qmd` |
 | 7 | chapter | `07_checkpointing/07_checkpointing.qmd` |
-| 8 | chapter | `08_scheduling/08_scheduling.qmd` |
 |  | part | `parts/security_isolation_principles.qmd` |
-| 9 | chapter | `09_actuation/09_actuation.qmd` |
+| 8 | chapter | `08_actuation/08_actuation.qmd` |
+| 9 | chapter | `09_virtualization/09_virtualization.qmd` |
 | 10 | chapter | `10_interrupts/10_interrupts.qmd` |
-| 11 | chapter | `11_virtualization/11_virtualization.qmd` |
+| 11 | chapter | `11_scheduling/11_scheduling.qmd` |
 |  | part | `parts/training_adaptation_principles.qmd` |
 | 12 | chapter | `12_data_flywheel/12_data_flywheel.qmd` |
 | 13 | chapter | `13_sft/13_sft.qmd` |

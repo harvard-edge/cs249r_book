@@ -387,124 +387,44 @@ To understand how grammar-constrained decoding operates concretely inside an inf
 
 ::: {#lst-vol3-processor-grammar-masking lst-cap="**Grammar-Constrained Logit Masking Engine**: Python implementation of a schema-driven FSM decoder featuring byte-level prefix-closure matching via a vocabulary trie and dynamic pre-softmax logit masking."}
 ```python
-from dataclasses import dataclass, field
-from enum import Enum, auto
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Set
 import numpy as np
 
 
-class JsonState(Enum):
-    START = auto()
-    OBJECT_OPEN = auto()
-    KEY_START = auto()
-    IN_KEY = auto()
-    KEY_END = auto()
-    COLON = auto()
-    VALUE_STRING = auto()
-    VALUE_NUMBER = auto()
-    COMMA = auto()
-    ACCEPT = auto()
-    ERROR = auto()
-
-
-class TrieNode:
-    """Trie node for token-to-byte prefix matching."""
-    def __init__(self):
-        self.children: Dict[int, "TrieNode"] = {}
-        self.token_ids: Set[int] = set()
-
-
-class TokenTrie:
-    """Prefix trie mapping raw byte sequences to subword vocabulary token IDs."""
-    def __init__(self, vocab: Dict[int, bytes]):
-        self.root = TrieNode()
-        for token_id, token_bytes in vocab.items():
-            node = self.root
-            for b in token_bytes:
-                if b not in node.children:
-                    node.children[b] = TrieNode()
-                node = node.children[b]
-            node.token_ids.add(token_id)
-
-
 class GrammarConstrainedDecoder:
-    """Compiles structured schemas into FSMs and applies dynamic logit masks."""
+    """Pre-softmax logit masking engine enforcing prefix-closed grammar constraints."""
 
-    def __init__(self, vocab: Dict[int, bytes]):
+    def __init__(self, vocab: Dict[int, bytes], transition_fn, initial_state: int):
         self.vocab = vocab
-        self.vocab_size = len(vocab)
-        self.trie = TokenTrie(vocab)
+        self.transition = transition_fn  # delta(state, byte) -> state or -1 (reject)
+        self.state = initial_state
 
-    def transition(self, state: JsonState, char: str) -> JsonState:
-        """Deterministic FSM state transitions for a minimal JSON schema."""
-        if state == JsonState.START and char == "{":
-            return JsonState.OBJECT_OPEN
-        if state == JsonState.OBJECT_OPEN and char == '"':
-            return JsonState.KEY_START
-        if state == JsonState.KEY_START and char.isalpha():
-            return JsonState.IN_KEY
-        if state == JsonState.IN_KEY and char.isalpha():
-            return JsonState.IN_KEY
-        if state == JsonState.IN_KEY and char == '"':
-            return JsonState.KEY_END
-        if state == JsonState.KEY_END and char == ":":
-            return JsonState.COLON
-        if state == JsonState.COLON and char == '"':
-            return JsonState.VALUE_STRING
-        if state == JsonState.COLON and char.isdigit():
-            return JsonState.VALUE_NUMBER
-        if state == JsonState.VALUE_STRING and char == '"':
-            return JsonState.COMMA
-        if state == JsonState.VALUE_STRING:
-            return JsonState.VALUE_STRING
-        if state == JsonState.VALUE_NUMBER and char.isdigit():
-            return JsonState.VALUE_NUMBER
-        if state == JsonState.VALUE_NUMBER and char == ",":
-            return JsonState.OBJECT_OPEN
-        if state == JsonState.VALUE_NUMBER and char == "}":
-            return JsonState.ACCEPT
-        if state == JsonState.COMMA and char == ",":
-            return JsonState.OBJECT_OPEN
-        if state == JsonState.COMMA and char == "}":
-            return JsonState.ACCEPT
-        return JsonState.ERROR
+    def compute_valid_tokens(self, state: int) -> Set[int]:
+        """Filters vocabulary tokens whose byte sequence preserves prefix closure."""
+        valid = set()
+        for token_id, byte_seq in self.vocab.items():
+            curr = state
+            for b in byte_seq:
+                curr = self.transition(curr, b)
+                if curr == -1:
+                    break
+            if curr != -1:
+                valid.add(token_id)
+        return valid
 
-    def compute_valid_continuations(self, current_state: JsonState) -> Set[int]:
-        """Computes prefix-closed valid tokens via recursive TokenTrie traversal."""
-        valid_tokens: Set[int] = set()
-
-        def dfs(node: TrieNode, state: JsonState):
-            # Tokens whose complete byte sequence terminates at a valid state
-            if state != JsonState.ERROR:
-                valid_tokens.update(node.token_ids)
-            # Prune entire sub-trie if the next byte transition is inadmissible
-            for byte_val, child in node.children.items():
-                next_state = self.transition(state, chr(byte_val))
-                if next_state != JsonState.ERROR:
-                    dfs(child, next_state)
-
-        dfs(self.trie.root, current_state)
-        return valid_tokens
-
-    def step(self, current_state: JsonState, token_id: int) -> JsonState:
-        """Advances the FSM state by consuming the token's byte sequence."""
-        state = current_state
-        for b in self.vocab.get(token_id, b""):
-            state = self.transition(state, chr(b))
-            if state == JsonState.ERROR:
-                break
-        return state
-
-    def apply_logit_mask(
-        self, logits: np.ndarray, current_state: JsonState
-    ) -> np.ndarray:
-        """Transforms raw logits into a strictly grammar-compliant probability distribution."""
-        valid_tokens = self.compute_valid_continuations(current_state)
-        masked_logits = np.full_like(logits, fill_value=-np.inf)
+    def mask_logits(self, logits: np.ndarray) -> np.ndarray:
+        """Applies -inf logit mask to all illegal tokens prior to softmax kernel."""
+        valid_tokens = self.compute_valid_tokens(self.state)
+        mask = np.full_like(logits, fill_value=-np.inf)
         if valid_tokens:
             indices = list(valid_tokens)
-            masked_logits[indices] = logits[indices]
-        return masked_logits
+            mask[indices] = logits[indices]
+        return mask  # Transferred to GPU HBM prior to sampling kernel
+
+    def step(self, sampled_token_id: int) -> None:
+        """Consumes accepted token bytes to advance the internal FSM state."""
+        for b in self.vocab[sampled_token_id]:
+            self.state = self.transition(self.state, b)
 ```
 :::
 
@@ -664,118 +584,47 @@ To demonstrate how the draft-then-verify protocol is implemented in production s
 
 ::: {#lst-vol3-processor-speculative-decoding lst-cap="**Speculative Decoding with Rejection Sampling and KV-Cache Rollback**: Python implementation of the two-tier draft-then-verify execution harness, featuring per-token acceptance testing, residual correction sampling, and KV cache length rollback."}
 ```python
-from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import List, Tuple
 import numpy as np
 
 
-@dataclass
-class SpeculativeRoundResult:
-  accepted_tokens: List[int]
-  acceptance_count: int
-  speculation_window: int
-  residual_sampled: bool
-  kv_cache_length: int
+def speculative_decode_round(
+    draft_fn, target_fn, context: List[int], K: int = 4
+) -> Tuple[List[int], int]:
+  """Executes draft-then-verify speculation with rejection sampling and KV rollback."""
+  # 1. Draft phase: K sequential steps on small model M_q
+  draft_tokens, q_probs, cur = [], [], list(context)
+  for _ in range(K):
+    q = draft_fn(cur)
+    tok = int(np.random.choice(len(q), p=q))
+    draft_tokens.append(tok)
+    q_probs.append(q)
+    cur.append(tok)
 
+  # 2. Verify phase: parallel forward pass on target model M_p for all K candidates
+  p_probs_matrix = target_fn(context, draft_tokens)  # Shape: (K + 1, vocab_size)
 
-class SpeculativeDecoder:
-  """Two-tier draft-then-verify speculative decoding engine with KV-cache rollback."""
+  # 3. Acceptance loop with residual sampling upon rejection
+  accepted = []
+  for k, (tok, q) in enumerate(zip(draft_tokens, q_probs)):
+    p = p_probs_matrix[k]
+    alpha = min(1.0, p[tok] / max(q[tok], 1e-12))
+    if np.random.uniform(0, 1) <= alpha:
+      accepted.append(tok)
+    else:
+      # Rejection: sample replacement from residual max(0, p - q) and stop
+      res = np.maximum(0.0, p - q)
+      res /= np.sum(res)
+      accepted.append(int(np.random.choice(len(res), p=res)))
+      break
 
-  def __init__(
-      self,
-      draft_policy: Callable[[List[int]], np.ndarray],
-      target_policy: Callable[[List[int], List[int]], np.ndarray],
-      speculation_window: int = 4,
-  ):
-    self.draft_policy = draft_policy  # M_q: returns (vocab_size,)
-    self.target_policy = target_policy  # M_p: takes (context, draft_tokens), returns (K+1, vocab_size)
-    self.K = speculation_window
+  # 4. Bonus token if all K accepted; truncate speculative KV cache slots
+  if len(accepted) == K:
+    bonus = p_probs_matrix[K]
+    accepted.append(int(np.random.choice(len(bonus), p=bonus)))
 
-  def decode_round(
-      self,
-      context_tokens: List[int],
-      kv_cache: Optional[np.ndarray] = None,
-  ) -> Tuple[SpeculativeRoundResult, Optional[np.ndarray]]:
-    """Executes a single draft-then-verify speculation round with physical KV cache rollback."""
-    draft_tokens: List[int] = []
-    draft_probs: List[np.ndarray] = []
-    curr_context = list(context_tokens)
-
-    # Phase 1: Draft generation - K sequential forward passes on small model M_q
-    for _ in range(self.K):
-      q_logits = self.draft_policy(curr_context)
-      q_dist = self._softmax(q_logits)
-      sampled_token = int(np.random.choice(len(q_dist), p=q_dist))
-      draft_tokens.append(sampled_token)
-      draft_probs.append(q_dist)
-      curr_context.append(sampled_token)
-
-    # Phase 2: Target verification - single parallel forward pass on M_p
-    # Evaluates context + all K draft tokens simultaneously in batched GEMM
-    target_logits_matrix = self.target_policy(context_tokens, draft_tokens)
-
-    # Phase 3: Token-level rejection sampling loop
-    accepted_tokens: List[int] = []
-    residual_sampled = False
-
-    for k in range(self.K):
-      token_id = draft_tokens[k]
-      p_dist = self._softmax(target_logits_matrix[k])
-      q_dist = draft_probs[k]
-
-      p_k = p_dist[token_id]
-      q_k = q_dist[token_id]
-
-      # Modified rejection sampling condition: alpha = min(1, p_k / q_k)
-      alpha = min(1.0, p_k / max(q_k, 1e-12))
-      u = np.random.uniform(0.0, 1.0)
-
-      if u <= alpha:
-        # Token accepted: commit token and advance
-        accepted_tokens.append(token_id)
-      else:
-        # Token rejected: sample replacement from residual distribution
-        # p_res(v) = norm(max(0, p(v) - q(v)))
-        residual_dist = np.maximum(0.0, p_dist - q_dist)
-        sum_res = np.sum(residual_dist)
-        if sum_res > 1e-12:
-          residual_dist /= sum_res
-        else:
-          residual_dist = p_dist
-        correction_token = int(
-            np.random.choice(len(residual_dist), p=residual_dist)
-        )
-        accepted_tokens.append(correction_token)
-        residual_sampled = True
-        break  # Halts speculation round on first rejection
-
-    # If all K tokens accepted, sample the (K+1)-th bonus token from target model
-    if len(accepted_tokens) == self.K and not residual_sampled:
-      bonus_dist = self._softmax(target_logits_matrix[self.K])
-      bonus_token = int(np.random.choice(len(bonus_dist), p=bonus_dist))
-      accepted_tokens.append(bonus_token)
-
-    # Phase 4: KV-Cache Truncation & Physical Block Table Rollback
-    # In PagedAttention runtimes (e.g., vLLM BlockManager), speculative tail slots
-    # allocated in physical block tables beyond accepted length are unmapped and returned to free pool.
-    committed_length = len(context_tokens) + len(accepted_tokens)
-    committed_kv_cache = None
-    if kv_cache is not None:
-      # Physically roll back cache tensor to truncate unverified speculative entries
-      committed_kv_cache = kv_cache[:, :, :committed_length, :]
-
-    result = SpeculativeRoundResult(
-        accepted_tokens=accepted_tokens,
-        acceptance_count=len(accepted_tokens),
-        speculation_window=self.K,
-        residual_sampled=residual_sampled,
-        kv_cache_length=committed_length,
-    )
-    return result, committed_kv_cache
-
-  def _softmax(self, logits: np.ndarray) -> np.ndarray:
-    exps = np.exp(logits - np.max(logits))
-    return exps / np.sum(exps)
+  kv_commit_len = len(context) + len(accepted)  # Unmapped speculative tail freed
+  return accepted, kv_commit_len
 ```
 :::
 

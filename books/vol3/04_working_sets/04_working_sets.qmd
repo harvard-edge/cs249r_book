@@ -351,85 +351,35 @@ To make these mechanics concrete, @lst-vol3-workingsets-streaming-buffer provide
 ::: {#lst-vol3-workingsets-streaming-buffer lst-cap="**Streaming Attention Sink and Rolling Local Window KV Cache Manager**: Python implementation of a fixed-capacity streaming KV cache buffer maintaining pinned attention sinks at offsets 0..3 alongside a circular rolling local window."}
 ```python
 import numpy as np
-from dataclasses import dataclass
-from typing import Tuple, Optional, Dict
-
-
-@dataclass
-class AttentionSinkConfig:
-    """Hardware buffer parameters for streaming attention with pinned sinks."""
-    num_sink_tokens: int = 4        # S: Pinned initial tokens (positions 0..3)
-    window_size: int = 1024         # W: Local sliding window capacity
-    head_dim: int = 128             # d_h: Per-head activation dimension
-    num_kv_heads: int = 8           # H_KV: Grouped-Query Attention heads
-    dtype: np.dtype = np.float32    # Numerically stable evaluation dtype
 
 
 class StreamingKVBuffer:
-    """Fixed-capacity KV cache manager implementing StreamingLLM buffer eviction."""
+    """Fixed-capacity KV cache maintaining pinned attention sinks and a rolling window."""
 
-    def __init__(self, config: AttentionSinkConfig):
-        self.cfg = config
-        self.max_capacity = config.num_sink_tokens + config.window_size
-        self.total_tokens_seen = 0
+    def __init__(self, num_sinks: int = 4, window_size: int = 1024, head_dim: int = 128):
+        self.s, self.w, self.d = num_sinks, window_size, head_dim
+        self.capacity = self.s + self.w
+        self.k_buf = np.zeros((self.capacity, self.d), dtype=np.float32)
+        self.v_buf = np.zeros((self.capacity, self.d), dtype=np.float32)
+        self.total_tokens = 0
 
-        # Pre-allocate contiguous physical memory buffer: (H_KV, S + W, d_h)
-        buf_shape = (config.num_kv_heads, self.max_capacity, config.head_dim)
-        self.key_buffer = np.zeros(buf_shape, dtype=config.dtype)
-        self.val_buffer = np.zeros(buf_shape, dtype=config.dtype)
-
-    @property
-    def current_length(self) -> int:
-        """Returns the number of currently resident active tokens."""
-        return min(self.total_tokens_seen, self.max_capacity)
-
-    def append_token(self, k_t: np.ndarray, v_t: np.ndarray):
-        """Inserts a newly decoded token Key and Value vector into the resident cache."""
-        s = self.cfg.num_sink_tokens
-        w = self.cfg.window_size
-        if self.total_tokens_seen < self.max_capacity:
-            # Phase A: Buffer is filling up monotonically [0 : s + w]
-            idx = self.total_tokens_seen
-            self.key_buffer[:, idx, :] = k_t
-            self.val_buffer[:, idx, :] = v_t
+    def append(self, k: np.ndarray, v: np.ndarray) -> None:
+        """Inserts token key/value vectors, pinning initial sinks and cycling rolling window."""
+        if self.total_tokens < self.capacity:
+            idx = self.total_tokens
         else:
-            # Phase B: Cache saturation reached; write to circular rolling window in O(1)
-            # Sinks [0 : s] remain permanently pinned in physical memory slots!
-            # Window tokens are overwritten via modulo ring pointer without memory copies
-            window_offset = (self.total_tokens_seen - self.max_capacity) % w
-            target_idx = s + window_offset
-            self.key_buffer[:, target_idx, :] = k_t
-            self.val_buffer[:, target_idx, :] = v_t
+            # Pinned sinks [0..s-1] remain untouched; overwrite circular window [s..s+w-1]
+            idx = self.s + ((self.total_tokens - self.capacity) % self.w)
+        self.k_buf[idx], self.v_buf[idx] = k, v
+        self.total_tokens += 1
 
-        self.total_tokens_seen += 1
-
-    def compute_attention(
-        self, q_t: np.ndarray
-    ) -> Tuple[np.ndarray, float]:
-        """Computes scaled dot-product attention against resident sink and window tokens."""
-        s = self.cfg.num_sink_tokens
-        cur_len = self.current_length
-
-        # Slice active resident keys and values
-        keys = self.key_buffer[:, :cur_len, :]      # (H_KV, cur_len, d_h)
-        values = self.val_buffer[:, :cur_len, :]    # (H_KV, cur_len, d_h)
-
-        # Scaled dot-product: (1, d_h) x (cur_len, d_h)^T -> (1, cur_len)
-        scale = 1.0 / np.sqrt(self.cfg.head_dim)
-        scores = np.einsum("hd,hkd->hk", q_t, keys) * scale
-
-        # Numerically stable softmax
-        scores_max = np.max(scores, axis=-1, keepdims=True)
-        exp_scores = np.exp(scores - scores_max)
-        denom = np.sum(exp_scores, axis=-1, keepdims=True)
-        attn_weights = exp_scores / (denom + 1e-12)
-
-        # Context activation output
-        out = np.einsum("hk,hkd->hd", attn_weights, values)
-
-        # Quantify sink absorption ratio: percentage of mass dumped on positions 0..S-1
-        sink_mass = float(np.sum(attn_weights[:, :s]) / self.cfg.num_kv_heads)
-        return out, sink_mass
+    def forward(self, q: np.ndarray) -> np.ndarray:
+        """Computes scaled dot-product attention across resident sinks and local window."""
+        length = min(self.total_tokens, self.capacity)
+        scores = np.dot(q, self.k_buf[:length].T) / np.sqrt(self.d)
+        weights = np.exp(scores - np.max(scores))
+        weights /= np.sum(weights)
+        return np.dot(weights, self.v_buf[:length])
 ```
 :::
 
@@ -556,110 +506,37 @@ To demonstrate this end-to-end mechanism, @lst-vol3-workingsets-cot-cleaner impl
 ::: {#lst-vol3-workingsets-cot-cleaner lst-cap="**Two-Phase Commit CoT Context Cleaner and Radix Prefix Reuser**: Python implementation of a transactional CoT manager excising ephemeral thought tokens post-sandbox execution and verifying Radix prefix cache hit preservation."}
 ```python
 import re
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Callable
-
-
-@dataclass
-class TrajectoryTurn:
-    """Represents a discrete turn in the persistent agent trajectory."""
-    turn_id: int
-    role: str                       # 'user', 'assistant', or 'tool'
-    content: str                    # Canonical text committed to persistent context
-    is_ephemeral: bool = False      # If True, subject to Phase 2 purge
-    token_count: int = 0
-
-
-class RadixPrefixNode:
-    """Simulated physical KV page tree node in an LLM serving runtime."""
-
-    def __init__(self, prefix: str, ref_count: int = 1):
-        self.prefix = prefix
-        self.ref_count = ref_count
-        self.children: Dict[str, "RadixPrefixNode"] = {}
-        self.is_evicted = False
-
-    def release(self):
-        """Decrements reference counter; frees pages if zero."""
-        self.ref_count -= 1
-        if self.ref_count <= 0:
-            self.is_evicted = True
-            for child in self.children.values():
-                child.release()
+from typing import Dict, Tuple
 
 
 class TwoPhaseCommitCoTManager:
-    """Orchestrates Two-Phase Commit for ephemeral Chain-of-Thought scratchpads."""
+    """Manages transactional CoT execution: excises ephemeral thoughts and commits prefix."""
 
     def __init__(self, system_prompt: str):
-        self.system_prompt = system_prompt
-        self.radix_root = RadixPrefixNode(prefix=system_prompt, ref_count=1)
-        self.active_prefix_node = self.radix_root
-        self.history: List[TrajectoryTurn] = [
-            TrajectoryTurn(
-                turn_id=0,
-                role="system",
-                content=system_prompt,
-                token_count=len(system_prompt) // 4,
-            )
-        ]
-        self.current_turn = 1
-        self.total_tokens_generated = 0
-        self.total_tokens_committed = 0
+        self.history = [("system", system_prompt)]
+        self.ref_counts: Dict[str, int] = {"root": 1}
 
-    def get_prompt_for_generation(self) -> str:
-        """Constructs the canonical prompt string for the next deliberation forward pass."""
-        return "\n".join(f"[{turn.role.upper()}]: {turn.content}" for turn in self.history)
+    def commit_turn(self, raw_response: str, execute_fn) -> Tuple[str, str, int]:
+        """Phase 1: executes tool; Phase 2: excises thoughts and preserves radix prefix."""
+        # 1. Parse ephemeral thought tokens and isolate canonical action
+        match = re.search(r"<(?:thought|think)>(.*?)</(?:thought|think)>", raw_response, re.DOTALL)
+        thought = match.group(1).strip() if match else ""
+        action = re.sub(
+            r"<(?:thought|think)>.*?</(?:thought|think)>", "", raw_response, flags=re.DOTALL
+        ).strip()
 
-    def commit_turn(
-        self,
-        raw_llm_response: str,
-        sandbox_executor: Callable[[str], str],
-    ) -> Tuple[str, int, int]:
-        """Phase 2 Commit: Excises thought tokens, executes tool, and commits canonical state."""
-        turn_id = self.current_turn
-        raw_token_count = len(raw_llm_response) // 4
-        self.total_tokens_generated += raw_token_count
+        # 2. Phase 1 execution: run tool in isolated sandbox
+        observation = execute_fn(action)
 
-        # Step 1: Parse ephemeral thought scratchpad (supports <thought> and <think>)
-        thought_match = re.search(r"<(?:thought|think)>(.*?)</(?:thought|think)>", raw_llm_response, re.DOTALL)
-        thought_content = thought_match.group(1).strip() if thought_match else ""
-        thought_tokens = len(thought_content) // 4
+        # 3. Phase 2 commit: release scratchpad cache branch (ref_count -> 0)
+        # Scratchpad KV pages are reclaimed by LRU; only canonical action/obs commit to prefix
+        self.ref_counts["scratchpad"] = 0  # Marked unreferenced for GPU allocator reclaim
+        self.history.append(("assistant", action))
+        self.history.append(("tool", observation))
+        self.ref_counts[f"turn_{len(self.history)}"] = 1
 
-        # Simulate ephemeral branch in serving engine's Radix tree during Phase 1
-        ephemeral_scratchpad_node = RadixPrefixNode(prefix=thought_content, ref_count=1)
-        self.active_prefix_node.children["thought_scratchpad"] = ephemeral_scratchpad_node
-
-        # Strip thought block to isolate canonical tool action
-        action_content = re.sub(r"<(?:thought|think)>.*?</(?:thought|think)>", "", raw_llm_response, flags=re.DOTALL).strip()
-        action_tokens = len(action_content) // 4
-
-        # Step 2: Execute tool action inside isolated container sandbox
-        tool_observation = sandbox_executor(action_content)
-        obs_tokens = len(tool_observation) // 4
-
-        # Step 3: Phase 2 Commit - Forcefully evict ephemeral scratchpad branch
-        # In the Radix tree, omitting the scratchpad decrements ref_count to 0
-        ephemeral_scratchpad_node.release()
-
-        # Commit canonical transition tuple to persistent Radix branch and history
-        canonical_node = RadixPrefixNode(prefix=f"{action_content}\n{tool_observation}", ref_count=1)
-        self.active_prefix_node.children[f"turn_{turn_id}"] = canonical_node
-        self.active_prefix_node = canonical_node
-
-        self.history.append(
-            TrajectoryTurn(turn_id=turn_id, role="assistant", content=action_content, token_count=action_tokens)
-        )
-        self.history.append(
-            TrajectoryTurn(turn_id=turn_id, role="tool", content=tool_observation, token_count=obs_tokens)
-        )
-
-        committed_tokens = action_tokens + obs_tokens
-        self.total_tokens_committed += committed_tokens
-        self.current_turn += 1
-
-        pruned_tokens = thought_tokens
-        return action_content, pruned_tokens, committed_tokens
+        pruned_tokens = len(thought) // 4
+        return action, observation, pruned_tokens
 ```
 :::
 

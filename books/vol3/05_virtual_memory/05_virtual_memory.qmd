@@ -289,16 +289,16 @@ class VirtualMemoryTtftCollapse:
 
 1. *Stateless Execution (Zero Context Retention):*
 - Total tokens prefilled: $S_{\text{total}} = \sum_{t=1}^{20} [16\text{,}000 + 800(t-1)] =$ `{python} VirtualMemoryTtftCollapse.s_stateless_total_str` tokens.
-- Cumulative prefill execution time: $T_{\text{prefill, stateless}} = 472\text{,}000 \times 2.8 \times 10^{-4}\text{ s} =$ \mathbf{`{python} VirtualMemoryTtftCollapse.t_stateless_total_str`\text{ seconds}}.
-- Turn-20 latency: With terminal prompt length $S_{20} = 16\text{,}000 + (19 \times 800) =$ `{python} VirtualMemoryTtftCollapse.s_turn_20_str` tokens, the agent stalls waiting for first response: $\text{TTFT}_{\text{turn-20, stateless}} = 31\text{,}200 \times 2.8 \times 10^{-4}\text{ s} =$ \mathbf{`{python} VirtualMemoryTtftCollapse.ttft_turn_20_stateless_str`\text{ seconds}}.
+- Cumulative prefill execution time: $T_{\text{prefill, stateless}} = 472\text{,}000 \times 2.8 \times 10^{-4}\text{ s} =$ **`{python} VirtualMemoryTtftCollapse.t_stateless_total_str` seconds**.
+- Turn-20 latency: With terminal prompt length $S_{20} = 16\text{,}000 + (19 \times 800) =$ `{python} VirtualMemoryTtftCollapse.s_turn_20_str` tokens, the agent stalls waiting for first response: $\text{TTFT}_{\text{turn-20, stateless}} = 31\text{,}200 \times 2.8 \times 10^{-4}\text{ s} =$ **`{python} VirtualMemoryTtftCollapse.ttft_turn_20_stateless_str` seconds**.
 2. *Stateful Virtual Memory Execution (Prefix Caching):*
 - Turn 1 cold prefill over root prompt: $T_1 = 16\text{,}000 \times 2.8 \times 10^{-4}\text{ s} =$ `{python} VirtualMemoryTtftCollapse.t_turn_1_str` seconds.
 - Turns 2–20 incremental delta prefill: $T_{2\dots 20} = 19 \times (800 \times 2.8 \times 10^{-4}\text{ s}) = 4.26\text{ seconds}$.
-- Cumulative prefill execution time: $T_{\text{prefill, cached}} = 4.48\text{ s} + 4.26\text{ s} =$ \mathbf{`{python} VirtualMemoryTtftCollapse.t_cached_total_str`\text{ seconds}}.
-- Per-turn interactive latency ($t \ge 2$): $\text{TTFT}_{\text{turn-}t\text{, cached}} = 800 \times 2.8 \times 10^{-4}\text{ s} =$ \mathbf{`{python} VirtualMemoryTtftCollapse.ttft_cached_ms_str`\text{ milliseconds}}.
+- Cumulative prefill execution time: $T_{\text{prefill, cached}} = 4.48\text{ s} + 4.26\text{ s} =$ **`{python} VirtualMemoryTtftCollapse.t_cached_total_str` seconds**.
+- Per-turn interactive latency ($t \ge 2$): $\text{TTFT}_{\text{turn-}t\text{, cached}} = 800 \times 2.8 \times 10^{-4}\text{ s} =$ **`{python} VirtualMemoryTtftCollapse.ttft_cached_ms_str` milliseconds**.
 3. *Comparative Performance Speedup:*
-- Trajectory prefill compute reduction: $\frac{132.16\text{ s}}{8.74\text{ s}} =$`{python} VirtualMemoryTtftCollapse.speedup_prefill_mult_str` faster.
-- Interactive TTFT reduction at turn 20: $\frac{8.74\text{ s}}{0.224\text{ s}} =$`{python} VirtualMemoryTtftCollapse.speedup_ttft_mult_str` faster.
+- Trajectory prefill compute reduction: $\frac{132.16\text{ s}}{8.74\text{ s}} \approx$ `{python} VirtualMemoryTtftCollapse.speedup_prefill_mult_str` faster.
+- Interactive TTFT reduction at turn 20: $\frac{8.74\text{ s}}{0.224\text{ s}} \approx$ `{python} VirtualMemoryTtftCollapse.speedup_ttft_mult_str` faster.
 - Cluster energy and FLOP savings: `{python} VirtualMemoryTtftCollapse.flops_saved_pflops_str` PFLOPs eliminated (saving `{python} VirtualMemoryTtftCollapse.redundant_tokens_str` redundant tokens, avoiding `{python} VirtualMemoryTtftCollapse.redundant_pct_str`% compute waste).
 
 **Systems Insight:** In an agentic perception-action loop, the human user or scheduling orchestrator experiences prefill latency as an interactive dead stall. Recomputing identical token sequences across turns destroys conversational responsiveness and starves GPU Tensor Cores. Retaining historical KV activations in virtualized accelerator memory converts quadratic prefill complexity ($\mathcal{O}(T \cdot L_{\text{root}} + T^2 \Delta S)$) into an optimal linear streaming pipeline ($\mathcal{O}(L_{\text{root}} + T \Delta S)$).
@@ -444,99 +444,43 @@ To illustrate how physical block aliasing and Copy-on-Write are orchestrated by 
 
 ::: {#lst-vol3-vm-pagedattention-block-allocator lst-cap="**PagedAttention Block Allocation and Copy-on-Write Execution Engine**: Python reference implementation of physical block allocation, logical-to-physical block table translation, zero-copy sequence branching, and Copy-on-Write mutation under PagedAttention."}
 ```python
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List
 import numpy as np
 
 
-@dataclass
-class PhysicalBlock:
-    """Represents a fixed-capacity physical memory frame in accelerator HBM."""
-    block_id: int
-    block_size: int = 16
-    token_dim: int = 128
-    ref_count: int = 0
-    num_tokens: int = 0
-    keys: np.ndarray = field(init=False)
-    values: np.ndarray = field(init=False)
-
-    def __post_init__(self):
-        self.keys = np.zeros((self.block_size, self.token_dim), dtype=np.float32)
-        self.values = np.zeros((self.block_size, self.token_dim), dtype=np.float32)
-
-
 class PagedMemoryManager:
-    """Orchestrates non-contiguous physical block allocation, address translation, and CoW."""
+    """Manages physical KV block allocation, page tables, zero-copy fork, and CoW."""
 
-    def __init__(self, num_blocks: int, block_size: int = 16, token_dim: int = 128):
-        self.block_size = block_size
-        self.token_dim = token_dim
-        self.blocks = [PhysicalBlock(i, block_size, token_dim) for i in range(num_blocks)]
-        self.free_pool: List[int] = list(range(num_blocks))
-        # Logical sequence ID -> list of physical block IDs
+    def __init__(self, num_blocks: int = 1024, block_size: int = 16, dim: int = 128):
+        self.block_size, self.dim = block_size, dim
+        self.free_pool = list(range(num_blocks))
+        self.ref_counts: Dict[int, int] = {}
         self.block_tables: Dict[str, List[int]] = {}
+        self.storage = np.zeros((num_blocks, block_size, dim), dtype=np.float32)
 
-    def allocate_block(self) -> int:
-        """Pops an unallocated physical block from the free list in O(1) time."""
-        if not self.free_pool:
-            raise MemoryError("HBM exhaustion: No free physical blocks available.")
+    def allocate(self) -> int:
         bid = self.free_pool.pop()
-        self.blocks[bid].ref_count = 1
-        self.blocks[bid].num_tokens = 0
+        self.ref_counts[bid] = 1
         return bid
 
-    def free_block(self, bid: int):
-        """Decrements reference count; reclaims block to free pool if unreferenced."""
-        block = self.blocks[bid]
-        block.ref_count -= 1
-        if block.ref_count <= 0:
-            block.ref_count = 0
-            block.num_tokens = 0
-            self.free_pool.append(bid)
+    def fork(self, parent_id: str, child_id: str) -> None:
+        """Zero-copy branch: aliases parent block table and increments reference counts."""
+        self.block_tables[child_id] = list(self.block_tables[parent_id])
+        for bid in self.block_tables[child_id]:
+            self.ref_counts[bid] += 1
 
-    def fork_sequence(self, parent_seq_id: str, child_seq_id: str):
-        """Creates a zero-copy child sequence by aliasing parent physical blocks (ref_count++)."""
-        parent_table = self.block_tables[parent_seq_id]
-        self.block_tables[child_seq_id] = list(parent_table)
-        for bid in parent_table:
-            self.blocks[bid].ref_count += 1
-
-    def append_token(self, seq_id: str, k_vec: np.ndarray, v_vec: np.ndarray):
-        """Appends a new KV activation, triggering Copy-on-Write if the tail block is shared."""
+    def append(self, seq_id: str, token_vec: np.ndarray, token_idx_in_block: int) -> None:
+        """Appends activation; triggers Copy-on-Write if tail block is shared (ref > 1)."""
         table = self.block_tables[seq_id]
-        if not table:
-            bid = self.allocate_block()
-            table.append(bid)
-
         tail_bid = table[-1]
-        tail_block = self.blocks[tail_bid]
-
-        # Case 1: Tail block is saturated; allocate fresh unshared block
-        if tail_block.num_tokens == self.block_size:
-            new_bid = self.allocate_block()
-            table.append(new_bid)
+        if self.ref_counts[tail_bid] > 1:
+            # CoW fork: clone shared block into private physical frame and decrement ref
+            new_bid = self.allocate()
+            self.storage[new_bid] = self.storage[tail_bid].copy()
+            self.ref_counts[tail_bid] -= 1
+            table[-1] = new_bid
             tail_bid = new_bid
-            tail_block = self.blocks[tail_bid]
-
-        # Case 2: Tail block is shared with parent/sibling (ref_count > 1) -> Copy-on-Write
-        elif tail_block.ref_count > 1:
-            cow_bid = self.allocate_block()
-            cow_block = self.blocks[cow_bid]
-            # Copy active tokens from shared block into private block
-            cow_block.keys[:tail_block.num_tokens] = tail_block.keys[:tail_block.num_tokens]
-            cow_block.values[:tail_block.num_tokens] = tail_block.values[:tail_block.num_tokens]
-            cow_block.num_tokens = tail_block.num_tokens
-
-            # Detach from shared block and update child table
-            self.free_block(tail_bid)
-            table[-1] = cow_bid
-            tail_block = cow_block
-
-        # Append activation into unshared tail block
-        idx = tail_block.num_tokens
-        tail_block.keys[idx] = k_vec
-        tail_block.values[idx] = v_vec
-        tail_block.num_tokens += 1
+        self.storage[tail_bid, token_idx_in_block] = token_vec
 ```
 :::
 
@@ -691,112 +635,52 @@ To demonstrate the mechanics of prefix matching, edge splitting, and reference-c
 
 ::: {#lst-vol3-vm-radix-prefix-tree lst-cap="**RadixAttention Prefix Cache Engine**: Python reference implementation of compressed prefix trie indexing, dynamic edge splitting, prefix lookup, and reference-counted leaf-only LRU eviction for PagedAttention blocks."}
 ```python
-from dataclasses import dataclass, field
 import time
 from typing import Dict, List, Optional, Tuple
 
 
-@dataclass
-class RadixTreeNode:
-    """Compressed trie node mapping a token sequence to resident physical PagedAttention blocks."""
-    tokens: List[int]
-    physical_blocks: List[int] = field(default_factory=list)
-    children: Dict[int, 'RadixTreeNode'] = field(default_factory=dict)
-    parent: Optional['RadixTreeNode'] = None
-    ref_count: int = 0
-    last_accessed: float = field(default_factory=time.time)
+class RadixNode:
+    """Compressed trie node indexing cached PagedAttention physical blocks."""
 
-    @property
-    def is_leaf(self) -> bool:
-        return len(self.children) == 0
+    def __init__(self, tokens: List[int], blocks: List[int], parent=None):
+        self.tokens, self.blocks, self.parent = tokens, blocks, parent
+        self.children: Dict[int, "RadixNode"] = {}
+        self.ref_count, self.last_used = 0, time.time()
 
 
 class RadixPrefixCache:
-    """Manages dynamic prefix sharing, edge splitting, and leaf LRU eviction."""
+    """Indexes token prefixes to physical blocks with dynamic splitting and LRU leaf eviction."""
 
     def __init__(self):
-        # Root node matches empty prefix with no physical blocks
-        self.root = RadixTreeNode(tokens=[])
+        self.root = RadixNode([], [])
 
-    def match_prefix(self, prompt_tokens: List[int]) -> Tuple[List[int], List[int], RadixTreeNode]:
-        """Traverses the radix tree to discover the longest cached token prefix."""
-        curr = self.root
-        matched_blocks: List[int] = []
-        token_offset = 0
-
-        while token_offset < len(prompt_tokens):
-            first_token = prompt_tokens[token_offset]
-            if first_token not in curr.children:
-                break
-
-            child = curr.children[first_token]
-            edge_tokens = child.tokens
-            match_len = 0
+    def match(self, tokens: List[int]) -> Tuple[List[int], List[int], RadixNode]:
+        """Traverses tree to match longest cached prefix, returning (blocks, remaining_tokens, node)."""
+        curr, offset, matched_blocks = self.root, 0, []
+        while offset < len(tokens) and tokens[offset] in curr.children:
+            child = curr.children[tokens[offset]]
+            m = 0
             while (
-                match_len < len(edge_tokens)
-                and token_offset + match_len < len(prompt_tokens)
-                and edge_tokens[match_len] == prompt_tokens[token_offset + match_len]
+                m < len(child.tokens)
+                and offset + m < len(tokens)
+                and child.tokens[m] == tokens[offset + m]
             ):
-                match_len += 1
-
-            if match_len == len(edge_tokens):
-                # Full edge matched; accumulate blocks and descend
-                matched_blocks.extend(child.physical_blocks)
-                token_offset += match_len
+                m += 1
+            if m == len(child.tokens):
+                matched_blocks.extend(child.blocks)
+                offset += m
                 curr = child
-                curr.last_accessed = time.time()
             else:
-                # Partial edge match terminates prefix traversal
                 break
+        return matched_blocks, tokens[offset:], curr
 
-        remaining_tokens = prompt_tokens[token_offset:]
-        return matched_blocks, remaining_tokens, curr
-
-    def split_edge(
-        self, parent: RadixTreeNode, child: RadixTreeNode, split_idx: int, prefix_blocks: List[int], suffix_blocks: List[int]
-    ) -> RadixTreeNode:
-        """Splits an edge into a shared parent node and a downstream suffix child node."""
-        first_token = child.tokens[0]
-        # Create intermediate node holding the matched prefix
-        split_node = RadixTreeNode(
-            tokens=child.tokens[:split_idx],
-            physical_blocks=prefix_blocks,
-            parent=parent,
-            ref_count=child.ref_count,
-            last_accessed=time.time()
-        )
-        # Update original child to hold remaining suffix
-        child.tokens = child.tokens[split_idx:]
-        child.physical_blocks = suffix_blocks
-        child.parent = split_node
-
-        split_node.children[child.tokens[0]] = child
-        parent.children[first_token] = split_node
-        return split_node
-
-    def evict_lru_leaf(self) -> Optional[List[int]]:
-        """Finds and evicts the least-recently-used unpinned (ref_count == 0) leaf node."""
-        candidate_leaf: Optional[RadixTreeNode] = None
-        oldest_time = float("inf")
-
-        def find_leaves(node: RadixTreeNode):
-            nonlocal candidate_leaf, oldest_time
-            if node.is_leaf and node.ref_count == 0 and node != self.root:
-                if node.last_accessed < oldest_time:
-                    oldest_time = node.last_accessed
-                    candidate_leaf = node
-            for child in node.children.values():
-                find_leaves(child)
-
-        find_leaves(self.root)
-        if candidate_leaf is None:
-            return None  # All resident nodes are pinned by active requests
-
-        parent = candidate_leaf.parent
-        first_token = candidate_leaf.tokens[0]
-        freed_blocks = candidate_leaf.physical_blocks
-        del parent.children[first_token]
-        return freed_blocks
+    def evict_leaf(self, node: RadixNode) -> Optional[List[int]]:
+        """Evicts unpinned (ref_count == 0) leaf node under physical memory pressure."""
+        if not node.children and node.ref_count == 0 and node.parent:
+            first_tok = node.tokens[0]
+            del node.parent.children[first_tok]
+            return node.blocks
+        return None
 ```
 :::
 

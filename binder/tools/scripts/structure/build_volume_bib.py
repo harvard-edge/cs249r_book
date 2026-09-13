@@ -39,11 +39,24 @@ CROSSREF = re.compile(
 ENTRY_HEAD = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
 
 
+INCLUDE_PATTERN = re.compile(r"\{\{<\s*include\s+([^\s>]+)\s*>\}\}")
+
+
 def cited_keys(vol: str) -> Counter:
     """Citation keys used by a volume, ignoring fenced code and crossrefs."""
     found: Counter = Counter()
-    for qmd in sorted((CONTENTS / vol).rglob("*.qmd")):
+    scanned = set()
+    queue = list(sorted((CONTENTS / vol).rglob("*.qmd")))
+    while queue:
+        qmd = queue.pop(0)
+        if qmd in scanned:
+            continue
+        scanned.add(qmd)
         text = strip_fenced_blocks(qmd.read_text(encoding="utf-8", errors="ignore"))
+        for inc in INCLUDE_PATTERN.finditer(text):
+            inc_path = (qmd.parent / inc.group(1)).resolve()
+            if inc_path.exists() and inc_path not in scanned:
+                queue.append(inc_path)
         for m in CITE.finditer(text):
             key = m.group(1).rstrip(".,;:)")
             if len(key) < 4 or CROSSREF.match(key):
