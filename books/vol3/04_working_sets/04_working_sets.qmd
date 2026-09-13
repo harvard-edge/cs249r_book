@@ -1,5 +1,23 @@
 # Context Working Sets and Attention Budgets {#sec-vol3-working-sets}
 
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+::: {.content-visible when-format="pdf"}
+\noindent
+![](images/png/cover_working_sets_blueprint_labeled_print.png){fig-alt="Isometric blueprint showing context working sets and attention budgets: permanent attention sink tokens, active sliding window working set, rotating context carousel, quadratic attention envelope, eviction discharge chute, and working set budget boundary."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_working_sets_blueprint_labeled.webp){fig-alt="Isometric blueprint showing context working sets and attention budgets: permanent attention sink tokens, active sliding window working set, rotating context carousel, quadratic attention envelope, eviction discharge chute, and working set budget boundary."}
+:::
+
+:::
+
 In long-horizon agentic workflows, the transformer context window functions as the volatile L1 cache of the stochastic processor. While naive runtime architectures treat modern multi-hundred-kilotoken context windows as unbounded append-only logs, the underlying accelerator hardware enforces strict computational, thermodynamic, and memory-bandwidth boundaries that degrade both execution latency and reasoning precision as sequences expand. Unmanaged trajectory accumulation triggers quadratic prefill latency explosions, exhausts accelerator High-Bandwidth Memory (HBM) with linear Key-Value (KV) cache accumulation, and induces cognitive degradation through attention dispersion. To sustain execution across unbounded operational horizons over finite physical memory, systems engineers must abandon the illusion of infinite memory and govern active context as an operating system manages memory working sets. This chapter formalizes the working set theory of token contexts, uncovers the mathematical mechanics of attention density and attention sinks, establishes dynamic context budgeting and loss-bounded semantic compaction pipelines, and analyzes selective attention and head pruning for low-latency serving.
 
 ## Purpose {.unnumbered .unlisted}
@@ -11,9 +29,9 @@ In long-horizon agentic workflows, the transformer context window functions as t
 \end{marginfigure}
 :::
 
-_How do we sustain a multi-step trajectory when attention memory scales quadratically?_
+_Why does multi-turn trajectory execution transform the prompt into an active memory hierarchy, and why does the context window behave like an operating system working set?_
 
-Modern foundation models boast nominal context windows reaching millions of tokens, tempting systems designers to append every shell trace, compiler diagnostic, and intermediate reflection into a monolithic context buffer. In production agent runtimes, this append-only design collides violently with silicon physics: autoregressive token decoding is strictly memory-bandwidth bound, reading gigabytes of cached activation history for every single generated token. When active trajectory state outgrows physical cache limits, the system enters neural thrashing, where probability mass dilutes across thousands of inert historical tokens and critical operational constraints are lost in the middle distance. In agentic systems, sustaining multi-step autonomy requires co-designing the neural policy proposal engine with deterministic memory hierarchies, treating the context window not as an archival store, but as an eviction-driven, actively budgeted working set.
+Part I established the foundation model as a stochastic processor core and demonstrated that complex problem solving requires test-time deliberation. However, as an agent deliberates across dozens of turns—executing tools, reading diagnostics, and evaluating hypotheses—it accumulates thousands of historical tokens. Modern models boast context windows reaching millions of tokens, tempting designers to append every intermediate trace into an ever-growing prompt buffer. In production runtimes, this append-only design collides violently with silicon limits: prefill compute scales quadratically ($O(C^2)$), KV cache memory expands linearly in expensive GPU HBM, and autoregressive decoding degrades under memory-bandwidth saturation. Furthermore, long contexts dilute attention entropy, causing the model to lose track of early system constraints. To prevent context thrashing, the runtime must abandon the illusion of infinite memory and govern active context as an operating system governs RAM: treating the context window not as an archival dump, but as an actively budgeted, eviction-driven L1 attention working set. This chapter formalizes the working set model for large language model (LLM) contexts, deriving the physical memory wall of KV caching and developing loss-bounded semantic compaction algorithms.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -35,7 +53,7 @@ Modern foundation models boast nominal context windows reaching millions of toke
 
 In October 2023, an automated debugging agent deployed on an enterprise Kubernetes cluster was tasked with resolving a build regression in a distributed C++ database engine. On turn 4 of its investigation, the agent executed a verbose build command (`ninja -v -j32`), which encountered a template instantiation cascade that emitted 65,000 lines of compiler diagnostics directly into standard error. The agent's runtime harness naively appended the resulting 112,000 tokens of raw compiler logs directly into the prompt context buffer.
 
-On turn 5, when the runtime invoked the underlying 70-billion parameter large language model (LLM) policy to propose the next corrective edit, the inference server suffered a catastrophic operational fault. The Time-to-First-Token (TTFT) exploded from a normal baseline of 420 milliseconds to 38.4 seconds, during which all tensor cores on the dual-NVIDIA H100 GPU node ran at 100 percent duty cycle executing the prompt prefill phase. Immediately following the prefill phase, the server attempted to allocate the Key-Value (KV) cache for the expanded sequence, demanding 36.7 gigabytes of High-Bandwidth Memory (HBM3) for that single stream alone. The host runtime suffered an out-of-memory (OOM) panic, terminated the agent process, dropped all co-scheduled user sessions on the cluster, and left the production repository in an uncommitted, corrupted state.
+On turn 5, when the runtime invoked the underlying 70-billion parameter LLM policy to propose the next corrective edit, the inference server suffered a catastrophic operational fault. The Time-to-First-Token (TTFT) exploded from a normal baseline of 420 milliseconds to 38.4 seconds, during which all tensor cores on the dual-NVIDIA H100 GPU node ran at 100 percent duty cycle executing the prompt prefill phase. Immediately following the prefill phase, the server attempted to allocate the Key-Value (KV) cache for the expanded sequence, demanding 36.7 gigabytes of High-Bandwidth Memory (HBM3) for that single stream alone. The host runtime suffered an out-of-memory (OOM) panic, terminated the agent process, dropped all co-scheduled user sessions on the cluster, and left the production repository in an uncommitted, corrupted state.
 
 The engineering post-mortem revealed that of the 112,000 compiler log tokens ingested, fewer than 180 tokens—specifically, the terminal file path, line number, and mismatch signature—contained any actionable diagnostic value. The remaining 99.8 percent of the tokens were computationally inert, yet they imposed a devastating hardware tax. To prevent such systems failures, systems architects must formalize the physical limits governing context expansion and decouple nominal context capacity from active memory residency.
 
@@ -138,14 +156,14 @@ $$
 T_{\text{decode}}(N) = \frac{M_{\text{weights}} + M_{\text{KV}}(N)}{B_{\text{mem}}}.
 $$ {#eq-decode-latency-bandwidth}
 
-**First-principles streaming latency napkin math:** For Llama-3-70B in 16-bit precision, model weights occupy $M_{\text{weights}} \approx 140\text{ GB}$. On an H100 SXM5 GPU ($B_{\text{mem}} = 3{,}350\text{ GB/s}$):
+**First-principles streaming latency napkin math:** For Llama-3-70B in 16-bit precision, model weights occupy $M_{\text{weights}} \approx 140\text{ GB}$. Because 140 GB exceeds the 80 GB physical capacity of a single H100 GPU, production serving deploys Tensor Parallelism across a dual-GPU node ($TP=2$), providing $160\text{ GB}$ of aggregate HBM3 and $B_{\text{node}} = 2 \times 3{,}350\text{ GB/s} = 6{,}700\text{ GB/s}$ of aggregate memory bandwidth:
 
 - **Short context ($N \approx 0, M_{\text{KV}} \approx 0$):**
-  $$T_{\text{decode}} \approx \frac{140\text{ GB}}{3{,}350\text{ GB/s}} \approx 41.8\text{ ms/token} \implies \text{Throughput} \approx 23.9\text{ tokens/s}.$$
-- **128k context ($M_{\text{KV}} \approx 43\text{ GB}$):** Total data streamed per token is $140 + 43 = 183\text{ GB}$.
-  $$T_{\text{decode}} \approx \frac{183\text{ GB}}{3{,}350\text{ GB/s}} \approx 54.6\text{ ms/token} \implies \text{Throughput} \approx 18.3\text{ tokens/s} \quad (\text{23\% slowdown}).$$
-- **500k context ($M_{\text{KV}} \approx 168\text{ GB} > M_{\text{weights}}$):** Total data streamed is $140 + 168 = 308\text{ GB}$.
-  $$T_{\text{decode}} \approx \frac{308\text{ GB}}{3{,}350\text{ GB/s}} \approx 91.9\text{ ms/token} \implies \text{Throughput} \approx 10.9\text{ tokens/s} \quad (\text{54\% slowdown}).$$
+  $$T_{\text{decode}} \approx \frac{140\text{ GB}}{6{,}700\text{ GB/s}} \approx 20.9\text{ ms/token} \implies \text{Throughput} \approx 47.8\text{ tokens/s}.$$
+- **128k context ($M_{\text{KV}} \approx 43\text{ GB}$ across node):** Total data streamed per token is $140 + 43 = 183\text{ GB}$.
+  $$T_{\text{decode}} \approx \frac{183\text{ GB}}{6{,}700\text{ GB/s}} \approx 27.3\text{ ms/token} \implies \text{Throughput} \approx 36.6\text{ tokens/s} \quad (\text{23\% slowdown}).$$
+- **500k context ($M_{\text{KV}} \approx 168\text{ GB} > M_{\text{weights}}$):** Total data streamed across node is $140 + 168 = 308\text{ GB}$.
+  $$T_{\text{decode}} \approx \frac{308\text{ GB}}{6{,}700\text{ GB/s}} \approx 46.0\text{ ms/token} \implies \text{Throughput} \approx 21.7\text{ tokens/s} \quad (\text{54\% slowdown}).$$
 
 When context length grows past 400k tokens, the KV cache literally outweighs the model weights on the memory bus! In multi-tenant environments, every unpruned token in an agent's history directly steals memory bus cycles from all co-scheduled inference streams.
 
@@ -296,11 +314,15 @@ This mathematical structure enforces a strong physical **recency bias**: high-fr
 - Tokens in the extreme prefix ($n \approx 0$) benefit from dedicated attention sinks and low-frequency rotary stability.
 - Tokens situated in the middle ($0.2 m \le n \le 0.8 m$) suffer the maximum geometric penalty: their relative offset is large enough to induce severe rotary decay, but they lack the positional anchoring of the initial prompt prefix.
 
-When an agent operates in a real-world multi-turn setting, the middle region is precisely where earlier tool outputs, intermediate file contents, and environmental observations reside, saturating accelerator HBM while degrading retrieval velocity.
+When an agent operates in a real-world multi-turn setting, the middle region is precisely where earlier tool outputs, intermediate file contents, and environmental observations reside, saturating accelerator HBM while degrading retrieval velocity (@fig-vol3-workingsets-lost-in-middle).
 
 > **The Systems Rule of Thumb (The U-Shaped Retrieval Penalty):** Due to RoPE harmonic decay ($\propto 1/\Delta^\gamma$), facts located in the middle 20 to 80 percent of an unmanaged context window suffer up to a 70 percent retrieval failure rate, despite consuming expensive accelerator HBM. Never allow intermediate tool executions or file dumps to accumulate passively in the context middle; serving architectures must actively reposition critical schema instructions or summarize middle turns into structured state registers.
 
 [^fn-workingsets-rope-geometry]: RoPE partitions head dimension $d_h$ into $d_h/2$ orthogonal 2D subspaces. Each 2D block rotates coordinates by angle $m \theta_i$ with base frequency $\theta_i = b^{-2(i-1)/d_h}$, ensuring $\langle \mathbf{R}_{\Theta, m} \mathbf{q}, \mathbf{R}_{\Theta, n} \mathbf{k} \rangle = \mathbf{q}^\top \mathbf{R}_{\Theta, n-m} \mathbf{k}$. For the full spectral derivation of RoPE distance decay, see `vol3/backmatter/appendix_math.qmd`.
+
+::: {#fig-vol3-workingsets-lost-in-middle fig-env="figure" fig-pos="htb" fig-cap="**Attention Dispersion, RoPE Harmonic Decay, and the Lost-in-the-Middle U-Curve**: Panel 1 illustrates softmax denominator dilution, where accumulating 100,000 background tokens drops target attention probability by $33\times$ (from $96.8\%$ down to $2.9\%$). Panel 2 demonstrates RoPE harmonic distance decay ($\propto 1/\Delta^\gamma$), where high frequencies destructively cancel out across large token offsets. Panel 3 plots the empirical retrieval accuracy U-curve, revealing the deep retrieval valley ($<30\%$ accuracy between $30\%$ and $70\%$ context depth) where intermediate tool outputs are forgotten. Source: Adapted from @liu2024lost and MLSysBook Attention Dynamics." fig-alt="Three-panel diagram: Panel 1 contrasts 100-token prompt with 100k-token prompt showing 33x target attention drop; Panel 2 shows RoPE harmonic wave decay; Panel 3 shows U-shaped retrieval accuracy curve with a deep amnesia valley below 30% accuracy between 30% and 70% depth."}
+![](images/svg/lost_in_the_middle_rope_decay.svg){width="100%"}
+:::
 
 ### The attention sink phenomenon
 
@@ -341,6 +363,43 @@ $$
 With this partition, language models can stream over millions of tokens with stable perplexity and constant $O(S + W)$ memory footprint.
 
 **StreamingLLM memory bounds napkin math:** On Llama-3-70B ($320\text{ KB/token}$ in BF16), pinning $S=4$ sink tokens alongside a sliding window of $W=1{,}024$ tokens bounds the active KV cache to $(4 + 1{,}024) \times 320\text{ KB} \approx 329\text{ MB}$ per stream. Even if an agent generates $1{,}000{,}000$ tokens, memory consumption remains strictly locked at $329\text{ MB}$ instead of exploding to $320\text{ GB}$—a $970\times$ reduction in physical HBM footprint.
+
+To make these mechanics concrete, @lst-vol3-workingsets-streaming-buffer provides an operational implementation of the StreamingLLM KV cache manager, maintaining permanent initial sink tokens while rolling a contiguous local window buffer and evaluating attention without softmax denominator collapse.
+
+::: {#lst-vol3-workingsets-streaming-buffer lst-cap="**Streaming Attention Sink and Rolling Local Window KV Cache Manager**: Python implementation of a fixed-capacity streaming KV cache buffer maintaining pinned attention sinks at offsets 0..3 alongside a circular rolling local window."}
+```python
+import numpy as np
+
+
+class StreamingKVBuffer:
+    """Fixed-capacity KV cache maintaining pinned attention sinks and a rolling window."""
+
+    def __init__(self, num_sinks: int = 4, window_size: int = 1024, head_dim: int = 128):
+        self.s, self.w, self.d = num_sinks, window_size, head_dim
+        self.capacity = self.s + self.w
+        self.k_buf = np.zeros((self.capacity, self.d), dtype=np.float32)
+        self.v_buf = np.zeros((self.capacity, self.d), dtype=np.float32)
+        self.total_tokens = 0
+
+    def append(self, k: np.ndarray, v: np.ndarray) -> None:
+        """Inserts token key/value vectors, pinning initial sinks and cycling rolling window."""
+        if self.total_tokens < self.capacity:
+            idx = self.total_tokens
+        else:
+            # Pinned sinks [0..s-1] remain untouched; overwrite circular window [s..s+w-1]
+            idx = self.s + ((self.total_tokens - self.capacity) % self.w)
+        self.k_buf[idx], self.v_buf[idx] = k, v
+        self.total_tokens += 1
+
+    def forward(self, q: np.ndarray) -> np.ndarray:
+        """Computes scaled dot-product attention across resident sinks and local window."""
+        length = min(self.total_tokens, self.capacity)
+        scores = np.dot(q, self.k_buf[:length].T) / np.sqrt(self.d)
+        weights = np.exp(scores - np.max(scores))
+        weights /= np.sum(weights)
+        return np.dot(weights, self.v_buf[:length])
+```
+:::
 
 However, while StreamingLLM prevents numerical collapse, it is insufficient for autonomous software agents. In an agent workflow, an observation received 20 turns ago (e.g., the root directory structure or a database configuration schema) cannot simply be evicted in favor of recent compiler noise. To preserve task completion capabilities over extended horizons, systems runtimes must move beyond static sliding windows to dynamic, content-aware context budgeting.
 
@@ -393,6 +452,15 @@ All intermediate tokens not belonging to $\mathcal{S} \cup \mathcal{W} \cup \mat
 ![](images/svg/attention_sinks_and_eviction.svg){width="100%"}
 :::
 
+::: {#callout-h2o-paged-friction .callout-note title="Systems reality: Token-level eviction vs. paged memory blocks"}
+While token-level sparsification algorithms such as H2O demonstrate elegant information-theoretic retention bounds, deploying token-granularity eviction directly within production serving engines (e.g., vLLM or SGLang) creates severe systems friction. Modern inference engines allocate GPU memory in fixed-size physical pages or blocks (typically 16 or 32 contiguous tokens) managed by virtual block translation tables. Evicting non-contiguous individual tokens within an active block creates internal page fragmentation and disrupts the regular memory access strides required by high-performance FlashAttention SRAM tiling kernels.
+
+Consequently, production runtimes implement sparsification at two coarse boundaries:
+
+1. **Block-Level Eviction:** Rather than scoring individual tokens, the runtime computes aggregate block importance scores $\bar{s}_{\text{block}} = \frac{1}{B_{\text{size}}} \sum_{i \in \text{block}} s_i$, evicting entire 16-token physical pages to maintain clean PagedAttention table invariants.
+2. **Prompt-Level Prefix Compaction:** Pruning is performed at turn boundaries by omitting unneeded tokens (such as ephemeral Chain-of-Thought scratchpads) from the reconstructed prompt, allowing the host Radix cache tree to reclaim unreferenced block allocations cleanly through standard Least-Recently-Used (LRU) mechanisms.
+:::
+
 > **The Systems Rule of Thumb (The Sink-Window-Heavy Invariant):** Never evict initial attention sinks ($S \ge 4$), as doing so triggers catastrophic perplexity explosions ($>10^3$). An optimal production KV cache eviction policy (such as H2O) partitions memory into initial sinks $\mathcal{S}$, a trailing sliding window $\mathcal{W}$, and heavy hitters $\mathcal{H}$, retaining just 20 percent of intermediate tokens to preserve 98 percent of multi-turn reasoning fidelity while slashing decode memory bus transfers by $4\times$.
 
 [^fn-workingsets-h2o-accumulation]: To minimize tracking overhead, H2O updates score accumulator $s_i^{(t)} \leftarrow s_i^{(t-1)} + \sum_{\ell, h} \alpha_{\ell, h, t, i}$ in place during the decode attention reduction without adding additional global memory traffic.
@@ -433,7 +501,62 @@ To eliminate this bloat, agent runtimes implement a **Two-Phase Commit for Reaso
 2. **Phase 2: Commit (Pruning and State Mutation):** The runtime intercepts action $a_t$, parses its tool arguments, and executes it within an isolated sandbox. Upon receiving verified environment observation $o_t$, the runtime **forcefully purges the ephemeral tokens $\mathbf{z}_t$ from the KV cache**. Only the canonical transition tuple $(a_t, o_t)$ is appended to the persistent trajectory $\tau_t$:
    $$\tau_t = \tau_{t-1} \circ (a_t, o_t).$$
 
-This two-phase commit protocol eliminates 75 to 90 percent of trajectory token bloat. The model retains full deliberative power during action formulation, while the persistent working set remains lean and free of transient cognitive noise.
+This two-phase commit protocol eliminates 75 to 90 percent of trajectory token bloat (@fig-vol3-workingsets-two-phase-cot). The model retains full deliberative power during action formulation, while the persistent working set remains lean and free of transient cognitive noise.
+
+::: {#fig-vol3-workingsets-two-phase-cot fig-env="figure" fig-pos="htb" fig-cap="**Two-Phase Commit Protocol for Ephemeral CoT Reasoning and Radix Cache Reclamation**: Phase 1 allocates ephemeral reasoning scratchpad tokens $\mathbf{z}_t$ (6,000 tokens) in temporary KV cache slots during action formulation. Phase 2 executes the action $a_t$ in an isolated sandbox, receives observation $o_t$, and forcefully purges the scratchpad from persistent context. In RadixAttention runtimes (vLLM / SGLang), the next prompt simply omits the `<thought>` block: the engine matches the shared prefix at $100\%$ cache hit rate, while the abandoned scratchpad branch is de-referenced ($C_{\text{ref}} = 0$) and reclaimed by LRU, delivering a $60\times$ memory reduction ($57.6\text{ GB} \to 0.96\text{ GB}$). Source: MLSysBook Context Architecture Blueprint." fig-alt="Three-panel diagram: Phase 1 shows proposal with pinned prefix, ephemeral scratchpad, and tool action; Phase 2 shows sandbox validation and strikethrough purge of thought tokens; Panel 3 illustrates Radix prefix tree reuse and 60x memory reduction."}
+![](images/svg/two_phase_cot_commit.svg){width="100%"}
+:::
+
+### Radix tree integration and production 2PC implementation
+
+In real-world inference systems such as SGLang (@zheng2023sglang) and vLLM (@kwon2023vllm), how does a systems engineer actually implement the Two-Phase Commit protocol without hacking custom CUDA kernels? The key insight is that modern serving engines organize their KV cache as a **Radix Prefix Tree** or hash-indexed block pool:
+
+1. **Phase 1 Deliberation:** The agent invokes the model with prompt $\tau_{t-1}$. The model autoregressively decodes `<thought> ... </thought>` followed by `<call:tool_name>{...}</call:tool_name>`. In the server's Radix tree, this generates a child branch extending from node $\tau_{t-1}$ holding both the thought and action tokens.
+2. **Phase 2 Sandbox Execution:** The client harness parses the emitted tool call, executes it in the containerized sandbox, and collects environment observation $o_t$.
+3. **Turn $t+1$ Prompt Formulation:** When dispatching turn $t+1$, the client **omits the `<thought>` block entirely**, submitting a prompt composed strictly of $\tau_{t-1} \circ (a_t, o_t)$.
+4. **Radix Prefix Hit and Automatic LRU Eviction:**
+   - The serving engine hashes the prompt prefix. Tokens matching $\tau_{t-1}$ hit the resident Radix tree with **$100\%$ cache reuse**, requiring zero prefill FLOPs.
+   - The abandoned child branch containing the `<thought>` tokens has its reference count decremented ($C_{\text{ref}} \leftarrow C_{\text{ref}} - 1 = 0$).
+   - The engine simply allocates fresh physical pages for the small $(a_t, o_t)$ suffix. When GPU memory pressure occurs, the unreferenced scratchpad pages are automatically evicted by the server's background LRU page allocator.
+
+To demonstrate this end-to-end mechanism, @lst-vol3-workingsets-cot-cleaner implements an operational `TwoPhaseCommitCoTManager` paired with a simulated `RadixPrefixNode` allocator, verifying that scratchpad excision maintains full prefix cache hits while eliminating memory bloat.
+
+::: {#lst-vol3-workingsets-cot-cleaner lst-cap="**Two-Phase Commit CoT Context Cleaner and Radix Prefix Reuser**: Python implementation of a transactional CoT manager excising ephemeral thought tokens post-sandbox execution and verifying Radix prefix cache hit preservation."}
+```python
+import re
+from typing import Dict, Tuple
+
+
+class TwoPhaseCommitCoTManager:
+    """Manages transactional CoT execution: excises ephemeral thoughts and commits prefix."""
+
+    def __init__(self, system_prompt: str):
+        self.history = [("system", system_prompt)]
+        self.ref_counts: Dict[str, int] = {"root": 1}
+
+    def commit_turn(self, raw_response: str, execute_fn) -> Tuple[str, str, int]:
+        """Phase 1: executes tool; Phase 2: excises thoughts and preserves radix prefix."""
+        # 1. Parse ephemeral thought tokens and isolate canonical action
+        match = re.search(r"<(?:thought|think)>(.*?)</(?:thought|think)>", raw_response, re.DOTALL)
+        thought = match.group(1).strip() if match else ""
+        action = re.sub(
+            r"<(?:thought|think)>.*?</(?:thought|think)>", "", raw_response, flags=re.DOTALL
+        ).strip()
+
+        # 2. Phase 1 execution: run tool in isolated sandbox
+        observation = execute_fn(action)
+
+        # 3. Phase 2 commit: release scratchpad cache branch (ref_count -> 0)
+        # Scratchpad KV pages are reclaimed by LRU; only canonical action/obs commit to prefix
+        self.ref_counts["scratchpad"] = 0  # Marked unreferenced for GPU allocator reclaim
+        self.history.append(("assistant", action))
+        self.history.append(("tool", observation))
+        self.ref_counts[f"turn_{len(self.history)}"] = 1
+
+        pruned_tokens = len(thought) // 4
+        return action, observation, pruned_tokens
+```
+:::
 
 ### Dual-pathway semantic compaction
 
@@ -583,15 +706,15 @@ By removing 30 to 50 percent of heads—predominantly diffuse broadcast heads in
 
 While post-hoc head pruning optimizes existing pretrained weights, architectural innovations in foundation model designs have introduced native structural sparsity to compress the KV cache by design. @Tbl-vol3-attention-architectures provides a quantitative comparison of these mechanisms.
 
-| Attention Architecture                                | Query Heads ($H_Q$) | Key/Value Heads ($H_{\text{KV}}$) | KV Cache Footprint per Token ($M_{\text{KV, token}}$) | Decode Arithmetic Intensity ($\mathcal{I}_{\text{decode}}$) | Max Concurrency on 80 GB H100 (128k Context) |
-|:------------------------------------------------------|:-------------------:|:---------------------------------:|:-----------------------------------------------------:|:-----------------------------------------------------------:|:--------------------------------------------:|
-| **Multi-Head Attention (MHA)**                        |          64         |                 64                |     $2{,}621{,}440\text{ bytes}$ ($2.56\text{MB}$)    |                 $\approx 0.8\text{ FLOP/B}$                 |       0 streams (OOM on single stream)       |
-| **Multi-Query Attention (MQA, @shazeer2019fast)**     |          64         |                 1                 |        $40{,}960\text{ bytes}$ ($40\text{KB}$)        |                 $\approx 3.8\text{ FLOP/B}$                 |                  14 streams                  |
-| **Grouped-Query Attention (GQA, @ainslie2023gqa)**    |          64         |                 8                 |       $327{,}680\text{ bytes}$ ($320\text{KB}$)       |                 $\approx 2.4\text{ FLOP/B}$                 |                  3 streams                   |
-| **Multi-Head Latent Attention (MLA, DeepSeek-V2/V3)** |         128         |         Latent: $d_c=512$         |       $69{,}120\text{ bytes}$ ($67.5\text{KB}$)       |                 $\approx 3.6\text{ FLOP/B}$                 |                  9 streams                   |
-| **GQA + 40% Structured Head Pruning**                 |          64         |         $8 \to 4.8$ (avg)         |       $196{,}608\text{ bytes}$ ($192\text{KB}$)       |                 $\approx 3.1\text{ FLOP/B}$                 |                  6 streams                   |
+| Attention Architecture                                | Query Heads ($H_Q$) | Key/Value Heads ($H_{\text{KV}}$) | KV Cache Footprint per Token ($M_{\text{KV, token}}$) | Decode Arithmetic Intensity ($\mathcal{I}_{\text{decode}}$) | Concurrency: Single H100 (10 GB Free) | Concurrency: Dual H100 (90 GB Free) |
+|:------------------------------------------------------|:-------------------:|:---------------------------------:|:-----------------------------------------------------:|:-----------------------------------------------------------:|:-------------------------------------:|:-----------------------------------:|
+| **Multi-Head Attention (MHA)**                        |          64         |                 64                |     $2{,}621{,}440\text{ bytes}$ ($2.56\text{MB}$)    |                 $\approx 0.8\text{ FLOP/B}$                 |    0 streams (OOM on single stream)   |   0 streams (OOM on single stream)  |
+| **Multi-Query Attention (MQA, @shazeer2019fast)**     |          64         |                 1                 |        $40{,}960\text{ bytes}$ ($40\text{KB}$)        |                 $\approx 3.8\text{ FLOP/B}$                 |               3 streams               |              28 streams             |
+| **Grouped-Query Attention (GQA, @ainslie2023gqa)**    |          64         |                 8                 |       $327{,}680\text{ bytes}$ ($320\text{KB}$)       |                 $\approx 2.4\text{ FLOP/B}$                 |    0 streams (OOM on single stream)   |              4 streams              |
+| **Multi-Head Latent Attention (MLA, DeepSeek-V2/V3)** |         128         |         Latent: $d_c=512$         |       $69{,}120\text{ bytes}$ ($67.5\text{KB}$)       |                 $\approx 3.6\text{ FLOP/B}$                 |               2 streams               |              19 streams             |
+| **GQA + 40% Structured Head Pruning**                 |          64         |         $8 \to 4.8$ (avg)         |       $196{,}608\text{ bytes}$ ($192\text{KB}$)       |                 $\approx 3.1\text{ FLOP/B}$                 |    0 streams (OOM on single stream)   |              7 streams              |
 
-: **Attention Architecture Comparison**: Memory footprint, arithmetic intensity, and serving concurrency for a 70B parameter model at 128k context across MHA, MQA, GQA, and MLA. {#tbl-vol3-attention-architectures tbl-colwidths="[22, 12, 14, 20, 16, 16]"}
+: **Attention Architecture Comparison**: Memory footprint, arithmetic intensity, and serving concurrency for a 70B parameter model at 128k context across MHA, MQA, GQA, and MLA on a single 80 GB H100 GPU (70 GB weights in FP8, 10 GB free HBM) and a dual-GPU node (160 GB HBM, 90 GB free HBM). {#tbl-vol3-attention-architectures tbl-colwidths="[20, 10, 12, 16, 14, 14, 14]"}
 
 #### Multi-query attention (MQA)
 Introduced by @shazeer2019fast, MQA collapses all $H_Q$ query heads to share a single key head and a single value head ($H_{\text{KV}} = 1$). This slashes the KV cache memory footprint by a factor of $H_Q$ (typically $32\times$ to $64\times$). However, MQA can degrade task performance on complex, multi-hop reasoning benchmarks, as query heads are forced to attend over an identical geometric projection of context history.
@@ -624,7 +747,11 @@ $$
 $$
 It then evaluates the inner product directly against the cached latent vectors $\mathbf{c}_i^{KV} \in \mathbb{R}^{d_c}$. An identical associative projection applies to the Value projections. As a result, the inference engine never materializes high-dimensional Key or Value states in HBM—streaming only $512$ latent dimensions across the bus instead of thousands!
 
-Because on-chip tensor core compute is abundant while HBM bus bandwidth is severely constrained, MLA trades cheap SRAM arithmetic for scarce memory bandwidth, achieving substantial throughput and concurrency improvements for long-horizon agent trajectories.
+Because on-chip tensor core compute is abundant while HBM bus bandwidth is severely constrained, MLA trades cheap SRAM arithmetic for scarce memory bandwidth, achieving substantial throughput and concurrency improvements for long-horizon agent trajectories (@fig-vol3-workingsets-mla-architecture).
+
+::: {#fig-vol3-workingsets-mla-architecture fig-env="figure" fig-pos="htb" fig-cap="**Multi-Head Latent Attention (MLA) Low-Rank Projection and On-Chip Matrix Associativity**: Panel 1 compares per-token KV cache memory footprint across attention architectures, highlighting MLA's $38\times$ reduction relative to MHA and $4.74\times$ reduction relative to GQA ($67.5\text{ KB}$ vs $320\text{ KB}$ vs $2,560\text{ KB}$). Panel 2 illustrates the low-rank projection topology during prefill and compact HBM storage ($d_c = 512$ latent vector plus $d_h^R = 64$ decoupled rotary key). Panel 3 demonstrates the inference matrix associativity trick: by pre-multiplying the active query vector by $\mathbf{W}_{UK}^\top$ in on-chip SRAM registers ($\mathbf{q}_t^{\text{latent}} = \mathbf{q}_t \mathbf{W}_{UK}^\top$), the inner product is evaluated directly against cached latent vectors in SRAM, eliminating the need to decompress high-dimensional keys and values in HBM. Source: MLSysBook Latent Attention Architecture." fig-alt="Three-panel diagram: Panel 1 shows KV footprint per token across MHA, GQA, and MLA; Panel 2 shows the low-rank projection topology with decoupled rotary keys; Panel 3 demonstrates the SRAM matrix associativity trick."}
+![](images/svg/multi_head_latent_attention_mla.svg){width="100%"}
+:::
 
 > **The Systems Rule of Thumb (The Architectural KV Compression Boundary):** Standard Multi-Head Attention (MHA) cannot sustain multi-turn agent concurrency on accelerator hardware due to memory bus exhaustion. While GQA provides an $8\times$ memory reduction with zero accuracy degradation, Multi-Head Latent Attention (MLA) slashes KV cache footprint by $38\times$ relative to MHA ($4.74\times$ over GQA) by trading cheap on-chip SRAM arithmetic for constrained HBM bandwidth. For long-horizon agent runtimes, native latent attention maximizes cluster concurrency and throughput.
 
@@ -663,7 +790,11 @@ $$C_{\text{free}} = 80\text{ GB} - 70\text{ GB} = 10\text{ GB}.$$
   $$\text{GQA: } B_{\max} = \lfloor 90 / 21.47 \rfloor = 4\text{ concurrent streams}.$$
   $$\text{MLA: } B_{\max} = \lfloor 90 / 4.53 \rfloor = 19\text{ concurrent streams!}$$
 
-MLA delivers a **$4.75\times$ concurrency multiplier** on identical physical GPU hardware, directly slashing the infrastructure cost per agent stream.
+MLA delivers a **$4.75\times$ concurrency multiplier** on identical physical GPU hardware, directly slashing the infrastructure cost per agent stream (@fig-vol3-workingsets-serving-concurrency).
+
+::: {#fig-vol3-workingsets-serving-concurrency fig-env="figure" fig-pos="htb" fig-cap="**Accelerator Roofline Model and Concurrent Agent Serving Capacity**: Panel 1 displays the NVIDIA H100 SXM5 decode roofline (3.35 TB/s HBM3 bandwidth, 989 TFLOP/s FP16/BF16 peak tensor throughput, arithmetic intensity knee at $295\text{ FLOP/B}$). Autoregressive decoding operates strictly along the memory-bandwidth slope, where MHA ($0.8\text{ FLOP/B}$), GQA ($2.4\text{ FLOP/B}$), and MLA ($3.6\text{ FLOP/B}$) achieve progressively higher tensor utilization. Panel 2 charts serving concurrency scaling for a 70B model at 128k context across single-GPU (80 GB) and dual-GPU (160 GB) nodes: uncompressed MHA triggers an immediate OOM fault on a single stream ($0$ streams), GQA sustains $0$ concurrent streams on a single GPU ($4$ on dual-GPU), and MLA scales to $2$ concurrent streams on a single GPU and $19$ concurrent streams on a dual-GPU node—a $4.75\times$ concurrency expansion over GQA. Source: MLSysBook Hardware Roofline Engine." fig-alt="Two-panel diagram: Panel 1 shows the H100 Roofline log-log curve with decode operating points far below the arithmetic intensity knee; Panel 2 shows a bar chart of concurrent agent streams showing 0 for MHA, 4 for GQA, and 19 for MLA across a dual-GPU node."}
+![](images/svg/roofline_serving_concurrency.svg){width="100%"}
+:::
 
 By combining token-level working set eviction ($N$-dimension) with head pruning and latent KV compression ($H, L$-dimensions), systems engineers transform the context memory hierarchy from an unmanaged, bottlenecked liability into a bounded, high-throughput computational substrate.
 
@@ -743,7 +874,7 @@ Managing the context window of an autonomous agent is a fundamental systems engi
 
 | Architectural Subsystem      | Governing Formulation / Mechanism                                                                              | Primary Hardware / Systems Bottleneck                   | Dominant Failure Mode                         | Production Systems Mitigation                                          |
 |:-----------------------------|:---------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------|:----------------------------------------------|:-----------------------------------------------------------------------|
-| **Prefill Compute Engine**   | $F_{\text{prefill}} \approx 4 L N^2 d_{\text{model}}$ (@eq-autoregressive-prefill-flops)                       | Accelerator tensor core peak FLOPs ($P_{\text{peak}}$)  | TTFT latency explosion (seconds to minutes)   | FlashAttention-2 tiling; chunked prefill scheduling                    |
+| **Prefill Compute Engine**   | $F_{\text{prefill}} \approx 2 L N^2 d_{\text{model}}$ (@eq-autoregressive-prefill-flops)                       | Accelerator tensor core peak FLOPs ($P_{\text{peak}}$)  | TTFT latency explosion (seconds to minutes)   | FlashAttention-2 tiling; chunked prefill scheduling                    |
 | **Decode Streaming Bus**     | $T_{\text{decode}} = \frac{M_{\text{weights}} + M_{\text{KV}}}{B_{\text{mem}}}$ (@eq-decode-latency-bandwidth) | Accelerator HBM memory bus bandwidth ($B_{\text{mem}}$) | Inter-token generation throughput collapse    | GQA, MLA, and structured head pruning                                  |
 | **KV Cache Memory Pool**     | $M_{\text{KV}} = 2 L H_{\text{KV}} d_h N b_{\text{elem}}$ (@eq-kv-cache-footprint)                             | Accelerator physical HBM capacity ($C_{\text{HBM}}$)    | Out-Of-Memory (OOM) aborts; cluster crash     | PagedAttention virtual memory; H2O eviction                            |
 | **Softmax Normalization**    | $\alpha_{t, i} = \frac{\exp(z_{t, i})}{\sum \exp(z_{t, j})}$ (@eq-softmax-attention)                           | Numerical instability; no-op attention absence          | Perplexity explosion upon token 0 eviction    | Pinned initial attention sinks ($S \ge 4$)                             |

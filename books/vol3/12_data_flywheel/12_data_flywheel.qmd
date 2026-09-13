@@ -4,6 +4,25 @@ engine: jupyter
 
 # Trajectory Data Flywheels & Synthesis {#sec-vol3-data-flywheel}
 
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+::: {.content-visible when-format="pdf"}
+\noindent
+![](images/png/cover_data_flywheel_blueprint_labeled_print.png){fig-alt="Isometric blueprint showing trajectory data flywheels and synthesis: raw multi-turn trajectory intake, syntax validation scanner, environment state-diff verifier, deduplication and decontamination gantry, validated policy training cassettes, and automated trajectory conveyor."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_data_flywheel_blueprint_labeled.webp){fig-alt="Isometric blueprint showing trajectory data flywheels and synthesis: raw multi-turn trajectory intake, syntax validation scanner, environment state-diff verifier, deduplication and decontamination gantry, validated policy training cassettes, and automated trajectory conveyor."}
+:::
+
+:::
+[]{#sec-vol3-flywheel}
+
 Pretraining on trillions of tokens of static web text endows language models with general semantic knowledge and natural language fluency, but leaves them unequipped to function as autonomous decision-making agents. Operating within complex digital environments—executing terminal commands, querying distributed databases, manipulating filesystems, and orchestrating external APIs—demands multi-turn causal credit assignment, rigid schema adherence, and systematic error recovery across extended horizons. While early agent runtimes attempt to coax this behavior through prompt stuffing and extensive runtime scaffolding, the resulting quadratic attention prefill overhead, key-value (KV) cache bloat, and context degradation impose crippling physical and economic ceilings. Compiling operational capabilities directly into neural policy parameters requires vast corpora of multi-turn execution trajectories. Because human expert demonstrations are economically prohibitive, slow, and inherently biased toward error-free golden paths, post-training systems must transition to closed-loop synthetic data flywheels. By coupling automated task synthesis, stochastic rollout exploration, deterministic non-differentiable verification oracles, and negative trajectory mining, the autonomous data flywheel transforms the agent data bottleneck into a scalable compute compilation pipeline.
 
 ## Purpose {.unnumbered .unlisted}
@@ -108,11 +127,11 @@ Before examining context compilation, verify your intuition on demonstration bia
 
 To circumvent the lack of fine-tuned agent policies, early system designs rely entirely on **in-context learning (ICL)**: prepending massive system prompts containing dozens of OpenAPI tool definitions, JSON schema rules, and multi-turn execution exemplars to every model invocation. While in-context prompting enables rapid prototyping without updating weights, it imposes crippling systems taxes on serving infrastructure:
 
-1. **Quadratic Prefill Saturation:** The attention prefill computation for an input sequence of length $S$ scales quadratically with sequence length:
+1. **Quadratic Prefill Saturation:** The attention prefill computation for an input sequence of length $S$ scales with both linear projections and quadratic pairwise self-attention:
    $$
-   \text{FLOPs}_{\text{prefill}} = 4 \cdot L \cdot d_{\text{model}} \cdot S^2 + 24 \cdot L \cdot d_{\text{model}}^2 \cdot S
+   \text{FLOPs}_{\text{prefill}} = 2 \cdot N_{\text{params}} \cdot S + 2 \cdot L \cdot d_{\text{model}} \cdot S^2 \approx 24 \cdot L \cdot d_{\text{model}}^2 \cdot S + 2 \cdot L \cdot d_{\text{model}} \cdot S^2
    $$
-   where $L$ is the number of transformer layers and $d_{\text{model}}$ is the hidden activation dimension. When an agent prepends 16,384 tokens of API schemas and behavioral guardrails to every turn of a 40-step interaction, prefill computation dominates the total latency budget, turning an interactive agent into an unresponsive batch pipeline.
+   where $L$ is the number of transformer layers, $d_{\text{model}}$ is the hidden activation dimension, and $2 L d_{\text{model}} S^2$ accounts for causal lower-triangular attention matrix multiplications ($QK^T$ and score-value aggregation across all layers, rising to $4 L d_{\text{model}} S^2$ under non-causal bidirectional attention). When an agent prepends 16,384 tokens of API schemas and behavioral guardrails to every turn of a 40-step interaction, prefill computation dominates the total latency budget, turning an interactive agent into an unresponsive batch pipeline.
 2. **Key-Value Cache Exhaustion:** The high-bandwidth memory (HBM) consumed by the Key-Value (KV) cache grows linearly with context length $S$:
    $$
    M_{\text{KV}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_h \cdot S \cdot b_{\text{bytes}}
@@ -134,9 +153,9 @@ The operational solution is **Context Compilation**\index{Context Compilation}: 
 
 ### The four subsystems of the flywheel
 
-Operating an autonomous data flywheel requires orchestrating four tightly coupled distributed subsystems:
+Operating an autonomous data flywheel requires orchestrating four tightly coupled distributed subsystems that ingest from both offline synthetic exploration and online production telemetry:
 
-1. **The Generative Task Synthesizer:** An automated problem generation engine that synthesizes programming tasks, infrastructure failure scenarios, database migration targets, and complex workflow directed acyclic graphs (DAGs). The synthesizer seeds the environment with reproducible test harnesses, initial file states, and clear operational objectives.
+1. **The Generative Task Synthesizer and Production Telemetry Harvester:** An automated ingestion fabric that feeds the flywheel from two complementary sources: (a) an offline task synthesizer generating reproducible programming defects, infrastructure failure scenarios, and property-based test harnesses, and (b) an online telemetry harvester intercepting live human-in-the-loop and deployed agent execution sessions via eBPF probes and API sidecars.
 2. **The Stochastic Rollout Fleet:** A high-throughput GPU inference cluster running continuous batching engines (such as vLLM [@kwon2023vllm] or SGLang [@zheng2023sglang]). The rollout fleet generates parallel candidate trajectories $\tau \sim \pi_\theta(\cdot \mid x)$ across diverse sampling temperatures and decoding strategies.
 3. **The Multi-Tier Verification Oracle:** A distributed pool of CPU worker nodes executing isolated sandboxes. The verification fleet evaluates proposed actions against hard deterministic checks: AST syntax validity, JSON Schema conformance, OS invariant diffs, and unit test pass assertions.
 4. **The Policy Curation and Distillation Stage:** An ingestion pipeline that deduplicates passing traces, extracts minimal golden paths, mines informative error-recovery branches, computes token loss masks, and formats standardized training records for post-training compilation.
@@ -201,7 +220,7 @@ Before proceeding to synthetic generation techniques, test your grasp of the har
 
 :::
 
----
+Sizing the heterogeneous cluster resolves the physical compute bottleneck, but hardware efficiency is meaningless if the generated trajectories fail to reflect the complexity of production software environments. Generating an effective post-training corpus requires moving from physical cluster architecture to the algorithmic mechanics of trajectory synthesis: how do we systematically explore complex problem spaces, manage exploration entropy across sampling temperatures, and contain untrusted agent execution within deterministic sandbox boundaries?
 
 ## Synthetic Trajectory Generation and Rollout Filtering {#sec-vol3-flywheel-synthetic-gen}
 
@@ -313,6 +332,7 @@ Modern verification fleets resolve this tension through **Hardware-Assisted Micr
 - **Sub-30 Millisecond Cold Boots:** Firecracker strips out emulated PC devices, legacy BIOS routines, and PCI buses, providing a minimal Linux kernel execution container running directly on KVM hardware virtualization.
 - **Immutable Base Images:** Base repository environments—containing Linux rootfs, compilers, dependencies, and git trees—are mounted as immutable, read-only block devices shared across hundreds of concurrent microVMs.
 - **Sub-5 Millisecond CoW Resets:** Each trajectory attaches an ephemeral Copy-on-Write storage overlay (`tmpfs` or device-mapper). All filesystem writes, temporary files, and compiled binaries mutate only this in-memory overlay. When the trajectory completes its verification pass, the overlay is discarded instantly. Resetting the environment to pristine baseline requires $<5$ ms, enabling a single 64-core CPU host to process hundreds of trajectory verifications per minute without disk wear.
+- **Zero-Copy Telemetry Interception:** To extract rich execution traces without disturbing guest execution, the microVM host utilizes eBPF probes attached to the guest kernel's socket write and process exit tracepoints, multiplexing terminal stdout, stderr, process return codes, and filesystem tree diffs into host shared-memory ring buffers at line rate.
 
 @Tbl-vol3-sandbox-technologies compares the performance, density, and isolation boundaries of candidate verification substrates.
 
@@ -340,7 +360,7 @@ Modern verification fleets resolve this tension through **Hardware-Assisted Micr
 
 :::
 
----
+Providing a secure, sub-5 millisecond microVM execution substrate guarantees that untrusted rollouts can be evaluated against hard operating system invariants without destabilizing the host cluster. However, executing candidate rollouts is merely the raw measurement step. To transform millions of noisy, divergent execution attempts into a compact post-training curriculum, the systems architect must formalize the mathematical rules of trajectory selection: how do we formulate deterministic rejection sampling, eliminate redundant exploratory bloat, and verify consensus across tasks with incomplete test specifications?
 
 ## Rejection Sampling and Majority Voting {#sec-vol3-flywheel-rejection-sampling}
 
@@ -382,7 +402,9 @@ $$
 \tau^*(x) = \arg\min_{\tau \in \mathcal{T}_{\text{pass}}(x)} J_{\text{cost}}(\tau)
 $$
 
-Additionally, passing traces are passed through an algorithmic pruning pass that strips out idempotent loops (e.g., repeating `ls` without intervening filesystem mutations) and dead-end read operations that never inform downstream action arguments. Fine-tuning on $\tau^*(x)$ trains the model to execute the shortest, most computationally efficient trajectory that satisfies the task contract.
+Additionally, passing traces are passed through an algorithmic pruning pass that strips out idempotent loops (e.g., repeating `ls` without intervening filesystem mutations) and dead-end read operations that never inform downstream action arguments.
+
+Furthermore, because independent stochastic rollouts frequently converge on near-identical solutions with minor syntactic variations, the curation tier enforces **Semantic Deduplication via MinHash Locality-Sensitive Hashing (LSH)**\index{MinHash Locality-Sensitive Hashing}. Each trajectory is decomposed into action $n$-grams and unified AST diff hunks. The engine computes $k=128$ MinHash permutation hashes per trajectory, grouping them into $b$ bands of $r$ rows in an LSH index. Candidates exhibiting an estimated Jaccard similarity $J(\tau_i, \tau_j) \ge 0.85$ are flagged as redundant duplicates; only the minimal-cost instance is retained. As quantified in Stage 3 of @tbl-vol3-filtering-funnel, semantic deduplication prunes 40 percent of passing traces, preventing fine-tuning compute from overfitting to repetitive syntactic templates. Fine-tuning on $\tau^*(x)$ trains the model to execute the shortest, most computationally efficient trajectory that satisfies the task contract.
 
 ### Rollout filtering funnels and synthetic token consumption
 
@@ -447,7 +469,7 @@ Consider a synthetic generation campaign targeting $N_{\text{raw}} = 1{,}000{,}0
    $$
    Divided across the $50{,}000$ verified golden paths, the unit compute cost is $\$15{,}630 / 50{,}000 \approx \$0.31$ per verified trajectory. This represents a $380\times$ cost reduction compared to human annotation (\$120.00/trace).
 4. **The Critical Role of Prefix Caching:**
-   Notice that the prefill volume ($116\text{B}$ tokens) dwarfs the output token volume ($3\text{B}$ tokens) by nearly a factor of 40. If every turn prefilled its entire context from scratch, attention prefill FLOPs and memory bandwidth would throttle the rollout fleet. Modern serving engines resolve this by utilizing **Prompt Prefix Caching** (such as RadixAttention in SGLang or PagedAttention prefix caching in vLLM). Because all candidate rollouts for a given task share identical system prompts, repository maps, and early turn prefixes, the engine reuses the precomputed KV cache across rollouts and turns, eliminating over 70 percent of prefill FLOPs and keeping tensor cores operating at peak decode saturation.
+   The prefill volume ($116\text{B}$ tokens) dwarfs the output token volume ($3\text{B}$ tokens) by nearly a factor of 40. If every turn prefilled its entire context from scratch, attention prefill FLOPs and memory bandwidth would throttle the rollout fleet. Modern serving engines resolve this by utilizing **Prompt Prefix Caching** (such as RadixAttention in SGLang or PagedAttention prefix caching in vLLM). Because all candidate rollouts for a given task share identical system prompts, repository maps, and early turn prefixes, the engine reuses the precomputed KV cache across rollouts and turns, eliminating over 70 percent of prefill FLOPs and keeping tensor cores operating at peak decode saturation.
 
 ### Majority voting and consensus verification
 
@@ -489,7 +511,7 @@ $$
 \mathcal{L}_{\text{distill}}(\phi) = - \sum_{t=0}^{H^*} \left[ \sum_{i \in z_t^*} \log \pi_\phi(y_i \mid y_{<i}, s_t) + \sum_{j \in a_t^*} \log \pi_\phi(y_j \mid y_{<j}, s_t) \right]
 $$
 
-Why does distilling the collapsed path $\tau^*$ work when the student policy is never exposed to the full search tree at inference time? This mechanism is grounded in the **Policy Improvement Theorem**\index{Policy Improvement Theorem} of reinforcement learning [@sutton2018reinforcement]. Multi-path search operates as a policy improvement operator:
+Distilling the collapsed path $\tau^*$ succeeds even though the student policy is never exposed to the full search tree at inference time because of the **Policy Improvement Theorem**\index{Policy Improvement Theorem} of reinforcement learning [@sutton2018reinforcement]. Multi-path search operates as a policy improvement operator:
 
 $$
 \pi_{\text{search}}(\tau \mid x) = \mathcal{I}(\pi_\theta) \ge \pi_\theta(\tau \mid x)
@@ -505,6 +527,13 @@ $$ {#eq-entropy-regularized-distill}
 
 where $\mathcal{H}(\pi) = - \sum_v \pi(v) \log \pi(v)$ and $\beta_{\text{ent}}$ controls the entropy floor.
 
+#### Trajectory curation: Supervised fine-tuning versus preference optimization
+
+The trajectory filtering and distillation pipeline serves two fundamentally distinct downstream post-training objectives:
+
+- **Curating for Supervised Trajectory Fine-Tuning (SFT):** SFT requires unambiguous, high-density demonstration records. The curation engine extracts exclusively the single minimal winning trajectory $\tau^*(x)$ for each resolved task, pruning all dead-end deliberations. The model is trained via token-level maximum likelihood to reproduce the optimal path.
+- **Curating for Preference Optimization and RLVR:** Algorithms such as direct preference optimization (DPO) [@rafailov2023dpo] and Reinforcement Learning from Verifiable Rewards (RLVR) require paired contrastive rollouts originating from the identical task prompt $x$. Rather than discarding rejected rollouts, the curation engine constructs preference pairs $(\tau_w, \tau_l)$, where $\tau_w \in \mathcal{T}_{\text{pass}}(x)$ represents a verified winning rollout and $\tau_l \in \mathcal{T}_{\text{fail}}(x)$ represents a candidate that failed verification or incurred substantially higher execution cost ($J_{\text{cost}}(\tau_l) \gg J_{\text{cost}}(\tau_w)$). By pairing the winning trajectory with a failed candidate departing at the identical pivot step $t_{\text{pivot}}$, the dataset explicitly teaches the policy which action transitions lead to failure.
+
 @Tbl-vol3-synthesis-comparison summarizes the operational trade-offs across the core trajectory synthesis methodologies.
 
 | **Methodology**              | **Proposal Generator**                         | **Verification Mechanism**           | **Primary Systems Bottleneck**        |          **Verification Yield**          | **Unit Cost per Trajectory** |
@@ -516,7 +545,7 @@ where $\mathcal{H}(\pi) = - \sum_v \pi(v) \log \pi(v)$ and $\beta_{\text{ent}}$ 
 
 : **Comparison of Trajectory Synthesis Methodologies**: Proposal generators, verification mechanisms, systems bottlenecks, yield rates, and compute costs. {#tbl-vol3-synthesis-comparison tbl-colwidths="[18,20,20,18,12,12]"}
 
----
+Filtering raw rollouts through deterministic rejection gates and distilling search deliberation trees produces concise, highly optimized golden paths that solve complex tasks with minimal token consumption. Yet, optimizing post-training corpora exclusively for flawless execution exposes the downstream policy to a catastrophic operational trap. When deployed into non-deterministic production environments, an agent trained only on pristine success lacks the causal priors necessary to handle transient network drops, missing libraries, or corrupted dependencies. To build an autonomous agent that survives real-world deployment, the data flywheel must systematically mine and curate the dark side of the execution distribution: failed rollouts, runtime errors, and synthetic fault-recovery traces.
 
 ## Self-Correction and Negative Trajectory Mining {#sec-vol3-flywheel-negative-mining}
 
@@ -688,6 +717,14 @@ At cluster scale, this footprint compounds rapidly:
   365 \text{ days} \times 3.75 \text{ TB/day} \approx 1.37 \text{ Petabytes per year}
   $$
 
+  Sustaining an ingestion rate of $3.75\text{ TB}$ per day requires provisioning a dedicated streaming telemetry pipeline. Ingesting $3.75\text{ TB}$ over 24 hours equates to an average network ingestion bandwidth of:
+  $$
+  B_{\text{telemetry}} = \frac{3.75 \times 10^{12} \text{ bytes} \times 8 \text{ bits/byte}}{86{,}400 \text{ seconds}} \approx 347.2 \text{ Mbps}
+  $$
+  To absorb traffic spikes during bursty rollout batches without dropping packets or stalling execution workers, telemetry agents write to local asynchronous ring buffers before flushing to a distributed Kafka ingestion cluster partitioned by `tenant_id` and `task_id`.
+
+  Crucially, production telemetry cannot be written directly to disk without **Inline Security and Privacy Scrubbing**\index{Inline Security and Privacy Scrubbing}. Real-world trajectory streams frequently capture sensitive credentials: bearer authorization tokens, database connection passwords, SSH private keys, and customer personally identifiable information (PII) emitted in stdout logs. An in-line streaming worker applies deterministic regex patterns, high-entropy token detectors, and language-specific AST token masks to scrub sensitive credentials before the trajectory is serialized into permanent storage, ensuring enterprise secrets never leak into fine-tuning weights.
+
 #### Columnar serialization and compression economics
 
 Retaining petabytes of trajectory logs as uncompressed flat JSONL files creates severe systems liabilities: reading a single attribute (such as filtering for trajectories where `exit_code == 137` to isolate out-of-memory crashes) requires parsing gigabytes of unindexed text from storage, incurring massive disk I/O and CPU deserialization bottlenecks.
@@ -732,11 +769,11 @@ Instead, high-efficiency curation pipelines deploy **Selective Columnar Facet In
 
 This compact index enables sub-second retrieval of targeted training curricula—such as *"extract 30,000 multi-turn Python trajectories that encountered `ModuleNotFoundError` and successfully recovered within 2 turns"*—by filtering structured metadata columns in columnar storage and streaming only the matching compressed records directly to SFT worker nodes.
 
----
+Implementing an end-to-end data flywheel—spanning grounded task synthesis, microVM execution, deterministic rejection cascades, negative trajectory mining, and tiered columnar indexing—transforms the software engineering bottleneck of manual data collection into a scalable, high-throughput compute compiler. However, operating this distributed pipeline at cluster scale exposes subtle, non-intuitive tensions between stochastic neural decoders, distributed runtimes, and non-differentiable execution boundaries. Understanding where these components diverge is essential to avoiding costly infrastructure traps.
 
 ## Fallacies and Pitfalls {#sec-vol3-flywheel-fallacies}
 
-Engineering a production-scale synthetic data flywheel reveals non-intuitive failure modes at the intersection of stochastic models, distributed runtimes, and execution oracles. Below are documented architectural fallacies and pitfalls.
+Engineering a production-scale synthetic data flywheel reveals non-intuitive failure modes at the intersection of stochastic models, distributed runtimes, and execution oracles. Operating these pipelines without formal systems guardrails triggers characteristic failure modes across generation, verification, and compute allocation.
 
 ---
 
@@ -837,7 +874,7 @@ In an empirical audit of majority voting on complex code generation without exec
 
 : **Architectural Failure Modes in Trajectory Data Flywheels**: Root mechanisms, operational symptoms, and systems mitigations across generation and filtering pipelines. {#tbl-vol3-flywheel-failure-modes tbl-colwidths="[18,26,28,28]"}
 
----
+Navigating these architectural failure modes underscores the central discipline of the agentic data flywheel: stochastic models cannot certify their own correctness, and distributed runtime environments cannot compensate for corrupted training distributions. The stability of the entire agent post-training lifecycle rests on enforcing non-differentiable execution boundaries at every stage of generation, verification, and curation.
 
 ## Summary {#sec-vol3-flywheel-summary}
 
@@ -845,21 +882,21 @@ The transition from in-context prompt engineering to autonomous agency requires 
 
 ::: {.callout-takeaways title="Core systems principles of trajectory synthesis and data flywheels"}
 
-1. **Context Compilation Transcends the Prompt Wall:** Stuffer prompts that encode schemas and exemplars incur quadratic prefill latency $\mathcal{O}(S^2 \cdot d_{\text{model}})$ and strand gigabytes of accelerator KV cache. Compiling runtime context directly into static model parameters compresses prompt prefixes by over 80 percent, restores attention focus, and maximizes serving concurrency.
-2. **Deterministic Oracles Provide Ground Truth:** Trajectory verification must never be delegated to subjective LLM-as-a-judge evaluators, which suffer from length bias and circular hallucinations. Ground truth emerges exclusively from non-differentiable execution boundaries: AST parsers, schema validators, OS state diffs, and hermetic unit test suites.
-3. **Architectural Disaggregation Prevents Accelerator Starvation:** Coupling GPU token generation synchronously to CPU test execution collapses accelerator utilization to single digits. Production flywheels strictly decouple rollout generation from verification via asynchronous message brokers, balancing clusters with 32 to 64 CPU cores per GPU accelerator.
-4. **MicroVM Sandboxes with CoW Overlays Enable High-Density Verification:** Standard containers suffer from daemon lock contention, slow resets, and shared-kernel vulnerabilities. Hardware-isolated microVMs (AWS Firecracker) utilizing in-memory Copy-on-Write storage overlays achieve sub-5 millisecond environment resets and support thousands of concurrent verifications per host.
-5. **Bifurcated Curation Tames Covariate Shift:** Training exclusively on flawless golden paths induces quadratic error compounding $\mathcal{O}(\epsilon H^2)$ when deployed agents encounter unexpected runtime exceptions. Curating bifurcated corpora (70 percent golden paths, 30 percent error-recovery traces) provides the causal supervision needed to bound error growth linearly $\mathcal{O}(\epsilon H)$.
-6. **Filtering Funnels and Columnar Tiering Dictate Flywheel Economics:** Multi-stage filtering cascades discard over 95 percent of unviable or duplicate candidate rollouts (5 percent net golden yield). Prompt prefix caching eliminates redundant prefill FLOPs across hundreds of billions of input tokens. Converting petabyte-scale trajectory logs to columnar Parquet with Zstandard achieves 80 to 88 percent compression, while selective metadata facet indexing enables sub-second retrieval without the massive overhead of full-text search.
+* **Context compilation transcends the prompt wall**: In-context prompting incurs quadratic attention prefill FLOPs and strands gigabytes of accelerator KV cache. Compiling runtime context directly into neural policy parameters compresses prompt prefixes by over 80 percent, eliminates redundant prefill overhead, and restores attention focus.
+* **Deterministic oracles provide non-differentiable ground truth**: Trajectory verification must never be delegated to subjective LLM-as-a-judge evaluators that suffer from length bias and circular hallucinations. Ground truth emerges exclusively from deterministic execution boundaries: AST parsers, schema validators, OS state diffs, and hermetic unit test suites.
+* **Architectural disaggregation prevents accelerator starvation**: Coupling GPU token generation synchronously to CPU test execution collapses accelerator utilization to single digits. Production flywheels decouple rollout generation from verification via asynchronous message brokers, balancing clusters with 32 to 64 CPU cores per GPU accelerator.
+* **MicroVM sandboxes with CoW overlays enable high-density verification**: Monolithic container daemons suffer from lock contention and kernel crash risks. Hardware-isolated microVMs utilizing in-memory Copy-on-Write storage overlays achieve sub-5 millisecond environment resets and support thousands of concurrent verifications per host.
+* **Bifurcated curation bounds autoregressive covariate shift**: Training exclusively on flawless golden paths induces quadratic error compounding $\mathcal{O}(\epsilon H^2)$ when deployed agents encounter unexpected runtime exceptions. Curating bifurcated corpora (70 percent golden paths, 30 percent error-recovery traces) provides the causal supervision needed to bound error growth linearly $\mathcal{O}(\epsilon H)$.
+* **Filtering funnels and columnar tiering govern flywheel economics**: Multi-stage filtering cascades discard over 95 percent of unviable candidate rollouts. Converting petabyte-scale trajectory logs to columnar Parquet with Zstandard achieves 80 to 88 percent compression, while selective metadata facet indexing enables sub-second curriculum retrieval.
 
 :::
 
 ::: {.callout-chapter-connection title="From trajectory synthesis to policy compilation via SFT"}
 
-The synthetic data flywheel resolves the data supply crisis: it produces millions of verified, high-purity, multi-turn trajectories across diverse software and execution environments.
+How do we compile millions of raw, heterogeneous execution traces into stable neural policy parameters without violating environmental causality?
 
-However, possessing a massive corpus of structured execution traces is only the prerequisite for policy optimization. How do we compute parameter updates over a multi-turn trajectory that interleaves agent thoughts, structured tool calls, and external system outputs? Standard language model training treats all tokens identically, but backpropagating gradients through unpredictable external environment observations violates environmental causality and induces execution hallucinations.
+The synthetic data flywheel resolves the data supply crisis by generating verified, multi-turn execution trajectories across diverse operating environments. However, possessing a massive corpus of structured traces is only the prerequisite for policy compilation. Standard language model training treats all tokens identically, but backpropagating gradients through unpredictable external environment observations violates environmental causality and induces execution hallucinations.
 
-In @sec-vol3-sft, we turn from data synthesis to the optimization mechanics of the policy compiler. We formulate the trajectory Supervised Fine-Tuning (SFT) loss objective, derive why the **Environmental Causality Boundary**\index{Environmental Causality Boundary} mandates strict token loss masking on external observations, analyze how sequence-length versus active-token normalization impacts optimization stability, and engineer parameter-efficient multi-tenant serving runtimes utilizing dynamically swapped LoRA adapters.
+In @sec-vol3-sft, we turn to the optimization mechanics of the policy compiler. We formulate the trajectory Supervised Fine-Tuning (SFT) loss objective, derive why the **Environmental Causality Boundary**\index{Environmental Causality Boundary} mandates strict token loss masking on external observations, analyze how sequence-length versus active-token normalization impacts optimization stability, and engineer parameter-efficient serving runtimes utilizing dynamically swapped LoRA adapters.
 
 :::

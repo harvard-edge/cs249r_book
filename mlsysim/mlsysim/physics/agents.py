@@ -321,3 +321,104 @@ def calc_multi_agent_coordination_overhead(num_agents: int, avg_message_tokens: 
         results["pairwise_cost"] = pairwise_tokens * cost_per_token
 
     return results
+
+
+def calc_multiagent_speedup(num_agents: int, s_serial: float, alpha: float = 0.0, beta: float = 0.0) -> float:
+    """
+    Calculate effective speedup for an agent ensemble under coordination tax.
+
+    Model:
+        D(M) = s_serial + (1 - s_serial) / M + alpha * M^2 + beta * M
+        S(M) = 1 / D(M)
+
+    where:
+    - s_serial is the serial planning / decomposition fraction (Amdahl's serial term).
+    - (1 - s_serial) is the parallelizable execution fraction.
+    - alpha is the quadratic synchronization / pairwise cross-talk coefficient (O(M^2)).
+    - beta is the linear coordination / supervisor provisioning coefficient (O(M)).
+
+    Parameters
+    ----------
+    num_agents : int
+        Number of collaborating agents in the ensemble (>= 1).
+    s_serial : float
+        Serial planning fraction (0.0 to 1.0).
+    alpha : float, optional
+        Quadratic synchronization coefficient (default: 0.0, >= 0.0).
+    beta : float, optional
+        Linear coordination coefficient (default: 0.0, >= 0.0).
+
+    Returns
+    -------
+    float
+        Theoretical speedup factor S(M) relative to a single agent.
+    """
+    validate_at_least(num_agents, 1, "num_agents")
+    validate_range(s_serial, 0.0, 1.0, "s_serial")
+    validate_nonnegative(alpha, "alpha")
+    validate_nonnegative(beta, "beta")
+
+    m = float(num_agents)
+    p_parallel = 1.0 - s_serial
+    d = s_serial + (p_parallel / m) + (alpha * (m ** 2)) + (beta * m)
+    if d <= 0.0:
+        return 0.0
+    return float(1.0 / d)
+
+
+def calc_multiagent_optimal_concurrency(s_serial: float, alpha: float, beta: float = 0.0) -> float:
+    """
+    Calculate the optimal concurrency boundary M* for an agent ensemble.
+
+    The stationary condition minimizing execution time D(M) satisfies:
+        D'(M) = -(1 - s) / M^2 + 2 * alpha * M + beta = 0
+        <=> 2 * alpha * M^3 + beta * M^2 - (1 - s) = 0
+
+    When alpha == 0 and beta == 0, S(M) approaches 1/s monotonically as M -> inf.
+    When alpha > 0, the cubic polynomial has strictly one positive real root by Descartes' Rule of Signs.
+
+    Parameters
+    ----------
+    s_serial : float
+        Serial planning fraction (0.0 to 1.0).
+    alpha : float
+        Quadratic synchronization coefficient (>= 0.0).
+    beta : float, optional
+        Linear coordination coefficient (default: 0.0, >= 0.0).
+
+    Returns
+    -------
+    float
+        Optimal number of concurrent agents M* maximizing speedup.
+    """
+    validate_range(s_serial, 0.0, 1.0, "s_serial")
+    validate_nonnegative(alpha, "alpha")
+    validate_nonnegative(beta, "beta")
+
+    p = 1.0 - s_serial
+    if alpha == 0.0 and beta == 0.0:
+        return float("inf")
+    if p <= 0.0:
+        return 1.0
+
+    low = 0.1
+    high = 1000.0
+
+    def f(m):
+        return 2.0 * alpha * (m ** 3) + beta * (m ** 2) - p
+
+    while f(high) < 0:
+        high *= 2.0
+        if high > 1e6:
+            return high
+
+    for _ in range(100):
+        mid = 0.5 * (low + high)
+        val = f(mid)
+        if abs(val) < 1e-12 or (high - low) < 1e-9:
+            return float(mid)
+        if val < 0:
+            low = mid
+        else:
+            high = mid
+    return float(0.5 * (low + high))

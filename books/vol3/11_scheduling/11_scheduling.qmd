@@ -1,0 +1,1083 @@
+# Trajectory Scheduling & Cluster Resource Management {#sec-vol3-scheduling}
+
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+::: {.content-visible when-format="pdf"}
+\noindent
+![](images/png/cover_scheduling_blueprint_labeled_print.png){fig-alt="Isometric blueprint showing trajectory scheduling and cluster resource management: prompt activation tensor stream, compute-bound prefill blade bank, optical CXL interconnect fabric, streaming autoregressive tokens, memory-bound decode blade bank, and phase-interference isolation."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_scheduling_blueprint_labeled.webp){fig-alt="Isometric blueprint showing trajectory scheduling and cluster resource management: prompt activation tensor stream, compute-bound prefill blade bank, optical CXL interconnect fabric, streaming autoregressive tokens, memory-bound decode blade bank, and phase-interference isolation."}
+:::
+
+:::
+
+In classical machine learning inference serving, queries arrive independently, consume a brief burst of compute to ingest a prompt, decode an output sequence one token at a time, and terminate—relinquishing their memory allocations within hundreds of milliseconds. Agentic workloads completely dismantle this operational model: execution trajectories unfold over heavy-tailed Pareto horizons; prompt contexts expand into hundreds of thousands of tokens across iterative reasoning loops; inference forward passes alternate with blocking external tool executions and human approval gates spanning seconds, minutes, or hours; and heterogeneous concurrent processes contend simultaneously for scarce accelerator High-Bandwidth Memory (HBM), Tensor Core compute units, host DRAM, and PCIe or remote direct memory access (RDMA) network bandwidth. Without disciplined context scheduling and architectural disaggregation, multi-agent systems suffer from catastrophic phase interference—where expansive, compute-bound prompt prefills freeze interactive token decoding—and tool-wait memory stranding, where idle contexts lock up accelerator memory and collapse cluster goodput to near zero. This chapter formalizes the systems principles and architectural mechanisms required to schedule, multiplex, and disaggregate context memory and accelerator compute across autonomous agent fleets.
+
+## Purpose {.unnumbered .unlisted}
+
+::: {.content-visible when-format="pdf"}
+\begin{marginfigure}
+\mlagentstack{10}{10}{10}{95}{10}{10}
+\caption{The Agentic Machine Learning Systems Stack.}
+\end{marginfigure}
+:::
+
+_Why does an agent waiting on an external tool invocation collapse GPU cluster throughput, and how can we schedule compute and memory across heterogeneous agent swarms without inducing phase interference?_
+
+When an autonomous agent enters a prolonged wait state for an external sandbox compilation, database migration, or human authorization gate, its execution trajectory blocks. If the serving runtime naively pins the active Key-Value (KV) context within physical accelerator High-Bandwidth Memory during these extreme bimodal latency stalls, scarce hardware memory is stranded, paralyzing concurrent execution across the cluster. Simultaneously, when newly arrived agents submit expansive multi-turn prompts, their compute-bound prefill passes monopolize accelerator streaming multiprocessors, causing severe tail-latency spikes for ongoing memory-bandwidth-bound decode streams. In agentic systems, the runtime must co-design the neural policy execution engine with deterministic operating system scheduling primitives: continuous batching with chunked prefill, physical disaggregation of prefill and decode over high-speed interconnects, priority scheduling under heavy-tailed Pareto workloads, cache-aware prefix routing, and multi-tier memory allocation under hardware constraints.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-learning-objectives}
+- Formulate the arithmetic intensity and Roofline divergence between the compute-bound prefill phase and the memory-bandwidth-bound decode phase.
+- Design chunked prefill and piggybacking schedulers that eliminate phase interference and bound tail Inter-Token Latency (ITL) jitter.
+- Architect physically disaggregated serving clusters that decouple prefill workers from decode workers over RDMA fabrics, establishing the KV streaming network invariant.
+- Analyze the queueing collapse of First-In-First-Out disciplines under heavy-tailed Pareto agent workloads and implement non-clairvoyant Least Attained Service (LAS) and Multi-Level Feedback Queues (MLFQ).
+- Implement cache-aware prefix routers using global Radix trie indexes and consistent hashing to minimize redundant prefill computation across multi-agent swarms.
+- Calculate analytical breakeven thresholds for preemptive KV cache swapping across HBM, host DDR5 DRAM, and NVMe fabrics during blocking tool invocations.
+:::
+
+## Continuous Batching and Chunked Prefill {#sec-vol3-scheduling-continuous-batching}
+
+Consider an interactive software engineering environment where an accelerator cluster serves 32 concurrent developer agents. Each agent maintains an active conversational session, generating code edits and receiving real-time syntax suggestions at an average Inter-Token Latency (ITL) of $25\text{ ms}$. Suddenly, an automated background triage agent arrives with an expansive request: it submits a $64\text{k}$-token repository diff to bisect a compiler regression. In a conventional serving engine running monolithic continuous iteration batching, the scheduler injects this entire $64\text{k}$-token prompt into the immediate next execution batch. The Tensor Cores on an NVIDIA H100 GPU are monopolized for $420\text{ ms}$ executing the prompt prefill General Matrix Multiply (GEMM) kernels. For nearly half a second, the 32 interactive agents cannot execute a single decode iteration; their Inter-Token Latency spikes by $16.8\times$ from $25\text{ ms}$ to $445\text{ ms}$. Interactive code completions stutter, token streaming buffers drain, and human-facing service level agreements (SLAs) are comprehensively breached.
+
+This production failure exposes the foundational tension in autoregressive sequence serving: the structural divergence between prompt prefill and token decode. Resolving this tension requires understanding how iteration-level scheduling operates and why co-locating unconstrained prefill with active decode induces severe phase interference.
+
+### From static to continuous iteration batching
+
+In early deep learning serving systems, requests were grouped using **static request-level batching**\index{Static request-level batching}. A batch of $B$ requests was assembled, padded to the maximum sequence length in the batch, and executed synchronously across all forward passes until every sequence generated an end-of-sequence (`<eos>`) delimiter. Static batching suffers from two devastating sources of hardware waste:
+
+1. **Internal Padding Waste:** Sequences within a batch have diverse prompt and generation lengths. Shorter sequences must be padded with dummy tokens to match the longest sequence, wasting compute on masked operations.
+2. **Early Finish Stranding:** When sequence $i$ finishes generating at token step 10 while sequence $j$ continues generating until step 500, sequence $i$'s allocated memory and compute slot remain completely idle for the remaining 490 iterations.
+
+To eliminate these inefficiencies, Orca [@yu2022orca] and vLLM [@kwon2023vllm] introduced **continuous iteration batching**\index{Continuous iteration batching} (also termed dynamic iteration-level scheduling). Instead of locking execution to the request lifecycle, the serving engine operates at the granularity of a single transformer forward pass iteration.
+
+At iteration boundary $t \to t+1$, the scheduler inspects the pool of active and pending sequences:
+
+- Completed sequences that emitted an `<eos>` token or breached token budgets are retired immediately, and their physical memory blocks are reclaimed.
+- Newly arrived requests are admitted into vacant batch slots without waiting for existing sequences to finish.
+- Active sequences execute exactly one autoregressive decoding step.
+
+While continuous batching dramatically improves accelerator throughput for short, homogeneous conversational queries in stateless serving runtimes, it encounters a physical breakdown when applied to agentic workloads characterized by expansive contexts, heavy-tailed Pareto service distributions, and intermittent tool executions. This breakdown stems from the fundamental divergence in operational intensity dictated by the Roofline model.
+
+### The arithmetic intensity divergence and phase contention
+
+The hardware efficiency of any workload on a modern accelerator is governed by the Williams-Waterman-Patterson Roofline model [@williams2009]. Let $P_{\text{peak}}$ denote the peak floating-point throughput of the processor (in $\text{FLOP/s}$), and let $B_{\text{mem}}$ denote the memory bandwidth between HBM and the compute cores (in $\text{bytes/s}$). The **arithmetic intensity**\index{Arithmetic intensity} (or operational intensity) $\mathcal{I}$ of an algorithm is defined as the ratio of total floating-point operations executed to total bytes transferred from memory: $\mathcal{I} = \text{FLOPs} / \text{Bytes}$.
+
+The hardware platform's **machine balance** or **ridge point** $\mathcal{I}_{\text{knee}}$ defines the critical threshold separating memory-bandwidth-bound operations from compute-bound operations in @eq-vol3-scheduling-ridge-point:
+
+$$
+\mathcal{I}_{\text{knee}} = \frac{P_{\text{peak}}}{B_{\text{mem}}} \quad \left[ \frac{\text{FLOP}}{\text{byte}} \right]
+$$ {#eq-vol3-scheduling-ridge-point}
+
+Consider an NVIDIA H100 SXM5 accelerator operating on 16-bit half-precision floating-point numbers (FP16/BF16), where dense peak Tensor Core throughput reaches $P_{\text{peak}} = 989\text{ TFLOPS}$ ($989 \times 10^{12}\text{ FLOP/s}$) and HBM3 memory bandwidth provides $B_{\text{mem}} = 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ B/s}$). Evaluating @eq-vol3-scheduling-ridge-point yields a machine ridge point of $\mathcal{I}_{\text{knee}} \approx 295.2\text{ FLOP/byte}$. Any kernel whose operational intensity satisfies $\mathcal{I} < 295.2\text{ FLOP/byte}$ is strictly bounded by HBM streaming bandwidth; its execution time is dominated by reading data across the memory bus, leaving the vast majority of Tensor Cores powered down or stalled. Conversely, any kernel with $\mathcal{I} \ge 295.2\text{ FLOP/byte}$ is compute-bound, fully utilizing the Tensor Cores.
+
+Now examine the two distinct operational phases of a decoder-only transformer model with $N_{\text{params}}$ parameters, $L$ transformer layers, hidden dimension $d_{\text{model}}$, $H$ query attention heads, $H_{\text{KV}}$ key-value heads, and per-head dimension $d_h = d_{\text{model}} / H$.
+
+#### The prefill phase (compute-bound)
+In the prefill phase, the model ingests an entire prompt sequence of length $S$ tokens in a single forward pass. Because all $S$ tokens are known simultaneously, the matrix-vector products across linear projections ($W_Q, W_K, W_V, W_O$ and the feed-forward blocks $W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$) are batched across all $S$ positions into General Matrix Multiplies (GEMMs).
+
+We can derive the operational intensity from first-principles napkin math: in 16-bit half-precision (FP16/BF16), every model parameter occupies 2 bytes of memory and participates in 2 floating-point operations per token (one multiply-accumulate operation: $1 \text{ MAC} = 2 \text{ FLOPs}$). Loading the full model weight tensor requires reading $2 N_{\text{params}}$ bytes from HBM across the memory bus. Because those weights are loaded once and reused across all $S$ prompt tokens in parallel, the linear layers execute $2 N_{\text{params}} S$ FLOPs. The operational intensity is simply the ratio of compute to memory traffic, yielding @eq-vol3-scheduling-prefill-intensity:
+
+$$
+\mathcal{I}_{\text{prefill}}(S) \approx \frac{2 N_{\text{params}} S}{2 N_{\text{params}}} = S \quad \left[ \frac{\text{FLOP}}{\text{byte}} \right]
+$$ {#eq-vol3-scheduling-prefill-intensity}
+
+When an agent prompt contains $S \ge 512$ tokens, its operational intensity $\mathcal{I}_{\text{prefill}} \ge 512\text{ FLOP/byte} > \mathcal{I}_{\text{knee}} = 295.2\text{ FLOP/byte}$. The prefill phase operates squarely in the **compute-bound regime**, saturating accelerator Tensor Cores.
+
+#### The decode phase (memory-bandwidth bound)
+In the autoregressive decode phase, the model generates exactly one new token at position $S + t$ for each active sequence in the batch. Let $B_{\text{dec}}$ denote the number of concurrent decoding sequences. For each sequence, the model must evaluate all $N_{\text{params}}$ weights against a single activation vector of length $1$. Operations degenerate from compute-dense GEMM to memory-bound GEMV (matrix-vector multiplication).
+
+Every single decode step requires streaming the entire model's $2 N_{\text{params}}$ bytes of weights from HBM, alongside the historical Key-Value (KV) cache memory $M_{\text{KV}}$ for all $B_{\text{dec}}$ sequences across all $L$ layers (@eq-vol3-scheduling-decode-intensity):
+
+$$
+\mathcal{I}_{\text{decode}}(B_{\text{dec}}) = \frac{2 N_{\text{params}} B_{\text{dec}}}{2 N_{\text{params}} + M_{\text{KV}}} \quad \left[ \frac{\text{FLOP}}{\text{byte}} \right]
+$$ {#eq-vol3-scheduling-decode-intensity}
+
+where $M_{\text{KV}} = 4 L H_{\text{KV}} d_h \sum_{i=1}^{B_{\text{dec}}} S_i$ bytes.[^fn-scheduling-intensity-divergence]
+
+Even if the historical KV cache were zero ($M_{\text{KV}} = 0$), the decode operational intensity is fundamentally capped by the batch size:
+
+$$
+\mathcal{I}_{\text{decode}} \le \frac{2 N_{\text{params}} B_{\text{dec}}}{2 N_{\text{params}}} = B_{\text{dec}} \quad \left[ \frac{\text{FLOP}}{\text{byte}} \right]
+$$
+
+For typical serving batch sizes ($B_{\text{dec}} \in [1, 64]$), decode operational intensity satisfies $\mathcal{I}_{\text{decode}} \le 64\text{ FLOP/byte} \ll 295.2\text{ FLOP/byte}$. Autoregressive decoding is severely **memory-bandwidth bound**: accelerator Tensor Cores sit starved of data for over 75 percent to 90 percent of each clock cycle while the memory bus streams weights from HBM.
+
+#### Phase contention
+When a monolithic continuous batching engine attempts to schedule an incoming prefill request alongside active decode sequences in the same iteration, a destructive phenomenon known as **phase contention**\index{Phase contention} (or phase interference) occurs (@tbl-vol3-scheduling-monolithic-batching):
+
+| Timeline Window             | Decode Stream Status                   | Prefill Engine State                    | Hardware Resource Allocation           | Inter-Token Latency Impact                |
+|:----------------------------|:---------------------------------------|:----------------------------------------|:---------------------------------------|:------------------------------------------|
+| $0\text{--}50\text{ ms}$    | Emits Token 1                          | Idle (no prompt arriving)               | Memory-bandwidth bound (GEMV on HBM)   | Nominal ITL ($25\text{ ms}$)              |
+| $50\text{--}100\text{ ms}$  | Emits Token 2                          | Idle (no prompt arriving)               | Memory-bandwidth bound (GEMV on HBM)   | Nominal ITL ($25\text{ ms}$)              |
+| $100\text{--}250\text{ ms}$ | **Stalled / Blocked** (waiting on SMs) | **Monolithic 64k Prefill** forward pass | Compute-dense GEMM claims all SMs      | **Spike (+150--200 ms jitter violation)** |
+| $250\text{--}275\text{ ms}$ | Emits Token 3 (resumes after prefill)  | Completed (transitioned to decode)      | Returns to memory-bandwidth bound GEMV | Recovers nominal ITL                      |
+
+: **Monolithic Co-Located Batching Timeline and Phase Contention**: Execution breakdown illustrating the destruction of decode stream SLOs when a compute-dense 64k prefill monopolizes GPU streaming multiprocessors, stalling active decodes. {#tbl-vol3-scheduling-monolithic-batching tbl-colwidths="[18,22,22,22,16]"}
+
+The compute-dense GEMM kernel of the prefill request claims all available Streaming Multiprocessors (SMs) and thread blocks. The lightweight GEMV kernels of the decoding sequences are serialized or starved of memory issue slots. Because modern GPU hardware schedulers cannot preempt an active cooperative thread array (CTA) mid-kernel, the decoding sequences must pause until the entire prefill GEMM executes to completion. The result is an explosive spike in tail Inter-Token Latency.
+
+> **The Systems Rule of Thumb (The Arithmetic Intensity Divergence):** Prefill and decode occupy diametrically opposed hardware regimes: prompt prefill is compute-bound ($\mathcal{I}_{\text{prefill}} \approx S \ge 512\text{ FLOP/byte}$), while autoregressive decode is memory-bus bound ($\mathcal{I}_{\text{decode}} \le B_{\text{dec}} \le 64\text{ FLOP/byte} \ll \mathcal{I}_{\text{knee}}$). Co-scheduling an unchunked prefill alongside active decode streams causes severe phase contention: the compute-dense GEMM monopolizes accelerator streaming multiprocessors, serializing memory-bound decode iterations and inducing tail latency spikes of 150 to 200 milliseconds.
+
+::: {#chk-vol3-11-roofline-phase-contention .callout-checkpoint title="The arithmetic intensity divergence and phase contention"}
+
+Before examining chunked prefill and physical cluster disaggregation, verify your understanding of serving physics:
+
+- [ ] **Machine ridge point**: calculate the ridge point $\mathcal{I}_{\text{knee}} = P_{\text{peak}} / B_{\text{mem}}$ for an accelerator with $989\text{ TFLOP/s}$ compute and $3.35\text{ TB/s}$ HBM bandwidth.
+- [ ] **Operational intensity divergence**: explain why prompt prefill is compute-bound ($\mathcal{I}_{\text{prefill}} \approx S$) while autoregressive decode is memory-bandwidth bound ($\mathcal{I}_{\text{decode}} \le B_{\text{dec}}$).
+- [ ] **Phase contention**: describe how co-locating an unchunked 64k prefill with active decodes on the same GPU destroys Inter-Token Latency (ITL) service-level objectives.
+
+:::
+
+[^fn-scheduling-intensity-divergence]: Total prefill operations equal $2 N_{\text{params}} S + 4 L d_{\text{model}} S^2$ FLOPs while streaming $2 N_{\text{params}}$ bytes of weights in half precision; for $S \ll N_{\text{params}} / (2 L d_{\text{model}})$, this simplifies to $\mathcal{I}_{\text{prefill}} \approx S$. Decode evaluates $2 N_{\text{params}} B_{\text{dec}}$ FLOPs while streaming all weights and historical Key-Value caches from HBM, capping operational intensity at $B_{\text{dec}}$.
+
+### Chunked prefill and iteration piggybacking
+
+To resolve phase contention without abandoning iteration-level scheduling, Sarathi [@agrawal2024sarathi] introduced **chunked prefill**\index{Chunked prefill} and **iteration piggybacking**\index{Iteration piggybacking}.
+
+Instead of executing a long prompt of length $S$ as a single, monolithic, atomic GEMM, the scheduler slices the prompt into a sequence of smaller, uniform token chunks of size $C$ (e.g., $C = 512$ or $C = 1024$ tokens). The total number of chunk iterations required to ingest the prompt is $K = \lceil S / C \rceil$.
+
+In each serving iteration $t$, the scheduler constructs a **hybrid batch** comprising:
+
+1. All $B_{\text{dec}}$ ready decode sequences (each contributing $1$ token).
+2. A single prefill chunk of size $C_{\text{eff}} \le C$ selected from the head of the prefill queue.
+
+The total token budget per iteration is constrained by a strict ceiling $T_{\text{budget}}$, satisfying $N_{\text{iter}}(t) = B_{\text{dec}}(t) + C_{\text{eff}}(t) \le T_{\text{budget}}$. By fixing $T_{\text{budget}}$ such that the total execution time of the hybrid batch matches the target Service-Level Objective for Inter-Token Latency ($\Delta t_{\text{iter}} \le SLO_{\text{ITL}}$), the runtime guarantees bounded latency jitter for active decode streams while steadily advancing prefill computation (@tbl-vol3-scheduling-chunked-piggybacking).
+
+| Serving Iteration | Time Window                | Prefill Chunk Progress                       | Decode Batch Status                       | Iteration Compute Profile                                      | ITL SLA Compliance             |
+|:------------------|:---------------------------|:---------------------------------------------|:------------------------------------------|:---------------------------------------------------------------|:-------------------------------|
+| **Iteration 1**   | $0\text{--}25\text{ ms}$   | Chunk 1 ($25\%$ ingested, KV cached)         | Token 1 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+| **Iteration 2**   | $25\text{--}50\text{ ms}$  | Chunk 2 ($50\%$ ingested, cross-attend KV)   | Token 2 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+| **Iteration 3**   | $50\text{--}75\text{ ms}$  | Chunk 3 ($75\%$ ingested, cross-attend KV)   | Token 3 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+| **Iteration 4**   | $75\text{--}100\text{ ms}$ | Chunk 4 ($100\%$ complete, ready for decode) | Token 4 emitted across all decode streams | Balanced GEMM + GEMV ($N_{\text{iter}} \le T_{\text{budget}}$) | $\le 25\text{ ms}$ (Compliant) |
+
+: **Chunked Prefill Piggybacking Timeline**: Iteration-level scheduling demonstrating smooth prefill ingestion interleaved with token generation, maintaining strict ITL upper bounds across consecutive forward passes. {#tbl-vol3-scheduling-chunked-piggybacking tbl-colwidths="[15,15,25,20,15,10]"}
+
+#### Attention computation across chunk boundaries
+Executing prefill in chunks requires careful handling of causal self-attention across chunk boundaries. When evaluating chunk $k$ spanning token indices $[(k-1)C, \, kC - 1]$:
+
+1. **Intra-Chunk Attention:** Tokens within chunk $k$ attend to preceding tokens within chunk $k$ via standard causal masking.
+2. **Cross-Chunk Attention:** Tokens within chunk $k$ attend to all historical tokens from chunks $1$ through $k-1$. Because the Key and Value states for chunks $1 \dots k-1$ were already materialized and stored in the paged KV cache during prior iterations, chunk $k$'s queries compute FlashAttention [@dao2022] against the concatenation of the cached KV blocks and the newly generated KV activations.
+3. **KV Cache Commitment:** As chunk $k$ completes its forward pass, its Key and Value activations are appended to the request's PagedAttention block table in HBM.
+
+Only when the final chunk $K$ finishes does the request transition from the prefill state to the active decode state, ready to generate its very first output token ($a_0$).
+
+#### Mathematical derivation of the optimal chunk budget
+
+What is the optimal token budget $T_{\text{budget}}^*$ that maximizes accelerator throughput without violating an operator's SLA? Let $\tau_{\text{target}}$ denote the target inter-token latency bound (e.g., $\tau_{\text{target}} = 25\text{ ms}$). The execution duration of an iteration processing $B_{\text{dec}}$ decode tokens and $C$ prefill tokens is governed by the two-term Roofline formulation in @eq-chunk-iter-time:
+
+$$
+\Delta t_{\text{iter}}(B_{\text{dec}}, C) = \max \left( \frac{2 N_{\text{params}} + \text{Bytes}_{\text{KV}}(B_{\text{dec}})}{B_{\text{mem}}}, \; \frac{2 N_{\text{params}} (B_{\text{dec}} + C) + 4 L d_{\text{model}} C S_{\text{avg}}}{P_{\text{peak}}} \right) + \delta_{\text{launch}}
+$$ {#eq-chunk-iter-time}
+
+where $\delta_{\text{launch}}$ represents kernel launch overhead and synchronization latency (typically $0.1\text{--}0.3\text{ ms}$).
+
+Notice the duality in @eq-chunk-iter-time: reading model weights requires a baseline memory transfer time $t_{\text{weights}} = 2 N_{\text{params}} / B_{\text{mem}}$ regardless of whether $C=0$ or $C>0$. For a 70B parameter model on an NVIDIA H100 ($B_{\text{mem}} = 3.35\text{ TB/s}$), streaming weights across the memory bus takes:
+
+$$
+t_{\text{weights}} = \frac{2 \times 70 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 41.8\text{ ms}
+$$
+
+During this $41.8\text{ ms}$ memory-read interval, the Tensor Cores are largely idle. Their theoretical arithmetic capacity during this time window is $P_{\text{peak}} \times t_{\text{weights}} = 2 N_{\text{params}} \mathcal{I}_{\text{knee}}$ FLOPs. A decode batch of $B_{\text{dec}}$ sequences only consumes $2 N_{\text{params}} B_{\text{dec}}$ FLOPs. The stranded arithmetic capacity available for prefill computation is therefore:
+
+$$
+\text{Stranded FLOPs} = 2 N_{\text{params}} \left( \mathcal{I}_{\text{knee}} - B_{\text{dec}} \right)
+$$
+
+Because each prefill token executes $2 N_{\text{params}}$ FLOPs in the linear projection and feed-forward layers, dividing stranded FLOPs by $2 N_{\text{params}}$ yields a remarkably clean **first-principles napkin rule**:
+
+$$
+C^* \approx \mathcal{I}_{\text{knee}} - B_{\text{dec}}
+$$
+
+On an NVIDIA H100 with $\mathcal{I}_{\text{knee}} \approx 295\text{ FLOP/byte}$, if the engine is actively decoding a batch of $B_{\text{dec}} = 32$ streams, the scheduler can piggyback:
+
+$$
+C^* \approx 295 - 32 = 263\text{ prefill tokens}
+$$
+
+into the iteration for **zero marginal latency cost**. The prefill compute executes concurrently within the memory fetch window of the decode weights.
+
+When factoring in the secondary self-attention computation ($4 L d_{\text{model}} C S_{\text{avg}}$ FLOPs across historical context length $S_{\text{avg}}$), the exact critical chunk threshold $C^*$ at which the iteration transitions from memory-bound to compute-bound evaluates to @eq-vol3-scheduling-optimal-chunk:
+
+$$
+C^* = \frac{2 N_{\text{params}} \left( \mathcal{I}_{\text{knee}} - B_{\text{dec}} \right)}{2 N_{\text{params}} + 4 L d_{\text{model}} S_{\text{avg}}}
+$$ {#eq-vol3-scheduling-optimal-chunk}
+
+where $\mathcal{I}_{\text{knee}} = P_{\text{peak}} / B_{\text{mem}}$ is the machine balance.[^fn-scheduling-chunk-derivation] For typical sequence lengths, this denominator reduces $C^*$ by only 5 percent to 15 percent. This derivation demonstrates why chunked prefill is so effective: rather than slowing down active users, it repurposes arithmetic cycles that would otherwise be permanently lost to memory bus stalls.
+
+@Tbl-scheduling-batching-comparison summarizes the trade-offs across batching architectures.
+
+| Dimension                     | Static Batching                      | Monolithic Continuous Batching    | Chunked Prefill Piggybacking              |
+|:------------------------------|:-------------------------------------|:----------------------------------|:------------------------------------------|
+| **Scheduling Granularity**    | Request lifecycle                    | Token iteration                   | Token iteration + token chunk             |
+| **Padding Overhead**          | High ($\mathcal{O}(\max S_i - S_i)$) | Zero                              | Zero                                      |
+| **Decode ITL Predictability** | High variance                        | Catastrophic spikes ($>15\times$) | Strictly bounded ($\le SLO_{\text{ITL}}$) |
+| **TTFT on Long Prompts**      | Minimal (single pass)                | Minimal (monolithic pass)         | Slightly increased ($+10\text{--}15\%$)   |
+| **Tensor Core Utilization**   | Low ($<15\%$)                        | Bimodal ($10\%\text{ or }90\%$)   | High and sustained ($>65\%$)              |
+| **KV Cache Allocation**       | Static maximum                       | Dynamic (PagedAttention)          | Progressive per chunk                     |
+
+: **Comparison of Inference Serving Batching Strategies**: Performance profiles, latency predictability, and accelerator resource utilization across static, monolithic continuous, and chunked prefill batching architectures. {#tbl-scheduling-batching-comparison tbl-colwidths="[20,25,25,30]"}
+
+> **The Systems Rule of Thumb (The Piggybacking Invariant):** Because single-token autoregressive decoding is strictly memory-bus bound, accelerator tensor cores sit idle for tens of milliseconds per step awaiting parameter streaming ($t_{\text{weights}} \approx 41.8\text{ ms}$ for 70B on H100). Iteration piggybacking allows schedulers to inject up to $C^*$ prefill tokens per step without increasing inter-token latency by a single microsecond, turning stranded compute capacity into free prompt ingestion.
+
+[^fn-scheduling-chunk-derivation]: Equating the memory streaming floor $2 N_{\text{params}} / B_{\text{mem}}$ with execution compute time $[2 N_{\text{params}} (B_{\text{dec}} + C^*) + 4 L d_{\text{model}} C^* S_{\text{avg}}] / P_{\text{peak}}$ and solving for $C^*$ yields the critical chunk threshold that fully saturates arithmetic units without delaying decode step completion.
+
+### Python implementation: Chunked prefill scheduler
+
+The following production-grade implementation demonstrates the core logic of a chunked prefill scheduler, constructing balanced hybrid iterations under strict token budget constraints:
+
+```python
+from __future__ import annotations
+import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Dict, List, Optional, Tuple
+
+class RequestPhase(Enum):
+    WAITING_PREFILL = "WAITING_PREFILL"
+    CHUNKED_PREFILL = "CHUNKED_PREFILL"
+    DECODING = "DECODING"
+    COMPLETED = "COMPLETED"
+
+@dataclass
+class SequenceDescriptor:
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    prompt_tokens: List[int] = field(default_factory=list)
+    generated_tokens: List[int] = field(default_factory=list)
+    phase: RequestPhase = RequestPhase.WAITING_PREFILL
+    prefilled_tokens: int = 0
+    max_output_tokens: int = 64
+    arrival_time: float = 0.0
+
+    @property
+    def total_prompt_length(self) -> int:
+        return len(self.prompt_tokens)
+
+    @property
+    def remaining_prefill_tokens(self) -> int:
+        return self.total_prompt_length - self.prefilled_tokens
+
+    @property
+    def is_prefill_complete(self) -> bool:
+        return self.prefilled_tokens >= self.total_prompt_length
+
+@dataclass
+class HybridIterationBatch:
+    iteration_id: int
+    decode_requests: List[SequenceDescriptor] = field(default_factory=list)
+    prefill_chunks: List[Tuple[SequenceDescriptor, int]] = field(default_factory=list)
+    total_tokens: int = 0
+
+class ChunkedPrefillScheduler:
+    def __init__(self, max_token_budget: int = 1024, max_decode_batch_size: int = 32):
+        self.max_token_budget = max_token_budget
+        self.max_decode_batch_size = max_decode_batch_size
+        self.waiting_queue: List[SequenceDescriptor] = []
+        self.active_decode_pool: List[SequenceDescriptor] = []
+        self.iteration_counter: int = 0
+
+    def add_request(self, seq: SequenceDescriptor) -> None:
+        self.waiting_queue.append(seq)
+
+    def schedule_next_iteration(self) -> HybridIterationBatch:
+        self.iteration_counter += 1
+        batch = HybridIterationBatch(iteration_id=self.iteration_counter)
+
+        # 1. Admit all active decode requests (highest priority for ITL stability)
+        for seq in self.active_decode_pool:
+            if len(batch.decode_requests) < self.max_decode_batch_size:
+                batch.decode_requests.append(seq)
+                batch.total_tokens += 1
+
+        tokens_remaining_budget = self.max_token_budget - batch.total_tokens
+
+        # 2. Allocate remaining token budget to prefill chunks
+        idx = 0
+        while idx < len(self.waiting_queue) and tokens_remaining_budget > 0:
+            seq = self.waiting_queue[idx]
+            needed = seq.remaining_prefill_tokens
+            chunk_size = min(needed, tokens_remaining_budget)
+
+            if chunk_size > 0:
+                batch.prefill_chunks.append((seq, chunk_size))
+                batch.total_tokens += chunk_size
+                tokens_remaining_budget -= chunk_size
+                seq.phase = RequestPhase.CHUNKED_PREFILL
+                seq.prefilled_tokens += chunk_size
+
+            # If request finished prefill, promote it to decode pool for next step
+            if seq.is_prefill_complete:
+                seq.phase = RequestPhase.DECODING
+                self.active_decode_pool.append(seq)
+                self.waiting_queue.pop(idx)
+            else:
+                idx += 1
+
+        return batch
+
+    def step_simulation(self, batch: HybridIterationBatch) -> None:
+        """Simulate forward pass execution and state transitions."""
+        # Process decode completions
+        retired: List[SequenceDescriptor] = []
+        for seq in batch.decode_requests:
+            mock_token = 42  # Synthetic generated token ID
+            seq.generated_tokens.append(mock_token)
+            if len(seq.generated_tokens) >= seq.max_output_tokens or mock_token == 0:
+                seq.phase = RequestPhase.COMPLETED
+                retired.append(seq)
+
+        for seq in retired:
+            self.active_decode_pool.remove(seq)
+```
+
+While chunked prefill successfully bounds Inter-Token Latency jitter within a single GPU or tensor-parallel group, co-locating prefill and decode phases on the exact same physical silicon remains fundamentally suboptimal. Slicing prefills forces compute-dense GEMMs to interleave with memory-bound GEMVs across the same Streaming Multiprocessors, generating severe intra-core contention for L2 cache capacity and shared memory bandwidth. Furthermore, co-location forces both operational phases into a single, coupled Tensor Parallelism degree ($TP$), creating an unresolvable architectural deadlock: prompt prefill requires high tensor parallelism ($TP = 8$) to minimize Time-To-First-Token, while autoregressive decode throughput favors low tensor parallelism ($TP = 1$ or $TP = 2$) to eliminate latency-dominated cross-GPU all-reduce synchronization. To break this hardware gridlock and achieve true hardware specialization, the runtime must physically disaggregate prefill from decode across high-speed interconnects.
+
+## Disaggregated Serving: Separating Prefill and Decode {#sec-vol3-scheduling-disaggregated}
+
+Even with chunked prefill, a homogeneous accelerator cluster exhibits deep operational inefficiencies when serving multi-agent workflows. Consider a 64-GPU cluster deployed to serve an enterprise agentic coding platform. During the morning hours, hundreds of agents ingest large codebases, documentation indices, and compiler traces—a workload dominated by massive prefill requests demanding tens of petaflops of raw FP16/BF16 compute. In the afternoon, those same agents enter autonomous debugging loops, performing multi-step tool calls, emitting thought tokens, and evaluating small intermediate results—a decode-dominated workload demanding terabytes per second of aggregate memory bandwidth while leaving $85\%$ of the Tensor Cores unutilized.
+
+In a homogeneous cluster where every GPU executes both prefill and decode, systems architects are forced into an impossible trade-off:
+
+- Over-provisioning compute (e.g., procuring NVIDIA H100/B200 SXM clusters with top-tier Tensor Cores) incurs extreme financial expenditure, only for those Tensor Cores to sit idle during decode-heavy hours.
+- Over-provisioning memory capacity (e.g., adding nodes simply to acquire more aggregate HBM for KV caches) fragments compute utilization and drives up total cost of ownership (TCO).
+- Tensor parallelism degrees are locked: prefill latency demands high tensor parallelism ($TP = 8$) to slash Time-To-First-Token (TTFT), while decode throughput favors low tensor parallelism ($TP = 1$ or $TP = 2$) to minimize cross-GPU all-reduce collective communication overheads on memory-bound GEMVs.
+
+This fundamental mismatch led to the architecture of **Disaggregated Serving**\index{Disaggregated Serving} (pioneered in research by DistServe [@zhong2024distserve] and Splitwise [@patel2024], and validated at industrial scale by **Mooncake** [@qin2024mooncake] in the Kimi / Moonshot AI infrastructure). In Mooncake, the disaggregated runtime centers on a distributed **KVCache Store** that pools underutilized host DRAM, local NVMe SSDs, and remote GPU HBM across the cluster into a unified memory hierarchy, coordinating zero-copy RDMA transfers so that prefill and decode instances scale independently.
+
+### Physical prefill-decode disaggregation architecture
+
+Disaggregated serving physically partitions the accelerator fleet into two distinct, specialized hardware pools connected by a high-speed interconnect fabric (@fig-vol3-scheduling-disaggregation):
+
+1. **Prefill Workers ($P$-Nodes):** Optimized for compute density ($P_{\text{peak}}$). Because prefill is compute-bound, $P$-nodes can be provisioned using high-TFLOPS accelerators (e.g., PCIe-based H100s or specialized dense GEMM processors). $P$-nodes run with high Tensor Parallelism ($TP_P = 8$) to minimize TTFT for large prompts. They do not maintain long-lived KV caches; once a prefill forward pass completes, the resulting KV activations are immediately evicted across the network.
+2. **Decode Workers ($D$-Nodes):** Optimized for memory capacity and bandwidth ($B_{\text{mem}}$). Because decoding is memory-bandwidth bound, $D$-nodes prioritize maximum HBM capacity and bandwidth (e.g., NVIDIA H200 with $141\text{ GB}$ HBM3e at $4.8\text{ TB/s}$, or AMD Instinct MI300X with $192\text{ GB}$ at $5.3\text{ TB/s}$). $D$-nodes run with lower Tensor Parallelism ($TP_D = 1$ or $2$) and high Pipeline Parallelism, maximizing batch concurrency and amortizing parameter loading costs across dozens of streams.
+
+::: {#fig-vol3-scheduling-disaggregation fig-env="figure" fig-pos="htb" fig-cap="**Physical Prefill-Decode Disaggregation Architecture**: Decoupling compute-bound prefill workers from memory-bandwidth-bound decode workers via a zero-copy RDMA network fabric. Key-Value cache activations are streamed from P-nodes to D-nodes over RoCEv2/InfiniBand, eliminating phase interference and enabling independent horizontal scaling. Source: Author design." fig-alt="Architecture diagram showing Disaggregated Serving: Incoming agent requests hit a Distributed Orchestrator. The prompt is dispatched to a P-Node running high Tensor Parallelism. Generated KV blocks stream over an RDMA fabric into a D-Node running low Tensor Parallelism, which generates output tokens until a tool invocation occurs."}
+![](images/svg/prefill_decode_disaggregation.svg)
+:::
+
+The lifecycle of an agent execution turn in a disaggregated serving system proceeds through five stages:
+
+1. **Admission and Routing:** An incoming agent request carrying prompt $\mathbf{x} = (x_1, \dots, x_S)$ arrives at the global cluster orchestrator. The orchestrator dispatches the request to an available $P$-node pool.
+2. **Prompt Evaluation:** The $P$-node evaluates the full prompt across its Tensor Cores, computing the hidden states and generating the Key and Value activation tensors for all $L$ layers.
+3. **KV Cache Network Transfer:** The $P$-node transfers the newly generated KV blocks across the interconnect fabric to the designated $D$-node hosting the agent's decode session.
+4. **Autoregressive Decoding:** The $D$-node loads the received KV cache into its local PagedAttention memory pool, computes the first token logits, and generates output tokens sequentially.
+5. **Tool Suspension / Re-Routing:** If the agent emits a tool call, the $D$-node releases its decode slot. When the tool observation returns with an expanded prompt, the updated sequence is routed back to a $P$-node, repeating the cycle.
+
+### The KV transfer network invariant and bottleneck analysis
+
+The primary engineering challenge in disaggregated serving is the **KV transfer tax**\index{KV transfer tax}: moving gigabytes of intermediate activation memory across network switches without destroying the latency gains achieved by compute specialization.
+
+To quantify this challenge, consider the physical footprint of the KV cache for a context sequence of length $S$. In a transformer with $L$ layers, $H_{\text{KV}}$ key-value heads, per-head dimension $d_h$, and numerical precision of $b_{\text{elem}}$ bytes per element, total resident memory footprint is governed by @eq-vol3-scheduling-kv-footprint:
+
+$$
+S_{\text{KV}}(S) = 2 L H_{\text{KV}} d_h S \cdot b_{\text{elem}} \quad \text{bytes}
+$$ {#eq-vol3-scheduling-kv-footprint}
+
+For the standard Llama-3-70B architecture ($L = 80, d_{\text{model}} = 8192, H_{\text{KV}} = 8, d_h = 128, b_{\text{elem}} = 2$) [@dubey2024llama], the KV cache memory density evaluates to $\sigma_{\text{KV}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ bytes/token} \approx 320\text{ KB/token}$. For an agent operating with an extended horizon of $S = 64\text{k} = 65{,}536$ tokens, resident context memory footprint reaches $S_{\text{KV}}(64\text{k}) \approx 21.47\text{ GB}$.
+
+Transferring $21.47\text{ GB}$ of raw activation memory across a network interface introduces physical communication delay. Total transfer latency $t_{\text{transfer}}$ across an effective network bandwidth $B_{\text{net}}$ is governed by @eq-vol3-scheduling-kv-transfer:
+
+$$
+t_{\text{transfer}} = \frac{S_{\text{KV}}}{B_{\text{net}}} + t_{\text{setup}}
+$$ {#eq-vol3-scheduling-kv-transfer}
+
+where $t_{\text{setup}}$ represents RDMA queue pair connection and memory registration overhead ($\approx 0.5\text{--}2\text{ ms}$).[^fn-scheduling-network-fabrics]
+
+@Tbl-vol3-scheduling-network-fabrics evaluates transfer latency across four generations of data center network fabrics.
+
+| Network Fabric Generation     | Physical Link Rate | Effective Bandwidth ($B_{\text{net}}$) | 64k KV Transfer Time ($21.47\text{ GB}$) | Time-to-First-Token Consequence                |
+|:------------------------------|:------------------:|:--------------------------------------:|:----------------------------------------:|:-----------------------------------------------|
+| **Standard Ethernet**         |      100 Gbps      |           $12.5\text{ GB/s}$           |  $1{,}718\text{ ms}$ ($1.72\text{ s}$)   | Catastrophic (completely wipes prefill gains)  |
+| **RoCEv2 / InfiniBand (NDR)** |      400 Gbps      |            $50\text{ GB/s}$            |            $429.4\text{ ms}$             | Substantial delay (exceeds interactive target) |
+| **InfiniBand (XDR / 2x NDR)** |      800 Gbps      |           $100\text{ GB/s}$            |            $214.7\text{ ms}$             | Bounded overhead                               |
+| **Scale-Up NVLink Network**   |      3.6 Tbps      |           $450\text{ GB/s}$            |             $47.7\text{ ms}$             | Negligible (well within TTFT budget)           |
+
+: **Interconnect Fabric Bandwidth and 64k KV Transfer Latency**: Physical transfer time and operational consequences of migrating a $21.47\text{ GB}$ context memory buffer across network generations. {#tbl-vol3-scheduling-network-fabrics tbl-colwidths="[25,18,18,20,19]"}
+
+On standard 100 Gbps Ethernet, a $1.72\text{-second}$ transfer latency erases the speedup of running prefill on dedicated accelerator nodes and breaches interactive TTFT service-level objectives. Even on 400 Gbps RoCEv2 fabrics, raw bulk transfer adds over $400\text{ ms}$ of unmasked delay unless the runtime actively overlaps transmission with execution.
+
+> **The Systems Rule of Thumb (The KV Network Invariant):** Disaggregated serving only preserves Time-to-First-Token advantages when network interconnect throughput exceeds the KV state footprint: $t_{\text{transfer}} \ll t_{\text{prefill}}$. Transferring a $64\text{k}$ KV cache ($21.47\text{ GB}$ on 70B models) across commodity 100 Gbps Ethernet introduces an intolerable $1.72\text{-second}$ delay that wipes out prefill speedups. Production disaggregation requires high-performance RDMA fabrics ($\ge 400\text{ Gbps}$) or pipelined layer streaming to keep transfer latency bounded below 50 milliseconds.
+
+[^fn-scheduling-network-fabrics]: Effective bandwidth assumes unconstrained line-rate transfers without queue congestion or packet drops. In multi-tenant enterprise clusters, incast congestion and switch buffer oversubscription can inflate tail transfer times by $2\times$ to $5\times$.
+
+### The KV streaming invariant
+
+To prevent $t_{\text{transfer}}$ from penalizing Time-To-First-Token, modern disaggregated runtimes implement **asynchronous layer-pipelined KV streaming**\index{Asynchronous KV streaming}.
+
+Rather than waiting for the entire forward pass across all $L$ layers to conclude before opening network sockets, the $P$-node initiates an asynchronous RDMA write into the $D$-node's pre-allocated HBM buffer as soon as layer $l$'s Key and Value tensors are produced.
+
+Let $\tau_{\text{compute}}(l) \approx (2 N_{\text{params, layer}} S + 4 H d_h S^2) / P_{\text{eff}}$ denote the computation duration of layer $l$, and let $\tau_{\text{transfer}}(l) = (2 H_{\text{KV}} d_h S \cdot b_{\text{elem}}) / B_{\text{RDMA}}$ denote the network transmission duration of layer $l$'s Key-Value activations.
+
+::: {.callout-note title="Lemma 11.1: The KV streaming invariant"}
+If the network transmission time of layer $l$'s KV cache is strictly less than or equal to the computation time of layer $l+1$'s forward pass (@eq-kv-streaming-invariant):
+
+$$
+\tau_{\text{transfer}}(l) \le \tau_{\text{compute}}(l+1) \quad \forall l \in \{1, \dots, L-1\}
+$$ {#eq-kv-streaming-invariant}
+
+then all intermediate network transfer latency is completely hidden behind forward-pass compute. The effective transfer penalty observed by the end-user collapses to the transmission duration of the final layer $L$ ($\Delta t_{\text{visible}} = \tau_{\text{transfer}}(L)$), governed by @eq-vol3-scheduling-visible-transfer:
+
+$$
+\Delta t_{\text{visible}} = \frac{S_{\text{KV}}}{L \cdot B_{\text{RDMA}}}
+$$ {#eq-vol3-scheduling-visible-transfer}
+:::
+
+For Llama-3-70B with an extended context of $S = 64\text{k}$ across a 400 Gbps RDMA interconnect ($B_{\text{RDMA}} = 50\text{ GB/s}$), @eq-vol3-scheduling-visible-transfer evaluates to $\Delta t_{\text{visible}} = 21.47\text{ GB} / (80 \times 50\text{ GB/s}) \approx 5.37\text{ ms}$.[^fn-scheduling-streaming-overlap]
+
+By enforcing the KV streaming invariant, the disaggregated runtime transfers over $21\text{ GB}$ of activation context while adding only $5.4\text{ ms}$ of visible overhead to the end-to-end Time-To-First-Token.
+
+> **The Systems Rule of Thumb (The Pipelined Streaming Invariant):** Asynchronous layer-by-layer KV streaming hides network latency behind forward-pass compute whenever layer transmission time is less than subsequent layer compute time ($\tau_{\text{transfer}}(l) \le \tau_{\text{compute}}(l+1)$). When satisfied, visible transfer latency collapses from the entire context footprint down to a single layer ($S_{\text{KV}} / (L \cdot B_{\text{RDMA}}) \approx 5.4\text{ ms}$ for 64k context on 400 Gbps RDMA), completely neutralizing the disaggregation network tax.
+
+[^fn-scheduling-streaming-overlap]: While layer $l+1$ executes forward-pass matrix multiplications, layer $l$'s Key-Value activations are transmitted concurrently over direct memory access (DMA) channels. Because network transmission finishes before subsequent layer computation concludes, only the terminal layer's transfer remains unoverlapped.
+
+Physical disaggregation specializes hardware nodes and neutralizes the KV transfer tax, but physical specialization alone cannot protect cluster stability against workload heterogeneity. When incoming requests originate from diverse agent classes—ranging from low-latency interactive developer completions to multi-hour autonomous debugging loops—a naive cluster control plane suffers from catastrophic queueing interference. Even on physically decoupled pools, admitting long-running, unpredictable reasoning trajectories into unweighted FIFO queues paralyzes the prefill and decode dispatch pipelines. To preserve Quality of Service across the cluster, the runtime must formalize decoupled Service-Level Objectives and deploy priority-aware queueing disciplines grounded in the mathematical realities of heavy-tailed workloads.
+
+## Priority Scheduling and Service-Level Objectives for Agent Swarms {#sec-vol3-scheduling-priority}
+
+In an enterprise multi-agent deployment, request streams are fundamentally heterogeneous. Consider a system supporting two concurrent classes of agents:
+
+1. **Interactive Developer Agents:** Human engineers issuing natural language instructions to an IDE agent for real-time code completion, syntax explanation, and inline refactoring. These sessions require immediate responsiveness: Time-To-First-Token must not exceed $500\text{ ms}$, and Inter-Token Latency must remain below $30\text{ ms}$ ($>33\text{ tokens/sec}$, matching human reading speed).
+2. **Autonomous Background Triage Swarms:** Hundreds of worker agents autonomously crawling repositories, running static analysis linters, bisecting regression tests, and attempting test compilations. These tasks are long-running, asynchronous, and batch-oriented; their completion deadlines span minutes to hours.
+
+If both workloads feed into a single, unweighted First-In-First-Out (FIFO) serving queue, the system experiences immediate operational collapse. An autonomous agent embarking on a 400-step test bisection loop occupies a decode slot on an accelerator node for 30 minutes. Interactive developer queries queue up behind it, suffering multi-minute queueing delays for requests that require only 200 milliseconds of actual compute.
+
+To guarantee Quality of Service (QoS) across heterogeneous agent fleets, the runtime must formalize Service-Level Objectives and deploy priority-aware queueing disciplines calibrated against the mathematical realities of heavy-tailed workloads.
+
+### Service-level objectives in agent serving
+
+In traditional web microservices, performance is summarized by a single scalar metric: total end-to-end request response latency. In agentic large language model (LLM) serving, single-scalar latency is structurally inadequate because inference is an incremental, autoregressive process. The serving runtime must enforce two decoupled **Service-Level Objectives (SLOs)**\index{Service-Level Objectives (SLOs)}:
+
+1. **Time-To-First-Token ($SLO_{\text{TTFT}}$):** The elapsed wall-clock time from when the agent submits a prompt $\mathbf{x}$ to when the serving system emits the initial generated token $y_1$:
+   $$TTFT = t_{\text{first\_token}} - t_{\text{arrival}} \le SLO_{\text{TTFT}}$$
+   TTFT is governed by queue waiting time, prompt prefill latency, and (in disaggregated systems) KV transfer time.
+2. **Inter-Token Latency ($SLO_{\text{ITL}}$):** The time elapsed between the emission of consecutive generated tokens:
+   $$ITL_k = t_{k} - t_{k-1} \le SLO_{\text{ITL}} \quad \forall k \in \{2, \dots, N_{\text{out}}\}$$
+   ITL is governed by the iteration forward-pass duration of the decode engine.
+
+To capture whether an agent's execution was actually useful, systems engineers define **Goodput**\index{Goodput}:
+$$\mathcal{G} = \frac{1}{T_{\text{total}}} \sum_{i=1}^{N_{\text{req}}} \mathbf{1}\left( TTFT_i \le SLO_{\text{TTFT}} \;\land\; \max_k ITL_{i,k} \le SLO_{\text{ITL}} \right) \quad \left[ \frac{\text{requests}}{\text{second}} \right]$$
+
+A request that generates 500 tokens at high speed but suffered a 30-second initial queue delay, or a request whose streaming tokens stuttered beyond human reading thresholds, represents **wasted compute**: the accelerator burned kilowatt-hours of electrical energy and gigabytes of memory bandwidth, yet the output violated its SLA and failed the user experience.
+
+### The queueing dynamics of heavy-tailed agent workloads
+
+Why do classical scheduling disciplines fail so completely when applied to multi-agent swarms? The answer lies in the probability distribution of agent execution horizons.
+
+In human conversational search, prompt and generation lengths cluster around moderate values with bounded variance (often modeled as log-normal or Poisson arrivals with bounded service times). In contrast, autonomous agent trajectories exhibit **heavy-tailed Pareto distributions**\index{Heavy-tailed Pareto distributions}. An agent tasked with finding a bug may terminate in 2 steps (a missing semicolon) or expand into 300 steps across multiple subagents (bisecting commits, compiling binaries, executing integration tests).
+
+Let $X$ denote the service time (measured in total generated tokens or forward-pass execution steps) of an agent trajectory. While conversational chatbot queries exhibit bounded variance, autonomous agent execution steps follow a heavy-tailed Pareto distribution: $P(X > x) = (x_m / x)^\alpha$ for $x \ge x_m$, where $x_m > 0$ is the minimum task horizon (e.g., $x_m = 2$ steps) and $\alpha > 0$ is the Pareto tail index.
+
+For $\alpha > 1$, the first moment (mean service time) converges to $\mathbb{E}[X] = \alpha x_m / (\alpha - 1)$. However, when $\alpha \le 2$, the second raw moment $\mathbb{E}[X^2]$ diverges to infinity.[^fn-scheduling-pareto-variance] Empirical measurements across production agent fleets (such as SWE-bench execution traces and autonomous web-browsing agents) reveal tail indices strictly within the heavy-tailed band $\alpha \in [1.1, 1.4]$. The workload exhibits **infinite theoretical variance**.
+
+#### The mathematical collapse of FIFO queueing
+In an inference serving engine, batch slots and KV cache page frames are finite physical resources. When requests are scheduled in strict First-In-First-Out (FIFO) order, an incoming task cannot begin execution until preceding tasks yield their slots. If service times have low variance (such as standard chatbot queries requiring 200–400 tokens), FIFO performs stably. But when service times follow a heavy-tailed distribution, catastrophic Head-of-Line (HoL) blocking emerges.
+
+Consider an inference serving node modeled as an $M/G/1$ queue with Poisson arrival rate $\lambda$, arbitrary service time distribution $X$, and server utilization $\rho = \lambda \mathbb{E}[X] < 1$. By the classical Pollaczek-Khinchine formula [@kleinrock1975queueing; see @sec-vol3-appendix-math-queueing], the expected waiting time in the queue is governed by @eq-pollaczek-khinchine:
+
+$$
+\mathbb{E}[W_{\text{FIFO}}] = \frac{\lambda \mathbb{E}[X^2]}{2(1 - \rho)}
+$$ {#eq-pollaczek-khinchine}
+
+Notice the critical vulnerability in @eq-pollaczek-khinchine: expected waiting time scales not with the average task duration $\mathbb{E}[X]$, but with the second raw moment of service time $\mathbb{E}[X^2]$. For empirical agent workloads where $\alpha \in [1.1, 1.4]$, the second moment diverges to infinity ($\mathbb{E}[X^2] \to \infty$; see proof in @sec-vol3-appendix-math-pareto).[^fn-scheduling-pareto-variance]
+
+This divergence is the mathematical root cause of real-world cluster freezes. In an actual GPU cluster, when a long-running 300-step agent enters the server, it seizes an active decode slot for minutes. Because the tail is heavy, dozens of quick 2-step verification requests back up in the external queue behind it. Even when average GPU utilization looks modest ($\rho \approx 0.6$), average queue latency explodes toward infinity as long-horizon outliers monopolize the serving slots. FIFO is structurally broken for multi-turn agent systems.
+
+> **The Systems Rule of Thumb (The Heavy-Tailed Queueing Catastrophe):** Because autonomous agent trajectories exhibit heavy-tailed Pareto execution horizons with shape parameter $\alpha \in [1.1, 1.4]$, workload service times have divergent variance ($\mathbb{E}[X^2] \to \infty$). Under standard First-In-First-Out (FIFO) queueing, the Pollaczek-Khinchine formula guarantees infinite average waiting times ($\mathbb{E}[W_{\text{FIFO}}] \to \infty$) as long-running reasoning trajectories block the queue. Serving runtimes must never schedule heterogeneous agent workloads via FIFO; non-clairvoyant prioritization or preemptive multi-level feedback queues are strictly required.
+
+[^fn-scheduling-pareto-variance]: For the complete mathematical derivation of divergent second moments under Pareto distributions and its queueing implications, see @sec-vol3-appendix-math-pareto and @sec-vol3-appendix-math-queueing.
+
+### Least attained service (LAS) scheduling
+
+In classical operating systems, when task durations are known in advance, **shortest remaining processing time** (SRPT) is provably optimal for minimizing mean response time. In autonomous agent serving, however, remaining processing time is fundamentally unknown. An agent is a stochastic, closed-loop process; whether it will resolve its task on the next turn or require 50 more turns depends on the unpredictable return values of external tools. Clairvoyant SRPT cannot be implemented.
+
+We must turn to **non-clairvoyant scheduling**\index{Non-clairvoyant scheduling}. Fortunately, heavy-tailed distributions possess a structural property that makes non-clairvoyant optimization possible: the **Decreasing Hazard Rate (DHR)**\index{Decreasing Hazard Rate}.
+
+The hazard rate $h(x) = f(x) / [1 - F(x)]$ represents the conditional probability density that a task will finish in the next infinitesimal interval, given that it has already executed for duration $x$. For a Pareto distribution with tail index $\alpha > 0$, the hazard rate evaluates to $h(x) = \alpha / x$, yielding a strictly negative derivative in @eq-decreasing-hazard:
+
+$$
+\frac{d}{dx} h(x) = -\frac{\alpha}{x^2} < 0 \quad \forall x > 0
+$$ {#eq-decreasing-hazard}
+
+where $h(x)$ decreases monotonically with attained service $x$.[^fn-scheduling-decreasing-hazard]
+
+The physical implication of @eq-decreasing-hazard directly reflects real-world engineering experience: **the longer an agent has been running, the less likely it is to complete in the next step**. Think of an agent debugging a software repository:
+
+- On turn 1, it may simply answer a factual query or fix a syntax typo; its instantaneous probability of terminating on the next turn is high ($h(1) = \alpha$).
+- On turn 100, that same agent has encountered repeated compiler errors, test failures, or web timeouts; it has branched into a deep troubleshooting loop. Its instantaneous probability of terminating on the next step has plummeted by a factor of 100 ($h(100) = \alpha / 100$).
+
+Because remaining execution time stochastically increases with attained service, non-clairvoyant schedulers must always give priority to younger tasks over older ones. To minimize mean response time under decreasing hazard rates, the mathematically optimal non-clairvoyant discipline is **Least Attained Service (LAS)**\index{Least Attained Service} (also known as Feedback or Foreground-Background scheduling).
+
+Under LAS:
+
+1. The scheduler always allocates compute to the active task(s) that have accumulated the least total service (fewest executed tokens or forward passes) so far.
+2. Newly arrived tasks, having attained zero service ($x = 0$), immediately preempt older tasks that have accumulated significant service.
+3. If multiple tasks share the exact same minimum attained service, they share compute equally via Generalized Processor Sharing.
+
+LAS exploits the Pareto property: it prioritizes the vast majority of tasks that terminate quickly, clearing them from the system with near-zero waiting time, while gracefully degrading the latency of the few massive outlier tasks that would otherwise starve the cluster.
+
+> **The Systems Rule of Thumb (The Decreasing Hazard Principle):** For heavy-tailed agent workloads, the longer an agent has executed, the lower its instantaneous probability of completion ($d h(x) / dx = -\alpha / x^2 < 0$). Least Attained Service (LAS) scheduling minimizes mean cluster completion time by continuously giving priority to newly spawned tasks over aging, compute-heavy trajectories, preventing outlier agents from starving interactive workloads.
+
+[^fn-scheduling-decreasing-hazard]: For Pareto density $f(x) = \alpha x_m^\alpha x^{-(\alpha + 1)}$ and survival function $1 - F(x) = (x_m / x)^\alpha$, the quotient simplifies directly to $h(x) = \alpha / x$. The strictly negative derivative confirms that remaining lifetime stochastically increases with attained service.
+
+### Multi-level feedback queues (MLFQ) for continuous token runtimes
+
+Implementing pure LAS requires continuous fine-grained preemption at every forward pass. In production serving clusters, frequent context eviction incurs bus transfer overheads. Schedulers approximate LAS using a discrete **Multi-Level Feedback Queue (MLFQ)**\index{Multi-Level Feedback Queue} (@fig-vol3-scheduling-architecture).
+
+::: {#fig-vol3-scheduling-architecture fig-env="figure" fig-pos="htb" fig-cap="**Trajectory Scheduling Architecture and Multi-Level Feedback Queues**: Incoming agent trajectories enter the highest-priority queue ($Q_0$). As agents accumulate service tokens without terminating, they are progressively demoted to lower-priority queues ($Q_1, Q_2$), protecting interactive developer requests from heavy-tailed background starvation. Source: Author design." fig-alt="Diagram showing an MLFQ scheduling architecture: Level 0 (Highest priority, short jobs, immediate admission), Level 1 (Medium jobs), Level 2 (Long-running batch agents). Preemption triggers and starvation-prevention priority boost arrows connect the queues."}
+![](images/svg/trajectory_scheduling_architecture.svg)
+:::
+
+The MLFQ architecture partitions pending and active agent contexts across $K$ priority queues $\mathcal{Q} = \{Q_0, Q_1, \dots, Q_{K-1}\}$, governed by an increasing sequence of service quantum thresholds $0 = T_0 < T_1 < T_2 < \dots < T_K = \infty$.
+
+The dispatch and promotion policies operate under strict invariants:
+
+1. **Admit High:** Every newly arriving agent trajectory is placed in the highest-priority queue $Q_0$.
+2. **Prioritize Low Service:** The scheduler always fills available accelerator batch slots from queue $Q_i$ before examining queue $Q_{i+1}$.
+3. **Demote on Attainment:** When an agent running in queue $Q_i$ accumulates total service tokens $s \ge T_{i+1}$ without terminating or blocking on external I/O, it is preempted from the batch, demoted to queue $Q_{i+1}$, and yields its slot to waiting higher-priority agents.
+4. **Starvation Prevention via Priority Boosting:** If an agent in the lowest-priority queue $Q_{K-1}$ sits idle for longer than a starvation threshold $t_{\text{starve}}$, the scheduler temporarily boosts its priority to $Q_0$, guaranteeing eventual forward progress.
+
+> **The Systems Rule of Thumb (The MLFQ Demotion Invariant):** Multi-Level Feedback Queues discretize Least Attained Service without incurring continuous preemption overhead. By admitting all new agent tasks into highest priority ($Q_0$) and demoting them across service quantum thresholds ($s \ge T_{i+1}$), interactive developer requests complete with near-zero queueing latency while long-running reasoning loops are gracefully isolated into lower-priority queues without starving the cluster.
+
+::: {#chk-vol3-11-pareto-mlfq-scheduling .callout-checkpoint title="Heavy-tailed Pareto scheduling and MLFQ"}
+
+Before examining cache-aware prefix routing and distributed load balancing, verify your understanding of multi-turn scheduling:
+
+- [ ] **Decreasing hazard rate**: explain why agent trajectories governed by a Pareto distribution exhibit a decreasing hazard rate ($d h(x) / dx < 0$), and why this makes FIFO scheduling vulnerable to queue collapse.
+- [ ] **MLFQ priority demotion**: how does a Multi-Level Feedback Queue isolate long-running background reasoning loops without starving interactive developer suggestions?
+- [ ] **Decoupled SLOs and Goodput**: explain why evaluating agent serving with a single end-to-end latency metric hides critical failures, and formulate how the goodput metric captures both TTFT and ITL compliance.
+
+:::
+
+While Multi-Level Feedback Queues govern the temporal prioritization of compute across heavy-tailed agent horizons, scheduling compute across time resolves only half the cluster optimization challenge. When dozens of agents in an autonomous swarm collaborate on a shared code repository or tool ecosystem, their prompts contain vast, overlapping token sequences. How should the cluster orchestrator route requests spatially across distributed nodes to eliminate redundant prefill computation without causing memory hot-spotting? This requires cache-aware load balancing and prefix routing.
+
+## Cache-Aware Load Balancing and Prefix Routing {#sec-vol3-scheduling-prefix-routing}
+
+In multi-agent systems, agents rarely operate in isolated lexical vacuums. Consider an autonomous software engineering swarm where 40 developer agents collaborate on a single repository:
+
+- Every agent is injected with an identical $16\text{k}$-token **System Prompt** containing role descriptions, organizational safety guidelines, and persona constraints.
+- Every agent receives an identical $8\text{k}$-token **Tool Schema Definition** defining the JSON schemas for the compiler, git CLI, file tree inspector, and debugger.
+- Every agent working on a specific microservice shares an identical $12\text{k}$-token **Repository Architecture Summary**.
+
+Out of each agent's $40\text{k}$-token prompt, $36\text{k}$ tokens ($90\%$) are completely identical across all 40 agents!
+
+If an uncoordinated cluster router (such as a standard Round-Robin, Random, or Least-Connections proxy) distributes these 40 incoming requests across 8 independent GPU serving nodes, every single node independently evaluates and stores the exact same $36\text{k}$-token prefix. The cluster wastes:
+$$\text{Redundant Tokens} = 8 \times 36{,}000 = 288{,}000 \text{ prefill tokens}$$
+Translating this into hardware waste on an 8-node H100 cluster running Llama-3-70B:
+
+- Compute waste: $2 \times 70\times 10^9 \times 288{,}000 \approx 4.03 \times 10^{16}\text{ FLOPs}$ of completely redundant Tensor Core computation.
+- Memory waste: $8 \text{ nodes} \times (36{,}000 \times 320\text{ KB/token}) \approx 92.16\text{ GB}$ of scarce HBM consumed storing identical, duplicated KV blocks.
+
+To prevent this catastrophic waste, modern agent serving runtimes must deploy **Cache-Aware Load Balancing**\index{Cache-Aware Load Balancing} and **Prefix Routing**\index{Prefix Routing}.
+
+### Prefix caching and radix tree context indexing
+
+In @sec-vol3-virtual-memory, we established that modern inference engines manage context memory using virtual memory paging (PagedAttention [@kwon2023vllm]) and prefix caching structures such as **Radix Trees**\index{Radix Tree} (SGLang [@zheng2023sglang]).
+
+In a prefix-cached engine, tokens are grouped into fixed-size physical memory blocks (typically 16 or 32 tokens per block). The serving node maintains a Radix Tree (or Trie) in host DRAM, where each path from the root node to an internal node represents a unique token prefix, and the node holds pointers to the physical HBM blocks containing the computed Key and Value tensors for that prefix (@tbl-vol3-scheduling-radix-prefix-tree):
+
+| Tree Level / Depth     | Logical Context Component      | Token Length                      | Cumulative Token Offset     | Physical HBM Allocation | Swarm Sharing Scope                        |
+|:-----------------------|:-------------------------------|:----------------------------------|:----------------------------|:------------------------|:-------------------------------------------|
+| **Level 0 (Root)**     | Empty Root Sentinel            | $0\text{ tokens}$                 | $0$                         | None (null pointer)     | Global cluster root                        |
+| **Level 1**            | Base System Prompt             | $16{,}384\text{ tokens}$          | $0\text{--}16{,}383$        | Blocks `#101`--`#110`   | Shared by all 40 swarm agents ($100\%$)    |
+| **Level 2**            | Tool Schema Definitions        | $8{,}192\text{ tokens}$           | $16{,}384\text{--}24{,}575$ | Blocks `#201`--`#205`   | Shared by all 40 swarm agents ($100\%$)    |
+| **Level 3 (Branch A)** | Repository Subsystem A Context | $12{,}288\text{ tokens}$          | $24{,}576\text{--}36{,}863$ | Blocks `#301`--`#308`   | Shared by Sub-team A (20 developer agents) |
+| **Level 3 (Branch B)** | Repository Subsystem B Context | $12{,}288\text{ tokens}$          | $24{,}576\text{--}36{,}863$ | Blocks `#401`--`#407`   | Shared by Sub-team B (20 developer agents) |
+| **Level 4 (Leaves)**   | User Instruction & Local Turns | Variable ($1\text{k--}4\text{k}$) | $36{,}864+$                 | Unshared dynamic blocks | Private to individual agent instance       |
+
+: **Radix Prefix Tree Hierarchy for Multi-Agent Swarm Workloads**: Logical prefix tree structure indexing shared token sequences to physical PagedAttention HBM blocks across collaborative agent trajectories. {#tbl-vol3-scheduling-radix-prefix-tree tbl-colwidths="[15,20,15,15,18,17]"}
+
+When a request arrives at a node whose Radix Tree already contains the prompt prefix:
+
+1. The node skips prefill computation for the matching prefix blocks.
+2. The prefill engine evaluates only the newly appended tokens (the suffix).
+3. Time-To-First-Token for the shared prefix drops from hundreds of milliseconds to zero!
+
+However, single-node Radix caching is powerless if the global load balancer routes requests to nodes that do not hold the prefix in memory. Cache-aware load balancing lifts prefix awareness from the single-GPU memory manager up into the distributed cluster control plane.
+
+### The cache-aware routing architecture
+
+In a cache-aware cluster, the global routing layer maintains a **Global Prefix Directory**\index{Global Prefix Directory}. This directory tracks which worker nodes hold which prefix blocks in their local memory pools (@fig-vol3-scheduling-prefix-routing).
+
+::: {#fig-vol3-scheduling-prefix-routing fig-env="figure" fig-pos="htb" fig-cap="**Cache-Aware Prefix Routing Architecture**: The global router evaluates incoming agent requests against a distributed prefix index. Requests sharing common system prompts and tool schemas are steered to nodes with existing warm KV cache blocks, maximizing cache hit rates while balancing compute load. Source: Author design." fig-alt="Flowchart showing Cache-Aware Prefix Routing: An incoming request prompt is fingerprinted. The router queries its Global Radix Directory to find nodes with matching prefixes. It computes a joint affinity-load score and dispatches the request to the optimal worker node."}
+![](images/svg/cache_aware_prefix_routing.svg)
+:::
+
+#### Prefix fingerprinting and chunk hashing
+To avoid transmitting full multi-thousand-token prompts to the router for string comparison, prompts are fingerprinted using rolling chunk hashes. The token sequence $\mathbf{x} = (x_1, \dots, x_S)$ is partitioned into chunks of $B_{\text{chunk}} = 16$ tokens ($c_k = (x_{(k-1)B_{\text{chunk}} + 1}, \dots, x_{k B_{\text{chunk}}})$), with recursive Merkle chunk hashes computed via $h_k = \text{Hash}(h_{k-1} \parallel c_k)$ from initial vector $h_0 = \text{IV}$.
+
+A request's prefix is thus uniquely represented as a sequence of 64-bit integers $[h_1, h_2, \dots, h_m]$. The router maintains a hash-indexed Trie mapping prefix hashes $h_k$ to the set of worker nodes $\mathcal{W}(h_k) \subseteq \{1, \dots, M\}$ that currently hold that prefix in HBM.
+
+#### The joint routing objective function
+Routing purely on prefix cache hits can create devastating load imbalances: if 90 percent of requests share a popular developer system prompt, routing all requests to the node holding that prompt will overwhelm that node's queue while peer nodes sit idle.
+
+The cache-aware router must optimize a joint objective balancing **cache affinity** against **worker queue load**.
+
+Let $\mathcal{W} = \{w_1, \dots, w_M\}$ denote the set of active serving nodes. For an incoming request $r$ with sequence length $S$, let $\text{MatchTokens}(r, w_j)$ denote the number of prefix tokens of $r$ currently cached in node $w_j$'s HBM. Let $L_j$ denote the current load of node $w_j$ (measured as the fraction of allocated memory blocks or queued tokens relative to capacity $L_{\text{max}}$). The router selects worker node $w^*$ via @eq-vol3-scheduling-cache-routing:
+
+$$
+w^* = \arg\max_{w_j \in \mathcal{W}} \left\{ \mu \cdot \frac{\text{MatchTokens}(r, w_j)}{S} - (1 - \mu) \cdot \left(\frac{L_j}{L_{\text{max}}}\right)^\gamma \right\}
+$$ {#eq-vol3-scheduling-cache-routing}
+
+where $\mu \in [0, 1]$ is the cache affinity coefficient ($\mu = 1$ is pure cache affinity, $\mu = 0$ is pure load-balancing) and $\gamma \ge 1$ is the load penalty exponent.[^fn-scheduling-affinity-routing]
+
+To see how this equation behaves in practice, consider an incoming prompt with $S = 16\text{k}$ tokens in a cluster configured with $\mu = 0.7$ and $\gamma = 2$:
+
+- **Node A** holds $12\text{k}$ cached prefix tokens ($\text{MatchTokens} / S = 0.75$) and operates at $70\%$ memory load ($L_A / L_{\text{max}} = 0.70$):
+  $$\text{Score}_A = 0.70 \times 0.75 - 0.30 \times (0.70)^2 = 0.525 - 0.147 = +0.378$$
+- **Node B** is completely cold ($\text{MatchTokens} = 0$) but lightly loaded ($L_B / L_{\text{max}} = 0.20$):
+  $$\text{Score}_B = 0.70 \times 0.00 - 0.30 \times (0.20)^2 = 0.000 - 0.012 = -0.012$$
+
+Node A easily wins the request, sparing the cluster from recomputing $12\text{k}$ tokens ($3.8\text{ GB}$ of KV cache on a 70B model). However, if Node A's memory fills to $95\%$ load ($L_A / L_{\text{max}} = 0.95$), its score drops to $0.525 - 0.30 \times (0.95)^2 = +0.254$.
+
+The quadratic exponent $\gamma = 2$ acts like an elastic barrier: below $70\%$ capacity, the load penalty is gentle, allowing prefix affinity to steer traffic freely; but as memory approaches $90\text{--}95\%$ saturation, the penalty escalates steeply, deflecting new requests to prevent GPU out-of-memory (OOM) evictions and cache thrashing.
+
+> **The Systems Rule of Thumb (The Affinity-Load Balance Principle):** Routing multi-agent traffic purely on prefix cache hits ($\mu = 1$) triggers devastating queue hot-spotting, while naive round-robin routing ($\mu = 0$) wastes terabytes of GPU memory recomputing identical system prefixes. Schedulers must evaluate a joint objective balancing matched prefix tokens against memory utilization with non-linear saturation penalties ($\gamma \ge 2$), ensuring high KV cache hit rates without stranding peer accelerators.
+
+[^fn-scheduling-affinity-routing]: The non-linear load penalty exponent ($\gamma \in [2, 3]$) creates steep deflection away from worker nodes operating above 85 percent memory capacity, preventing queue spillover and avoiding expensive GPU out-of-memory preemption.
+
+### Consistent hashing with bounded loads for token prefixes
+
+To implement cache-aware routing statelessly at line rate, distributed systems adapt **Consistent Hashing with Bounded Loads** [@mirrokni2018consistent].
+
+In classical consistent hashing, worker nodes are mapped to points on a unit circle $\mathbb{S}^1$. A request's primary prefix hash $h_{\text{prefix}}$ is mapped to the circle, and the request is assigned to the first node encountered moving clockwise. Under non-uniform agent workloads, however, a single popular agent workflow will direct an unbounded cascade of requests to a single node.
+
+To enforce load bounds, let $\bar{L} = \frac{1}{M} \sum_{j=1}^M L_j$ denote the average cluster load, and define an allowed load ceiling:
+$$L_{\text{cap}} = (1 + \epsilon) \bar{L}$$
+where $\epsilon > 0$ is a tolerance parameter (typically $\epsilon \in [0.15, 0.30]$).
+
+When routing request $r$ with prefix hash $h_{\text{prefix}}$:
+
+1. Locate the primary worker node $w_{\text{primary}}$ clockwise from $h_{\text{prefix}}$ on the hash ring.
+2. If $L(w_{\text{primary}}) \le L_{\text{cap}}$, dispatch the request to $w_{\text{primary}}$. The request hits a warm prefix cache.
+3. If $L(w_{\text{primary}}) > L_{\text{cap}}$, node $w_{\text{primary}}$ is overloaded. The router advances clockwise along the ring to find the first non-overloaded node $w_{\text{alt}}$ satisfying $L(w_{\text{alt}}) \le L_{\text{cap}}$.
+
+@mirrokni2018consistent proved that this algorithm simultaneously guarantees:
+
+- No node exceeds $(1 + \epsilon)$ times the average load.
+- The probability of assigning a request to its optimal primary cache node is at least $1 / (1 + \epsilon)$.
+
+### Python implementation: Cache-aware prefix router
+
+The following Python implementation demonstrates a cache-aware router combining Radix-tree prefix tracking with bounded load balancing:
+
+```python
+from __future__ import annotations
+import hashlib
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set, Tuple
+
+@dataclass
+class WorkerNodeStatus:
+    node_id: str
+    capacity_blocks: int
+    used_blocks: int = 0
+    cached_prefix_hashes: Set[str] = field(default_factory=set)
+
+    @property
+    def load_factor(self) -> float:
+        return self.used_blocks / max(1, self.capacity_blocks)
+
+class CacheAwarePrefixRouter:
+    def __init__(self, nodes: List[WorkerNodeStatus], affinity_weight: float = 0.7, load_exponent: float = 2.0):
+        self.nodes: Dict[str, WorkerNodeStatus] = {n.node_id: n for n in nodes}
+        self.affinity_weight = affinity_weight
+        self.load_exponent = load_exponent
+
+    @staticmethod
+    def compute_prefix_hashes(tokens: List[int], chunk_size: int = 16) -> List[str]:
+        """Generate hierarchical Merkle prefix hashes for token chunks."""
+        hashes: List[str] = []
+        current_digest = hashlib.sha256(b"ROOT").digest()
+        for i in range(0, len(tokens), chunk_size):
+            chunk = tokens[i : i + chunk_size]
+            chunk_bytes = b"".join(t.to_bytes(4, "little") for t in chunk)
+            hasher = hashlib.sha256(current_digest)
+            hasher.update(chunk_bytes)
+            current_digest = hasher.digest()
+            hashes.append(current_digest.hex()[:16])
+        return hashes
+
+    def route_request(self, prompt_tokens: List[int]) -> Tuple[str, int]:
+        """
+        Select the optimal worker node by evaluating joint prefix match and load penalty.
+        Returns: (selected_node_id, matched_prefix_tokens)
+        """
+        prefix_hashes = self.compute_prefix_hashes(prompt_tokens)
+        best_node_id: Optional[str] = None
+        best_score = -float("inf")
+        best_match_tokens = 0
+
+        for node_id, node in self.nodes.items():
+            # Calculate matched prefix tokens
+            matched_chunks = 0
+            for h in prefix_hashes:
+                if h in node.cached_prefix_hashes:
+                    matched_chunks += 1
+                else:
+                    break  # Prefixes must be contiguous from the root
+
+            matched_tokens = matched_chunks * 16
+            affinity_score = matched_tokens / max(1, len(prompt_tokens))
+            load_penalty = node.load_factor ** self.load_exponent
+
+            # Composite objective score
+            score = (self.affinity_weight * affinity_score) - ((1.0 - self.affinity_weight) * load_penalty)
+
+            if score > best_score:
+                best_score = score
+                best_node_id = node_id
+                best_match_tokens = matched_tokens
+
+        if best_node_id is None:
+            raise RuntimeError("No available serving nodes in cluster.")
+
+        return best_node_id, best_match_tokens
+
+    def register_cache_commitment(self, node_id: str, prompt_tokens: List[int], allocated_blocks: int) -> None:
+        """Update router index when a worker node commits new prefix blocks."""
+        node = self.nodes[node_id]
+        node.used_blocks += allocated_blocks
+        prefix_hashes = self.compute_prefix_hashes(prompt_tokens)
+        for h in prefix_hashes:
+            node.cached_prefix_hashes.add(h)
+```
+
+Prefix-aware routing and bounded consistent hashing maximize spatial KV cache reuse, eliminating terabytes of redundant prefill computation across the cluster. Yet, spatial routing alone cannot mitigate the temporal holding cost of agent execution. When an autonomous agent transitions from autoregressive token generation to external tool execution—waiting seconds for unit tests, minutes for container builds, or hours for human authorization—its accumulated multi-gigabyte KV cache sits completely dormant in physical accelerator memory. If hundreds of concurrent agents pin their context frames during these prolonged latency stalls, accelerator HBM is completely exhausted, and cluster throughput collapses to near zero. Resolving this crisis requires transforming the runtime into a true distributed operating system: formalizing trajectory state via the Agent Control Block and managing physical memory through analytical breakeven swapping and multi-resource fairness.
+
+## Resource Allocation Under Memory Constraints {#sec-vol3-scheduling-allocation}
+
+In classical single-turn serving, memory management is straightforward: allocate memory blocks as tokens are generated, and deallocate all blocks when the request emits an `<eos>` token. Agent workloads shatter this simplicity by introducing the **Tool-Wait HBM Stranding Crisis**\index{Tool-Wait HBM Stranding Crisis}.
+
+Consider an autonomous software engineering agent executing a multi-turn trajectory. At step 14, the agent generates a shell tool invocation:
+```bash
+pytest tests/integration/test_distributed_consensus.py --timeout=300
+```
+This integration test suite compiles test binaries, provisions ephemeral local services, and runs stress tests, taking $45\text{ seconds}$ to execute.
+
+While this bash command executes in a sandboxed container, what happens to the agent's KV cache on the GPU accelerator? The agent has accumulated an active context of $48\text{k}$ tokens. On a 70B parameter model with Grouped-Query Attention, that $48\text{k}$-token context consumes:
+$$S_{\text{KV}} = 48{,}000 \times 327{,}680\text{ bytes} \approx 15.73\text{ GB of HBM}$$
+
+If the serving runtime naively holds this context resident in physical GPU memory during the 45-second tool wait, that $15.73\text{ GB}$ of high-bandwidth memory sits completely dormant. Multiply this by 20 concurrent agents running similar workflows, and over $314\text{ GB}$ of HBM—representing four entire NVIDIA H100 GPUs—is locked up in total idleness. Active decoding agents cannot allocate memory blocks; queue lengths explode; and cluster compute utilization collapses from $85\%$ to below $5\%$.
+
+To eliminate this memory tax, the agent runtime must operate as an operating system: formalizing the agent's identity via an authoritative execution descriptor and implementing asynchronous, multi-tier memory swapping.
+
+### The Agent Control Block (ACB)
+
+Just as the Linux kernel encapsulates an executing process using `struct task_struct` to manage CPU registers, virtual memory page tables, file descriptors, and scheduling state [@ritchie1974], an autonomous agent serving runtime requires a persistent, strongly typed kernel data structure to govern multi-turn execution: the **Agent Control Block (ACB)**\index{Agent Control Block}.
+
+::: {#dfn-acb .callout-definition title="Definition 11.1: Agent Control Block (ACB)"}
+An **Agent Control Block** is a strongly typed, persistent kernel data structure that uniquely encapsulates the complete operational identity, execution authority, memory handles, and lifecycle state of an autonomous agent trajectory:
+$$\text{ACB} = \langle \text{AID}, \, \mathcal{P}_{\text{id}}, \, \mathcal{G}, \, \mathcal{K}_{\text{leases}}, \, \mathcal{Q}_{\text{budget}}, \, \mathcal{M}_{\text{handles}}, \, \mathcal{S}_{\text{fsm}}, \, \mathcal{L}_{\text{lineage}}, \, \mathcal{V}_{\text{clock}} \rangle$$ {#eq-dfn-acb}
+where:
+
+- $\text{AID} \in \mathbb{U}_{128}$: Globally unique 128-bit time-ordered identifier (UUIDv7).
+- $\mathcal{P}_{\text{id}}$: Authenticated tenant or user principal identity.
+- $\mathcal{G}$: Immutable task goal specification and formal safety invariants.
+- $\mathcal{K}_{\text{leases}}$: Cryptographically signed capability leases governing external tool access.
+- $\mathcal{Q}_{\text{budget}}$: Multi-dimensional resource quota bounding tokens, dollars, and execution depth.
+- $\mathcal{M}_{\text{handles}}$: Memory pointers referencing active PagedAttention block tables in HBM, swap buffers in host DRAM, and cold checkpoint URIs in non-volatile storage.
+- $\mathcal{S}_{\text{fsm}} \in \Sigma_{\text{lifecycle}}$: Discrete lifecycle operational state.
+- $\mathcal{L}_{\text{lineage}}$: Ancestry tuple $\langle \text{ParentID}, \{\text{ChildIDs}\}, \text{Depth} \rangle$.
+- $\mathcal{V}_{\text{clock}}$: Lamport vector clock guaranteeing causal ordering across asynchronous tool returns.
+:::
+
+@Tbl-vol3-pcb-vs-acb details the structural duality between classical POSIX processes and agent trajectories.
+
+| Architectural Dimension | Classical POSIX PCB                          | Agent Control Block (ACB)                                        |
+|:------------------------|:---------------------------------------------|:-----------------------------------------------------------------|
+| **Primary Identifier**  | Process ID (`pid_t`, 32-bit int)             | Agent ID (`AID`, 128-bit UUIDv7)                                 |
+| **Execution State**     | Hardware registers (`RIP`, `RSP`)            | KV cache block tables, context working set                       |
+| **Memory Isolation**    | MMU page tables (CR3 register, 4 KB pages)   | PagedAttention block tables, Radix trie handles                  |
+| **System Interface**    | POSIX system call table (`sys_enter`)        | Tool Execution Interface / Typed ABI                             |
+| **Authority Model**     | POSIX permissions (`rwx`, capabilities)      | Attenuating capability leases, schema filters                    |
+| **Resource Accounting** | CPU ticks, Resident Set Size (RSS)           | Token burn velocity ($v_{\text{burn}}$), GPU HBM bytes, API cost |
+| **Context Switch Cost** | Microseconds ($1\text{ to }10\,\mu\text{s}$) | Milliseconds to seconds ($50\text{ to }1{,}000\,\text{ms}$)      |
+| **Failure Recovery**    | Core dump, signal handler (`SIGSEGV`)        | Sagas compensating transactions, reflection rollbacks            |
+
+: **Architectural Duality between POSIX PCB and Agent Control Block**: Structural comparison of execution primitives, memory isolation handles, authority structures, and scheduling granularities between classical operating system processes and autonomous agents. {#tbl-vol3-pcb-vs-acb tbl-colwidths="[20,35,45]"}
+
+The structural divergence between classical operating system descriptors and the Agent Control Block is contrasted in @fig-vol3-scheduling-pcb-vs-acb.
+
+::: {#fig-vol3-scheduling-pcb-vs-acb fig-env="figure" fig-pos="htb" fig-cap="**Architectural Duality between POSIX Process Control Block and Agent Control Block**: Structural comparison of execution descriptors across classical operating systems and autonomous machine learning runtimes. The POSIX PCB (left, slate) encapsulates deterministic CPU execution state (registers, MMU page tables, file descriptors) enabling microsecond context switching. In contrast, the Agent Control Block (right, purple) encapsulates stochastic trajectory state across distributed accelerator clusters: tracking prompt token working sets, PagedAttention block tables, attenuating cryptographic capability leases, and causal vector clocks required for asynchronous tool-wait suspension and state hydration." fig-alt="Side-by-side comparison cards illustrating the POSIX Process Control Block on the left and the Agent Control Block on the right, contrasting registers and page tables with capability leases and PagedAttention memory handles."}
+![](images/svg/pcb_vs_acb.svg)
+:::
+
+### The ACB lifecycle finite state machine
+
+An agent does not run as an unbroken stream of computation. It transitions through a formal **Finite State Machine (FSM)**\index{Finite State Machine} managed by the runtime kernel (@fig-vol3-scheduling-acb-lifecycle).
+
+::: {#fig-vol3-scheduling-acb-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**The ACB Lifecycle Finite State Machine**: Deterministic state transitions governing an agent trajectory across active prefill and decode compute phases, bimodal tool-wait suspensions, asynchronous memory swapping, and compensating rollback paths." fig-alt="Finite State Machine diagram showing ACB states: Initialized, Active Prefill, Active Decode, Suspended Tool Wait, Memory Swapping, Suspended Human Gate, Rollback Compensating, Terminated Success, Terminated Failed."}
+![](images/svg/acb_lifecycle_state_machine.svg)
+:::
+
+The kernel enforces nine discrete lifecycle states:
+
+1. **`INITIALIZED`:** The ACB is allocated in host DRAM. Quotas are escrowed, tool capability leases are verified, and the session is queued in the admission pipeline.
+2. **`ACTIVE_PREFILL`:** The agent is allocated to a $P$-node accelerator. The foundation model ingests prompt tokens, saturating Tensor Cores to establish TTFT.
+3. **`ACTIVE_DECODE`:** The agent executes autoregressive decoding on a $D$-node, generating thought tokens and formatting tool invocation schemas.
+4. **`SUSPENDED_TOOL_WAIT`:** The agent emits a tool invocation. The runtime traps the call, verifies argument schemas, and dispatches the execution to an isolated container sandbox. The agent relinquishes its active decode slot.
+5. **`SUSPENDED_HUMAN_GATE`:** The agent attempts a sensitive external actuation (e.g., executing a database write or financial transaction). Execution state is snapshotted, and the agent enters an asynchronous wait for human approval.
+6. **`MEMORY_SWAPPING`:** If cluster memory pressure exceeds critical thresholds, or if a tool execution is anticipated to block beyond a mathematically derived breakeven duration, the memory manager swaps physical KV blocks from accelerator HBM to host DDR5 DRAM or local NVMe storage.
+7. **`ROLLBACK_COMPENSATING`:** A tool execution fails, or a verifier oracle detects an invariant violation. The runtime executes compensating transactions ($A^{-1}$) to restore external state.
+8. **`TERMINATED_SUCCESS`:** Task completion predicate evaluates to true; final deliverables are returned; unused budget escrows are refunded.
+9. **`TERMINATED_FAILED`:** Quotas exhausted, safety invariant breached, or unrecoverable exception encountered; execution telemetry is frozen for post-mortem analysis.
+
+### Derivation of the breakeven suspension duration
+
+When an agent enters the `SUSPENDED_TOOL_WAIT` state, the memory manager faces a fundamental systems decision:
+
+- **Strategy A (Pinning):** Hold the KV cache resident in accelerator HBM throughout the tool wait.
+- **Strategy B (Preemptive Swapping):** Evict the KV cache across the PCIe/Compute Express Link (CXL) bus into host DDR5 DRAM, and swap it back into HBM when the tool completes.
+- **Strategy C (Discard and Recompute):** Evict the KV cache entirely without swapping to DRAM, and recompute the prefill from scratch when the tool returns.
+
+Under what conditions is swapping strictly superior to pinning and recomputation? We formalize this through the **Breakeven Suspension Duration ($T_{\text{breakeven}}$)**\index{Breakeven Suspension Duration}.
+
+Let $S_{\text{KV}}$ denote the size of the agent's KV cache (in bytes), and let $B_{\text{PCIe}}$ denote the effective unidirectional DMA bandwidth over the host-to-device interconnect (e.g., PCIe Gen5 x16: theoretical $64\text{ GB/s}$, effective DMA $\approx 55\text{ GB/s}$). Round-trip context migration duration comprises swap-out to host DRAM, swap-in back to HBM, and DMA queue setup latencies $\delta_{\text{setup}}$: $T_{\text{swap\_overhead}} = 2 S_{\text{KV}} / B_{\text{PCIe}} + 2\delta_{\text{setup}}$.
+
+Holding memory pinned in HBM during tool waits of duration $T_{\text{wait}}$ strands accelerator capital and memory capacity ($\text{Cost}_{\text{pin}} = S_{\text{KV}} \times T_{\text{wait}} \times C_{\text{HBM}}$). Swapping yields net positive cluster throughput whenever tool wait duration satisfies $T_{\text{wait}} \ge T_{\text{breakeven}}$, governed by @eq-breakeven-formula:
+
+$$
+T_{\text{breakeven}} = \frac{2 S_{\text{KV}}}{B_{\text{PCIe}}} + 2\delta_{\text{setup}} + \Delta t_{\text{slack}}
+$$ {#eq-breakeven-formula}
+
+where $\Delta t_{\text{slack}}$ represents safety scheduling margin (typically $100\text{ ms}$).[^fn-scheduling-breakeven-derivation]
+
+Now compare swapping against recomputation (Strategy C). Recomputing the prefill from scratch requires time $T_{\text{recompute}} \approx (2 N_{\text{params}} S + 4 L d_{\text{model}} S^2) / P_{\text{eff}}$. Swapping to host DRAM is strictly faster than recomputing whenever $\sigma_{\text{KV}} / B_{\text{PCIe}} < N_{\text{params}} / P_{\text{eff}}$.
+
+Consider an autonomous software engineering agent running Llama-3-70B on an NVIDIA H100 GPU over PCIe Gen5:
+
+- Context length: $S = 48\text{k} = 49{,}152$ tokens
+- KV cache size: $S_{\text{KV}} = 49{,}152 \times 327{,}680\text{ bytes} \approx 16.1\text{ GB}$
+- Effective PCIe Gen5 DMA bandwidth: $B_{\text{PCIe}} = 55\text{ GB/s}$, with setup latency $\delta_{\text{setup}} \approx 3\text{ ms}$
+- Recomputation throughput ($P_{\text{eff}} \approx 400\text{ TFLOPS}$): $T_{\text{recompute}} \approx (2 \times 70 \times 10^9 \times 49{,}152) / (400 \times 10^{12}) \approx 17.2\text{ seconds}$
+- Round-trip swap overhead: $T_{\text{swap\_overhead}} = (2 \times 16.1\text{ GB}) / (55\text{ GB/s}) + 0.006\text{ s} \approx 591\text{ ms}$
+
+With scheduling slack $\Delta t_{\text{slack}} = 100\text{ ms}$, @eq-breakeven-formula yields $T_{\text{breakeven}} = 591\text{ ms} + 100\text{ ms} \approx 0.7\text{ seconds}$.
+
+This derivation reveals a critical operational threshold: **whenever an external tool call is anticipated to block for longer than $0.7\text{ seconds}$, the runtime must immediately evict the KV cache to host DRAM** (@fig-vol3-scheduling-swapping). Because software compilations, web requests, and database queries routinely take 2 to 60 seconds ($T_{\text{wait}} \gg 0.7\text{ s}$), preemptive swapping frees $16.1\text{ GB}$ of HBM for 95 percent of the agent's lifetime, boosting cluster concurrency by up to $8\times$. Furthermore, swapping back in takes only $295\text{ ms}$—which is $58\times$ faster than recomputing the prefill from scratch ($17.2\text{ seconds}$).
+
+> **The Systems Rule of Thumb (The Breakeven Swapping Threshold):** Accelerator memory managers must decouple tool-wait suspension from physical memory residency. Whenever an external tool call or human interaction is anticipated to block for longer than $T_{\text{breakeven}} = 2 S_{\text{KV}} / B_{\text{PCIe}} + 2\delta_{\text{setup}} + \Delta t_{\text{slack}} \approx 0.7\text{ seconds}$ (for $48\text{k}$ context on PCIe Gen5), runtimes must preemptively DMA-swap the KV cache to host DRAM, reclaiming gigabytes of high-bandwidth memory at a $58\times$ latency advantage over recomputation.
+
+[^fn-scheduling-breakeven-derivation]: Migration overhead accounts for unidirectional DMA push to host DDR5 DRAM, subsequent pull back to HBM, and driver registration delays. Holding pinned HBM throughout prolonged tool waits wastes $S_{\text{KV}} \cdot T_{\text{wait}} \cdot C_{\text{HBM}}$ byte-seconds of high-bandwidth memory capacity.
+
+::: {#fig-vol3-scheduling-swapping fig-env="figure" fig-pos="htb" fig-cap="**Preemptive KV Cache Memory Swapping Across Hardware Tiers**: When an agent enters a blocking tool wait exceeding $T_{\text{breakeven}}$, the memory manager asynchronously DMA-swaps its PagedAttention blocks across PCIe Gen5 to Host DDR5 DRAM, reclaiming HBM for active decode streams and restoring it prior to tool return. Source: Author design." fig-alt="Diagram showing three memory tiers: Accelerator HBM, Host DDR5 DRAM, and Local NVMe Storage. PagedAttention block tables are shown migrating asynchronously across PCIe Gen5 over the course of tool execution."}
+![](images/svg/acb_memory_swapping.svg)
+:::
+
+### Dominant resource fairness for multi-agent fleets
+
+When hundreds of diverse agent swarms share a physical cluster, they contend for multiple heterogeneous resources simultaneously:
+
+- Speculative verification agents consume high **Tensor Core Compute** but minimal memory.
+- Long-context software development agents consume massive **GPU HBM** and **Host DRAM** for KV caches.
+- Autonomous web-scraping agents consume minimal GPU compute but monopolize **External Container Sandboxes** and network sockets.
+
+Static resource partitioning or single-scalar fair sharing (such as token-based fair share) leads to resource starvation and cluster inefficiency. Consider what happens if an operator enforces naive 50/50 fair sharing based on GPU compute alone across two tenant classes:
+
+1. **Coding Agents (Class A):** If allocated 50 percent of cluster compute ($4000\text{ TFLOPS}$), each instance needs only $40\text{ TF}$, permitting up to $100$ instances. But 100 instances require $100 \times 32\text{ GB} = 3200\text{ GB}$ of Host DRAM—over $3\times$ the cluster's entire $1024\text{ GB}$ memory capacity! The cluster crashes with out-of-memory errors while Tensor Cores sit underutilized.
+2. **Reasoning Agents (Class B):** Conversely, if partitioned 50/50 by Host DRAM alone ($512\text{ GB}$ each), Class B could launch $512 / 8 = 64$ instances, demanding $64 \times 250\text{ TF} = 16{,}000\text{ TFLOPS}$—double the physical compute capacity of the entire GPU fleet!
+
+Single-resource fairness fails because different agent workloads bottleneck on fundamentally different physical hardware tiers. Coding agents bottleneck on memory (HBM and host DRAM for deep context histories), whereas reasoning agents bottleneck on arithmetic compute (Tensor Cores for tree search and verification).
+
+To resolve multi-resource contention without stranding hardware capacity, the agent runtime must implement **Dominant Resource Fairness (DRF)** [@ghodsi2011].
+
+::: {#dfn-drf .callout-definition title="Definition 11.2: Dominant resource fairness (DRF)"}
+Let $\mathcal{R} = \{1, \dots, m\}$ denote the set of $m$ shared physical resources with total cluster capacities $\mathbf{R} = [R_1, \dots, R_m]^T$. Let $\mathcal{A} = \{1, \dots, n\}$ denote $n$ active agent tenants. Tenant $i$ requires a resource demand vector $\mathbf{c}_i = [c_{i,1}, \dots, c_{i,m}]^T$ to execute one unit trajectory, yielding normalized resource share $s_{i,r} = c_{i,r} / R_r$.
+
+Tenant $i$'s **dominant resource** is the resource for which it claims the largest share of cluster capacity ($r_i^* = \arg\max_{r \in \mathcal{R}} s_{i,r}$), with dominant share $s_i^* = \max_{r \in \mathcal{R}} s_{i,r}$.
+
+Dominant Resource Fairness equalizes dominant shares across all active tenants via the max-min allocation in @eq-vol3-scheduling-drf-allocation:
+
+$$
+\max \min_{i \in \mathcal{A}} s_i^* \quad \text{subject to} \quad \sum_{i=1}^n N_i \mathbf{c}_i \le \mathbf{R}
+$$ {#eq-vol3-scheduling-drf-allocation}
+
+where $N_i$ denotes the allocated concurrency for tenant $i$.
+:::
+
+DRF guarantees four essential systems properties: **Sharing Incentive** (no tenant is worse off than under uniform partitioning $1/n$), **Strategy-Proofness** (no tenant can game the system by misrepresenting its demands), **Envy-Freeness** (no tenant prefers another's allocation), and **Pareto Efficiency** (it is impossible to allocate more resources to an agent without reducing another's allocation).[^fn-scheduling-drf-fairness]
+
+@Tbl-drf-allocation-matrix illustrates a numerical allocation across two competing agent classes on a cluster consisting of 8 H100 GPUs ($640\text{ GB}$ HBM, $8000\text{ TFLOPS}$) and $1024\text{ GB}$ host DRAM, and @fig-vol3-scheduling-drf-allocation illustrates the multi-dimensional geometric balancing across coupled resources:
+
+| Agent Tenant Class          | Per-Agent Demand Vector $\mathbf{c}_i$                      | Dominant Resource | Dominant Share per Instance  | DRF Allocated Concurrency           |
+|:----------------------------|:------------------------------------------------------------|:------------------|:-----------------------------|:------------------------------------|
+| **Class A: Coding Agents**  | $[15\text{ GB HBM}, \, 40\text{ TF}, \, 32\text{ GB DRAM}]$ | Host DRAM         | $\frac{32}{1024} = 3.125\%$  | **20 instances** ($s_A^* = 62.5\%$) |
+| **Class B: Reasoning Bots** | $[4\text{ GB HBM}, \, 250\text{ TF}, \, 8\text{ GB DRAM}]$  | Compute (TFLOPS)  | $\frac{250}{8000} = 3.125\%$ | **20 instances** ($s_B^* = 62.5\%$) |
+
+: **Dominant Resource Fairness Multi-Resource Allocation**: Balancing high-memory coding agents against high-compute reasoning agents across heterogeneous hardware tiers. Dominant shares are equalized, maximizing aggregate cluster throughput. {#tbl-drf-allocation-matrix tbl-colwidths="[18,32,18,16,16]"}
+
+::: {#fig-vol3-scheduling-drf-allocation fig-env="figure" fig-pos="htb" fig-cap="**Dominant Resource Fairness Across Coupled Agent Resources**: Max-min fair allocation across GPU Compute (TFLOPS), Accelerator Memory (KV Blocks), and External Tool API Leases. Equalizing dominant shares prevents single-tenant monopolization and maximizes aggregate cluster throughput. Source: Author design." fig-alt="Diagram showing Dominant Resource Fairness across coupled agent resources: Cluster Resource Pools on the left, Tenant Demand Profiles in the center, and DRF Equalization Engine on the right."}
+![](images/svg/drf_multi_resource_agent_allocation.svg)
+:::
+
+> **The Systems Rule of Thumb (The Multi-Resource Dominant Share Law):** Single-scalar token accounting fails in agentic clusters because workloads simultaneously bottleneck on disparate physical tiers: memory-dense agents saturate HBM while compute-dense agents saturate tensor cores. Dominant Resource Fairness equalizes each tenant's maximum normalized resource share ($\max \min_i s_i^*$), preventing high-memory agents from starving high-compute workers and maximizing aggregate cluster concurrency.
+
+[^fn-scheduling-drf-fairness]: Dominant share equalization ($s_1^* = s_2^* = \dots = s_n^*$) ensures Pareto efficiency, sharing incentive, strategy-proofness, and envy-freeness across multi-resource clusters.
+
+### Preemption, reversibility boundaries, and coffman deadlock prevention
+
+When memory is completely saturated and an interactive high-priority agent arrives, the scheduler must preempt an active agent. However, autonomous agents cannot be arbitrarily suspended like stateless processes. If an agent is in the middle of executing a non-invertible external tool—such as committing an API call, acquiring a distributed lock, or migrating a database table—abruptly killing or preempting its process state introduces external environment corruption.
+
+The scheduler evaluates an operation's external side effects across a strict four-zone **Reversibility Spectrum**\index{Reversibility Spectrum} (@fig-vol3-scheduling-reversibility):
+
+1. **Zone 1 (Pure Internal State):** Model generating internal thought tokens. Safe for instant preemption; KV cache can be swapped or discarded with zero side effects.
+2. **Zone 2 (Idempotent / Read-Only Tool):** Agent executing file reads or GET requests. Safe for preemption; tool process can be aborted via `SIGKILL` and retried idempotently upon resumption.
+3. **Zone 3 (Compensable Mutation):** Agent creating files, provisioning cloud instances, or writing staging records. If preempted, the kernel must execute pre-compiled compensating transactions ($A^{-1}$) defined in the ACB to clean up external state.
+4. **Zone 4 (Non-Invertible Actuation):** Agent executing database drops, sending user emails, or committing financial transfers. **Real-time pinned invariant:** The scheduler forbids preemption during Zone 4 actuations. The agent's memory is pinned until the irreversible transaction completes.
+
+::: {#fig-vol3-scheduling-reversibility fig-env="figure" fig-pos="htb" fig-cap="**The Reversibility Spectrum and Preemption Matrix**: The four operational zones governing agent preemption based on external side effects. Pure internal generation is instantly preemptible, while irreversible actuations pin execution until completion. Source: Author design." fig-alt="Matrix diagram showing four zones of reversibility: Zone 1 (Internal Inference), Zone 2 (Read-Only Tool), Zone 3 (Compensable Side-Effects), Zone 4 (Non-Invertible Action), mapping each to preemption policies and rollback protocols."}
+![](images/svg/reversibility_boundary_preemption_matrix.svg)
+:::
+
+#### Coffman deadlock prevention in shared KV pools
+When agents dynamically spawn child subagents, allowing child agents to recursively allocate memory from a shared pool without global coordination introduces the threat of **Coffman deadlocks**\index{Coffman deadlocks} [@coffman1971]:
+
+- **Mutual Exclusion:** Physical HBM blocks are held exclusively by individual PagedAttention tables.
+- **Hold and Wait:** A parent agent holds its $32\text{k}$-token context in HBM while waiting for a child subagent to complete.
+- **No Preemption:** High-priority subagent allocations cannot be arbitrarily stolen if pinned in Zone 4.
+- **Circular Wait:** Parent $A$ holds memory waiting for Child $B$; Child $B$ needs memory currently locked by Parent $C$; Parent $C$ waits on a tool result from $A$.
+
+To guarantee forward progress, the runtime kernel enforces **Banker's Algorithm** [@dijkstra1965] on context memory allocation:
+$$\text{Free Blocks} \ge \sum_{i \in \text{Active}} \text{MaxRemainingTokens}(i) + \Delta_{\text{safety}}$$ {#eq-bankers-condition}
+If admitting a child subagent would violate the safe-state condition in @eq-bankers-condition, admission is gated, and the requesting parent trajectory is forced to swap its context to host DRAM before spawning its child.
+
+By enforcing Banker's Algorithm on shared memory pools, establishing analytical breakeven boundaries for PCIe DMA swapping, and equalizing dominant shares across heterogeneous hardware tiers, the cluster runtime maintains mathematical guarantees of forward progress and memory safety. Yet, in production deployments, engineers frequently bypass these operating system primitives in favor of intuitive, naive heuristics—such as pinning memory during tool waits, assuming FIFO fairness under heavy-tailed workloads, or confusing local GPU capacity with distributed routing topology. In the next section, we identify and dismantle the pervasive architectural fallacies and operational pitfalls that undermine cluster stability in agentic serving infrastructure.
+
+## Fallacies and Pitfalls {#sec-vol3-scheduling-fallacies}
+
+In the computer systems tradition established by John Hennessy and David Patterson [@hennessy2011computer], architectural progress requires identifying and dismantling common misconceptions that seduce engineers into suboptimal or fragile designs. In autonomous machine learning systems, the rapid transition from static single-turn inference to stateful, multi-turn execution has given rise to widespread industry intuitions that collapse when confronted with physical hardware bounds. These fallacies and pitfalls capture the architectural antipatterns that lead to memory exhaustion, financial insolvency, and catastrophic reliability failures in production agent infrastructure.
+
+::: {.fallacy-pitfall}
+
+**Fallacy:** *First-In-First-Out (FIFO) with continuous batching provides sufficient fairness and throughput for autonomous agent swarms.*
+
+Engineers frequently assume that because continuous iteration batching (vLLM, TensorRT-LLM) revolutionized stateless conversational serving, it can be applied directly to multi-agent platforms by simply enqueuing incoming agent turns into a FIFO queue.
+
+This intuition ignores the heavy-tailed queueing dynamics of autonomous execution. Conversational queries exhibit bounded lengths with low variance. Autonomous agent trajectories, by contrast, follow heavy-tailed Pareto distributions with shape parameter $\alpha \in [1.1, 1.4]$.
+
+As derived in @sec-vol3-scheduling-priority, when $\alpha \le 2$, the theoretical variance of task service times diverges to infinity ($\mathbb{E}[X^2] \to \infty$). Under the Pollaczek-Khinchine formula (@eq-pollaczek-khinchine), the expected queue waiting time under FIFO is:
+$$\mathbb{E}[W_{\text{FIFO}}] = \frac{\lambda \mathbb{E}[X^2]}{2(1 - \rho)} \longrightarrow \infty$$
+
+In a production cluster, admitting a single 400-step refactoring task freezes accelerator slots for tens of minutes. Hundreds of short, interactive, 2-step verification requests queue up behind it, suffering catastrophic Head-of-Line blocking. Schedulers must abandon FIFO in favor of non-clairvoyant Least Attained Service (LAS) or Multi-Level Feedback Queues (MLFQ).
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall:** *Holding accelerator High-Bandwidth Memory allocated during blocking external tool executions.*
+
+In naive synchronous agent orchestration frameworks, an agent generates a tool invocation, dispatches the call to an external environment (e.g., executing a bash script, querying a remote database, or awaiting human approval), and blocks synchronously while holding its allocated PagedAttention blocks resident in GPU HBM.
+
+This practice incurs a catastrophic **Tool-Wait memory tax**:
+
+1. **The Latency Asymmetry:** Autoregressive token generation operates on millisecond timescales ($20\text{--}40\text{ ms}$ per step). External software tools operate on second-to-minute timescales ($2\text{--}60\text{ s}$ for compilers and integration tests; minutes to hours for human approval gates).
+2. **HBM Stranding:** An agent with a $48\text{k}$-token context on a 70B model locks up $15.7\text{ GB}$ of HBM. If the tool blocks for $45\text{ seconds}$, that $15.7\text{ GB}$ sits completely dormant for $98\%$ of the agent's wall-clock lifetime.
+3. **Breakeven Violation:** As proven in @eq-breakeven-formula, the analytical breakeven duration for DMA-swapping a $48\text{k}$ context over PCIe Gen5 is $T_{\text{breakeven}} \approx 0.7\text{ seconds}$. Because $T_{\text{wait}} = 45\text{ s} \gg 0.7\text{ s}$, holding HBM resident rather than swapping to host DRAM wastes over $700\text{ GB-seconds}$ of accelerator memory per turn, collapsing serving concurrency and driving cluster compute utilization below $10\%$.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy:** *Chunked prefill eliminates all phase interference, rendering physical disaggregation unnecessary.*
+
+After implementing chunked prefill (Sarathi), engineers observe that Inter-Token Latency jitter drops significantly, and conclude that physical prefill-decode disaggregation adds needless network complexity.
+
+While chunked prefill successfully bounds iteration execution times on a single GPU, it cannot resolve the deeper architectural mismatches of monolithic serving:
+
+1. **Intra-Core Memory Bus Contention:** Slicing a prefill into chunks still executes compute-dense GEMMs alongside memory-bound GEMVs on the same Streaming Multiprocessors. The prefill kernels flood the L2 cache and shared memory controllers, reducing effective memory bandwidth for concurrent decode streams by $25\text{--}40\%$.
+2. **Parallelism Coupling:** A monolithic node is locked to a single Tensor Parallelism degree ($TP$). Prefill demands high parallelism ($TP = 8$) to minimize TTFT on long prompts, while decode favors low parallelism ($TP = 1$ or $2$) to avoid cross-GPU all-reduce latency overheads on small batches.
+3. **Capital Misallocation:** A homogeneous cluster provisions identical expensive SXM accelerators for both tasks. As proven by DistServe [@zhong2024distserve] and Splitwise [@patel2024], physical disaggregation allows operators to pair high-TFLOPS PCIe nodes for prefill with high-bandwidth H200/MI300X nodes for decode, increasing goodput per dollar by $3\text{--}4\times$.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall:** *Unbounded subagent spawning leading to cyclic Coffman memory deadlocks.*
+
+When coordinating complex workflows, parent agents frequently spawn autonomous subagents to parallelize work. If the runtime permits child agents to recursively spawn grandchild agents without quota attenuation, the process tree expands exponentially.
+
+If two sibling subagents contend for shared physical memory blocks or external sandbox execution slots, the cluster enters an unrecoverable **Coffman deadlock** [@coffman1971]:
+
+1. Parent agent $A$ holds $30\text{ GB}$ of HBM while blocking synchronously on Child $B$.
+2. Child $B$ spawns Child $C$ and requests $20\text{ GB}$ of memory.
+3. The memory allocator is saturated by concurrent Parent $D$, which is waiting on Child $E$.
+4. None of the child agents can allocate enough memory to complete their forward passes, and none of the parent agents can terminate or release memory until their children finish.
+
+The entire cluster livelocks. Runtimes must enforce strict monotonic delegation limits ($D_{\text{depth}} \le 3$), global memory headroom reserves via Banker's Algorithm (@eq-bankers-condition), and mandatory context swapping before subagent delegation.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Fallacy:** *Prefix caching hit rate is solely a function of local GPU cache capacity.*
+
+Engineering teams diagnosing low prefix cache hit rates in multi-agent clusters often assume the bottleneck is insufficient GPU HBM, petitioning to upgrade hardware from 80 GB to 141 GB GPUs to retain more prefix blocks.
+
+In distributed agent swarms, prefix hit rate is predominantly governed by **routing topology**, not local memory capacity:
+
+- When requests are distributed using uncoordinated load balancing (Round-Robin or Least-Connections), shared prefixes are scattered uniformly across all nodes. Each node stores duplicate copies of identical system prompts and tool schemas, fragmenting cluster memory.
+- As demonstrated in @sec-vol3-scheduling-prefix-routing, a cluster of 8 nodes serving 40 agents with an identical $36\text{k}$-token prefix wastes $92\text{ GB}$ of HBM storing redundant state, while each node achieves an effective cache hit rate below $25\%$.
+- Implementing cache-aware prefix routing with consistent hashing concentrates identical prefixes on designated affinity nodes, boosting cluster cache hit rates to over $85\%$ on existing hardware without purchasing an additional gigabyte of accelerator memory.
+
+:::
+
+::: {.fallacy-pitfall}
+
+**Pitfall:** *Causal inversion from unsynchronized asynchronous tool callbacks.*
+
+When an agent dispatches multiple asynchronous tool requests concurrently (e.g., querying five code documentation endpoints in parallel), variable network latency causes responses to arrive out of chronological dispatch order.
+
+If the serving runtime appends observation tokens to the active context window strictly in order of network packet arrival, the agent's context suffers from **causal inversion**:
+
+- The neural policy observes an observation returning *before* the action that triggered it, or processes dependent observations in reverse logical order.
+- The model generates invalid deductions, deduces contradictory facts, and hallucinates erroneous tool invocations.
+- Trajectory debugging becomes impossible because recorded timestamps do not reflect logical causality.
+
+The runtime must encapsulate each turn within the Agent Control Block using Lamport vector clocks ($\mathcal{V}_{\text{clock}}$, @eq-dfn-acb) to reorder asynchronous observation callbacks deterministically prior to context ingestion.
+
+:::
+
+::: {#ws-scheduling-cluster-freeze .callout-war-story title="The 1.2 terabyte cluster memory freeze"}
+
+**Context:** In late 2024, an enterprise software company deployed an autonomous coding fleet of 60 agents to automatically generate unit tests across a legacy microservices repository, served by an inference engine with continuous batching across 12 NVIDIA H100 GPUs (960 GB HBM).
+
+**Mechanism:** An upstream network partition severed connectivity to an internal npm registry while all 60 agents concurrently executed `bash(npm test)`. The commands blocked indefinitely awaiting 15-minute TCP socket timeouts. Because the serving runtime lacked bimodal context swapping and Agent Control Block (ACB) descriptors, each blocked agent held its active $48\text{k}$-token context window pinned in physical HBM ($15.7\text{ GB}$ per instance), locking up over $940\text{ GB}$ of GPU memory.
+
+**Impact:** Incoming high-priority developer requests found zero free PagedAttention blocks. Memory allocation threads spun at 100 percent CPU in a catastrophic Coffman livelock, Kubernetes node health checks failed, and the orchestrator initiated a cluster-wide rolling reboot storm that destroyed all in-flight trajectory states.
+
+**Response:** Schedulers implemented asynchronous DMA context swapping to host DRAM triggered whenever an agent enters an out-of-band tool wait exceeding $T_{\text{breakeven}}$ (700 ms), releasing physical GPU page frames back to the allocator's free pool.
+
+**Systems Lesson:** Never permit a stochastic agent process to hold physical accelerator frames across an unsandboxed external boundary. The absence of bimodal context swapping transforms an ordinary network latency hiccup into a total cluster infrastructure collapse.
+
+:::
+
+## Summary {#sec-vol3-scheduling-summary}
+
+Trajectory scheduling and disaggregated serving transform machine learning infrastructure from stateless request-response engines into distributed operating systems optimized for stateful, asynchronous, multi-agent processes. By parameterizing the fundamental divergence between compute-bound prefill and memory-bandwidth-bound decode on the Roofline model, systems architects can eliminate phase interference through chunked prefill and physical cluster disaggregation. Abstracting trajectory identity into the Agent Control Block enables non-clairvoyant priority scheduling via Multi-Level Feedback Queues, overcoming the mathematical collapse of FIFO under heavy-tailed Pareto workloads. Finally, cache-aware prefix routing and analytical breakeven context swapping bridge the temporal chasm between microsecond token generation and minute-long tool waits, ensuring that scarce accelerator High-Bandwidth Memory is continuously utilized by active compute streams.
+
+::: {.callout-takeaways title="The agent scheduling invariant"}
+1. **The Roofline Dichotomy Governs Serving Phases:** Prompt prefill is compute-bound ($\mathcal{I} \gg \mathcal{I}_{\text{knee}}$), saturating Tensor Cores; token decode is memory-bandwidth bound ($\mathcal{I} \ll \mathcal{I}_{\text{knee}}$), starving on HBM loads. Co-locating unconstrained prefill with decode induces catastrophic phase interference.
+2. **Chunked Prefill Piggybacks for Free:** Slicing prompts into uniform chunks ($C \approx 512\text{ tokens}$) absorbs prefill compute into the stranded arithmetic capacity of memory-bound decode iterations, bounding Inter-Token Latency jitter to strict SLA limits.
+3. **Disaggregation Specializes Hardware and Hides Latency:** Physically separating $P$-nodes from $D$-nodes over an RDMA fabric unlocks independent horizontal scaling and custom parallelism degrees ($TP_P \ne TP_D$). Enforcing the KV streaming invariant hides network transfer latency behind forward-pass compute.
+4. **Heavy Tails Demand Non-Clairvoyant Priority:** Agent execution horizons follow Pareto distributions with divergent second moments ($\mathbb{E}[X^2] \to \infty$), causing FIFO queues to collapse. Schedulers must implement Least Attained Service (LAS) via Multi-Level Feedback Queues.
+5. **Tool-Wait Latency Mandates Context Swapping:** Tool executions block for seconds to minutes, far exceeding the analytical breakeven duration ($T_{\text{wait}} \gg T_{\text{breakeven}} \approx 0.7\text{ s}$). Contexts must be asynchronously DMA-swapped to host DRAM to eliminate the Tool-Wait memory tax.
+:::
+
+::: {.callout-chapter-connection title="From cluster scheduling to trajectory harvesting"}
+This chapter completes Part III: The Actuation Boundary, Isolation & Control by establishing how accelerator compute, context memory, and hardware interconnects are multiplexed, scheduled, and disaggregated across autonomous agent fleets. Across Chapters 08 through 11, we have constructed the complete execution substrate: formalizing typed system calls and capability leases (@sec-vol3-actuation), isolating untrusted execution inside ephemeral microVM sandboxes (@sec-vol3-virtualization), handling asynchronous interrupts and human approval gates (@sec-vol3-interrupts), and orchestrating multi-agent compute under heavy-tailed queueing dynamics (this chapter).
+
+Yet, even the most sophisticated cluster scheduler cannot compensate for a fragile, unadapted neural policy. Managing multi-turn execution trajectories through complex runtime scaffolding—paged attention memories, preemptive swapping engines, and extensive prompt engineering—is an expensive palliative for a foundation model that was never trained to act as an autonomous agent. When an un-adapted model encounters an unexpected tool error or an ambiguous environment observation, it rapidly enters pathological retry loops, burning cluster token budgets and driving up operational costs. To achieve true agentic reliability, systems architects must compile operational capabilities directly into the model's neural parameters.
+
+In @sec-vol3-data-flywheel, we transition across the architectural boundary into Part IV: The Policy Compiler. We examine how the execution traces, sandbox verification signals, and scheduler telemetry captured across production clusters are harvested to build closed-loop synthetic data flywheels—generating, filtering, and curating massive corpora of verified trajectories through self-play, execution-based rejection sampling, and negative trace mining to train the next generation of autonomous policies.
+:::

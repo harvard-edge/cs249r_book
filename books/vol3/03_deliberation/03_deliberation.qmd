@@ -1,5 +1,23 @@
 # Test-Time Deliberation and Search {#sec-vol3-deliberation}
 
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+::: {.content-visible when-format="pdf"}
+\noindent
+![](images/png/cover_deliberation_blueprint_labeled_print.png){fig-alt="Isometric blueprint showing test-time deliberation and search: root decision state, active exploratory branch, optimal high-reward path, pruned dead-end containment cap, speculative rollout branch, and value-heuristic telemetry rail."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_deliberation_blueprint_labeled.webp){fig-alt="Isometric blueprint showing test-time deliberation and search: root decision state, active exploratory branch, optimal high-reward path, pruned dead-end containment cap, speculative rollout branch, and value-heuristic telemetry rail."}
+:::
+
+:::
+
 In unconstrained agentic execution, foundation models cannot rely on single-pass forward propagation to resolve complex compositional tasks. An autoregressive token generator commits irreversibly to output tokens as they are emitted into the context buffer. When a model encounters ambiguous decision boundaries or cascading dependencies, greedy selection locks the trajectory into stochastic drift and catastrophic livelocks. Deliberation introduces test-time compute scaling: allocating additional inference FLOPs, memory bandwidth, and verification cycles to explore counterfactual execution branches, evaluate intermediate belief states, and backtrack from invalid trajectories before committing irreversible actions to the physical environment. This chapter establishes the formal systems architecture of test-time deliberation, quantifying the Pareto frontiers of inference compute scaling, analyzing search topologies, deriving the Verification Tax, and engineering memory-compact tree execution runtimes.
 
 ## Purpose {.unnumbered .unlisted}
@@ -11,9 +29,9 @@ In unconstrained agentic execution, foundation models cannot rely on single-pass
 \end{marginfigure}
 :::
 
-_Why does thinking before acting trade inference compute for trajectory survival?_
+_Why cannot a stochastic processor solve complex multi-step tasks through single-pass greedy generation, and why does deliberate search fundamentally alter hardware compute demands?_
 
-In unconstrained environments, foundation models suffer from cognitive drift and semantic livelocks because autoregressive sampling cannot inherently backtrack or verify its own logical progression. Without structured search and bounded topologies, allocating more compute merely accelerates the accumulation of compounding errors. In agentic systems, the runtime must co-design the neural policy proposal engine with deterministic execution boundaries, transforming fragile stochastic models into dependable, self-correcting problem solvers.
+Operating as a stochastic processor core executing autoregressive forward passes, a foundation model cannot reliably solve complex multi-step tasks through a single pass of greedy decoding. Because autoregressive sampling commits to each token sequentially without lookahead or backtracking, early mistakes poison subsequent probabilities, leading to exposure bias and catastrophic compounding errors. To solve difficult problems, the system cannot merely output the first tokens it generates; it must deliberate. Deliberation transforms the execution model from a linear token pipeline into a branching search tree: the processor explores hypothetical action trajectories, evaluates intermediate reasoning states against verification criteria, and prunes unpromising branches before committing mutations to the external world. This shift activates test-time compute scaling, fundamentally altering the economics of machine learning systems by trading inference FLOPs and memory bandwidth for task survival. This chapter establishes the systems architecture of test-time deliberation, formalizing search topologies, quantifying the Verification Tax, and engineering memory-compact tree runtimes.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -35,7 +53,7 @@ In unconstrained environments, foundation models suffer from cognitive drift and
 <!-- ======================================================================= -->
 ## The Limits of Greedy Next-Token Generation {#sec-vol3-deliberation-limits-greedy}
 
-In October 2024, an autonomous code-generation agent was deployed in a staging cluster to synthesize a distributed lock manager in Python using `asyncio` and `etcd3`. The task required 250 lines of precise synchronization logic. At line 48, having generated 1,850 tokens of class scaffolding, configuration parsing, and connection-pool management, the model reached the critical acquisition method:
+Single-pass autoregressive generation rests on the fragile premise that local token optimization mirrors global reasoning correctness. In October 2024, an autonomous code-generation agent was deployed in a staging cluster to synthesize a distributed lock manager in Python using `asyncio` and `etcd3`. The task required 250 lines of precise synchronization logic. At line 48, having generated 1,850 tokens of class scaffolding, configuration parsing, and connection-pool management, the model reached the critical acquisition method:
 
 ```python
 async def acquire(self, timeout: float = 5.0) -> bool:
@@ -152,13 +170,13 @@ $$
 \mathcal{I}_{\text{decode}} = \frac{2 \cdot P \text{ FLOPs}}{2 \cdot P \text{ Bytes}} \approx 1.0 \text{ FLOP/Byte}
 $$
 
-On an NVIDIA H100 SXM5 GPU capable of $1{,}979\text{ TFLOPs}$ of FP16/BF16 compute and $3.35\text{ TB/s}$ of High-Bandwidth Memory (HBM3) bandwidth, saturating the tensor cores requires an arithmetic intensity of:
+On an NVIDIA H100 SXM5 GPU capable of $989\text{ TFLOP/s}$ of dense 16-bit tensor compute (rising to $1{,}979\text{ TFLOP/s}$ with 2:4 structured sparsity or FP8 precision) and $3.35\text{ TB/s}$ of High-Bandwidth Memory (HBM3) bandwidth, saturating the dense tensor cores requires an arithmetic intensity of:
 
 $$
-\mathcal{I}_{\text{knee}} = \frac{1{,}979 \times 10^{12} \text{ FLOPs/s}}{3.35 \times 10^{12} \text{ Bytes/s}} \approx 590 \text{ FLOPs/Byte}
+\mathcal{I}_{\text{knee}} = \frac{989 \times 10^{12} \text{ FLOPs/s}}{3.35 \times 10^{12} \text{ Bytes/s}} \approx 295 \text{ FLOPs/Byte}
 $$
 
-Greedy decoding operates nearly $600\times$ below the accelerator's roofline knee. The compute engine is stalled, waiting for model weights to stream across the memory bus.
+(rising to $\approx 590\text{ FLOPs/Byte}$ under sparse or FP8 execution). Greedy decoding operates nearly $300\times$ below the accelerator's dense roofline knee (and nearly $600\times$ below its sparse ceiling). The compute engine is stalled, waiting for model weights to stream across the memory bus.
 
 Greedy decoding wastes silicon capacity by running a computationally uniform, memory-bandwidth-choked algorithm on problems whose difficulty distribution is deeply non-uniform. To break free of this memory-bound, single-path failure trap, the runtime must decouple execution from the rigid token-by-token forward pass. It must treat the foundation model as an untrusted proposal engine within a deliberate, test-time search architecture.
 
@@ -167,7 +185,7 @@ Greedy decoding wastes silicon capacity by running a computationally uniform, me
 <!-- ======================================================================= -->
 ## Test-Time Compute Scaling Laws {#sec-vol3-deliberation-scaling-laws}
 
-In 2024, empirical evaluations on the American Invitational Mathematics Examination (AIME) and the SWE-bench software engineering benchmark revealed a striking performance inversion. A frontier 70-billion-parameter model executing greedy decoding achieved $22.6\%$ accuracy on AIME, consuming approximately $1.4 \times 10^{14}$ FLOPs per query. When researchers evaluated a compact 8-billion-parameter model equipped with an inference runtime that allocated $2{,}048$ test-time deliberation tokens—allowing the model to draft scratchpad rollouts, cross-examine intermediate equations, and prune inconsistent deductions—its accuracy rose to $48.2\%$.
+Decoupling generation from single-pass decoding activates an orthogonal scaling frontier: allocating compute at inference time rather than during pretraining. In 2024, empirical evaluations on the American Invitational Mathematics Examination (AIME) and the SWE-bench software engineering benchmark revealed a striking performance inversion. A frontier 70-billion-parameter model executing greedy decoding achieved $22.6\%$ accuracy on AIME, consuming approximately $1.4 \times 10^{14}$ FLOPs per query. When researchers evaluated a compact 8-billion-parameter model equipped with an inference runtime that allocated $2{,}048$ test-time deliberation tokens—allowing the model to draft scratchpad rollouts, cross-examine intermediate equations, and prune inconsistent deductions—its accuracy rose to $48.2\%$.
 
 The 8B model with deliberation outperformed the 70B zero-shot model by more than $2\times$ while consuming $3.8\times$ fewer total FLOPs per solved task. The implications for machine learning systems architecture are profound: **inference-time compute can substitute for pretraining parameter scale**.
 
@@ -425,19 +443,19 @@ Generalizes tree search by allowing vertices to have multiple parents [@besta202
 
 Moving from linear chains to autonomous graphs shifts control authority from deterministic code to stochastic models. Production agent systems govern this transition across five canonical control archetypes, illustrated in @fig-vol3-deliberation-spectrum.
 
-::: {#fig-vol3-deliberation-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The Architectural Spectrum of Agentic Control**: Progression across five canonical archetypes from deterministic linear pipelines to open-ended autonomous loops, illustrating the trade-offs between model autonomy, verification burden, and cost unpredictability. As execution moves toward autonomous loops, verification overhead and cost variance rise monotonically with agent autonomy. Source: Adapted from MLSysBook Volume III Control Architecture Blueprint." fig-alt="Horizontal architectural spectrum comparing five control paradigms from left to right: Prompt Chaining, Routing and Dispatch, Parallel Fan-Out, Orchestrator-Workers, and Autonomous Loops. Three colored progression bars at the bottom illustrate that Model Autonomy, Verification Burden, and Cost and Latency Unpredictability increase together as control transitions from hardcoded directed graphs to model-directed cycles."}
+::: {#fig-vol3-deliberation-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The Architectural Spectrum of Agentic Control**: Progression across five canonical archetypes from deterministic linear pipelines to open-ended autonomous loops, illustrating the trade-offs between model autonomy, verification burden, and cost unpredictability. As execution moves toward autonomous loops, verification overhead and cost variance rise monotonically with agent autonomy. Source: Adapted from MLSysBook Volume III Control Architecture Blueprint." fig-alt="Horizontal architectural spectrum comparing five control paradigms from left to right: Prompt Chaining, Routing and Dispatch, Parallel Fan-Out, Supervisor-Workers (Orchestrator-Workers), and Autonomous Loops. Three colored progression bars at the bottom illustrate that Model Autonomy, Verification Burden, and Cost and Latency Unpredictability increase together as control transitions from hardcoded directed graphs to model-directed cycles."}
 ![](images/svg/control_spectrum.svg){width="100%"}
 :::
 
 @Tbl-vol3-deliberation-archetypes formalizes the operational characteristics, execution complexities, and verification boundaries across this spectrum:
 
-| Control Archetype      | Graph Structure                     | Autonomy Level             | Latency Complexity                       | Token Variance ($\sigma^2$)                  | Failure Blast Radius               | Primary Verification Mechanism              |
-|:-----------------------|:------------------------------------|:---------------------------|:-----------------------------------------|:---------------------------------------------|:-----------------------------------|:--------------------------------------------|
-| **Prompt Chaining**    | Static linear pipeline              | Zero (Hardcoded sequence)  | $\mathcal{O}(1)$ deterministic           | Minimal ($\sigma^2 \approx 0$)               | Minimal (Isolated to failing step) | JSON Schema / Strict regex validation       |
-| **Routing & Dispatch** | Conditional branching tree          | Constrained classification | $\mathcal{O}(1)$ bounded                 | Low ($\sigma^2 \le \sigma_{\text{route}}^2$) | Low (Contained within branch)      | Classifier confusion matrix / Thresholds    |
-| **Parallel Fan-Out**   | Map-Reduce DAG [@dean2004mapreduce] | Partitioned concurrent     | $\mathcal{O}(\max_{i} t_i)$ parallel     | Medium (Additive worker variance)            | Medium (Isolated worker sandbox)   | Barrier invariants / Majority voting        |
-| **Supervisor-Workers** | Hierarchical supervisor tree        | Supervised delegation      | $\mathcal{O}(D)$ where $D$ is tree depth | Controlled dynamic                           | Low (Bounded by worker lease)      | Deterministic verifier gates / Schema diffs |
-| **Autonomous Loops**   | Cyclic statechart / FSM             | Open-ended self-directed   | $\mathcal{O}(K)$ heavy-tailed Pareto     | High (Unbounded worst-case)                  | Severe (Unchecked state mutation)  | Semantic cycle detectors / Circuit breakers |
+| Control Archetype                             | Graph Structure                     | Autonomy Level             | Latency Complexity                       | Token Variance ($\sigma^2$)                  | Failure Blast Radius               | Primary Verification Mechanism              |
+|:----------------------------------------------|:------------------------------------|:---------------------------|:-----------------------------------------|:---------------------------------------------|:-----------------------------------|:--------------------------------------------|
+| **Prompt Chaining**                           | Static linear pipeline              | Zero (Hardcoded sequence)  | $\mathcal{O}(1)$ deterministic           | Minimal ($\sigma^2 \approx 0$)               | Minimal (Isolated to failing step) | JSON Schema / Strict regex validation       |
+| **Routing & Dispatch**                        | Conditional branching tree          | Constrained classification | $\mathcal{O}(1)$ bounded                 | Low ($\sigma^2 \le \sigma_{\text{route}}^2$) | Low (Contained within branch)      | Classifier confusion matrix / Thresholds    |
+| **Parallel Fan-Out**                          | Map-Reduce DAG [@dean2004mapreduce] | Partitioned concurrent     | $\mathcal{O}(\max_{i} t_i)$ parallel     | Medium (Additive worker variance)            | Medium (Isolated worker sandbox)   | Barrier invariants / Majority voting        |
+| **Supervisor-Workers (Orchestrator-Workers)** | Hierarchical supervisor tree        | Supervised delegation      | $\mathcal{O}(D)$ where $D$ is tree depth | Controlled dynamic                           | Low (Bounded by worker lease)      | Deterministic verifier gates / Schema diffs |
+| **Autonomous Loops**                          | Cyclic statechart / FSM             | Open-ended self-directed   | $\mathcal{O}(K)$ heavy-tailed Pareto     | High (Unbounded worst-case)                  | Severe (Unchecked state mutation)  | Semantic cycle detectors / Circuit breakers |
 
 : **Architectural Archetypes of Agentic Control**: Comparison of control topologies across graph structure, autonomy level, latency complexity, token variance, failure blast radius, and primary verification mechanisms. {#tbl-vol3-deliberation-archetypes tbl-colwidths="[15,15,15,15,15,15,10]"}
 
@@ -601,6 +619,13 @@ To mitigate Goodhart degradation, production architectures partition verificatio
 **Invariant:** Learned Process Reward Models can guide intermediate search expansion, but terminal state commitment must always be gated by a deterministic environmental oracle. Never deploy an agent with an unanchored neural verifier on irreversible action spaces.
 :::
 
+### The reversibility boundary: Transactional sandboxes vs. non-reversible mutations
+
+Algorithmic backtracking assumes that exploratory branches can be pruned and discarded without corrupting persistent state. However, real-world agent environments are not pure mathematical graphs; actions possess asymmetric physical reversibility. Production runtimes partition operations across the **Reversibility Boundary**:
+
+1. **Transactional Speculative Actions (Internal to Search):** Operations confined to isolated environments—such as file edits inside copy-on-write sandboxes (Linux OverlayFS, git working trees, tmpfs), read-only HTTP GET queries, and internal reasoning tokens—are fully reversible. When branch $b_i$ is pruned, its sandbox overlay is destroyed, restoring clean baseline state in milliseconds.
+2. **Non-Reversible Actions (Deferred Commitment via Two-Phase Commit or Sagas):** Operations with external physical side effects—such as sending an email, executing a financial transaction, dispatching an irreversible HTTP POST webhook, or deleting a remote database record—cannot be undone by pointer manipulation. Runtimes enforce a **Two-Phase Commit (2PC) Gate**: non-reversible tool invocations are intercepted and queued as speculative intents during tree search, and are physically dispatched only after the search algorithm concludes and selects the winning trajectory. When non-reversible operations must execute mid-trajectory to observe downstream environment feedback, the runtime must implement the **Saga Pattern** [@garciamolina1987sagas], pairing every forward action with an explicit, idempotent compensating transaction (e.g., `refund_charge` compensating `charge_card`), detailed in @sec-vol3-checkpoint-saga.
+
 ::: {#chk-vol3-03-verifiers-goodhart .callout-checkpoint title="Reward models and Goodhart's law in search"}
 
 Before analyzing tree search algorithms and the Verification Tax, verify your understanding of test-time verifier dynamics:
@@ -611,7 +636,7 @@ Before analyzing tree search algorithms and the Verification Tax, verify your un
 
 :::
 
-Equipped with reward models and verification oracles, the runtime can deploy algorithmic tree search to navigate multi-step problem spaces.
+Equipped with step-level verifiers, deterministic oracles, and transactional sandboxes, the runtime can deploy algorithmic search engines (Best-of-$N$, Beam Search, MCTS) to systematically explore candidate branches. However, running these algorithms introduces a fundamental economic trade-off: balancing exploratory search against the latency and compute overhead of verification—the Verification Tax.
 
 <!-- ======================================================================= -->
 <!-- SECTION 3.5: TREE SEARCH ALGORITHMS AND THE VERIFICATION TAX            -->
@@ -682,6 +707,54 @@ MCTS [@kocsis2006bandit; @silver2016mastering] provides an asymptotically optima
    $$
    N(s, a) \leftarrow N(s, a) + 1, \quad Q(s, a) \leftarrow Q(s, a) + \frac{V(s') - Q(s, a)}{N(s, a)}
    $$
+
+To translate this theoretical formulation into a production runtime, @lst-vol3-deliberation-mcts-prefix implements an executable PUCT search engine that couples tree expansion to copy-on-write key-value cache page tables. Rather than duplicating prompt tokens across candidate branches, each `MCTSNode` maintains a reference-counted `RadixCacheHandle`, ensuring that memory consumption scales with the active search frontier rather than the combinatorial token tree.
+
+::: {#lst-vol3-deliberation-mcts-prefix lst-cap="**Monte Carlo Tree Search with Radix Prefix Cache Management**: Production implementation of PUCT tree search coupling node exploration to copy-on-write KV-cache prefix allocation."}
+```python
+import math
+from typing import Dict, Optional
+
+
+class MCTSNode:
+    """Deliberation tree node backed by a copy-on-write KV-cache page handle."""
+
+    def __init__(self, parent: Optional["MCTSNode"] = None, prior: float = 1.0, cache_handle=None):
+        self.parent, self.prior = parent, prior
+        self.cache_handle = cache_handle  # Reference-counted physical page in Radix cache
+        self.children: Dict[str, "MCTSNode"] = {}
+        self.visits, self.value = 0, 0.0
+
+    @property
+    def q_value(self) -> float:
+        return self.value / self.visits if self.visits > 0 else 0.0
+
+    def puct(self, c: float = 1.414) -> float:
+        u = c * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
+        return self.q_value + u
+
+
+def search_step(root: MCTSNode, expand_fn, eval_fn) -> None:
+    """Executes a 4-phase MCTS iteration with CoW prefix cache fork & backpropagation."""
+    # 1. Select: traverse path maximizing PUCT
+    curr, path = root, [root]
+    while curr.children:
+        curr = max(curr.children.values(), key=lambda n: n.puct())
+        path.append(curr)
+
+    # 2. Expand: fork candidate children sharing parent's KV prefix handle
+    if not curr.children:
+        for action, prior in expand_fn(curr).items():
+            child_handle = curr.cache_handle.fork() if curr.cache_handle else None
+            curr.children[action] = MCTSNode(parent=curr, prior=prior, cache_handle=child_handle)
+
+    # 3. Evaluate & 4. Backpropagate: update visit counts and Q-values along search path
+    val = eval_fn(curr)
+    for node in reversed(path):
+        node.visits += 1
+        node.value += val
+```
+:::
 
 ### The verification tax formulation
 
@@ -765,7 +838,7 @@ $$
 m^* \approx \sqrt{\frac{2 \cdot T_{\text{ver}}}{(1 - p) \cdot T_{\text{step}}}}
 $$ {#eq-optimal-verification-cadence}
 
-This formula demonstrates that verification scheduling in deliberative agents obeys the classical **Square-Root Law of Checkpointing**—the exact same principle formulated by Young and Daly for fault-tolerant high-performance computing [@young1974; @daly2006]. The optimal checkpoint interval $m^*$ embodies three critical systems properties:
+This formula demonstrates that verification scheduling in deliberative agents obeys the classical **Square-Root Law of Checkpointing**—the exact same principle formulated by Young and Daly for fault-tolerant high-performance computing [@young1974; @daly2006]. In Daly's continuous formulation, the factor of 2 arises because random Poisson faults strike uniformly across an execution interval, discarding an average of $\frac{1}{2} m$ steps of work upon rollback. In discrete agentic search, when step-level PRMs or early assertions detect failure midway through a block, this exact $\sqrt{2}$ scaling balances forward generation investment against expected recompute latency. The optimal checkpoint interval $m^*$ embodies three critical systems properties:
 
 * **Oracle Latency Scaling ($\sqrt{T_{\text{ver}}}$):** As the verification oracle becomes heavier (e.g., a 60-second end-to-end integration test vs. a 2 ms AST parser), the optimal cadence widens with $\sqrt{T_{\text{ver}}}$. Expensive verifiers must be called sparingly.
 * **Error Rate Sensitivity ($1 / \sqrt{1 - p}$):** As single-step reliability drops (higher failure rate $1 - p$), the optimal interval shrinks with $1/\sqrt{1 - p}$, forcing tighter verification checkpoints to curtail catastrophic rollback waste.
@@ -834,9 +907,9 @@ $$
 
 where $L(v)$ is the token length of node $v$, and $m_{\text{token}} = 2 \cdot L_{\text{layers}} \cdot H_{\text{KV}} \cdot d_h \cdot b_{\text{elem}}$ is the physical memory allocated per cached token across both Key and Value matrices (with $L_{\text{layers}}$ model layers, $H_{\text{KV}}$ Key-Value heads under Grouped-Query Attention, $d_h$ head dimension, and $b_{\text{elem}}$ bytes per element).
 
-### Dynamic rollout pruning policies
+### Dynamic rollout pruning policies and memory reclamation
 
-To prevent the active search frontier from exhausting physical HBM, production runtimes enforce three dynamic pruning policies:
+To prevent the active search frontier from exhausting physical HBM, production runtimes enforce dynamic pruning policies paired with a tiered memory reclamation hierarchy:
 
 1. **Value Threshold Pruning:** The runtime immediately terminates any candidate branch whose estimated state value falls below a survival threshold:
    $$
@@ -847,7 +920,23 @@ To prevent the active search frontier from exhausting physical HBM, production r
    \bar{\mathcal{H}}(a_t) = -\frac{1}{|a_t|}\sum_{i=1}^{|a_t|} \sum_{v \in \mathcal{V}} P(v) \log P(v) > \mathcal{H}_{\max} \implies \text{PruneBranch}(s_t)
    $$
    the branch is pruned to prevent speculative exploration of low-confidence hallucination manifolds.
-3. **Priority Queue Frontier Management:** The search frontier is maintained in a bounded Priority Queue of capacity $K_{\max}$. When new nodes are expanded, only the top-$K_{\max}$ states ranked by upper confidence bound are retained in accelerator memory; all lower-ranked frontiers are evicted to host DRAM or discarded.
+3. **Priority Queue Frontier Management:** The search frontier is maintained in a bounded Priority Queue of capacity $K_{\max}$. When new nodes are expanded, only the top-$K_{\max}$ states ranked by upper confidence bound are retained in accelerator memory; all lower-ranked frontiers are evicted or discarded.
+
+When physical HBM reaches saturation ($>95\%$ allocation), the runtime enforces a **Three-Tier Memory Reclamation Hierarchy**:
+
+* **Tier 1: LRU Unreferenced Prefix Eviction ($C_{\text{ref}} = 0$):** Physical pages belonging to pruned or completed branches are reclaimed using Least-Recently-Used replacement from the free list.
+* **Tier 2: Asynchronous Host DRAM Swapping:** Active leaf rollout pages are swapped over PCIe Gen5 into pinned host memory buffers ($64\text{ GB/s}$ bidirectional bandwidth), freeing accelerator HBM for immediate decoding steps while avoiding recomputation.
+* **Tier 3: PUCT Priority Branch Pruning:** If both HBM and host DRAM approach capacity exhaustion, the search engine forcibly terminates active leaf branches with the lowest PUCT scores, releasing their ancestral page trees up to the nearest common split point.
+
+### Distributed MCTS and cache-aware affinity routing
+
+When search scaling expands across multi-node GPU clusters (e.g., 32 parallel MCTS rollouts distributed across an 8-node GPU cluster), naive round-robin or random load balancing destroys prefix cache locality. If worker GPU 3 expands branch $b_i$ from parent $v$, dispatching child branch $b_{i+1}$ to worker GPU 5 forces worker 5 to either recompute all ancestral prompt tokens from scratch or transfer gigabytes of KV-cache pages over InfiniBand via remote direct memory access (RDMA).
+
+Production deliberative runtimes deploy **Cache-Aware Affinity Routing**:
+
+* The cluster load balancer maintains a lightweight global index of prefix token hashes mapped to worker GPU IDs.
+* When dispatching a rollout step for node $v$, the router hashes the trajectory prefix tokens and directs the execution request to the specific worker with the highest resident prefix match length.
+* Consequently, cross-node KV-cache network migration is eliminated, preserving $\ge 90\%$ prefix cache hit rates even under high tree branching factors.
 
 ### Semantic state-space compaction
 
@@ -888,6 +977,60 @@ The circuit breaker operates as an out-of-band Finite State Machine (FSM):
 2. **`HALF-OPEN` (Degraded Remediation):** Tripped by soft invariant breaches (e.g., 2 consecutive tool errors or semantic stagnation). The runtime suspends unconstrained autonomy, injects an out-of-band system warning into context, prunes failing tools from the schema, and grants a strict 2-step remediation budget. If the model demonstrates physical progress ($\Delta \mathcal{S}_{\text{env}} > \delta$), the breaker resets to `CLOSED`.
 3. **`OPEN` (Tripped & Safe Abort):** Tripped by hard invariant violations or failed remediation. The runtime forcibly terminates model inference, initiates compensating rollbacks for uncommitted environment mutations, emits structured telemetry, and escalates to human-in-the-loop queues.
 
+To formalize both the mathematical verification scheduler and the out-of-band watchdog engine, @lst-vol3-deliberation-circuit-breaker implements an operational `VerificationScheduler` computing $m^*$ under the Young-Daly Square-Root Law, directly determining how many tree expansion steps the `PUCTSearchPlanner` from @lst-vol3-deliberation-mcts-prefix executes before invoking intermediate verifiers. This is paired with a three-state `WatchdogCircuitBreaker` FSM that tracks token burn, error burst ceilings, and cosine semantic distances to arrest runaway agent loops.
+
+::: {#lst-vol3-deliberation-circuit-breaker lst-cap="**Dynamic Verification Scheduler and Watchdog Circuit Breaker**: Python implementation of optimal Young-Daly verification cadence scheduling alongside an out-of-band circuit breaker FSM monitoring semantic progress deltas and error burst rates."}
+```python
+import math
+from enum import Enum, auto
+
+
+class CircuitState(Enum):
+    CLOSED = auto()
+    HALF_OPEN = auto()
+    OPEN = auto()
+
+
+def compute_optimal_cadence(t_step: float, t_ver: float, reliability_p: float) -> int:
+    """Evaluates Young-Daly verification cadence: m* = sqrt(2 * T_ver / ((1 - p) * T_step))."""
+    ratio = (2.0 * t_ver) / (max(1.0 - reliability_p, 1e-4) * t_step)
+    return max(1, round(math.sqrt(ratio)))
+
+
+class WatchdogCircuitBreaker:
+    """Out-of-band kernel watchdog monitoring agent trajectory health invariants."""
+
+    def __init__(self, max_steps: int = 30, max_tokens: int = 50_000, error_thresh: int = 3):
+        self.max_steps = max_steps
+        self.max_tokens = max_tokens
+        self.error_thresh = error_thresh
+        self.state = CircuitState.CLOSED
+        self.steps = 0
+        self.tokens = 0
+        self.consecutive_errors = 0
+
+    def step(self, tokens_used: int, error: bool = False, delta_env: float = 1.0) -> CircuitState:
+        """Evaluates trajectory health invariants on each agent control step."""
+        self.steps += 1
+        self.tokens += tokens_used
+        self.consecutive_errors = (self.consecutive_errors + 1) if error else 0
+
+        # Hard invariant violations trip immediately to OPEN
+        if (
+            self.steps > self.max_steps
+            or self.tokens > self.max_tokens
+            or self.consecutive_errors >= self.error_thresh
+        ):
+            self.state = CircuitState.OPEN
+        elif delta_env <= 0.0:  # Stagnation trips to HALF_OPEN degraded remediation
+            self.state = CircuitState.HALF_OPEN if self.state == CircuitState.CLOSED else CircuitState.OPEN
+        elif self.state == CircuitState.HALF_OPEN and not error:
+            self.state = CircuitState.CLOSED  # Remediated progress restores normal operation
+
+        return self.state
+```
+:::
+
 ::: {#ws-deliberation-endogenous-livelock .callout-war-story title="The endogenous feedback loop and livelock meltdown"}
 
 **Context:** On May 6, 2010, the financial markets experienced the Flash Crash [@kirilenko2017flash], where an automated execution algorithm attempted to hedge an equity position by selling 75,000 E-Mini S&P 500 futures contracts targeting 9 percent of recent trading volume.
@@ -907,7 +1050,7 @@ The circuit breaker operates as an out-of-band Finite State Machine (FSM):
 <!-- ======================================================================= -->
 ## Fallacies and Pitfalls {#sec-vol3-deliberation-fallacies}
 
-Designing test-time deliberation systems requires navigating these economic and structural constraints while avoiding critical architectural misconceptions.
+By uniting tree-structured radix KV caches, tiered memory reclamation, and out-of-band watchdog circuit breakers, runtimes create a stable physical substrate for multi-branch deliberation. However, translating these theoretical frameworks into production architectures requires confronting widespread engineering anti-patterns and false intuitions.
 
 ::: {.fallacy-pitfall}
 
@@ -988,23 +1131,23 @@ Over-verification increases end-to-end task execution latency by nearly **$4\tim
 
 Deploying multi-branch deliberation (Best-of-$N$, Beam Search, MCTS) on top of naive, stateless large language model (LLM) serving endpoints causes immediate High-Bandwidth Memory exhaustion.
 
-Consider serving $N = 64$ parallel candidate rollouts on an 80-layer, 70B parameter model ($d_{\text{model}} = 8192, H = 64, d_h = 128$) where each branch shares a $16{,}000$-token prompt prefix and generates 500 output tokens.
+Consider serving $N = 64$ parallel candidate rollouts on an 80-layer, 70B parameter model using Grouped-Query Attention ($d_{\text{model}} = 8192, H_{\text{KV}} = 8, d_h = 128$, yielding $328\text{ KB/token}$) where each branch shares a $16{,}000$-token prompt prefix and generates 500 output tokens.
 
-In naive serving, the prefix is recomputed or duplicated across all 64 branches. The memory consumed by the KV cache alone is:
+In naive serving, the prefix is recomputed or duplicated across all 64 branches ($16{,}500$ tokens per branch, or $1{,}056{,}000$ total tokens). The memory consumed by the KV cache alone is:
 
 $$
-M_{\text{naive}} = 64 \times (16{,}000 + 500) \times 2 \times 80 \times 64 \times 128 \times 2 \text{ bytes} \approx \mathbf{2{,}214\text{ GB } (2.21\text{ TB})}
+M_{\text{naive}} = 64 \times (16{,}000 + 500) \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} \approx \mathbf{346.0\text{ GB}}
 $$
 
-This requires an entire cluster of 28x H100 GPUs purely to store the KV cache.
+Storing $346.0\text{ GB}$ of KV cache alone requires partitioning across at least five 80 GB GPUs before accounting for model weights or activation memory.
 
 Under RadixAttention prefix sharing, the 16,000-token prompt is stored **once**:
 
 $$
-M_{\text{shared}} = \left[16{,}000 + (64 \times 500)\right] \times 2 \times 80 \times 64 \times 128 \times 2 \text{ bytes} \approx \mathbf{644\text{ GB}}
+M_{\text{shared}} = \left[16{,}000 + (64 \times 500)\right] \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} = 48{,}000 \times 327{,}680 \text{ bytes} \approx \mathbf{15.73\text{ GB}}
 $$
 
-Prefix sharing achieves an immediate **$3.44\times$ memory reduction**, allowing the entire batch to fit comfortably on 8 GPUs. Failing to integrate radix prefix caching into search engines turns deliberation into an operational non-starter.
+Prefix sharing achieves an immediate **$22.0\times$ memory reduction**, allowing the KV cache for all 64 parallel branches to fit easily within a single accelerator alongside model weights. Failing to integrate radix prefix caching into search runtimes turns multi-branch deliberation into an operational non-starter.
 
 :::
 

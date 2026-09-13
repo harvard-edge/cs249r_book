@@ -1,5 +1,23 @@
 # State Checkpointing & Time-Travel Recovery {#sec-vol3-checkpointing}
 
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+::: {.content-visible when-format="pdf"}
+\noindent
+![](images/png/cover_checkpointing_blueprint_labeled_print.png){fig-alt="Isometric blueprint showing state checkpointing and time-travel recovery: transaction execution stream, verified checkpoint anchor, execution fault alarm sensor, committed transaction bus, compensating rollback conduit, and deterministic state rewind path."}
+:::
+
+::: {.content-visible unless-format="pdf"}
+![](images/webp/cover_checkpointing_blueprint_labeled.webp){fig-alt="Isometric blueprint showing state checkpointing and time-travel recovery: transaction execution stream, verified checkpoint anchor, execution fault alarm sensor, committed transaction bus, compensating rollback conduit, and deterministic state rewind path."}
+:::
+
+:::
+
 Autonomous agents operate as non-deterministic, closed-loop control programs that continuously mutate their operating environment through tool invocations, shell commands, and API requests. Unlike classical batch inference pipelines, an agent executing an extended multi-hour trajectory cannot be treated as a stateless request-response service: intermediate execution steps alter external infrastructure, allocate cloud resources, mutate remote databases, and modify filesystems. When such a workflow encounters an infrastructure crash, an out-of-memory fault, a hardware preemption, or a semantic hallucination, naive restarting from step zero wastes tens of thousands of dollars in compute, incurs unacceptable latency, and risks re-executing non-idempotent mutations with catastrophic consequences. Building resilient agent runtimes requires a fundamental systems redesign: decoupling volatile accelerator memory from persistent state, partitioning operations across an architectural reversibility boundary, orchestrating compensating distributed sagas, and establishing bit-accurate record/replay mechanics that survive non-deterministic hardware foundations.
 
 ## Purpose {.unnumbered .unlisted}
@@ -263,7 +281,7 @@ Holding $21\text{ GB}$ of HBM idle for an 8-hour human review window incurs an i
 
 To survive the Human Oversight Latency Tax, the runtime must implement **Asynchronous State Suspension**\index{Asynchronous State Suspension}: dehydrating the agent's execution state, flushing KV cache blocks to host DRAM or NVMe, unmounting ephemeral container storage, and evicting the execution thread from the GPU scheduler until an out-of-band authorization signal resumes execution.
 
----
+The Irreversibility Dilemma thus establishes the fundamental dichotomy of autonomous systems: while external mutations across $\mathcal{S}_{\text{external}}$ require cryptographic idempotency and asynchronous oversight gates to prevent irreversible physical damage, surviving node panics, human pauses, and semantic defects requires durably preserving internal state ($\mathcal{S}_{\text{internal}}$). Yet, as the Human Oversight Latency Tax reveals, holding raw execution states in accelerator HBM is economically ruinous, while naively serializing tens of gigabytes of activation tensors at every turn saturates storage buses. To make recovery tractable, the runtime requires lightweight, fine-grained state representations and copy-on-write memory virtualization—the architectural primitives to which we now turn.
 
 ## Differential State Snapshots and Copy-on-Write Memory {#sec-vol3-checkpoint-cow}
 
@@ -516,13 +534,13 @@ The runtime must commit a consistent state checkpoint approximately every 90 sec
 
 Before examining distributed Sagas and compensating transactions, verify your understanding of checkpoint scheduling:
 
-- [ ] **Young-Daly derivation**: explain why the optimal checkpoint interval $T_{\text{opt}} \approx \sqrt{2 \cdot \delta \cdot M}$ balances write overhead against expected lost work upon crash.
-- [ ] **Napkin math scaling**: if snapshot write latency $\delta = 2.5\text{ s}$ and system MTBF is $M = 1{,}600\text{ s}$, calculate $T_{\text{opt}}$ in seconds and convert this into an execution turn cadence when turns take $15\text{ s}$.
-- [ ] **Golden Invariant of Sagas**: why must compensating transactions $C_i$ be pre-compiled deterministic code closures rather than synthesized dynamically by the stochastic model at failure time?
+- [ ] **Young-Daly derivation**: explain why the optimal checkpoint interval $T_{\text{opt}} \approx \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}}$ balances write overhead against expected lost work upon crash.
+- [ ] **Napkin math scaling**: if snapshot write latency $T_{\text{save}} = 2.5\text{ s}$ and system MTBF is $M_{\text{MTBF}} = 1{,}600\text{ s}$, calculate $T_{\text{opt}}$ in seconds and convert this into an execution turn cadence when turns take $15\text{ s}$.
+- [ ] **Copy-on-write memory virtualization**: explain how PagedAttention block tables share physical HBM frames across speculative branches ($B=16$), and calculate the memory savings compared to naive buffer replication.
 
 :::
 
----
+While differential Write-Ahead Logging, OverlayFS, and PagedAttention CoW block tables provide sub-50 ms crash recovery and zero-liability rollbacks, their operational guarantees are strictly confined to the internal domain ($\mathcal{S}_{\text{internal}}$). Memory pages in HBM and local scratchpad directories can be discarded and re-read at will. But autonomous agents are fundamentally built to actuate upon the external world ($\mathcal{S}_{\text{external}}$). When a trajectory encounters a fatal error after having already mutated remote databases, provisioned cloud instances, or triggered external webhooks, restoring an internal memory snapshot cannot undo external side effects. To maintain global system consistency across irreversible boundaries, the runtime must graduate from local state checkpointing to distributed Saga orchestration and compensating transactions.
 
 ## Saga Execution Orchestrations for External Tools {#sec-vol3-checkpoint-saga}
 
@@ -670,6 +688,26 @@ Let us compare the latency profiles:
 
 This derivation establishes an essential systems architectural rule: **Schedule distributed tool operations in ascending order of reliability ($p_i$) and descending order of compensation cost ($T_{\text{comp}}$) to minimize cumulative compensation debt upon failure.**
 
+### Production durable execution: Temporal and compensation debt
+
+In real-world production systems, executing an agent saga cannot rely on an in-memory Python script. If the host process running the agent crashes due to an out-of-memory (OOM) error, node preemption, or network partition midway through an 80-step trajectory, pure in-memory state is wiped out. The system loses track of which forward transactions completed and which compensating actions were pending, leaking orphaned cloud infrastructure and leaving external databases in corrupted, half-mutated states.
+
+To prevent this failure mode, modern agent runtimes rely on **Durable Execution Engines**\index{Durable Execution} such as Temporal [@temporal2024] and Cadence. In a durable execution model, the agent's control flow is structured as a deterministic workflow orchestrating external **Activities** (the tool calls):
+
+1. **Deterministic Event History:** The runtime logs every activity invocation, input payload, execution status, and returned result to an append-only distributed event store.
+2. **Replay-Based State Reconstruction:** When a worker process fails or migrates to a different cluster node, a replacement worker reconstructs the exact thread state, call stack, and local variables by replaying the logged event history. Completed activities are intercepted by the replay engine and resolved immediately from cached history rather than re-executing against external services.
+3. **Durable Compensation Chains:** Compensating transactions $C_i$ are registered as durable workflow compensation steps. If forward execution terminates abnormally at step $k$, the workflow orchestrator guarantees that the compensation sequence $C_{k-1} \dots C_1$ is durably enqueued and executed to completion regardless of intervening worker crashes.
+
+#### Secondary compensation failures and compensation debt
+
+A dangerous fallacy in naive saga implementations is assuming that compensating transactions are infallible. In distributed environments, compensation actions $C_i$ are themselves subject to network timeouts, third-party API rate limits, and transient infrastructure outages. When a compensating transaction fails, the runtime incurs **Compensation Debt**\index{Compensation Debt}.
+
+To prevent secondary compensation failures from corrupting state, production architectures enforce three defensive guarantees:
+
+* **Strict Idempotency:** Every compensating activity must accept an idempotency key (e.g., a deterministic hash of the forward transaction ID and resource UUID). If a network timeout occurs during a rollback call, the orchestrator can safely retry the compensation without creating duplicate mutations.
+* **Exponential Backoff with Jitter:** Compensating activities are executed with bounded exponential backoff policies. Because the goal is restoring global consistency, retries continue across minutes or hours rather than failing immediately.
+* **Dead-Letter Queues (DLQs) and Escalation Traps:** If a compensating transaction exhausts its maximum retry threshold (e.g., due to an unrecoverable authentication rejection or cloud provider outage), the failure is routed to a persistent Dead-Letter Queue. The runtime triggers an asynchronous interrupt (trapping to an SRE intervention workflow as detailed in @sec-vol3-interrupts-hitl), ensuring that no orphaned resource remains unmonitored.
+
 ### Fork-on-error and counterfactual remediation
 
 Certain real-world actuations lack a mathematical or operational inverse:
@@ -692,7 +730,17 @@ The Fork-on-Error sequence operates under strict isolation:
 4. **Counterfactual Forward Repair:** The remediation subagent ingests point-in-time recovery logs, diagnoses the delta between the observed anomalous state and the desired invariant, and generates a forward repair patch.
 5. **Deterministic Verification and Splicing:** A deterministic verifier oracle validates that the environment satisfies core system invariants. If the repair passes, the clean repaired state is spliced back into the primary trajectory's Write-Ahead Log, the taint bit is cleared, and normal execution resumes.
 
----
+::: {#chk-vol3-07-saga-orchestration .callout-checkpoint title="Distributed sagas and compensation debt"}
+
+Before investigating accelerator hardware non-determinism and trajectory replay, verify your understanding of external tool recovery:
+
+- [ ] **The Golden Invariant**: why must compensating transactions $C_i$ be pre-compiled, deterministic code closures registered at dispatch time rather than dynamically synthesized by the model at failure time?
+- [ ] **Fail-fast transaction scheduling**: explain how ordering saga steps by ascending reliability ($p_i$) and descending compensation cost ($T_{\text{comp}}$) minimizes cumulative compensation debt upon failure.
+- [ ] **Fork-on-Error protocol**: when an external mutation lacks an inverse handler ($C_i = \emptyset$), how do Information Flow Control (IFC) taint isolation and remediation subagents restore invariant closure?
+
+:::
+
+Distributed Sagas and Fork-on-Error protocols ensure that live operational failures do not corrupt production environments or leave orphaned infrastructure. However, remediating a failure during live execution is only the first half of dependable systems engineering; the second half is forensic analysis and post-mortem diagnosis. When an agent exhibits an anomalous or unsafe trajectory in production, engineers must be able to reproduce the exact failure mode in an offline sandbox. Yet, when developers attempt to re-execute a failed trajectory using the identical model weights, input prompt, and random seed, they confront a baffling systems phenomenon: the bug vanishes, and the agent follows a completely different execution path. To understand why reproduction fails and how to achieve true trajectory time travel, we must deconstruct the microarchitectural sources of non-determinism in modern accelerator hardware.
 
 ## Deterministic Replay and Hardware Record/Replay {#sec-vol3-checkpoint-replay}
 
@@ -750,6 +798,8 @@ On an NVIDIA H100 GPU containing 132 Streaming Multiprocessors (SMs) executing w
 1. **Dynamic Thread Scheduling:** The hardware thread scheduler dispatches thread blocks to SMs based on instantaneous thermal, clock, and memory latency variations.
 2. **Atomic Reductions:** High-performance CUDA kernels (including `atomicAdd` across parallel reduction trees) accumulate intermediate gradient and activation tensors in whatever order thread warps arrive at the memory controller.
 3. **FlashAttention Tiling:** Block-sparse and fused FlashAttention kernels [@dao2022] dynamically partition attention matrices $\mathbf{Q}\mathbf{K}^T$ across SRAM tiles. Varying reduction orders yield slightly different floating-point rounding errors in the output logits $\mathbf{z}$.
+4. **cuBLAS Split-K GEMM Reductions:** In projection layers and linear heads, dense general matrix multiplication (GEMM) operations employ cuBLAS split-K parallelization, partitioning large inner-product reduction loops along the $K$-dimension across separate thread blocks. These blocks accumulate partial sums into global HBM buffers via non-deterministic atomic additions whose completion order fluctuates with memory bus arbitration.
+5. **cuRAND/Philox Counter Desynchronization:** Hardware-accelerated stochastic sampling utilizes parallel PRNG kernels such as NVIDIA cuRAND Philox4x32-10. Under continuous batching with dynamic prompt lengths, worker warps advance PRNG counter states at variable rates. Unless the exact 64-bit generator key, seed, and sequence offset are pinned in the Agent Control Block, identical starting seeds produce diverging sampling streams across runs.
 
 Let $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$ denote the logit vector emitted by a foundation model before softmax. If the top two most probable tokens $v_1$ and $v_2$ have logits separated by a margin smaller than the hardware floating-point divergence threshold $\epsilon_{\text{fp}}$:
 
@@ -824,7 +874,7 @@ $$\tau' = \tau_{0 \dots k} \cup (s_{k+1}', a_{k+1}', \dots)$$
 
 Because parent state blocks are managed via Copy-on-Write page tables and OverlayFS layers, counterfactual branches materialize in milliseconds without duplicating underlying disk or memory infrastructure.
 
----
+The convergence of append-only Write-Ahead Logging, Copy-on-Write memory virtualization, distributed sagas, and the Replay Invariant provides a mathematically rigorous foundation for agent fault tolerance. Yet, translating these theoretical principles into high-throughput production clusters is fraught with subtle architectural hazards. Practitioners routinely make dangerous assumptions regarding model self-healing, accelerator determinism, and compensation mechanics. To safeguard autonomous architectures against production outages, we must confront the prevailing fallacies and implementation pitfalls that undermine state persistence.
 
 ## Fallacies and Pitfalls {#sec-vol3-checkpoint-fallacies}
 
@@ -892,7 +942,7 @@ Failing to attach deterministic idempotency keys to mutating tool calls exposes 
 In distributed networks, an HTTP timeout does not imply execution failure: the remote gateway may have applied the mutation while the confirmation response was dropped in transit. If an agent retries an un-keyed tool call (e.g., `POST /v1/payments` or `POST /v1/virtual_machines`), the remote service executes the operation twice, double-billing a customer or spinning up duplicate infrastructure. Every state-mutating request must carry a deterministic HMAC derived from the trajectory ID and step counter, enabling remote gateways to deduplicate requests and guarantee exactly-once execution semantics.
 :::
 
----
+Navigating these pitfalls requires moving beyond ad-hoc recovery heuristics and adhering to strict physical systems invariants. The following summary codifies the end-to-end checkpointing and recovery contract.
 
 ## Summary {#sec-vol3-checkpoint-summary}
 
@@ -906,10 +956,16 @@ Dependable autonomous systems cannot be engineered upon the assumption that foun
 5. **The Replay Invariant:** Trajectory time-travel debugging and crash hydration demand that external tool calls are intercepted and served directly from the Write-Ahead Log without re-executing network mutations. Hardware floating-point non-determinism mandates that replay relies on captured token IDs rather than stochastic re-inference.
 :::
 
-::: {.callout-chapter-connection title="From checkpointing to trajectory scheduling"}
-In Part II (The Context Memory Hierarchy), we have examined how an agent structures its long-term memories (@sec-vol3-episodic-memory), virtualizes its active working set via PagedAttention (@sec-vol3-virtual-memory), and guarantees execution durability through state checkpointing and sagas (this chapter).
+::: {.callout-chapter-connection title="From state checkpointing to tool actuation"}
+With state checkpointing and time-travel recovery established, we conclude **Part II: The Context Memory Hierarchy**. Across this part, we have traced the full life cycle of agent state: managing active token working sets (@sec-vol3-working-sets), virtualizing memory via PagedAttention and Radix prefix trees (@sec-vol3-virtual-memory), retrieving long-term assertions through episodic and topological indices (@sec-vol3-episodic-memory), and guaranteeing durability across node panics and semantic faults through differential snapshots and sagas (this chapter).
 
-Once trajectories can be cleanly snapshotted, suspended, and restored to disk, a fundamental systems question emerges: *How does the operating system schedule, multiplex, and prioritize hundreds of concurrent, multi-turn agent workflows across scarce, expensive accelerator fleets?*
+Throughout our analysis of the Reversibility Boundary, we treated external tools as an abstract domain ($\mathcal{S}_{\text{external}}$) governed by compensating transactions and idempotency keys. But this introduces the central question that launches **Part III: The Actuation Boundary**: *How does an autonomous runtime physically translate non-deterministic, continuous token distributions into safe, typed, and verifiable software operations?*
 
-In @sec-vol3-scheduling, we explore the bimodal execution profile of agents, formalize Multi-Level Feedback Queues for token generation, and resolve the catastrophic Tool-Wait memory wall through preemptive context swapping.
+In @sec-vol3-actuation (*Tool Actuation & The Environment Interface*), we bridge stochastic neural proposals with discrete execution environments:
+
+- Formulating tool execution through the classical computer architecture lens of **Memory-Mapped I/O (MMIO)**, device drivers, and unprivileged user-space system call traps.
+- Standardizing the interface through the **Model Context Protocol (MCP)** and typed Application Binary Interfaces (ABIs) that decouple deliberative reasoning from tool implementations.
+- Enforcing **Grammar-Constrained Logit Decoding** at the GPU tensor layer, evaluating sub-millisecond finite state machine bitmasks to guarantee schema compliance before tokens leave accelerator memory.
+- Implementing **Capability-Based Security** and monotonic privilege attenuation to defeat indirect prompt injection and confused deputy exploits.
+- Deploying **Cryptographic Nonce Gateways** to ensure at-most-once physical execution across stochastic neural retry loops.
 :::
