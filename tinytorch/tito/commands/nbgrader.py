@@ -664,6 +664,8 @@ class NBGraderCommand(BaseCommand):
         result = self._run_external(cmd)
         if result.returncode != 0:
             console.print(f"[red]Failed to {action} assignment {resolved_assignment}[/red]")
+            if result.stderr:
+                console.print(f"[red]{result.stderr.strip()}[/red]")
             return result.returncode or 1
 
         console.print(f"[green]Assignment {resolved_assignment} {action} completed.[/green]")
@@ -758,6 +760,8 @@ class NBGraderCommand(BaseCommand):
         result = self._run_external(cmd)
         if result.returncode != 0:
             self.console.print("[red]Failed to generate grades report[/red]")
+            if result.stderr:
+                self.console.print(f"[red]{result.stderr.strip()}[/red]")
             return result.returncode or 1
 
         self.console.print("[green]Grades report exported by nbgrader.[/green]")
