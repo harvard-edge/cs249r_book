@@ -222,6 +222,42 @@ labels_placement = [
     {'text': 'qos isolation trench', 'pill': (720, 750), 'targ': (588, 564), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
+# Chapter 14: Supervisory Intervention
+labels_intervention = [
+    {'text': 'autonomous policy', 'pill': (180, 260), 'targ': (335, 353), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'haptic master console', 'pill': (550, 70), 'targ': (568, 154)},
+    {'text': 'kinetic authority arbiter', 'pill': (850, 220), 'targ': (738, 344), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'unified drive shaft', 'pill': (1150, 320), 'targ': (1038, 404)},
+    {'text': 'intervention event logger', 'pill': (460, 720), 'targ': (657, 575), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
+# Chapter 15: Adversarial Verification
+labels_verification = [
+    {'text': 'virtual simulation crucible', 'pill': (300, 680), 'targ': (455, 559), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'processor-in-the-loop', 'pill': (420, 240), 'targ': (588, 474)},
+    {'text': 'hardware-in-the-loop dyno', 'pill': (760, 680), 'targ': (748, 331), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'fault injection needles', 'pill': (1160, 120), 'targ': (926, 187), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'surveillance telemetry', 'pill': (880, 60), 'targ': (768, 144)},
+]
+
+# Chapter 16: Deployment Release
+labels_release = [
+    {'text': 'evidence telemetry pipelines', 'pill': (280, 680), 'targ': (473, 549)},
+    {'text': 'gsn argument hierarchy', 'pill': (480, 220), 'targ': (691, 379), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'deployment authorization seal', 'pill': (722, 60), 'targ': (710, 175), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'certified envelope threshold', 'pill': (1160, 320), 'targ': (875, 410), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'revocation interlock', 'pill': (1120, 680), 'targ': (888, 524), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
+# Chapter 17: The Epistemic Frontier
+labels_frontier = [
+    {'text': 'tripartite physical stack', 'pill': (200, 140), 'targ': (390, 253), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'actuator body housing', 'pill': (340, 680), 'targ': (528, 454)},
+    {'text': 'containment barrier', 'pill': (1180, 220), 'targ': (949, 307), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'exploratory horizon prism', 'pill': (880, 60), 'targ': (869, 179), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'unobserved reality chasm', 'pill': (1200, 680), 'targ': (1088, 524)},
+]
+
 if __name__ == '__main__':
     process_chapter('02_body', 'vol4_ch02_body_base_1789242698098.jpg', labels_body)
     process_chapter('03_brain', 'vol4_ch03_brain_base_1789242713788.jpg', labels_brain)
@@ -235,4 +271,8 @@ if __name__ == '__main__':
     process_chapter('11_planning', 'vol4_ch11_planning_base_1789293290135.jpg', labels_planning)
     process_chapter('12_enforcement', 'vol4_ch12_enforcement_base_1789293313920.jpg', labels_enforcement)
     process_chapter('13_placement', 'vol4_ch13_placement_base_1789293408508.jpg', labels_placement)
-    print('All 12 chapter openers generated successfully.')
+    process_chapter('14_intervention', 'vol4_ch14_intervention_base_1789294696657.jpg', labels_intervention)
+    process_chapter('15_verification', 'vol4_ch15_verification_base_1789294730403.jpg', labels_verification)
+    process_chapter('16_release', 'vol4_ch16_release_base_1789294762541.jpg', labels_release)
+    process_chapter('17_frontier', 'vol4_ch17_frontier_base_1789294795242.jpg', labels_frontier)
+    print('All 16 chapter openers generated successfully.')
