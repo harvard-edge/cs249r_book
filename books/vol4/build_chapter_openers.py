@@ -164,6 +164,64 @@ labels_evaluation = [
     {'text': 'safety envelope', 'pill': (240, 560), 'targ': (350, 440), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
+# Chapter 08: Sensor Perception
+labels_perception = [
+    {'text': 'stereo optical rail', 'pill': (160, 360), 'targ': (238, 464)},
+    {'text': 'micro-lidar beam', 'pill': (480, 80), 'targ': (458, 214)},
+    {'text': 'calibration target', 'pill': (680, 710), 'targ': (664, 404)},
+    {'text': 'uncertainty ellipsoid', 'pill': (1160, 160), 'targ': (1010, 354), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'latency drift vector', 'pill': (1240, 620), 'targ': (1168, 414), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
+# Chapter 09: Spatial Memory
+labels_memory = [
+    {'text': 'octree voxel grid', 'pill': (180, 320), 'targ': (341, 438)},
+    {'text': 'occlusion barrier', 'pill': (560, 70), 'targ': (568, 224)},
+    {'text': 'spatial belief decay', 'pill': (820, 90), 'targ': (752, 240), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'temporal lease ledger', 'pill': (1220, 160), 'targ': (1079, 278), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'stale token eviction', 'pill': (1160, 710), 'targ': (958, 567), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
+# Chapter 10: Grounded Intent
+labels_intent = [
+    {'text': 'task token prism', 'pill': (200, 80), 'targ': (364, 135), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'deliberative projection', 'pill': (480, 240), 'targ': (508, 264)},
+    {'text': 'reachability manifold', 'pill': (460, 690), 'targ': (608, 504)},
+    {'text': 'tolerance cylinder', 'pill': (700, 710), 'targ': (694, 434), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'countdown lease ring', 'pill': (880, 160), 'targ': (694, 294), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'expiration tripwire', 'pill': (1180, 160), 'targ': (1003, 239), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
+# Chapter 11: Trajectory Planning
+labels_planning = [
+    {'text': 'actuator origin', 'pill': (240, 140), 'targ': (368, 224)},
+    {'text': 'executed spline', 'pill': (380, 520), 'targ': (534, 285), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'prospective chunk', 'pill': (700, 680), 'targ': (795, 341), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'continuity calipers', 'pill': (650, 100), 'targ': (648, 204)},
+    {'text': 'stopping suffix', 'pill': (1160, 360), 'targ': (1034, 478), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'terminal buffer pad', 'pill': (1160, 720), 'targ': (1068, 624)},
+]
+
+# Chapter 12: Safety Enforcement
+labels_enforcement = [
+    {'text': 'neural proposal flow', 'pill': (220, 80), 'targ': (396, 208), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'cbf-qp projection filter', 'pill': (744, 80), 'targ': (732, 284)},
+    {'text': 'admissible permission gate', 'pill': (1120, 140), 'targ': (937, 274), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'actuator motor drive', 'pill': (1200, 260), 'targ': (1048, 204)},
+    {'text': 'unsafe vector sump', 'pill': (1020, 730), 'targ': (868, 624), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'emergency interlock', 'pill': (420, 680), 'targ': (568, 464), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
+# Chapter 13: Silicon Placement
+labels_placement = [
+    {'text': '3d memory stacks', 'pill': (140, 100), 'targ': (218, 294)},
+    {'text': 'cognitive npu cluster', 'pill': (180, 280), 'targ': (368, 344), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'thermal dissipation fins', 'pill': (360, 60), 'targ': (468, 144)},
+    {'text': 'deterministic mcu enclave', 'pill': (1160, 260), 'targ': (925, 356)},
+    {'text': 'shared crossbar bus', 'pill': (380, 720), 'targ': (538, 464), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'qos isolation trench', 'pill': (720, 750), 'targ': (588, 564), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
 if __name__ == '__main__':
     process_chapter('02_body', 'vol4_ch02_body_base_1789242698098.jpg', labels_body)
     process_chapter('03_brain', 'vol4_ch03_brain_base_1789242713788.jpg', labels_brain)
@@ -171,4 +229,10 @@ if __name__ == '__main__':
     process_chapter('05_data', 'vol4_ch05_data_clean_1789245664081.jpg', labels_data)
     process_chapter('06_training', 'test_ch06_gemini_opt2_1789246590824.jpg', labels_training)
     process_chapter('07_evaluation', 'vol4_ch07_eval_vibrant_1789292406547.jpg', labels_evaluation)
-    print('All 6 chapter openers updated successfully.')
+    process_chapter('08_perception', 'vol4_ch08_perception_base_1789293224660.jpg', labels_perception)
+    process_chapter('09_memory', 'vol4_ch09_memory_base_1789293246965.jpg', labels_memory)
+    process_chapter('10_intent', 'vol4_ch10_intent_base_1789293267152.jpg', labels_intent)
+    process_chapter('11_planning', 'vol4_ch11_planning_base_1789293290135.jpg', labels_planning)
+    process_chapter('12_enforcement', 'vol4_ch12_enforcement_base_1789293313920.jpg', labels_enforcement)
+    process_chapter('13_placement', 'vol4_ch13_placement_base_1789293408508.jpg', labels_placement)
+    print('All 12 chapter openers generated successfully.')
