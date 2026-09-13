@@ -172,11 +172,13 @@ labels_evaluation = [
 
 # Chapter 08: Sensor Perception
 labels_perception = [
-    {'text': 'stereo optical rail', 'pill': (160, 360), 'targ': (238, 464)},
-    {'text': 'micro-lidar beam', 'pill': (480, 80), 'targ': (458, 214)},
-    {'text': 'calibration target', 'pill': (680, 710), 'targ': (664, 404)},
-    {'text': 'uncertainty ellipsoid', 'pill': (1160, 160), 'targ': (1010, 354), 'border': '#D97706', 'color': '#D97706'},
-    {'text': 'latency drift vector', 'pill': (1240, 620), 'targ': (1168, 414), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'stereo optical baseline', 'pill': (360, 70), 'targ': (620, 140)},
+    {'text': 'micro-lidar point cloud', 'pill': (880, 80), 'targ': (720, 230), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'metrology step artifact', 'pill': (200, 260), 'targ': (550, 360)},
+    {'text': 'extrinsic calibration frame', 'pill': (220, 500), 'targ': (635, 415), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'latency drift vector', 'pill': (480, 720), 'targ': (690, 525), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'spatial covariance ellipsoid', 'pill': (1160, 600), 'targ': (850, 480), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'edge preprocessor box', 'pill': (1160, 340), 'targ': (980, 400)},
 ]
 
 # Chapter 09: Spatial Memory
@@ -271,7 +273,7 @@ if __name__ == '__main__':
     process_chapter('05_data', 'vol4_ch05_teleop_cell_1789298090568.jpg', labels_data)
     process_chapter('06_training', 'test_ch06_gemini_opt2_1789246590824.jpg', labels_training)
     process_chapter('07_evaluation', 'vol4_ch07_mocap_cell_1789299882214.jpg', labels_evaluation)
-    process_chapter('08_perception', 'vol4_ch08_perception_base_1789293224660.jpg', labels_perception)
+    process_chapter('08_perception', 'vol4_ch08_opt_b_bench_1789300399870.jpg', labels_perception)
     process_chapter('09_memory', 'vol4_ch09_memory_base_1789293246965.jpg', labels_memory)
     process_chapter('10_intent', 'vol4_ch10_intent_base_1789293267152.jpg', labels_intent)
     process_chapter('11_planning', 'vol4_ch11_planning_base_1789293290135.jpg', labels_planning)
