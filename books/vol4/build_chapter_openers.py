@@ -141,12 +141,13 @@ labels_nervous = [
 
 # Chapter 05: Physical Data
 labels_data = [
-    {'text': 'haptic teleop', 'pill': (140, 370), 'targ': (380, 370)},
-    {'text': 'stereo vision', 'pill': (670, 90), 'targ': (670, 300)},
-    {'text': 'micro-lidar', 'pill': (940, 240), 'targ': (705, 365)},
-    {'text': 'calibration target', 'pill': (780, 710), 'targ': (800, 510)},
-    {'text': 'deterministic logger', 'pill': (1180, 180), 'targ': (1080, 390)},
-    {'text': 'timestamp sync', 'pill': (1260, 680), 'targ': (1200, 560), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'bilateral haptic master', 'pill': (240, 260), 'targ': (440, 360), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'overhead sensor mast', 'pill': (560, 80), 'targ': (690, 130)},
+    {'text': 'stereo vision cone', 'pill': (880, 160), 'targ': (760, 240)},
+    {'text': '6-dof follower arm', 'pill': (1160, 260), 'targ': (960, 340)},
+    {'text': 'manipulation workpiece', 'pill': (1180, 520), 'targ': (816, 457)},
+    {'text': 'action stream conduit', 'pill': (240, 580), 'targ': (580, 500), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'timestamp sync logger', 'pill': (700, 740), 'targ': (710, 600), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
 # Chapter 06: Policy Training (Sim-to-Real)
@@ -266,7 +267,7 @@ if __name__ == '__main__':
     process_chapter('02_body', 'vol4_body_anatomy_1789296638170.jpg', labels_body)
     process_chapter('03_brain', 'vol4_brain_cognitive_1789296655524.jpg', labels_brain)
     process_chapter('04_nervous', 'vol4_nervous_bridge_1789296675456.jpg', labels_nervous)
-    process_chapter('05_data', 'vol4_ch05_data_clean_1789245664081.jpg', labels_data)
+    process_chapter('05_data', 'vol4_ch05_teleop_cell_1789298090568.jpg', labels_data)
     process_chapter('06_training', 'test_ch06_gemini_opt2_1789246590824.jpg', labels_training)
     process_chapter('07_evaluation', 'vol4_ch07_eval_vibrant_1789292406547.jpg', labels_evaluation)
     process_chapter('08_perception', 'vol4_ch08_perception_base_1789293224660.jpg', labels_perception)
