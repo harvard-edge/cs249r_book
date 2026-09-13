@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate high-resolution labeled and unlabeled isometric blueprint chapter openers
-for Volume 4 Part I (Chapters 02, 03, 04).
+for Volume 4 Part I and Part II (Chapters 02 - 07).
 """
 
 import os
@@ -29,18 +29,23 @@ def create_isometric_grid(w=1400, h=800, spacing=50, color=(226, 235, 242)):
         draw.line([(x1, y1), (x2_n, y2_n)], fill=color, width=1)
     return grid_img
 
-def draw_pill(draw, text, x, y, border_color='#1C4E4F', text_color='#1C4E4F', bg_color='#FFFFFF'):
+def draw_pill(draw, text, cx, cy, border_color='#1A4D3E', text_color='#1A4D3E'):
+    try:
+        font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 16)
+    except:
+        font = ImageFont.load_default()
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     px, py = 12, 6
-    rect = [x - tw//2 - px, y - th//2 - py, x + tw//2 + px, y + th//2 + py]
-    draw.rounded_rectangle(rect, radius=5, fill=bg_color, outline=border_color, width=2)
-    draw.text((x - tw//2, y - th//2 - 1), text, fill=text_color, font=font)
-    return rect
+    bx0, by0 = cx - tw//2 - px, cy - th//2 - py
+    bx1, by1 = cx + tw//2 + px, cy + th//2 + py
+    draw.rounded_rectangle([bx0, by0, bx1, by1], radius=8, fill='white', outline=border_color, width=2)
+    draw.text((cx - tw//2, cy - th//2 - 1), text, fill=text_color, font=font)
+    return (bx0, by0, bx1, by1)
 
-def draw_leader(draw, p_pill, p_target, color='#1C4E4F'):
-    draw.line([p_pill, p_target], fill=color, width=2)
+def draw_leader(draw, p_box, p_target, color='#1A4D3E'):
+    draw.line([p_box, p_target], fill=color, width=2)
     r = 3.5
     draw.ellipse([p_target[0]-r, p_target[1]-r, p_target[0]+r, p_target[1]+r], fill=color)
 
@@ -87,9 +92,8 @@ def process_chapter(slug, base_filename, labels):
     os.makedirs(png_dir, exist_ok=True)
     os.makedirs(webp_dir, exist_ok=True)
     
-    prefix = slug.split('_')[1] # body, brain, nervous
+    prefix = slug.split('_')[1] # body, brain, nervous, data, training, evaluation
     
-    # Output file paths
     unlabeled_png = os.path.join(png_dir, f'cover_{prefix}_blueprint.png')
     unlabeled_webp = os.path.join(webp_dir, f'cover_{prefix}_blueprint.webp')
     labeled_png = os.path.join(png_dir, f'cover_{prefix}_blueprint_labeled_print.png')
@@ -100,7 +104,6 @@ def process_chapter(slug, base_filename, labels):
     labeled.save(labeled_png, 'PNG')
     labeled.save(labeled_webp, 'WEBP', quality=95)
     
-    # Also save a copy in brain dir for instant review
     labeled.save(os.path.join(BRAIN, f'final_{slug}_labeled.png'))
     print(f'Processed {slug} -> {labeled_png}')
 
@@ -132,8 +135,40 @@ labels_nervous = [
     {'text': 'reflex filter', 'pill': (360, 570), 'targ': (580, 410), 'border': '#9B2226', 'color': '#9B2226'},
 ]
 
+# Chapter 05: Physical Data
+labels_data = [
+    {'text': 'haptic teleop', 'pill': (140, 370), 'targ': (380, 370)},
+    {'text': 'stereo vision', 'pill': (670, 90), 'targ': (670, 300)},
+    {'text': 'micro-lidar', 'pill': (940, 240), 'targ': (705, 365)},
+    {'text': 'calibration target', 'pill': (780, 710), 'targ': (800, 510)},
+    {'text': 'deterministic logger', 'pill': (1180, 180), 'targ': (1080, 390)},
+    {'text': 'timestamp sync', 'pill': (1260, 680), 'targ': (1200, 560), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
+# Chapter 06: Policy Training (Sim-to-Real)
+labels_training = [
+    {'text': 'virtual twin', 'pill': (160, 200), 'targ': (298, 344), 'border': '#0090B0', 'color': '#0090B0'},
+    {'text': 'friction cones', 'pill': (600, 80), 'targ': (718, 314), 'border': '#D97706', 'color': '#D97706'},
+    {'text': 'actuator lag', 'pill': (620, 710), 'targ': (668, 484), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+    {'text': 'parameter ranges', 'pill': (380, 690), 'targ': (568, 514), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+    {'text': 'contact mismatch', 'pill': (1220, 260), 'targ': (1098, 434), 'border': '#9B2226', 'color': '#9B2226'},
+    {'text': 'physical plant', 'pill': (990, 740), 'targ': (978, 614), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+]
+
+# Chapter 07: Closed-Loop Evaluation & Metrology
+labels_evaluation = [
+    {'text': 'mocap array', 'pill': (530, 70), 'targ': (530, 160)},
+    {'text': 'tracking constellation', 'pill': (360, 220), 'targ': (660, 310)},
+    {'text': 'dynamometer plate', 'pill': (690, 690), 'targ': (690, 480)},
+    {'text': 'confidence ledger', 'pill': (1150, 180), 'targ': (1020, 310)},
+    {'text': 'safety envelope', 'pill': (240, 560), 'targ': (350, 440), 'border': '#9B2226', 'color': '#9B2226'},
+]
+
 if __name__ == '__main__':
     process_chapter('02_body', 'vol4_ch02_body_base_1789242698098.jpg', labels_body)
     process_chapter('03_brain', 'vol4_ch03_brain_base_1789242713788.jpg', labels_brain)
     process_chapter('04_nervous', 'vol4_ch04_nervous_base_1789242728948.jpg', labels_nervous)
-    print('All openers generated successfully.')
+    process_chapter('05_data', 'vol4_ch05_data_clean_1789245664081.jpg', labels_data)
+    process_chapter('06_training', 'test_ch06_gemini_opt2_1789246590824.jpg', labels_training)
+    process_chapter('07_evaluation', 'vol4_ch07_eval_vibrant_1789292406547.jpg', labels_evaluation)
+    print('All 6 chapter openers updated successfully.')
