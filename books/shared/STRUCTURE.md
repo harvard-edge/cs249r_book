@@ -166,8 +166,8 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 1 | chapter | `01_boundary/01_boundary.qmd` |
 |  | part | `parts/anatomy_principles.qmd` |
 | 2 | chapter | `02_body/02_body.qmd` |
-| 3 | chapter | `03_nervous/03_nervous.qmd` |
-| 4 | chapter | `04_brain/04_brain.qmd` |
+| 3 | chapter | `03_brain/03_brain.qmd` |
+| 4 | chapter | `04_nervous/04_nervous.qmd` |
 |  | part | `parts/teaching_principles.qmd` |
 | 5 | chapter | `05_data/05_data.qmd` |
 | 6 | chapter | `06_training/06_training.qmd` |
