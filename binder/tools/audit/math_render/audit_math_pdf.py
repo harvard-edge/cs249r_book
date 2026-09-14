@@ -113,6 +113,9 @@ def list_all_chapters() -> list[tuple[str, str, Path]]:
             if qmd.name.startswith("_") and qmd.name not in (
                 "_notation_body.qmd",
                 "_notation_distributed.qmd",
+                "_notation_scaling.qmd",
+                "_notation_agentic.qmd",
+                "_notation_physical.qmd",
             ):
                 continue
             chapters.append((qmd.stem, vol, qmd))
