@@ -131,7 +131,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | part | `parts/part3_io.qmd` |
 | 7 | chapter | `07_actuation/07_actuation.qmd` |
 | 8 | chapter | `08_virtualization/08_virtualization.qmd` |
-|  | part | `parts/part4_kernel.qmd` |
+|  | part | `parts/part4_os.qmd` |
 | 9 | chapter | `09_checkpointing/09_checkpointing.qmd` |
 | 10 | chapter | `10_interrupts/10_interrupts.qmd` |
 | 11 | chapter | `11_scheduling/11_scheduling.qmd` |
