@@ -29,18 +29,23 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    import mlsysim
     from mlsysim.labs.components import MathPeek
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        RationaleChallenge,
         build_lab_report,
         deployment_mitigation,
         deployment_track_profile,
         evaluate_deployment_envelope,
+        evaluate_rationale,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        render_interactive_roofline,
+        render_latency_breakdown,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -58,18 +63,23 @@ async def _():
         COLORS,
         LAB_CSS,
         MathPeek,
+        RationaleChallenge,
         apply_plotly_theme,
         build_lab_report,
         deployment_mitigation,
         deployment_track_profile,
         evaluate_deployment_envelope,
+        evaluate_rationale,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html,
         ledger,
+        mlsysim,
         mo,
+        render_interactive_roofline,
+        render_latency_breakdown,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -566,6 +576,22 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    partB_mechanism_options = {
+        "Memory bandwidth bounds weight transfer; FLOP speedup leaves memory time unchanged.": "memory_bound",
+        "Compute throughput directly bounds execution time; latency is cut in half.": "compute_bound",
+        "Fixed framework dispatch overhead and placement latency dominate.": "overhead_bound",
+    }
+    partB_mechanism = mo.ui.radio(
+        options=partB_mechanism_options,
+        value="Memory bandwidth bounds weight transfer; FLOP speedup leaves memory time unchanged.",
+        label="Stated Physical Mechanism (Why will this happen?):",
+    )
+    partB_mechanism
+    return (partB_mechanism, partB_mechanism_options)
+
+
+@app.cell(hide_code=True)
 def _(mo, v1_02_deployment):
     partB_compute_multiplier = mo.ui.slider(
         start=1.0,
@@ -669,24 +695,35 @@ def _(mo, v1_02_deployment):
 
 @app.cell
 def _(
+    COLORS,
+    RationaleChallenge,
     deployment_mitigation,
     evaluate_deployment_envelope,
+    evaluate_rationale,
+    mlsysim,
     partA_placement,
     partA_workload,
     partB_bandwidth_multiplier,
     partB_compute_multiplier,
+    partB_mechanism,
+    partB_mechanism_options,
     partB_placement,
+    partB_prediction,
+    partB_speedup_options,
     partC_placement_strategy,
     partC_stress,
     partD_mitigation,
     partD_placement,
     partD_workload,
+    render_interactive_roofline,
     sweep_deployment_knob,
     v1_02_all_deployments,
     v1_02_clamp_workload,
     v1_02_deployment,
+    v1_02_hardware,
     v1_02_latency_terms,
     v1_02_mitigation_value,
+    v1_02_model,
     v1_02_placement_id,
     v1_02_speedup_class,
     v1_02_strategy_placement_id,
@@ -725,6 +762,52 @@ def _(
     partB_actual_speedup = partB_baseline_latency / max(partB_upgraded_latency, 0.001)
     partB_actual_class = v1_02_speedup_class(partB_actual_speedup)
     partB_active_term = max(partB_upgraded_terms, key=lambda key: partB_upgraded_terms[key])
+
+    # ── Live MLSys·im Engine Physics & Rationale Evaluation ───────────────
+    partB_baseline_prof = mlsysim.Engine.solve(
+        v1_02_model,
+        v1_02_hardware,
+        batch_size=1,
+    )
+    _b_ai = float(partB_baseline_prof.arithmetic_intensity.magnitude)
+    _model_flops = getattr(v1_02_model, "inference_flops", None)
+    _flops_g = float(_model_flops.to("GFLOP").magnitude) if _model_flops else 1.0
+    _b_perf = float(partB_baseline_prof.throughput.to("1/s").magnitude) * _flops_g
+
+    _p_comp_mult = float(partB_compute_multiplier.value)
+    _p_bw_mult = float(partB_bandwidth_multiplier.value)
+    _p_ai = _b_ai * (1.0 / max(_p_bw_mult, 0.1))
+    _p_perf = _b_perf * min(_p_comp_mult, _p_bw_mult * (_p_ai / max(_b_ai, 0.01)))
+
+    partB_roofline_fig = render_interactive_roofline(
+        hardware=v1_02_hardware,
+        points=[
+            ("Baseline Point", _b_ai, _b_perf, COLORS["BlueLine"]),
+            ("Upgraded Proposal", _p_ai, _p_perf, COLORS["RedLine"]),
+        ],
+        title=f"Roofline Analysis: {v1_02_hardware.name} · {v1_02_model.name}",
+    )
+
+    partB_challenge = RationaleChallenge(
+        question="If compute throughput improves by 2x, what happens to total latency?",
+        metric_label="Speedup",
+        options=partB_speedup_options,
+        mechanisms=partB_mechanism_options,
+        correct_option="twenty_to_forty_percent" if "compute" in str(partB_baseline_prof.bottleneck).lower() else "less_than_ten_percent",
+        correct_mechanism="compute_bound" if "compute" in str(partB_baseline_prof.bottleneck).lower() else "memory_bound",
+        concept_title="The Iron Law & Amdahl's Law in Single-Node Systems",
+        chapter_reference="Chapter 2: Machine Learning Systems",
+        literature_source="Williams et al. (2009), Roofline Model",
+        fallacy_explanation="Peak FLOPS dictates runtime only when the workload is compute-bound. At small batch sizes or low arithmetic intensity, memory bandwidth or kernel launch dispatch overhead dominates.",
+    )
+
+    partB_rationale_eval = evaluate_rationale(
+        challenge=partB_challenge,
+        student_prediction=partB_prediction.value,
+        student_mechanism=getattr(partB_mechanism, "value", "memory_bound"),
+        baseline_profile=partB_baseline_prof,
+        proposal_profile=partB_baseline_prof,
+    )
 
     partC_strategy = partC_placement_strategy.value
     partC_results = {}
@@ -810,7 +893,9 @@ def _(
         partB_active_term,
         partB_baseline_latency,
         partB_placement_id,
+        partB_rationale_eval,
         partB_result,
+        partB_roofline_fig,
         partB_terms,
         partB_upgraded_latency,
         partB_upgraded_terms,
@@ -857,13 +942,16 @@ def _(
     partB_bandwidth_multiplier,
     partB_baseline_latency,
     partB_compute_multiplier,
+    partB_mechanism,
+    partB_placement,
     partB_prediction,
+    partB_rationale_eval,
     partB_result,
+    partB_roofline_fig,
     partB_speedup_options,
     partB_terms,
     partB_upgraded_latency,
     partB_upgraded_terms,
-    partB_placement,
     partC_active_sweep,
     partC_first_walls_by_track,
     partC_placement_strategy,
@@ -1019,16 +1107,17 @@ def _(
             """),
             mo.Html("""
             <div class="mlsysbook-panel">
-              <h2>Prediction Lock</h2>
+              <h2>Prediction Lock & Stated Rationale</h2>
               <p class="mlsysbook-action-note">
-                Predict whether the 2x compute upgrade produces a 2x system-level win.
+                Predict whether the 2x compute upgrade produces a 2x system-level win, and declare the physical mechanism.
               </p>
             </div>
             """),
             partB_prediction,
+            partB_mechanism,
         ]
-        if partB_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your speedup prediction to unlock the latency waterfall."), kind="warn"))
+        if partB_prediction.value is None or getattr(partB_mechanism, "value", None) is None:
+            items.append(mo.callout(mo.md("Select both your speedup prediction and your physical mechanism to unlock the flight instruments."), kind="warn"))
             return mo.vstack(items)
 
         fig = go.Figure(go.Waterfall(
@@ -1060,6 +1149,8 @@ def _(
         tone = "success" if partB_prediction.value == partB_actual_class else "warn"
         items.extend([
             mo.hstack([partB_compute_multiplier, partB_bandwidth_multiplier, partB_placement], widths="equal"),
+            mo.as_html(partB_roofline_fig),
+            mo.callout(mo.md(partB_rationale_eval.critique_markdown), kind="info" if partB_rationale_eval.mechanism_correct else "warn"),
             mo.Html(v1_02_reveal_card(
                 "Speedup is limited by the remaining term.",
                 predicted,
@@ -1092,12 +1183,12 @@ def _(
             ),
             source_trace(
                 {
-                    "api": "evaluate_deployment_envelope() plus notebook-local latency decomposition",
+                    "api": "mlsysim.Engine.solve() with first-principles Roofline model",
                     "profile": v1_02_deployment.label,
-                    "result_label": "chapter-model approximation, not Engine.solve()",
+                    "result_label": f"Engine.solve() -> Bottleneck: {partB_rationale_eval.proposal_regime}",
                     "placement": partB_result.placement_label,
                 },
-                summary="Part B source model",
+                summary="Part B source model (Powered by MLSys·im)",
             ),
             mo.Html(f"""
             <div class="mlsysbook-panel">

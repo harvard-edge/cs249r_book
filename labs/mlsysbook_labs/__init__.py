@@ -13,6 +13,13 @@ from .legacy_components import (
     StakeholderMessage,
 )
 from .catalog import LAB_CATALOG, get_lab_metadata
+from .rationale import (
+    RationaleChallenge,
+    RationaleEvaluation,
+    evaluate_rationale,
+    render_interactive_roofline,
+    render_latency_breakdown,
+)
 from .edge import (
     AdaptationStorageResult,
     EdgeDeviceProfile,
@@ -597,4 +604,9 @@ __all__ = [
     "gemm_workload",
     "hardware_roofline_profile",
     "roofline_point",
+    "RationaleChallenge",
+    "RationaleEvaluation",
+    "evaluate_rationale",
+    "render_interactive_roofline",
+    "render_latency_breakdown",
 ]
