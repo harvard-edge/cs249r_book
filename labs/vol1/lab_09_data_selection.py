@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: SETUP
-# ===========================================================================
 
 
 @app.cell
@@ -31,13 +27,17 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
         coverage_profile,
         data_policy_decision,
         data_selection_profile,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         resolve_mlsysim_ref,
         selection_frontier,
@@ -45,7 +45,6 @@ async def _():
         source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
     ledger = DesignLedger()
@@ -56,6 +55,7 @@ async def _():
         COLORS,
         LAB_CSS,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         coverage_profile,
         data_policy_decision,
@@ -73,7 +73,6 @@ async def _():
         source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -84,11 +83,20 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
+    _options = {
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
+        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
+        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+    }
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_09_track_picker = track_selector(default=_default_track)
-    v1_09_track_picker
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    v1_09_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_09_track_picker,)
 
 
@@ -100,6 +108,7 @@ def _(
     resolve_mlsysim_ref,
     v1_09_track_picker,
 ):
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
     v1_09_track_id = v1_09_track_picker.value
     v1_09_profile = get_track_profile(v1_09_track_id)
     v1_09_variant = get_lab_track_variant("v1_09_selection_paradox", v1_09_profile.track_id)
@@ -111,19 +120,13 @@ def _(
         v1_09_hardware,
         v1_09_model,
     )
-    return (
-        v1_09_hardware,
-        v1_09_model,
-        v1_09_profile,
-        v1_09_selection,
-        v1_09_track_id,
-        v1_09_variant,
-    )
+    return v1_09_profile, v1_09_selection, v1_09_variant
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
     track_arc_context,
@@ -131,56 +134,106 @@ def _(
     v1_09_metadata,
     v1_09_profile,
     v1_09_selection,
+    v1_09_track_picker,
     v1_09_variant,
 ):
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 09
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_09_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 9 &middot; Foundational Lab 09
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                Data Selection
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              Data Selection: Marginal Value, Coverage, Label Cost &amp; Residual Risk
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Marginal Value &middot; Coverage &middot; Label Cost &middot; Residual Risk
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_09_variant.workload_summary} Trace why data quantity is not data value. Discover when learning signal saturates, why stratified subgroup coverage beats raw sample counts, how label budgets create Pareto trade-offs, and how to defend residual risk in downstream deployment.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 900px; line-height: 1.65;">
-                {v1_09_variant.workload_summary} This lab keeps one shared concept
-                sequence across all tracks: data quantity is not data value, and a
-                defensible selection policy must account for marginal utility,
-                coverage, label cost, and residual downstream risk.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Memo &middot; ~50 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_09_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_09_selection.dataset_unit}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_09_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Workload:</strong> {v1_09_selection.dataset_unit}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_09_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_09_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> Data Valuation &amp; Coreset Curation
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> {v1_09_selection.report_artifact}
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">ICR Saturation</span>
-                <span class="badge badge-warn">Coverage Guardrail</span>
-                <span class="badge badge-info">Label Frontier</span>
-                <span class="badge badge-fail">Risk Memo</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_09_profile.label} Data Engineering &amp; Coreset Selection
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_09_selection.stakeholder}</strong> responsible for selecting training, fine-tuning, or calibration data for <strong>{v1_09_variant.model_ref}</strong> on <strong>{v1_09_variant.hardware_ref}</strong>. The target system must balance dataset quality, human labeling cost, storage footprint, and downstream bias under <strong>{v1_09_selection.dataset_unit}</strong>.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of Data Selection:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Marginal Utility Saturation Law:</strong> Information-to-compute ratio (ICR) and marginal accuracy gains diminish logarithmically with dataset scale: &Delta;<em>U</em> &prop; 1 / <em>N</em>. Indiscriminate dataset growth inflates ingestion, storage, and training energy without proportional capability gains.</li>
+                <li><strong>The Coverage vs Scale Guardrail:</strong> Aggregate validation metrics mask critical subgroup performance collapse. A smaller, stratification-balanced coreset yields higher deployment reliability than a massively skewed raw web-scrape: <em>R</em><sub>subgroup</sub>(<em>D</em><sub>coreset</sub>) &lt; <em>R</em><sub>subgroup</sub>(<em>D</em><sub>raw</sub>).</li>
+                <li><strong>The Budgeted Label Frontier:</strong> Data curation cost is multidimensional: <em>C</em><sub>data</sub> = <em>C</em><sub>acquire</sub> + <em>C</em><sub>label</sub> + <em>C</em><sub>review</sub> + <em>C</em><sub>store</sub> + <em>C</em><sub>process</sub>. High-fidelity human annotation must be rationed along the Pareto-optimal frontier where uncertainty and representational loss are highest.</li>
+                <li><strong>The Selection Inequality &amp; Residual Bias Law:</strong> Downstream pruning is economically sound only when pre-filtering and subset training beat full-scale training: <em>T</em><sub>selection</sub> + <em>T</em><sub>train</sub>(<em>D</em><sub>subset</sub>) &lt; <em>T</em><sub>train</sub>(<em>D</em><sub>total</sub>). Any unselected cohort represents an intentional residual bias that must be codified in a risk memo before deployment.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Measure saturation:</strong>
+                    explain why marginal data value falls while collection and compute cost continue to grow.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Compare coverage:</strong>
+                    identify when a smaller diverse cohort beats a larger raw cohort.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Budget labels:</strong>
+                    choose a data policy on a label-quality-cost frontier.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Defend risk:</strong>
+                    record residual bias, rejected alternatives, and downstream validation needs.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    Which {v1_09_selection.dataset_unit} should {v1_09_selection.label}
+                    collect next, and what residual risk is carried forward by not collecting everything?
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
+                            line-height: 1.6; margin-top: 10px;">
+                    Every track follows the same four concepts. The selected track changes
+                    persona, constraints, thresholds, evidence emphasis, failure mode, and
+                    report framing.
+                </div>
             </div>
         </div>
         """),
@@ -191,46 +244,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_09_selection):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Learning Objectives
-        </div>
-        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Measure saturation:</strong>
-                explain why marginal data value falls while collection and compute cost continue to grow.</div>
-            <div style="margin-bottom: 3px;">2. <strong>Compare coverage:</strong>
-                identify when a smaller diverse cohort beats a larger raw cohort.</div>
-            <div style="margin-bottom: 3px;">3. <strong>Budget labels:</strong>
-                choose a data policy on a label-quality-cost frontier.</div>
-            <div style="margin-bottom: 3px;">4. <strong>Defend risk:</strong>
-                record residual bias, rejected alternatives, and downstream validation needs.</div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                Which {v1_09_selection.dataset_unit} should {v1_09_selection.label}
-                collect next, and what residual risk is carried forward by not collecting everything?
-            </div>
-        </div>
-    </div>
-    """)
+def _():
     return
-
-
-# ===========================================================================
-# ZONE B: CONTROLS AND NOTEBOOK-LOCAL SUPPORT
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -738,7 +753,6 @@ def _(coverage_profile, selection_utility):
         v1_09_label_selected,
         v1_09_metric_cards,
         v1_09_part_banner,
-        v1_09_policy_by_id,
         v1_09_prediction_label,
         v1_09_release_gate,
         v1_09_reveal_card,
@@ -854,15 +868,11 @@ def _(
     )
 
 
-# ===========================================================================
-# ZONE C: CONCEPT MODULES
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
+    big_takeaways,
     go,
     mo,
     source_trace,
@@ -890,6 +900,7 @@ def _(
     v1_09_part_d_checkpoint,
     v1_09_policy_choice,
     v1_09_prediction_label,
+    v1_09_profile,
     v1_09_reflection,
     v1_09_release,
     v1_09_reveal_card,
@@ -903,7 +914,6 @@ def _(
     v1_09_validation_focus,
     v1_09_validation_prediction,
     v1_09_value_prediction,
-    v1_09_variant,
 ):
     def build_part_a():
         items = [
@@ -1031,23 +1041,23 @@ def _(
         items.extend([
             mo.accordion({
                 "Math Peek / Source Model - ICR saturation": mo.md("""
-The chapter defines information-compute ratio as:
+    The chapter defines information-compute ratio as:
 
-$$
-\\text{ICR} = \\frac{\\Delta I}{\\Delta \\text{FLOPs}}
-$$
+    $$
+    \\text{ICR} = \\frac{\\Delta I}{\\Delta \\text{FLOPs}}
+    $$
 
-For redundant data, marginal information decays while compute grows roughly
-linearly:
+    For redundant data, marginal information decays while compute grows roughly
+    linearly:
 
-$$
-\\text{ICR}(D) \\approx \\frac{1}{O_{sample} \\cdot D}
-$$
+    $$
+    \\text{ICR}(D) \\approx \\frac{1}{O_{sample} \\cdot D}
+    $$
 
-The lab instrument uses a saturating information proxy and the shared
-`selection_utility()` cost fields. The exact values are scenario instrumentation;
-the shape is the chapter concept.
-""")
+    The lab instrument uses a saturating information proxy and the shared
+    `selection_utility()` cost fields. The exact values are scenario instrumentation;
+    the shape is the chapter concept.
+    """)
             }),
             source_trace({
                 "chapter_anchor": "Information-Compute Ratio and ICR Frontier",
@@ -1183,18 +1193,18 @@ the shape is the chapter concept.
         items.extend([
             mo.accordion({
                 "Math Peek / Source Model - coverage guardrail": mo.md("""
-Coreset selection is a coverage problem before it is a sample-count problem:
-retain the smallest cohort that preserves deployment-relevant slices.
+    Coreset selection is a coverage problem before it is a sample-count problem:
+    retain the smallest cohort that preserves deployment-relevant slices.
 
-This lab scores each subgroup as:
+    This lab scores each subgroup as:
 
-$$
-\\text{risk} = \\max(0, \\text{coverage floor} - \\text{coverage}) \\cdot \\text{risk weight}
-$$
+    $$
+    \\text{risk} = \\max(0, \\text{coverage floor} - \\text{coverage}) \\cdot \\text{risk weight}
+    $$
 
-The decision is not "largest dataset wins"; it is "which cohort leaves the
-least important deployment gap under the budget?"
-""")
+    The decision is not "largest dataset wins"; it is "which cohort leaves the
+    least important deployment gap under the budget?"
+    """)
             }),
             source_trace({
                 "chapter_anchor": "Coreset Selection Algorithms and rare-class pruning pitfall",
@@ -1351,21 +1361,21 @@ least important deployment gap under the budget?"
         items.extend([
             mo.accordion({
                 "Math Peek / Source Model - total data cost": mo.md("""
-The chapter's total data cost model is:
+    The chapter's total data cost model is:
 
-$$
-C_{total} = C_{acquire} + C_{label} + C_{store} + C_{process}
-$$
+    $$
+    C_{total} = C_{acquire} + C_{label} + C_{store} + C_{process}
+    $$
 
-The selection engineering gate is:
+    The selection engineering gate is:
 
-$$
-T_{selection} + T_{train}(D_{subset}) < T_{train}(D_{total})
-$$
+    $$
+    T_{selection} + T_{train}(D_{subset}) < T_{train}(D_{total})
+    $$
 
-Part C turns that idea into a track-local label frontier: labels, review,
-processing, storage, quality, coverage, and rare-event floors must all pass.
-""")
+    Part C turns that idea into a track-local label frontier: labels, review,
+    processing, storage, quality, coverage, and rare-event floors must all pass.
+    """)
             }),
             source_trace({
                 "chapter_anchor": "Cost Modeling and Selection Inequality",
@@ -1504,16 +1514,16 @@ processing, storage, quality, coverage, and rare-event floors must all pass.
         items.extend([
             mo.accordion({
                 "Math Peek / Source Model - release risk gate": mo.md("""
-The lab's release gate is deliberately conjunctive:
+    The lab's release gate is deliberately conjunctive:
 
-$$
-release\\_ok = aggregate\\_ok \\land subgroup\\_risk\\_ok \\land rare\\_event\\_ok \\land evidence\\_ok
-$$
+    $$
+    release\\_ok = aggregate\\_ok \\land subgroup\\_risk\\_ok \\land rare\\_event\\_ok \\land evidence\\_ok
+    $$
 
-This follows the chapter warning that PPD, DCR, and aggregate validation can
-look strong while deployment edge cases fail. Stratified risk evidence must
-travel with the selected data policy.
-""")
+    This follows the chapter warning that PPD, DCR, and aggregate validation can
+    look strong while deployment edge cases fail. Stratified risk evidence must
+    travel with the selected data policy.
+    """)
             }),
             source_trace({
                 "chapter_anchor": "Measurement Framework and optimizing selection metrics instead of deployment metrics",
@@ -1531,79 +1541,6 @@ travel with the selected data policy.
             v1_09_reflection,
         ])
         return mo.vstack(items)
-
-    v1_09_tabs = mo.ui.tabs({
-        "Part A - Marginal Value": build_part_a(),
-        "Part B - Coverage": build_part_b(),
-        "Part C - Label Frontier": build_part_c(),
-        "Part D - Risk": build_part_d(),
-        "Synthesis": mo.md("Use the synthesis memo below after completing Parts A-D."),
-    })
-    v1_09_tabs
-    return (v1_09_tabs,)
-
-
-# ===========================================================================
-# ZONE D: SYNTHESIS AND REPORT
-# ===========================================================================
-
-
-@app.cell(hide_code=True)
-def _(
-    ledger,
-    mo,
-    v1_09_amount_system,
-    v1_09_coverage_best,
-    v1_09_coverage_checkpoint,
-    v1_09_coverage_prediction,
-    v1_09_decision,
-    v1_09_fraction_multiplier,
-    v1_09_label_budget_multiplier,
-    v1_09_label_prediction,
-    v1_09_label_selected_row,
-    v1_09_part_a_checkpoint,
-    v1_09_part_c_checkpoint,
-    v1_09_part_d_checkpoint,
-    v1_09_profile,
-    v1_09_reflection,
-    v1_09_release,
-    v1_09_risk_tolerance,
-    v1_09_selected_utility,
-    v1_09_selection,
-    v1_09_validation_focus,
-    v1_09_validation_prediction,
-    v1_09_value_prediction,
-    v1_09_variant,
-):
-    _all_predictions = (
-        v1_09_value_prediction.value,
-        v1_09_coverage_prediction.value,
-        v1_09_label_prediction.value,
-        v1_09_validation_prediction.value,
-    )
-    if all(value is not None for value in _all_predictions):
-        ledger.save(chapter=9, design={
-            "chapter": "v1_09",
-            "track_id": v1_09_profile.track_id,
-            "scenario_id": v1_09_variant.scenario_id,
-            "hardware_ref": v1_09_selection.hardware_ref,
-            "model_ref": v1_09_selection.model_ref,
-            "completed": True,
-            "value_prediction": v1_09_value_prediction.value,
-            "coverage_prediction": v1_09_coverage_prediction.value,
-            "label_prediction": v1_09_label_prediction.value,
-            "validation_prediction": v1_09_validation_prediction.value,
-            "fraction_multiplier": v1_09_fraction_multiplier.value,
-            "label_budget_multiplier": v1_09_label_budget_multiplier.value,
-            "selected_policy": v1_09_decision.selected_id,
-            "selected_cohort": v1_09_decision.selected_label,
-            "selected_examples_k": v1_09_selected_utility.selected_examples_k,
-            "binding_budget": v1_09_label_selected_row["binding_constraint"],
-            "worst_subgroup": v1_09_decision.worst_subgroup,
-            "residual_risk": v1_09_decision.residual_risk,
-            "release_gate": v1_09_release["decision"],
-            "carry_forward_risk": v1_09_amount_system["carry_forward"],
-        })
 
     def build_synthesis():
         _rejections = "".join(f"<li>{item}</li>" for item in v1_09_decision.rejected_alternatives)
@@ -1624,6 +1561,16 @@ def _(
             </div>
             """),
             mo.Html(f"""
+            <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
+              <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+                Lead Systems Architect Authorization
+              </div>
+              <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
+                The data selection and curation policy for <strong>{v1_09_profile.label}</strong> is authorized for execution. Coreset allocation, coverage floors, and label budgeting satisfy production risk envelopes under <strong>{v1_09_selection.dataset_unit}</strong>.
+              </div>
+            </div>
+            """),
+            mo.Html(f"""
             <div class="mlsysbook-panel">
               <h2>Rejected Alternatives</h2>
               <ul class="mlsysbook-list">{_rejections}</ul>
@@ -1637,17 +1584,12 @@ def _(
               </ul>
             </div>
             """),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Big Takeaways</h2>
-              <ul class="mlsysbook-list">
-                <li><strong>Data value is marginal.</strong> Additional examples can add cost after useful signal saturates.</li>
-                <li><strong>Coverage is a systems guardrail.</strong> A smaller cohort can be better if it protects the slices that deployment depends on.</li>
-                <li><strong>Labels create a frontier.</strong> Quality, curation, review, storage, and processing are budgeted amounts.</li>
-                <li><strong>Risk travels forward.</strong> The memo must defend residual bias and downstream validation, not just a score.</li>
-              </ul>
-            </div>
-            """),
+            big_takeaways([
+                ("Data value is marginal", "Additional examples can add cost after useful signal saturates."),
+                ("Coverage is a systems guardrail", "A smaller cohort can be better if it protects the slices that deployment depends on."),
+                ("Labels create a frontier", "Quality, curation, review, storage, and processing are budgeted amounts."),
+                ("Risk travels forward", "The memo must defend residual bias and downstream validation, not just a score."),
+            ]),
             mo.Html(f"""
             <div class="lab-hud">
                 <span class="hud-label">LAB</span>
@@ -1663,7 +1605,95 @@ def _(
             """),
         ])
 
-    build_synthesis()
+    v1_09_tabs = mo.ui.tabs({
+        "Part A · Marginal Value": build_part_a(),
+        "Part B · Coverage": build_part_b(),
+        "Part C · Label Frontier": build_part_c(),
+        "Part D · Risk": build_part_d(),
+        "Synthesis": build_synthesis(),
+    })
+    v1_09_tabs
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    ledger,
+    mo,
+    v1_09_amount_system,
+    v1_09_coverage_prediction,
+    v1_09_decision,
+    v1_09_fraction_multiplier,
+    v1_09_label_budget_multiplier,
+    v1_09_label_prediction,
+    v1_09_label_selected_row,
+    v1_09_profile,
+    v1_09_reflection,
+    v1_09_release,
+    v1_09_selected_utility,
+    v1_09_selection,
+    v1_09_validation_prediction,
+    v1_09_value_prediction,
+    v1_09_variant,
+):
+    _all_predictions = (
+        v1_09_value_prediction.value,
+        v1_09_coverage_prediction.value,
+        v1_09_label_prediction.value,
+        v1_09_validation_prediction.value,
+    )
+    _ready = all(value is not None for value in _all_predictions) and bool(str(v1_09_reflection.value or "").strip())
+    ledger.save(chapter=9, design={
+        "chapter": "v1_09",
+        "track_id": v1_09_profile.track_id,
+        "scenario_id": v1_09_variant.scenario_id,
+        "hardware_ref": v1_09_selection.hardware_ref,
+        "model_ref": v1_09_selection.model_ref,
+        "completed": _ready,
+        "value_prediction": v1_09_value_prediction.value,
+        "coverage_prediction": v1_09_coverage_prediction.value,
+        "label_prediction": v1_09_label_prediction.value,
+        "validation_prediction": v1_09_validation_prediction.value,
+        "fraction_multiplier": v1_09_fraction_multiplier.value,
+        "label_budget_multiplier": v1_09_label_budget_multiplier.value,
+        "selected_policy": v1_09_decision.selected_id,
+        "selected_cohort": v1_09_decision.selected_label,
+        "selected_examples_k": v1_09_selected_utility.selected_examples_k,
+        "binding_budget": v1_09_label_selected_row["binding_constraint"],
+        "worst_subgroup": v1_09_decision.worst_subgroup,
+        "residual_risk": v1_09_decision.residual_risk,
+        "release_gate": v1_09_release["decision"],
+        "carry_forward_risk": v1_09_amount_system["carry_forward"],
+    })
+
+    _hud = mo.Html(f"""
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">09 &middot; Data Selection</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_09_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">{v1_09_selection.report_artifact}</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">{'SAVED' if _ready else 'ACTIVE'}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Selected cohort</strong>{v1_09_decision.selected_label}</div>
+        <div class="mlsysbook-field"><strong>Binding budget</strong>{v1_09_label_selected_row["binding_constraint"]}</div>
+        <div class="mlsysbook-field"><strong>Worst subgroup</strong>{v1_09_decision.worst_subgroup}</div>
+        <div class="mlsysbook-field"><strong>Release gate</strong>{v1_09_release["decision"]}</div>
+        <div class="mlsysbook-field"><strong>Carry-forward risk</strong>{v1_09_decision.residual_risk}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
+    </div>
+    """)
+    _hud
     return
 
 
