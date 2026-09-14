@@ -1,4 +1,4 @@
-# Stochastic Processors {#sec-vol3-processor}
+# The Stochastic Processor {#sec-vol3-processor}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -79,25 +79,11 @@ Under the hood, this forward pass decomposes into three primary computational st
 
 ### Token embedding and positional encoding
 
-At step $t$, the sampled token index $y_{t-1} \in \{0, \ldots, |\mathcal{V}|-1\}$ is mapped to a dense representation by a lookup into the embedding matrix $\mathbf{E} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$,
-
-$$
-\mathbf{h}_0 = \mathbf{E}[y_{t-1}] + \mathbf{p}_{t-1},
-$$ {#eq-embedding-lookup}
-
-In @eq-embedding-lookup, $\mathbf{p}_{t-1} \in \mathbb{R}^{d_{\text{model}}}$ is the positional encoding for position $t-1$ and $d_{\text{model}}$ is the model dimension. For a vocabulary of $|\mathcal{V}| = 128{,}000$ tokens and $d_{\text{model}} = 8192$, the embedding matrix alone occupies $128{,}000 \times 8192 \times 2 \approx 2.0\,\text{GB}$ in BF16 precision. The operation is a single row extraction: its arithmetic intensity is identically 0 FLOPs per byte, making it unconditionally memory-bound. It is also instantaneous relative to the cost of subsequent layers, but it must reside in HBM to avoid catastrophic access latency; a miss to system DRAM over a PCIe 4.0 x16 link would incur approximately 10–20 µs of additional per-step latency, compounding to seconds across a multi-thousand-step generation.
+At step $t$, the sampled token index $y_{t-1} \in \{0, \ldots, |\mathcal{V}|-1\}$ is mapped to a dense representation $\mathbf{h}_0 = \mathbf{E}[y_{t-1}] + \mathbf{p}_{t-1}$ by extracting a row from the embedding matrix $\mathbf{E} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$ and adding positional encoding $\mathbf{p}_{t-1} \in \mathbb{R}^{d_{\text{model}}}$. For a vocabulary of $|\mathcal{V}| = 128{,}000$ tokens and model dimension $d_{\text{model}} = 8192$, the embedding matrix alone occupies $128{,}000 \times 8192 \times 2 \approx 2.0\,\text{GB}$ in BF16 precision. The operation is a single row extraction: its arithmetic intensity is identically 0 FLOPs per byte, making it unconditionally memory-bound. It is also instantaneous relative to the cost of subsequent layers, but it must reside in HBM to avoid catastrophic access latency; a miss to system DRAM over a PCIe 4.0 x16 link would incur approximately 10–20 µs of additional per-step latency, compounding to seconds across a multi-thousand-step generation.
 
 ### Multi-head attention and the key-value cache
 
-The dominant computational structure across the $L$ layers is multi-head attention (MHA). At layer $\ell$ and step $t$, the query, key, and value projections of the current token are
-
-$$
-\mathbf{Q}_t^{(\ell)} = \mathbf{h}_{t}^{(\ell)} \mathbf{W}_Q^{(\ell)}, \quad
-\mathbf{K}_t^{(\ell)} = \mathbf{h}_{t}^{(\ell)} \mathbf{W}_K^{(\ell)}, \quad
-\mathbf{V}_t^{(\ell)} = \mathbf{h}_{t}^{(\ell)} \mathbf{W}_V^{(\ell)},
-$$ {#eq-qkv-projections}
-
-In @eq-qkv-projections, $\mathbf{W}_Q^{(\ell)} \in \mathbb{R}^{d_{\text{model}} \times d_{\text{head}} \cdot H_Q}$, while $\mathbf{W}_K^{(\ell)}, \mathbf{W}_V^{(\ell)} \in \mathbb{R}^{d_{\text{model}} \times d_{\text{head}} \cdot H_{\text{KV}}}$, where $H_Q$ denotes query attention heads and $H_{\text{KV}}$ denotes key-value attention heads ($H_{\text{KV}} = H_Q$ under legacy Multi-Head Attention; $H_{\text{KV}} \ll H_Q$ under Grouped-Query Attention). The attention output is computed against all prior keys and values, which are materialized as the KV cache $\mathcal{K}^{(\ell)} \in \mathbb{R}^{t \times 2 \times H_{\text{KV}} \times d_{\text{head}}}$ accumulated over context length $t$. The memory footprint of this cache across all $L$ layers is
+The dominant computational structure across the $L$ layers is multi-head attention (MHA). At layer $\ell$ and step $t$, the hidden representation $\mathbf{h}_t^{(\ell)}$ is projected through learned weights to produce query, key, and value vectors: $\mathbf{Q}_t^{(\ell)} = \mathbf{h}_{t}^{(\ell)} \mathbf{W}_Q^{(\ell)}$, $\mathbf{K}_t^{(\ell)} = \mathbf{h}_{t}^{(\ell)} \mathbf{W}_K^{(\ell)}$, and $\mathbf{V}_t^{(\ell)} = \mathbf{h}_{t}^{(\ell)} \mathbf{W}_V^{(\ell)}$, where $\mathbf{W}_Q^{(\ell)} \in \mathbb{R}^{d_{\text{model}} \times d_{\text{head}} \cdot H_Q}$, while $\mathbf{W}_K^{(\ell)}, \mathbf{W}_V^{(\ell)} \in \mathbb{R}^{d_{\text{model}} \times d_{\text{head}} \cdot H_{\text{KV}}}$. Here $H_Q$ denotes query attention heads and $H_{\text{KV}}$ denotes key-value attention heads ($H_{\text{KV}} = H_Q$ under legacy Multi-Head Attention; $H_{\text{KV}} \ll H_Q$ under Grouped-Query Attention). The attention output is computed against all prior keys and values, which are materialized as the KV cache $\mathcal{K}^{(\ell)} \in \mathbb{R}^{t \times 2 \times H_{\text{KV}} \times d_{\text{head}}}$ accumulated over context length $t$. The memory footprint of this cache across all $L$ layers is
 
 $$
 M_{\text{KV}} = 2 \cdot L \cdot H_{\text{KV}} \cdot d_{\text{head}} \cdot t \cdot b_{\text{elem}},
@@ -118,13 +104,7 @@ The resulting arithmetic intensity in @eq-attn-intensity evaluates to 1 FLOPs pe
 
 ### The feed-forward sublayer
 
-The position-wise feed-forward network (FFN) applies two learned linear transformations with a nonlinear activation,
-
-$$
-\text{FFN}(\mathbf{h}) = \phi\!\left(\mathbf{h} \mathbf{W}_1\right) \mathbf{W}_2,
-$$ {#eq-ffn-forward}
-
-In @eq-ffn-forward, $\mathbf{W}_1 \in \mathbb{R}^{d_{\text{model}} \times d_{\text{ff}}}$, $\mathbf{W}_2 \in \mathbb{R}^{d_{\text{ff}} \times d_{\text{model}}}$, and $\phi$ is a nonlinear activation such as SiLU or GELU. With the standard ratio $d_{\text{ff}} = 4 d_{\text{model}}$, the weight matrices of a single FFN layer for $d_{\text{model}} = 8192$ contain $2 \times (8192 \times 32{,}768) = 536{,}870{,}912$ parameters, occupying exactly $1.07\text{ GB}$ per layer in BF16 (or approximately $1.41\text{ GB}$ per layer in modern SwiGLU architectures utilizing three matrices $\mathbf{W}_{\text{gate}}, \mathbf{W}_{\text{up}}, \mathbf{W}_{\text{down}}$ with $d_{\text{ff}} = \frac{8}{3}d_{\text{model}}$). For a single-token decode pass, the matrix multiplications $\mathbf{h} \mathbf{W}_1$ and $\mathbf{h} \mathbf{W}_2$ each have the shape $(1 \times d_{\text{model}}) \times (d_{\text{model}} \times d_{\text{ff}})$ — degenerate matrix-vector products, not matrix-matrix products. The arithmetic intensity of a matrix-vector multiply of dimensions $(1 \times m) \times (m \times n)$ is
+The position-wise feed-forward network (FFN) applies two learned linear transformations with a nonlinear activation: $\text{FFN}(\mathbf{h}) = \phi(\mathbf{h} \mathbf{W}_1) \mathbf{W}_2$, where $\mathbf{W}_1 \in \mathbb{R}^{d_{\text{model}} \times d_{\text{ff}}}$, $\mathbf{W}_2 \in \mathbb{R}^{d_{\text{ff}} \times d_{\text{model}}}$, and $\phi$ is an activation function such as SiLU or GELU. With the standard ratio $d_{\text{ff}} = 4 d_{\text{model}}$, the weight matrices of a single FFN layer for $d_{\text{model}} = 8192$ contain $2 \times (8192 \times 32{,}768) = 536{,}870{,}912$ parameters, occupying exactly $1.07\text{ GB}$ per layer in BF16 (or approximately $1.41\text{ GB}$ per layer in modern SwiGLU architectures utilizing three matrices $\mathbf{W}_{\text{gate}}, \mathbf{W}_{\text{up}}, \mathbf{W}_{\text{down}}$ with $d_{\text{ff}} = \frac{8}{3}d_{\text{model}}$). For a single-token decode pass, the matrix multiplications $\mathbf{h} \mathbf{W}_1$ and $\mathbf{h} \mathbf{W}_2$ each have the shape $(1 \times d_{\text{model}}) \times (d_{\text{model}} \times d_{\text{ff}})$ — degenerate matrix-vector products, not matrix-matrix products. The arithmetic intensity of a matrix-vector multiply of dimensions $(1 \times m) \times (m \times n)$ is
 
 $$
 \mathcal{I}_{\text{gemv}} = \frac{2mn}{(m \cdot n + m + n) \cdot b_{\text{elem}}} \approx \frac{2}{b_{\text{elem}}},
@@ -365,13 +345,7 @@ $$ {#eq-mask-latency}
 
 where $\tau_{\text{lookup}} \approx 50$–$200$ ns for an L2/L3 cache hit on the transition table, $\tau_{\text{transfer}} \approx 18$–$100$ ns for NVLink or PCIe transfer of the 16 KB mask, and $\tau_{\text{apply}} \approx 50$ $\mu$s for the GPU vectorized scatter. Total $\tau_{\text{mask}} < 0.2$ ms per step for FSM-backed masking, compared to 1–10 ms for the forward pass itself.
 
-The transition table $T$ has memory footprint $|Q_F| \times |\mathcal{T}| \times 4$ bytes. For a JSON schema with $|Q_F| = 512$ states and $|\mathcal{T}| = 128{,}000$ tokens, this amounts to $512 \times 128{,}000 \times 4 = 262$ MB—well within host DRAM but too large for GPU L2 cache. Implementations therefore maintain the table in pinned host memory and transfer only the active row per decoding step, keeping device memory uncontested for KV cache allocation. For a 70B-parameter model at BF16 precision across $N_{\text{layers}} = 80$ transformer layers with sequence length $S = 4{,}096$ and $n_{\text{kv}} = 8$ grouped-query key-value heads of dimension $d_{\text{head}} = 128$, the KV cache requires the allocation quantified in @eq-kv-cache:
-
-$$
-M_{\text{KV}} = 2 \cdot N_{\text{layers}} \cdot n_{\text{kv}} \cdot d_{\text{head}} \cdot S \cdot b_{\text{elem}} = 2 \times 80 \times 8 \times 128 \times 4096 \times 2 \approx 1.34 \; \text{GB}
-$$ {#eq-kv-cache}
-
-amounting to $16.8\text{ MB}$ per layer. The 16 KB mask transfer per step is five orders of magnitude smaller than the active KV cache footprint and does not compete for HBM bandwidth, which on the H100 peaks at 3.35 TB/s.
+The transition table $T$ has memory footprint $|Q_F| \times |\mathcal{T}| \times 4$ bytes. For a JSON schema with $|Q_F| = 512$ states and $|\mathcal{T}| = 128{,}000$ tokens, this amounts to $512 \times 128{,}000 \times 4 = 262$ MB—well within host DRAM but too large for GPU L2 cache. Implementations therefore maintain the table in pinned host memory and transfer only the active row per decoding step, keeping device memory uncontested for KV cache allocation. For a 70B-parameter model at BF16 precision across $L = 80$ transformer layers with sequence length $t = 4{,}096$ and $H_{\text{KV}} = 8$ grouped-query heads of dimension $d_{\text{head}} = 128$, the KV cache requires the allocation quantified in @eq-kv-cache-memory ($M_{\text{KV}} \approx 1.34\text{ GB}$, or $16.8\text{ MB}$ per layer). The 16 KB mask transfer per step is five orders of magnitude smaller than the active KV cache footprint and does not compete for HBM bandwidth, which on the H100 peaks at 3.35 TB/s.
 
 This compilation pipeline—from offline schema specification to online token-level masking—is diagrammed in @fig-vol3-processor-grammar-fsm. Production inference engines like Outlines [@willard2023efficient], XGrammar, and vLLM's structured generation backend leverage this architecture to compile arbitrary JSON schemas into compact state tables that execute in microseconds.
 
@@ -492,13 +466,7 @@ The x86-64 architecture implements this through the NX bit (bit 63 of each page-
 
 A transformer-based large language model (LLM) receives its entire operational context — system prompt, retrieved documents, conversation history, tool outputs, and user utterances — as a single, contiguous sequence of integer token IDs. The model's attention mechanism [@vaswani2017] operates uniformly over this sequence: each token attends to every other token (subject to causal masking) with weights determined solely by learned key-query inner products. There is no hardware or architectural mechanism that causes the model to treat a token at position $i$ differently based on whether it originated from an operator-supplied system prompt or from a document fetched from an untrusted third-party URL.
 
-Let $\mathbf{x} = (x_1, x_2, \ldots, x_n)$ denote the input token sequence and let $\mathbf{h}_i \in \mathbb{R}^d$ denote the residual stream hidden state at position $i$ after $L$ transformer layers. The self-attention operation at layer $\ell$ computes:
-
-$$
-\mathbf{A}^{(\ell)}_{ij} = \frac{\exp\left(\mathbf{q}_i^{(\ell)} \cdot \mathbf{k}_j^{(\ell)} / \sqrt{d_k}\right)}{\sum_{j'=1}^{n} \exp\left(\mathbf{q}_i^{(\ell)} \cdot \mathbf{k}_{j'}^{(\ell)} / \sqrt{d_k}\right)}
-$$ {#eq-attention-weights}
-
-where $\mathbf{q}_i^{(\ell)}$ and $\mathbf{k}_j^{(\ell)}$ are query and key projections at layer $\ell$, and $d_k$ is the key dimensionality. Crucially, @eq-attention-weights contains no term indexed by provenance: there is no $\text{source}(j)$ flag, no privilege register, no segment selector. The attention weight $\mathbf{A}^{(\ell)}_{ij}$ between a system-prompt token and a malicious injected token is computed by exactly the same arithmetic as the weight between two legitimate user tokens. The flat Von Neumann hazard is reproduced in activation space.
+Let $\mathbf{x} = (x_1, x_2, \ldots, x_n)$ denote the input token sequence and let $\mathbf{h}_i \in \mathbb{R}^d$ denote the residual stream hidden state at position $i$ after $L$ transformer layers. The self-attention operation computes attention scores $\mathbf{A}^{(\ell)}_{ij} \propto \exp(\mathbf{q}_i^{(\ell)} \cdot \mathbf{k}_j^{(\ell)} / \sqrt{d_k})$. Crucially, this bilinear computation contains no term indexed by provenance: there is no $\text{source}(j)$ flag, no privilege register, no segment selector. The attention weight between a system-prompt token and a malicious injected token is computed by exactly the same arithmetic as the weight between two legitimate user tokens. The flat Von Neumann hazard is reproduced in activation space.
 
 ::: {.callout-warning title="The token equivalence principle"}
 Every token in the context window is an identically typed object from the attention mechanism's perspective. A token encoding `"You are a helpful assistant"` and a token encoding `"Ignore the above"` have the same dimensionality, the same range of representable values, and the same capacity to influence subsequent hidden states. No hardware-level mechanism prevents the latter from overriding the former.
@@ -734,13 +702,7 @@ The engineering discipline of computer architecture has long catalogued not mere
 
 **Fallacy:** *A language model with sufficiently low perplexity on a held-out corpus will produce deterministic, repeatable instruction outputs across multiple inference calls.*
 
-Perplexity is a corpus-level statistic. Formally, for a test set $\mathcal{D} = \{x_1, \ldots, x_N\}$ of $N$ tokens, perplexity is defined as
-
-$$
-\text{PPL}(\mathcal{D}) = \exp\!\left(-\frac{1}{N}\sum_{i=1}^{N} \log p_\theta(x_i \mid x_{<i})\right)
-$$ {#eq-perplexity}
-
-where $p_\theta$ denotes the model distribution parameterized by weights $\theta$. The corpus perplexity defined in @eq-perplexity characterizes the *average* log-probability per token over the entire corpus; a value of $\text{PPL} = 4.2$, as reported for leading open-weight models on standard benchmarks, reveals nothing about the variance of $p_\theta(x_i \mid x_{<i})$ at the individual token positions that determine agentic behavior: tool-call boundaries, JSON key emissions, and conditional branch tokens.
+Perplexity is a corpus-level statistic. Formally, for a test set $\mathcal{D} = \{x_1, \ldots, x_N\}$ of $N$ tokens, perplexity is defined as $\text{PPL}(\mathcal{D}) = \exp(-\frac{1}{N}\sum_{i=1}^{N} \log p_\theta(x_i \mid x_{<i}))$, where $p_\theta$ denotes the model distribution parameterized by weights $\theta$. Corpus perplexity characterizes the *average* log-probability per token over the entire corpus; a value of $\text{PPL} = 4.2$, as reported for leading open-weight models on standard benchmarks, reveals nothing about the variance of $p_\theta(x_i \mid x_{<i})$ at the individual token positions that determine agentic behavior: tool-call boundaries, JSON key emissions, and conditional branch tokens.
 
 Empirical measurement on production-grade instruction-tuned models reveals that, for tokens occupying structurally critical positions—the opening brace of a function call, the delimiter between an action name and its argument list, the boolean value of a conditional flag—the softmax entropy $H = -\sum_v p_v \log p_v$ regularly exceeds $2.1$ bits even when overall perplexity is low, because high-confidence tokens elsewhere in the sequence suppress the corpus-level average. A model with $\text{PPL} = 4.2$ can simultaneously assign $p(\texttt{true}) = 0.48$ and $p(\texttt{false}) = 0.41$ at a branch-critical position with temperature $T = 1.0$. Under nucleus sampling with $p = 0.95$, both tokens remain in the sampling nucleus, yielding a per-call flip probability of approximately 41 percent for that decision.
 
@@ -758,24 +720,10 @@ The systems implication is precise: an agent orchestration layer that assumes id
 
 Context-window extension is frequently deployed as a straightforward reliability improvement: if the model sees more history, it will make fewer errors due to lost context. The hardware arithmetic governing this decision, however, reveals a severe arithmetic intensity collapse that degrades both throughput and reliability simultaneously.
 
-The KV cache memory footprint for a transformer with $L$ layers, $H_{\text{KV}}$ key-value attention heads, head dimension $d_h$, and context length $S$ tokens, stored in BF16 ($b_{\text{elem}} = 2$ bytes per element), is given by @eq-kvcache:
+The KV cache memory footprint across context length $S$, as formulated in @eq-kv-cache-memory ($M_{\text{KV}} = 2 \cdot L \cdot H_{\text{KV}} \cdot d_h \cdot S \cdot b_{\text{elem}}$), reveals why extending context to $S = 128{,}000$ tokens on a 70B model ($L = 80, d_h = 128$) produces an immediate crisis:
 
-$$
-M_{\text{KV}} = 2 \cdot L \cdot H_{\text{KV}} \cdot d_h \cdot S \cdot b_{\text{elem}}
-$$ {#eq-kvcache}
-
-where the leading factor of $2$ accounts for both key and value tensors. For a 70B-parameter model ($L = 80, d_h = 128$) at a long context of $S = 128{,}000$ tokens, the architectural difference between legacy Multi-Head Attention and modern Grouped-Query Attention is dramatic:
-
-- **Legacy Multi-Head Attention ($H_{\text{KV}} = H_Q = 64$):**
-  $$
-  M_{\text{KV}}^{\text{MHA}} = 2 \times 80 \times 64 \times 128 \times 128{,}000 \times 2 \approx 335.5 \;\text{GB}
-  $$
-  This exhausts the combined 320 GB HBM3 capacity of four H100 SXM5 GPUs ($4 \times 80\;\text{GB}$) before loading a single byte of the 140 GB model weights. Serving an uncompressed 128K context under MHA required at minimum six H100s for KV cache alone.
-- **Modern Grouped-Query Attention ($H_{\text{KV}} = 8$, as in Llama 3 70B):**
-  $$
-  M_{\text{KV}}^{\text{GQA}} = 2 \times 80 \times 8 \times 128 \times 128{,}000 \times 2 \approx 41.9 \;\text{GB}
-  $$
-  GQA reduces KV cache storage by an exact factor of $8\times$ (from $2.62\text{ MB/token}$ down to $328\text{ KB/token}$ across all layers), allowing the cache to fit within GPU node memory.
+- **Legacy Multi-Head Attention ($H_{\text{KV}} = H_Q = 64$):** Evaluates to $2 \times 80 \times 64 \times 128 \times 128{,}000 \times 2 \approx 335.5\text{ GB}$—exhausting the combined 320 GB HBM3 capacity of four H100 SXM5 GPUs ($4 \times 80\text{ GB}$) before loading a single byte of the 140 GB model weights.
+- **Modern Grouped-Query Attention ($H_{\text{KV}} = 8$, as in Llama 3 70B):** Evaluates to $2 \times 80 \times 8 \times 128 \times 128{,}000 \times 2 \approx 41.9\text{ GB}$—an exact $8\times$ reduction (from $2.62\text{ MB/token}$ down to $328\text{ KB/token}$ across all layers), allowing the cache to fit within GPU node memory.
 
 Beyond capacity, however, memory bandwidth imposes an escalating throughput penalty as context lengthens. During single-request decode ($B=1$), the accelerator must stream both the static model weights ($140\text{ GB}$ in BF16) and the active KV cache from HBM for every generated token, as quantified by @eq-fallacy-attn-bytes:
 
@@ -801,13 +749,7 @@ The reliability failure is subtler and more dangerous than the cost failure. Emp
 
 **Fallacy:** *Temperature is a global reliability dial: setting temperature to zero produces deterministic, maximally reliable instruction execution.*
 
-Temperature $T$ rescales logits before the softmax operation. For logit vector $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$ over vocabulary $\mathcal{V}$, the tempered distribution is defined by @eq-temperature:
-
-$$
-p_T(v) = \frac{\exp(z_v / T)}{\sum_{v' \in \mathcal{V}} \exp(z_{v'} / T)}
-$$ {#eq-temperature}
-
-As $T \to 0$, the distribution collapses toward an argmax, and the practitioner intuition is that greedy decoding at $T = 0$ eliminates stochasticity. Three distinct failure modes invalidate this assumption for instruction-processing workloads.
+Temperature $T$ rescales logits before the softmax operation ($\mathbf{p}_T(v) \propto \exp(z_v / T)$). As $T \to 0$, the distribution collapses toward an argmax, and the practitioner intuition is that greedy decoding at $T = 0$ eliminates stochasticity. Three distinct failure modes invalidate this assumption for instruction-processing workloads.
 
 First, greedy decoding is *exposure-biased* [@bengio2015scheduledsampling]: the model was trained under teacher forcing, observing ground-truth tokens at each step, but at inference it conditions on its own previous outputs. At $T = 0$, a single high-probability error token at position $i$ deterministically propagates through all subsequent positions, producing a *hard failure cascade* rather than the probabilistic failures of higher-temperature regimes. Empirical measurement on structured output tasks (JSON generation, tool-call formatting) shows that $T = 0$ reduces token-level error rate by 18 percent relative to $T = 1.0$ but *increases* complete-output failure rate by 27 percent, because cascading errors that sampling would have probabilistically escaped become deterministically locked in.
 

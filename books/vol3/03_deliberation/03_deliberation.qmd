@@ -67,23 +67,7 @@ Understanding why high-capacity foundation models succumb to such pathological f
 
 ### Autoregressive factorization and the myopic horizon
 
-An autoregressive language model factors the joint probability of a sequence of tokens $\mathbf{y} = (y_1, y_2, \dots, y_T)$ given input prompt $\mathbf{x}$ via the chain rule of probability:
-
-$$
-P(\mathbf{y} \mid \mathbf{x}) = \prod_{t=1}^T P_\theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t})
-$$
-
-In standard greedy decoding, the execution unit selects the token that maximizes the local conditional probability at each discrete time step $t$:
-
-$$
-y_t^* = \arg\max_{v \in \mathcal{V}} P_\theta(v \mid \mathbf{x}, y_1^*, \dots, y_{t-1}^*)
-$$
-
-where $\mathcal{V}$ is the model's vocabulary ($|\mathcal{V}| \approx 32{,}000\text{ to }128{,}000$). Greedy decoding implicitly assumes that a sequence of locally optimal choices yields a globally optimal reasoning trajectory:
-
-$$
-\mathbf{y}^* \stackrel{?}{=} \arg\max_{\mathbf{y}} \prod_{t=1}^T P_\theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t})
-$$
+An autoregressive language model factors the joint probability of a sequence of tokens $\mathbf{y} = (y_1, y_2, \dots, y_T)$ given input prompt $\mathbf{x}$ via the chain rule: $P(\mathbf{y} \mid \mathbf{x}) = \prod_{t=1}^T P_\theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t})$. In standard greedy decoding, the execution unit selects the token that maximizes local conditional probability at each discrete step: $y_t^* = \arg\max_{v \in \mathcal{V}} P_\theta(v \mid \mathbf{x}, y_1^*, \dots, y_{t-1}^*)$, where $\mathcal{V}$ is the model's vocabulary ($|\mathcal{V}| \approx 32{,}000\text{ to }128{,}000$). Greedy decoding implicitly assumes that a sequence of locally optimal choices yields a globally optimal reasoning trajectory ($\mathbf{y}^* = \arg\max_{\mathbf{y}} P(\mathbf{y} \mid \mathbf{x})$).
 
 This assumption fails catastrophically on compositional tasks. The optimization landscape of multi-step reasoning is non-convex and deceptive. A token choice that maximizes local conditional probability $P_\theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t})$ frequently leads into a semantic "garden path"—a region of state space where all subsequent continuations have low probability or represent logical falsehoods.
 
@@ -93,17 +77,11 @@ Consider a mathematical deduction requiring a non-obvious substitution. The loca
 
 In single-turn classification or summarization, an error on token $t$ produces a cosmetic imperfection. In an agentic trajectory, an error on token $t$ alters the causal history upon which all future actions condition.
 
-Let $p_t$ denote the probability that token $y_t$ is semantically and logically valid, conditioned on the premise that all preceding tokens $\mathbf{y}_{<t}$ are valid:
-
-$$
-p_t = P\left(y_t \text{ is sound} \mid \mathbf{y}_{<t} \text{ is sound}\right)
-$$
-
-The trajectory survival probability over a sequence of length $T$ is the product of these conditional step probabilities:
+Let $p_t = P(y_t \text{ is sound} \mid \mathbf{y}_{<t} \text{ is sound})$ denote the conditional probability that step $t$ is semantically valid given that prior steps were sound. The trajectory survival probability over an execution horizon of length $T$ is the product of these conditional step probabilities (@eq-trajectory-survival):
 
 $$
 P_{\text{survival}}(T) = \prod_{t=1}^T p_t \le \left(\bar{p}\right)^T
-$$
+$$ {#eq-trajectory-survival}
 
 where $\bar{p} = \frac{1}{T}\sum_{t=1}^T p_t$ is the arithmetic mean step reliability. @Tbl-vol3-deliberation-survival demonstrates how compounding error decay rapidly degrades execution integrity across both token-level generation and multi-step tool-action horizons.
 
@@ -116,19 +94,7 @@ where $\bar{p} = \frac{1}{T}\sum_{t=1}^T p_t$ is the arithmetic mean step reliab
 
 : **Trajectory Survival Probability Decay**: Compounding error decay $P_{\text{survival}}(T) = p^T$ across sequence lengths and step reliabilities. Even near-perfect single-token accuracy yields catastrophic failure over extended multi-step trajectories without verification and backtracking. {#tbl-vol3-deliberation-survival tbl-colwidths="[22,12,12,12,12,12,18]"}
 
-Even for a model calibrated to exceptional precision—such as $\bar{p} = 0.999$ per token—the survival probability across an extended 1,000-token generation drops exponentially:
-
-$$
-P_{\text{survival}}(1000) \le (0.999)^{1000} \approx 0.3676
-$$
-
-If the agent operates at the level of semantic tool invocations, where an action step consists of a complete API call, single-step reliability is substantially lower (e.g., $p_{\text{step}} = 0.90$). Across a 20-step autonomous workflow, the probability of reaching the objective without an unrecoverable failure is:
-
-$$
-P_{\text{success}} = (0.90)^{20} \approx 0.1216
-$$
-
-Nearly 88 percent of unguided greedy trajectories collapse into unrecoverable states.
+Even for a model calibrated to exceptional precision—such as $\bar{p} = 0.999$ per token—the survival probability across an extended 1,000-token generation drops exponentially: $P_{\text{survival}}(1000) \le (0.999)^{1000} \approx 0.368$. If the agent operates at the level of semantic tool invocations, where an action step consists of a complete API call with $p_{\text{step}} = 0.90$, the probability of completing a 20-step workflow without an unrecoverable failure is $P_{\text{success}} = (0.90)^{20} \approx 0.122$—meaning nearly 88 percent of unguided greedy trajectories collapse into unrecoverable states.
 
 ::: {#chk-vol3-03-trajectory-survival .callout-checkpoint title="Compounding errors and trajectory survival"}
 
@@ -142,39 +108,15 @@ Before exploring test-time compute scaling, verify your understanding of compoun
 
 ### Exposure bias and cognitive drift
 
-The root cause of greedy decoding collapse lies in the training regime of foundation models: **Teacher Forcing** [@bengio2015scheduledsampling]. During pretraining and supervised fine-tuning, the loss is computed over ground-truth sequences:
-
-$$
-\mathcal{L}_{\text{SFT}}(\theta) = -\sum_{t=1}^T \log P_\theta(y_t^* \mid \mathbf{x}, y_1^*, \dots, y_{t-1}^*)
-$$
-
-At training time, the model is never exposed to its own mistakes; each step conditions on an untainted prefix $(y_1^*, \dots, y_{t-1}^*)$. At inference time, however, the model conditions on its own sampled emissions $(\hat{y}_1, \dots, \hat{y}_{t-1})$.
+The root cause of greedy decoding collapse lies in the training regime of foundation models: **Teacher Forcing** [@bengio2015scheduledsampling]. During pretraining and supervised fine-tuning, the loss is computed over ground-truth sequences: $\mathcal{L}_{\text{SFT}}(\theta) = -\sum_{t=1}^T \log P_\theta(y_t^* \mid \mathbf{x}, y_1^*, \dots, y_{t-1}^*)$. At training time, the model is never exposed to its own mistakes; each step conditions on an untainted prefix $(y_1^*, \dots, y_{t-1}^*)$. At inference time, however, the model conditions on its own sampled emissions $(\hat{y}_1, \dots, \hat{y}_{t-1})$.
 
 This discrepancy—known as **Exposure Bias**—triggers an acute failure mode in agentic systems: *Cognitive Drift*. In an autoregressive transformer, the Key and Value projections of an erroneous token $\hat{y}_\tau$ are materialized directly into accelerator High-Bandwidth Memory (HBM). Because subsequent multi-head attention passes compute $A = \text{softmax}(Q K^T / \sqrt{d_k}) V$, these flawed KV vectors persist across every subsequent decoding step, actively skewing the attention weights for all future tokens. The model cannot unsee its past activations; instead, it attempts to minimize sequence perplexity by generating tokens that are semantically consistent with the flawed premise. Rather than executing a rollback, the policy rationalizes the error, generating plausible justifications for an objectively broken execution path.
 
 ### Thermodynamic and hardware limits of one-pass decoding
 
-From a systems perspective, greedy autoregressive decoding treats all tokens as computationally equal. The forward pass through an $L$-layer transformer with hidden dimension $d_{\text{model}}$ and parameter count $P$ performs:
+From a systems perspective, greedy autoregressive decoding treats all tokens as computationally equal. The forward pass through an $L$-layer transformer with hidden dimension $d_{\text{model}}$ and parameter count $P$ performs $C_{\text{pass}} \approx 2 \cdot P\text{ FLOPs/token}$, regardless of whether the token being emitted is an inconsequential syntactic comma or the foundational architectural invariant of a software system.
 
-$$
-C_{\text{pass}} \approx 2 \cdot P \quad \text{FLOPs/token}
-$$
-
-regardless of whether the token being emitted is an inconsequential syntactic token (such as a comma or closing brace) or the foundational architectural invariant of a software system.
-
-During autoregressive generation, memory bandwidth—not tensor compute—is the binding constraint. At batch size $B=1$, the arithmetic intensity of decoding is:
-
-$$
-\mathcal{I}_{\text{decode}} = \frac{2 \cdot P \text{ FLOPs}}{2 \cdot P \text{ Bytes}} \approx 1.0 \text{ FLOP/Byte}
-$$
-
-On an NVIDIA H100 SXM5 GPU capable of $989\text{ TFLOP/s}$ of dense 16-bit tensor compute (rising to $1{,}979\text{ TFLOP/s}$ with 2:4 structured sparsity or FP8 precision) and $3.35\text{ TB/s}$ of High-Bandwidth Memory (HBM3) bandwidth, saturating the dense tensor cores requires an arithmetic intensity of:
-
-$$
-\mathcal{I}_{\text{knee}} = \frac{989 \times 10^{12} \text{ FLOPs/s}}{3.35 \times 10^{12} \text{ Bytes/s}} \approx 295 \text{ FLOPs/Byte}
-$$
-
-(rising to $\approx 590\text{ FLOPs/Byte}$ under sparse or FP8 execution). Greedy decoding operates nearly $300\times$ below the accelerator's dense roofline knee (and nearly $600\times$ below its sparse ceiling). The compute engine is stalled, waiting for model weights to stream across the memory bus.
+During autoregressive generation, memory bandwidth—not tensor compute—is the binding constraint. At batch size $B=1$, the arithmetic intensity of decoding is $\mathcal{I}_{\text{decode}} = \frac{2 \cdot P \text{ FLOPs}}{2 \cdot P \text{ Bytes}} \approx 1.0\text{ FLOP/Byte}$. On an NVIDIA H100 SXM5 GPU capable of $989\text{ TFLOP/s}$ of dense 16-bit tensor compute (rising to $1{,}979\text{ TFLOP/s}$ with 2:4 structured sparsity or FP8 precision) and $3.35\text{ TB/s}$ of High-Bandwidth Memory (HBM3) bandwidth, saturating the dense tensor cores requires an arithmetic intensity of $\mathcal{I}_{\text{knee}} = \frac{989 \times 10^{12} \text{ FLOPs/s}}{3.35 \times 10^{12} \text{ Bytes/s}} \approx 295\text{ FLOPs/Byte}$ (rising to $\approx 590\text{ FLOPs/Byte}$ under sparse or FP8 execution). Greedy decoding operates nearly $300\times$ below the accelerator's dense roofline knee (and nearly $600\times$ below its sparse ceiling). The compute engine is stalled, waiting for model weights to stream across the memory bus.
 
 Greedy decoding wastes silicon capacity by running a computationally uniform, memory-bandwidth-choked algorithm on problems whose difficulty distribution is deeply non-uniform. To break free of this memory-bound, single-path failure trap, the runtime must decouple execution from the rigid token-by-token forward pass. It must treat the foundation model as an untrusted proposal engine within a deliberate, test-time search architecture.
 
@@ -189,19 +131,15 @@ The 8B model with deliberation outperformed the 70B zero-shot model by more than
 
 ### Pretraining scaling frontiers vs. inference compute frontiers
 
-For half a decade, deep learning scaling was governed by the empirical power laws established by @kaplan2020scaling and refined by @hoffmann2022chinchilla. Cross-entropy test loss $L$ scales as a power law of pretraining compute $C_{\text{train}}$, parameter count $N_{\text{param}}$, and pretraining dataset size $D_{\text{tokens}}$:
-
-$$
-L(N_{\text{param}}, D_{\text{tokens}}) = E + \left(\frac{N_c}{N_{\text{param}}}\right)^{\alpha_N} + \left(\frac{D_c}{D_{\text{tokens}}}\right)^{\alpha_D}
-$$
+For half a decade, deep learning scaling was governed by the empirical power laws established by @kaplan2020scaling and refined by @hoffmann2022chinchilla. Cross-entropy test loss $L$ scales as a power law of pretraining compute $C_{\text{train}}$, parameter count $N_{\text{param}}$, and pretraining dataset size $D_{\text{tokens}}$: $L(N_{\text{param}}, D_{\text{tokens}}) = E + (N_c / N_{\text{param}})^{\alpha_N} + (D_c / D_{\text{tokens}})^{\alpha_D}$.
 
 Under compute-optimal pretraining ($C_{\text{train}} \approx 6 N_{\text{param}} D_{\text{tokens}}$), improving accuracy requires quadratic growth in capital expenditure, data center power, and cluster networking infrastructure. Scaling from a 70B model to a 405B model requires an order of magnitude more training FLOPs, but yields diminishing marginal returns on multi-step reasoning benchmarks. Once a foundation model has acquired basic world knowledge, syntax, and instruction-following abilities, its failure mode on hard compositional tasks is not a lack of facts—it is a failure of operational search.
 
-Test-time compute scaling laws [@snell2024scaling; @openai2024o1] formalize an orthogonal scaling dimension. For a fixed, pretrained parameter checkpoint $\theta$, task accuracy scales as a power law of the test-time compute budget $C_{\text{test}}$ allocated to deliberate reasoning:
+Test-time compute scaling laws [@snell2024scaling; @openai2024o1] formalize an orthogonal scaling dimension. For a fixed, pretrained parameter checkpoint $\theta$, task accuracy scales as a power law of the test-time compute budget $C_{\text{test}}$ allocated to deliberate reasoning (@eq-test-time-error-scaling):
 
 $$
 \text{Error}(C_{\text{test}}) = A \cdot C_{\text{test}}^{-\beta_{\text{test}}} + \text{Error}_\infty
-$$
+$$ {#eq-test-time-error-scaling}
 
 where $\beta_{\text{test}}$ is the test-time scaling exponent and $\text{Error}_\infty$ represents the asymptotic error ceiling imposed by the model's fundamental representation capacity. As formalized in @fig-vol3-deliberation-compute-scaling, test-time compute fundamentally alters the system's economic Pareto frontier: allocating additional decoding FLOPs enables a compact policy model to match or exceed the accuracy of an order-of-magnitude larger unverified baseline.
 
@@ -214,30 +152,16 @@ where $\beta_{\text{test}}$ is the test-time scaling exponent and $\text{Error}_
 As illustrated in @fig-vol3-deliberation-compute-scaling (Panel A), test-time compute $C_{\text{test}}$ can be expanded along two primary axes:
 
 #### 1. Sequential deliberation scaling (latent chain-of-thought)
-In this regime, the inference runtime allows the model to emit a variable stream of internal "thinking tokens" $\mathbf{z} = (z_1, z_2, \dots, z_K)$ prior to emitting the external action $\mathbf{a}$:
-
-$$
-P(\mathbf{a} \mid \mathbf{x}) = \sum_{\mathbf{z}} P_\theta(\mathbf{a} \mid \mathbf{x}, \mathbf{z}) P_\theta(\mathbf{z} \mid \mathbf{x})
-$$
+In this regime, the inference runtime allows the model to emit a variable stream of internal "thinking tokens" $\mathbf{z} = (z_1, z_2, \dots, z_K)$ prior to emitting the external action $\mathbf{a}$, marginalizing over internal trajectories: $P(\mathbf{a} \mid \mathbf{x}) = \sum_{\mathbf{z}} P_\theta(\mathbf{a} \mid \mathbf{x}, \mathbf{z}) P_\theta(\mathbf{z} \mid \mathbf{x})$.
 
 From a hardware execution perspective, each thinking token $z_k$ acts as a **virtual transformer layer**. While an $L$-layer model possesses fixed physical depth, an autoregressive chain of $K$ deliberation tokens executes $K \cdot L$ sequential layer transformations over the hidden representation. This recurrent processing allows the model to iteratively refine its internal belief state, solve sub-problems sequentially, and correct intermediate calculation errors before committing to external token emissions.
 
 #### 2. Parallel search and verification scaling (search width)
-In this regime, the runtime generates multiple candidate hypotheses in parallel, constructing a search tree evaluated by external verifiers:
-
-$$
-C_{\text{test}} = \sum_{i=1}^N C_{\text{gen}}(\tau_i) + \sum_{i=1}^N C_{\text{ver}}(\tau_i)
-$$
-
-where $N$ is the number of candidate rollouts, $C_{\text{gen}}$ is the token generation compute, and $C_{\text{ver}}$ is the verification cost.
+In this regime, the runtime generates multiple candidate hypotheses in parallel, constructing a search tree evaluated by external verifiers with total compute $C_{\text{test}} = \sum_{i=1}^N [C_{\text{gen}}(\tau_i) + C_{\text{ver}}(\tau_i)]$, where $N$ is the number of candidate rollouts, $C_{\text{gen}}$ is the token generation compute, and $C_{\text{ver}}$ is the verification cost.
 
 ### The Pareto frontier of systems efficiency
 
-To evaluate the economic trade-off between pretraining scale and test-time search, consider an organization serving $Q$ user queries over the lifetime of a deployed model checkpoint. The total lifecycle compute expenditure is:
-
-$$
-C_{\text{lifecycle}} = C_{\text{train}}(N_{\text{param}}) + Q \cdot C_{\text{infer}}(N_{\text{param}}, C_{\text{test}})
-$$
+To evaluate the economic trade-off between pretraining scale and test-time search, consider an organization serving $Q$ user queries over the lifetime of a deployed model checkpoint. The total lifecycle compute expenditure across queries is $C_{\text{lifecycle}} = C_{\text{train}}(N_{\text{param}}) + Q \cdot C_{\text{infer}}(N_{\text{param}}, C_{\text{test}})$.
 
 Under greedy decoding ($C_{\text{test}} = 2 \cdot N_{\text{param}} \cdot T_{\text{out}}$), achieving higher accuracy requires deploying an enormous model (e.g., $N_{\text{param}} = 405\text{B}$). This inflates both the pretraining compute $C_{\text{train}}$ and the per-query serving cost $C_{\text{infer}}$, demanding multi-node tensor-parallel GPU clusters with severe memory capacity constraints.
 
@@ -342,29 +266,32 @@ Calculate the inference FLOPs per task, monthly aggregate inference compute, and
 - FLOPs per token forward pass: $C_{\text{token}} \approx 2 \cdot P$.
 
 **Math:**
+
 *Architecture A (70B Greedy):*
-Inference FLOPs per query:
-$$C_{\text{query}, A} = 2 \times (70 \times 10^9) \times 500 = 7.0 \times 10^{13} \text{ FLOPs } (70\text{ TFLOPs})$$
-Delivering `{python} DeliberationParetoBreakeven.c_query_a_tflops_str` TFLOPs per task.
+
+Inference compute per query:
+$$C_{\text{query}, A} = 2 \times (70 \times 10^9) \times 500 = 7.0 \times 10^{13} \text{ FLOPs}$$
+delivering `{python} DeliberationParetoBreakeven.c_query_a_tflops_str` TFLOPs per task.
 
 Monthly aggregate compute across $10^7$ queries:
-$$C_{\text{monthly}, A} = 10^7 \times 70\text{ TFLOPs} = 7.0 \times 10^{20} \text{ FLOPs } (\mathbf{700\text{ EFLOPs}})$$
-Requiring `{python} DeliberationParetoBreakeven.c_monthly_a_eflops_str` EFLOPs of monthly cluster compute.
+$$C_{\text{monthly}, A} = 10^7 \times 70\text{ TFLOPs} = 7.0 \times 10^{20} \text{ FLOPs}$$
+requiring `{python} DeliberationParetoBreakeven.c_monthly_a_eflops_str` EFLOPs of monthly cluster compute.
 
 Weight memory footprint (FP16 precision, 2 bytes/param):
 $$M_{\text{weights}, A} = 70 \times 10^9 \times 2 \text{ bytes} = 140\text{ GB}$$
 Serving requires `{python} DeliberationParetoBreakeven.m_weights_a_str` GB of HBM, demanding at minimum two 80 GB GPUs (e.g., $2 \times \text{H100 SXM5}$) per replica purely to hold the model weights before allocating KV caches.
 
 *Architecture B (8B Test-Time Search):*
+
 Total tokens generated per task across $N = 8$ branches:
 $$T_{\text{total}, B} = 8 \times 750 = 6{,}000 \text{ tokens}$$
-Inference FLOPs per query:
-$$C_{\text{query}, B} = 2 \times (8 \times 10^9) \times 6{,}000 = 9.6 \times 10^{13} \text{ FLOPs } (96\text{ TFLOPs})$$
-Delivering `{python} DeliberationParetoBreakeven.c_query_b_tflops_str` TFLOPs per task.
+Inference compute per query:
+$$C_{\text{query}, B} = 2 \times (8 \times 10^9) \times 6{,}000 = 9.6 \times 10^{13} \text{ FLOPs}$$
+delivering `{python} DeliberationParetoBreakeven.c_query_b_tflops_str` TFLOPs per task.
 
 Monthly aggregate compute:
-$$C_{\text{monthly}, B} = 10^7 \times 96\text{ TFLOPs} = 9.6 \times 10^{20} \text{ FLOPs } (\mathbf{960\text{ EFLOPs}})$$
-Requiring `{python} DeliberationParetoBreakeven.c_monthly_b_eflops_str` EFLOPs of monthly cluster compute.
+$$C_{\text{monthly}, B} = 10^7 \times 96\text{ TFLOPs} = 9.6 \times 10^{20} \text{ FLOPs}$$
+requiring `{python} DeliberationParetoBreakeven.c_monthly_b_eflops_str` EFLOPs of monthly cluster compute.
 
 Weight memory footprint (FP16 precision):
 $$M_{\text{weights}, B} = 8 \times 10^9 \times 2 \text{ bytes} = 16\text{ GB}$$
@@ -393,19 +320,14 @@ To engineer dependable deliberative agents, runtime architects must formalize th
 
 We formalize test-time deliberation as directed graph traversal over a semantic state-action space $\mathcal{G} = (\mathcal{V}, \mathcal{E})$:
 
-* **Vertices ($v \in \mathcal{V}$):** Represent intermediate agent belief states and environmental snapshots:
-  $$
-  v_t = \langle \mathbf{x}, \mathbf{a}_{1:t}, \mathbf{o}_{1:t}, \mathbf{z}_t, \mathcal{S}_{\text{env}}^{(t)} \rangle
-  $$
-  where:
-
+* **Vertices ($v \in \mathcal{V}$):** Represent intermediate agent belief states and environmental snapshots: $v_t = \langle \mathbf{x}, \mathbf{a}_{1:t}, \mathbf{o}_{1:t}, \mathbf{z}_t, \mathcal{S}_{\text{env}}^{(t)} \rangle$, where:
   - $\mathbf{x}$ is the original task context stored in read-only, shared KV cache pages.
   - $\mathbf{a}_{1:t}$ and $\mathbf{o}_{1:t}$ form the external execution trace (immutable action calls and environment observations).
   - $\mathbf{z}_t$ is the internal deliberation scratchpad (ephemeral reasoning tokens that can be evaluated, rewound, or pruned prior to action emission).
   - $\mathcal{S}_{\text{env}}^{(t)}$ is the physical environment state (copy-on-write filesystem overlay, database savepoint, or container PID namespace).
 * **Edges ($e = (u, v) \in \mathcal{E}$):** Represent candidate actions or discrete reasoning steps $a \in \mathcal{A}$ generated by the policy model $\pi_\theta(a \mid u)$ that transition the system from state $u$ to state $v$.
 
-The topology of $\mathcal{G}$ determines the degree of freedom the agent possesses to explore, backtrack, and synthesize solutions, as contrasted in @fig-vol3-deliberation-execution-topologies across linear ReAct chains, hierarchical DAGs, and branching deliberate search.
+The topology of $\mathcal{G}$ determines the degree of freedom the agent possesses to explore, backtrack, and synthesize solutions, as contrasted in @fig-vol3-deliberation-execution-topologies across linear ReAct chains, hierarchical directed acyclic graphs (DAGs), and branching deliberate search.
 
 ::: {#fig-vol3-deliberation-execution-topologies fig-env="figure" fig-pos="htb" fig-cap="**Comparative Execution Graph Topologies**: Structural contrast between reactive step-by-step interleaving (ReAct), hierarchical deliberative planning (Plan-and-Solve DAG), and deliberate test-time search with process reward models and backtracking. ReAct couples generation directly to local environment observations; Plan-and-Solve builds a static dependency graph prior to execution; Deliberate Search explores branching trajectories with state rollback and value-guided pruning. Source: MLSysBook Deliberation and Planning Taxonomy." fig-alt="Diagram contrasting three control topologies: Panel A shows ReAct with an alternating single-path loop between thought, action, and observation; Panel B shows Plan-and-Solve with a centralized planner generating a directed acyclic graph dispatched to specialized sub-agents; Panel C shows Deliberate Search expanding a decision tree with PRM node evaluations and backtracking."}
 ![](images/svg/execution_topologies.svg){width="100%"}
@@ -416,10 +338,8 @@ The topology of $\mathcal{G}$ determines the degree of freedom the agent possess
 As illustrated in @fig-vol3-deliberation-execution-topologies, deliberative architectures span three primary graph topologies:
 
 #### 1. Linear chains (chain-of-thought / ReAct)
-The execution graph is a degenerate, unbranching chain, as popularized by Chain-of-Thought prompting [@wei2022cot] and ReAct interleaving of reasoning traces with action calls [@yao2023react]:
-$$
-v_0 \xrightarrow{a_1} v_1 \xrightarrow{a_2} v_2 \xrightarrow{a_3} \dots \xrightarrow{a_T} v_T
-$$
+The execution graph is a degenerate, unbranching chain ($v_0 \xrightarrow{a_1} v_1 \xrightarrow{a_2} \dots \xrightarrow{a_T} v_T$), as popularized by Chain-of-Thought prompting [@wei2022cot] and ReAct interleaving of reasoning traces with action calls [@yao2023react]:
+
 * **Branching Factor:** $b = 1$. Backtracking is impossible.
 * **Systems Profile:** Minimal memory overhead. At step $t$, the system maintains a single active KV cache sequence of length $L_t$.
 * **Failure Mode:** Irreversible error cascading. A flawed premise at $v_1$ corrupts all downstream vertices $v_{t > 1}$.
@@ -460,7 +380,7 @@ Moving from linear chains to autonomous graphs shifts control authority from det
 ::: {#pri-vol3-minimum-autonomy .callout-principle title="The minimum autonomy invariant"}
 **Invariant:** The failure blast radius, latency complexity, and token variance of an agent system scale monotonically with its control autonomy.
 
-**Operational Rule:** Never deploy a more autonomous control topology than the problem strictly demands. If a workflow can be satisfied with a deterministic prompt chain, a classification router, or a bounded Map-Reduce directed acyclic graph (DAG), wrapping it in an autonomous loop introduces unnecessary operational risk, unbounded latency variance, and avoidable verification tax.
+**Operational Rule:** Never deploy a more autonomous control topology than the problem strictly demands. If a workflow can be satisfied with a deterministic prompt chain, a classification router, or a bounded Map-Reduce DAG, wrapping it in an autonomous loop introduces unnecessary operational risk, unbounded latency variance, and avoidable verification tax.
 :::
 
 ### The anti-swarm principle
@@ -477,11 +397,7 @@ In production engineering, this pattern is a catastrophic failure mode. We forma
 ![](images/svg/anti_swarm_supervisor.svg){width="100%"}
 :::
 
-In a flat mesh of $N$ communicating agents (@fig-vol3-deliberation-anti-swarm), the number of bidirectional communication channels scales quadratically:
-
-$$
-C_{\text{channels}} = \frac{N(N - 1)}{2} = \mathcal{O}(N^2)
-$$
+In a flat mesh of $N$ communicating agents (@fig-vol3-deliberation-anti-swarm), bidirectional communication channels scale quadratically: $C_{\text{channels}} = \frac{N(N - 1)}{2} = \mathcal{O}(N^2)$.
 
 As messages bounce asynchronously between agents, four catastrophic systems failures emerge:
 
@@ -513,55 +429,23 @@ This failure illustrates the classical **Credit Assignment Problem** in sequenti
 
 ### Mathematical formulation of credit assignment
 
-Consider an agent trajectory $\tau$ consisting of an alternating sequence of intermediate states and actions over horizon $T$:
-
-$$
-\tau = (s_0, a_1, s_1, a_2, s_2, \dots, a_T, s_T)
-$$
+Consider an agent trajectory $\tau = (s_0, a_1, s_1, a_2, s_2, \dots, a_T, s_T)$ consisting of an alternating sequence of intermediate states and actions over horizon $T$.
 
 #### Outcome reward models (ORMs)
-An Outcome Reward Model evaluates the trajectory holistically, assigning a scalar score conditioned solely on the terminal state $s_T$ and the original context $s_0$:
-
-$$
-R_{\text{ORM}}(\tau) = P\left(\text{task success} \mid s_0, s_T\right) \in [0, 1]
-$$
+An Outcome Reward Model evaluates the trajectory holistically, assigning a scalar score conditioned solely on the terminal state $s_T$ and the original context $s_0$: $R_{\text{ORM}}(\tau) = P(\text{task success} \mid s_0, s_T) \in [0, 1]$.
 
 In reinforcement learning policy optimization, terminal rewards suffer from severe **credit dilution**: every action $a_t$ in the sequence receives the identical scalar return $(R_{\text{ORM}}(\tau) - b)$. If an agent executes 40 flawless bash commands to configure a Kubernetes cluster and makes a single typo on command 41 that crashes the pod, $R_{\text{ORM}} = 0$. At training time, this uniform penalty inflates gradient estimator variance quadratically as $\mathcal{O}(T^2)$, requiring millions of interaction trajectories to isolate the single failing action.[^prm-variance-derivation]
 
-At inference time, the systems penalty of an ORM is even more severe: **speculative rollout waste**. Because an ORM cannot evaluate intermediate vertices, scoring an exploratory branch at step $t$ requires the runtime to simulate $M$ complete speculative rollouts all the way to the terminal horizon $T$. Evaluating $K$ candidate actions at depth $t$ forces the serving cluster to generate:
-
-$$
-C_{\text{eval}}(t) \approx 2 \cdot K \cdot M \cdot (T - t) \cdot T_{\text{action}} \cdot P \quad \text{FLOPs}
-$$
-
-For a 50-step trajectory at step $t = 5$, evaluating $K = 4$ alternative decisions using $M = 8$ rollouts per action forces the serving engine to generate $4 \times 8 \times (50 - 5) = 1{,}440$ complete action steps. The cluster burns tens of thousands of speculative tokens merely to compute a single intermediate value estimate, only to discard those rollouts the moment the branch is graded.
+At inference time, the systems penalty of an ORM is even more severe: **speculative rollout waste**. Because an ORM cannot evaluate intermediate vertices, scoring an exploratory branch at step $t$ requires the runtime to simulate $M$ complete speculative rollouts all the way to the terminal horizon $T$. Evaluating $K$ candidate actions at depth $t$ forces the serving cluster to generate $C_{\text{eval}}(t) \approx 2 \cdot K \cdot M \cdot (T - t) \cdot T_{\text{action}} \cdot P\text{ FLOPs}$. For a 50-step trajectory at step $t = 5$, evaluating $K = 4$ alternative decisions using $M = 8$ rollouts per action forces the serving engine to generate $4 \times 8 \times (50 - 5) = 1{,}440$ complete action steps. The cluster burns tens of thousands of speculative tokens merely to compute a single intermediate value estimate, only to discard those rollouts the moment the branch is graded.
 
 [^prm-variance-derivation]: For the formal derivation showing that policy gradient variance scales as $\mathcal{O}(T^2)$ under terminal outcome rewards and collapses to $\mathcal{O}(T)$ under localized process rewards, see @sec-vol3-appendix-math-credit-assignment.
 
 #### Process reward models (PRMs)
-A Process Reward Model [@lightman2023let] provides dense, step-level credit assignment by evaluating each discrete state transition $(s_{t-1}, a_t) \to s_t$:
+A Process Reward Model [@lightman2023let] provides dense, step-level credit assignment by evaluating each discrete state transition $(s_{t-1}, a_t) \to s_t$: $r_t = r_{\text{PRM}}(s_{t-1}, a_t) \in [-1, 1]$, where $r_t$ reflects the logical correctness, safety, or progress of action $a_t$.
 
-$$
-r_t = r_{\text{PRM}}(s_{t-1}, a_t) \in [-1, 1]
-$$
+The value of an intermediate state $s_t$ during tree search can be formulated either multiplicatively (as the cumulative survival probability along the path, $V_{\text{path}}(s_t) = \prod_{k=1}^t \sigma(r_{\text{PRM}}(s_{k-1}, a_k))$) or additively (as discounted return, $V_{\text{return}}(s_t) = \sum_{k=t}^T \gamma^{k-t} r_{\text{PRM}}(s_{k-1}, a_k)$).
 
-where $r_t$ reflects the logical correctness, safety, or progress of action $a_t$.
-
-The value of an intermediate state $s_t$ during tree search can be formulated either multiplicatively (as the cumulative survival probability along the path) or additively (as discounted return):
-
-$$
-V_{\text{path}}(s_t) = \prod_{k=1}^t \sigma\left(r_{\text{PRM}}(s_{k-1}, a_k)\right)
-$$
-
-$$
-V_{\text{return}}(s_t) = \sum_{k=t}^T \gamma^{k-t} r_{\text{PRM}}(s_{k-1}, a_k)
-$$
-
-PRMs transform test-time search by enabling **Early Error Localization**. Rather than generating hundreds or thousands of speculative rollout tokens, evaluating a candidate step with a PRM requires only a single forward inference pass through the reward head ($2 \cdot |a_t| \cdot P_{\text{PRM}}$ FLOPs). The runtime detects the precise step index $t^*$ where the trajectory derailed:
-
-$$
-t^* = \min \left\{ t \in \{1, \dots, T\} \mid r_{\text{PRM}}(s_{t-1}, a_t) < \tau_{\text{cutoff}} \right\}
-$$
+PRMs transform test-time search by enabling **Early Error Localization**. Rather than generating hundreds or thousands of speculative rollout tokens, evaluating a candidate step with a PRM requires only a single forward inference pass through the reward head ($2 \cdot |a_t| \cdot P_{\text{PRM}}$ FLOPs). The runtime detects the precise step index $t^* = \min \{ t \in \{1, \dots, T\} \mid r_{\text{PRM}}(s_{t-1}, a_t) < \tau_{\text{cutoff}} \}$ where the trajectory derailed.
 
 Rather than generating tokens all the way to terminal step $T$, the search runtime immediately prunes the trajectory at step $t^*$, rolls back the environment to snapshot $s_{t^*-1}$, and branches along alternative actions, eliminating $(T - t^*)$ wasted generation steps.
 
@@ -658,27 +542,13 @@ Deliberate inference maps problem solving onto tree search algorithms that balan
 As illustrated in @fig-vol3-deliberation-search-topologies, test-time search algorithms navigate decision trees under differing synchronization and memory constraints:
 
 #### 1. Best-of-$N$ sampling (rejection sampling)
-The simplest search baseline generates $N$ independent trajectories in parallel from prompt $\mathbf{x}$:
-
-$$
-\mathcal{T} = \{\tau_1, \tau_2, \dots, \tau_N\}, \quad \tau_i \sim \pi_\theta(\cdot \mid \mathbf{x})
-$$
-
-Each trajectory is executed to terminal completion, and the selection oracle chooses the best outcome:
-
-$$
-\tau^* = \arg\max_{\tau_i \in \mathcal{T}} \mathcal{R}(\tau_i)
-$$
+The simplest search baseline generates $N$ independent trajectories $\mathcal{T} = \{\tau_1, \tau_2, \dots, \tau_N\}$ with $\tau_i \sim \pi_\theta(\cdot \mid \mathbf{x})$ in parallel from prompt $\mathbf{x}$. Each trajectory is executed to terminal completion, and the selection oracle chooses the best outcome: $\tau^* = \arg\max_{\tau_i \in \mathcal{T}} \mathcal{R}(\tau_i)$.
 
 * **Systems Profile:** Embarrassingly parallel. Dispatches across large GPU batches, saturating tensor cores.
 * **Systems Flaw:** Severe token waste. If an unrecoverable hallucination occurs at step 2 of a 20-step trajectory, Best-of-$N$ blindly generates the remaining 18 steps to completion. Across $N$ failing branches, up to $70\%\text{--}90\%$ of generated tokens represent discarded compute.
 
 #### 2. Beam search
-Maintains a fixed frontier of $B$ active hypothesis beams at horizon step $t$: $\mathcal{B}_t = \{\tau_t^{(1)}, \dots, \tau_t^{(B)}\}$. At each step, the policy generates $K$ candidate next-step actions per beam, creating a candidate pool of size $B \cdot K$:
-
-$$
-\mathcal{C}_{t+1} = \bigcup_{b=1}^B \left\{ \tau_t^{(b)} \circ a_{t+1}^{(k)} \mid a_{t+1}^{(k)} \sim \pi_\theta(\cdot \mid \tau_t^{(b)}), \, k \in \{1, \dots, K\} \right\}
-$$
+Maintains a fixed frontier of $B$ active hypothesis beams at horizon step $t$: $\mathcal{B}_t = \{\tau_t^{(1)}, \dots, \tau_t^{(B)}\}$. At each step, the policy generates $K$ candidate next-step actions per beam, creating a candidate pool $\mathcal{C}_{t+1} = \bigcup_{b=1}^B \{ \tau_t^{(b)} \circ a_{t+1}^{(k)} \mid a_{t+1}^{(k)} \sim \pi_\theta(\cdot \mid \tau_t^{(b)}), \, k \in \{1, \dots, K\} \}$ of size $B \cdot K$.
 
 A step-level PRM or deterministic linter scores all $B \cdot K$ candidates, and the runtime retains the top $B$ paths to form $\mathcal{B}_{t+1}$, immediately freeing the memory of the pruned $(B \cdot K - B)$ branches.
 * **Systems Bottleneck (Straggler Thread Stall):** Beam search imposes a synchronous barrier across all $B \cdot K$ candidates at each ply. If one candidate action triggers a 10-second external compile while nine others complete in 50 ms, the entire serving batch stalls at the slowest branch.
@@ -687,10 +557,10 @@ A step-level PRM or deterministic linter scores all $B \cdot K$ candidates, and 
 #### 3. Monte Carlo tree search (MCTS)
 MCTS [@kocsis2006bandit; @silver2016mastering] provides an asymptotically optimal search framework that navigates asymmetric decision trees via four cyclical phases:
 
-1. **Selection:** Starting at root node $s_0$, traversal descends the existing tree by selecting the action that maximizes the Predictor Upper Confidence Bounds applied to Trees (PUCT) metric:
+1. **Selection:** Starting at root node $s_0$, traversal descends the existing tree by selecting the action that maximizes the Predictor Upper Confidence Bounds applied to Trees (PUCT) metric (@eq-puct-selection):
    $$
    a^* = \arg\max_{a \in \mathcal{A}(s)} \left[ Q(s, a) + c_{\text{puct}} \cdot P(s, a) \cdot \frac{\sqrt{N(s)}}{1 + N(s, a)} \right]
-   $$
+   $$ {#eq-puct-selection}
    where:
 
    - $Q(s, a)$ is the exploitation term, tracking the running mean empirical value or verifier score of edge $(s, a)$.
@@ -701,12 +571,9 @@ MCTS [@kocsis2006bandit; @silver2016mastering] provides an asymptotically optima
 3. **Simulation (Evaluation):** The newly expanded state $s'$ is evaluated. Rather than running costly, unguided random rollouts to terminal depth, agentic runtimes deploy two evaluators:
    * A learned value network head $V_\phi(s') \in [-1, 1]$ providing a scalar position evaluation in a single forward pass.
    * A truncated shallow rollout (1–2 steps) evaluated by a deterministic sandbox oracle.
-4. **Backpropagation:** The evaluation score $V(s')$ is propagated recursively up the ancestral tree path. For each visited edge $(s, a)$:
-   $$
-   N(s, a) \leftarrow N(s, a) + 1, \quad Q(s, a) \leftarrow Q(s, a) + \frac{V(s') - Q(s, a)}{N(s, a)}
-   $$
+4. **Backpropagation:** The evaluation score $V(s')$ is propagated recursively up the ancestral tree path. For each visited edge $(s, a)$, the runtime updates visit counts and running values: $N(s, a) \leftarrow N(s, a) + 1$, $Q(s, a) \leftarrow Q(s, a) + \frac{V(s') - Q(s, a)}{N(s, a)}$.
 
-While classical game-playing systems treat MCTS nodes as lightweight mathematical coordinate vectors, an agentic deliberation tree operates over dense neural language states where every branch point represents thousands of prompt and trajectory tokens. Naively duplicating activation tensors across hundreds of speculative search rollouts would saturate accelerator memory within seconds, while recomputing prefixes from scratch induces quadratic prefill latency. @Algo-mcts-radix-cache resolves this systems dilemma by coupling the four PUCT search phases directly to virtual memory page tables. Rather than duplicating context in device memory, the expansion phase forks the parent node's physical cache handle, pinning shared prompt pages in high-bandwidth memory (HBM) and allocating fresh physical blocks strictly for divergent continuation tokens.
+While classical game-playing systems treat MCTS nodes as lightweight mathematical coordinate vectors, an agentic deliberation tree operates over dense neural language states where every branch point represents thousands of prompt and trajectory tokens. Naively duplicating activation tensors across hundreds of speculative search rollouts would saturate accelerator memory within seconds, while recomputing prefixes from scratch induces quadratic prefill latency. @Algo-mcts-radix-cache resolves this systems dilemma by coupling the four PUCT search phases directly to virtual memory page tables. Rather than duplicating context in device memory, the expansion phase forks the parent node's physical cache handle, pinning shared prompt pages in HBM and allocating fresh physical blocks strictly for divergent continuation tokens.
 
 ```pseudocode
 #| label: algo-mcts-radix-cache
@@ -758,56 +625,22 @@ To see why @algo-mcts-radix-cache represents a viable systems architecture rathe
 
 ### The verification tax formulation
 
-Expanding search trees is computationally futile if the system cannot reliably discriminate between sound and defective states. However, invoking verification oracles is not free: every test execution, compiler invocation, or PRM pass consumes compute, memory bandwidth, and wall-clock latency. We formalize this fundamental overhead as the **Verification Tax** ($C_{\text{ver}}$):
-
-$$
-C_{\text{total}} = \sum_{v \in \mathcal{V}} C_{\text{gen}}(v) + \sum_{v \in \mathcal{V}} C_{\text{ver}}(v)
-$$
-
-We define the **Verification Tax Ratio** ($T_v$) as:
-
-$$
-T_v = \frac{\sum_{v \in \mathcal{V}} C_{\text{ver}}(v)}{\sum_{v \in \mathcal{V}} C_{\text{gen}}(v)}
-$$
+Expanding search trees is computationally futile if the system cannot reliably discriminate between sound and defective states. However, invoking verification oracles is not free: every test execution, compiler invocation, or PRM pass consumes compute, memory bandwidth, and wall-clock latency. We formalize this fundamental overhead as the **Verification Tax** ($C_{\text{ver}}$), where total compute is $C_{\text{total}} = \sum_{v \in \mathcal{V}} [C_{\text{gen}}(v) + C_{\text{ver}}(v)]$, defining the **Verification Tax Ratio** as $T_v = \frac{\sum_{v \in \mathcal{V}} C_{\text{ver}}(v)}{\sum_{v \in \mathcal{V}} C_{\text{gen}}(v)}$.
 
 #### Search space collapse
 The systems justification for paying the Verification Tax is exponential search space collapse (@fig-vol3-deliberation-compute-scaling, Panel B):
 
-* In an unverified search tree with branching factor $b$ and depth $d$, total generated candidate nodes expand exponentially:
-  $$
-  |\mathcal{V}_{\text{unverified}}| = \sum_{k=1}^d b^k = \frac{b(b^d - 1)}{b - 1} \approx b^d
-  $$
-* When an intermediate verifier prunes a fraction $(1 - \alpha)$ of invalid branches at each ply (where $\alpha \in (0, 1)$ is the verifier survival fraction), the effective branching factor collapses to:
-  $$
-  b_{\text{eff}} = \alpha \cdot b
-  $$
-  The total number of explored nodes collapses to a bounded geometric series:
-  $$
-  |\mathcal{V}_{\text{verified}}| = \sum_{k=1}^d b \cdot (b_{\text{eff}})^{k-1} = b \left(\frac{b_{\text{eff}}^d - 1}{b_{\text{eff}} - 1}\right)
-  $$
-
-If $b = 5$ and $d = 6$, an unverified search explodes to $5^6 = 15{,}625$ candidate leaves. If an intermediate verifier maintains a survival fraction of $\alpha = 0.25$, the effective branching factor drops to $b_{\text{eff}} = 0.25 \times 5 = 1.25$. Total generated nodes collapse to:
+* In an unverified search tree with branching factor $b$ and depth $d$, total generated candidate nodes expand exponentially: $|\mathcal{V}_{\text{unverified}}| = \sum_{k=1}^d b^k \approx b^d$.
+* When an intermediate verifier prunes a fraction $(1 - \alpha)$ of invalid branches at each ply (where $\alpha \in (0, 1)$ is the verifier survival fraction), the effective branching factor collapses to $b_{\text{eff}} = \alpha \cdot b$. The total number of explored nodes collapses to a bounded geometric series (@eq-verified-tree-collapse):
 
 $$
-|\mathcal{V}_{\text{verified}}| = 5 \times \frac{1.25^6 - 1}{1.25 - 1} = 5 \times \frac{3.814 - 1}{0.25} \approx 56.3 \text{ nodes}
-$$
+|\mathcal{V}_{\text{verified}}| = \sum_{k=1}^d b \cdot (b_{\text{eff}})^{k-1} = b \left(\frac{b_{\text{eff}}^d - 1}{b_{\text{eff}} - 1}\right)
+$$ {#eq-verified-tree-collapse}
 
-A **$99.6\%$ reduction** in candidate node expansions.
+If $b = 5$ and $d = 6$, an unverified search explodes to $5^6 = 15{,}625$ candidate leaves. If an intermediate verifier maintains a survival fraction of $\alpha = 0.25$, the effective branching factor drops to $b_{\text{eff}} = 0.25 \times 5 = 1.25$. Total generated nodes collapse to $5 \times \frac{1.25^6 - 1}{1.25 - 1} \approx 56\text{ nodes}$—a **$99.6\%$ reduction** in candidate node expansions.
 
 #### Breakeven verification compute
-Step-level verification is strictly cheaper than unverified exhaustive search whenever total verified compute is less than unverified compute:
-
-$$
-|\mathcal{V}_{\text{verified}}| \cdot \left(C_{\text{gen}} + C_{\text{ver}}\right) \le |\mathcal{V}_{\text{unverified}}| \cdot C_{\text{gen}}
-$$
-
-Solving for the maximum allowable verification cost per node ($C_{\text{ver}}^{\max}$):
-
-$$
-C_{\text{ver}}^{\max} \le \left(\frac{|\mathcal{V}_{\text{unverified}}| - |\mathcal{V}_{\text{verified}}|}{|\mathcal{V}_{\text{verified}}|}\right) \cdot C_{\text{gen}}
-$$
-
-In the example above, $C_{\text{ver}}^{\max} \le \frac{15{,}625 - 56}{56} C_{\text{gen}} \approx 278 \times C_{\text{gen}}$. The engineering team can deploy an intermediate verifier that is up to $278\times$ more computationally expensive than the generator itself while still reducing net cluster FLOP expenditure.
+Step-level verification is strictly cheaper than unverified exhaustive search whenever total verified compute is less than unverified compute: $|\mathcal{V}_{\text{verified}}| \cdot (C_{\text{gen}} + C_{\text{ver}}) \le |\mathcal{V}_{\text{unverified}}| \cdot C_{\text{gen}}$. Solving for the maximum allowable verification cost per node yields $C_{\text{ver}}^{\max} \le \left(\frac{|\mathcal{V}_{\text{unverified}}| - |\mathcal{V}_{\text{verified}}|}{|\mathcal{V}_{\text{verified}}|}\right) \cdot C_{\text{gen}}$. In the example above, $C_{\text{ver}}^{\max} \le \frac{15{,}625 - 56}{56} C_{\text{gen}} \approx 278 \times C_{\text{gen}}$: the engineering team can deploy an intermediate verifier that is up to $278\times$ more computationally expensive than the generator itself while still reducing net cluster FLOP expenditure.
 
 ### The optimal verification cadence
 
@@ -869,19 +702,7 @@ In December 2024, a team deploying an autonomous web-research agent on an 8x NVI
 
 When memory allocators were profiled, engineers discovered that the serving engine was treating every active leaf rollout as an independent, isolated request. Each of the $4^4 = 256$ concurrent branches maintained an uncompressed, dedicated Key-Value cache storing the initial system prompt (4,000 tokens), retrieved HTML pages (16,000 tokens), and intermediate search turns (12,000 tokens).
 
-At 32,000 tokens per branch in FP16 precision on a 70B model ($L = 80, H = 64, d_h = 128$), the KV cache memory footprint per active branch was:
-
-$$
-M_{\text{branch}} = 2 \times 80 \times 64 \times 128 \times 32{,}000 \times 2 \text{ bytes} \approx 83.88 \text{ GB}
-$$
-
-Across 256 independent branches, the cluster attempted to allocate:
-
-$$
-M_{\text{total}} = 256 \times 83.88 \text{ GB} \approx 21{,}473 \text{ GB } (\mathbf{21.47\text{ TB}})
-$$
-
-exceeding the entire cluster's physical HBM capacity ($8 \times 80\text{ GB} = 640\text{ GB}$) by more than $33\times$. Over $92\%$ of this allocated memory consisted of redundant identical prefix tokens duplicated across sibling branches.
+At 32,000 tokens per branch in FP16 precision on a 70B model ($L = 80, H = 64, d_h = 128$), the KV cache memory footprint per active branch was $M_{\text{branch}} = 2 \times 80 \times 64 \times 128 \times 32{,}000 \times 2 \text{ bytes} \approx 83.88 \text{ GB}$. Across 256 independent branches, the cluster attempted to allocate $M_{\text{total}} = 256 \times 83.88 \text{ GB} \approx 21{,}473 \text{ GB } (\mathbf{21.47\text{ TB}})$, exceeding the entire cluster's physical HBM capacity ($8 \times 80\text{ GB} = 640\text{ GB}$) by more than $33\times$. Over $92\%$ of this allocated memory consisted of redundant identical prefix tokens duplicated across sibling branches.
 
 Without state-space compaction, tree search algorithms are physically unrunnable on production silicon.
 
@@ -899,11 +720,11 @@ In naive serving (@fig-vol3-deliberation-tree-kv-cache, Panel A), each candidate
 * **Copy-on-Write (CoW):** When child branch $b_i$ emits new tokens $a_{t+1}^{(i)}$, the runtime allocates physical pages strictly for the incremental delta tokens. The ancestral prefix is read-only and immutable.
 * **Reference Counting:** Each physical KV page maintains a reference counter $C_{\text{ref}}$. When branch $b_k$ is pruned by the search engine, its reference counter decrements ($C_{\text{ref}} \leftarrow C_{\text{ref}} - 1$). If $C_{\text{ref}} = 0$, the page allocator immediately reclaims the physical block into the free pool.
 
-Under radix prefix sharing, total memory consumption collapses from $\mathcal{O}(B \cdot T)$ down to the exact number of unique nodes in the search tree:
+Under radix prefix sharing, total memory consumption collapses from $\mathcal{O}(B \cdot T)$ down to the exact number of unique nodes in the search tree (@eq-radix-kv-cache):
 
 $$
 M_{\text{radix}} = \sum_{v \in \mathcal{V}_{\text{tree}}} L(v) \cdot m_{\text{token}}
-$$
+$$ {#eq-radix-kv-cache}
 
 where $L(v)$ is the token length of node $v$, and $m_{\text{token}} = 2 \cdot L_{\text{layers}} \cdot H_{\text{KV}} \cdot d_h \cdot b_{\text{elem}}$ is the physical memory allocated per cached token across both Key and Value matrices (with $L_{\text{layers}}$ model layers, $H_{\text{KV}}$ Key-Value heads under Grouped-Query Attention, $d_h$ head dimension, and $b_{\text{elem}}$ bytes per element).
 
@@ -911,15 +732,8 @@ where $L(v)$ is the token length of node $v$, and $m_{\text{token}} = 2 \cdot L_
 
 To prevent the active search frontier from exhausting physical HBM, production runtimes enforce dynamic pruning policies paired with a tiered memory reclamation hierarchy:
 
-1. **Value Threshold Pruning:** The runtime immediately terminates any candidate branch whose estimated state value falls below a survival threshold:
-   $$
-   V(s_t) < \tau_{\text{kill}} \implies \text{PruneBranch}(s_t)
-   $$
-2. **Entropy Ceiling Pruning:** Highly uncertain generations indicate model confusion. If the mean token entropy over a reasoning step exceeds an empirical ceiling:
-   $$
-   \bar{\mathcal{H}}(a_t) = -\frac{1}{|a_t|}\sum_{i=1}^{|a_t|} \sum_{v \in \mathcal{V}} P(v) \log P(v) > \mathcal{H}_{\max} \implies \text{PruneBranch}(s_t)
-   $$
-   the branch is pruned to prevent speculative exploration of low-confidence hallucination manifolds.
+1. **Value Threshold Pruning:** The runtime immediately terminates any candidate branch whose estimated state value falls below a survival threshold: $V(s_t) < \tau_{\text{kill}} \implies \text{PruneBranch}(s_t)$.
+2. **Entropy Ceiling Pruning:** Highly uncertain generations indicate model confusion. If the mean token entropy over a reasoning step exceeds an empirical ceiling $\bar{\mathcal{H}}(a_t) = -\frac{1}{|a_t|}\sum_{i=1}^{|a_t|} \sum_{v \in \mathcal{V}} P(v) \log P(v) > \mathcal{H}_{\max}$, the branch is pruned to prevent speculative exploration of low-confidence hallucination manifolds.
 3. **Priority Queue Frontier Management:** The search frontier is maintained in a bounded Priority Queue of capacity $K_{\max}$. When new nodes are expanded, only the top-$K_{\max}$ states ranked by upper confidence bound are retained in accelerator memory; all lower-ranked frontiers are evicted or discarded.
 
 When physical HBM reaches saturation ($>95\%$ allocation), the runtime enforces a **Three-Tier Memory Reclamation Hierarchy**:
@@ -942,10 +756,7 @@ Production deliberative runtimes deploy **Cache-Aware Affinity Routing**:
 
 Beyond KV cache page sharing, long-horizon deliberation requires compressing the semantic information carried across turns:
 
-* **Observation Compaction:** Raw environment observations (e.g., a 5,000-line compiler stack trace or a 2 MB JSON API response) must never be injected directly into the context stream. Runtimes deploy deterministic extractive filters to extract the minimal semantic delta:
-  $$
-  \Delta \mathcal{S}_{\text{env}} = \text{ExtractMinimalFailure}(o_t)
-  $$
+* **Observation Compaction:** Raw environment observations (e.g., a 5,000-line compiler stack trace or a 2 MB JSON API response) must never be injected directly into the context stream. Runtimes deploy deterministic extractive filters to extract the minimal semantic delta: $\Delta \mathcal{S}_{\text{env}} = \text{ExtractMinimalFailure}(o_t)$.
 * **AST Compaction:** In coding agents, completed intermediate code blocks are parsed into ASTs; comments, whitespace, and intermediate exploratory test scripts are pruned, retaining only the structural interface signatures.
 
 ### Multi-tier semantic cycle detection
@@ -1059,19 +870,9 @@ By uniting tree-structured radix KV caches, tiered memory reclamation, and out-o
 
 Practitioners frequently assume that if $N = 16$ improves accuracy by $15\%$, scaling to $N = 10{,}000$ will solve the task. This assumption fails on two mathematical grounds.
 
-First, if the base policy assigns zero probability mass to a necessary algorithmic insight ($P(a^* \mid s) = 0$), sampling $N$ independent trajectories merely samples noise. The trajectory survival probability remains zero:
+First, if the base policy assigns zero probability mass to a necessary algorithmic insight ($P(a^* \mid s) = 0$), sampling $N$ independent trajectories merely samples noise. The trajectory survival probability remains zero: $P(\text{success} \mid N) = 1 - (1 - 0)^N \equiv 0$. No amount of test-time search can compensate for fundamental pretraining capability deficits.
 
-$$
-P\left(\text{success} \mid N\right) = 1 - (1 - 0)^N \equiv 0
-$$
-
-No amount of test-time search can compensate for fundamental pretraining capability deficits.
-
-Second, under learned reward models, scaling $N$ past a critical threshold triggers catastrophic Goodhart degradation. As derived in @eq-goodhart-scaling, for a reward model with false-positive rate $\epsilon_{\text{fp}} = 0.01$, the probability of selecting an adversarial hallucination at $N = 1{,}000$ is:
-
-$$
-P(\text{adversarial selection}) = 1 - (1 - 0.01)^{1000} \approx 1 - 0.000043 = 0.999957
-$$
+Second, under learned reward models, scaling $N$ past a critical threshold triggers catastrophic Goodhart degradation. As derived in @eq-goodhart-scaling, for a reward model with false-positive rate $\epsilon_{\text{fp}} = 0.01$, the probability of selecting an adversarial hallucination at $N = 1{,}000$ is $P(\text{adversarial selection}) = 1 - (1 - 0.01)^{1000} \approx 0.99996$.
 
 Sampling width $N$ cannot be scaled independently of verifier precision.
 
@@ -1108,17 +909,7 @@ Practitioners often believe that minimizing error propagation requires continuou
 
 Consider a 60-step code refactoring workflow where each step takes $T_{\text{step}} = 1.0\text{ s}$ of GPU inference and has reliability $p = 0.96$. Verifying intermediate state requires running an isolated unit test suite taking $T_{\text{ver}} = 12.0\text{ s}$.
 
-If the runtime sets cadence $m = 1$ (verifying after every single step):
-
-$$
-T(1) = \frac{60}{1} \cdot \frac{1 \times 1.0 + 12.0}{(0.96)^1} = 60 \cdot \frac{13.0}{0.96} \approx \mathbf{812.5\text{ seconds}}
-$$
-
-If the runtime tunes the verification cadence to $m^* = 8$ steps:
-
-$$
-T(8) = \frac{60}{8} \cdot \frac{8 \times 1.0 + 12.0}{(0.96)^8} = 7.5 \cdot \frac{20.0}{0.7214} \approx \mathbf{207.9\text{ seconds}}
-$$
+If the runtime sets cadence $m = 1$ (verifying after every single step), $T(1) = \frac{60}{1} \cdot \frac{1 \times 1.0 + 12.0}{(0.96)^1} \approx \mathbf{812.5\text{ seconds}}$. If the runtime tunes the verification cadence to $m^* = 8$ steps, $T(8) = \frac{60}{8} \cdot \frac{8 \times 1.0 + 12.0}{(0.96)^8} \approx \mathbf{207.9\text{ seconds}}$.
 
 Over-verification increases end-to-end task execution latency by nearly **$4\times$ ($390\%$)**, paralyzing serving throughput. Verification must be scheduled at the optimal economic cadence $m^*$.
 
@@ -1134,21 +925,9 @@ Deploying multi-branch deliberation (Best-of-$N$, Beam Search, MCTS) on top of n
 
 Consider serving $N = 64$ parallel candidate rollouts on an 80-layer, 70B parameter model using Grouped-Query Attention ($d_{\text{model}} = 8192, H_{\text{KV}} = 8, d_h = 128$, yielding $328\text{ KB/token}$) where each branch shares a $16{,}000$-token prompt prefix and generates 500 output tokens.
 
-In naive serving, the prefix is recomputed or duplicated across all 64 branches ($16{,}500$ tokens per branch, or $1{,}056{,}000$ total tokens). The memory consumed by the KV cache alone is:
+In naive serving, the prefix is recomputed or duplicated across all 64 branches ($16{,}500$ tokens per branch, or $1{,}056{,}000$ total tokens). The memory consumed by the KV cache alone is $M_{\text{naive}} = 64 \times (16{,}000 + 500) \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} \approx \mathbf{346.0\text{ GB}}$. Storing $346.0\text{ GB}$ of KV cache alone requires partitioning across at least five 80 GB GPUs before accounting for model weights or activation memory.
 
-$$
-M_{\text{naive}} = 64 \times (16{,}000 + 500) \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} \approx \mathbf{346.0\text{ GB}}
-$$
-
-Storing $346.0\text{ GB}$ of KV cache alone requires partitioning across at least five 80 GB GPUs before accounting for model weights or activation memory.
-
-Under RadixAttention prefix sharing, the 16,000-token prompt is stored **once**:
-
-$$
-M_{\text{shared}} = \left[16{,}000 + (64 \times 500)\right] \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} = 48{,}000 \times 327{,}680 \text{ bytes} \approx \mathbf{15.73\text{ GB}}
-$$
-
-Prefix sharing achieves an immediate **$22.0\times$ memory reduction**, allowing the KV cache for all 64 parallel branches to fit easily within a single accelerator alongside model weights. Failing to integrate radix prefix caching into search runtimes turns multi-branch deliberation into an operational non-starter.
+Under RadixAttention prefix sharing, the 16,000-token prompt is stored **once**: $M_{\text{shared}} = [16{,}000 + (64 \times 500)] \times 2 \times 80 \times 8 \times 128 \times 2 \text{ bytes} \approx \mathbf{15.73\text{ GB}}$. Prefix sharing achieves an immediate **$22.0\times$ memory reduction**, allowing the KV cache for all 64 parallel branches to fit easily within a single accelerator alongside model weights. Failing to integrate radix prefix caching into search runtimes turns multi-branch deliberation into an operational non-starter.
 
 :::
 
