@@ -1,24 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# -----------------------------------------------------------------------------
-# LAB V2-14: THE ROBUSTNESS BUDGET
-#
-# Chapter invariant: robustness is an amount system. A deployed model buys
-# bounded behavior under shift by spending finite stress coverage, retraining,
-# monitoring, hardening, and fallback capacity. Under-spend and the failure stays
-# silent; over-spend and latency, cost, energy, clean quality, and sustainability
-# become the new binding constraints.
-#
-# Packet modules:
-#   Part A - Shift Exposure And Failure Cost
-#   Part B - Robustness Budget Allocation
-#   Part C - Robustness Tax Frontier
-#   Part D - Robustness Policy Gate
-#   Synthesis
-# -----------------------------------------------------------------------------
 
 
 @app.cell
@@ -48,10 +31,14 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         source_trace,
         track_arc_context,
@@ -65,22 +52,20 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        DecisionLog,
-        LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
+        instrumentation_console,
         ledger,
         math,
         mo,
         report_export_panel,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -91,10 +76,17 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "robotaxi"
-    v2_14_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_14_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (ARM Cortex-M55 / ESP32-S3 & Motion Artifact Robustness)": "oura_ring",
+            "📱 Mobile Track (Apple Silicon / Snapdragon & Context Shift / Battery Guard)": "iphone",
+            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Sensor Degradation / Safety Envelopes)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (H100/B200 Clusters & Distribution Shift / Fallback Cascades)": "cloud_fleet",
+        },
+        value="🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Sensor Degradation / Safety Envelopes)",
+        label="Select Course / Industry Track",
+    )
     v2_14_track_picker
     return (v2_14_track_picker,)
 
@@ -819,18 +811,13 @@ def _(COLORS, math, mo):
         v2_14_defense_options,
         v2_14_defense_result,
         v2_14_failure_card,
-        v2_14_fmt,
-        v2_14_math_peek,
         v2_14_metric_card,
-        v2_14_part_banner,
         v2_14_pct,
         v2_14_policy_catalog,
         v2_14_policy_result,
         v2_14_reveal_card,
-        v2_14_shift_catalog,
         v2_14_shift_exposure,
         v2_14_shift_options,
-        v2_14_stakeholder_card,
         v2_14_table_html,
         v2_14_tax_label,
         v2_14_track_params,
@@ -838,87 +825,117 @@ def _(COLORS, math, mo):
 
 
 @app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    track_arc_context,
-    track_context,
-    v2_14_metadata,
-    v2_14_profile,
-    v2_14_track_params,
-    v2_14_variant,
-):
+def _(ACADEMIC_LAB_CSS, mo, v2_14_profile, v2_14_track_params, v2_14_variant):
     _params = v2_14_track_params(v2_14_profile.track_id, v2_14_variant)
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div style="background:linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
-                    border-radius:16px; padding:32px 40px; margin-bottom:8px;
-                    border:1px solid #2d3748;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
-                <div>
-                    <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                                text-transform:uppercase; letter-spacing:0.14em; margin-bottom:8px;">
-                        Vol 2 &middot; Lab 14 &middot; Robust AI
-                    </div>
-                    <div style="font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.15; margin-bottom:10px;">
-                        The Robustness Budget
-                    </div>
-                    <div style="font-size:0.95rem; color:#94a3b8; max-width:710px; line-height:1.6;">
-                        {v2_14_variant.workload_summary} You will turn robustness into quantities:
-                        shift exposure, stress coverage, hardening spend, residual failure, and policy guardrails.
-                    </div>
-                </div>
-                <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
-                    <span class="badge badge-info">{v2_14_profile.label}</span>
-                    <span class="badge badge-info">{v2_14_variant.hardware_ref}</span>
-                    <span class="badge badge-info">{v2_14_variant.model_ref}</span>
-                    <span class="badge badge-warn">45-55 minutes &middot; 4 Parts + Synthesis</span>
-                </div>
-            </div>
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 14 &middot; LAB 14
         </div>
-        """),
-        track_context(v2_14_profile),
-        track_arc_context(v2_14_profile, v2_14_metadata.lab_id),
-        mo.callout(
-            mo.md(
-                f"**Track consequence:** {_params['likely_failure']}. "
-                "Every part uses the same concept sequence; the selected track changes thresholds, costs, and residual-risk framing."
-            ),
-            kind="info",
-        ),
-    ])
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          Robust AI: Distribution Shift, Outliers &amp; Adversarial Perturbations
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Treat robustness as a finite amount system: bound performance degradation under covariate, sensor, and adversarial shifts
+          by allocating finite budgets across stress testing, automated retraining, real-time drift monitoring, adversarial hardening, and fallback capacity.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_14_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_14_variant.stakeholder}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Hardware:</strong> {v2_14_variant.hardware_ref}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Model:</strong> {v2_14_variant.model_ref}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Primary Metric:</strong> {v2_14_variant.primary_metric}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> {v2_14_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_14_profile.label} Robustness &amp; Safety Boundary
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_14_variant.workload_summary} You will turn robustness into quantifiable engineering amounts:
+          shift exposure, stress coverage, hardening spend, residual failure, and policy guardrails.
+          Production models inevitably drift from training distributions; silent failures occur when accuracy collapses while latency and system health dashboards remain green.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Robust ML Systems:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Shift Exposure &amp; Population Stability Invariant:</strong> Distribution shift is measurable: <i>PSI</i> = &sum; (<i>p</i><sub>i</sub> &minus; <i>q</i><sub>i</sub>) ln(<i>p</i><sub>i</sub> / <i>q</i><sub>i</sub>). Unmitigated shift drives catastrophic silent failures while telemetry greenlights execution.</li>
+            <li><strong>The Robustness Budget Allocation Law:</strong> Fixed engineering budgets must be partitioned across four competing accounts: Stress Coverage (<i>C</i>), Retraining Capacity (<i>R</i>), Drift Monitoring (<i>M</i>), and Fallback Abstention (<i>F</i>).</li>
+            <li><strong>The Multi-Dimensional Robustness Tax:</strong> Defense mechanisms exact measurable taxes: latency penalty (&Delta;<i>T</i>), hardware energy drain (&Delta;<i>E</i>), clean accuracy degradation (&Delta;<i>Acc</i><sub>clean</sub>), and edge-case regression risk.</li>
+            <li><strong>Conjunctive Safety &amp; Stability Gate:</strong> Deployment is valid only when all independent operational guardrails pass simultaneously: Launchable = ResidualRisk<sub>ok</sub> &and; Latency<sub>ok</sub> &and; Energy<sub>ok</sub> &and; CleanLoss<sub>ok</sub> &and; Coverage<sub>ok</sub>.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, mo, v2_14_profile):
     mo.Html(f"""
-    <div style="border-left:4px solid {COLORS['BlueLine']};
-                background:white; border-radius:0 8px 8px 0;
-                padding:20px 28px; margin:8px 0 16px 0;
-                box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                    text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-            Learning Objectives
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <ul class="mlsysbook-list" style="margin: 0; font-size: 0.9rem; color: {COLORS['TextSec']};">
+                <li><strong>Measure shift exposure:</strong> quantify covariate, sensor, and adversarial shifts via Population Stability Index (PSI) and expected failure cost for {v2_14_profile.label}.</li>
+                <li><strong>Allocate fixed robustness budget:</strong> optimize 100-point spend across stress coverage, retraining, monitoring, and fallback capacity.</li>
+                <li><strong>Explore the robustness tax frontier:</strong> measure tradeoffs between safety gains and latency, energy, cost, and clean accuracy degradation.</li>
+                <li><strong>Authorize conjunctive robustness policies:</strong> enforce multi-guardrail release gates ensuring all safety dimensions pass together.</li>
+            </ul>
         </div>
-        <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
-            <div>1. <strong>Measure shift exposure:</strong> connect likely distribution shifts to failure consequence and PSI-style evidence.</div>
-            <div>2. <strong>Allocate fixed robustness budget:</strong> split spend across coverage, retraining, monitoring, and fallback.</div>
-            <div>3. <strong>Test the tax frontier:</strong> compare robustness improvement against latency, cost, energy, clean quality, and regression risk.</div>
-            <div>4. <strong>Write a policy memo:</strong> select guardrails, reject an alternative, and name residual failure.</div>
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Distribution shift &middot; Drift detection (PSI/KS) &middot; Adversarial training &middot; Uncertainty estimation &middot; Fallback cascades
+                </div>
+            </div>
+            <div style="flex: 0 0 160px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']};">
+                    <strong>~50 min</strong><br>
+                    <span style="color: {COLORS['TextMuted']}; font-size: 0.78rem;">A: 12 &middot; B: 12 &middot; C: 12 &middot; D: 14 min</span>
+                </div>
+            </div>
         </div>
-        <div style="border-top:1px solid {COLORS['Border']}; margin:16px -28px 0 -28px; padding:16px 28px 0 28px;">
-            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px;">
                 Core Question
             </div>
-            <div style="font-size:1.05rem; color:{COLORS['Text']}; font-weight:600;
-                        line-height:1.5; font-style:italic;">
-                "How much robustness should this system buy, and which residual failure will still remain?"
+            <div style="font-size: 1.0rem; color: {COLORS['Text']}; font-weight: 600; font-style: italic; line-height: 1.5;">
+                &ldquo;How much robustness should this system buy, and which residual failure will still remain?&rdquo;
             </div>
         </div>
     </div>
@@ -928,16 +945,20 @@ def _(COLORS, mo):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.callout(
-        mo.md("""
-**Recommended Reading** -- Complete before this lab:
-
-- Robust AI: silent failures, environmental shifts, adversarial inputs, and system faults.
-- Quantitative drift detection: PSI, KL, KS thresholds, and retraining decision framework.
-- Adversarial defenses: robustness tax, certified defenses, uncertainty, guardrails, and fallback.
-"""),
-        kind="info",
-    )
+    mo.Html("""
+    <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">Recommended Reading</h3>
+      <p style="margin: 0 0 8px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+        Complete these foundational readings before beginning this lab:
+      </p>
+      <ul class="mlsysbook-list" style="margin: 0; font-size: 0.9rem; color: #475569;">
+        <li><strong>Robust AI &amp; Silent Failures:</strong> environmental shifts, out-of-distribution inputs, and cascading pipeline faults.</li>
+        <li><strong>Quantitative Drift Detection:</strong> Population Stability Index (PSI), Kolmogorov-Smirnov, and retraining decision frameworks.</li>
+        <li><strong>Adversarial Hardening &amp; Robustness Taxes:</strong> min-max robust optimization, certified defense boundaries, and accuracy-robustness trade-offs.</li>
+        <li><strong>Uncertainty &amp; Fallback Cascades:</strong> conformal prediction, selective classification, and fail-safe policy gates.</li>
+      </ul>
+    </div>
+    """)
     return
 
 
@@ -1080,7 +1101,13 @@ def _(mo, v2_14_defense_options, v2_14_track_id):
 
 
 @app.cell(hide_code=True)
-def _(mo, v2_14_policy_catalog, v2_14_track_id, v2_14_track_params, v2_14_variant):
+def _(
+    mo,
+    v2_14_policy_catalog,
+    v2_14_track_id,
+    v2_14_track_params,
+    v2_14_variant,
+):
     _params = v2_14_track_params(v2_14_track_id, v2_14_variant)
     partD_prediction = mo.ui.radio(
         options={
@@ -1127,10 +1154,28 @@ def _(mo, v2_14_policy_catalog, v2_14_track_id, v2_14_track_params, v2_14_varian
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    v2_14_student_id = mo.ui.text(label="Lead Architect / Engineer ID", value="")
+    v2_14_memo_note = mo.ui.text_area(
+        label="Architectural Rationale & Safety Disclosure",
+        placeholder="Document your rationale for the allocated budget, binding guardrail, and residual failure mode...",
+        rows=3,
+    )
+    return v2_14_memo_note, v2_14_student_id
+
+
+@app.cell(hide_code=True)
 def _(
     COLORS,
+    MathPeek,
     apply_plotly_theme,
+    big_takeaways,
+    build_lab_report,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
+    ledger,
+    math,
     mo,
     partA_checkpoint,
     partA_cost_prediction,
@@ -1154,51 +1199,52 @@ def _(
     partD_prediction,
     partD_residual_case,
     partD_strictness,
-    source_trace,
+    report_export_panel,
     v2_14_account_label,
     v2_14_budget_result,
     v2_14_defense_catalog,
     v2_14_defense_result,
     v2_14_failure_card,
-    v2_14_fmt,
-    v2_14_math_peek,
+    v2_14_memo_note,
+    v2_14_metadata,
     v2_14_metric_card,
-    v2_14_part_banner,
     v2_14_pct,
     v2_14_policy_catalog,
     v2_14_policy_result,
     v2_14_profile,
     v2_14_reveal_card,
-    v2_14_shift_catalog,
     v2_14_shift_exposure,
-    v2_14_stakeholder_card,
+    v2_14_student_id,
     v2_14_table_html,
     v2_14_tax_label,
     v2_14_track_id,
-    v2_14_track_params,
     v2_14_variant,
 ):
     def build_part_a():
         items = [
-            v2_14_part_banner(
-                "A",
-                "Shift Exposure Has A Cost",
-                "10-12 min",
-                "Robustness starts by naming the likely distribution shift and the cost of being confidently wrong while the service still looks healthy.",
-                COLORS["BlueLine"],
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Shift Exposure Briefing &middot; {v2_14_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;The dashboard is green. Tell me which shift will break the model first, how much harm it creates,
+                    and whether we monitor, investigate, retrain, or fall back.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_14_variant.stakeholder} &middot; {v2_14_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                mo.vstack([partA_shift_prediction, partA_cost_prediction]),
+                title="1. Formulate Shift Family & Failure Cost Hypothesis",
+                subtitle="Commit to the likely shift mechanism and dominant operational harm before manipulating stress exposure.",
             ),
-            v2_14_stakeholder_card(
-                v2_14_variant.stakeholder,
-                "The dashboard is green. Tell me which shift will break the model first, how much harm it creates, and whether we monitor, investigate, retrain, or fall back.",
-                COLORS["BlueLine"],
-                COLORS["BlueLL"],
-            ),
-            mo.md("Commit to the likely shift and failure cost before manipulating the stress exposure."),
-            partA_shift_prediction,
-            partA_cost_prediction,
         ]
         if partA_shift_prediction.value is None or partA_cost_prediction.value is None:
-            items.append(mo.callout(mo.md("Select both Part A predictions to unlock the shift instrument."), kind="warn"))
             return mo.vstack(items)
 
         result = v2_14_shift_exposure(
@@ -1240,7 +1286,7 @@ def _(
 
         _rows = []
         for label, base, current in zip(params["bin_labels"], result["base"], result["current"]):
-            contribution = (base - current) * __import__("math").log(base / current)
+            contribution = (base - current) * math.log(base / current)
             _rows.append((
                 label,
                 v2_14_pct(base * 100),
@@ -1265,11 +1311,14 @@ def _(
         _kind = "success" if result["psi"] < 0.20 else "warn" if result["psi"] < 0.25 else "danger"
 
         items.extend([
-            mo.md("### Manipulate the shift and failure cost"),
-            mo.hstack([
-                mo.vstack([partA_shift, partA_exposure]),
-                mo.vstack([partA_failure_cost]),
-            ], justify="center", gap=2),
+            instrumentation_console(
+                mo.vstack([
+                    mo.hstack([partA_shift, partA_exposure], widths="equal"),
+                    partA_failure_cost,
+                ]),
+                title="Shift Exposure & Failure Impact Controls",
+                subtitle=f"Tune stress exposure multipliers and consequence weighting for {v2_14_profile.label}",
+            ),
             v2_14_failure_card(
                 result["psi"] >= 0.25 or result["expected_loss"] > params["failure_value"] * 110,
                 "Major silent-failure exposure",
@@ -1298,31 +1347,27 @@ def _(
                 f"For {v2_14_profile.label}, failure consequence is framed as {params['failure_unit']}.",
                 "success" if partA_cost_prediction.value == _cost_actual else "warn",
             ),
-            v2_14_math_peek(
-                "Math Peek / Source Model - PSI and expected failure cost",
-                f"""
-```
-PSI = sum_i (p_i - q_i) * ln(p_i / q_i)
-expected_loss = failures_per_10k * consequence_value * failure_cost_multiplier
-```
-
-Chapter source: Robust AI quantitative drift detection and PSI threshold bands.
-Current PSI = {result['psi']:.3f}; action tier = {result['action']}.
-The cohort shares are notebook-local teaching distributions for {v2_14_profile.label},
-with track-specific buckets and consequence values.
-""",
-            ),
-            source_trace(
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Operational Response Decision</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Current PSI: <code>{result['psi']:.3f}</code> ({result['tier']}) &mdash; Expected loss: <code>{result['expected_loss']:.1f} {params['failure_unit']}</code>.
+                    Commit your engineering response:
+                </p>
+                {partA_checkpoint}
+            </div>
+            """),
+            MathPeek(
+                r"PSI = \sum_{i=1}^B (p_i - q_i) \cdot \ln\left(\frac{p_i}{q_i}\right), \quad L_{\text{exp}} = F_{\text{rate}} \cdot C_{\text{unit}} \cdot \mu_{\text{cost}}",
                 {
-                    "chapter": "books/vol2/robust_ai/robust_ai.qmd",
-                    "formula": "PSI = sum_i (p_i - q_i) * ln(p_i / q_i)",
-                    "helper": "v2_14_shift_exposure",
-                    "track_id": v2_14_track_id,
-                    "scenario_id": v2_14_variant.scenario_id,
+                    "current PSI": f"{result['psi']:.3f}",
+                    "action tier": f"{result['action']} ({result['tier']})",
+                    "failures per 10k": f"{result['failures_per_10k']:.1f}",
+                    "expected loss": f"{result['expected_loss']:.1f} {params['failure_unit']}",
+                    "chapter source": "Volume II, Chapter 14: Quantitative Drift Detection & Population Stability",
                 },
-                summary="Part A source trace: PSI and failure-cost proxy",
             ),
-            partA_checkpoint,
         ])
         if partA_checkpoint.value in ("investigate", "retrain", "fallback"):
             items.append(mo.callout(mo.md("Checkpoint saved: the response treats robustness as a measurable operating condition."), kind="success"))
@@ -1346,23 +1391,28 @@ with track-specific buckets and consequence values.
             partB_fallback.value,
         )
         items = [
-            v2_14_part_banner(
-                "B",
-                "Robustness Budget Is Allocated, Not Added",
-                "10-12 min",
-                "A fixed robustness budget has to buy different capabilities. Coverage, retraining, monitoring, and fallback are not interchangeable.",
-                COLORS["GreenLine"],
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Budget Allocation Briefing &middot; {v2_14_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;You have 100 budget points. I need to know which account is underfunded and what residual failure remains.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_14_variant.stakeholder} &middot; {v2_14_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partB_prediction,
+                title="2. Formulate Robustness Account Priority Hypothesis",
+                subtitle="Predict which defensive account most effectively mitigates the dominant distribution shift.",
             ),
-            v2_14_stakeholder_card(
-                "Robustness review owner",
-                "You have 100 budget points. I need to know which account is underfunded and what residual failure remains.",
-                COLORS["GreenLine"],
-                COLORS["GreenLL"],
-            ),
-            partB_prediction,
         ]
         if partB_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your budget-account prediction to unlock Part B."), kind="warn"))
             return mo.vstack(items)
 
         accounts = ["coverage", "retraining", "monitoring", "fallback"]
@@ -1378,53 +1428,44 @@ with track-specific buckets and consequence values.
             textposition="auto",
             hovertemplate="%{x}: %{y:.0f} points<extra></extra>",
         ))
-        _fig.add_hline(
-            y=25,
-            line=dict(color=COLORS["Border"], width=1, dash="dot"),
-            annotation_text="even split reference",
-        )
+        _fig.add_hline(y=25, line=dict(color=COLORS["Border"], width=1, dash="dash"), annotation_text="balanced baseline")
         _fig.update_layout(
-            height=310,
-            xaxis=dict(title="Robustness spending account"),
-            yaxis=dict(title="Budget points"),
-            margin=dict(t=40, b=70, l=55, r=20),
+            height=300,
+            yaxis=dict(title="Allocated points (sum <= 100)", range=[0, 85]),
+            margin=dict(t=30, b=50, l=60, r=20),
         )
         apply_plotly_theme(_fig)
 
         _rows = []
+        needs = shift_result["params"]["budget_needs"]
         for account in accounts:
-            need = shift_result["params"]["budget_needs"][account]
-            status = "under target" if result["allocations"][account] < need else "funded"
-            color = COLORS["RedLine"] if status == "under target" else COLORS["GreenLine"]
             _rows.append((
                 v2_14_account_label(account),
                 f"{result['allocations'][account]:.0f}",
-                f"{need:.0f}",
+                f"{needs[account]:.0f}",
                 f"{result['benefits'][account] * 100:.1f}%",
-                f"<span style='color:{color}; font-weight:700;'>{status}</span>",
+                "UNDERFUNDED" if account == result["underfunded"] else "OK",
             ))
         _prediction_detail = (
-            "That account is the current highest-value account for this shift."
+            "Your prediction matches the account with highest marginal return for this shift."
             if partB_prediction.value == result["actual_best"]
-            else f"The Part A shift points first to {v2_14_account_label(result['actual_best'])}."
+            else f"For this shift, the highest marginal leverage is in {v2_14_account_label(result['actual_best'])}."
         )
+
         items.extend([
-            mo.md("### Allocate exactly 100 robustness points"),
-            mo.hstack([
-                mo.vstack([partB_coverage, partB_retraining]),
-                mo.vstack([partB_monitoring, partB_fallback]),
-            ], justify="center", gap=2),
-            v2_14_failure_card(
-                result["over_budget"] > 0,
-                "Budget overrun",
-                f"Current allocation spends {result['total_budget']:.0f} points, {result['over_budget']:.0f} over the 100-point budget.",
-                "move points out of a lower-value account until total spend is at or below 100",
+            instrumentation_console(
+                mo.vstack([
+                    mo.hstack([partB_coverage, partB_retraining], widths="equal"),
+                    mo.hstack([partB_monitoring, partB_fallback], widths="equal"),
+                ]),
+                title="100-Point Robustness Budget Partitions",
+                subtitle=f"Allocate spend across stress coverage, retraining, monitoring, and fallback capacity for {v2_14_profile.label}",
             ),
             v2_14_failure_card(
-                result["residual_risk"] > shift_result["params"]["residual_limit"],
-                "Residual risk remains above track limit",
-                f"Residual risk is {result['residual_risk']:.1f} versus limit {shift_result['params']['residual_limit']:.1f}. Underfunded account: {v2_14_account_label(result['underfunded'])}.",
-                "rebalance toward the underfunded account or lower the Part A exposure",
+                result["over_budget"] > 0 or result["residual_risk"] > shift_result["params"]["residual_limit"],
+                "Budget boundary violation",
+                f"Total spend is {result['total_budget']:.0f}/100 and residual risk is {result['residual_risk']:.1f} (target <= {shift_result['params']['residual_limit']:.1f}).",
+                "reduce over-allocated accounts, rebalance toward the underfunded need, or fund fallback capacity",
             ),
             mo.hstack([
                 v2_14_metric_card("Total spend", f"{result['total_budget']:.0f}", "100 point budget", COLORS["RedLine"] if result["over_budget"] else COLORS["GreenLine"]),
@@ -1441,21 +1482,27 @@ with track-specific buckets and consequence values.
                 _prediction_detail,
                 "success" if partB_prediction.value == result["actual_best"] else "warn",
             ),
-            v2_14_math_peek(
-                "Math Peek / Source Model - fixed budget and diminishing returns",
-                f"""
-```
-total_budget = coverage + retraining + monitoring + fallback
-benefit_i = weight_i * (1 - exp(-spend_i / need_i))
-residual_risk = shift_risk * (1 - sum_i benefit_i) + overrun_penalty
-```
-
-The four accounts map to the chapter's defense-in-depth stack: stress tests,
-adaptation, continuous monitoring, and graceful degradation. The selected shift
-boosts the account that best matches its failure mode.
-""",
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #16A34A; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Robustness Budget Allocation Choice</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Total budget spent: <code>{result['total_budget']:.0f}/100</code> &mdash; Residual risk: <code>{result['residual_risk']:.1f}</code>.
+                    Commit your allocation principle:
+                </p>
+                {partB_checkpoint}
+            </div>
+            """),
+            MathPeek(
+                r"\sum_{k} B_k \le 100, \quad R_{\text{residual}} = R_{\text{base}} \cdot \prod_k (1 - \beta_k(B_k)) + \text{Pen}_{\text{over}}",
+                {
+                    "total points allocated": f"{result['total_budget']:.0f}/100",
+                    "underfunded account": v2_14_account_label(result["underfunded"]),
+                    "residual risk points": f"{result['residual_risk']:.1f}",
+                    "detection delay": f"{result['detection_delay']:.1f} hours",
+                    "chapter source": "Volume II, Chapter 14: The Multi-Account Robustness Budget",
+                },
             ),
-            partB_checkpoint,
         ])
         if partB_checkpoint.value == "weakest":
             items.append(mo.callout(mo.md("Checkpoint saved: protect the weakest required account before increasing the strongest one."), kind="success"))
@@ -1488,23 +1535,28 @@ boosts the account that best matches its failure mode.
             v2_14_variant,
         )
         items = [
-            v2_14_part_banner(
-                "C",
-                "Robustness Has A Tax Frontier",
-                "10-12 min",
-                "Hardening improves worst-case behavior, but every defense spends latency, cost, energy, clean quality, or regression risk.",
-                COLORS["OrangeLine"],
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Tax Frontier Briefing &middot; {v2_14_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Show me the robustness gain and the tax side by side. A defense that breaks our operating envelope is not shippable.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_14_variant.stakeholder} &middot; {v2_14_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partC_prediction,
+                title="3. Formulate Robustness Tax Bottleneck Hypothesis",
+                subtitle="Predict which operational resource budget binds first when hardening the model against shift.",
             ),
-            v2_14_stakeholder_card(
-                "Release performance lead",
-                "Show me the robustness gain and the tax side by side. A defense that breaks our operating envelope is not shippable.",
-                COLORS["OrangeLine"],
-                COLORS["OrangeLL"],
-            ),
-            partC_prediction,
         ]
         if partC_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your tax prediction to unlock Part C."), kind="warn"))
             return mo.vstack(items)
 
         params = shift_result["params"]
@@ -1576,12 +1628,16 @@ boosts the account that best matches its failure mode.
             if partC_prediction.value == _actual_tax_group
             else f"The selected strategy currently binds on {v2_14_tax_label(_actual_tax)}."
         )
+
         items.extend([
-            mo.md("### Tune hardening strength and uncertainty sampling"),
-            mo.hstack([
-                mo.vstack([partC_defense, partC_strength]),
-                mo.vstack([partC_uq_samples]),
-            ], justify="center", gap=2),
+            instrumentation_console(
+                mo.vstack([
+                    mo.hstack([partC_defense, partC_strength], widths="equal"),
+                    partC_uq_samples,
+                ]),
+                title="Hardening Mechanisms & Defense Strength Controls",
+                subtitle=f"Select active defense strategy and calibration parameters for {v2_14_profile.label}",
+            ),
             v2_14_failure_card(
                 result["binding_tax"] != "none",
                 "Robustness tax violates a guardrail",
@@ -1603,22 +1659,28 @@ boosts the account that best matches its failure mode.
                 _prediction_detail,
                 "success" if partC_prediction.value == _actual_tax_group else "warn",
             ),
-            v2_14_math_peek(
-                "Math Peek / Source Model - robustness tax",
-                f"""
-```
-robustness_gain ~= defense_gain * (1 - exp(-2.2 * strength))
-tax_checks = latency_ok and cost_ok and energy_ok and clean_quality_ok and regression_ok
-robust objective: min_theta max_||delta||<=epsilon L(f_theta(x + delta), y)
-```
-
-Chapter source: Robust AI adversarial-defense workflow and robustness-tax example.
-The chapter reports a large clean-accuracy tax for strong adversarial robustness;
-this lab generalizes the same idea across latency, cost, energy, quality, and
-regression-risk guardrails.
-""",
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #D97706; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Tax Frontier Decision</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Defense: <strong>{result['defense']['label']}</strong> &mdash; Gain: <code>{result['gain']:.1f}</code> pts &mdash; Binding tax: <code>{v2_14_tax_label(result['binding_tax'])}</code>.
+                    Commit your defense trade-off:
+                </p>
+                {partC_checkpoint}
+            </div>
+            """),
+            MathPeek(
+                r"T_{\text{lat}} = T_{\text{base}} \cdot (1 + \tau_{\text{lat}}), \quad E = E_{\text{base}} \cdot (1 + \tau_E), \quad \Delta \text{Acc}_{\text{clean}} = \tau_Q",
+                {
+                    "selected defense": result["defense"]["label"],
+                    "robustness gain": f"{result['gain']:.1f} risk points",
+                    "latency overhead": f"{result['metrics']['latency']:.1f}%",
+                    "clean quality tax": f"{result['metrics']['quality']:.1f}%",
+                    "binding tax": v2_14_tax_label(result["binding_tax"]),
+                    "chapter source": "Volume II, Chapter 14: Adversarial Defense & The Robustness Tax",
+                },
             ),
-            partC_checkpoint,
         ])
         if partC_checkpoint.value == "guardrail":
             items.append(mo.callout(mo.md("Checkpoint saved: choose the strongest defense that still passes the operating envelope."), kind="success"))
@@ -1661,23 +1723,28 @@ regression-risk guardrails.
             v2_14_variant,
         )
         items = [
-            v2_14_part_banner(
-                "D",
-                "A Robustness Policy Has Guardrails And Residual Failure",
-                "12-15 min",
-                "A shippable robustness policy is not a slogan. It is a threat-model-bound guardrail conjunction with a rejected alternative and a disclosed residual failure.",
-                COLORS["RedLine"],
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Policy Authorization Briefing &middot; {v2_14_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Submit one policy. It must state guardrails, what you rejected, and which failure case remains after the robustness budget is spent.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_14_variant.stakeholder} &middot; {v2_14_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partD_prediction,
+                title="4. Formulate Conjunctive Robustness Gate Hypothesis",
+                subtitle="Predict which guardrail constraint invalidates permissive deployment policies.",
             ),
-            v2_14_stakeholder_card(
-                "Governance review chair",
-                "Submit one policy. It must state guardrails, what you rejected, and which failure case remains after the robustness budget is spent.",
-                COLORS["RedLine"],
-                COLORS["RedLL"],
-            ),
-            partD_prediction,
         ]
         if partD_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your policy prediction to unlock Part D."), kind="warn"))
             return mo.vstack(items)
 
         policy_rows = []
@@ -1711,12 +1778,16 @@ regression-risk guardrails.
             if passed
             else f"The selected policy is blocked by {result['binding']}."
         )
+
         items.extend([
-            mo.md("### Select the policy, strictness, and residual failure"),
-            mo.hstack([
-                mo.vstack([partD_policy, partD_strictness]),
-                mo.vstack([partD_residual_case]),
-            ], justify="center", gap=2),
+            instrumentation_console(
+                mo.vstack([
+                    mo.hstack([partD_policy, partD_strictness], widths="equal"),
+                    partD_residual_case,
+                ]),
+                title="Policy Gate & Residual Failure Disclosures",
+                subtitle="Select candidate release policy, strictness thresholds, and explicit residual failure scenarios",
+            ),
             v2_14_failure_card(
                 not passed,
                 "Policy gate failed",
@@ -1738,35 +1809,27 @@ regression-risk guardrails.
                 "success" if partD_prediction.value == partD_policy.value and passed else "warn",
             ),
             mo.Html(f"""
-            <div style="background:white; border:1px solid {COLORS['Border']};
-                        border-radius:8px; padding:20px 24px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:800; color:{COLORS['RedLine']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
-                    Policy Memo Draft
-                </div>
-                <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
-                    <div><strong>Selected policy:</strong> {result['policy_label']}.</div>
-                    <div><strong>Binding amount:</strong> {result['binding']}.</div>
-                    <div><strong>Rejected alternative:</strong> {result['rejected']}</div>
-                    <div><strong>Residual failure case:</strong> {result['residual_case_text']}</div>
-                    <div><strong>V2-15 implication:</strong> {result['sustainability']}</div>
-                </div>
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Production Policy Authorization</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Policy: <strong>{result['policy_label']}</strong> &mdash; Status: <code>{'PASS' if passed else 'BLOCKED'}</code> &mdash; Binding: <code>{result['binding']}</code>.
+                    Authorize deployment gate:
+                </p>
+                {partD_checkpoint}
             </div>
             """),
-            v2_14_math_peek(
-                "Math Peek / Source Model - policy feasibility",
-                f"""
-```
-deployable = residual_ok and coverage_ok and fallback_ok
-             and latency_ok and cost_ok and energy_ok and quality_ok
-```
-
-Chapter source: defense-in-depth workflow, fallacies and pitfalls, and summary.
-The selected policy is explicitly bounded by a threat model and operating
-envelope. It must include a rejected alternative and residual failure case.
-""",
+            MathPeek(
+                r"\text{Deployable} = R_{\text{residual}} \le R_{\text{lim}} \land \Delta T \le \Delta T_{\text{lim}} \land \Delta E \le \Delta E_{\text{lim}} \land \Delta Q \le \Delta Q_{\text{lim}}",
+                {
+                    "selected policy": result["policy_label"],
+                    "binding guardrail": result["binding"],
+                    "residual risk points": f"{result['metrics']['residual']:.1f}",
+                    "rejected alternative": result["rejected"],
+                    "disclosed residual case": result["residual_case_text"],
+                    "chapter source": "Volume II, Chapter 14: Conjunctive Safety Gates & Residual Failure Disclosures",
+                },
             ),
-            partD_checkpoint,
         ])
         if partD_checkpoint.value == "all_guardrails":
             items.append(mo.callout(mo.md("Checkpoint saved: the policy is a guardrail conjunction, not a single robustness score."), kind="success"))
@@ -1808,49 +1871,227 @@ envelope. It must include a rejected alternative and residual failure case.
             defense,
             v2_14_variant,
         )
-        return mo.vstack([
+        complete_widgets = (
+            ("Part A shift prediction", partA_shift_prediction),
+            ("Part A cost prediction", partA_cost_prediction),
+            ("Part A checkpoint", partA_checkpoint),
+            ("Part B budget prediction", partB_prediction),
+            ("Part B checkpoint", partB_checkpoint),
+            ("Part C tax prediction", partC_prediction),
+            ("Part C checkpoint", partC_checkpoint),
+            ("Part D policy prediction", partD_prediction),
+            ("Part D checkpoint", partD_checkpoint),
+        )
+        incomplete = [label for label, widget in complete_widgets if widget.value is None]
+        passed = all(policy["checks"].values())
+        report = build_lab_report(
+            v2_14_metadata,
+            student_id=v2_14_student_id.value or "",
+            track=v2_14_profile.label,
+            scenario=v2_14_variant.workload_summary,
+            learning_objectives=(
+                "Identify likely distribution shifts and failure costs for the selected track.",
+                "Allocate a fixed robustness budget across stress coverage, retraining, monitoring, and fallback.",
+                "Compare robustness improvement against latency, cost, energy, clean quality, and regression-risk tax.",
+                "Select a robustness policy with guardrails, a rejected alternative, and a residual failure case.",
+                "Carry the robustness overhead and residual risk into V2-15 sustainability reasoning.",
+            ),
+            predictions={
+                "partA_likely_shift": partA_shift_prediction.value,
+                "partA_failure_cost": partA_cost_prediction.value,
+                "partB_high_value_account": partB_prediction.value,
+                "partC_binding_tax": partC_prediction.value,
+                "partD_policy": partD_prediction.value,
+            },
+            knob_settings={
+                "shift_scenario": partA_shift.value,
+                "stress_exposure": partA_exposure.value,
+                "failure_cost_multiplier": partA_failure_cost.value,
+                "coverage_points": partB_coverage.value,
+                "retraining_points": partB_retraining.value,
+                "monitoring_points": partB_monitoring.value,
+                "fallback_points": partB_fallback.value,
+                "hardening_strategy": defense["defense"]["label"],
+                "hardening_strength": partC_strength.value,
+                "uq_samples": partC_uq_samples.value,
+                "policy": policy["policy_label"],
+                "guardrail_strictness_pct": partD_strictness.value,
+                "residual_case": policy["residual_case_text"],
+            },
+            binding_constraints={
+                "shift_action": shift_result["action"],
+                "budget_binding": budget["binding"],
+                "defense_tax": defense["binding_tax"],
+                "policy_binding": policy["binding"],
+            },
+            decisions={
+                "part_a_checkpoint": partA_checkpoint.value,
+                "part_b_checkpoint": partB_checkpoint.value,
+                "part_c_checkpoint": partC_checkpoint.value,
+                "part_d_checkpoint": partD_checkpoint.value,
+                "selected_policy": policy["policy_label"],
+                "rejected_alternative": policy["rejected"],
+                "v2_15_sustainability_implication": policy["sustainability"],
+            },
+            reflections={"memo_note": v2_14_memo_note.value or "Not recorded."},
+            residual_risk=policy["residual_case_text"],
+            evidence_summary={
+                "psi": round(shift_result["psi"], 4),
+                "expected_loss": round(shift_result["expected_loss"], 3),
+                "budget_total": round(budget["total_budget"], 3),
+                "residual_risk": round(policy["metrics"]["residual"], 3),
+                "policy_binding": policy["binding"],
+            },
+            final_decision={
+                "selected_policy": policy["policy_label"],
+                "binding_amount": policy["binding"],
+                "residual_risk": round(policy["metrics"]["residual"], 3),
+                "residual_failure_case": policy["residual_case_text"],
+                "rejected_alternative": policy["rejected"],
+                "v2_15_sustainability_implication": policy["sustainability"],
+            },
+            big_takeaways=(
+                "Robustness is measured against shift and consequence, not average accuracy alone.",
+                "Coverage, retraining, monitoring, and fallback are distinct budget accounts.",
+                "Hardening improves worst-case behavior by paying taxes in other system resources.",
+                "A policy is deployable only inside a guardrail conjunction.",
+                "Residual robustness overhead becomes a sustainability input in the next lab.",
+            ),
+            source_trace={
+                "chapter": "books/vol2/robust_ai/robust_ai.qmd",
+                "formulas": (
+                    "PSI = sum (p_i - q_i) * ln(p_i / q_i)",
+                    "expected_loss = failures * cost * mult",
+                    "R_residual = R_base * prod(1 - beta) + overrun",
+                ),
+            },
+            result_snapshot={
+                "shift": shift_result,
+                "budget": budget,
+                "defense": defense,
+                "policy": policy,
+            },
+            incomplete_fields=tuple(incomplete),
+        )
+        if not incomplete:
+            ledger.save(
+                chapter=14,
+                design={
+                    "track_id": v2_14_profile.track_id,
+                    "scenario_id": v2_14_variant.scenario_id,
+                    "selected_robustness_policy": policy["policy_label"],
+                    "binding_robustness_amount": policy["binding"],
+                    "residual_risk": round(policy["metrics"]["residual"], 3),
+                    "rejected_alternative": policy["rejected"],
+                    "v2_15_sustainability_implication": policy["sustainability"],
+                    "policy_feasible": passed,
+                },
+            )
+        status = "SAVED" if not incomplete else "INCOMPLETE"
+        status_kind = "success" if not incomplete else "warn"
+
+        items = [
+            mo.md("## Synthesis &mdash; Robust AI Architecture &amp; Safety Gate Memo"),
             mo.Html(f"""
-            <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                        border-radius:8px; padding:24px 28px; margin:16px 0;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:12px;">
-                    Key Takeaways
+            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO &amp; REFLECTIONS</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Robust AI Architecture Memo</h4>
+                {v2_14_student_id}
+                <div style="margin-top: 12px;">{v2_14_memo_note}</div>
+            </div>
+            """),
+            mo.callout(
+                mo.md(
+                    f"**Memo summary:** Selected `{policy['policy_label']}` (binding guardrail: `{policy['binding']}`); "
+                    f"residual risk: `{policy['metrics']['residual']:.1f}`; rejected `{policy['rejected']}`.  \n\n"
+                    f"**V2-15 sustainability implication:** {policy['sustainability']}"
+                ),
+                kind=status_kind,
+            ),
+            mo.callout(
+                mo.md(
+                    f"**Status:** {status}. "
+                    + (
+                        "Complete all predictions and checkpoints before final save."
+                        if incomplete
+                        else "Ledger snapshot saved for downstream labs."
+                    )
+                ),
+                kind=status_kind,
+            ),
+            mo.Html(f"""
+            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['GreenLine']};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                        Selected release policy</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                        {policy['policy_label']}</div>
                 </div>
-                <div style="font-size:0.92rem; color:{COLORS['Text']}; line-height:1.75;">
-                    <div><strong>1. Shift has an amount.</strong> Current PSI is {shift_result['psi']:.3f}, tier {shift_result['tier']}, with {shift_result['expected_loss']:.1f} expected loss units.</div>
-                    <div><strong>2. Robustness spend is allocated.</strong> Budget spend is {budget['total_budget']:.0f}/100; underfunded account is {v2_14_account_label(budget['underfunded'])}.</div>
-                    <div><strong>3. Hardening has a tax.</strong> {defense['defense']['label']} removes {defense['gain']:.1f} risk points and binds on {v2_14_tax_label(defense['binding_tax'])}.</div>
-                    <div><strong>4. Policy is a guardrail conjunction.</strong> Selected policy is {policy['policy_label']} with binding amount {policy['binding']}.</div>
-                    <div><strong>5. Residual failure remains.</strong> {policy['residual_case_text']}</div>
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['OrangeLine']};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                        Binding amount</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                        {policy['binding']}</div>
+                </div>
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['RedLine']};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                        Rejected alternative</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                        {policy['rejected']}</div>
                 </div>
             </div>
             """),
+            big_takeaways([
+                "Robustness is measured against shift and consequence, not average accuracy alone.",
+                "Coverage, retraining, monitoring, and fallback are distinct budget accounts.",
+                "Hardening improves worst-case behavior by paying taxes in other system resources.",
+                "A policy is deployable only inside a guardrail conjunction.",
+                "Residual robustness overhead becomes a sustainability input in the next lab.",
+            ]),
             mo.Html(f"""
-            <div style="background:white; border:1px solid {COLORS['Border']};
-                        border-radius:8px; padding:22px 26px; margin:8px 0 16px 0;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:10px;">
-                    Robustness Budget Memo
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION &amp; SIGN-OFF</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Robust AI &amp; Safety Systems Architect Authorization</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Confirm your robustness policy, verify that all conjunctive guardrails pass, and export the signed audit record.
+                </p>
+            </div>
+            """),
+            report_export_panel(report),
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab V2-15: Sustainable AI: Carbon Accounting, Water &amp; Energy Budgets</strong> &mdash;
+                        Carry forward the selected robustness policy and energy tax. The next challenge is quantifying carbon intensity,
+                        grid awareness, and embodied emissions for the deployment.
+                    </div>
                 </div>
-                <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
-                    <div><strong>Selected policy:</strong> {policy['policy_label']} for {v2_14_profile.label}.</div>
-                    <div><strong>Binding amount:</strong> {policy['binding']}.</div>
-                    <div><strong>Residual risk:</strong> {policy['metrics']['residual']:.1f} risk points after disclosed case: {policy['residual_case_text']}</div>
-                    <div><strong>Rejected alternative:</strong> {policy['rejected']}</div>
-                    <div><strong>V2-15 sustainability implication:</strong> {policy['sustainability']}</div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Upstream Precedent
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab V2-13: Security and Privacy</strong> established the cryptographic trust boundary and data lineage.
+                        Robustness controls now bound behavior under non-stationary environments and adversarial perturbations.
+                    </div>
                 </div>
             </div>
             """),
-            mo.accordion({
-                "Self-Assessment": mo.md("""
-1. Which distribution shift or stress case is most likely for your selected track?
-2. Which account was underfunded when you allocated the 100-point robustness budget?
-3. Which robustness tax became binding?
-4. What residual failure case remains after your selected policy?
-5. What energy or carbon implication should V2-15 inherit?
-""")
-            }),
-        ])
+        ]
+        return mo.vstack(items)
 
     tabs = mo.ui.tabs({
         "Part A -- Shift Exposure": build_part_a(),
@@ -1864,17 +2105,8 @@ envelope. It must include a rejected alternative and residual failure case.
 
 
 @app.cell(hide_code=True)
-def _(DecisionLog):
-    decision_input, decision_ui = DecisionLog()
-    return decision_input, decision_ui
-
-
-@app.cell(hide_code=True)
 def _(
     COLORS,
-    decision_input,
-    decision_ui,
-    ledger,
     mo,
     partA_checkpoint,
     partA_cost_prediction,
@@ -1898,7 +2130,6 @@ def _(
     partD_prediction,
     partD_residual_case,
     partD_strictness,
-    v2_14_account_label,
     v2_14_budget_result,
     v2_14_defense_result,
     v2_14_policy_result,
@@ -1954,38 +2185,8 @@ def _(
             partD_checkpoint,
         )
     )
-    _ledger_design = {
-        "track_id": v2_14_profile.track_id,
-        "scenario_id": v2_14_variant.scenario_id,
-        "partA_shift_prediction": partA_shift_prediction.value or "no_selection",
-        "partA_cost_prediction": partA_cost_prediction.value or "no_selection",
-        "partA_selected_shift": partA_shift.value,
-        "partA_psi": round(_shift["psi"], 4),
-        "partA_action": _shift["action"],
-        "partA_expected_loss": round(_shift["expected_loss"], 3),
-        "partB_prediction": partB_prediction.value or "no_selection",
-        "partB_total_budget": round(_budget["total_budget"], 3),
-        "partB_underfunded": _budget["underfunded"],
-        "partB_residual_risk": round(_budget["residual_risk"], 3),
-        "partC_prediction": partC_prediction.value or "no_selection",
-        "partC_defense": _defense["defense"]["label"],
-        "partC_strength": partC_strength.value,
-        "partC_binding_tax": _defense["binding_tax"],
-        "partC_robustness_gain": round(_defense["gain"], 3),
-        "partD_prediction": partD_prediction.value or "no_selection",
-        "partD_policy": _policy["policy_label"],
-        "partD_binding_amount": _policy["binding"],
-        "partD_rejected_alternative": _policy["rejected"],
-        "partD_residual_failure_case": _policy["residual_case_text"],
-        "v2_15_sustainability_implication": _policy["sustainability"],
-        "student_justification": str(decision_input.value),
-    }
-    if _complete:
-        ledger.save(chapter=14, design=_ledger_design)
-
     _status = "SAVED" if _complete else "INCOMPLETE"
     _status_color = COLORS["GreenLine"] if _complete else COLORS["OrangeLine"]
-    decision_ui
     mo.Html(f"""
     <div class="lab-hud">
         <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 14</span></div>
@@ -1996,199 +2197,6 @@ def _(
         <div><span class="hud-label">STATUS</span> <span style="color:{_status_color}; font-family:var(--font-mono);">{_status}</span></div>
     </div>
     """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    build_lab_report,
-    decision_input,
-    mo,
-    partA_checkpoint,
-    partA_cost_prediction,
-    partA_exposure,
-    partA_failure_cost,
-    partA_shift,
-    partA_shift_prediction,
-    partB_checkpoint,
-    partB_coverage,
-    partB_fallback,
-    partB_monitoring,
-    partB_prediction,
-    partB_retraining,
-    partC_checkpoint,
-    partC_defense,
-    partC_prediction,
-    partC_strength,
-    partC_uq_samples,
-    partD_checkpoint,
-    partD_policy,
-    partD_prediction,
-    partD_residual_case,
-    partD_strictness,
-    report_export_panel,
-    v2_14_account_label,
-    v2_14_budget_result,
-    v2_14_defense_result,
-    v2_14_metadata,
-    v2_14_policy_result,
-    v2_14_profile,
-    v2_14_shift_exposure,
-    v2_14_tax_label,
-    v2_14_variant,
-):
-    _shift = v2_14_shift_exposure(
-        v2_14_profile.track_id,
-        partA_shift.value,
-        partA_exposure.value,
-        partA_failure_cost.value,
-        v2_14_variant,
-    )
-    _budget = v2_14_budget_result(
-        _shift,
-        partB_coverage.value,
-        partB_retraining.value,
-        partB_monitoring.value,
-        partB_fallback.value,
-    )
-    _defense = v2_14_defense_result(
-        v2_14_profile.track_id,
-        partC_defense.value,
-        partC_strength.value,
-        partC_uq_samples.value,
-        _budget,
-        _shift,
-        v2_14_variant,
-    )
-    _policy = v2_14_policy_result(
-        v2_14_profile.track_id,
-        partD_policy.value,
-        partD_strictness.value,
-        partD_residual_case.value,
-        _shift,
-        _budget,
-        _defense,
-        v2_14_variant,
-    )
-    _incomplete = []
-    for label, widget in (
-        ("Part A shift prediction", partA_shift_prediction),
-        ("Part A cost prediction", partA_cost_prediction),
-        ("Part A checkpoint", partA_checkpoint),
-        ("Part B budget prediction", partB_prediction),
-        ("Part B checkpoint", partB_checkpoint),
-        ("Part C tax prediction", partC_prediction),
-        ("Part C checkpoint", partC_checkpoint),
-        ("Part D policy prediction", partD_prediction),
-        ("Part D checkpoint", partD_checkpoint),
-    ):
-        if widget.value is None:
-            _incomplete.append(label)
-
-    _report = build_lab_report(
-        v2_14_metadata,
-        track=v2_14_profile.label,
-        scenario=v2_14_variant.workload_summary,
-        learning_objectives=(
-            "Identify likely distribution shifts and failure costs for the selected track.",
-            "Allocate a fixed robustness budget across stress coverage, retraining, monitoring, and fallback.",
-            "Compare robustness improvement against latency, cost, energy, clean quality, and regression-risk tax.",
-            "Select a robustness policy with guardrails, a rejected alternative, and a residual failure case.",
-            "Carry the robustness overhead and residual risk into V2-15 sustainability reasoning.",
-        ),
-        predictions={
-            "partA_likely_shift": partA_shift_prediction.value,
-            "partA_failure_cost": partA_cost_prediction.value,
-            "partB_high_value_account": partB_prediction.value,
-            "partC_binding_tax": partC_prediction.value,
-            "partD_policy": partD_prediction.value,
-        },
-        knob_settings={
-            "shift_scenario": partA_shift.value,
-            "stress_exposure": partA_exposure.value,
-            "failure_cost_multiplier": partA_failure_cost.value,
-            "coverage_points": partB_coverage.value,
-            "retraining_points": partB_retraining.value,
-            "monitoring_points": partB_monitoring.value,
-            "fallback_points": partB_fallback.value,
-            "hardening_strategy": _defense["defense"]["label"],
-            "hardening_strength": partC_strength.value,
-            "uq_samples": partC_uq_samples.value,
-            "policy": _policy["policy_label"],
-            "guardrail_strictness_pct": partD_strictness.value,
-            "residual_case": _policy["residual_case_text"],
-        },
-        evidence_summary={
-            "psi": round(_shift["psi"], 4),
-            "psi_tier": _shift["tier"],
-            "recommended_action": _shift["action"],
-            "expected_loss": round(_shift["expected_loss"], 3),
-            "budget_total": round(_budget["total_budget"], 3),
-            "underfunded_account": v2_14_account_label(_budget["underfunded"]),
-            "residual_risk_after_budget": round(_budget["residual_risk"], 3),
-            "robustness_gain": round(_defense["gain"], 3),
-            "binding_tax": v2_14_tax_label(_defense["binding_tax"]),
-            "policy_binding_amount": _policy["binding"],
-            "rejected_alternative": _policy["rejected"],
-        },
-        final_decision={
-            "selected_policy": _policy["policy_label"],
-            "binding_amount": _policy["binding"],
-            "residual_risk": round(_policy["metrics"]["residual"], 3),
-            "residual_failure_case": _policy["residual_case_text"],
-            "rejected_alternative": _policy["rejected"],
-            "v2_15_sustainability_implication": _policy["sustainability"],
-        },
-        big_takeaways=(
-            "Robustness is measured against shift and consequence, not average accuracy alone.",
-            "Coverage, retraining, monitoring, and fallback are different budget accounts.",
-            "Hardening improves worst-case behavior by paying taxes in other system resources.",
-            "A policy is deployable only inside a guardrail conjunction.",
-            "Residual robustness overhead becomes a sustainability input in the next lab.",
-        ),
-        reflections={
-            "partA_checkpoint": partA_checkpoint.value,
-            "partB_checkpoint": partB_checkpoint.value,
-            "partC_checkpoint": partC_checkpoint.value,
-            "partD_checkpoint": partD_checkpoint.value,
-            "student_justification": str(decision_input.value),
-        },
-        residual_risk=_policy["residual_case_text"],
-        source_trace={
-            "track_id": v2_14_profile.track_id,
-            "scenario_id": v2_14_variant.scenario_id,
-            "hardware_ref": v2_14_variant.hardware_ref,
-            "model_ref": v2_14_variant.model_ref,
-            "chapter_source": "books/vol2/robust_ai/robust_ai.qmd",
-            "notebook_local_helpers": (
-                "v2_14_shift_exposure",
-                "v2_14_budget_result",
-                "v2_14_defense_result",
-                "v2_14_policy_result",
-            ),
-            "formula_refs": ("PSI", "robust minimax objective", "guardrail conjunction"),
-            "source_policy": v2_14_profile.source_policy,
-        },
-        result_snapshot={
-            "shift": _shift,
-            "budget": _budget,
-            "defense": _defense,
-            "policy": _policy,
-        },
-        incomplete_fields=tuple(_incomplete),
-    )
-
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This report is generated locally from the selected track, typed lab variant metadata, "
-                "and notebook-local `v2_14_` robustness-budget helpers."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
     return
 
 
