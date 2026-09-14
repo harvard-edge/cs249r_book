@@ -1544,7 +1544,35 @@ def _(
             report_export_panel(_report),
         ])
 
-    _status
+    _hud = mo.Html(f"""
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">01 &middot; ML Systems Introduction</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_01_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">BINDING AXIS</span>
+        <span class="hud-value">{_diag.binding_axis}</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">{"SAVED" if not _incomplete else "ACTIVE"}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if not _incomplete else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Silent degradation</strong>{_silent_response or 'pending'}</div>
+        <div class="mlsysbook-field"><strong>Triad diagnosis</strong>{_diagnosis_value or 'pending'}</div>
+        <div class="mlsysbook-field"><strong>Evidence packet</strong>{_evidence_value or 'pending'}</div>
+        <div class="mlsysbook-field"><strong>First fix</strong>{_frontier.selected_intervention or 'pending'}</div>
+        <div class="mlsysbook-field"><strong>Carry-forward risk</strong>{'committed' if synthesis_risk.value else 'pending'}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
+    </div>
+    """)
+
+    mo.vstack([_hud, _status])
     return
 
 
