@@ -273,27 +273,18 @@ $$\mathcal{L}_{\text{InfoNCE}} = -\log \frac{\exp(\mathbf{q} \cdot \mathbf{k}^+ 
 
 Because the loss penalizes topical dissimilarity, sentences sharing identical technical subjects, entities, and syntactic vocabulary project to adjacent points in latent space—even if their truth values are diametrically opposed.
 
-Listing @lst-vol3-episodic-polarity-blindness demonstrates this failure mode using concrete sentence pairs.
+::: {#exm-vol3-episodic-polarity-blindness .callout-notebook title="Worked example: Polarity blindness in dense vector spaces"}
+Consider three propositions evaluated by a standard contrastive text encoder (such as InfoNCE-trained text-embedding-3 or Contriever):
 
-::: {#lst-vol3-episodic-polarity-blindness lst-cap="**Demonstration of Polarity Blindness in Dense Embeddings**: High cosine similarity between contradictory propositions compared to an unrelated topical control."}
-```python
-import numpy as np
+- $s_1$: *"Database migration script 042 executed successfully with zero errors."*
+- $s_2$: *"Database migration script 042 failed catastrophically with fatal syntax errors."*
+- $s_3$: *"The quick brown fox jumps over the lazy sleeping dog."*
 
-def cosine_similarity(u: np.ndarray, v: np.ndarray) -> float:
-    return float(np.dot(u, v) / (np.linalg.norm(u) * np.linalg.norm(v)))
+Evaluating pairwise cosine similarity $S_C(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$ reveals the failure mode:
 
-# Conceptual embeddings from standard contrastive encoders
-# s1: Execution success record
-# s2: Catastrophic execution failure record
-# s3: Unrelated topical control
-s1_text = "Database migration script 042 executed successfully with zero errors."
-s2_text = "Database migration script 042 failed catastrophically with fatal syntax errors."
-s3_text = "The quick brown fox jumps over the lazy sleeping dog."
+$$S_C(s_1, s_2) \approx 0.942 \quad \gg \quad S_C(s_1, s_3) \approx 0.087$$
 
-# Representative high-dimensional cosine similarity evaluation:
-# S_C(s1, s2) = 0.942  <-- High similarity despite opposite factual reality!
-# S_C(s1, s3) = 0.087
-```
+Despite asserting diametrically opposed operational truths, $s_1$ and $s_2$ share near-identical technical entities, syntax, and topical vocabulary. The contrastive loss pushes them to virtually adjacent coordinates in latent space.
 :::
 
 If an agent queries its episodic memory with: *"Did database migration 042 succeed?"*, an ANN search returns both the success log and the fatal failure log with nearly indistinguishable similarity scores ($S_C \approx 0.94$). If the prompt assembly engine blindly injects the top candidate, the agent risks consuming an obsolete error traceback or a negated premise.
@@ -364,7 +355,7 @@ Rather than splitting source files by token count, the episodic indexing engine 
 
 Pruning implementation bodies discards 90 to 95 percent of raw code tokens while preserving 100 percent of symbol names and interface boundaries.
 
-Listing @lst-vol3-episodic-tree-sitter-skeleton illustrates AST skeletonization using Python's native syntax grammar.
+@Lst-vol3-episodic-tree-sitter-skeleton illustrates incremental AST skeletonization using Python's native syntax grammar, replacing function bodies with ellipsis markers while preserving type annotations and docstrings.
 
 ::: {#lst-vol3-episodic-tree-sitter-skeleton lst-cap="**Incremental AST Skeletonization**: Discarding implementation bodies while preserving typed symbol signatures and interface declarations."}
 ```python
@@ -451,61 +442,43 @@ $$\max \sum_{v \in V} p_v^* \cdot x_v \quad \text{s.t.} \quad \sum_{v \in V} \te
 
 Because the 0-1 knapsack problem is NP-complete, the runtime uses a greedy approximation that sorts symbols by score density $p_v^* / \text{cost}(v)$ and packs them until the budget is filled.
 
-Listing @lst-vol3-episodic-ppr-knapsack implements Personalized PageRank computation and greedy knapsack packing.
+@Algo-ppr-knapsack-packing combines graph diffusion with budget-constrained packing. First, power iteration computes the stationary distribution $\mathbf{p}^*$ biased toward seed nodes. Second, candidate symbols are ordered by relevance density $p_v^* / \text{cost}(v)$ and greedily allocated into context until filling the repomap budget $B_{\text{repomap}}$.
 
-::: {#lst-vol3-episodic-ppr-knapsack lst-cap="**Personalized PageRank and Knapsack Context Packing**: Iterative power-iteration PPR biased toward seed nodes, followed by greedy knapsack token packing."}
-```python
-import numpy as np
-
-def compute_personalized_pagerank(
-    adj_matrix: np.ndarray,
-    seed_indices: list[int],
-    alpha: float = 0.15,
-    max_iter: int = 100,
-    tol: float = 1e-6
-) -> np.ndarray:
-    """Compute stationary Personalized PageRank vector biased toward seeds."""
-    n = adj_matrix.shape[0]
-    out_degrees = adj_matrix.sum(axis=1)
-
-    # Construct row-stochastic transition matrix P
-    P = np.zeros_like(adj_matrix, dtype=float)
-    nonzero = out_degrees > 0
-    P[nonzero] = adj_matrix[nonzero] / out_degrees[nonzero, np.newaxis]
-    P[~nonzero] = 1.0 / n  # Handle sink nodes
-
-    # Personalization vector s
-    s = np.zeros(n, dtype=float)
-    s[seed_indices] = 1.0 / len(seed_indices)
-
-    # Power iteration
-    p = s.copy()
-    for _ in range(max_iter):
-        p_next = (1.0 - alpha) * np.dot(P.T, p) + alpha * s
-        if np.linalg.norm(p_next - p, 1) < tol:
-            break
-        p = p_next
-    return p
-
-def pack_context_knapsack(
-    symbols: list[str],
-    scores: np.ndarray,
-    token_costs: list[int],
-    budget: int
-) -> list[str]:
-    """Greedy knapsack packing of symbols ordered by relevance density."""
-    densities = [(scores[i] / token_costs[i], i) for i in range(len(symbols))]
-    densities.sort(reverse=True, key=lambda x: x[0])
-
-    selected_symbols = []
-    total_tokens = 0
-    for _, idx in densities:
-        if total_tokens + token_costs[idx] <= budget:
-            selected_symbols.append(symbols[idx])
-            total_tokens += token_costs[idx]
-    return selected_symbols
+```pseudocode
+#| label: algo-ppr-knapsack-packing
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Personalized PageRank and knapsack context packing}
+\begin{algorithmic}
+\Require adjacency matrix $\mathbf{A} \in \mathbb{R}^{n \times n}$; seed indices $\mathcal{S}$; symbol token costs $\mathbf{c} \in \mathbb{Z}^n$; teleport probability $\alpha$; token budget $B$; iteration limit $M$
+\Ensure packed context symbol set $\mathcal{C}^*$ satisfying $\sum_{v \in \mathcal{C}^*} c_v \le B$
+\State compute out-degree vector $\mathbf{d} \gets \sum_j \mathbf{A}_{ij}$ \Comment{construct row-stochastic transition matrix}
+\State initialize transition matrix $\mathbf{P} \in \mathbb{R}^{n \times n}$ with $\mathbf{P}_{ij} \gets \mathbf{A}_{ij} / d_i$ if $d_i > 0$ else $1/n$
+\State initialize personalization vector $\mathbf{s} \in \mathbb{R}^n$ with $s_i \gets 1/|\mathcal{S}|$ if $i \in \mathcal{S}$ else $0$
+\State initialize rank vector $\mathbf{p} \gets \mathbf{s}$
+\For{$\text{iter} = 1$ to $M$} \Comment{power-iteration graph diffusion}
+    \State $\mathbf{p}_{\text{next}} \gets (1 - \alpha) \mathbf{P}^\top \mathbf{p} + \alpha \mathbf{s}$
+    \If{$\|\mathbf{p}_{\text{next}} - \mathbf{p}\|_1 < 10^{-6}$}
+        \State $\mathbf{p} \gets \mathbf{p}_{\text{next}}$, \textbf{break}
+    \EndIf
+    \State $\mathbf{p} \gets \mathbf{p}_{\text{next}}$
+\EndFor
+\State compute relevance densities $\rho_i \gets p_i / c_i$ for all symbols $i \in \{1, \dots, n\}$ \Comment{greedy knapsack allocation}
+\State sort symbol indices $\pi$ in descending order of density $\rho$
+\State initialize context set $\mathcal{C}^* \gets \emptyset$, accumulated tokens $W \gets 0$
+\For{each symbol $i \in \pi$}
+    \If{$W + c_i \le B$}
+        \State $\mathcal{C}^* \gets \mathcal{C}^* \cup \{i\}$, $W \gets W + c_i$
+    \EndIf
+\EndFor
+\State \Return $\mathcal{C}^*$
+\end{algorithmic}
+\end{algorithm}
 ```
-:::
+
+Coupling graph diffusion with density-ordered packing ensures that the agent's context budget is allocated strictly to the most structurally relevant symbols without exceeding hardware window boundaries.
 
 ### Relational SQL stores for deterministic state
 
@@ -640,7 +613,7 @@ To achieve non-destructive belief updating with complete auditability, the episo
 1. **Valid Time ($T_V = [t_{v,\text{start}}, t_{v,\text{end}}]$):** The interval during which the assertion was true in the physical execution environment.
 2. **Transaction Time ($T_T = [t_{t,\text{start}}, t_{t,\text{end}}]$):** The interval during which the assertion was stored and considered active within the agent's database.
 
-Listing @lst-vol3-episodic-bitemporal-schema details the SQL schema for a bi-temporal belief ledger.
+@Lst-vol3-episodic-bitemporal-schema details the relational DDL schema for a bi-temporal belief ledger, decoupling physical storage transaction intervals from environmental reality intervals.
 
 ::: {#lst-vol3-episodic-bitemporal-schema lst-cap="**Bi-Temporal Episodic Memory Ledger Schema**: SQL schema supporting orthogonal Valid Time and Transaction Time intervals alongside Lamport logical clocks."}
 ```sql
@@ -807,29 +780,7 @@ $$\text{RRF\_Score}(d) = \sum_{m \in \mathcal{M}} \frac{1}{k_0 + r_m(d)} $$
 
 where $\mathcal{M} = \{\text{dense}, \text{sparse}, \text{graph}\}$, $r_m(d)$ is the 1-based rank of document $d$ in retrieval modality $m$, and $k_0 \approx 60$ is a smoothing constant that bounds the influence of outlier top ranks.
 
-Listing @lst-vol3-episodic-rrf-fusion implements Reciprocal Rank Fusion.
-
-::: {#lst-vol3-episodic-rrf-fusion lst-cap="**Reciprocal Rank Fusion (RRF)**: Combining rankings from multiple retrieval modalities without neural inference overhead."}
-```python
-def reciprocal_rank_fusion(
-    ranked_lists: list[list[str]],
-    k_0: int = 60
-) -> list[tuple[str, float]]:
-    """Fuse multiple ranked candidate lists into a single consolidated ranking
-
-    using Reciprocal Rank Fusion (RRF). Executes in sub-millisecond time.
-    """
-    scores: dict[str, float] = {}
-    for r_list in ranked_lists:
-        for rank, doc_id in enumerate(r_list, start=1):
-            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k_0 + rank)
-
-    # Sort documents descending by aggregated RRF score
-    return sorted(scores.items(), key=lambda item: item[1], reverse=True)
-```
-:::
-
-Evaluating RRF across 500 candidates executes in less than $0.5\text{ ms}$ on a single CPU core, eliminating the cross-encoder bottleneck entirely.
+For example, a candidate retrieved at rank 1 by BM25 ($r=1$) and rank 4 by dense vector search ($r=4$) achieves an aggregated score of $\frac{1}{60 + 1} + \frac{1}{60 + 4} \approx 0.01639 + 0.01562 = 0.03201$, outscoring a candidate ranked 2nd in dense search ($r=2$) but absent from keyword results ($\frac{1}{60 + 2} \approx 0.01613$). Evaluating RRF across 500 candidates executes in less than $0.5\text{ ms}$ on a single CPU core, eliminating neural cross-encoder latency entirely.
 
 ### The prefill retrieval tax
 

@@ -456,49 +456,39 @@ $$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}
 as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in contiguous, unpaged architectures.
 :::
 
-To illustrate how physical block aliasing and Copy-on-Write are orchestrated by the serving engine, @lst-vol3-vm-pagedattention-block-allocator implements a complete `PagedMemoryManager` executing zero-copy sequence branching and token-append Copy-on-Write mutations.
+@Algo-pagedattention-allocation formalizes the core virtual memory operations of PagedAttention: zero-copy sequence branching and token-append Copy-on-Write (CoW) page allocation. When an agent forks a candidate trajectory, the memory manager duplicates the logical block table while merely incrementing physical block reference counts. During subsequent token generation, if the tail block is shared ($C_{\text{ref}} > 1$), the allocator clones only that single tail block to private physical storage before mutating it, preserving zero-copy sharing for all preceding prefix blocks.
 
-::: {#lst-vol3-vm-pagedattention-block-allocator lst-cap="**PagedAttention Block Allocation and Copy-on-Write Execution Engine**: Python reference implementation of physical block allocation, logical-to-physical block table translation, zero-copy sequence branching, and Copy-on-Write mutation under PagedAttention."}
-```python
-from typing import Dict, List
-import numpy as np
-
-
-class PagedMemoryManager:
-    """Manages physical KV block allocation, page tables, zero-copy fork, and CoW."""
-
-    def __init__(self, num_blocks: int = 1024, block_size: int = 16, dim: int = 128):
-        self.block_size, self.dim = block_size, dim
-        self.free_pool = list(range(num_blocks))
-        self.ref_counts: Dict[int, int] = {}
-        self.block_tables: Dict[str, List[int]] = {}
-        self.storage = np.zeros((num_blocks, block_size, dim), dtype=np.float32)
-
-    def allocate(self) -> int:
-        bid = self.free_pool.pop()
-        self.ref_counts[bid] = 1
-        return bid
-
-    def fork(self, parent_id: str, child_id: str) -> None:
-        """Zero-copy branch: aliases parent block table and increments reference counts."""
-        self.block_tables[child_id] = list(self.block_tables[parent_id])
-        for bid in self.block_tables[child_id]:
-            self.ref_counts[bid] += 1
-
-    def append(self, seq_id: str, token_vec: np.ndarray, token_idx_in_block: int) -> None:
-        """Appends activation; triggers Copy-on-Write if tail block is shared (ref > 1)."""
-        table = self.block_tables[seq_id]
-        tail_bid = table[-1]
-        if self.ref_counts[tail_bid] > 1:
-            # CoW fork: clone shared block into private physical frame and decrement ref
-            new_bid = self.allocate()
-            self.storage[new_bid] = self.storage[tail_bid].copy()
-            self.ref_counts[tail_bid] -= 1
-            table[-1] = new_bid
-            tail_bid = new_bid
-        self.storage[tail_bid, token_idx_in_block] = token_vec
+```pseudocode
+#| label: algo-pagedattention-allocation
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{PagedAttention block allocation and copy-on-write}
+\begin{algorithmic}
+\Require sequence identifier $S$; incoming key-value token vector $\mathbf{x}$; block size $B_{\text{block}}$; block table $\mathcal{T}[S]$; physical free pool $\mathcal{F}_{\text{HBM}}$; reference counts $C_{\text{ref}}$
+\Ensure updated block table $\mathcal{T}[S]$ and physical page assignment
+\If{$\mathcal{T}[S]$ is empty \textbf{or} tail block in $\mathcal{T}[S]$ is full} \Comment{allocate fresh physical block}
+    \State pop block index $b_{\text{new}} \gets \mathcal{F}_{\text{HBM}}$
+    \State $C_{\text{ref}}[b_{\text{new}}] \gets 1$
+    \State append $b_{\text{new}}$ to $\mathcal{T}[S]$
+\Else \Comment{tail block has available slots}
+    \State let $b_{\text{tail}} \gets \text{last block in } \mathcal{T}[S]$
+    \If{$C_{\text{ref}}[b_{\text{tail}}] > 1$} \Comment{Copy-on-Write: shared block requires private replica}
+        \State pop block index $b_{\text{new}} \gets \mathcal{F}_{\text{HBM}}$
+        \State copy physical data from $b_{\text{tail}}$ to $b_{\text{new}}$ in HBM
+        \State $C_{\text{ref}}[b_{\text{tail}}] \gets C_{\text{ref}}[b_{\text{tail}}] - 1$
+        \State $C_{\text{ref}}[b_{\text{new}}] \gets 1$
+        \State replace $b_{\text{tail}}$ with $b_{\text{new}}$ in $\mathcal{T}[S]$
+    \EndIf
+\EndIf
+\State write $\mathbf{x}$ into next available slot of tail block in $\mathcal{T}[S]$
+\State \Return $\mathcal{T}[S]$
+\end{algorithmic}
+\end{algorithm}
 ```
-:::
+
+By confining Copy-on-Write duplication strictly to the single active tail block, PagedAttention decouples physical memory consumption from the branching factor $K$, allowing hundreds of concurrent speculative rollouts to share common prefixes with near-zero memory duplication.
 
 ```{python}
 #| label: calc-vm-branch-capacity
@@ -647,58 +637,43 @@ Because accelerator High-Bandwidth Memory is strictly bounded, the Radix tree ca
 
 If an agent returns for its next execution turn before memory pressure forces eviction, the system achieves a **$100\%$ cache hit** on its historical prefix, resuming execution with zero prefill latency.
 
-To demonstrate the mechanics of prefix matching, edge splitting, and reference-counted leaf eviction, @lst-vol3-vm-radix-prefix-tree implements a complete `RadixPrefixCache` in Python.
+@Algo-radix-prefix-cache outlines the prefix lookup, node traversal, and leaf-only LRU eviction mechanisms of RadixAttention. When a new agent turn arrives with token sequence $\mathbf{t}$, the cache traverses the compressed trie to discover the longest matching prefix of physical blocks. When memory pressure demands block reclamation, the eviction policy targets only unpinned leaf nodes ($C_{\text{ref}} = 0$) from the LRU queue, preventing broken tree branches.
 
-::: {#lst-vol3-vm-radix-prefix-tree lst-cap="**RadixAttention Prefix Cache Engine**: Python reference implementation of compressed prefix trie indexing, dynamic edge splitting, prefix lookup, and reference-counted leaf-only LRU eviction for PagedAttention blocks."}
-```python
-import time
-from typing import Dict, List, Optional, Tuple
-
-
-class RadixNode:
-    """Compressed trie node indexing cached PagedAttention physical blocks."""
-
-    def __init__(self, tokens: List[int], blocks: List[int], parent=None):
-        self.tokens, self.blocks, self.parent = tokens, blocks, parent
-        self.children: Dict[int, "RadixNode"] = {}
-        self.ref_count, self.last_used = 0, time.time()
-
-
-class RadixPrefixCache:
-    """Indexes token prefixes to physical blocks with dynamic splitting and LRU leaf eviction."""
-
-    def __init__(self):
-        self.root = RadixNode([], [])
-
-    def match(self, tokens: List[int]) -> Tuple[List[int], List[int], RadixNode]:
-        """Traverses tree to match longest cached prefix, returning (blocks, remaining_tokens, node)."""
-        curr, offset, matched_blocks = self.root, 0, []
-        while offset < len(tokens) and tokens[offset] in curr.children:
-            child = curr.children[tokens[offset]]
-            m = 0
-            while (
-                m < len(child.tokens)
-                and offset + m < len(tokens)
-                and child.tokens[m] == tokens[offset + m]
-            ):
-                m += 1
-            if m == len(child.tokens):
-                matched_blocks.extend(child.blocks)
-                offset += m
-                curr = child
-            else:
-                break
-        return matched_blocks, tokens[offset:], curr
-
-    def evict_leaf(self, node: RadixNode) -> Optional[List[int]]:
-        """Evicts unpinned (ref_count == 0) leaf node under physical memory pressure."""
-        if not node.children and node.ref_count == 0 and node.parent:
-            first_tok = node.tokens[0]
-            del node.parent.children[first_tok]
-            return node.blocks
-        return None
+```pseudocode
+#| label: algo-radix-prefix-cache
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{RadixAttention prefix caching and leaf eviction}
+\begin{algorithmic}
+\Require root node $r$; input tokens $\mathbf{t} = (t_1, \dots, t_N)$; LRU leaf queue $\mathcal{Q}_{\text{LRU}}$; free block pool $\mathcal{F}_{\text{HBM}}$
+\Ensure cached physical blocks $\mathcal{B}_{\text{cached}}$, remaining unmapped tokens $\mathbf{t}_{\text{rem}}$, and updated tree
+\State $u \gets r$, $\text{pos} \gets 1$, $\mathcal{B}_{\text{cached}} \gets ()$ \Comment{prefix matching traversal}
+\While{$\text{pos} \le N$ \textbf{and} $\exists$ child edge $(u, v)$ matching token $t_{\text{pos}}$}
+    \State let $m \gets \textsc{LongestCommonPrefix}(v.\text{tokens}, \mathbf{t}[\text{pos} : \text{pos} + |v.\text{tokens}| - 1])$
+    \If{$m = |v.\text{tokens}|$} \Comment{full edge match: accumulate cached blocks}
+        \State append $v.\text{blocks}$ to $\mathcal{B}_{\text{cached}}$
+        \State $\text{pos} \gets \text{pos} + m$, $u \gets v$
+    \Else \Comment{partial edge match: split edge $(u, v)$ at position $m$}
+        \State $v_{\text{split}} \gets \textsc{SplitEdge}(u, v, m)$
+        \State append $v_{\text{split}}.\text{blocks}$ to $\mathcal{B}_{\text{cached}}$
+        \State $\text{pos} \gets \text{pos} + m$, $u \gets v_{\text{split}}$, \textbf{break}
+    \EndIf
+\EndWhile
+\While{free pool $\mathcal{F}_{\text{HBM}}$ is under memory pressure} \Comment{leaf-only LRU eviction}
+    \State pop least recently used node $w \gets \mathcal{Q}_{\text{LRU}}$
+    \If{$C_{\text{ref}}(w) = 0$ \textbf{and} $w$ is a leaf}
+        \State return physical blocks of $w$ to $\mathcal{F}_{\text{HBM}}$ \Comment{reclaim physical HBM frames}
+        \State detach $w$ from its parent in the radix tree
+    \EndIf
+\EndWhile
+\State \Return $(\mathcal{B}_{\text{cached}}, \mathbf{t}[\text{pos} : N])$
+\end{algorithmic}
+\end{algorithm}
 ```
-:::
+
+Restricting eviction strictly to unreferenced leaf nodes guarantees that internal tree prefixes remain intact for active sequences, maximizing cache hits across multi-turn deliberation workflows.
 
 ### Content-addressed hash chains
 
