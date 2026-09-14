@@ -1,22 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# -----------------------------------------------------------------------------
-# LAB V2-13: THE PRICE OF PRIVACY
-#
-# Chapter invariant: security and privacy are amount systems. Threat surface,
-# privacy budget, control overhead, access/deletion lineage, audit evidence, and
-# residual risk must all fit inside the selected track's operating envelope.
-#
-# Packet modules:
-#   Part A - threat surface and privacy budget as binding amounts
-#   Part B - control strength versus latency, utility, and governance overhead
-#   Part C - access, retention, deletion lineage, and residual exposure
-#   Part D - deployment policy as multi-guardrail conjunction
-#   Synthesis - security/privacy memo and V2-14 robustness implication
-# -----------------------------------------------------------------------------
 
 
 @app.cell
@@ -48,10 +33,14 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         source_trace,
         track_arc_context,
@@ -65,23 +54,22 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
+        instrumentation_console,
         ledger,
         math,
         mo,
         pd,
         report_export_panel,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -90,24 +78,36 @@ def _(get_lab_metadata):
     v2_13_lab_path = "vol2/lab_13_security_privacy.py"
     v2_13_chapter = 13
     v2_13_metadata = get_lab_metadata(v2_13_lab_path)
-    return v2_13_chapter, v2_13_lab_path, v2_13_metadata
+    return v2_13_chapter, v2_13_metadata
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_13_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_13_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (ARM Cortex-M55 / ESP32-S3 & On-Device Telemetry Scrubbing)": "oura_ring",
+            "📱 Mobile Track (Apple Silicon / Snapdragon & Differential Privacy vs Utility)": "iphone",
+            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Geofenced Video Sanitization)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (H100/B200 Multi-Tenant Enclaves & Model Extraction Defenses)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (H100/B200 Multi-Tenant Enclaves & Model Extraction Defenses)",
+        label="Select Course / Industry Track",
+    )
     v2_13_track_picker
     return (v2_13_track_picker,)
 
 
 @app.cell
-def _(get_lab_track_variant, get_track_profile, v2_13_metadata, v2_13_track_picker):
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    v2_13_metadata,
+    v2_13_track_picker,
+):
     v2_13_track_id = v2_13_track_picker.value
     v2_13_profile = get_track_profile(v2_13_track_id)
     v2_13_variant = get_lab_track_variant(v2_13_metadata.lab_id, v2_13_track_id)
-    return v2_13_profile, v2_13_track_id, v2_13_variant
+    return v2_13_profile, v2_13_variant
 
 
 @app.cell
@@ -327,7 +327,6 @@ def _(html_lib, math):
 
     return (
         v2_13_binding_from_ratios,
-        v2_13_escape,
         v2_13_fmt_ms,
         v2_13_fmt_number,
         v2_13_fmt_pct,
@@ -341,6 +340,143 @@ def _(html_lib, math):
 def _(v2_13_profile, v2_13_track_packet, v2_13_variant):
     v2_13_packet = v2_13_track_packet(v2_13_profile, v2_13_variant)
     return (v2_13_packet,)
+
+
+@app.cell(hide_code=True)
+def _(ACADEMIC_LAB_CSS, mo, v2_13_packet, v2_13_profile, v2_13_variant):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 13 &middot; LAB 13
+        </div>
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          Security and Privacy: Threat Surfaces, Differential Privacy &amp; Lineage Control
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Treat security and privacy as quantifiable amount systems across the lifecycle: bound attack surfaces and cumulative privacy budgets (&epsilon;),
+          balance cryptographic and sanitization overhead against latency and utility, enforce immutable access and deletion lineage, and verify multi-guardrail release policies.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_13_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_13_variant.stakeholder}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Hardware:</strong> {v2_13_packet['hardware_ref']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Protected Asset:</strong> {v2_13_packet['protected_asset']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Primary Metric:</strong> {v2_13_variant.primary_metric}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> {v2_13_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_13_profile.label} Security &amp; Privacy Boundary
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_13_variant.workload_summary} Security and privacy are amount systems rather than binary compliance checklists. Deploying machine learning models exposes sprawling attack surfaces spanning data ingestion, fine-tuning APIs, model weights, and inference outputs. Every query consumes differential privacy epsilon, every protective cryptographic enclave imposes latency and throughput penalties, and incomplete deletion lineage creates persistent legal and adversarial vulnerability.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of ML Security &amp; Privacy:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Threat Surface &amp; Privacy Budget Invariant:</strong> Attack surface and privacy leakage are consumable amounts (<i>S</i><sub>threat</sub> = &sum; <i>w</i><sub>i</sub> <i>N</i><sub>i</sub>, &epsilon;<sub>total</sub> = &sum; &epsilon;<sub>j</sub>). Unaudited telemetry and fine-tuning accesses steadily deplete safety reserves.</li>
+            <li><strong>The Protection vs. System Overhead Law:</strong> Confidential computing and differential privacy exact measurable performance taxes: <i>T</i><sub>latency</sub> = <i>T</i><sub>base</sub> + &Delta;<i>T</i><sub>crypto</sub>, Utility = Utility<sub>base</sub> &minus; &Delta;<i>U</i>(&sigma;<sub>noise</sub>). Misconfigured controls induce massive latency blowups (TEE/FHE) or catastrophic utility degradation.</li>
+            <li><strong>Lineage &amp; Deletion Invariant:</strong> Regulatory and security compliance requires provable data deletion within binding SLAs (<i>T</i><sub>del</sub> &le; SLA<sub>del</sub>) backed by verified lineage traces (<i>E</i><sub>audit</sub> &ge; <i>E</i><sub>floor</sub>).</li>
+            <li><strong>Conjunctive Security Guardrail Bundle:</strong> A policy is deployable only when all independent security guardrails pass simultaneously: Launchable = Surface<sub>pass</sub> &and; Privacy<sub>pass</sub> &and; Latency<sub>pass</sub> &and; Lineage<sub>pass</sub> &and; Risk<sub>pass</sub>.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
+    return
+
+
+@app.cell(hide_code=True)
+def _(COLORS, mo, v2_13_packet, v2_13_profile):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <ul class="mlsysbook-list" style="margin: 0; font-size: 0.9rem; color: {COLORS['TextSec']};">
+                <li><strong>Quantify threat surface &amp; privacy budget:</strong> calculate attack surfaces and cumulative differential privacy spend for {v2_13_profile.label}.</li>
+                <li><strong>Evaluate defense overhead:</strong> balance cryptographic protection (TEE/HE) and DP noise against serving latency and model utility.</li>
+                <li><strong>Track access, retention &amp; deletion lineage:</strong> measure audit readiness and verify data deletion SLAs to bound residual exposure.</li>
+                <li><strong>Authorize conjunctive security policies:</strong> enforce multi-guardrail release gates ensuring all safety dimensions pass together.</li>
+            </ul>
+        </div>
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Threat modeling &middot; Differential privacy &middot; Confidential computing &middot; Data lineage
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>~50 min</strong><br/>
+                    A: 10 &middot; B: 15 &middot; C: 10 &middot; D: 15 min
+                </div>
+            </div>
+        </div>
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                &ldquo;When securing {v2_13_packet['ops_unit']}, which constraint binds first:
+                threat surface expansion, differential privacy budget depletion, serving latency overhead,
+                or deletion lineage verification?&rdquo;
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.Html(f"""
+    <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-bottom: 20px;">
+        <h4 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.05rem;">
+            Recommended Reading &mdash; Complete before this lab:
+        </h4>
+        <ul class="mlsysbook-list" style="margin: 0; font-size: 0.9rem; color: #334155;">
+            <li><strong>Threat Surfaces in ML Systems:</strong> data poisoning, prompt injection, model inversion, and membership inference attacks.</li>
+            <li><strong>Differential Privacy &amp; Privacy Budgets:</strong> Renyi DP, composition theorems, noise mechanisms, and utility trade-offs.</li>
+            <li><strong>Confidential Computing &amp; Cryptographic Controls:</strong> Trusted Execution Environments (TEEs), secure multi-party computation, and homomorphic encryption.</li>
+            <li><strong>Data Provenance &amp; Compliance:</strong> right-to-be-forgotten, machine unlearning, and immutable audit logs.</li>
+        </ul>
+    </div>
+    """)
+    return
 
 
 @app.cell
@@ -554,7 +690,6 @@ def _(mo, v2_13_packet):
         label="Optional memo note",
         placeholder="One sentence of local residual risk or deployment context.",
     )
-
     return (
         v2_13_access_model,
         v2_13_aggregation_policy,
@@ -876,7 +1011,15 @@ def _(
 
 
 @app.cell
-def _(v2_13_a, v2_13_assess_policy, v2_13_b, v2_13_c, v2_13_packet, v2_13_partD_policy_choice, v2_13_rejected_policy):
+def _(
+    v2_13_a,
+    v2_13_assess_policy,
+    v2_13_b,
+    v2_13_c,
+    v2_13_packet,
+    v2_13_partD_policy_choice,
+    v2_13_rejected_policy,
+):
     def v2_13_policy_candidates(packet, a, b, c):
         broad = {
             "name": "Broad data access",
@@ -939,14 +1082,20 @@ def _(v2_13_a, v2_13_assess_policy, v2_13_b, v2_13_c, v2_13_packet, v2_13_partD_
     return (
         v2_13_broad_policy,
         v2_13_d_policies,
-        v2_13_policy_candidates,
         v2_13_rejected_policy_result,
         v2_13_selected_policy,
     )
 
 
 @app.cell
-def _(apply_plotly_theme, go, pd, v2_13_fmt_ms, v2_13_fmt_number, v2_13_fmt_pct, v2_13_guardrail_badge):
+def _(
+    apply_plotly_theme,
+    go,
+    pd,
+    v2_13_fmt_ms,
+    v2_13_fmt_pct,
+    v2_13_guardrail_badge,
+):
     def v2_13_color(colors, key, fallback):
         try:
             return colors[key]
@@ -1128,7 +1277,6 @@ def _(apply_plotly_theme, go, pd, v2_13_fmt_ms, v2_13_fmt_number, v2_13_fmt_pct,
         return fig
 
     return (
-        v2_13_color,
         v2_13_part_a_table,
         v2_13_part_b_table,
         v2_13_part_c_table,
@@ -1140,109 +1288,12 @@ def _(apply_plotly_theme, go, pd, v2_13_fmt_ms, v2_13_fmt_number, v2_13_fmt_pct,
 
 @app.cell(hide_code=True)
 def _(
-    ACADEMIC_LAB_CSS,
     COLORS,
-    LAB_CSS,
-    mo,
-    source_trace,
-    track_arc_context,
-    track_context,
-    v2_13_escape,
-    v2_13_metadata,
-    v2_13_packet,
-    v2_13_profile,
-    v2_13_variant,
-):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.Html(
-                f"""
-                <div style="background:linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
-                            border-radius:16px; padding:32px 40px; margin-bottom:8px;
-                            border:1px solid #2d3748;">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
-                        <div>
-                            <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                                        text-transform:uppercase; letter-spacing:0.14em; margin-bottom:8px;">
-                                Vol 2 &middot; Lab 13 &middot; Security and Privacy
-                            </div>
-                            <div style="font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.15; margin-bottom:10px;">
-                                The Price of Privacy
-                            </div>
-                            <div style="font-size:0.95rem; color:#94a3b8; max-width:760px; line-height:1.6;">
-                                {v2_13_escape(v2_13_variant.workload_summary)} The shared concept sequence treats
-                                threat surface, privacy budget, control overhead, access/deletion lineage, and residual risk
-                                as amounts that must fit the track envelope.
-                            </div>
-                        </div>
-                        <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
-                            <span class="badge badge-info">{v2_13_escape(v2_13_profile.label)}</span>
-                            <span class="badge badge-info">{v2_13_escape(v2_13_packet['ops_unit'])}</span>
-                            <span class="badge badge-info">{v2_13_escape(v2_13_packet['hardware_ref'])}</span>
-                            <span class="badge badge-warn">45-55 minutes &middot; 4 Parts + Synthesis</span>
-                        </div>
-                    </div>
-                </div>
-                """
-            ),
-            track_context(v2_13_profile),
-            track_arc_context(v2_13_profile, v2_13_metadata.lab_id),
-            source_trace(
-                {
-                    "chapter": "Volume II, Chapter 13: Security and Privacy",
-                    "anchors": (
-                        "Expanded attack surface",
-                        "Threat model fields: asset, boundary, adversary, control",
-                        "Model extraction defenses and output leakage",
-                        "Privacy budget composition",
-                        "Security and privacy maturity model",
-                    ),
-                    "track_source": v2_13_packet["source_policy"],
-                    "implementation": "Notebook-local v2_13_ amount-system formulas; shared track metadata, source trace, ledger, and report helpers.",
-                }
-            ),
-        ]
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(COLORS, mo, v2_13_escape, v2_13_packet):
-    mo.Html(
-        f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']};
-                    background:white; border-radius:0 8px 8px 0;
-                    padding:20px 28px; margin:8px 0 16px 0;
-                    box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                Shared concept sequence
-            </div>
-            <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
-                <div>1. <strong>Threat/privacy surface:</strong> measure the amount that binds first.</div>
-                <div>2. <strong>Control overhead:</strong> trade protection against latency, utility, and governance cost.</div>
-                <div>3. <strong>Lineage:</strong> access, retention, deletion, and audit evidence determine residual exposure.</div>
-                <div>4. <strong>Policy:</strong> privacy, latency, utility, evidence, deletion, and risk guardrails must all pass.</div>
-            </div>
-            <div style="border-top:1px solid {COLORS['Border']}; margin:16px -28px 0 -28px; padding:16px 28px 0 28px;
-                        font-size:0.86rem; color:{COLORS['TextSec']}; line-height:1.65;">
-                <strong>Track lens:</strong> {v2_13_escape(v2_13_packet['stakeholder'])} protects
-                <strong>{v2_13_escape(v2_13_packet['protected_asset'])}</strong>.
-                Trust boundary: {v2_13_escape(v2_13_packet['trust_boundary'])}.
-                Natural failure: {v2_13_escape(v2_13_packet['natural_failure'])}.
-            </div>
-        </div>
-        """
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    COLORS,
+    MathPeek,
+    big_takeaways,
     build_lab_report,
+    gated_hypothesis_card,
+    instrumentation_console,
     ledger,
     mo,
     report_export_panel,
@@ -1254,12 +1305,10 @@ def _(
     v2_13_broad_policy,
     v2_13_c,
     v2_13_chapter,
-    v2_13_color,
     v2_13_compute_boundary,
     v2_13_control_strength,
     v2_13_d_policies,
     v2_13_deletion_window_days,
-    v2_13_escape,
     v2_13_fmt_ms,
     v2_13_fmt_number,
     v2_13_fmt_pct,
@@ -1298,17 +1347,6 @@ def _(
     v2_13_surface_nodes,
     v2_13_variant,
 ):
-    def v2_13_gate(pred_widget, items):
-        if pred_widget.value is None:
-            items.append(
-                mo.callout(
-                    mo.md("Commit to the structured prediction first; the instrument is hidden until the prior is explicit."),
-                    kind="warn",
-                )
-            )
-            return True
-        return False
-
     def v2_13_feedback(predicted, actual, labels):
         kind, message = v2_13_prediction_feedback(predicted, actual, labels)
         return mo.callout(mo.md(message), kind=kind)
@@ -1316,31 +1354,53 @@ def _(
     def v2_13_status_callout(ok, success, failure):
         return mo.callout(mo.md(success if ok else failure), kind="success" if ok else "danger")
 
-    def v2_13_build_part_a():
+    def build_part_a():
         labels = {
             "threat_surface": "threat surface",
             "privacy_budget": "privacy budget",
             "evidence_lineage": "audit/evidence lineage",
         }
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                You are the {v2_13_packet['stakeholder']}. Before selecting a control, you must
-                model the asset, trust boundary, adversary, and control path for
-                `{v2_13_packet['protected_asset']}`. The first task is to identify which amount
-                is binding: exposed surface, privacy budget, or evidence lineage.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Threat Surface &amp; Privacy Briefing &middot; {v2_13_packet['stakeholder']}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Deploying {v2_13_profile.label} exposes sensitive pathways to model extraction, data reconstruction,
+                    and unauthorized telemetry leakage. Before configuring protections, we must quantify which amount is binding:
+                    exposed communication nodes, cumulative differential privacy epsilon, or audit lineage.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_13_packet['stakeholder']} &middot; {v2_13_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_13_partA_pred,
+                title="1. Formulate Threat Surface & Privacy Budget Hypothesis",
+                subtitle=(
+                    f"Scenario: Threat modeling for {v2_13_packet['protected_asset']}. "
+                    "Predict which amount becomes the primary binding constraint under baseline deployment."
+                ),
             ),
-            v2_13_partA_pred,
         ]
-        if v2_13_gate(v2_13_partA_pred, items):
+        if v2_13_partA_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_13_feedback(v2_13_partA_pred.value, v2_13_a["binding_key"], labels),
-                mo.hstack([v2_13_surface_nodes, v2_13_sensitive_paths], widths="equal"),
-                mo.hstack([v2_13_privacy_accesses, v2_13_logging_scope], widths="equal"),
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_13_surface_nodes, v2_13_sensitive_paths], widths="equal"),
+                        mo.hstack([v2_13_privacy_accesses, v2_13_logging_scope], widths="equal"),
+                    ]),
+                    title="Threat Surface & Privacy Budget Instrumentation",
+                    subtitle=f"Adjust exposed topology nodes, sensitive ingress paths, privacy-consuming query access counts, and logging scope for {v2_13_profile.label}",
+                ),
                 v2_13_ratio_fig(
                     COLORS,
                     "Part A threat surface, privacy spend, and evidence ratios",
@@ -1357,32 +1417,36 @@ def _(
                     f"Threat/privacy envelope holds. Binding amount: `{v2_13_a['binding']}` at {v2_13_a['binding_ratio']:.2f}x its limit.",
                     f"Boundary violation. `{v2_13_a['binding']}` is at {v2_13_a['binding_ratio']:.2f}x its limit. Reduce sensitive paths, segment nodes, spend fewer privacy-consuming accesses, or add scoped evidence.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Attack Surface &amp; Budget Commitment</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Binding constraint: <code>{v2_13_a['binding']}</code> ({v2_13_a['binding_ratio']:.2f}x limit).
+                        Select your architecture mitigation decision:
+                    </p>
+                    {v2_13_partA_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"S_{\text{threat}} = N_{\text{paths}} \cdot w_{\text{path}} + \frac{N(N-1)}{2} \cdot w_{\text{channel}} + L_{\text{logging}}, \quad \varepsilon_{\text{total}} = \sum_{j=1}^m \varepsilon_j",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Threat surface index = sensitive paths x path weight + communication channels x coupling + logging exposure.
-
-                            Current pair channels: `{v2_13_surface_nodes.value} * ({v2_13_surface_nodes.value} - 1) / 2`
-                            = `{v2_13_fmt_number(v2_13_a['pair_channels'])}`.
-
-                            Privacy spend composes as summed epsilon:
-                            `{v2_13_privacy_accesses.value}` accesses x `{v2_13_packet['epsilon_per_access']:.2f}`
-                            plus logging-path spend = `{v2_13_a['privacy_epsilon']:.2f}` epsilon.
-
-                            Evidence lineage compares the current logging/evidence score
-                            `{v2_13_fmt_pct(v2_13_a['evidence_score'])}` with the track floor
-                            `{v2_13_fmt_pct(v2_13_packet['evidence_floor'])}`.
-                            """
-                        )
-                    }
+                        "surface nodes (N)": f"{v2_13_surface_nodes.value}",
+                        "pair communication channels": f"{v2_13_fmt_number(v2_13_a['pair_channels'])}",
+                        "sensitive ingress paths": f"{v2_13_sensitive_paths.value}",
+                        "surface index": f"{v2_13_a['surface_index']:.2f} (limit: {v2_13_packet['surface_index_limit']:.2f})",
+                        "privacy-consuming queries": f"{v2_13_privacy_accesses.value}",
+                        "epsilon per query": f"{v2_13_packet['epsilon_per_access']:.2f}",
+                        "total privacy spend": f"{v2_13_a['privacy_epsilon']:.2f} \u03b5 (budget: {v2_13_packet['privacy_budget_epsilon']:.2f} \u03b5)",
+                        "evidence score": f"{v2_13_fmt_pct(v2_13_a['evidence_score'])} (floor: {v2_13_fmt_pct(v2_13_packet['evidence_floor'])})",
+                        "chapter source": "Volume II, Chapter 13: Expanded Attack Surface & Privacy Budget Accounting",
+                    },
                 ),
-                v2_13_partA_checkpoint,
             ]
         )
         return mo.vstack(items)
 
-    def v2_13_build_part_b():
+    def build_part_b():
         labels = {
             "latency": "latency overhead",
             "utility": "utility loss",
@@ -1390,23 +1454,43 @@ def _(
             "protection": "remaining protection gap",
         }
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                The threat model now has to become a control stack. The selected stack must
-                reduce leakage and attacker economics without breaking `{v2_13_packet['ops_unit']}`
-                latency, utility, or governance budgets.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Control Stack Briefing &middot; {v2_13_packet['stakeholder']}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Security mechanisms are not costless abstractions. Confidential computing enclaves add memory bus overhead,
+                    differential privacy noise degrades prediction quality, and output filters introduce token latency. We must find the
+                    Pareto boundary between protection strength and production service feasibility.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_13_packet['stakeholder']} &middot; {v2_13_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_13_partB_pred,
+                title="2. Formulate Control Overhead & Utility Tradeoff Hypothesis",
+                subtitle="Predict which operational dimension breaks first when ramping up defense isolation and differential privacy.",
             ),
-            v2_13_partB_pred,
         ]
-        if v2_13_gate(v2_13_partB_pred, items):
+        if v2_13_partB_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_13_feedback(v2_13_partB_pred.value, v2_13_b["binding_key"], labels),
-                mo.hstack([v2_13_control_strength, v2_13_compute_boundary], widths="equal"),
-                mo.hstack([v2_13_output_policy, v2_13_aggregation_policy], widths="equal"),
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_13_control_strength, v2_13_compute_boundary], widths="equal"),
+                        mo.hstack([v2_13_output_policy, v2_13_aggregation_policy], widths="equal"),
+                    ]),
+                    title="Defense Mechanisms & Operational Overhead Controls",
+                    subtitle=f"Select cryptographic boundary, output token sanitation, aggregation isolation, and overall defense strength for {v2_13_profile.label}",
+                ),
                 v2_13_ratio_fig(
                     COLORS,
                     "Part B control stack overhead and protection ratios",
@@ -1424,33 +1508,34 @@ def _(
                     f"Control stack is feasible. `{v2_13_b['control_stack']}` reaches a protection score of `{v2_13_fmt_pct(v2_13_b['protection_score'])}` with binding overhead `{v2_13_b['binding']}`.",
                     f"Control stack boundary fails. `{v2_13_b['binding']}` is at {v2_13_b['binding_ratio']:.2f}x its guardrail. Adjust isolation, output exposure, aggregation mode, or control strength.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Control Stack Selection Decision</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Current protection score: <code>{v2_13_fmt_pct(v2_13_b['protection_score'])}</code>
+                        (latency: <code>{v2_13_fmt_ms(v2_13_b['latency_ms'])}</code>, utility loss: <code>{v2_13_b['utility_loss_pp']:.2f} pp</code>).
+                        Commit your defense configuration:
+                    </p>
+                    {v2_13_partB_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"T_{\text{latency}} = T_{\text{base}} + \Delta T_{\text{boundary}} + \Delta T_{\text{output}} + \Delta T_{\text{agg}} + \Delta T_{\text{tax}}, \quad \Delta U \propto \sigma_{\text{noise}}",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Latency = base inference + compute boundary + output policy + aggregation policy + strength tax.
-
-                            Current latency: `{v2_13_fmt_ms(v2_13_b['latency_ms'])}` against
-                            `{v2_13_fmt_ms(v2_13_packet['latency_limit_ms'])}`.
-
-                            Utility loss grows with privacy noise/output restriction:
-                            `{v2_13_b['utility_loss_pp']:.2f}` percentage points against a
-                            `{v2_13_packet['utility_loss_limit_pp']:.2f}` pp guardrail.
-
-                            Governance overhead counts the evidence items needed to prove the
-                            control remains active after deployment. Protection score is compared
-                            with the track floor because weak controls can pass latency while still
-                            leaving the threat model underdefended.
-                            """
-                        )
-                    }
+                        "base inference latency": f"{v2_13_fmt_ms(v2_13_packet['base_latency_ms'])}",
+                        "total defense latency": f"{v2_13_fmt_ms(v2_13_b['latency_ms'])} (limit: {v2_13_fmt_ms(v2_13_packet['latency_limit_ms'])})",
+                        "utility penalty": f"{v2_13_b['utility_loss_pp']:.2f} pp (limit: {v2_13_packet['utility_loss_limit_pp']:.2f} pp)",
+                        "governance verification items": f"{v2_13_b['governance_items']:.0f} (limit: {v2_13_packet['governance_limit']:.0f})",
+                        "protection score achieved": f"{v2_13_fmt_pct(v2_13_b['protection_score'])} (floor: {v2_13_fmt_pct(v2_13_packet['protection_floor'])})",
+                        "chapter source": "Volume II, Chapter 13: Model Extraction Defenses, Enclaves & Differential Privacy",
+                    },
                 ),
-                v2_13_partB_checkpoint,
             ]
         )
         return mo.vstack(items)
 
-    def v2_13_build_part_c():
+    def build_part_c():
         labels = {
             "access_roles": "access roles",
             "retention": "retention record-days",
@@ -1458,23 +1543,43 @@ def _(
             "audit_gap": "audit evidence gap",
         }
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                An auditor or data subject asks which records, logs, checkpoints, and outputs
-                still carry their influence. The answer depends on access breadth, retention,
-                deletion timing, lineage coverage, and audit sampling, not on access control alone.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Lineage &amp; Compliance Briefing &middot; {v2_13_packet['stakeholder']}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;When a user or regulator invokes the 'right to be forgotten' or an audit discovery request arrives,
+                    a lack of immutable data lineage turns compliance into a crisis. We must trace training checkpoints, fine-tuning
+                    shards, and telemetry caches, proving verifiable deletion within rigid SLA windows.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_13_packet['stakeholder']} &middot; {v2_13_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_13_partC_pred,
+                title="3. Formulate Data Lineage, Retention & Deletion Hypothesis",
+                subtitle="Predict which lifecycle parameter drives residual exposure risk when managing sensitive records.",
             ),
-            v2_13_partC_pred,
         ]
-        if v2_13_gate(v2_13_partC_pred, items):
+        if v2_13_partC_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_13_feedback(v2_13_partC_pred.value, v2_13_c["binding_key"], labels),
-                mo.hstack([v2_13_access_model, v2_13_retention_days, v2_13_deletion_window_days], widths="equal"),
-                mo.hstack([v2_13_lineage_coverage_pct, v2_13_audit_sampling_pct], widths="equal"),
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_13_access_model, v2_13_retention_days, v2_13_deletion_window_days], widths="equal"),
+                        mo.hstack([v2_13_lineage_coverage_pct, v2_13_audit_sampling_pct], widths="equal"),
+                    ]),
+                    title="Access Breadth, Retention Windows & Lineage Verification",
+                    subtitle=f"Configure role-based access granularity, data retention horizons, deletion SLAs, and automated audit coverage for {v2_13_profile.label}",
+                ),
                 v2_13_ratio_fig(
                     COLORS,
                     "Part C access, retention, deletion, and evidence ratios",
@@ -1492,33 +1597,34 @@ def _(
                     f"Lineage envelope holds. Residual exposure is `{v2_13_c['residual_exposure']:.1f}` against a limit of `{v2_13_packet['residual_risk_limit']:.1f}`.",
                     f"Lineage boundary fails. `{v2_13_c['binding']}` is at {v2_13_c['binding_ratio']:.2f}x its guardrail or residual exposure exceeds the track limit. Tighten access, shorten retention/deletion, or add auditable lineage.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Lineage &amp; Deletion Governance Choice</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Residual exposure index: <code>{v2_13_c['residual_exposure']:.1f}</code>
+                        (limit: <code>{v2_13_packet['residual_risk_limit']:.1f}</code>, audit score: <code>{v2_13_fmt_pct(v2_13_c['audit_score'])}</code>).
+                        Confirm your compliance architecture:
+                    </p>
+                    {v2_13_partC_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"\text{Residual Exposure} = 0.30 R_{\text{access}} + 0.24 R_{\text{retention}} + 0.24 R_{\text{deletion}} + 0.22 \Delta_{\text{audit}}",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Residual exposure is a weighted amount:
-
-                            `0.30 * access_ratio + 0.24 * retention_ratio + 0.24 * deletion_ratio + 0.22 * audit_gap`.
-
-                            Current access model `{v2_13_c['access_label']}` exposes
-                            `{v2_13_c['access_roles']:.0f}` roles. Retention is
-                            `{v2_13_c['retention_days']}` days, deletion window is
-                            `{v2_13_c['deletion_window_days']}` days, and audit score is
-                            `{v2_13_fmt_pct(v2_13_c['audit_score'])}`.
-
-                            The chapter maturity model treats retention policy and reproducible
-                            control checks as governance evidence: without lineage, deletion and
-                            recovery are claims rather than verifiable controls.
-                            """
-                        )
-                    }
+                        "access model": f"{v2_13_c['access_label']} ({v2_13_c['access_roles']:.0f} roles)",
+                        "retention horizon": f"{v2_13_c['retention_days']} days (limit: {v2_13_packet['retention_limit_days']} d)",
+                        "deletion SLA": f"{v2_13_c['deletion_window_days']} days (limit: {v2_13_packet['deletion_sla_days']} d)",
+                        "audit completeness score": f"{v2_13_fmt_pct(v2_13_c['audit_score'])} (floor: {v2_13_fmt_pct(v2_13_packet['audit_floor'])})",
+                        "residual exposure score": f"{v2_13_c['residual_exposure']:.1f} (limit: {v2_13_packet['residual_risk_limit']:.1f})",
+                        "chapter source": "Volume II, Chapter 13: Data Lineage, Retention Policies & Verifiable Unlearning",
+                    },
                 ),
-                v2_13_partC_checkpoint,
             ]
         )
         return mo.vstack(items)
 
-    def v2_13_build_part_d():
+    def build_part_d():
         labels = {
             "residual": "residual risk",
             "privacy": "privacy budget",
@@ -1528,52 +1634,71 @@ def _(
         selected_violations = ", ".join(v2_13_selected_policy["violations"]) or "none"
         rejected_violations = ", ".join(v2_13_rejected_policy_result["violations"]) or "none"
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                The release review needs one security/privacy policy. A policy is valid only
-                when privacy budget, latency, utility, evidence, deletion, and residual-risk
-                guardrails pass together.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Policy Authorization Briefing &middot; {v2_13_packet['stakeholder']}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Security and privacy authorization requires a conjunctive release gate: every guardrail—privacy epsilon,
+                    serving latency, utility floor, audit lineage, deletion SLA, and residual risk—must pass simultaneously.
+                    A failure on any single dimension invalidates deployment.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_13_packet['stakeholder']} &middot; {v2_13_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_13_partD_pred,
+                title="4. Formulate Conjunctive Security & Privacy Policy Hypothesis",
+                subtitle="Predict which guardrail causes naive permissive or broad-access deployment policies to fail.",
             ),
-            v2_13_partD_pred,
         ]
-        if v2_13_gate(v2_13_partD_pred, items):
+        if v2_13_partD_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_13_feedback(v2_13_partD_pred.value, v2_13_broad_policy["binding"], labels),
                 v2_13_policy_fig(COLORS, v2_13_d_policies),
                 v2_13_policy_table(v2_13_d_policies, v2_13_guardrail_label),
-                mo.hstack([v2_13_partD_policy_choice, v2_13_rejected_policy], widths="equal"),
+                instrumentation_console(
+                    mo.hstack([v2_13_partD_policy_choice, v2_13_rejected_policy], widths="equal"),
+                    title="Release Candidate Policy Selection",
+                    subtitle="Select the candidate policy to authorize for production deployment and the explicit rejected alternative",
+                ),
                 v2_13_status_callout(
                     v2_13_selected_policy["feasible"],
                     f"Selected policy passes all guardrails. Binding guardrail is `{v2_13_guardrail_label(v2_13_selected_policy['binding'])}`.",
                     f"Selected policy is not deployable. Violations: `{selected_violations}`. Rejected alternative violations: `{rejected_violations}`.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #16A34A; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Production Policy Authorization</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Candidate policy: <strong>{v2_13_selected_policy['name']}</strong> &mdash; Status: <code>{'FEASIBLE' if v2_13_selected_policy['feasible'] else 'UNSAFE'}</code>.
+                        Confirm release authorization:
+                    </p>
+                    {v2_13_partD_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"\text{Deployable} = \varepsilon \le \varepsilon_{\text{lim}} \land T_{\text{lat}} \le T_{\text{lim}} \land \Delta U \le \Delta U_{\text{lim}} \land E_{\text{audit}} \ge E_{\text{floor}} \land T_{\text{del}} \le \text{SLA} \land \text{Risk} \le \text{Risk}_{\text{lim}}",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Policy feasibility is a conjunction:
-
-                            `privacy_ok and latency_ok and utility_ok and evidence_ok and deletion_ok and residual_ok`.
-
-                            Current selected policy `{v2_13_selected_policy['name']}` has:
-                            epsilon `{v2_13_selected_policy['privacy_epsilon']:.2f}`,
-                            latency `{v2_13_fmt_ms(v2_13_selected_policy['latency_ms'])}`,
-                            utility loss `{v2_13_selected_policy['utility_loss_pp']:.2f}` pp,
-                            evidence `{v2_13_fmt_pct(v2_13_selected_policy['evidence_score'])}`,
-                            deletion `{v2_13_selected_policy['deletion_days']:.0f}` days,
-                            residual risk `{v2_13_selected_policy['residual_risk']:.1f}`.
-
-                            This is why a local mechanism cannot be treated as a system guarantee:
-                            one failed predicate invalidates the deployment.
-                            """
-                        )
-                    }
+                        "selected policy": v2_13_selected_policy["name"],
+                        "privacy epsilon": f"{v2_13_selected_policy['privacy_epsilon']:.2f} \u03b5",
+                        "latency": f"{v2_13_fmt_ms(v2_13_selected_policy['latency_ms'])}",
+                        "utility loss": f"{v2_13_selected_policy['utility_loss_pp']:.2f} pp",
+                        "audit evidence": f"{v2_13_fmt_pct(v2_13_selected_policy['evidence_score'])}",
+                        "deletion timeline": f"{v2_13_selected_policy['deletion_days']:.0f} days",
+                        "residual risk": f"{v2_13_selected_policy['residual_risk']:.1f}",
+                        "chapter source": "Volume II, Chapter 13: Conjunctive Guardrail Architectures & Release Verification",
+                    },
                 ),
-                v2_13_partD_checkpoint,
             ]
         )
         return mo.vstack(items)
@@ -1750,48 +1875,116 @@ def _(
             )
         status = "SAVED" if not incomplete else "INCOMPLETE"
         status_kind = "success" if not incomplete else "warn"
-        return mo.vstack(
-            [
+
+        items = [
+            mo.md("## Synthesis &mdash; Security and Privacy Policy Memo"),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO &amp; REFLECTIONS</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Security &amp; Privacy Architecture Memo</h4>
+                {v2_13_student_id}
+                <div style="margin-top: 12px;">{v2_13_robustness_implication}</div>
+                <div style="margin-top: 12px;">{v2_13_memo_note}</div>
+            </div>
+            """),
+            mo.callout(
                 mo.md(
-                    f"""
-                    ### Security/Privacy Memo
-
-                    **Report frame:** {v2_13_packet['report_frame']}
-
-                    **Selected policy:** `{v2_13_selected_policy['name']}`
-
-                    **Binding amount:** `{binding_guardrail}`
-
-                    **Residual risk:** {residual_risk_text}
-
-                    **Rejected alternative:** `{v2_13_rejected_policy_result['name']}`
-
-                    **V2-14 implication:** {robustness_text}
-                    """
+                    f"**Memo summary:** Selected `{v2_13_selected_policy['name']}` (binding guardrail: `{binding_guardrail}`); "
+                    f"residual risk: `{residual_risk_text}`; rejected `{v2_13_rejected_policy_result['name']}`.  \n\n"
+                    f"**V2-14 robustness implication:** {robustness_text}"
                 ),
-                mo.hstack([v2_13_student_id, v2_13_robustness_implication], widths="equal"),
-                v2_13_memo_note,
-                mo.callout(
-                    mo.md(
-                        f"**Status:** {status}. "
-                        + (
-                            "Complete all predictions, checkpoints, policy choices, and the V2-14 implication before final save."
-                            if incomplete
-                            else "Ledger snapshot saved for downstream labs."
-                        )
-                    ),
-                    kind=status_kind,
+                kind=status_kind,
+            ),
+            mo.callout(
+                mo.md(
+                    f"**Status:** {status}. "
+                    + (
+                        "Complete all predictions, checkpoints, policy choices, and the V2-14 implication before final save."
+                        if incomplete
+                        else "Ledger snapshot saved for downstream labs."
+                    )
                 ),
-                report_export_panel(report),
-            ]
-        )
+                kind=status_kind,
+            ),
+            mo.Html(f"""
+            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['GreenLine']};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                        Selected release policy</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                        {v2_13_selected_policy['name']}</div>
+                </div>
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['OrangeLine']};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                        Binding guardrail</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                        {binding_guardrail}</div>
+                </div>
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['RedLine']};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                        Rejected alternative</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                        {v2_13_rejected_policy_result['name']}</div>
+                </div>
+            </div>
+            """),
+            big_takeaways([
+                "Threat modeling turns asset, boundary, adversary, and control into measurable amounts.",
+                "Privacy/security controls spend latency, utility, and governance budget.",
+                "Access, retention, deletion, and audit lineage determine residual exposure.",
+                "A deployable security/privacy policy is a conjunction of guardrails.",
+            ]),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION &amp; SIGN-OFF</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Security &amp; Privacy Architect Authorization</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Confirm your security architecture, verify that all 6 independent guardrails pass, and export the signed privacy assurance report.
+                </p>
+            </div>
+            """),
+            report_export_panel(report),
+            mo.Html(f"""
+            <div style="display: flex; gap: 16px; margin: 16px 0; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        What's Next
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab V2-14: Robust AI: Distribution Shift, Outliers &amp; Adversarial Perturbations</strong> &mdash;
+                        Carry forward the selected security policy and residual risk ceiling. The next challenge is verifying robustness
+                        against distributional drift, adversarial feature attacks, and sensor corruptions.
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 280px; background: white;
+                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                            padding: 20px 24px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                        Upstream Precedent
+                    </div>
+                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                        <strong>Lab V2-12: ML Operations at Scale</strong> provided the error budget and canary release harness.
+                        Security and privacy controls now establish the cryptographic trust boundary and lineage guarantees.
+                    </div>
+                </div>
+            </div>
+            """),
+        ]
+        return mo.vstack(items)
 
     v2_13_tabs = mo.ui.tabs(
         {
-            "Part A - Surface Budget": v2_13_build_part_a(),
-            "Part B - Control Overhead": v2_13_build_part_b(),
-            "Part C - Lineage": v2_13_build_part_c(),
-            "Part D - Policy": v2_13_build_part_d(),
+            "Part A - Surface Budget": build_part_a(),
+            "Part B - Control Overhead": build_part_b(),
+            "Part C - Lineage": build_part_c(),
+            "Part D - Policy": build_part_d(),
             "Synthesis": build_synthesis(),
         }
     )
