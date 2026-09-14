@@ -3125,14 +3125,14 @@ def mlperf_generate_compliance_report(self, results: Dict[str, Dict[str, Any]],
     report_data = self._compile_report_data(results)
 
     # Save JSON report
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(report_data, f, indent=2)
 
     # Generate and save human-readable summary
     summary_text = self._format_compliance_summary(report_data)
 
     summary_path = output_path.replace('.json', '_summary.md')
-    with open(summary_path, 'w') as f:
+    with open(summary_path, 'w', encoding='utf-8') as f:
         f.write(summary_text)
 
     print(f"📄 MLPerf report saved to {output_path}")
