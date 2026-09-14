@@ -43,8 +43,8 @@ SYNC_MAP=(
 #   tinytorch/site/_static/subscribe-modal.js                (legacy Sphinx site)
 #
 # SocratiQ Interactive Widget (Canonicals only, no mirrors needed):
-#   books/tools/scripts/socratiQ/bundle.js
-#   books/tools/scripts/socratiQ/assets/style.css
+#   binder/tools/scripts/socratiQ/bundle.js
+#   binder/tools/scripts/socratiQ/assets/style.css
 
 stale=0
 synced=0

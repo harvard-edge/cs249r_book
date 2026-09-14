@@ -79,9 +79,12 @@ export default defineConfig({
         
         // --- Destinations ---
         const destinations = [
-          { 
-            path: resolve(__dirname, '../books/tools/scripts/socratiQ'), 
-            name: "Quarto Source" 
+          // 2026-09-14: was ../books/tools/scripts/socratiQ, a path the toolchain
+          // left on 2026-09-10. The bundle was never regenerated in place, so the
+          // CI drift guard compared a file this build no longer wrote.
+          {
+            path: resolve(__dirname, '../binder/tools/scripts/socratiQ'),
+            name: "Quarto Source"
           },
           { 
             path: resolve(__dirname, '../books/_build/html-vol1/tools/scripts/socratiQ'), 
