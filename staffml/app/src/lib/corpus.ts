@@ -108,7 +108,7 @@ export interface Resource {
  * `primary` ref carries an authored `why` line connecting the topic to the
  * chapter; `also_see` refs are secondary reading. `url` is a chapter-level
  * mlsysbook.ai link (section anchors are deferred — they regenerate on
- * rebuild). See `BookRefResolver` in vault-cli and cs249r_book#1822.
+ * rebuild). See `BookRefResolver` in vault-cli and harvard-edge/cs249r_book#1822.
  */
 export interface BookRef {
   vol: number;
