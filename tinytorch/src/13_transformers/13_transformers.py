@@ -497,7 +497,7 @@ class LayerNorm:
         - beta should start at 0.0 (no shift)
         - eps prevents division by zero in variance calculation
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not isinstance(normalized_shape, (int, np.integer)) or normalized_shape <= 0:
             raise ValueError("TinyTorch LayerNorm normalizes one positive final dimension")
         self.normalized_shape = normalized_shape
@@ -681,7 +681,7 @@ class MLP:
 
         HINT: Standard transformer MLP uses 4x expansion (hidden_dim = 4 * embed_dim)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if hidden_dim is None:
             hidden_dim = 4 * embed_dim  # Standard 4x expansion
 
@@ -714,7 +714,7 @@ class MLP:
 
         HINT: self.gelu is the GELU you built in Module 02
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # First linear layer with expansion
         hidden = self.linear1.forward(x)
 
@@ -912,7 +912,7 @@ class TransformerBlock:
 
         HINT: We use pre-norm architecture (LayerNorm before attention/MLP)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.embed_dim = embed_dim
         self.num_heads = num_heads
 
@@ -1286,7 +1286,7 @@ class GPT:
         - Language modeling head is a separate Linear(embed_dim, vocab_size) layer
           (weight tying with the token embedding is a production optimization not implemented here)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.num_layers = num_layers
@@ -1334,7 +1334,7 @@ class GPT:
 
         HINT: Pass start_pos to the embedding layer; it slices the positions from there
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         batch_size, seq_len = tokens.shape
 
         # Pass tokens to embedding layer to get token embeddings and positional embeddings
@@ -1362,7 +1362,7 @@ class GPT:
 
     def _create_causal_mask(self, seq_len):
         """Create causal mask to prevent attending to future positions."""
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Same binary convention as create_causal_mask: 1 = attend, 0 = block
         return create_causal_mask(seq_len)
         ### END SOLUTION
@@ -1386,7 +1386,7 @@ class GPT:
 
         HINT: Use np.exp(x - max(x)) / sum(np.exp(x - max(x))) for stable softmax
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Apply temperature scaling
         if not np.isfinite(temperature) or temperature < 0:
             raise ValueError("temperature must be finite and nonnegative")
@@ -1427,7 +1427,7 @@ class GPT:
 
         HINT: Use self._sample_next_token(last_logits, temperature) for sampling
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if len(prompt_tokens.shape) != 2 or prompt_tokens.shape[0] != 1 or prompt_tokens.shape[1] == 0:
             raise ValueError("generate expects one nonempty prompt with shape (1, sequence)")
         if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:

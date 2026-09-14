@@ -415,7 +415,7 @@ class Embedding:
 
         HINT: rng.uniform(-limit, limit, (vocab_size, embed_dim))
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
 
@@ -689,7 +689,7 @@ class PositionalEncoding:
 
         HINT: limit = sqrt(2.0 / embed_dim), then uniform(-limit, limit)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.max_seq_len = max_seq_len
         self.embed_dim = embed_dim
 
@@ -734,7 +734,7 @@ class PositionalEncoding:
           never reaches the parameter.
         - Use x + pos_embeddings_batched for element-wise addition
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if len(x.shape) == 2:
             raise ValueError(
                 f"Expected 3D input (batch, seq, embed), got 2D: {x.shape}\n"
@@ -1113,7 +1113,7 @@ def create_sinusoidal_embeddings(max_seq_len: int, embed_dim: int) -> Tensor:
     HINT: The heavy lifting is done by _compute_sinusoidal_table. This function
     just wraps the result as a Tensor for use in the embedding pipeline.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     pe = _compute_sinusoidal_table(max_seq_len, embed_dim)
     return Tensor(pe)
     ### END SOLUTION
@@ -1323,7 +1323,7 @@ class EmbeddingLayer:
         HINT: The pos_encoding parameter selects the strategy; each strategy
         produces a different type of object stored in self.pos_encoding.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.max_seq_len = max_seq_len
@@ -1478,7 +1478,7 @@ def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
     - For learned PE, just call self.pos_encoding.forward(token_embeds, start_pos)
     - Remember to squeeze the batch dim for 1D inputs at the end
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Handle 1D input by adding batch dimension
     if len(tokens.shape) == 1:
         # NOTE: Tensor reshape preserves gradients

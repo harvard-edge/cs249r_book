@@ -321,7 +321,7 @@ class Linear(Layer):
         - Use rng.standard_normal() for normal distribution
         - bias=None when bias=False
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.in_features = in_features
         self.out_features = out_features
 
@@ -397,7 +397,7 @@ class Linear(Layer):
         - Check if self.bias is not None before appending
         - Return the complete list
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         params = [self.weight]
         if self.bias is not None:
             params.append(self.bias)
@@ -639,7 +639,7 @@ class Dropout(Layer):
         - Check: DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB
         - Raise descriptive ValueError if invalid
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB:
             raise ValueError(
                 f"Invalid dropout probability: {p}\n"
@@ -676,7 +676,7 @@ class Dropout(Layer):
 
         HINT: Both conditions must be true for dropout to apply
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return training and self.p > DROPOUT_MIN_PROB
         ### END SOLUTION
 
@@ -716,7 +716,7 @@ class Dropout(Layer):
         - Threshold with < keep_prob to get a boolean mask
         - Scale factor is 1.0 / keep_prob
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         keep_prob = 1.0 - self.p
         binary_mask = (rng.random(shape) < keep_prob).astype(np.float32)
         scale = 1.0 / keep_prob
