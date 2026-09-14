@@ -1,4 +1,4 @@
-# Trajectory Scheduling & Cluster Resource Management {#sec-vol3-scheduling}
+# Trajectory Cluster Scheduling {#sec-vol3-scheduling}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -44,7 +44,7 @@ When an autonomous agent enters a prolonged wait state for an external sandbox c
 - Calculate analytical breakeven thresholds for preemptive KV cache swapping across HBM, host DDR5 DRAM, and NVMe fabrics during blocking tool invocations.
 :::
 
-## Continuous Batching and Chunked Prefill {#sec-vol3-scheduling-continuous-batching}
+## Continuous Chunked Batching {#sec-vol3-scheduling-continuous-batching}
 
 Consider an interactive software engineering environment where an accelerator cluster serves 32 concurrent developer agents. Each agent maintains an active conversational session, generating code edits and receiving real-time syntax suggestions at an average Inter-Token Latency (ITL) of $25\text{ ms}$. Suddenly, an automated background triage agent arrives with an expansive request: it submits a $64\text{k}$-token repository diff to bisect a compiler regression. In a conventional serving engine running monolithic continuous iteration batching, the scheduler injects this entire $64\text{k}$-token prompt into the immediate next execution batch. The Tensor Cores on an NVIDIA H100 GPU are monopolized for $420\text{ ms}$ executing the prompt prefill General Matrix Multiply (GEMM) kernels. For nearly half a second, the 32 interactive agents cannot execute a single decode iteration; their Inter-Token Latency spikes by $16.8\times$ from $25\text{ ms}$ to $445\text{ ms}$. Interactive code completions stutter, token streaming buffers drain, and human-facing service level agreements (SLAs) are comprehensively breached.
 
@@ -341,7 +341,7 @@ class ChunkedPrefillScheduler:
 
 While chunked prefill successfully bounds Inter-Token Latency jitter within a single GPU or tensor-parallel group, co-locating prefill and decode phases on the exact same physical silicon remains fundamentally suboptimal. Slicing prefills forces compute-dense GEMMs to interleave with memory-bound GEMVs across the same Streaming Multiprocessors, generating severe intra-core contention for L2 cache capacity and shared memory bandwidth. Furthermore, co-location forces both operational phases into a single, coupled Tensor Parallelism degree ($TP$), creating an unresolvable architectural deadlock: prompt prefill requires high tensor parallelism ($TP = 8$) to minimize Time-To-First-Token, while autoregressive decode throughput favors low tensor parallelism ($TP = 1$ or $TP = 2$) to eliminate latency-dominated cross-GPU all-reduce synchronization. To break this hardware gridlock and achieve true hardware specialization, the runtime must physically disaggregate prefill from decode across high-speed interconnects.
 
-## Disaggregated Serving: Separating Prefill and Decode {#sec-vol3-scheduling-disaggregated}
+## Disaggregated Prefill-Decode Serving {#sec-vol3-scheduling-disaggregated}
 
 Even with chunked prefill, a homogeneous accelerator cluster exhibits deep operational inefficiencies when serving multi-agent workflows. Consider a 64-GPU cluster deployed to serve an enterprise agentic coding platform. During the morning hours, hundreds of agents ingest large codebases, documentation indices, and compiler traces—a workload dominated by massive prefill requests demanding tens of petaflops of raw FP16/BF16 compute. In the afternoon, those same agents enter autonomous debugging loops, performing multi-step tool calls, emitting thought tokens, and evaluating small intermediate results—a decode-dominated workload demanding terabytes per second of aggregate memory bandwidth while leaving $85\%$ of the Tensor Cores unutilized.
 
@@ -441,7 +441,7 @@ By enforcing the KV streaming invariant, the disaggregated runtime transfers ove
 
 Physical disaggregation specializes hardware nodes and neutralizes the KV transfer tax, but physical specialization alone cannot protect cluster stability against workload heterogeneity. When incoming requests originate from diverse agent classes—ranging from low-latency interactive developer completions to multi-hour autonomous debugging loops—a naive cluster control plane suffers from catastrophic queueing interference. Even on physically decoupled pools, admitting long-running, unpredictable reasoning trajectories into unweighted FIFO queues paralyzes the prefill and decode dispatch pipelines. To preserve Quality of Service across the cluster, the runtime must formalize decoupled Service-Level Objectives and deploy priority-aware queueing disciplines grounded in the mathematical realities of heavy-tailed workloads.
 
-## Priority Scheduling and Service-Level Objectives for Agent Swarms {#sec-vol3-scheduling-priority}
+## Swarm Priority Scheduling {#sec-vol3-scheduling-priority}
 
 In an enterprise multi-agent deployment, request streams are fundamentally heterogeneous. Consider a system supporting two concurrent classes of agents:
 
@@ -559,7 +559,7 @@ Before examining cache-aware prefix routing and distributed load balancing, veri
 
 While Multi-Level Feedback Queues govern the temporal prioritization of compute across heavy-tailed agent horizons, scheduling compute across time resolves only half the cluster optimization challenge. When dozens of agents in an autonomous swarm collaborate on a shared code repository or tool ecosystem, their prompts contain vast, overlapping token sequences. How should the cluster orchestrator route requests spatially across distributed nodes to eliminate redundant prefill computation without causing memory hot-spotting? This requires cache-aware load balancing and prefix routing.
 
-## Cache-Aware Load Balancing and Prefix Routing {#sec-vol3-scheduling-prefix-routing}
+## Cache-Aware Prefix Routing {#sec-vol3-scheduling-prefix-routing}
 
 In multi-agent systems, agents rarely operate in isolated lexical vacuums. Consider an autonomous software engineering swarm where 40 developer agents collaborate on a single repository:
 

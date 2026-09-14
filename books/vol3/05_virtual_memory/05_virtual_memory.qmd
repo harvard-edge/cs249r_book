@@ -1,4 +1,4 @@
-# Virtual Memory & PagedAttention {#sec-vol3-virtual-memory}
+# Paged Attention Memory {#sec-vol3-virtual-memory}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -592,7 +592,7 @@ class SpeculativeBranchCapacity:
 
 PagedAttention resolves the physical memory addressing problem: it allows arbitrary non-contiguous physical blocks to back a logical sequence and enables zero-copy sharing across known, explicitly forked branches. However, PagedAttention assumes the serving system already knows which requests share memory. In an autonomous multi-agent swarm where dozens of heterogeneous agents submit requests asynchronously, the runtime requires a dynamic indexing data structure to discover, match, and reuse shared prefixes automatically.
 
-## Memory Defragmentation, Page Tables, and Block Allocation {#sec-vol3-virtualmem-defrag}
+## Paged KV-Block Allocation {#sec-vol3-virtualmem-defrag}
 
 An asynchronous multi-agent orchestrator managing 32 automated pull-request evaluation workers encounters severe latency jitter: while the cluster's median Time-to-First-Token (TTFT) is $210\text{ ms}$, the 99th-percentile tail latency explodes to $16.4\text{ seconds}$. Profiling the host CPU serving process reveals that the runtime is suffering from severe **prefix cache thrashing**. Because worker agents submit prompts with minor cosmetic variations in their system instructions and tool definitions, an unindexed page allocator fails to recognize common token substrings. The host engine repeatedly evicts warm physical blocks to satisfy incoming allocations, only to immediately re-prefill those exact same tokens hundreds of milliseconds later.
 
@@ -790,7 +790,7 @@ When the tool execution nears completion (or when the orchestrator receives an a
 
 Dynamic prefix trees, chunked prefill, and hierarchical memory swapping optimize the management of physical memory on a single machine. However, as agent context windows expand beyond 100,000 tokens and swarms scale across hundreds of accelerators, co-locating compute-bound prefill and memory-bound decode on the same silicon creates an unresolvable hardware bottleneck. Breaking this bottleneck requires physical disaggregation.
 
-## Prefill-Decode Disaggregation and Remote KV Paging {#sec-vol3-virtualmem-disaggregation}
+## Remote KV-Paging Disaggregation {#sec-vol3-virtualmem-disaggregation}
 
 A high-scale agent infrastructure serving an enterprise code-generation fleet deploys 64 homogeneous nodes, each equipped with 8 NVIDIA H100 GPUs. The platform encounters an insoluble operational dilemma: if the nodes are configured with large batch sizes to maximize decode throughput and amortize parameter streaming costs, incoming 32,000-token tool observations cause massive Time-to-First-Token (TTFT) stalls, halting generation across all active streams for up to 8 seconds. Conversely, if the scheduler reserves GPU compute headroom to process incoming prefills instantaneously, the cluster's sustained decode throughput collapses by $65\%$, stranding millions of dollars of GPU capital equipment.
 
@@ -875,7 +875,7 @@ In an agentic cluster where $\gamma = 25$, prefill nodes represent over $60\%$ o
 
 Even with disaggregated serving over $800\text{ Gbps}$ RDMA networks, the absolute size of the Key-Value cache remains the fundamental ceiling on concurrency. Storing multi-gigabyte activation tensors in 16-bit precision exhausts accelerator memory when context windows scale to 128,000 or 1,000,000 tokens. Unlocking the next order of magnitude in agent concurrency requires compressing the activations themselves.
 
-## Hardware-Aware KV Cache Compression: Quantization and SVD {#sec-vol3-virtualmem-compression}
+## Hardware-Aware KV-Cache Compression {#sec-vol3-virtualmem-compression}
 
 A frontier autonomous agent platform serving 1,000 concurrent developer agents hits an insurmountable memory capacity barrier when sequences reach 64,000 tokens. Adding additional GPU nodes is cost-prohibitive, requiring millions of dollars in capital expenditure. To double agent concurrency on existing hardware, the platform's infrastructure team enables naive INT4 uniform quantization across all Key and Value caches. Within hours, customer error reports surge: the agents' pass rate on HumanEval code-generation benchmarks plummets from $84.2\%$ to $32.8\%$. Detailed activation logs reveal that the model has begun emitting corrupted JSON schemas, generating invalid variable names, and getting trapped in infinite repetition loops. The cause: numerical underflow and severe clipping error in attention outlier channels.
 
