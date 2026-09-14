@@ -452,7 +452,7 @@ class KVCache:
         - Store caches as list of tuples: [(key_0, val_0), (key_1, val_1), ...]
         - Pre-allocation avoids dynamic resizing overhead during generation
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         for name, value in (("batch_size", batch_size), ("max_seq_len", max_seq_len),
                             ("num_layers", num_layers), ("num_heads", num_heads),
                             ("head_dim", head_dim)):
@@ -1016,7 +1016,7 @@ def _create_cache_storage(model):
     - Raise AttributeError with helpful 3-part message if attribute missing
     - Raise ValueError if embed_dim not divisible by num_heads
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Validate model has required attributes
     # hasattr() is LEGITIMATE here: plugin system with user-defined models
     required_attrs = ['embed_dim', 'num_layers', 'num_heads', 'max_seq_len', 'blocks']
@@ -1191,7 +1191,7 @@ class CachedAttention:
         - x.shape[1] is the sequence length
         - The cached step handles an empty cache itself (the first token attends to itself)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if x.shape[1] > 1:
             return self.attention.forward(x, mask)
         return _cached_generation_step(x, self.attention, self.cache, self.layer_idx)
@@ -1322,7 +1322,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     Returns:
         List of generated token IDs (integers)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
         raise ValueError("max_new_tokens must be a nonnegative integer")
     if not np.isfinite(temperature) or temperature < 0:
@@ -1504,7 +1504,7 @@ def enable_kv_cache(model):
     - isinstance(block.attention, CachedAttention) tells you a stand-in is already in place
     - The stand-in needs the original layer, the cache, and its layer index
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Step 1: Validate model and create cache
     cache, head_dim = _create_cache_storage(model)
 

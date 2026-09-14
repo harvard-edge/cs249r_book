@@ -684,7 +684,7 @@ class BenchmarkReport:
         - Multiply by 1000 to convert seconds to milliseconds
         - Use X_batch[:1] so each call sees exactly one sample
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if num_runs <= 0 or X_batch.shape[0] == 0:
             raise ValueError("Latency measurement needs samples and positive num_runs")
         for _ in range(min(5, num_runs)):
@@ -713,7 +713,7 @@ class BenchmarkReport:
         - FP32 = 4 bytes per parameter
         - 1 MB = 1024 * 1024 bytes
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if hasattr(model, 'size_bytes'):
             return model.size_bytes() / (1024 * 1024)
         return sum(param.data.nbytes for param in model.parameters()) / (1024 * 1024)
@@ -2236,5 +2236,5 @@ You started Module 01 with a simple Tensor class. Now you have:
 
 Export with: `tito module complete 20`
 
-**Next**: The TorchPerf Olympics in `milestones/06_2018_mlperf/` pit your submission against everyone else's. Congratulations on completing TinyTorch!
+**Next**: The TinyTorch Olympics in `milestones/06_2018_mlperf/` pit your submission against everyone else's. Congratulations on completing TinyTorch!
 """

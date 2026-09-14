@@ -291,7 +291,7 @@ class LogSoftmax(Function):
 
         HINT: Use np.max(x, axis=dim, keepdims=True) to preserve dimensions
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Step 1: Find max along dimension for numerical stability
         max_vals = np.max(x, axis=self.dim, keepdims=True)
 
@@ -882,7 +882,7 @@ class BinaryCrossEntropyFunction(Function):
         - Binary cross-entropy: -(targets * log(preds) + (1-targets) * log(1-preds))
         - Use np.mean() to average over all samples
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if predictions.shape != targets.shape or predictions.size == 0:
             raise ValueError("BinaryCrossEntropyLoss requires matching, nonempty prediction and target shapes")
         for values in (predictions, targets):

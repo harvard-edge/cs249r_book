@@ -249,7 +249,7 @@ class SigmoidFunction(Function):
         (exp(1000) is inf in float32). The unit test runs your code with NumPy
         set to raise on overflow, so the naive form fails it
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Both branches use the same bounded exponential, so neither overflows.
         z = np.exp(-np.abs(x))
         result = np.where(x >= 0, 1.0 / (1.0 + z), z / (1.0 + z))
@@ -514,7 +514,7 @@ class TanhFunction(Function):
 
         HINT: NumPy provides np.tanh function
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Apply tanh using NumPy
         result = np.tanh(x)
         return result
@@ -661,7 +661,7 @@ class GELUFunction(Function):
 
         HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return x * SigmoidFunction().forward(1.702 * x)
         ### END SOLUTION
 

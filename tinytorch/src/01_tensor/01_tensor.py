@@ -512,7 +512,7 @@ class Tensor:
         HINT: Use len(tensor.shape) to check dimensionality and tensor.shape[-1]
         to access the last dimension.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not isinstance(other, Tensor):
             raise TypeError(
                 f"Matrix multiplication requires Tensor, got {type(other).__name__}\n"
@@ -594,7 +594,7 @@ class Tensor:
         - For -1: unknown_dim = self.size // known_size
         - Raise ValueError if total elements don't match
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
             new_shape = tuple(shape[0])
         else:
@@ -672,7 +672,7 @@ class Tensor:
         - For default: axes[-2], axes[-1] = axes[-1], axes[-2]
         - The Permute operation calls np.transpose(a, axes); here you only build the axes list
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if dim0 is None and dim1 is None:
             if len(self.shape) < 2:
                 return Copy.apply(self)
@@ -916,7 +916,7 @@ class Sub(Function):
 
         HINT: NumPy's - operator handles broadcasting automatically
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return a - b
         ### END SOLUTION
 
@@ -936,7 +936,7 @@ class Mul(Function):
         >>> print((a * b).data)
         [ 4. 10. 18.]
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return a * b
         ### END SOLUTION
 
@@ -952,7 +952,7 @@ class Div(Function):
 
         HINT: Do not guard against zero. float32 division by zero gives inf, which is the honest answer.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return a / b
         ### END SOLUTION
 
@@ -1471,7 +1471,7 @@ class Slice(Function):
         1. self.key is whatever the caller wrote inside the brackets (an int, a slice, a tuple, ...)
         2. NumPy indexing already understands every one of those, so hand it the key
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return a[self.key]
         ### END SOLUTION
 
@@ -1485,7 +1485,7 @@ class Reshape(Function):
 
         TODO: Return np.reshape(a, self.shape).
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return np.reshape(a, self.shape)
         ### END SOLUTION
 
@@ -1499,7 +1499,7 @@ class Permute(Function):
 
         TODO: Return np.transpose(a, self.axes).
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return np.transpose(a, self.axes)
         ### END SOLUTION
 
@@ -1515,7 +1515,7 @@ class Copy(Function):
 
         HINT: NumPy promotes a scalar to shape (1,); reshape back to a.shape.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return np.ascontiguousarray(a).reshape(a.shape)
         ### END SOLUTION
 
@@ -1532,7 +1532,7 @@ class MaskedFill(Function):
         HINT: Copy first. Boolean indexing needs a full-size mask; use
         np.broadcast_to(self.mask, a.shape) to expand a shared attention mask.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         result = a.copy()
         result[np.broadcast_to(self.mask, a.shape)] = self.value
         return result
@@ -1747,7 +1747,7 @@ class Sum(Function):
 
         HINT: axis=None (the default) sums every element.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return np.sum(a, axis=self.axis, keepdims=self.keepdims)
         ### END SOLUTION
 
@@ -1763,7 +1763,7 @@ class Mean(Function):
 
         TODO: Return np.mean(a, axis=self.axis, keepdims=self.keepdims).
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return np.mean(a, axis=self.axis, keepdims=self.keepdims)
         ### END SOLUTION
 
@@ -1779,7 +1779,7 @@ class Max(Function):
 
         TODO: Return np.max(a, axis=self.axis, keepdims=self.keepdims).
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return np.max(a, axis=self.axis, keepdims=self.keepdims)
         ### END SOLUTION
 

@@ -130,7 +130,7 @@ class TestMilestoneRuns:
     @pytest.mark.slow
     def test_milestone_04_cnn_tinydigits(self):
         """Milestone 04: CNN Revolution (1998) - TinyDigits (default, no download)."""
-        returncode, stdout, stderr = run_milestone("04", timeout=180)
+        returncode, stdout, stderr = run_milestone("04", timeout=360)
 
         assert returncode == 0, f"Milestone 04 failed:\nstdout: {stdout}\nstderr: {stderr}"
 

@@ -334,7 +334,7 @@ class Tokenizer:
         >>> CharTokenizer(['a', 'b', 'c']).encode("abc")
         [1, 2, 3]
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         raise NotImplementedError(
             f"encode() not implemented in base Tokenizer class\n"
             f"  ❌ Called encode() on abstract base class {self.__class__.__name__}\n"
@@ -360,7 +360,7 @@ class Tokenizer:
         >>> CharTokenizer(['a', 'b', 'c']).decode([1, 2, 3])
         "abc"
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         raise NotImplementedError(
             f"decode() not implemented in base Tokenizer class\n"
             f"  ❌ Called decode() on abstract base class {self.__class__.__name__}\n"
@@ -467,7 +467,7 @@ class CharTokenizer(Tokenizer):
         >>> tokenizer.vocab_size
         4  # 3 chars + 1 unknown token
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if vocab is None:
             vocab = []
 
@@ -499,7 +499,7 @@ class CharTokenizer(Tokenizer):
         - Join all texts then convert to set
         - Don't forget the <UNK> token
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Collect all unique characters
         all_chars = set()
         for text in corpus:
@@ -533,7 +533,7 @@ class CharTokenizer(Tokenizer):
         >>> tokenizer.encode("hello")
         [1, 2, 3, 3, 4]  # maps to h,e,l,l,o
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         tokens = []
         for char in text:
             tokens.append(self.char_to_id.get(char, self.unk_id))
@@ -556,7 +556,7 @@ class CharTokenizer(Tokenizer):
         >>> tokenizer.decode([1, 2, 3, 3, 4])
         "hello"
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         chars = []
         for token_id in tokens:
             # Use unknown token for invalid IDs
@@ -1004,7 +1004,7 @@ class BPETokenizer(Tokenizer):
 
         HINT: Initialize vocab and merges as empty lists, mappings as empty dicts
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.vocab_size = vocab_size
         self.vocab = []
         self.merges = []  # List of (pair, new_token) merges
@@ -1029,7 +1029,7 @@ class BPETokenizer(Tokenizer):
 
         HINT: Use list() to split word into characters, then modify the last element
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not word:
             return []
 
@@ -1055,7 +1055,7 @@ class BPETokenizer(Tokenizer):
 
         HINT: Loop from 0 to len(word_tokens)-1 and create tuple pairs
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         pairs = set()
         for i in range(len(word_tokens) - 1):
             pairs.add((word_tokens[i], word_tokens[i + 1]))
@@ -1096,7 +1096,7 @@ class BPETokenizer(Tokenizer):
         - Use _merge_pair(word_tokens, best_pair) to apply the merge
         - Don't forget to call _build_mappings() at the end
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if vocab_size:
             self.vocab_size = vocab_size
 
@@ -1135,7 +1135,7 @@ class BPETokenizer(Tokenizer):
 
     def _build_mappings(self):
         """Build token-to-ID and ID-to-token mappings."""
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.token_to_id = {token: idx for idx, token in enumerate(self.vocab)}
         self.id_to_token = {idx: token for idx, token in enumerate(self.vocab)}
         ### END SOLUTION
@@ -1158,7 +1158,7 @@ class BPETokenizer(Tokenizer):
 
         HINT: For each merge pair, scan through tokens and replace adjacent pairs
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not self.merges:
             return tokens
 
@@ -1202,7 +1202,7 @@ class BPETokenizer(Tokenizer):
         - Use _apply_merges() to apply learned merge rules
         - Use token_to_id dictionary with 0 (UNK) as default
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not self.vocab:
             return []
 
@@ -1247,7 +1247,7 @@ class BPETokenizer(Tokenizer):
         - Join all tokens into single string with ''.join()
         - Replace Tokenizer.TOK_EOW markers with spaces for word boundaries
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not self.id_to_token:
             return ""
 
@@ -1397,7 +1397,7 @@ def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: Lis
     >>> tokenizer = create_tokenizer("char", corpus=corpus)
     >>> tokens = tokenizer.encode("hello")
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if strategy == "char":
         tokenizer = CharTokenizer()
         if corpus:
@@ -1439,7 +1439,7 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     - Handle empty texts gracefully (empty list is fine)
     - Truncate from the end if too long: tokens[:max_length]
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if max_length is not None and (not isinstance(max_length, int) or max_length < 0):
         raise ValueError("max_length must be a nonnegative integer or None")
     tokenized = []
@@ -1479,7 +1479,7 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
     - Compression ratio = total_characters / total_tokens
     - Return dict with vocab_size, avg_sequence_length, max_sequence_length, etc.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Tokenize once, then derive every statistic from the result
     tokenized = [tokenizer.encode(text) for text in texts]
     all_tokens = [token for tokens in tokenized for token in tokens]

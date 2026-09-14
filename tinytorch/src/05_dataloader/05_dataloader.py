@@ -192,7 +192,7 @@ class Dataset(ABC):
     HINT: Abstract methods force subclasses to implement core functionality
     """
 
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     @abstractmethod
     def __len__(self) -> int:
         """
@@ -365,7 +365,7 @@ class TensorDataset(Dataset):
 
         All tensors must have the same size in their first dimension.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if len(tensors) == 0:
             raise ValueError("TensorDataset needs at least one tensor")
 
@@ -403,7 +403,7 @@ class TensorDataset(Dataset):
 
         HINT: All tensors have same first dimension (validated in __init__)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         return len(self.tensors[0].data)
         ### END SOLUTION
 
@@ -441,7 +441,7 @@ class TensorDataset(Dataset):
         - Report the index the caller passed in the error, not the normalized one
         - Use generator expression with tuple() for clean syntax
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         original_idx = idx
         if idx < 0:
             idx += len(self)
@@ -627,7 +627,7 @@ class DataLoader:
             batch_size: Number of samples per batch
             shuffle: Whether to shuffle data each epoch
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if isinstance(batch_size, bool) or not isinstance(batch_size, (int, np.integer)) or batch_size < 1:
             raise ValueError("batch_size must be a positive integer")
         self.dataset = dataset
@@ -652,7 +652,7 @@ class DataLoader:
 
         HINT: Ceiling division handles uneven splits correctly
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Calculate number of complete batches
         return (len(self.dataset) + self.batch_size - 1) // self.batch_size
         ### END SOLUTION
@@ -726,7 +726,7 @@ class DataLoader:
         - Extract .data from each tensor before stacking
         - np.stack() creates new axis at position 0 (batch dimension)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if len(batch) == 0:
             return ()
 
@@ -841,7 +841,7 @@ class RandomHorizontalFlip:
 
         HINT: Raise ValueError if p is outside valid range
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not 0.0 <= p <= 1.0:
             raise ValueError(
                 f"Invalid flip probability: {p}\n"
@@ -877,7 +877,7 @@ class RandomHorizontalFlip:
 
         HINT: Find the width axis first; it differs for HW, CHW, and HWC layouts
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if rng.random() < self.p:
             is_tensor = isinstance(x, Tensor)
             data = x.data if is_tensor else x
@@ -956,7 +956,7 @@ def _pad_image(data, padding):
     - Use (0, 0) for axes you do NOT want to pad (channels)
     - Use (padding, padding) for axes you DO want to pad (H, W)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if data.ndim == 2:
         # (H, W) format — pad both axes
         return np.pad(data, padding, mode='constant', constant_values=0)
@@ -1071,7 +1071,7 @@ def _random_crop_region(padded_h, padded_w, target_h, target_w):
 
     HINT: rng.integers(0, high+1) gives values in [0, high] inclusive
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     top = rng.integers(0, padded_h - target_h + 1)
     left = rng.integers(0, padded_w - target_w + 1)
     return top, left
@@ -1176,7 +1176,7 @@ class RandomCrop:
 
         HINT: Handle both int and tuple sizes for flexibility
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if isinstance(size, int):
             self.size = (size, size)
         else:
@@ -1214,7 +1214,7 @@ class RandomCrop:
           CHW: padded[:, top:top+h, left:left+w]
           HWC: padded[top:top+h, left:left+w, :]
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         is_tensor = isinstance(x, Tensor)
         data = x.data if is_tensor else x
 

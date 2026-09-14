@@ -281,7 +281,7 @@ class Optimizer:
           optimizer, and PyTorch does not zero gradients at construction either.
           Only set grad when the attribute is missing.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Own the list so later caller edits cannot misalign parameters and state.
         self.params = list(params)
         if len({id(param) for param in self.params}) != len(self.params):
@@ -312,7 +312,7 @@ class Optimizer:
 
         WHY: Gradients accumulate by default, so we need to clear them between batches
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         for param in self.params:
             param.grad = None
         ### END SOLUTION
@@ -381,7 +381,7 @@ def _extract_gradient(self, param: Tensor) -> np.ndarray:
 
     HINT: Use isinstance(grad, Tensor) to check the type
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     grad = param.grad
     if isinstance(grad, Tensor):
         return grad.data
@@ -591,7 +591,7 @@ class SGD(Optimizer):
         - Momentum buffers should be initialized as None
         - They'll be created lazily on first step
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         super().__init__(params)
 
         self.lr = lr
@@ -888,7 +888,7 @@ class Adam(Optimizer):
         EXAMPLE:
         >>> optimizer = Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         super().__init__(params)
 
         self.lr = lr
@@ -1276,7 +1276,7 @@ class AdamW(Optimizer):
         EXAMPLE:
         >>> optimizer = AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         super().__init__(params)
 
         self.lr = lr
@@ -1337,7 +1337,7 @@ def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
 
     HINT: Same math as Adam -- the decoupling happens in step(), not here
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Initialize buffers if needed
     if self.m_buffers[i] is None:
         self.m_buffers[i] = np.zeros_like(grad_data)
@@ -1463,7 +1463,7 @@ def step(self):
     - Do NOT modify grad_data with weight decay (that is Adam's coupled form)
     - Apply decay as a multiplicative factor on param.data
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Increment step counter first
     self.step_count += 1
 
