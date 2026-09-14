@@ -1,12 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -36,23 +31,10 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         RationaleChallenge,
-        build_lab_report,
-        deployment_mitigation,
-        deployment_track_profile,
-        evaluate_deployment_envelope,
         evaluate_rationale,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
         render_interactive_roofline,
         render_latency_breakdown,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        sweep_deployment_knob,
-        track_arc_context,
-        track_context,
-        track_selector,
+        build_lab_report,
     )
 
     ledger = DesignLedger()
@@ -60,1704 +42,549 @@ async def _():
         _ = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS,
-        COLORS,
-        LAB_CSS,
-        MathPeek,
         RationaleChallenge,
-        apply_plotly_theme,
-        build_lab_report,
-        deployment_mitigation,
-        deployment_track_profile,
-        evaluate_deployment_envelope,
         evaluate_rationale,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        html,
         ledger,
         mlsysim,
         mo,
         render_interactive_roofline,
         render_latency_breakdown,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        sweep_deployment_knob,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v1_02_metadata = get_lab_metadata("vol1/lab_02_ml_systems.py")
-    return (v1_02_metadata,)
-
-
-@app.cell(hide_code=True)
-def _(ledger, track_selector):
-    v1_02_saved_track = ledger.get_track()
-    v1_02_default_track = (
-        v1_02_saved_track
-        if v1_02_saved_track and v1_02_saved_track != "NONE"
-        else "iphone"
-    )
-    v1_02_track_picker = track_selector(default=v1_02_default_track)
-    v1_02_track_picker
-    return (v1_02_track_picker,)
-
-
-@app.cell
-def _(
-    deployment_track_profile,
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    v1_02_track_picker,
-):
-    v1_02_track_id = v1_02_track_picker.value
-    v1_02_profile = get_track_profile(v1_02_track_id)
-    v1_02_variant = get_lab_track_variant(
-        "v1_02_physics_of_deployment",
-        v1_02_profile.track_id,
-    )
-    v1_02_hardware = resolve_mlsysim_ref(v1_02_variant.hardware_ref)
-    v1_02_model = resolve_mlsysim_ref(v1_02_variant.model_ref)
-    v1_02_deployment = deployment_track_profile(
-        v1_02_profile,
-        v1_02_variant,
-        v1_02_hardware,
-        v1_02_model,
-    )
+def _(mlsysim):
+    # Volume I: The Node Level - Grounded in exact MLSysIM registry objects
+    h100 = mlsysim.Hardware.Cloud.H100
+    llama3 = mlsysim.Models.Language.Llama3_8B
+    h100_peak_flops_tflops = 989.0  # FP16 Tensor Core Peak
+    h100_bandwidth_tbs = 3.35       # HBM3 Peak Bandwidth
+    h100_ridge_point = h100_peak_flops_tflops * 1e12 / (h100_bandwidth_tbs * 1e12)
     return (
-        v1_02_deployment,
-        v1_02_hardware,
-        v1_02_model,
-        v1_02_profile,
-        v1_02_track_id,
-        v1_02_variant,
-    )
-
-
-@app.cell
-def _(
-    deployment_track_profile,
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-):
-    v1_02_track_ids = ("iphone", "oura_ring", "robotaxi", "cloud_fleet")
-    v1_02_all_deployments = {}
-    for _track_id in v1_02_track_ids:
-        track_profile = get_track_profile(_track_id)
-        variant = get_lab_track_variant("v1_02_physics_of_deployment", _track_id)
-        hardware = resolve_mlsysim_ref(variant.hardware_ref)
-        model = resolve_mlsysim_ref(variant.model_ref)
-        v1_02_all_deployments[_track_id] = deployment_track_profile(
-            track_profile,
-            variant,
-            hardware,
-            model,
-        )
-    return (v1_02_all_deployments, v1_02_track_ids)
-
-
-@app.cell
-def _(COLORS, html):
-    def v1_02_wall_category(wall):
-        wall = str(wall or "").lower()
-        if "memory" in wall or "flash" in wall or "ota" in wall:
-            return "memory_or_flash"
-        if "latency" in wall:
-            return "latency"
-        if "energy" in wall or "power" in wall or "thermal" in wall:
-            return "energy_or_power"
-        if "bandwidth" in wall or "cost" in wall:
-            return "bandwidth_or_cost"
-        return "unknown"
-
-    def v1_02_option_label(value, options):
-        if not isinstance(options, dict):
-            return "not selected" if value is None else str(value)
-        for label, option_value in options.items():
-            if option_value == value:
-                return label
-        return "not selected"
-
-    def v1_02_placement_id(raw_value, deployment):
-        for option in deployment.placement_options:
-            if raw_value in (option.placement_id, option.label):
-                return option.placement_id
-        return deployment.placement_options[0].placement_id
-
-    def v1_02_mitigation_value(raw_value, deployment):
-        for mitigation in deployment.mitigation_options:
-            if raw_value == mitigation:
-                return mitigation
-        return deployment.mitigation_options[0] if deployment.mitigation_options else "No mitigation selected."
-
-    def v1_02_clamp_workload(deployment, value):
-        return max(deployment.knob_min, min(deployment.knob_max, float(value)))
-
-    def v1_02_strategy_placement_id(deployment, strategy):
-        index_by_strategy = {"primary": 0, "hybrid": 1, "offload": 2}
-        index = min(index_by_strategy.get(strategy, 0), len(deployment.placement_options) - 1)
-        return deployment.placement_options[index].placement_id
-
-    def v1_02_worst_headroom(result):
-        return min(check.headroom_pct for check in result.checks)
-
-    def v1_02_first_wall_check(result):
-        for check in result.checks:
-            if check.name == result.first_wall:
-                return check
-        return min(result.checks, key=lambda check: check.headroom_pct)
-
-    def v1_02_latency_terms(deployment, result):
-        network_ms = 0.0
-        for option in deployment.placement_options:
-            if option.placement_id == result.placement_id:
-                network_ms = option.network_latency_ms
-                break
-        local_ms = max(0.001, result.latency_ms - network_ms)
-        raw_compute = max(0.05, deployment.model_flops_g / max(deployment.peak_tflops, 0.001))
-        raw_memory = max(
-            0.05,
-            result.memory_required_mb / max(deployment.memory_bandwidth_gbs, 0.001),
-        )
-        raw_overhead = max(0.10, deployment.latency_ms_at_default * 0.08)
-        raw_total = raw_compute + raw_memory + raw_overhead
-        scale = local_ms / raw_total
-        return {
-            "compute": raw_compute * scale,
-            "memory/bandwidth": raw_memory * scale,
-            "placement/network": network_ms,
-            "fixed overhead": raw_overhead * scale,
-        }
-
-    def v1_02_upgrade_terms(terms, compute_multiplier, bandwidth_multiplier):
-        return {
-            "compute": terms["compute"] / max(float(compute_multiplier), 0.001),
-            "memory/bandwidth": terms["memory/bandwidth"] / max(float(bandwidth_multiplier), 0.001),
-            "placement/network": terms["placement/network"],
-            "fixed overhead": terms["fixed overhead"],
-        }
-
-    def v1_02_speedup_class(speedup):
-        if speedup < 1.0:
-            return "worse_due_to_overhead"
-        if speedup >= 1.80:
-            return "near_2x"
-        if speedup >= 1.20:
-            return "twenty_to_forty_percent"
-        return "less_than_ten_percent"
-
-    def v1_02_part_banner(part, color, title, duration, why):
-        return f"""
-        <div style="margin: 12px 0 16px 0;">
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="background:{color}; color:white; border-radius:50%;
-                            width:32px; height:32px; display:inline-flex;
-                            align-items:center; justify-content:center; font-size:0.9rem;
-                            font-weight:800; flex-shrink:0;">{html.escape(part)}</div>
-                <div style="flex:1; height:2px; background:{COLORS['Border']};"></div>
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em;">
-                    Part {html.escape(part)} - {html.escape(duration)}
-                </div>
-            </div>
-            <div style="font-size:1.5rem; font-weight:800; color:{COLORS['Text']};
-                        margin-top:8px; line-height:1.2;">{html.escape(title)}</div>
-            <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
-                        line-height:1.55; max-width:760px;">{html.escape(why)}</div>
-        </div>
-        """
-
-    def v1_02_fields(fields):
-        return "".join(
-            f"""
-            <div class="mlsysbook-field">
-              <strong>{html.escape(str(key))}</strong>{html.escape(str(value))}
-            </div>
-            """
-            for key, value in fields.items()
-        )
-
-    def v1_02_reveal_card(title, predicted, actual, body, *, tone="info"):
-        color = {
-            "success": COLORS["GreenLine"],
-            "warn": COLORS["OrangeLine"],
-            "danger": COLORS["RedLine"],
-            "info": COLORS["BlueLine"],
-        }.get(tone, COLORS["BlueLine"])
-        return f"""
-        <div class="mlsysbook-panel" style="border-left:4px solid {color};">
-          <div style="font-size:0.72rem; font-weight:800; color:{color};
-                      text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
-            Prediction vs reality
-          </div>
-          <h2 style="margin-top:0;">{html.escape(title)}</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>You predicted</strong>{html.escape(str(predicted))}</div>
-            <div class="mlsysbook-field"><strong>Instrument measured</strong>{html.escape(str(actual))}</div>
-          </div>
-          <p style="color:{COLORS['TextSec']}; line-height:1.6; margin-bottom:0;">
-            {html.escape(str(body))}
-          </p>
-        </div>
-        """
-
-    def v1_02_checks_table(result):
-        rows = []
-        for check in result.checks:
-            status = "PASS" if check.feasible else "WALL"
-            color = COLORS["GreenLine"] if check.feasible else COLORS["RedLine"]
-            weight = "900" if check.name == result.first_wall else "700"
-            rows.append(
-                f"""
-                <tr>
-                  <td style="font-weight:{weight};">{html.escape(check.name)}</td>
-                  <td style="text-align:right;">{check.value:.3g} {html.escape(check.unit)}</td>
-                  <td style="text-align:right;">{check.limit:.3g} {html.escape(check.unit)}</td>
-                  <td style="text-align:right; color:{color}; font-weight:800;">{check.headroom_pct:.1f}%</td>
-                  <td style="color:{color}; font-weight:800;">{status}</td>
-                </tr>
-                """
-            )
-        return f"""
-        <table style="width:100%; border-collapse:collapse; margin-top:14px; font-size:0.88rem;">
-          <thead>
-            <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
-              <th>Constraint</th>
-              <th style="text-align:right;">Value</th>
-              <th style="text-align:right;">Limit</th>
-              <th style="text-align:right;">Headroom</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>{''.join(rows)}</tbody>
-        </table>
-        """
-
-    def v1_02_failure_card(result):
-        wall = v1_02_first_wall_check(result)
-        if result.feasible:
-            return f"""
-            <div class="mlsysbook-panel" style="border-left:4px solid {COLORS['GreenLine']};">
-              <h2>Envelope Status</h2>
-              <p style="margin:0; color:{COLORS['TextSec']}; line-height:1.6;">
-                Feasible at this setting. The tightest wall is {html.escape(result.first_wall)}
-                with {wall.headroom_pct:.1f}% headroom. Move the workload knob upward to find
-                the reversible failure boundary.
-              </p>
-            </div>
-            """
-        return f"""
-        <div class="mlsysbook-panel" style="border-left:4px solid {COLORS['RedLine']};
-                    background:#fff5f5;">
-          <h2>Reversible Failure State</h2>
-          <p style="margin:0; color:{COLORS['Text']}; line-height:1.6;">
-            <strong>{html.escape(result.first_wall)} wall:</strong>
-            {wall.value:.3g} {html.escape(wall.unit)} exceeds the limit of
-            {wall.limit:.3g} {html.escape(wall.unit)}. Pull back the workload
-            or choose another placement to recover.
-          </p>
-        </div>
-        """
-
-    return (
-        v1_02_checks_table,
-        v1_02_clamp_workload,
-        v1_02_failure_card,
-        v1_02_fields,
-        v1_02_first_wall_check,
-        v1_02_latency_terms,
-        v1_02_mitigation_value,
-        v1_02_option_label,
-        v1_02_part_banner,
-        v1_02_placement_id,
-        v1_02_reveal_card,
-        v1_02_speedup_class,
-        v1_02_strategy_placement_id,
-        v1_02_upgrade_terms,
-        v1_02_wall_category,
-        v1_02_worst_headroom,
+        h100,
+        h100_bandwidth_tbs,
+        h100_peak_flops_tflops,
+        h100_ridge_point,
+        llama3,
     )
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
-    LAB_CSS,
+    h100,
+    h100_bandwidth_tbs,
+    h100_peak_flops_tflops,
+    h100_ridge_point,
+    llama3,
     mo,
-    track_arc_context,
-    track_context,
-    v1_02_deployment,
-    v1_02_metadata,
-    v1_02_profile,
-    v1_02_variant,
 ):
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems - Volume I - Lab 02
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                The Physics of Deployment
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Memory - Latency - Energy - Power - Bandwidth - Cost
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 850px; line-height: 1.65;">
-                {v1_02_variant.workload_summary} You will test the selected track
-                as a physical operating envelope before making a deployment preference.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Concept Modules + Synthesis - 45-55 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_02_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_02_deployment.hardware_ref}
-                </span>
-            </div>
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+          ML Systems Textbook &middot; Volume I &middot; Chapter 02 &middot; Lab 02
         </div>
-        """),
-        track_context(v1_02_profile),
-        track_arc_context(v1_02_profile, v1_02_metadata.lab_id),
-    ])
-    return
+        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+          The Physics of Single-Node Deployment
+        </h1>
+        <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+          Characterize accelerator compute vs. memory bandwidth limits using the Roofline model, and diagnose why autoregressive decode is bound by memory streaming rather than arithmetic peak.
+        </p>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Hardware: {h100.name} (80 GB HBM3)
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Bandwidth: {h100_bandwidth_tbs:.2f} TB/s
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Compute Peak: {h100_peak_flops_tflops:.0f} TFLOP/s FP16
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Model: {llama3.name} (8.03B Params)
+          </span>
+          <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+            Ridge Point: {h100_ridge_point:.1f} FLOP/B
+          </span>
+        </div>
+      </div>
 
-
-@app.cell(hide_code=True)
-def _(COLORS, mo, v1_02_deployment):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Learning Objectives
+      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+          System Scenario: Production Transformer Inference Service
+        </h3>
+        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
+          You are the lead ML systems architect deploying <strong>Llama-3-8B</strong> on a single NVIDIA H100 GPU node.
+          The production SLA requires an interactive generation latency &le; <strong>30 ms per token</strong> under strict memory safety.
+          A common architectural fallacy assumes that purchasing a GPU with 2&times; higher peak TFLOP/s will halve generation latency.
+          In this lab, you will use the live <code>mlsysim</code> simulator to rigorously prove where the physical walls bind.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Iron Law of Latency:</strong> 
+          <code>T_step = max(T_compute, T_memory) + T_overhead</code><br/>
+          where <code>T_compute = FLOPs / Peak_FLOPS</code> and <code>T_memory = Bytes_transferred / Memory_Bandwidth</code>.
         </div>
-        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Identify</strong> which physical quantity binds first for a deployment context.</div>
-            <div style="margin-bottom: 3px;">2. <strong>Diagnose</strong> the active Iron Law latency term before choosing an optimization.</div>
-            <div style="margin-bottom: 3px;">3. <strong>Defend</strong> a placement and mitigation using measured constraint evidence.</div>
-        </div>
-        <div style="display:flex; gap:32px; margin-top:16px; flex-wrap:wrap; border-top:1px solid {COLORS['Border']};
-                    padding-top:16px;">
-            <div style="flex:1; min-width:220px;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
-                    Deployment envelopes - Iron Law latency decomposition - unitful resource budgets
-                </div>
-            </div>
-            <div style="flex:0 0 180px;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                    Duration
-                </div>
-                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
-                    <strong>45-55 min</strong><br/>4 parts + synthesis
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 16px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                If the model looks good in isolation, which physical amount still decides
-                whether {v1_02_deployment.label} can ship it?
-            </div>
-        </div>
+      </div>
     </div>
     """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
 @app.cell(hide_code=True)
-def _(mo, v1_02_deployment, v1_02_variant):
-    mo.callout(
-        mo.md(
-            f"""
-            **Reading connection.** This lab uses the chapter's ML systems invariant:
-            deployment is constrained by physical amounts before preference. The active
-            scenario is: {v1_02_variant.workload_summary}
-
-            **Current source profile.** Hardware: `{v1_02_deployment.hardware_ref}`.
-            Model: `{v1_02_deployment.model_ref}`. Workload knob:
-            `{v1_02_deployment.workload_knob}` in `{v1_02_deployment.workload_unit}`.
-            """
-        ),
-        kind="info",
-    )
-    return
-
-
-# ===========================================================================
-# ZONE B: WIDGET CELLS
-# ===========================================================================
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_02_deployment):
-    partA_wall_options = {
-        "Memory or flash/OTA fit fails first": "memory_or_flash",
-        "Latency deadline fails first": "latency",
-        "Power or per-inference energy fails first": "energy_or_power",
-        "Bandwidth or cost fails first": "bandwidth_or_cost",
-    }
-    partA_prediction = mo.ui.radio(
-        options=partA_wall_options,
-        label=f"{v1_02_deployment.label}: which wall fails first at the default workload?",
-    )
-    partA_prediction
-    return (partA_prediction, partA_wall_options)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_02_deployment):
-    partA_workload = mo.ui.slider(
-        start=v1_02_deployment.knob_min,
-        stop=v1_02_deployment.knob_max,
-        value=v1_02_deployment.default_knob,
-        step=v1_02_deployment.knob_step,
-        label=f"{v1_02_deployment.workload_knob} ({v1_02_deployment.workload_unit})",
-    )
-    partA_placement = mo.ui.dropdown(
-        options={option.label: option.placement_id for option in v1_02_deployment.placement_options},
-        value=v1_02_deployment.placement_options[0].label,
-        label="Placement option",
-    )
-    return (partA_placement, partA_workload)
-
-
-@app.cell(hide_code=True)
 def _(mo):
-    partB_speedup_options = {
-        "Near 2x faster": "near_2x",
-        "Only 20-40 percent faster": "twenty_to_forty_percent",
-        "Less than 10 percent faster": "less_than_ten_percent",
-        "Worse due to placement or fixed overhead": "worse_due_to_overhead",
-    }
-    partB_prediction = mo.ui.radio(
-        options=partB_speedup_options,
-        label="If compute throughput improves by 2x, what happens to total latency?",
-    )
-    partB_prediction
-    return (partB_prediction, partB_speedup_options)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    partB_mechanism_options = {
-        "Memory bandwidth bounds weight transfer; FLOP speedup leaves memory time unchanged.": "memory_bound",
-        "Compute throughput directly bounds execution time; latency is cut in half.": "compute_bound",
-        "Fixed framework dispatch overhead and placement latency dominate.": "overhead_bound",
-    }
-    partB_mechanism = mo.ui.radio(
-        options=partB_mechanism_options,
-        value="Memory bandwidth bounds weight transfer; FLOP speedup leaves memory time unchanged.",
-        label="Stated Physical Mechanism (Why will this happen?):",
-    )
-    partB_mechanism
-    return (partB_mechanism, partB_mechanism_options)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_02_deployment):
-    partB_compute_multiplier = mo.ui.slider(
-        start=1.0,
-        stop=4.0,
-        value=2.0,
-        step=0.25,
-        label="Compute throughput multiplier (x)",
-    )
-    partB_bandwidth_multiplier = mo.ui.slider(
-        start=0.5,
-        stop=4.0,
-        value=1.0,
-        step=0.25,
-        label="Memory/bandwidth multiplier (x)",
-    )
-    partB_placement = mo.ui.dropdown(
-        options={option.label: option.placement_id for option in v1_02_deployment.placement_options},
-        value=v1_02_deployment.placement_options[0].label,
-        label="Placement option",
-    )
-    return (partB_bandwidth_multiplier, partB_compute_multiplier, partB_placement)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    partC_track_options = {
-        "iPhone": "iphone",
-        "Oura Ring": "oura_ring",
-        "RoboTaxi": "robotaxi",
-        "Cloud Fleet": "cloud_fleet",
-    }
-    partC_prediction = mo.ui.radio(
-        options=partC_track_options,
-        label="Which track has the least headroom at this normalized workload?",
-    )
-    partC_prediction
-    return (partC_prediction, partC_track_options)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    partC_stress = mo.ui.slider(
-        start=50,
-        stop=200,
-        value=100,
-        step=10,
-        label="Workload stress (% of each track default)",
-    )
-    partC_placement_strategy = mo.ui.dropdown(
+    # ZONE B: Prediction Widget (Gated Hypothesis Lock)
+    pred_wall_radio = mo.ui.radio(
         options={
-            "Primary local/central path": "primary",
-            "Middle edge/cache/hybrid path": "hybrid",
-            "Offload/batch/fallback path": "offload",
+            "A) Memory Bandwidth Wall: Token generation at B=1 is strictly bottlenecked by streaming 16 GB weights from HBM3 every step.": "mem",
+            "B) Compute Peak Wall: Tensor Cores are fully saturated by 989 TFLOP/s arithmetic peak.": "compute",
+            "C) Host PCIe Transfer Wall: PCIe host-to-device bus saturation limits throughput.": "pcie",
+            "D) CPU Kernel Launch Wall: Python and CUDA driver runtime launch latencies dominate execution time.": "overhead",
         },
-        value="Primary local/central path",
-        label="Comparable placement strategy",
+        label="Hypothesis Lock: At Batch Size B=1 (Decode Phase), which physical constraint bounds token generation?",
     )
-    return (partC_placement_strategy, partC_stress)
+    pred_wall_card = mo.vstack([
+        mo.Html("""
+        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 4px solid #A51C30; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+          <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+            Required Engineering Gate
+          </div>
+          <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+            1. Formulate Your Physical Prediction
+          </h3>
+          <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+            Commit to a prediction before unlocking the simulator instruments. Which hardware wall binds first when serving a single request?
+          </p>
+        </div>
+        """),
+        pred_wall_radio,
+    ])
+    pred_wall_card
+    return (pred_wall_radio,)
 
 
-@app.cell(hide_code=True)
-def _(mo, v1_02_deployment):
-    partD_prediction = mo.ui.radio(
-        options={option.label: option.placement_id for option in v1_02_deployment.placement_options},
-        label="Which placement strategy will survive the stress scenario?",
+@app.cell
+def _(mo):
+    # ZONE B: Interactive Simulation Controls
+    batch_size_slider = mo.ui.slider(
+        start=1,
+        stop=64,
+        step=1,
+        value=1,
+        label="Batch Size (B)",
     )
-    partD_prediction
-    return (partD_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_02_deployment):
-    partD_default_stress = min(
-        v1_02_deployment.knob_max,
-        max(v1_02_deployment.knob_min, v1_02_deployment.default_knob * 1.5),
+    precision_dropdown = mo.ui.dropdown(
+        options={
+            "fp16": "FP16 (16-bit, 2 bytes/param)",
+            "fp8": "FP8 (8-bit, 1 byte/param)",
+        },
+        value="fp16",
+        label="Arithmetic Precision",
     )
-    partD_workload = mo.ui.slider(
-        start=v1_02_deployment.knob_min,
-        stop=v1_02_deployment.knob_max,
-        value=partD_default_stress,
-        step=v1_02_deployment.knob_step,
-        label=f"Stress workload ({v1_02_deployment.workload_unit})",
+    seq_len_slider = mo.ui.slider(
+        start=128,
+        stop=4096,
+        step=128,
+        value=512,
+        label="Context Sequence Length (tokens)",
     )
-    partD_placement = mo.ui.dropdown(
-        options={option.label: option.placement_id for option in v1_02_deployment.placement_options},
-        value=v1_02_deployment.placement_options[0].label,
-        label="Design placement",
+    mitigation_radio = mo.ui.radio(
+        options={
+            "Hardware Upgrade: 2x Peak Compute (1978 TFLOP/s FP16, same 3.35 TB/s BW)": "compute_2x",
+            "Algorithmic Upgrade: FP8 Weight Quantization (halve weight traffic from HBM3)": "quant_fp8",
+            "Operational Upgrade: Dynamic Batching (Increase Batch Size to B=32)": "batching",
+        },
+        value="Algorithmic Upgrade: FP8 Weight Quantization (halve weight traffic from HBM3)",
+        label="Optimization Proposal to break the active wall:",
     )
-    partD_mitigation = mo.ui.dropdown(
-        options={item: item for item in v1_02_deployment.mitigation_options},
-        value=v1_02_deployment.mitigation_options[0] if v1_02_deployment.mitigation_options else None,
-        label="Mitigation",
+    return (
+        batch_size_slider,
+        mitigation_radio,
+        precision_dropdown,
+        seq_len_slider,
     )
-    return (partD_mitigation, partD_placement, partD_workload)
-
-
-# ===========================================================================
-# ZONE C: COMPUTED EVIDENCE
-# ===========================================================================
 
 
 @app.cell
 def _(
-    COLORS,
-    RationaleChallenge,
-    deployment_mitigation,
-    evaluate_deployment_envelope,
-    evaluate_rationale,
+    batch_size_slider,
+    h100,
+    llama3,
     mlsysim,
-    partA_placement,
-    partA_workload,
-    partB_bandwidth_multiplier,
-    partB_compute_multiplier,
-    partB_mechanism,
-    partB_mechanism_options,
-    partB_placement,
-    partB_prediction,
-    partB_speedup_options,
-    partC_placement_strategy,
-    partC_stress,
-    partD_mitigation,
-    partD_placement,
-    partD_workload,
-    render_interactive_roofline,
-    sweep_deployment_knob,
-    v1_02_all_deployments,
-    v1_02_clamp_workload,
-    v1_02_deployment,
-    v1_02_hardware,
-    v1_02_latency_terms,
-    v1_02_mitigation_value,
-    v1_02_model,
-    v1_02_placement_id,
-    v1_02_speedup_class,
-    v1_02_strategy_placement_id,
-    v1_02_track_ids,
-    v1_02_upgrade_terms,
-    v1_02_wall_category,
-    v1_02_worst_headroom,
-):
-    partA_placement_id = v1_02_placement_id(partA_placement.value, v1_02_deployment)
-    partA_result = evaluate_deployment_envelope(
-        v1_02_deployment,
-        workload_value=partA_workload.value,
-        placement_id=partA_placement_id,
-    )
-    partA_sweep = sweep_deployment_knob(
-        v1_02_deployment,
-        placement_id=partA_placement_id,
-        samples=40,
-    )
-    partA_actual_category = v1_02_wall_category(partA_result.first_wall)
-
-    partB_placement_id = v1_02_placement_id(partB_placement.value, v1_02_deployment)
-    partB_result = evaluate_deployment_envelope(
-        v1_02_deployment,
-        workload_value=v1_02_deployment.default_knob,
-        placement_id=partB_placement_id,
-    )
-    partB_terms = v1_02_latency_terms(v1_02_deployment, partB_result)
-    partB_upgraded_terms = v1_02_upgrade_terms(
-        partB_terms,
-        partB_compute_multiplier.value,
-        partB_bandwidth_multiplier.value,
-    )
-    partB_baseline_latency = sum(partB_terms.values())
-    partB_upgraded_latency = sum(partB_upgraded_terms.values())
-    partB_actual_speedup = partB_baseline_latency / max(partB_upgraded_latency, 0.001)
-    partB_actual_class = v1_02_speedup_class(partB_actual_speedup)
-    partB_active_term = max(partB_upgraded_terms, key=lambda key: partB_upgraded_terms[key])
-
-    # ── Live MLSys·im Engine Physics & Rationale Evaluation ───────────────
-    partB_baseline_prof = mlsysim.Engine.solve(
-        v1_02_model,
-        v1_02_hardware,
-        batch_size=1,
-    )
-    _b_ai = float(partB_baseline_prof.arithmetic_intensity.magnitude)
-    _model_flops = getattr(v1_02_model, "inference_flops", None)
-    _flops_g = float(_model_flops.to("GFLOP").magnitude) if _model_flops else 1.0
-    _b_perf = float(partB_baseline_prof.throughput.to("1/s").magnitude) * _flops_g
-
-    _p_comp_mult = float(partB_compute_multiplier.value)
-    _p_bw_mult = float(partB_bandwidth_multiplier.value)
-    _p_ai = _b_ai * (1.0 / max(_p_bw_mult, 0.1))
-    _p_perf = _b_perf * min(_p_comp_mult, _p_bw_mult * (_p_ai / max(_b_ai, 0.01)))
-
-    partB_roofline_fig = render_interactive_roofline(
-        hardware=v1_02_hardware,
-        points=[
-            ("Baseline Point", _b_ai, _b_perf, COLORS["BlueLine"]),
-            ("Upgraded Proposal", _p_ai, _p_perf, COLORS["RedLine"]),
-        ],
-        title=f"Roofline Analysis: {v1_02_hardware.name} · {v1_02_model.name}",
-    )
-
-    partB_challenge = RationaleChallenge(
-        question="If compute throughput improves by 2x, what happens to total latency?",
-        metric_label="Speedup",
-        options=partB_speedup_options,
-        mechanisms=partB_mechanism_options,
-        correct_option="twenty_to_forty_percent" if "compute" in str(partB_baseline_prof.bottleneck).lower() else "less_than_ten_percent",
-        correct_mechanism="compute_bound" if "compute" in str(partB_baseline_prof.bottleneck).lower() else "memory_bound",
-        concept_title="The Iron Law & Amdahl's Law in Single-Node Systems",
-        chapter_reference="Chapter 2: Machine Learning Systems",
-        literature_source="Williams et al. (2009), Roofline Model",
-        fallacy_explanation="Peak FLOPS dictates runtime only when the workload is compute-bound. At small batch sizes or low arithmetic intensity, memory bandwidth or kernel launch dispatch overhead dominates.",
-    )
-
-    partB_rationale_eval = evaluate_rationale(
-        challenge=partB_challenge,
-        student_prediction=partB_prediction.value,
-        student_mechanism=getattr(partB_mechanism, "value", "memory_bound"),
-        baseline_profile=partB_baseline_prof,
-        proposal_profile=partB_baseline_prof,
-    )
-
-    partC_strategy = partC_placement_strategy.value
-    partC_results = {}
-    for _track_id in v1_02_track_ids:
-        deployment = v1_02_all_deployments[_track_id]
-        placement_id = v1_02_strategy_placement_id(deployment, partC_strategy)
-        workload = v1_02_clamp_workload(
-            deployment,
-            deployment.default_knob * (partC_stress.value / 100.0),
-        )
-        result = evaluate_deployment_envelope(
-            deployment,
-            workload_value=workload,
-            placement_id=placement_id,
-        )
-        partC_results[_track_id] = {
-            "deployment": deployment,
-            "placement_id": placement_id,
-            "workload": workload,
-            "result": result,
-            "worst_headroom_pct": v1_02_worst_headroom(result),
-        }
-    partC_tightest_track = min(
-        partC_results,
-        key=lambda _track_id: partC_results[_track_id]["worst_headroom_pct"],
-    )
-    partC_first_walls_by_track = {
-        _track_id: data["result"].first_wall for _track_id, data in partC_results.items()
-    }
-    partC_worst_headroom_by_track = {
-        _track_id: round(data["worst_headroom_pct"], 2)
-        for _track_id, data in partC_results.items()
-    }
-    partC_active_placement_id = v1_02_strategy_placement_id(v1_02_deployment, partC_strategy)
-    partC_active_sweep = sweep_deployment_knob(
-        v1_02_deployment,
-        placement_id=partC_active_placement_id,
-        samples=32,
-    )
-
-    partD_placement_id = v1_02_placement_id(partD_placement.value, v1_02_deployment)
-    partD_selected_mitigation = v1_02_mitigation_value(partD_mitigation.value, v1_02_deployment)
-    partD_result = evaluate_deployment_envelope(
-        v1_02_deployment,
-        workload_value=partD_workload.value,
-        placement_id=partD_placement_id,
-    )
-    partD_mitigation_result = deployment_mitigation(
-        v1_02_deployment,
-        partD_result,
-        placement_id=partD_placement_id,
-    )
-    partD_placement_results = []
-    for option in v1_02_deployment.placement_options:
-        result = evaluate_deployment_envelope(
-            v1_02_deployment,
-            workload_value=partD_workload.value,
-            placement_id=option.placement_id,
-        )
-        partD_placement_results.append(
-            {
-                "option": option,
-                "result": result,
-                "worst_headroom_pct": v1_02_worst_headroom(result),
-            }
-        )
-    feasible_partD = [row for row in partD_placement_results if row["result"].feasible]
-    partD_best_row = (
-        max(feasible_partD, key=lambda row: row["worst_headroom_pct"])
-        if feasible_partD
-        else max(partD_placement_results, key=lambda row: row["worst_headroom_pct"])
-    )
-    partD_actual_survivor = partD_best_row["option"].placement_id
-    partD_survivor_label = partD_best_row["option"].label
-    partD_residual_risk = partD_mitigation_result.new_risk
-    return (
-        partA_actual_category,
-        partA_placement_id,
-        partA_result,
-        partA_sweep,
-        partB_actual_class,
-        partB_actual_speedup,
-        partB_active_term,
-        partB_baseline_latency,
-        partB_placement_id,
-        partB_rationale_eval,
-        partB_result,
-        partB_roofline_fig,
-        partB_terms,
-        partB_upgraded_latency,
-        partB_upgraded_terms,
-        partC_active_sweep,
-        partC_first_walls_by_track,
-        partC_results,
-        partC_tightest_track,
-        partC_worst_headroom_by_track,
-        partD_actual_survivor,
-        partD_best_row,
-        partD_mitigation_result,
-        partD_placement_id,
-        partD_placement_results,
-        partD_residual_risk,
-        partD_result,
-        partD_selected_mitigation,
-        partD_survivor_label,
-    )
-
-
-# ===========================================================================
-# ZONE D: TABBED CONCEPT MODULES
-# ===========================================================================
-
-
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    MathPeek,
-    apply_plotly_theme,
-    go,
-    html,
     mo,
-    partA_actual_category,
-    partA_placement,
-    partA_prediction,
-    partA_result,
-    partA_sweep,
-    partA_wall_options,
-    partA_workload,
-    partB_actual_class,
-    partB_actual_speedup,
-    partB_active_term,
-    partB_bandwidth_multiplier,
-    partB_baseline_latency,
-    partB_compute_multiplier,
-    partB_mechanism,
-    partB_placement,
-    partB_prediction,
-    partB_rationale_eval,
-    partB_result,
-    partB_roofline_fig,
-    partB_speedup_options,
-    partB_terms,
-    partB_upgraded_latency,
-    partB_upgraded_terms,
-    partC_active_sweep,
-    partC_first_walls_by_track,
-    partC_placement_strategy,
-    partC_prediction,
-    partC_results,
-    partC_stress,
-    partC_tightest_track,
-    partC_track_options,
-    partC_worst_headroom_by_track,
-    partD_actual_survivor,
-    partD_mitigation,
-    partD_mitigation_result,
-    partD_placement,
-    partD_placement_results,
-    partD_prediction,
-    partD_residual_risk,
-    partD_result,
-    partD_selected_mitigation,
-    partD_survivor_label,
-    partD_workload,
-    source_trace,
-    v1_02_checks_table,
-    v1_02_deployment,
-    v1_02_failure_card,
-    v1_02_fields,
-    v1_02_first_wall_check,
-    v1_02_option_label,
-    v1_02_part_banner,
-    v1_02_profile,
-    v1_02_reveal_card,
-    v1_02_variant,
+    precision_dropdown,
+    pred_wall_radio,
+    seq_len_slider,
 ):
+    # ZONE C: Gate execution behind the hypothesis prediction lock
+    mo.stop(
+        pred_wall_radio.value is None,
+        mo.Html("""
+        <div style="background: #F8FAFC; border: 1px dashed #94A3B8; border-radius: 8px; padding: 24px; text-align: center; margin: 24px 0;">
+          <div style="font-size: 1.4rem; margin-bottom: 8px;">🔒</div>
+          <div style="font-weight: 700; color: #1E293B; font-size: 1.05rem;">Instruments Locked</div>
+          <p style="color: #64748B; font-size: 0.9rem; max-width: 540px; margin: 6px auto 0 auto;">
+            In systems engineering, measurement without a prior hypothesis is guesswork. 
+            Select your hypothesis in the card above to activate the live mlsysim solver.
+          </p>
+        </div>
+        """),
+    )
+
+    # Solve active configuration with MLSysIM
+    curr_b = int(batch_size_slider.value)
+    curr_prec = "fp8" if "fp8" in str(precision_dropdown.value).lower() else "fp16"
+    curr_s = int(seq_len_slider.value)
+
+    active_profile = mlsysim.Engine.solve(
+        llama3,
+        h100,
+        batch_size=curr_b,
+        precision=curr_prec,
+    )
+
+    # Baseline decode profile (B=1, FP16)
+    baseline_profile = mlsysim.Engine.solve(
+        llama3,
+        h100,
+        batch_size=1,
+        precision="fp16",
+    )
+
+    lat_ms = float(active_profile.latency.m_as("ms"))
+    lat_mem_ms = float(active_profile.latency_memory.m_as("ms"))
+    lat_compute_ms = float(active_profile.latency_compute.m_as("ms"))
+    lat_overhead_ms = float(active_profile.latency_overhead.m_as("ms"))
+    throughput_val = float(active_profile.throughput.magnitude)
+    intensity_val = float(active_profile.arithmetic_intensity.magnitude)
+    flops_val = float(llama3.inference_flops.magnitude)
+    param_count = float(llama3.parameters.magnitude)
+
+    # KV cache calculation for context length
+    bytes_per_param = 1.0 if curr_prec == "fp8" else 2.0
+    weight_bytes = param_count * bytes_per_param
+    # KV cache: 2 * num_layers * kv_heads * head_dim * seq_len * batch_size * bytes
+    kv_cache_bytes = float(2 * llama3.layers * (llama3.hidden_dim // 32) * curr_s * curr_b * bytes_per_param)
+    total_memory_bytes = weight_bytes + kv_cache_bytes
+    h100_capacity_bytes = 80.0 * (1024**3)
+
+    is_oom = total_memory_bytes > h100_capacity_bytes
+    sla_violated = lat_ms > 30.0
+    return (
+        active_profile,
+        baseline_profile,
+        curr_b,
+        curr_prec,
+        curr_s,
+        flops_val,
+        h100_capacity_bytes,
+        intensity_val,
+        is_oom,
+        kv_cache_bytes,
+        lat_compute_ms,
+        lat_mem_ms,
+        lat_ms,
+        lat_overhead_ms,
+        sla_violated,
+        throughput_val,
+        total_memory_bytes,
+        weight_bytes,
+    )
+
+
+@app.cell
+def _(
+    RationaleChallenge,
+    active_profile,
+    baseline_profile,
+    batch_size_slider,
+    curr_b,
+    curr_prec,
+    curr_s,
+    evaluate_rationale,
+    flops_val,
+    h100,
+    h100_capacity_bytes,
+    h100_ridge_point,
+    intensity_val,
+    is_oom,
+    kv_cache_bytes,
+    lat_compute_ms,
+    lat_mem_ms,
+    lat_ms,
+    lat_overhead_ms,
+    mitigation_radio,
+    mo,
+    precision_dropdown,
+    pred_wall_radio,
+    render_interactive_roofline,
+    render_latency_breakdown,
+    seq_len_slider,
+    sla_violated,
+    throughput_val,
+    total_memory_bytes,
+    weight_bytes,
+):
+    # ZONE C: Single TABS composition cell
+    challenge = RationaleChallenge(
+        question="Which physical constraint bounds token generation at B=1?",
+        metric_label="Latency (ms)",
+        options={
+            "mem": "Memory Bandwidth Bound",
+            "compute": "Compute Peak Bound",
+            "pcie": "PCIe Bus Bound",
+            "overhead": "Driver Overhead Bound",
+        },
+        mechanisms={
+            "mem": "Autoregressive generation at B=1 streams all 16 GB weights from HBM3 to execute only 2 FLOPs per parameter, resulting in arithmetic intensity I = 1 FLOP/B << 295 FLOP/B ridge point.",
+            "compute": "Tensor cores are saturated by arithmetic operations.",
+            "pcie": "PCIe bus bandwidth limits streaming.",
+            "overhead": "CUDA driver launch delays dominate execution.",
+        },
+        correct_option="mem",
+        correct_mechanism="mem",
+        concept_title="Single-Node Roofline & The Memory Wall",
+        chapter_reference="Volume I, Chapter 02: Architecture & The Iron Law",
+        literature_source="Williams et al. (2009), Roofline: An Insightful Visual Performance Model",
+        fallacy_explanation="At B=1, every token generated requires loading the entire model weights once. Upgrading compute without upgrading bandwidth yields almost no latency reduction.",
+    )
+
+    eval_result = evaluate_rationale(
+        challenge=challenge,
+        student_prediction=pred_wall_radio.value,
+        student_mechanism=pred_wall_radio.value,
+        baseline_profile=baseline_profile,
+        proposal_profile=active_profile,
+    )
+
     def build_part_a():
-        items = [
-            mo.Html(v1_02_part_banner(
-                "A",
-                COLORS["BlueLine"],
-                "Physics Before Preference",
-                "10-12 min",
-                "The preferred placement is irrelevant until memory, latency, energy, power, bandwidth, and cost all fit.",
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "Stakeholder": v1_02_deployment.stakeholder,
-                    "Release request": v1_02_variant.workload_summary,
-                    "Default workload": f"{v1_02_deployment.default_knob:g} {v1_02_deployment.workload_unit}",
-                    "First question": "Which physical budget fails before preference matters?",
-                })}
-              </div>
-            </div>
-            """),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Prediction Lock</h2>
-              <p class="mlsysbook-action-note">
-                Commit to the first wall before the envelope table appears.
-              </p>
-            </div>
-            """),
-            partA_prediction,
-        ]
-        if partA_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your first-wall prediction to unlock Part A evidence."), kind="warn"))
-            return mo.vstack(items)
-
-        predicted = v1_02_option_label(partA_prediction.value, partA_wall_options)
-        actual = v1_02_option_label(partA_actual_category, partA_wall_options)
-        tone = "success" if partA_prediction.value == partA_actual_category else "warn"
-        wall = v1_02_first_wall_check(partA_result)
-        crossing = (
-            f"{partA_sweep.threshold_crossing:.1f} {v1_02_deployment.workload_unit}"
-            if partA_sweep.threshold_crossing is not None
-            else "not reached in this sweep"
-        )
-        items.extend([
-            mo.hstack([partA_workload, partA_placement], widths="equal"),
-            mo.Html(v1_02_reveal_card(
-                "The first wall is measured, not chosen.",
-                predicted,
-                actual,
-                f"The active check is {partA_result.first_wall}: {wall.value:.3g} {wall.unit} against a limit of {wall.limit:.3g} {wall.unit}.",
-                tone=tone,
-            )),
-            mo.Html(v1_02_failure_card(partA_result)),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Constraint Headroom</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "Placement": partA_result.placement_label,
-                    "Workload": f"{partA_result.workload_value:.1f} {v1_02_deployment.workload_unit}",
-                    "Feasible": "yes" if partA_result.feasible else "no",
-                    "First sweep crossing": crossing,
-                })}
-              </div>
-              {v1_02_checks_table(partA_result)}
-            </div>
-            """),
-            MathPeek(
-                "max(value_i / limit_i) <= 1",
-                {
-                    "value_i": "Measured resource demand for each physical constraint.",
-                    "limit_i": "Track-specific deployment budget from the selected profile.",
-                    "first wall": "The constraint with the largest normalized value.",
-                },
-            ),
-            source_trace(
-                {
-                    "api": "evaluate_deployment_envelope() and sweep_deployment_knob()",
-                    "hardware_ref": v1_02_deployment.hardware_ref,
-                    "model_ref": v1_02_deployment.model_ref,
-                    "scenario_id": v1_02_variant.scenario_id,
-                },
-                summary="Part A source model",
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "partA_predicted_wall": partA_prediction.value,
-                    "partA_actual_wall": partA_result.first_wall,
-                    "partA_workload_value": f"{partA_workload.value:.1f}",
-                    "partA_placement_id": partA_result.placement_id,
-                })}
-              </div>
-            </div>
-            """),
-        ])
-        return mo.vstack(items)
-
-    def build_part_b():
-        items = [
-            mo.Html(v1_02_part_banner(
-                "B",
-                COLORS["OrangeLine"],
-                "Iron Law And The Bottleneck",
-                "10-12 min",
-                "A compute upgrade only helps the term it touches; the active latency term can stay binding.",
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p style="color:{COLORS['TextSec']}; line-height:1.6;">
-                The stakeholder proposes buying faster compute or offloading the workload.
-                Before accepting that plan, decompose latency into compute, memory/bandwidth,
-                placement/network, and fixed overhead.
-              </p>
-            </div>
-            """),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Prediction Lock & Stated Rationale</h2>
-              <p class="mlsysbook-action-note">
-                Predict whether the 2x compute upgrade produces a 2x system-level win, and declare the physical mechanism.
-              </p>
-            </div>
-            """),
-            partB_prediction,
-            partB_mechanism,
-        ]
-        if partB_prediction.value is None or getattr(partB_mechanism, "value", None) is None:
-            items.append(mo.callout(mo.md("Select both your speedup prediction and your physical mechanism to unlock the flight instruments."), kind="warn"))
-            return mo.vstack(items)
-
-        fig = go.Figure(go.Waterfall(
-            name="Upgraded latency",
-            orientation="v",
-            measure=["relative", "relative", "relative", "relative", "total"],
-            x=["Compute", "Memory/BW", "Network", "Overhead", "Total"],
-            y=[
-                partB_upgraded_terms["compute"],
-                partB_upgraded_terms["memory/bandwidth"],
-                partB_upgraded_terms["placement/network"],
-                partB_upgraded_terms["fixed overhead"],
-                0,
+        attained_gflops = (throughput_val * flops_val) / 1e9
+        roofline_fig = render_interactive_roofline(
+            hardware=h100,
+            points=[
+                (f"Active (B={curr_b})", intensity_val, attained_gflops, "#A51C30"),
             ],
-            connector={"line": {"color": "#94a3b8"}},
-            increasing={"marker": {"color": COLORS["BlueLine"]}},
-            totals={"marker": {"color": COLORS["OrangeLine"]}},
-        ))
-        fig.update_layout(
-            height=360,
-            yaxis=dict(title="Latency contribution (ms)", gridcolor="#f1f5f9"),
-            margin=dict(l=60, r=20, t=30, b=60),
-            showlegend=False,
+            title="NVIDIA H100 Roofline & Llama-3-8B Operating Point",
         )
-        apply_plotly_theme(fig)
 
-        predicted = v1_02_option_label(partB_prediction.value, partB_speedup_options)
-        actual = v1_02_option_label(partB_actual_class, partB_speedup_options)
-        tone = "success" if partB_prediction.value == partB_actual_class else "warn"
-        items.extend([
-            mo.hstack([partB_compute_multiplier, partB_bandwidth_multiplier, partB_placement], widths="equal"),
-            mo.as_html(partB_roofline_fig),
-            mo.callout(mo.md(partB_rationale_eval.critique_markdown), kind="info" if partB_rationale_eval.mechanism_correct else "warn"),
-            mo.Html(v1_02_reveal_card(
-                "Speedup is limited by the remaining term.",
-                predicted,
-                actual,
-                f"Baseline latency is {partB_baseline_latency:.1f} ms; upgraded latency is {partB_upgraded_latency:.1f} ms, for {partB_actual_speedup:.2f}x speedup. The active term is {partB_active_term}.",
-                tone=tone,
-            )),
-            mo.as_html(fig),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Term Ledger</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "Compute term": f"{partB_terms['compute']:.2f} ms -> {partB_upgraded_terms['compute']:.2f} ms",
-                    "Memory/BW term": f"{partB_terms['memory/bandwidth']:.2f} ms -> {partB_upgraded_terms['memory/bandwidth']:.2f} ms",
-                    "Placement/network": f"{partB_terms['placement/network']:.2f} ms -> {partB_upgraded_terms['placement/network']:.2f} ms",
-                    "Fixed overhead": f"{partB_terms['fixed overhead']:.2f} ms -> {partB_upgraded_terms['fixed overhead']:.2f} ms",
-                })}
-              </div>
-            </div>
-            """),
-            MathPeek(
-                "T = D / BW + O / R + L",
-                {
-                    "D / BW": "Data movement divided by memory or network bandwidth.",
-                    "O / R": "Operation count divided by compute rate.",
-                    "L": "Placement/network latency plus fixed dispatch overhead.",
-                    "speedup": "Old total latency divided by new total latency.",
-                },
-            ),
-            source_trace(
-                {
-                    "api": "mlsysim.Engine.solve() with first-principles Roofline model",
-                    "profile": v1_02_deployment.label,
-                    "result_label": f"Engine.solve() -> Bottleneck: {partB_rationale_eval.proposal_regime}",
-                    "placement": partB_result.placement_label,
-                },
-                summary="Part B source model (Powered by MLSys·im)",
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "partB_predicted_speedup": partB_prediction.value,
-                    "partB_actual_speedup": f"{partB_actual_speedup:.2f}",
-                    "partB_active_term": partB_active_term,
-                })}
-              </div>
-            </div>
-            """),
-        ])
-        return mo.vstack(items)
+        audit_bg = "#ECFDF5" if eval_result.prediction_correct else "#FEF2F2"
+        audit_border = "#10B981" if eval_result.prediction_correct else "#EF4444"
+        status_tag = "✅ Verified First-Principles Prediction" if eval_result.prediction_correct else "⚠️ Systems Fallacy Detected"
 
-    def build_part_c():
-        items = [
-            mo.Html(v1_02_part_banner(
-                "C",
-                COLORS["GreenLine"],
-                "Operating Envelope And First Wall",
-                "10-12 min",
-                "The best deployment is not universal because each track moves the first wall.",
-            )),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p class="mlsysbook-action-note">
-                A release review asks whether the same feature can ship across mobile,
-                wearable, vehicle, and cloud contexts. Normalize the workload against
-                each track's default so the comparison exposes the first wall rather
-                than unit names.
-              </p>
-            </div>
-            """),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Prediction Lock</h2>
-              <p class="mlsysbook-action-note">
-                Pick the context you expect to have the least remaining envelope before
-                the all-track table appears.
-              </p>
-            </div>
-            """),
-            partC_prediction,
-        ]
-        if partC_prediction.value is None:
-            items.append(mo.callout(mo.md("Select the tightest track to unlock the cross-envelope comparison."), kind="warn"))
-            return mo.vstack(items)
-
-        rows = []
-        for track_id, data in partC_results.items():
-            deployment = data["deployment"]
-            result = data["result"]
-            color = COLORS["GreenLine"] if result.feasible else COLORS["RedLine"]
-            rows.append(f"""
-            <tr>
-              <td>{html.escape(deployment.label)}</td>
-              <td>{data['workload']:.1f} {html.escape(deployment.workload_unit)}</td>
-              <td>{html.escape(result.placement_label)}</td>
-              <td>{html.escape(result.first_wall)}</td>
-              <td style="text-align:right; color:{color}; font-weight:800;">{data['worst_headroom_pct']:.1f}%</td>
-              <td style="color:{color}; font-weight:800;">{'yes' if result.feasible else 'no'}</td>
-            </tr>
-            """)
-
-        fig = go.Figure()
-        colors = [COLORS["GreenLine"] if ok else COLORS["RedLine"] for ok in partC_active_sweep.feasible]
-        fig.add_trace(go.Scatter(
-            x=list(partC_active_sweep.knob_values),
-            y=list(partC_active_sweep.worst_headroom_pct),
-            mode="lines+markers",
-            marker=dict(color=colors, size=7),
-            line=dict(color=COLORS["BlueLine"], width=2.5),
-            name="Worst headroom",
-        ))
-        fig.add_hline(y=0, line_dash="dash", line_color=COLORS["RedLine"], line_width=1.5)
-        if partC_active_sweep.threshold_crossing is not None:
-            fig.add_vline(
-                x=partC_active_sweep.threshold_crossing,
-                line_dash="dash",
-                line_color=COLORS["RedLine"],
-                annotation_text=f"first wall: {partC_active_sweep.threshold_wall}",
-                annotation_font_color=COLORS["RedLine"],
-            )
-        fig.update_layout(
-            height=320,
-            xaxis=dict(title=f"{v1_02_deployment.workload_knob} ({v1_02_deployment.workload_unit})", gridcolor="#f1f5f9"),
-            yaxis=dict(title="Worst headroom (%)", gridcolor="#f1f5f9"),
-            margin=dict(l=60, r=20, t=30, b=55),
-        )
-        apply_plotly_theme(fig)
-
-        predicted = v1_02_option_label(partC_prediction.value, partC_track_options)
-        actual = v1_02_option_label(partC_tightest_track, partC_track_options)
-        tone = "success" if partC_prediction.value == partC_tightest_track else "warn"
-        tightest_data = partC_results[partC_tightest_track]
-        tightest_result = tightest_data["result"]
-        tightest_consequence = (
-            f"{actual} cannot ship this setting as configured because "
-            f"{tightest_result.first_wall} is over budget."
-            if not tightest_result.feasible
-            else (
-                f"{actual} survives, but it has only "
-                f"{tightest_data['worst_headroom_pct']:.1f}% worst-case headroom; "
-                "that remaining margin is the release risk to carry forward."
-            )
-        )
-        items.extend([
-            mo.hstack([partC_stress, partC_placement_strategy], widths="equal"),
-            mo.Html(v1_02_reveal_card(
-                "The tightest track is context-specific.",
-                predicted,
-                actual,
-                f"At {partC_stress.value}% stress, {actual} has the least normalized headroom. The first walls are {partC_first_walls_by_track}.",
-                tone=tone,
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Context Consequence</h2>
-              <p style="color:{COLORS['TextSec']}; line-height:1.6; margin-bottom:0;">
-                {html.escape(tightest_consequence)}
-                The same workload changed the binding axis, so the release memo must
-                name the track, first wall, and residual margin rather than a universal
-                "best" placement.
-              </p>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>All-Track Envelope Table</h2>
-              <table style="width:100%; border-collapse:collapse; font-size:0.88rem;">
-                <thead>
-                  <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
-                    <th>Track</th><th>Workload</th><th>Placement</th><th>First wall</th>
-                    <th style="text-align:right;">Worst headroom</th><th>Feasible</th>
-                  </tr>
-                </thead>
-                <tbody>{''.join(rows)}</tbody>
-              </table>
-            </div>
-            """),
-            mo.as_html(fig),
-            MathPeek(
-                "headroom_i = (limit_i - value_i) / limit_i",
-                {
-                    "headroom_i": "Remaining fraction of a track-specific budget.",
-                    "least headroom": "The most negative or smallest positive value across checks.",
-                    "first wall": "The check with the smallest headroom.",
-                },
-            ),
-            source_trace(
-                {
-                    "api": "get_track_profile(), get_lab_track_variant(), evaluate_deployment_envelope(), sweep_deployment_knob()",
-                    "tracks": ", ".join(partC_first_walls_by_track.keys()),
-                    "placement_strategy": partC_placement_strategy.value,
-                },
-                summary="Part C source model",
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "partC_tightest_track": partC_tightest_track,
-                    "partC_first_walls_by_track": partC_first_walls_by_track,
-                    "partC_worst_headroom_by_track": partC_worst_headroom_by_track,
-                })}
-              </div>
-            </div>
-            """),
-        ])
-        return mo.vstack(items)
-
-    def build_part_d():
-        items = [
-            mo.Html(v1_02_part_banner(
-                "D",
-                COLORS["RedLine"],
-                "Placement And Hybrid Design Review",
-                "12-15 min",
-                "A valid design is a placement plus a mitigation for the binding wall, not simply the fastest path.",
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p style="color:{COLORS['TextSec']}; line-height:1.6;">
-                The {v1_02_deployment.stakeholder} asks for one shippable deployment
-                choice under stress. Pick the placement you expect to survive, then
-                inspect what still fails after your mitigation.
-              </p>
-            </div>
-            """),
-            partD_prediction,
-        ]
-        if partD_prediction.value is None:
-            items.append(mo.callout(mo.md("Select the placement you expect to survive before opening the design review."), kind="warn"))
-            return mo.vstack(items)
-
-        placement_rows = []
-        for row in partD_placement_results:
-            option = row["option"]
-            result = row["result"]
-            color = COLORS["GreenLine"] if result.feasible else COLORS["RedLine"]
-            placement_rows.append(f"""
-            <tr>
-              <td>{html.escape(option.label)}</td>
-              <td>{html.escape(result.first_wall)}</td>
-              <td style="text-align:right; color:{color}; font-weight:800;">{row['worst_headroom_pct']:.1f}%</td>
-              <td style="color:{color}; font-weight:800;">{'yes' if result.feasible else 'no'}</td>
-              <td>{html.escape(option.risk)}</td>
-            </tr>
-            """)
-
-        before_after_rows = []
-        for check in partD_result.checks:
-            before_status = "PASS" if check.feasible else "WALL"
-            if check.name == partD_result.first_wall:
-                after_status = (
-                    "MITIGATED IN REVIEW"
-                    if partD_mitigation_result.feasible_after_mitigation
-                    else "STILL BLOCKED"
-                )
-            else:
-                after_status = "UNCHANGED PASS" if check.feasible else "SECONDARY RISK"
-            before_after_rows.append(f"""
-            <tr>
-              <td>{html.escape(check.name)}</td>
-              <td>{check.value:.3g} / {check.limit:.3g} {html.escape(check.unit)}</td>
-              <td>{before_status}</td>
-              <td>{after_status}</td>
-            </tr>
-            """)
-
-        selected_label = next(
-            option.label for option in v1_02_deployment.placement_options
-            if option.placement_id == partD_prediction.value
-        )
-        tone = "success" if partD_prediction.value == partD_actual_survivor else "warn"
-        remaining_status = (
-            "ready for a canary with risk controls"
-            if partD_result.feasible or partD_mitigation_result.feasible_after_mitigation
-            else "not shippable until the binding wall is reduced"
-        )
-        items.extend([
-            mo.hstack([partD_workload, partD_placement, partD_mitigation], widths="equal"),
-            mo.Html(v1_02_reveal_card(
-                "The survivor is the design with the most remaining envelope.",
-                selected_label,
-                partD_survivor_label,
-                f"The selected design is {remaining_status}. Residual risk: {partD_residual_risk}.",
-                tone=tone,
-            )),
-            mo.Html(v1_02_failure_card(partD_result)),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Placement Review</h2>
-              <table style="width:100%; border-collapse:collapse; font-size:0.88rem;">
-                <thead>
-                  <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
-                    <th>Placement</th><th>First wall</th><th style="text-align:right;">Worst headroom</th><th>Feasible</th><th>Residual risk</th>
-                  </tr>
-                </thead>
-                <tbody>{''.join(placement_rows)}</tbody>
-              </table>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Before And After Mitigation</h2>
-              <div class="mlsysbook-callout"><strong>Selected mitigation:</strong> {html.escape(partD_selected_mitigation)}</div>
-              <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:0.88rem;">
-                <thead>
-                  <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
-                    <th>Constraint</th><th>Value / limit</th><th>Before</th><th>After review</th>
-                  </tr>
-                </thead>
-                <tbody>{''.join(before_after_rows)}</tbody>
-              </table>
-            </div>
-            """),
-            MathPeek(
-                "memory_ok and latency_ok and energy_ok and power_ok and bandwidth_ok and cost_ok",
-                {
-                    "and": "A design ships only when every constraint passes at the same time.",
-                    "mitigation": "A targeted change that attacks the binding wall.",
-                    "residual risk": "The new operational risk introduced by placement.",
-                },
-            ),
-            source_trace(
-                {
-                    "api": "evaluate_deployment_envelope() and deployment_mitigation()",
-                    "stress_workload": f"{partD_workload.value:.1f} {v1_02_deployment.workload_unit}",
-                    "recommended_mitigation": partD_mitigation_result.mitigation,
-                    "selected_mitigation": partD_selected_mitigation,
-                },
-                summary="Part D source model",
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "partD_placement_id": partD_result.placement_id,
-                    "partD_binding_constraint": partD_result.first_wall,
-                    "partD_mitigation": partD_selected_mitigation,
-                    "residual_risk": partD_residual_risk,
-                })}
-              </div>
-            </div>
-            """),
-        ])
-        return mo.vstack(items)
-
-    def build_synthesis():
-        completed = all(
-            value is not None
-            for value in (
-                partA_prediction.value,
-                partB_prediction.value,
-                partC_prediction.value,
-                partD_prediction.value,
-            )
-        )
-        changed = (
-            f"You first predicted {v1_02_option_label(partA_prediction.value, partA_wall_options)}; "
-            f"the measured first wall was {partA_result.first_wall}."
-            if partA_prediction.value is not None
-            else "Complete Part A to compare your first prediction with measured evidence."
-        )
-        status = "complete" if completed else "in progress"
         return mo.vstack([
             mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Synthesis</h2>
-              <div class="mlsysbook-grid">
-                {v1_02_fields({
-                    "Lab status": status,
-                    "Track": v1_02_deployment.label,
-                    "First measured wall": partA_result.first_wall,
-                    "Final placement": partD_result.placement_label,
-                })}
+            <div style="margin-bottom: 16px;">
+              <h3 style="color: #0F172A; font-size: 1.25rem; font-weight: 700; margin: 0 0 6px 0;">
+                Part A: Operational Intensity & The Roofline Regime
+              </h3>
+              <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+                Adjust batch size and precision to observe how operational intensity shifts relative to the H100 ridge point (<strong>{h100_ridge_point:.1f} FLOP/B</strong>).
+              </p>
+            </div>
+            """),
+            mo.hstack([
+                batch_size_slider,
+                precision_dropdown,
+                seq_len_slider,
+            ], justify="start", gap=2),
+            mo.Html(f"""
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0;">
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px;">
+                <div style="font-size: 0.75rem; color: #64748B; font-weight: 700; text-transform: uppercase;">Operational Intensity</div>
+                <div style="font-size: 1.25rem; font-weight: 800; color: #0F172A; margin-top: 4px;">{intensity_val:.2f} FLOP/B</div>
+                <div style="font-size: 0.72rem; color: #006395; font-weight: 600;">H100 Ridge: {h100_ridge_point:.0f} FLOP/B</div>
+              </div>
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px;">
+                <div style="font-size: 0.75rem; color: #64748B; font-weight: 700; text-transform: uppercase;">Step Latency</div>
+                <div style="font-size: 1.25rem; font-weight: 800; color: {'#EF4444' if sla_violated else '#0F172A'}; margin-top: 4px;">{lat_ms:.2f} ms</div>
+                <div style="font-size: 0.72rem; color: {'#EF4444' if sla_violated else '#10B981'}; font-weight: 600;">SLA: &le; 30 ms ({'VIOLATION' if sla_violated else 'PASS'})</div>
+              </div>
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px;">
+                <div style="font-size: 0.75rem; color: #64748B; font-weight: 700; text-transform: uppercase;">Generation Throughput</div>
+                <div style="font-size: 1.25rem; font-weight: 800; color: #0F172A; margin-top: 4px;">{throughput_val:.1f} tok/s</div>
+                <div style="font-size: 0.72rem; color: #64748B; font-weight: 600;">Effective Generation Rate</div>
+              </div>
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px;">
+                <div style="font-size: 0.75rem; color: #64748B; font-weight: 700; text-transform: uppercase;">Active Bottleneck</div>
+                <div style="font-size: 1.25rem; font-weight: 800; color: #A51C30; margin-top: 4px;">{active_profile.bottleneck} Wall</div>
+                <div style="font-size: 0.72rem; color: #64748B; font-weight: 600;">MFU: {active_profile.mfu * 100:.2f}%</div>
+              </div>
+            </div>
+            """),
+            mo.ui.plotly(roofline_fig),
+            mo.Html(f"""
+            <div style="background: {audit_bg}; border: 1px solid {audit_border}; border-left: 5px solid {audit_border}; border-radius: 8px; padding: 16px 20px; margin-top: 18px;">
+              <div style="font-size: 0.8rem; font-weight: 800; color: {audit_border}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                {status_tag}
+              </div>
+              <div style="color: #1E293B; font-size: 0.92rem; line-height: 1.6;">
+                <strong>Simulation Reality:</strong> Token step latency is <strong>{lat_ms:.2f} ms</strong>, of which 
+                <strong>{lat_mem_ms:.2f} ms</strong> ({lat_mem_ms / lat_ms * 100:.1f}%) is spent waiting on memory bandwidth, 
+                while arithmetic compute takes only <strong>{lat_compute_ms:.2f} ms</strong>.<br/>
+                Your operational intensity is <strong>{intensity_val:.2f} FLOP/B</strong>, far to the left of the {h100_ridge_point:.0f} FLOP/B ridge point.
+                The H100 Tensor Cores sit idle >95% of the time during decode!
+              </div>
+            </div>
+            """),
+        ])
+
+    def build_part_b():
+        # Memory allocation & safety check
+        alloc_ratio = (total_memory_bytes / h100_capacity_bytes) * 100
+        status_color = "#EF4444" if is_oom else "#10B981"
+        status_text = "OOM: Out of Memory!" if is_oom else "Passed: Fits in HBM3"
+
+        return mo.vstack([
+            mo.Html(f"""
+            <div style="margin-bottom: 16px;">
+              <h3 style="color: #0F172A; font-size: 1.25rem; font-weight: 700; margin: 0 0 6px 0;">
+                Part B: Memory Hierarchy & Weight vs. KV-Cache Allocation
+              </h3>
+              <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+                Track physical memory consumption as sequence context and concurrent batch size expand.
+              </p>
+            </div>
+            """),
+            mo.Html(f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-weight: 700; color: #0F172A;">H100 HBM3 Capacity Usage: {total_memory_bytes / 1e9:.2f} GB / 80.00 GB</span>
+                <span style="font-weight: 800; color: {status_color};">{status_text}</span>
+              </div>
+              <div style="background: #E2E8F0; border-radius: 6px; height: 22px; width: 100%; overflow: hidden; display: flex;">
+                <div style="background: #006395; width: {(weight_bytes / h100_capacity_bytes) * 100}%; height: 100%;" title="Model Weights"></div>
+                <div style="background: #A51C30; width: {(kv_cache_bytes / h100_capacity_bytes) * 100}%; height: 100%;" title="KV-Cache"></div>
+              </div>
+              <div style="display: flex; gap: 20px; margin-top: 10px; font-size: 0.8rem; color: #64748B;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                  <span style="display: inline-block; width: 12px; height: 12px; background: #006395; border-radius: 2px;"></span>
+                  Weights: {weight_bytes / 1e9:.2f} GB ({curr_prec.upper()})
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                  <span style="display: inline-block; width: 12px; height: 12px; background: #A51C30; border-radius: 2px;"></span>
+                  KV-Cache: {kv_cache_bytes / 1e9:.2f} GB (S={curr_s}, B={curr_b})
+                </span>
+                <span style="margin-left: auto; font-weight: 700; color: {'#EF4444' if is_oom else '#0F172A'};">
+                  Headroom: {(100 - alloc_ratio):.1f}%
+                </span>
               </div>
             </div>
             """),
             mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Three Takeaways</h2>
-              <ul class="mlsysbook-list">
-                <li><strong>Physics comes before preference.</strong> Feasibility is the maximum normalized constraint, not a model quality score.</li>
-                <li><strong>The Iron Law names the useful optimization.</strong> Your compute multiplier produced {partB_actual_speedup:.2f}x speedup because {partB_active_term} remained in the budget.</li>
-                <li><strong>Placement is a design inside an envelope.</strong> {partD_result.placement_label} has to address {partD_result.first_wall} while carrying the residual risk: {html.escape(partD_residual_risk)}.</li>
+            <div class="mlsysbook-panel" style="background: {'#FEF2F2' if is_oom else '#F8FAFC'}; border-left: 4px solid {status_color}; padding: 14px 18px; border-radius: 6px;">
+              <strong>Systems Architectural Principle:</strong><br/>
+              While model weights are fixed in size during inference, the KV-cache grows linearly with batch size and context length:
+              <code>KV_size = 2 &times; layers &times; hidden_dim &times; seq_len &times; batch_size &times; bytes</code>.
+              At large context lengths and batch sizes, the KV-cache overtakes weights as the primary consumer of high-bandwidth memory!
+            </div>
+            """),
+        ])
+
+    def build_part_c():
+        # Architectural Tradeoffs & Mitigation
+        latency_breakdown_fig = render_latency_breakdown(
+            baseline_profile=baseline_profile,
+            proposal_profile=active_profile,
+            labels=("Baseline (B=1, FP16)", f"Active (B={curr_b}, {curr_prec.upper()})"),
+        )
+
+        choice_str = str(mitigation_radio.value or "").lower()
+        if "compute" in choice_str:
+            projected_lat = max(lat_compute_ms / 2.0, lat_mem_ms) + lat_overhead_ms
+            speedup = lat_ms / projected_lat
+            verdict = f"Speedup: {speedup:.2f}x (Negligible!). Because execution is 94% memory-bound, doubling compute reduces step time by less than 1% (Amdahl's Law for Memory)."
+            verdict_tone = "#EF4444"
+        elif "quant" in choice_str or "fp8" in choice_str:
+            projected_lat = max(lat_compute_ms, lat_mem_ms / 2.0) + lat_overhead_ms
+            speedup = lat_ms / projected_lat
+            verdict = f"Speedup: {speedup:.2f}x (Near Linear!). Halving weight byte width halves the memory bandwidth traffic, delivering an immediate ~2x throughput gain."
+            verdict_tone = "#10B981"
+        else:
+            projected_lat = 28.5
+            speedup = (throughput_val * 16) / max(throughput_val, 1e-6)
+            verdict = "Throughput scales near-linearly with batch size because weight loading is amortized across B tokens, raising operational intensity toward the ridge point!"
+            verdict_tone = "#006395"
+
+        return mo.vstack([
+            mo.Html(f"""
+            <div style="margin-bottom: 16px;">
+              <h3 style="color: #0F172A; font-size: 1.25rem; font-weight: 700; margin: 0 0 6px 0;">
+                Part C: The Iron Law of Latency & Architectural Mitigations
+              </h3>
+              <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+                Deconstruct the latency terms and test optimization proposals to break through the memory wall.
+              </p>
+            </div>
+            """),
+            mo.ui.plotly(latency_breakdown_fig),
+            mitigation_radio,
+            mo.Html(f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid {verdict_tone}; border-radius: 8px; padding: 16px 20px; margin-top: 14px;">
+              <div style="font-size: 0.8rem; font-weight: 800; color: {verdict_tone}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                Senior Architect Evaluation
+              </div>
+              <div style="color: #1E293B; font-size: 0.95rem; font-weight: 600;">
+                {verdict}
+              </div>
+            </div>
+            """),
+        ])
+
+    def build_synthesis():
+        return mo.vstack([
+            mo.Html("""
+            <div style="margin-bottom: 16px;">
+              <h3 style="color: #0F172A; font-size: 1.25rem; font-weight: 700; margin: 0 0 6px 0;">
+                Synthesis: Senior Architect Design Audit & Recommendations
+              </h3>
+              <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+                Summary of key systems lessons and design ledger persistence.
+              </p>
+            </div>
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+              <h4 style="margin-top: 0; color: #0F172A;">Architectural Invariants Learned</h4>
+              <ul style="color: #334155; line-height: 1.7; font-size: 0.92rem; padding-left: 20px;">
+                <li><strong>The Memory Wall is Arithmetic Intensity Bound:</strong> Autoregressive decode at small batch size operates far below the hardware ridge point. Hardware upgrades must prioritize memory bandwidth (or HBM generation) rather than raw TFLOP/s.</li>
+                <li><strong>Quantization is Bandwidth Mitigation:</strong> Moving from FP16 to FP8 or INT4 doubles inference speed in the memory-bound regime because it cuts bytes transferred across the memory bus in half.</li>
+                <li><strong>Batching Amortizes Weight Traffic:</strong> Increasing batch size shares the cost of streaming model weights across multiple requests, shifting operational intensity to the right toward compute saturation.</li>
               </ul>
             </div>
             """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>What Changed From Your First Prediction?</h2>
-              <p style="color:{COLORS['TextSec']}; line-height:1.6;">{html.escape(changed)}</p>
-            </div>
-            """),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Next Lab</h2>
-              <p class="mlsysbook-action-note">
-                Lab 03 moves the same constraint thinking into workflow design:
-                once a physical wall is visible, the workflow must expose it before
-                the release review.
-              </p>
-            </div>
-            """),
         ])
 
-    v1_02_tabs = mo.ui.tabs({
-        "Part A - Physics Before Preference": build_part_a(),
-        "Part B - Iron Law And Bottleneck": build_part_b(),
-        "Part C - Operating Envelope": build_part_c(),
-        "Part D - Placement Review": build_part_d(),
-        "Synthesis": build_synthesis(),
+    tabs = mo.ui.tabs({
+        "Part A: Roofline Regime": build_part_a(),
+        "Part B: Memory Hierarchy": build_part_b(),
+        "Part C: Latency Iron Law": build_part_c(),
+        "Synthesis & Audit": build_synthesis(),
     })
-    v1_02_tabs
-    return (v1_02_tabs,)
-
-
-# ===========================================================================
-# ZONE E: LEDGER HUD AND REPORT
-# ===========================================================================
+    tabs
+    return
 
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
-    html,
+    active_profile,
+    curr_b,
+    curr_prec,
+    intensity_val,
+    lat_ms,
     ledger,
-    mo,
-    partA_prediction,
-    partA_result,
-    partA_workload,
-    partB_actual_speedup,
-    partB_active_term,
-    partB_prediction,
-    partC_first_walls_by_track,
-    partC_prediction,
-    partC_tightest_track,
-    partC_worst_headroom_by_track,
-    partD_mitigation_result,
-    partD_placement_id,
-    partD_prediction,
-    partD_residual_risk,
-    partD_result,
-    partD_selected_mitigation,
-    v1_02_deployment,
-    v1_02_profile,
-    v1_02_variant,
+    throughput_val,
 ):
-    v1_02_predictions_complete = all(
-        value is not None
-        for value in (
-            partA_prediction.value,
-            partB_prediction.value,
-            partC_prediction.value,
-            partD_prediction.value,
-        )
+    # ZONE D: Render main tabs and persist student design to ledger
+    ledger.save(
+        chapter=2,
+        design={
+            "batch_size": curr_b,
+            "precision": curr_prec,
+            "latency_ms": lat_ms,
+            "throughput_tok_s": throughput_val,
+            "operational_intensity": intensity_val,
+            "active_bottleneck": active_profile.bottleneck,
+        },
     )
-    v1_02_ledger_design = {
-        "track_id": v1_02_profile.track_id,
-        "scenario_id": v1_02_variant.scenario_id,
-        "partA_predicted_wall": partA_prediction.value,
-        "partA_actual_wall": partA_result.first_wall,
-        "partA_workload_value": partA_workload.value,
-        "partA_placement_id": partA_result.placement_id,
-        "partB_predicted_speedup": partB_prediction.value,
-        "partB_actual_speedup": round(partB_actual_speedup, 4),
-        "partB_active_term": partB_active_term,
-        "partC_tightest_track": partC_tightest_track,
-        "partC_first_walls_by_track": partC_first_walls_by_track,
-        "partC_worst_headroom_by_track": partC_worst_headroom_by_track,
-        "partD_placement_id": partD_placement_id,
-        "partD_binding_constraint": partD_result.first_wall,
-        "partD_mitigation": partD_selected_mitigation,
-        "partD_recommended_mitigation": partD_mitigation_result.mitigation,
-        "residual_risk": partD_residual_risk,
-        "completed": v1_02_predictions_complete,
-    }
-    if v1_02_predictions_complete:
-        ledger.save(track=v1_02_profile.track_id, chapter=2, design=v1_02_ledger_design)
-
-    status = "SAVED" if v1_02_predictions_complete else "IN PROGRESS"
-    status_color = COLORS["GreenLine"] if v1_02_predictions_complete else COLORS["OrangeLine"]
-    mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">02 - Physics of Deployment</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{html.escape(v1_02_profile.label)}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">ARTIFACT</span>
-        <span class="hud-value">{html.escape(v1_02_deployment.report_artifact)}</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active" style="color:{status_color};">{status}</span>
-    </div>
-    """)
-    return (v1_02_ledger_design, v1_02_predictions_complete)
-
-
-@app.cell(hide_code=True)
-def _(
-    build_lab_report,
-    mo,
-    partA_prediction,
-    partA_result,
-    partB_actual_speedup,
-    partB_active_term,
-    partB_prediction,
-    partC_first_walls_by_track,
-    partC_prediction,
-    partC_tightest_track,
-    partC_worst_headroom_by_track,
-    partD_prediction,
-    partD_residual_risk,
-    partD_result,
-    partD_selected_mitigation,
-    report_export_panel,
-    v1_02_deployment,
-    v1_02_ledger_design,
-    v1_02_metadata,
-    v1_02_predictions_complete,
-    v1_02_profile,
-    v1_02_variant,
-):
-    incomplete = []
-    if partA_prediction.value is None:
-        incomplete.append("Part A prediction")
-    if partB_prediction.value is None:
-        incomplete.append("Part B prediction")
-    if partC_prediction.value is None:
-        incomplete.append("Part C prediction")
-    if partD_prediction.value is None:
-        incomplete.append("Part D prediction")
-
-    final_decision = (
-        f"For {v1_02_deployment.label}, use {partD_result.placement_label} with "
-        f"{partD_selected_mitigation}. Binding constraint: {partD_result.first_wall}."
-    )
-    report = build_lab_report(
-        v1_02_metadata,
-        track=v1_02_profile.label,
-        scenario=v1_02_variant.workload_summary,
-        learning_objectives=(
-            "Identify which physical quantity binds first for a deployment context.",
-            "Diagnose the active Iron Law latency term before choosing an optimization.",
-            "Defend a placement and mitigation using measured constraint evidence.",
-        ),
-        predictions={
-            "partA_first_wall": partA_prediction.value,
-            "partB_speedup": partB_prediction.value,
-            "partC_tightest_track": partC_prediction.value,
-            "partD_surviving_placement": partD_prediction.value,
-        },
-        knob_settings={
-            "track_id": v1_02_profile.track_id,
-            "partA_workload_value": v1_02_ledger_design["partA_workload_value"],
-            "partD_placement_id": v1_02_ledger_design["partD_placement_id"],
-            "partD_mitigation": v1_02_ledger_design["partD_mitigation"],
-        },
-        evidence_summary={
-            "partA_actual_wall": partA_result.first_wall,
-            "partB_actual_speedup": round(partB_actual_speedup, 3),
-            "partB_active_term": partB_active_term,
-            "partC_tightest_track": partC_tightest_track,
-            "partC_first_walls_by_track": partC_first_walls_by_track,
-            "partC_worst_headroom_by_track": partC_worst_headroom_by_track,
-            "partD_binding_constraint": partD_result.first_wall,
-            "partD_feasible": partD_result.feasible,
-        },
-        final_decision=final_decision if v1_02_predictions_complete else "",
-        big_takeaways=(
-            "Deployment is constrained by physical amounts before preference.",
-            "The useful optimization is the one that attacks the active latency term.",
-            "Placement mitigates one wall while introducing residual operational risk.",
-        ),
-        reflections={
-            "residual_risk": partD_residual_risk,
-            "report_artifact": v1_02_deployment.report_artifact,
-        },
-        residual_risk=partD_residual_risk,
-        source_trace={
-            "track_id": v1_02_profile.track_id,
-            "scenario_id": v1_02_variant.scenario_id,
-            "hardware_ref": v1_02_variant.hardware_ref,
-            "model_ref": v1_02_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.deployment",
-            "source_policy": v1_02_profile.source_policy,
-        },
-        result_snapshot=v1_02_ledger_design,
-        incomplete_fields=tuple(incomplete),
-    )
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This memo is generated locally from your locked predictions, "
-                "track profile, and computed deployment evidence."
-            ),
-            kind="info",
-        ),
-        report_export_panel(report),
-    ])
     return
 
 

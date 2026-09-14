@@ -224,12 +224,22 @@ def render_interactive_roofline(
         )
 
     fig.update_layout(
-        title=title,
-        xaxis=dict(title="Arithmetic Intensity (FLOPs / Byte)", type="log", gridcolor="#f1f5f9"),
-        yaxis=dict(title="Attained Throughput (GFLOPs / s)", type="log", gridcolor="#f1f5f9"),
+        title=dict(text=title, y=0.96, font=dict(size=14, color=COLORS["Text"])),
+        xaxis=dict(
+            title="Arithmetic Intensity (FLOPs / Byte)",
+            type="log",
+            range=[-1, 4],
+            gridcolor="#f1f5f9",
+        ),
+        yaxis=dict(
+            title="Attained Throughput (GFLOPs / s)",
+            type="log",
+            range=[1, 6.5],
+            gridcolor="#f1f5f9",
+        ),
         height=380,
-        margin=dict(l=60, r=40, t=50, b=50),
-        legend=dict(orientation="h", y=1.12, x=0),
+        margin=dict(l=60, r=40, t=60, b=60),
+        legend=dict(orientation="h", y=-0.25, x=0),
     )
 
     return apply_plotly_theme(fig)

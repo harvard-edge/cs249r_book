@@ -337,7 +337,11 @@ class TestLabCatalog:
                 and "system_design_controls" in source
                 and "track_selector" in source
             )
-            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface):
+            has_rationale_surface = (
+                "evaluate_rationale" in source
+                and "build_lab_report" in source
+            )
+            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface or has_rationale_surface):
                 missing.append(path)
         assert not missing, f"Missing track/report surface: {missing}"
 
