@@ -251,7 +251,7 @@ def report_export(report: LabReport, *, include_json: bool = True):
         mimetype="application/json",
         label="Download JSON snapshot",
     )
-    return mo.hstack([md_download, json_download], justify="start")
+    return mo.hstack([md_download, json_download], justify="start", gap=1.0)
 
 
 def report_text_fallback(report: LabReport) -> str:

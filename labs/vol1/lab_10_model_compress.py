@@ -1,12 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -43,8 +38,10 @@ async def _():
         build_lab_report,
         chapter_recap,
         decision_flow,
+        gated_hypothesis_card,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         lab_header,
         lab_map,
         learning_objectives,
@@ -60,36 +57,26 @@ async def _():
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
-
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
         ChapterRecap,
         CompressionModel,
-        DEFAULT_TRACK_ID,
-        LAB_CSS,
         LabMetadata,
         apply_plotly_theme,
         big_takeaways,
         build_lab_report,
-        chapter_recap,
         decision_flow,
+        gated_hypothesis_card,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
-        lab_header,
-        lab_map,
-        learning_objectives,
+        instrumentation_console,
         ledger,
         mo,
         report_export_panel,
         resolve_mlsysim_ref,
-        scenario_brief,
-        scenario_thread,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -142,14 +129,22 @@ def _(ChapterRecap, LabMetadata):
         "Runtime and hardware support are part of the compression contract.",
         "A release recipe needs validation evidence and a named residual risk.",
     )
-    return chapter_10_recap, lab_big_takeaways, lab_learning_objectives, lab_metadata
+    return lab_big_takeaways, lab_learning_objectives, lab_metadata
 
 
-@app.cell(hide_code=True)
-def _(DEFAULT_TRACK_ID, ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else DEFAULT_TRACK_ID
-    v1_10_track_picker = track_selector(default=_default_track)
+@app.cell
+def _(mo):
+    # Top-Level Universal Track Selector
+    v1_10_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 & FP8/INT4 vs Cost/SLA)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Jetson Orin & INT8/Sparsity vs p99 Tail Latency)": "robotaxi",
+            "📱 Mobile Track (Apple Silicon & 4-bit AWQ vs Thermal Headroom)": "iphone",
+            "⚡ TinyML Track (ESP32-S3 & INT8/INT4 Weight-Only vs SRAM/Flash Limits)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 & FP8/INT4 vs Cost/SLA)",
+        label="Select Course / Industry Track",
+    )
     return (v1_10_track_picker,)
 
 
@@ -455,30 +450,25 @@ def _(CompressionModel, resolve_mlsysim_ref, v1_10_variant):
         }
 
     return (
-        v1_10_aggressive_label,
         v1_10_best_candidate_label,
         v1_10_best_candidate_row,
         v1_10_bit_widths,
-        v1_10_carry_forward_implication,
-        v1_10_candidate_configs,
         v1_10_candidate_rows,
         v1_10_candidate_to_row,
+        v1_10_carry_forward_implication,
         v1_10_compression_solver,
         v1_10_compression_sweep,
         v1_10_defaults,
-        v1_10_dominated_label,
         v1_10_evaluate_distillation,
         v1_10_evaluate_recipe,
         v1_10_hardware,
         v1_10_lowest_feasible_bit_width,
         v1_10_method_label,
         v1_10_model,
-        v1_10_quant_label,
+        v1_10_recipe_prediction_options,
         v1_10_rejected_candidate_row,
         v1_10_rejected_method_label,
-        v1_10_recipe_prediction_options,
         v1_10_size_limit,
-        v1_10_unsupported_label,
         v1_10_validation_tests,
     )
 
@@ -501,8 +491,8 @@ def _(COLORS, html_lib, mo):
     def v1_10_part_banner(letter: str, title: str, why: str, color: str, duration: str = "10-12 min"):
         return mo.Html(
             f"""
-<div style="margin: 12px 0;">
-  <div style="display:flex; align-items:center; gap:12px;">
+    <div style="margin: 12px 0;">
+      <div style="display:flex; align-items:center; gap:12px;">
     <div style="background:{color}; color:white; border-radius:50%; width:32px; height:32px;
                 display:inline-flex; align-items:center; justify-content:center; font-size:0.9rem;
                 font-weight:800; flex-shrink:0;">{html_lib.escape(letter)}</div>
@@ -511,13 +501,13 @@ def _(COLORS, html_lib, mo):
                 text-transform:uppercase; letter-spacing:0.12em;">
       Part {html_lib.escape(letter)} &middot; {html_lib.escape(duration)}
     </div>
-  </div>
-  <div style="font-size:1.5rem; font-weight:800; color:{COLORS['Text']};
+      </div>
+      <div style="font-size:1.5rem; font-weight:800; color:{COLORS['Text']};
               margin-top:8px; line-height:1.2;">{html_lib.escape(title)}</div>
-  <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
+      <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
               line-height:1.55; max-width:780px;">{html_lib.escape(why)}</div>
-</div>
-"""
+    </div>
+    """
         )
 
     def v1_10_metric_cards(cards: tuple[tuple[str, str, str, str], ...]):
@@ -525,70 +515,70 @@ def _(COLORS, html_lib, mo):
         for title, value, caption, color in cards:
             card_html.append(
                 f"""
-<div style="padding:14px 16px; border:1px solid {COLORS['Border']}; border-radius:8px;
+    <div style="padding:14px 16px; border:1px solid {COLORS['Border']}; border-radius:8px;
             background:white; border-top:3px solid {color}; min-width:170px; flex:1;">
-  <div style="color:{COLORS['TextMuted']}; font-size:0.75rem; font-weight:700;
+      <div style="color:{COLORS['TextMuted']}; font-size:0.75rem; font-weight:700;
               text-transform:uppercase; letter-spacing:0.08em;">{html_lib.escape(title)}</div>
-  <div style="font-size:1.45rem; font-weight:800; color:{color}; margin-top:4px;">
+      <div style="font-size:1.45rem; font-weight:800; color:{color}; margin-top:4px;">
     {html_lib.escape(value)}
-  </div>
-  <div style="font-size:0.78rem; color:{COLORS['TextSec']}; line-height:1.45;">
+      </div>
+      <div style="font-size:0.78rem; color:{COLORS['TextSec']}; line-height:1.45;">
     {html_lib.escape(caption)}
-  </div>
-</div>
-"""
+      </div>
+    </div>
+    """
             )
         return mo.Html(
             f"""
-<div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
-  {''.join(card_html)}
-</div>
-"""
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
+      {''.join(card_html)}
+    </div>
+    """
         )
 
     def v1_10_reveal_card(title: str, predicted: str, actual: str, consequence: str, ok: bool = False):
         color = COLORS["GreenLine"] if ok else COLORS["OrangeLine"]
         return mo.Html(
             f"""
-<div style="background:white; border:1px solid {COLORS['Border']}; border-left:4px solid {color};
+    <div style="background:white; border:1px solid {COLORS['Border']}; border-left:4px solid {color};
             border-radius:8px; padding:16px 18px; margin:14px 0;">
-  <div style="font-size:0.72rem; font-weight:800; color:{color}; text-transform:uppercase;
+      <div style="font-size:0.72rem; font-weight:800; color:{color}; text-transform:uppercase;
               letter-spacing:0.12em; margin-bottom:6px;">Prediction vs. Reality</div>
-  <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:8px;">
+      <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:8px;">
     {html_lib.escape(title)}
-  </div>
-  <div style="color:{COLORS['TextSec']}; line-height:1.65;">
+      </div>
+      <div style="color:{COLORS['TextSec']}; line-height:1.65;">
     <strong>You predicted:</strong> {html_lib.escape(predicted)}<br/>
     <strong>Actual:</strong> {html_lib.escape(actual)}<br/>
     <strong>Consequence:</strong> {html_lib.escape(consequence)}
-  </div>
-</div>
-"""
+      </div>
+    </div>
+    """
         )
 
     def v1_10_checkpoint_card(title: str, fields: tuple[tuple[str, str], ...], color: str):
         field_html = "".join(
             f"""
-<div style="display:flex; gap:8px; align-items:flex-start; padding:5px 0;">
-  <div style="min-width:160px; color:{COLORS['TextMuted']}; font-weight:800; font-size:0.76rem;
+    <div style="display:flex; gap:8px; align-items:flex-start; padding:5px 0;">
+      <div style="min-width:160px; color:{COLORS['TextMuted']}; font-weight:800; font-size:0.76rem;
               text-transform:uppercase; letter-spacing:0.06em;">{html_lib.escape(label)}</div>
-  <div style="color:{COLORS['Text']}; line-height:1.45;">{html_lib.escape(value)}</div>
-</div>
-"""
+      <div style="color:{COLORS['Text']}; line-height:1.45;">{html_lib.escape(value)}</div>
+    </div>
+    """
             for label, value in fields
         )
         return mo.Html(
             f"""
-<div style="background:white; border:1px solid {COLORS['Border']}; border-left:4px solid {color};
+    <div style="background:white; border:1px solid {COLORS['Border']}; border-left:4px solid {color};
             border-radius:8px; padding:15px 18px; margin:14px 0;">
-  <div style="font-size:0.72rem; font-weight:800; color:{color}; text-transform:uppercase;
+      <div style="font-size:0.72rem; font-weight:800; color:{color}; text-transform:uppercase;
               letter-spacing:0.12em; margin-bottom:6px;">Checkpoint</div>
-  <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:6px;">
+      <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:6px;">
     {html_lib.escape(title)}
-  </div>
-  {field_html}
-</div>
-"""
+      </div>
+      {field_html}
+    </div>
+    """
         )
 
     def v1_10_failure_card(title: str, failures: tuple[str, ...] | list[str], recovery: str):
@@ -597,21 +587,21 @@ def _(COLORS, html_lib, mo):
         )
         return mo.Html(
             f"""
-<div style="background:#FFF7F7; border:1px solid #F3B8B8; border-left:4px solid {COLORS['RedLine']};
+    <div style="background:#FFF7F7; border:1px solid #F3B8B8; border-left:4px solid {COLORS['RedLine']};
             border-radius:8px; padding:16px 18px; margin:14px 0;">
-  <div style="font-size:0.72rem; font-weight:800; color:{COLORS['RedLine']};
+      <div style="font-size:0.72rem; font-weight:800; color:{COLORS['RedLine']};
               text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">Failure State</div>
-  <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:6px;">
+      <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:6px;">
     {html_lib.escape(title)}
-  </div>
-  <ul style="margin:8px 0 8px 18px; color:{COLORS['TextSec']}; line-height:1.55;">
+      </div>
+      <ul style="margin:8px 0 8px 18px; color:{COLORS['TextSec']}; line-height:1.55;">
     {failure_items}
-  </ul>
-  <div style="color:{COLORS['TextSec']}; line-height:1.55;">
+      </ul>
+      <div style="color:{COLORS['TextSec']}; line-height:1.55;">
     <strong>Recovery:</strong> {html_lib.escape(recovery)}
-  </div>
-</div>
-"""
+      </div>
+    </div>
+    """
         )
 
     def v1_10_candidate_table(rows, columns, highlight_label: str = ""):
@@ -650,16 +640,16 @@ def _(COLORS, html_lib, mo):
             )
         return mo.Html(
             f"""
-<div style="overflow-x:auto; margin:14px 0; border:1px solid {COLORS['Border']};
+    <div style="overflow-x:auto; margin:14px 0; border:1px solid {COLORS['Border']};
             border-radius:8px; background:white;">
-  <table style="border-collapse:collapse; width:100%; font-size:0.84rem;">
+      <table style="border-collapse:collapse; width:100%; font-size:0.84rem;">
     <thead style="background:{COLORS['Surface2']}; color:{COLORS['Text']};">
       <tr>{header_html}</tr>
     </thead>
     <tbody>{''.join(body_html)}</tbody>
-  </table>
-</div>
-"""
+      </table>
+    </div>
+    """
         )
 
     def v1_10_release_gate_card(result: dict[str, object]):
@@ -678,29 +668,27 @@ def _(COLORS, html_lib, mo):
             warning_html = f"<div style='margin-top:8px;'><strong>Residual warning:</strong><ul>{warning_html}</ul></div>"
         return mo.Html(
             f"""
-<div style="background:white; border:1px solid {COLORS['Border']}; border-left:4px solid {color};
+    <div style="background:white; border:1px solid {COLORS['Border']}; border-left:4px solid {color};
             border-radius:8px; padding:16px 18px; margin:14px 0;">
-  <div style="font-size:0.72rem; font-weight:800; color:{color}; text-transform:uppercase;
+      <div style="font-size:0.72rem; font-weight:800; color:{color}; text-transform:uppercase;
               letter-spacing:0.12em; margin-bottom:6px;">Release Gate</div>
-  <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:8px;">{status}</div>
-  <div style="color:{COLORS['TextSec']}; line-height:1.6;">
+      <div style="font-weight:800; color:{COLORS['Text']}; margin-bottom:8px;">{status}</div>
+      <div style="color:{COLORS['TextSec']}; line-height:1.6;">
     <strong>Recipe:</strong> {html_lib.escape(str(result['selected_recipe']))}<br/>
     <strong>Primary metric evidence:</strong> {html_lib.escape(str(result['primary_metric_gain']))}<br/>
     <strong>Validation test:</strong> {html_lib.escape(str(result['validation_test']))}
     <ul style="margin:8px 0 0 18px;">{failure_html}</ul>
     {warning_html}
-  </div>
-</div>
-"""
+      </div>
+    </div>
+    """
         )
 
     return (
         v1_10_candidate_table,
         v1_10_checkpoint_card,
         v1_10_failure_card,
-        v1_10_fmt_size_mb,
         v1_10_metric_cards,
-        v1_10_part_banner,
         v1_10_release_gate_card,
         v1_10_reveal_card,
         v1_10_status_color,
@@ -708,117 +696,67 @@ def _(COLORS, html_lib, mo):
 
 
 @app.cell(hide_code=True)
-def _(ACADEMIC_LAB_CSS, LAB_CSS, lab_header, lab_metadata, mo):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            lab_header(
-                lab_metadata,
-                (
-                    "Use solver-backed compression candidates to decide what can actually "
-                    "ship on the selected deployment track."
-                ),
-                chips=("Compression", "Guardrails", "Calibration", "Sparsity", "Release gate"),
-            ),
-        ]
-    )
-    return
-
-
-@app.cell(hide_code=True)
 def _(
-    chapter_10_recap,
-    chapter_recap,
-    lab_learning_objectives,
-    lab_map,
-    learning_objectives,
+    ACADEMIC_LAB_CSS,
     mo,
-    scenario_brief,
-    track_arc_context,
-    track_context,
+    v1_10_hardware,
+    v1_10_model,
     v1_10_track_picker,
     v1_10_track_profile,
     v1_10_variant,
 ):
-    mo.vstack(
-        [
-            learning_objectives(lab_learning_objectives),
-            chapter_recap(chapter_10_recap),
-            v1_10_track_picker,
-            track_context(v1_10_track_profile),
-            track_arc_context(v1_10_track_profile, "v1_10_compression_paradox"),
-            scenario_brief(
-                "Scenario Brief",
-                stakeholder=v1_10_variant.stakeholder,
-                objective=v1_10_variant.objective,
-                constraints={
-                    "Workload": v1_10_variant.workload_summary,
-                    "Primary metric": v1_10_variant.primary_metric,
-                    "Release guardrail": v1_10_variant.guardrail_metric,
-                    "Required validation": ", ".join(v1_10_variant.defaults["validation_tests"]),
-                },
-            ),
-            lab_map(
-                (
-                    {
-                        "part_id": "A",
-                        "part": "A",
-                        "concept": "Smaller Is Not Automatically Faster",
-                        "question": "Which method still wins after track guardrails and hardware support are applied?",
-                    },
-                    {
-                        "part_id": "B",
-                        "part": "B",
-                        "concept": "Pruning Has Structure",
-                        "question": "When do zeros become speed instead of storage-only sparsity?",
-                    },
-                    {
-                        "part_id": "C",
-                        "part": "C",
-                        "concept": "Distillation Trades Teacher Quality For Student Constraints",
-                        "question": "When is a dense student deployable, and what teacher risk follows it?",
-                    },
-                    {
-                        "part_id": "D",
-                        "part": "D",
-                        "concept": "Compression Strategy Depends On Binding Constraint And Evidence",
-                        "question": "Which recipe survives the release gate?",
-                    },
-                    {
-                        "part_id": "Synthesis",
-                        "part": "Synthesis",
-                        "concept": "Compression Contract",
-                        "question": "What lesson carries into hardware acceleration?",
-                    },
-                ),
-                {},
-            ),
-        ]
-    )
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div style="margin-bottom: 16px;">
+        {v1_10_track_picker}
+      </div>
+      <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+          ML Systems Textbook &middot; Volume I &middot; Chapter 10 &middot; Lab 10
+        </div>
+        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+          Model Compression &amp; The Compression Paradox
+        </h1>
+        <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+          Evaluate post-training quantization, structured pruning, and knowledge distillation across deployment tiers to find recipes that actually accelerate hardware without breaking SLA guardrails.
+        </p>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Hardware:</strong> {v1_10_hardware.name}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Baseline:</strong> {v1_10_model.name}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Primary Metric:</strong> {v1_10_variant.primary_metric}
+          </span>
+          <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+            <strong>Guardrail:</strong> {v1_10_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+          System Scenario: {v1_10_track_profile.label}
+        </h3>
+        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
+          {v1_10_variant.workload_summary} {v1_10_variant.objective}
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Model Compression:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>Compression Ratio &ne; Real Speedup:</strong> Theoretical parameter reductions or unstructured sparsity only yield latency and energy wins if target hardware engines support sparse acceleration or lower-bit tensor math.</li>
+            <li><strong>Memory Footprint vs. Bandwidth Wall:</strong> Weight-only quantization saves storage and DRAM loading bandwidth, but compute-bound workloads only speed up when activations and MAC pipelines operate at reduced precision.</li>
+            <li><strong>Accuracy Cliffs &amp; Calibration:</strong> Aggressive quantization below 8 bits (e.g., INT4/FP4) requires outlier-aware calibration (AWQ/SmoothQuant) to avoid catastrophic loss on rare-hazard edge cases.</li>
+            <li><strong>Deployment Feasibility is a Conjunction:</strong> A valid recipe must simultaneously satisfy physical memory limits, real p99 latency SLAs, thermal TDP, and domain accuracy floors.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.Html(
-        """
-<div class="mlsysbook-panel mlsysbook-launch-panel">
-  <div class="mlsysbook-section-label">Instructions</div>
-  <h2>Recommended Reading</h2>
-  <ul class="mlsysbook-list">
-    <li><strong>Chapter 10: Model Compression</strong> -- quantization, calibration, pruning structure, distillation, and the Pareto frontier.</li>
-    <li><strong>Chapter 11 preview</strong> -- hardware acceleration explains why supported kernels control speedup.</li>
-  </ul>
-</div>
-"""
-    )
-    return
-
-
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -840,6 +778,7 @@ def _(
             "Distillation": "distillation",
             "No compression / keep baseline": "no_compression",
         },
+        value="INT8 quantization",
         label="Which single method is most likely to win for this track?",
     )
     partA_method = mo.ui.dropdown(
@@ -855,6 +794,7 @@ def _(
             "About 5x": "5x",
             "About 10x": "10x",
         },
+        value="About 1x",
         label="At 90 percent sparsity, what speedup do you expect?",
     )
     partC_sparsity_pct = mo.ui.slider(start=0, stop=90, value=90, step=10, label="Sparsity (%)")
@@ -883,6 +823,7 @@ def _(
             "Validation coverage blocks release": "validation_coverage",
             "Dense student is ready to ship": "ship",
         },
+        value="Teacher quality blocks release",
         label="Which distillation risk most likely blocks release?",
     )
     partC_teacher_quality = mo.ui.dropdown(
@@ -913,6 +854,7 @@ def _(
 
     partD_pred = mo.ui.radio(
         options=v1_10_recipe_prediction_options,
+        value=f"Best feasible recipe: {v1_10_best_candidate_label}",
         label="Which recipe survives this track's release gate?",
     )
     partD_quant_bit = mo.ui.dropdown(
@@ -964,9 +906,9 @@ def _(
         partA_method,
         partA_pred,
         partC_decision,
-        partC_pred,
         partC_distill_decision,
         partC_distill_pred,
+        partC_pred,
         partC_sparsity_pct,
         partC_sparsity_type,
         partC_student_scale,
@@ -981,17 +923,14 @@ def _(
     )
 
 
-# ===========================================================================
-# ZONE C: CONCEPT MODULE TABS
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
     decision_flow,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     mo,
     partA_method,
     partA_pred,
@@ -1010,33 +949,25 @@ def _(
     partD_quant_bit,
     partD_residual_risk,
     partD_validation,
-    scenario_thread,
     v1_10_best_candidate_label,
     v1_10_best_candidate_row,
-    v1_10_bit_widths,
-    v1_10_carry_forward_implication,
     v1_10_candidate_rows,
     v1_10_candidate_table,
     v1_10_candidate_to_row,
+    v1_10_carry_forward_implication,
     v1_10_checkpoint_card,
     v1_10_compression_solver,
-    v1_10_compression_sweep,
     v1_10_defaults,
     v1_10_evaluate_distillation,
     v1_10_evaluate_recipe,
     v1_10_failure_card,
-    v1_10_fmt_size_mb,
     v1_10_hardware,
-    v1_10_lowest_feasible_bit_width,
-    v1_10_method_label,
     v1_10_metric_cards,
     v1_10_model,
-    v1_10_part_banner,
-    v1_10_quant_label,
+    v1_10_recipe_prediction_options,
     v1_10_rejected_candidate_row,
     v1_10_rejected_method_label,
     v1_10_release_gate_card,
-    v1_10_recipe_prediction_options,
     v1_10_reveal_card,
     v1_10_size_limit,
     v1_10_status_color,
@@ -1080,35 +1011,21 @@ def _(
 
     def build_part_a():
         items = [
-            v1_10_part_banner(
-                "A",
-                "Smaller Is Not Automatically Faster",
-                (
-                    "The common prior is to choose the highest compression ratio. The solver shows "
-                    "that the winning method depends on track guardrails and supported runtime paths."
-                ),
-                COLORS["BlueLine"],
+            mo.Html(f"""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>Part A: Smaller Is Not Automatically Faster</h2></div>
+              <div class="mlsysbook-callout"><strong>Invariant:</strong>
+                The common prior is to choose the highest compression ratio. The solver shows
+                that the winning method depends on track guardrails and supported runtime paths.</div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partA_pred,
+                title="1. Formulate Your Compression Feasibility Hypothesis",
+                subtitle=f"Determine which compression method solves the binding constraint on {v1_10_hardware.name} ({_primary_metric}) without exceeding quality degradation floors ({_max_drop_pct:.2f}%).",
+                gate_label="Required Engineering Gate",
+                accent="#A51C30",
             ),
-            scenario_thread(
-                f"{_track_label} feasibility review",
-                (
-                    f"{v1_10_variant.stakeholder} needs {_primary_metric} without violating "
-                    f"{_guardrail}. The active model is {v1_10_model.name} on {v1_10_hardware.name}."
-                ),
-                callout=(
-                    f"Size limit: {v1_10_size_limit.to('MB').magnitude:.3g} MB; "
-                    f"max quality drop: {_max_drop_pct:.2f}%; min speedup: {_min_speedup:.2f}x."
-                ),
-            ),
-            mo.md(
-                """
-### Scenario
-
-Compression is not one operation. A method must reduce the resource that binds this
-track, preserve quality, meet the speedup requirement, and run on a supported fast path.
-"""
-            ),
-            partA_pred,
         ]
         if partA_pred.value is None:
             items.append(mo.callout(mo.md("Select a method prediction to reveal the solver-backed candidate table."), kind="warn"))
@@ -1116,7 +1033,11 @@ track, preserve quality, meet the speedup requirement, and run on a supported fa
 
         items.extend(
             [
-                mo.hstack([partA_method], justify="start"),
+                instrumentation_console(
+                    [partA_method],
+                    title="Candidate Exploration Knobs",
+                    subtitle="Select candidate compression method to inspect runtime feasibility and guardrails",
+                ),
                 decision_flow(
                     "Part A decision path",
                     (
@@ -1218,22 +1139,22 @@ track, preserve quality, meet the speedup requirement, and run on a supported fa
                 {
                     "Math Peek: Compression feasibility": mo.md(
                         """
-Compression ratio:
+    Compression ratio:
 
-$$
-\\text{ratio} = \\frac{\\text{original size}}{\\text{compressed size}}
-$$
+    $$
+    \\text{ratio} = \\frac{\\text{original size}}{\\text{compressed size}}
+    $$
 
-Solver release condition:
+    Solver release condition:
 
-$$
-\\text{feasible} =
-\\text{size_ok} \\land \\text{quality_ok} \\land \\text{speed_ok} \\land \\text{hardware_supported}
-$$
+    $$
+    \\text{feasible} =
+    \\text{size_ok} \\land \\text{quality_ok} \\land \\text{speed_ok} \\land \\text{hardware_supported}
+    $$
 
-Source model: `CompressionModel.sweep()` evaluates all listed candidates against the
-track's size limit, maximum accuracy drop, minimum speedup, and hardware support flag.
-"""
+    Source model: `CompressionModel.sweep()` evaluates all listed candidates against the
+    track's size limit, maximum accuracy drop, minimum speedup, and hardware support flag.
+    """
                     )
                 }
             )
@@ -1259,33 +1180,21 @@ track's size limit, maximum accuracy drop, minimum speedup, and hardware support
             row for row in pruning_rows if row["sparsity_type"] == "unstructured" and row["sparsity_pct"] == 90
         )
         items = [
-            v1_10_part_banner(
-                "B",
-                "Pruning Has Structure",
-                (
-                    "The naive prior says 90 percent sparse should mean about 10x faster. "
-                    "The runtime only sees speed when the sparsity has exploitable structure."
-                ),
-                COLORS["RedLine"],
+            mo.Html(f"""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>Part B: Pruning Has Structure</h2></div>
+              <div class="mlsysbook-callout"><strong>Invariant:</strong>
+                The naive prior says 90 percent sparse should mean about 10x faster.
+                The runtime only sees speed when the sparsity has exploitable structure.</div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partC_pred,
+                title="2. Formulate Your Sparsity Speedup Hypothesis",
+                subtitle=f"Assess whether pruning zero-weights creates actual latency speedup or merely storage reductions on {v1_10_hardware.name}.",
+                gate_label="Required Engineering Gate",
+                accent="#A51C30",
             ),
-            scenario_thread(
-                f"{_track_label} pruning escalation",
-                (
-                    f"{v1_10_variant.stakeholder} asks whether pruning can rescue the release. "
-                    "The answer depends on zero structure, not only zero count."
-                ),
-                callout=f"Validation risk: {', '.join(v1_10_variant.defaults['validation_tests'])}.",
-            ),
-            mo.md(
-                """
-### Scenario
-
-Unstructured zeros often save storage only. Structured pruning can create real
-speedup, but it trades regularity against quality. N:M patterns only help when
-the hardware supports the exact sparse-kernel shape.
-"""
-            ),
-            partC_pred,
         ]
         if partC_pred.value is None:
             items.append(mo.callout(mo.md("Select a sparsity speedup prediction to unlock the pruning evidence."), kind="warn"))
@@ -1293,7 +1202,11 @@ the hardware supports the exact sparse-kernel shape.
 
         items.extend(
             [
-                mo.hstack([partC_sparsity_pct, partC_sparsity_type, partC_decision], justify="start"),
+                instrumentation_console(
+                    [partC_sparsity_pct, partC_sparsity_type, partC_decision],
+                    title="Pruning Pattern & Sparsity Knobs",
+                    subtitle="Configure sparsity percentage, pattern type, and checkpoint decision",
+                ),
                 v1_10_candidate_table(
                     pruning_rows + (selected_row,),
                     (
@@ -1378,26 +1291,26 @@ the hardware supports the exact sparse-kernel shape.
                 {
                     "Math Peek: Pruning ratio and hardware branch": mo.md(
                         """
-Theoretical pruning ratio:
+    Theoretical pruning ratio:
 
-$$
-\\text{pruning_ratio} = \\frac{1}{1 - s}
-$$
+    $$
+    \\text{pruning_ratio} = \\frac{1}{1 - s}
+    $$
 
-Runtime branch:
+    Runtime branch:
 
-$$
-\\text{speedup} =
-\\begin{cases}
-1.0, & \\text{unstructured on dense kernels} \\\\
-\\frac{1}{1-s}, & \\text{structured pruning} \\\\
-2.0, & \\text{supported 2:4 N:M near 50 percent sparsity}
-\\end{cases}
-$$
+    $$
+    \\text{speedup} =
+    \\begin{cases}
+    1.0, & \\text{unstructured on dense kernels} \\\\
+    \\frac{1}{1-s}, & \\text{structured pruning} \\\\
+    2.0, & \\text{supported 2:4 N:M near 50 percent sparsity}
+    \\end{cases}
+    $$
 
-Source model: `CompressionModel.candidate()` normalizes the sparsity type, checks
-hardware support, and returns guardrail violations for the selected pattern.
-"""
+    Source model: `CompressionModel.candidate()` normalizes the sparsity type, checks
+    hardware support, and returns guardrail violations for the selected pattern.
+    """
                     )
                 }
             )
@@ -1411,34 +1324,21 @@ hardware support, and returns guardrail violations for the selected pattern.
             partD_validation.value,
         )
         items = [
-            v1_10_part_banner(
-                "C",
-                "Distillation Trades Teacher Quality For Student Constraints",
-                (
-                    "A dense student can be easier to deploy than a sparse teacher, but the "
-                    "student can only inherit what the teacher and distillation data can teach."
-                ),
-                COLORS["OrangeLine"],
+            mo.Html(f"""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>Part C: Distillation Trades Teacher Quality For Student Constraints</h2></div>
+              <div class="mlsysbook-callout"><strong>Invariant:</strong>
+                A dense student can be easier to deploy than a sparse teacher, but the
+                student can only inherit what the teacher and distillation data can teach.</div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partC_distill_pred,
+                title="3. Formulate Your Distillation Risk Hypothesis",
+                subtitle=f"Evaluate whether a dense student architecture can satisfy {_guardrail} on {v1_10_hardware.name} without teacher quality collapse.",
+                gate_label="Required Engineering Gate",
+                accent="#A51C30",
             ),
-            scenario_thread(
-                f"{_track_label} dense-student review",
-                (
-                    f"{v1_10_variant.stakeholder} asks whether a smaller dense student can "
-                    f"replace {v1_10_model.name} while preserving {_guardrail}."
-                ),
-                callout="The trade moves cost from repeated inference into teacher choice, soft-target generation, and validation.",
-            ),
-            mo.md(
-                """
-### Scenario
-
-Distillation trains a smaller dense student from a larger teacher. It can remove
-deployment cost without depending on sparse kernels, but it is not lossless: a
-weak teacher, biased soft targets, or an undersized student can fail the release
-quality guardrail.
-"""
-            ),
-            partC_distill_pred,
         ]
         if partC_distill_pred.value is None:
             items.append(mo.callout(mo.md("Select a distillation-risk prediction to unlock the dense-student evidence."), kind="warn"))
@@ -1446,8 +1346,11 @@ quality guardrail.
 
         items.extend(
             [
-                mo.hstack([partC_teacher_quality, partC_student_scale, partC_distill_decision], justify="start"),
-                mo.hstack([partD_validation], justify="start"),
+                instrumentation_console(
+                    [partC_teacher_quality, partC_student_scale, partC_distill_decision, partD_validation],
+                    title="Distillation Student & Teacher Knobs",
+                    subtitle="Configure teacher quality, student relative size, and checkpoint validation test",
+                ),
             ]
         )
         items.append(
@@ -1518,24 +1421,24 @@ quality guardrail.
                 {
                     "Math Peek: Distillation capacity and teacher risk": mo.md(
                         """
-Dense-student compression:
+    Dense-student compression:
 
-$$
-\\text{student compression ratio} = \\frac{1}{\\text{student scale}}
-$$
+    $$
+    \\text{student compression ratio} = \\frac{1}{\\text{student scale}}
+    $$
 
-Local risk model:
+    Local risk model:
 
-$$
-\\Delta \\text{quality} =
-\\text{teacher penalty} + \\max(0, 0.40 - \\text{student scale}) \\cdot 0.05
-$$
+    $$
+    \\Delta \\text{quality} =
+    \\text{teacher penalty} + \\max(0, 0.40 - \\text{student scale}) \\cdot 0.05
+    $$
 
-Source model: `CompressionModel` has no trained-student physics, so this
-notebook-local risk card only checks the chapter claim that teacher quality and
-student capacity limit deployability. The final release still requires the
-track validation test selected for Part D.
-"""
+    Source model: `CompressionModel` has no trained-student physics, so this
+    notebook-local risk card only checks the chapter claim that teacher quality and
+    student capacity limit deployability. The final release still requires the
+    track validation test selected for Part D.
+    """
                     )
                 }
             )
@@ -1551,25 +1454,21 @@ track validation test selected for Part D.
             partD_validation.value,
         )
         items = [
-            v1_10_part_banner(
-                "D",
-                "Recipe Frontier And Release Gate",
-                (
-                    "A leaderboard candidate is not a release. A compression deployment is a "
-                    "recipe plus validation evidence and residual risk."
-                ),
-                COLORS["GreenLine"],
-                duration="12-15 min",
+            mo.Html(f"""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>Part D: Recipe Frontier And Release Gate</h2></div>
+              <div class="mlsysbook-callout"><strong>Invariant:</strong>
+                A leaderboard candidate is not a release. A compression deployment is a
+                recipe plus validation evidence and residual risk.</div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partD_pred,
+                title="4. Formulate Your Release Gate Recipe Hypothesis",
+                subtitle=f"Select the compression recipe that survives this track's release gate on {v1_10_hardware.name} with {_primary_metric} gains and zero guardrail violations.",
+                gate_label="Required Engineering Gate",
+                accent="#A51C30",
             ),
-            scenario_thread(
-                f"{_track_label} release review",
-                (
-                    "The review board wants the recipe you would ship, the guardrail that "
-                    "could block it, and the validation test you will run first."
-                ),
-                callout=f"Primary metric: {_primary_metric}; guardrail: {_guardrail}.",
-            ),
-            partD_pred,
         ]
         if partD_pred.value is None:
             items.append(mo.callout(mo.md("Select the release-gate prediction to unlock the recipe frontier."), kind="warn"))
@@ -1613,13 +1512,10 @@ track validation test selected for Part D.
                     ),
                     v1_10_best_candidate_label,
                 ),
-                mo.hstack(
-                    [partD_quant_bit, partD_prune_choice, partD_distillation],
-                    justify="start",
-                ),
-                mo.hstack(
-                    [partD_calibration, partD_validation, partD_residual_risk],
-                    justify="start",
+                instrumentation_console(
+                    [partD_quant_bit, partD_prune_choice, partD_distillation, partD_calibration, partD_validation, partD_residual_risk],
+                    title="Production Compression Recipe Knobs",
+                    subtitle="Set quantization bit-width, pruning mode, distillation fallback, calibration, and residual risk",
                 ),
                 v1_10_release_gate_card(recipe_result),
             ]
@@ -1661,24 +1557,24 @@ track validation test selected for Part D.
                 {
                     "Math Peek: Multi-constraint recipe feasibility": mo.md(
                         """
-Release condition:
+    Release condition:
 
-$$
-\\text{ship} =
-\\text{size_ok} \\land \\text{quality_ok} \\land \\text{speed_ok}
-\\land \\text{hardware_supported} \\land \\text{validation_selected}
-$$
+    $$
+    \\text{ship} =
+    \\text{size_ok} \\land \\text{quality_ok} \\land \\text{speed_ok}
+    \\land \\text{hardware_supported} \\land \\text{validation_selected}
+    $$
 
-Dominance condition:
+    Dominance condition:
 
-$$
-a \\prec b \\quad \\text{if candidate a is no worse in size, speed, and quality, and better in at least one.}
-$$
+    $$
+    a \\prec b \\quad \\text{if candidate a is no worse in size, speed, and quality, and better in at least one.}
+    $$
 
-Source model: `CompressionModel.sweep()` marks dominated and frontier candidates.
-The local recipe gate reuses `CompressionModel.candidate()` for each selected
-quantization or pruning anchor and adds calibration and validation checks.
-"""
+    Source model: `CompressionModel.sweep()` marks dominated and frontier candidates.
+    The local recipe gate reuses `CompressionModel.candidate()` for each selected
+    quantization or pruning anchor and adds calibration and validation checks.
+    """
                     )
                 }
             )
@@ -1700,41 +1596,38 @@ quantization or pruning anchor and adds calibration and validation checks.
         )
         return mo.vstack(
             [
-                v1_10_part_banner(
-                    "S",
-                    "Synthesis",
-                    (
-                        "The invariant across the parts is that compression is a deployment "
-                        "contract, not a model-size scoreboard."
-                    ),
-                    COLORS["BlueLine"],
-                    duration="5-8 min",
-                ),
+                mo.Html(f"""
+                <div class="mlsysbook-panel mlsysbook-nugget">
+                  <div class="mlsysbook-part-title"><h2>Synthesis: The Compression Deployment Contract</h2></div>
+                  <div class="mlsysbook-callout"><strong>Invariant:</strong>
+                    Compression is a deployment contract, not a model-size scoreboard.
+                    A production recipe requires explicit validation evidence, verified hardware paths, and a named residual risk.</div>
+                </div>
+                """),
                 mo.Html(
                     f"""
-<div style="background:#F7FAFF; border:1px solid #C9D8EE; border-left:4px solid {COLORS['BlueLine']};
-            border-radius:8px; padding:22px 26px; margin:16px 0;">
-  <div style="font-size:0.72rem; font-weight:800; color:{COLORS['BlueLine']};
+    <div class="mlsysbook-panel">
+      <div style="font-size:0.72rem; font-weight:800; color:var(--mlsysbook-primary);
               text-transform:uppercase; letter-spacing:0.12em; margin-bottom:10px;">
-    Key Takeaways
-  </div>
-  <div style="font-size:0.92rem; color:{COLORS['Text']}; line-height:1.75;">
-    <div><strong>1. Compression helps only if it attacks the binding resource.</strong>
-      The best candidate for {_track_label} is {v1_10_best_candidate_label}, not necessarily the smallest candidate.</div>
-    <div style="margin-top:8px;"><strong>2. Hardware support is part of the contract.</strong>
-      Rejected method: {v1_10_rejected_method_label} ({rejected_reason}).</div>
-    <div style="margin-top:8px;"><strong>3. Final recipes require validation and residual risk.</strong>
-      This recipe records {_primary_metric} as the binding resource, {_guardrail} as the quality guardrail, and "{partD_residual_risk.value}" as the risk to test.</div>
-    <div style="margin-top:8px;"><strong>4. Carry-forward implication.</strong>
-      {v1_10_carry_forward_implication}</div>
-  </div>
-</div>
-"""
+    Key Architectural Takeaways
+      </div>
+      <ul class="mlsysbook-list" style="font-size:0.92rem; color:{COLORS['Text']}; line-height:1.75;">
+    <li><strong>Compression helps only if it attacks the binding resource:</strong>
+      The best candidate for {_track_label} is <strong>{v1_10_best_candidate_label}</strong>, not necessarily the smallest candidate.</li>
+    <li><strong>Hardware support is part of the contract:</strong>
+      Rejected method: <strong>{v1_10_rejected_method_label}</strong> ({rejected_reason}). Theoretical sparsity without hardware kernel support yields zero inference acceleration.</li>
+    <li><strong>Final recipes require validation and residual risk:</strong>
+      This recipe records <strong>{_primary_metric}</strong> as the binding resource, <strong>{_guardrail}</strong> as the quality guardrail, and <em>"{partD_residual_risk.value}"</em> as the risk to test.</li>
+    <li><strong>Carry-forward implication:</strong>
+      {v1_10_carry_forward_implication}</li>
+      </ul>
+    </div>
+    """
                 ),
                 mo.Html(
                     f"""
-<div style="display:flex; gap:16px; margin:8px 0 16px 0; flex-wrap:wrap;">
-  <div style="flex:1; min-width:280px; background:white; border:1px solid {COLORS['Border']};
+    <div style="display:flex; gap:16px; margin:8px 0 16px 0; flex-wrap:wrap;">
+      <div style="flex:1; min-width:280px; background:white; border:1px solid {COLORS['Border']};
               border-radius:8px; padding:18px 22px;">
     <div style="font-size:0.7rem; font-weight:800; color:{COLORS['BlueLine']};
                 text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
@@ -1743,8 +1636,8 @@ quantization or pruning anchor and adds calibration and validation checks.
     <div style="font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.6;">
       <strong>Lab 11:</strong> Hardware acceleration and roofline analysis explain why a supported fast path controls whether compression turns into speedup.
     </div>
-  </div>
-  <div style="flex:1; min-width:280px; background:white; border:1px solid {COLORS['Border']};
+      </div>
+      <div style="flex:1; min-width:280px; background:white; border:1px solid {COLORS['Border']};
               border-radius:8px; padding:18px 22px;">
     <div style="font-size:0.7rem; font-weight:800; color:{COLORS['GreenLine']};
                 text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
@@ -1753,19 +1646,30 @@ quantization or pruning anchor and adds calibration and validation checks.
     <div style="font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.6;">
       The ledger saves the selected recipe, rejected method, binding resource, quality guardrail, validation test, and residual risk for later labs.
     </div>
-  </div>
-</div>
-"""
+      </div>
+    </div>
+    """
                 ),
+                mo.Html(f"""
+                <div class="lab-hud">
+                    <span class="hud-label">LAB</span>
+                    <span class="hud-value">10 &middot; Model Compression</span>
+                    <span class="hud-label">TRACK</span>
+                    <span class="hud-value">{v1_10_track_profile.label}</span>
+                    <span style="flex:1;"></span>
+                    <span class="hud-label">STATUS</span>
+                    <span class="hud-active">ACTIVE</span>
+                </div>
+                """),
                 mo.accordion(
                     {
                         "Self-check": mo.md(
                             """
-1. Why can a smaller model still be infeasible?
-2. Why does unstructured sparsity usually save storage but not latency?
-3. What teacher or student constraint can make distillation unsafe?
-4. What validation evidence would you demand before release?
-"""
+    1. Why can a smaller model still be infeasible?
+    2. Why does unstructured sparsity usually save storage but not latency?
+    3. What teacher or student constraint can make distillation unsafe?
+    4. What validation evidence would you demand before release?
+    """
                         )
                     }
                 ),
@@ -1783,11 +1687,6 @@ quantization or pruning anchor and adds calibration and validation checks.
     )
     tabs
     return
-
-
-# ===========================================================================
-# ZONE D: REPORT AND LEDGER
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -1817,8 +1716,8 @@ def _(
     partD_validation,
     report_export_panel,
     v1_10_best_candidate_label,
-    v1_10_carry_forward_implication,
     v1_10_candidate_rows,
+    v1_10_carry_forward_implication,
     v1_10_compression_sweep,
     v1_10_evaluate_recipe,
     v1_10_lowest_feasible_bit_width,
@@ -1922,14 +1821,14 @@ def _(
             big_takeaways(lab_big_takeaways),
             mo.Html(
                 """
-<div class="mlsysbook-panel mlsysbook-report-panel">
-  <h2>Download Report</h2>
-  <p class="mlsysbook-source-summary">
+    <div class="mlsysbook-panel mlsysbook-report-panel">
+      <h2>Download Report</h2>
+      <p class="mlsysbook-source-summary">
     This report records the solver-backed candidate frontier, structured predictions,
     selected recipe, release-gate result, validation test, and residual risk.
-  </p>
-</div>
-"""
+      </p>
+    </div>
+    """
             ),
             report_export_panel(report),
         ]
@@ -1946,9 +1845,10 @@ def _(
     partC_decision,
     partC_distill_decision,
     partC_distill_pred,
-    partC_student_scale,
+    partC_pred,
     partC_sparsity_pct,
     partC_sparsity_type,
+    partC_student_scale,
     partC_teacher_quality,
     partD_calibration,
     partD_distillation,
@@ -1958,8 +1858,8 @@ def _(
     partD_residual_risk,
     partD_validation,
     v1_10_best_candidate_label,
-    v1_10_carry_forward_implication,
     v1_10_candidate_rows,
+    v1_10_carry_forward_implication,
     v1_10_evaluate_recipe,
     v1_10_lowest_feasible_bit_width,
     v1_10_rejected_candidate_row,
@@ -2025,18 +1925,18 @@ def _(
     status = "COMPLETE" if complete else "IN PROGRESS"
     mo.Html(
         f"""
-<div class="lab-hud">
-  <span class="hud-label">LAB</span>
-  <span class="hud-value">10 &middot; Model Compression</span>
-  <span style="flex:1;"></span>
-  <span class="hud-label">CH</span>
-  <span class="hud-value">10</span>
-  <span class="hud-label">TRACK</span>
-  <span class="hud-value">{v1_10_track_id}</span>
-  <span class="hud-label">STATUS</span>
-  <span class="hud-active">{status}</span>
-</div>
-"""
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">10 &middot; Model Compression</span>
+      <span style="flex:1;"></span>
+      <span class="hud-label">CH</span>
+      <span class="hud-value">10</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v1_10_track_id}</span>
+      <span class="hud-label">STATUS</span>
+      <span class="hud-active">{status}</span>
+    </div>
+    """
     )
     return
 
