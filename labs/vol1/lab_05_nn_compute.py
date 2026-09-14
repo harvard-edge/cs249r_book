@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -32,9 +28,11 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         memory_cliff,
         neural_compute_profile,
         operation_ledger,
@@ -54,26 +52,23 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        LAB_CSS,
         apply_plotly_theme,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
+        instrumentation_console,
         ledger,
         memory_cliff,
         mo,
         neural_compute_profile,
         operation_ledger,
         operator_design,
-        part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -83,12 +78,19 @@ def _(get_lab_metadata):
     return (v1_05_metadata,)
 
 
-@app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_05_track_picker = track_selector(default=_default_track)
-    v1_05_track_picker
+@app.cell
+def _(mo):
+    # Top-Level Universal Track Selector
+    v1_05_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 & FlashAttention vs MHA)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Jetson Orin & TensorRT Conv Engine)": "robotaxi",
+            "📱 Mobile Track (Apple Silicon & Winograd Conv vs GEMM)": "iphone",
+            "⚡ TinyML Track (ESP32-S3 & CMSIS-NN Depthwise Tiling)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 & FlashAttention vs MHA)",
+        label="Select Course / Industry Track",
+    )
     return (v1_05_track_picker,)
 
 
@@ -116,7 +118,6 @@ def _(
         v1_05_hardware,
         v1_05_model,
         v1_05_profile,
-        v1_05_track_id,
         v1_05_variant,
     )
 
@@ -129,29 +130,30 @@ def _():
         return _html.escape(str(value))
 
     def v1_05_fields_html(fields):
-        return "\n".join(
-            (
-                '<div class="mlsysbook-field">'
-                f"<strong>{v1_05_escape(key)}</strong>{v1_05_escape(value)}"
-                "</div>"
+        items = []
+        for key, value in fields.items():
+            items.append(
+                f'<div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 14px;">'
+                f'<div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">{v1_05_escape(key)}</div>'
+                f'<div style="font-size: 0.98rem; font-weight: 700; color: #0F172A;">{v1_05_escape(value)}</div>'
+                f'</div>'
             )
-            for key, value in fields.items()
-        )
+        return f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 12px 0;">{"".join(items)}</div>'
 
     def v1_05_table_html(headers, rows, numeric=()):
-        header_html = "".join(f"<th>{v1_05_escape(header)}</th>" for header in headers)
+        header_html = "".join(f'<th style="padding: 10px 14px; border-bottom: 2px solid #CBD5E1; text-align: left; font-weight: 700; color: #334155; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em;">{v1_05_escape(header)}</th>' for header in headers)
         body_rows = []
         numeric_cols = set(numeric)
         for row in rows:
             cells = []
             for idx, value in enumerate(row):
                 align = "right" if idx in numeric_cols else "left"
-                cells.append(f'<td style="text-align:{align};">{v1_05_escape(value)}</td>')
+                cells.append(f'<td style="padding: 10px 14px; border-bottom: 1px solid #E2E8F0; text-align:{align}; color: #1E293B;">{v1_05_escape(value)}</td>')
             body_rows.append(f"<tr>{''.join(cells)}</tr>")
         return f"""
-        <div style="overflow-x:auto; margin-top:14px;">
-          <table class="mlsysbook-table">
-            <thead><tr>{header_html}</tr></thead>
+        <div style="overflow-x:auto; margin-top:14px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+            <thead><tr style="background: #F8FAFC;">{header_html}</tr></thead>
             <tbody>{''.join(body_rows)}</tbody>
           </table>
         </div>
@@ -412,189 +414,77 @@ def _():
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
-    LAB_CSS,
     mo,
-    source_trace,
-    track_arc_context,
-    track_context,
     v1_05_compute,
-    v1_05_metadata,
+    v1_05_hardware,
+    v1_05_model,
     v1_05_profile,
+    v1_05_track_picker,
     v1_05_track_story,
     v1_05_variant,
 ):
     _story = v1_05_track_story(v1_05_profile.track_id)
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 05
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                Neural Computation Amounts
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.05rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Operations &middot; Activations &middot; Memory Traffic &middot; Energy
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 860px; line-height: 1.65;">
-                {v1_05_variant.workload_summary} Neural computation is a budget:
-                tensor shapes become bounded amounts of operations, activations,
-                memory traffic, and energy.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Concept Modules + Synthesis
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_05_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_05_compute.tensor_label}
-                </span>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Shape Growth</span>
-                <span class="badge badge-warn">Activation Cliff</span>
-                <span class="badge badge-info">Batch/Precision</span>
-                <span class="badge badge-fail">Compute-vs-Memory Diagnosis</span>
-            </div>
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div style="margin-bottom: 16px;">
+        {v1_05_track_picker}
+      </div>
+      <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+          ML Systems Textbook &middot; Volume I &middot; Chapter 05 &middot; Lab 05
         </div>
-        """),
-        track_context(v1_05_profile),
-        track_arc_context(v1_05_profile, v1_05_metadata.lab_id),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Track Amount Lens</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Stakeholder</strong>{_story["stakeholder"]}</div>
-            <div class="mlsysbook-field"><strong>Bounded amounts</strong>{_story["amount_focus"]}</div>
-            <div class="mlsysbook-field"><strong>Natural failure</strong>{_story["failure"]}</div>
-            <div class="mlsysbook-field"><strong>Operator tensor</strong>{v1_05_compute.tensor_label}</div>
-          </div>
-          <div class="mlsysbook-callout"><strong>Shared concept sequence:</strong>
-            Parts A-D are the same for every track. The selected track changes
-            persona, constraints, thresholds, evidence emphasis, failure mode,
-            and report framing.</div>
+        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+          Neural Computation &amp; Operator Physics
+        </h1>
+        <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+          Connect tensor dimensions to bounded physical amounts of operations, intermediate activations, memory traffic, and energy consumption across hardware tiers.
+        </p>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Hardware: {v1_05_hardware.name}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Model: {v1_05_model.name}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Activation Budget: {v1_05_compute.activation_budget_mb:.1f} MB
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            Bandwidth Budget: {v1_05_compute.bandwidth_budget_gbs:.1f} GB/s
+          </span>
+          <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+            Power Budget: {v1_05_compute.power_budget_w:.2f} W
+          </span>
         </div>
-        """),
-        source_trace(
-            {
-                "chapter_invariant": "neural computation turns tensors into bounded operation, activation, memory-traffic, and energy amounts",
-                "chapter_anchors": "Purpose; Forward pass computation; Memory wall; Batch processing; Arithmetic intensity",
-                "hardware_ref": v1_05_variant.hardware_ref,
-                "model_ref": v1_05_variant.model_ref,
-                "shared_helper": "neural_compute_profile()",
-            },
-            summary="Opening source map",
-        ),
-    ])
+      </div>
+
+      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+          System Scenario: {_story['stakeholder'].title()} Operator Architecture
+        </h3>
+        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
+          {v1_05_variant.workload_summary}
+          In systems engineering, neural computation is never an abstract math problem—it is a finite resource budget.
+          As input resolutions, sequence lengths, and batch sizes expand, physical hardware limits enforce hard performance cliffs.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Neural Computation:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Iron Law of Activation Memory:</strong> Intermediate layer activations scale directly with tensor dimensions, frequently overflowing fast SRAM or cache long before parameter storage does.</li>
+            <li><strong>Memory Bandwidth Streaming Tax:</strong> Transferring feature maps between compute ALUs and off-chip DRAM consumes orders of magnitude more energy and latency than arithmetic multiply-accumulates.</li>
+            <li><strong>Arithmetic Intensity Bound:</strong> Operational intensity (FLOPs per byte moved) determines whether an operator is memory bandwidth-bound or compute peak-bound on the Roofline.</li>
+            <li><strong>Operator Tiling &amp; Kernel Fusion:</strong> Keeping intermediate tiles in fast register/SRAM caches prevents redundant DRAM roundtrips and breaks the memory wall.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, part_workflow, v1_05_compute, v1_05_profile, v1_05_track_story):
-    _story = v1_05_track_story(v1_05_profile.track_id)
-    mo.vstack([
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: white; border-radius: 0 12px 12px 0;
-                    padding: 20px 28px; margin: 8px 0 16px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Trace tensor shape growth:</strong>
-                    connect a changed shape to activation, operation, and byte amounts.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Find the binding budget:</strong>
-                    identify when activations, bandwidth, latency, or power bind first.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Compare batch and precision:</strong>
-                    trade throughput against memory, latency, and energy in your track.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Diagnose the optimization:</strong>
-                    decide whether compute or memory/data movement is the wall.</div>
-            </div>
-            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                        padding: 16px 28px 0 28px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Core Question
-                </div>
-                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                            line-height: 1.5; font-style: italic;">
-                    Which bounded amount controls {v1_05_compute.label}, and which operator
-                    choice carries the right architecture implication forward?
-                </div>
-            </div>
-        </div>
-        """),
-        part_workflow(
-            "Neural Computation Amount Workflow",
-            (
-                {
-                    "part": "Part A",
-                    "concept": "Tensor shape growth changes activation and operation amounts.",
-                    "prediction": "Predict which amount binds first.",
-                    "controls": "Adjust the shape multiplier for the active operator.",
-                    "evidence": "Compare activation memory, GMACs, bytes moved, intensity, latency, and power.",
-                    "decision": "Pick the amount to reduce first.",
-                },
-                {
-                    "part": "Part B",
-                    "concept": "Memory and activations can bind before arithmetic does.",
-                    "prediction": "Predict where the activation cliff appears.",
-                    "controls": "Sweep the shape variable and inspect normalized budgets.",
-                    "evidence": "Find the first threshold crossing and exact violations.",
-                    "decision": "Choose the largest defensible shape policy.",
-                },
-                {
-                    "part": "Part C",
-                    "concept": "Batch and precision trade throughput, memory, latency, and energy.",
-                    "prediction": "Predict which batch/precision strategy survives.",
-                    "controls": "Change batch/window and precision policies.",
-                    "evidence": "Compare feasible and infeasible strategies in a table and scatter plot.",
-                    "decision": "Record the track-specific batch/precision policy.",
-                },
-                {
-                    "part": "Part D",
-                    "concept": "Compute-vs-memory diagnosis determines the right optimization.",
-                    "prediction": "Predict the wall before selecting an operator design.",
-                    "controls": "Choose an operator design option.",
-                    "evidence": "Compare arithmetic intensity with the hardware crossover and design candidates.",
-                    "decision": "Name the optimization family and residual risk.",
-                },
-            ),
-            scenario=(
-                f"{v1_05_compute.label} is constrained by {_story['amount_focus']}; "
-                f"batch/window choices mean {_story['batch_meaning']}."
-            ),
-            reflection="The synthesis saves an operator budget note: binding amount, selected design, residual risk, and V1-06 architecture implication.",
-        ),
-    ])
-    return
-
-
-# ===========================================================================
-# ZONE B: CONTROLS
-# ===========================================================================
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_05_compute):
+def _(mo):
     v1_05_resource_prediction = mo.ui.radio(
         options={
             "Activation memory binds first": "activation memory",
@@ -602,14 +492,14 @@ def _(mo, v1_05_compute):
             "Arithmetic latency binds first": "latency",
             "Energy or power binds first": "power",
         },
-        label=f"Part A prediction: which bounded amount will dominate {v1_05_compute.label}?",
+        value="Activation memory binds first",
     )
     v1_05_shape_multiplier = mo.ui.slider(
-        start=v1_05_compute.shape_min,
-        stop=v1_05_compute.shape_max,
-        value=v1_05_compute.default_shape_multiplier,
-        step=v1_05_compute.shape_step,
-        label="Shape multiplier",
+        start=0.25,
+        stop=4.0,
+        value=1.0,
+        step=0.25,
+        label="Shape Multiplier",
     )
     v1_05_amount_checkpoint = mo.ui.radio(
         options={
@@ -618,9 +508,13 @@ def _(mo, v1_05_compute):
             "Reduce operation count first": "reduce_ops",
             "Reduce sustained power first": "reduce_power",
         },
-        label="Part A checkpoint: which amount should the operator budget reduce first?",
+        value="Reduce activation tensor size first",
     )
-    return (v1_05_amount_checkpoint, v1_05_resource_prediction, v1_05_shape_multiplier)
+    return (
+        v1_05_amount_checkpoint,
+        v1_05_resource_prediction,
+        v1_05_shape_multiplier,
+    )
 
 
 @app.cell(hide_code=True)
@@ -632,7 +526,7 @@ def _(mo):
             "The cliff appears only after more shape growth": "later",
             "No activation cliff appears in the tested envelope": "no_cliff",
         },
-        label="Part B prediction: where will the activation budget fail?",
+        value="The cliff is near the default shape",
     )
     v1_05_memory_checkpoint = mo.ui.radio(
         options={
@@ -641,9 +535,9 @@ def _(mo):
             "Hold shape and reduce precision first": "reduce_precision",
             "Accept the overage and document the violation": "accept_violation",
         },
-        label="Part B checkpoint: what shape policy goes into the budget note?",
+        value="Tile or stream the operator before growing shape",
     )
-    return (v1_05_cliff_prediction, v1_05_memory_checkpoint)
+    return v1_05_cliff_prediction, v1_05_memory_checkpoint
 
 
 @app.cell(hide_code=True)
@@ -655,7 +549,7 @@ def _(mo):
             "A larger batch/window is safe": "larger_batch",
             "The selected batch/precision policy will fail": "not_safe",
         },
-        label="Part C prediction: which batch/precision outcome do you expect?",
+        value="Track default is the only defensible policy",
     )
     v1_05_batch_policy = mo.ui.dropdown(
         options={
@@ -683,7 +577,7 @@ def _(mo):
             "Increase batch/window only with p99 guardrail": "batch_with_guardrail",
             "Reject the selected policy and redesign": "reject_redesign",
         },
-        label="Part C checkpoint: what batch/precision policy do you record?",
+        value="Use default batch/window and protect latency",
     )
     return (
         v1_05_batch_checkpoint,
@@ -702,7 +596,7 @@ def _(mo, v1_05_compute):
             "Compute latency is the wall": "compute",
             "Energy or thermal power is the wall": "energy",
         },
-        label="Part D prediction: what wall should the optimization target?",
+        value="Memory or data movement is the wall",
     )
     v1_05_design = mo.ui.dropdown(
         options=_design_options,
@@ -716,9 +610,13 @@ def _(mo, v1_05_compute):
             "Reduce precision, wake time, or sustained power": "energy_optimization",
             "Keep the baseline and accept the residual risk": "accept_baseline",
         },
-        label="Part D checkpoint: which optimization family goes into the memo?",
+        value="Reduce bytes moved and activation residency",
     )
-    return (v1_05_design, v1_05_diagnosis_prediction, v1_05_optimization_checkpoint)
+    return (
+        v1_05_design,
+        v1_05_diagnosis_prediction,
+        v1_05_optimization_checkpoint,
+    )
 
 
 @app.cell(hide_code=True)
@@ -729,17 +627,18 @@ def _(mo):
             "Ship only after reducing the binding amount": "reduce_before_ship",
             "Redesign architecture before this operator can ship": "redesign_architecture",
         },
-        label="Synthesis decision: what is the operator budget decision?",
+        value="Ship selected operator with measured binding amount",
     )
     v1_05_budget_note = mo.ui.text_area(
         label="Operator budget note",
+        value="Activation memory and streaming bandwidth bind first under tensor shape expansion. Selected fused attention kernel to keep intermediate tiles in SRAM and reduce DRAM traffic.",
         placeholder=(
             "Name the binding amount, the selected operator design, the evidence number, "
             "the residual risk, and the architecture implication for V1-06."
         ),
         full_width=True,
     )
-    return (v1_05_budget_note, v1_05_final_decision)
+    return v1_05_budget_note, v1_05_final_decision
 
 
 @app.cell
@@ -820,16 +719,13 @@ def _(
     )
 
 
-# ===========================================================================
-# ZONE C: CONCEPT MODULES
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     mo,
     source_trace,
     v1_05_alignment,
@@ -1090,6 +986,26 @@ def _(
         else "selected policy stays inside the modeled envelope"
     )
 
+    _part_a_hyp = gated_hypothesis_card(
+        v1_05_resource_prediction,
+        title="1. Formulate Your Operator Hypothesis",
+        subtitle=f"Predict which bounded amount will dominate {v1_05_compute.label} under scaling:",
+        gate_label="Required Engineering Gate",
+        accent="#A51C30",
+    )
+    _part_a_controls = instrumentation_console(
+        v1_05_shape_multiplier,
+        title="2. Interactive Workload & Shape Controls",
+        subtitle="Vary the tensor shape multiplier to inspect activation volume and operational intensity:",
+    )
+    _part_a_checkpoint = gated_hypothesis_card(
+        v1_05_amount_checkpoint,
+        title="3. Engineering Checkpoint",
+        subtitle="Based on the operation ledger evidence, which amount should the operator budget reduce first?",
+        gate_label="Decision Gate",
+        accent="#1F407A",
+    )
+
     _part_a = mo.vstack([
         mo.Html(f"""
         <div class="mlsysbook-panel mlsysbook-nugget">
@@ -1099,8 +1015,8 @@ def _(
             {v1_05_compute.operator_story}</div>
         </div>
         """),
-        v1_05_resource_prediction,
-        v1_05_shape_multiplier,
+        _part_a_hyp,
+        _part_a_controls,
         mo.Html(v1_05_prediction_html(
             "Prediction Check",
             v1_05_resource_prediction.value,
@@ -1111,16 +1027,14 @@ def _(
         mo.Html(f"""
         <div class="mlsysbook-panel">
           <h2>Operation Ledger Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_05_fields_html({
-                "Dominant bounded amount": _resource_labels.get(v1_05_ledger.dominant_resource, v1_05_ledger.dominant_resource),
-                "Shape multiplier": f"{v1_05_shape_multiplier.value:.2f}x",
-                "Activation memory": f"{v1_05_ledger.activations_mb:.2f} MB / {v1_05_compute.activation_budget_mb:.2f} MB",
-                "Operations": f"{v1_05_ledger.ops_gmac:.2f} GMAC",
-                "Bytes moved": f"{v1_05_ledger.bytes_moved_mb:.2f} MB",
-                "Track amount lens": v1_05_story["amount_focus"],
-            })}
-          </div>
+          {v1_05_fields_html({
+              "Dominant bounded amount": _resource_labels.get(v1_05_ledger.dominant_resource, v1_05_ledger.dominant_resource),
+              "Shape multiplier": f"{v1_05_shape_multiplier.value:.2f}x",
+              "Activation memory": f"{v1_05_ledger.activations_mb:.2f} MB / {v1_05_compute.activation_budget_mb:.2f} MB",
+              "Operations": f"{v1_05_ledger.ops_gmac:.2f} GMAC",
+              "Bytes moved": f"{v1_05_ledger.bytes_moved_mb:.2f} MB",
+              "Track amount lens": v1_05_story["amount_focus"],
+          })}
           {v1_05_table_html(("Amount", "Value", "Meaning"), _ledger_rows, numeric=(1,))}
         </div>
         """),
@@ -1150,9 +1064,23 @@ def _(
             },
             summary="Part A source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_05_amount_checkpoint,
+        _part_a_checkpoint,
     ])
+
+    _part_b_hyp = gated_hypothesis_card(
+        v1_05_cliff_prediction,
+        title="1. Predict the Activation Cliff",
+        subtitle=f"Where will the activation memory budget fail for {v1_05_compute.label}?",
+        gate_label="Boundary Prediction",
+        accent="#A51C30",
+    )
+    _part_b_checkpoint = gated_hypothesis_card(
+        v1_05_memory_checkpoint,
+        title="2. Shape Policy Checkpoint",
+        subtitle="What shape policy goes into the engineering budget note?",
+        gate_label="Architectural Decision",
+        accent="#1F407A",
+    )
 
     _part_b = mo.vstack([
         mo.Html(f"""
@@ -1163,8 +1091,7 @@ def _(
             the track's activation, bandwidth, latency, or power budget fails.</div>
         </div>
         """),
-        v1_05_cliff_prediction,
-        v1_05_shape_multiplier,
+        _part_b_hyp,
         mo.Html(v1_05_prediction_html(
             "Prediction Check",
             v1_05_cliff_prediction.value,
@@ -1175,16 +1102,14 @@ def _(
         mo.Html(f"""
         <div class="mlsysbook-panel">
           <h2>Boundary Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_05_fields_html({
-                "First activation cliff": _threshold,
-                "Current activation": f"{v1_05_ledger.activations_mb:.2f} MB",
-                "Activation budget": f"{v1_05_compute.activation_budget_mb:.2f} MB",
-                "Binding budget": f"{v1_05_binding_ratio['name']} at {v1_05_binding_ratio['ratio']:.2f}x",
-                "Current feasible": "yes" if v1_05_ledger.feasible else "no",
-                "Violations": _violations,
-            })}
-          </div>
+          {v1_05_fields_html({
+              "First activation cliff": _threshold,
+              "Current activation": f"{v1_05_ledger.activations_mb:.2f} MB",
+              "Activation budget": f"{v1_05_compute.activation_budget_mb:.2f} MB",
+              "Binding budget": f"{v1_05_binding_ratio['name']} at {v1_05_binding_ratio['ratio']:.2f}x",
+              "Current feasible": "yes" if v1_05_ledger.feasible else "no",
+              "Violations": _violations,
+          })}
           {v1_05_table_html(("Budget amount", "Used / limit", "Status"), _budget_rows, numeric=(1,))}
         </div>
         """),
@@ -1218,9 +1143,28 @@ def _(
             },
             summary="Part B source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_05_memory_checkpoint,
+        _part_b_checkpoint,
     ])
+
+    _part_c_hyp = gated_hypothesis_card(
+        v1_05_batch_prediction,
+        title="1. Predict Batch & Precision Outcome",
+        subtitle="Which batch/precision strategy survives the hardware envelope?",
+        gate_label="Concurrency Prediction",
+        accent="#A51C30",
+    )
+    _part_c_controls = instrumentation_console(
+        mo.hstack([v1_05_batch_policy, v1_05_precision_policy], widths="equal", gap=2),
+        title="2. Concurrency & Numerical Representation Knobs",
+        subtitle="Configure batch/window sizing and numerical precision:",
+    )
+    _part_c_checkpoint = gated_hypothesis_card(
+        v1_05_batch_checkpoint,
+        title="3. Batch/Precision Policy Checkpoint",
+        subtitle="What batch and precision policy do you record in the system budget?",
+        gate_label="System Gate",
+        accent="#1F407A",
+    )
 
     _part_c = mo.vstack([
         mo.Html(f"""
@@ -1231,8 +1175,8 @@ def _(
             Precision changes bytes per value, memory traffic, and validation risk.</div>
         </div>
         """),
-        v1_05_batch_prediction,
-        mo.hstack([v1_05_batch_policy, v1_05_precision_policy], justify="start", gap="2rem"),
+        _part_c_hyp,
+        _part_c_controls,
         mo.Html(v1_05_prediction_html(
             "Prediction Check",
             v1_05_batch_prediction.value,
@@ -1243,16 +1187,14 @@ def _(
         mo.Html(f"""
         <div class="mlsysbook-panel">
           <h2>Batch/Precision Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_05_fields_html({
-                "Selected strategy": v1_05_selected_batch_row["label"],
-                "Selected batch/window": v1_05_selected_batch_row["batch"],
-                "Precision bytes": v1_05_selected_batch_row["precision_bytes"],
-                "Throughput estimate": f"{v1_05_selected_batch_row['throughput_per_s']:.1f}/s",
-                "Energy amount": v1_05_energy_display(v1_05_compute.track_id, v1_05_selected_batch_row["energy_j"]),
-                "Binding amount": f"{v1_05_selected_batch_row['binding']} at {v1_05_selected_batch_row['binding_ratio']:.2f}x",
-            })}
-          </div>
+          {v1_05_fields_html({
+              "Selected strategy": v1_05_selected_batch_row["label"],
+              "Selected batch/window": v1_05_selected_batch_row["batch"],
+              "Precision bytes": v1_05_selected_batch_row["precision_bytes"],
+              "Throughput estimate": f"{v1_05_selected_batch_row['throughput_per_s']:.1f}/s",
+              "Energy amount": v1_05_energy_display(v1_05_compute.track_id, v1_05_selected_batch_row["energy_j"]),
+              "Binding amount": f"{v1_05_selected_batch_row['binding']} at {v1_05_selected_batch_row['binding_ratio']:.2f}x",
+          })}
           {v1_05_table_html(
               ("Strategy", "Batch", "Precision", "Activation", "Latency", "Throughput", "Energy", "Binding", "Status"),
               _batch_rows,
@@ -1289,9 +1231,28 @@ def _(
             },
             summary="Part C source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_05_batch_checkpoint,
+        _part_c_checkpoint,
     ])
+
+    _part_d_hyp = gated_hypothesis_card(
+        v1_05_diagnosis_prediction,
+        title="1. Predict Active System Bottleneck",
+        subtitle="What wall should the operator optimization target?",
+        gate_label="Diagnostic Prediction",
+        accent="#A51C30",
+    )
+    _part_d_controls = instrumentation_console(
+        v1_05_design,
+        title="2. Operator Design Candidate",
+        subtitle="Select the candidate kernel architecture to evaluate against the hardware crossover:",
+    )
+    _part_d_checkpoint = gated_hypothesis_card(
+        v1_05_optimization_checkpoint,
+        title="3. Optimization Family Checkpoint",
+        subtitle="Which optimization family goes into the technical memo?",
+        gate_label="Optimization Gate",
+        accent="#1F407A",
+    )
 
     _part_d = mo.vstack([
         mo.Html(f"""
@@ -1303,8 +1264,8 @@ def _(
             tiling, streaming, or reuse.</div>
         </div>
         """),
-        v1_05_diagnosis_prediction,
-        v1_05_design,
+        _part_d_hyp,
+        _part_d_controls,
         mo.Html(v1_05_prediction_html(
             "Prediction Check",
             v1_05_diagnosis_prediction.value,
@@ -1315,16 +1276,14 @@ def _(
         mo.Html(f"""
         <div class="mlsysbook-panel">
           <h2>Diagnosis Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_05_fields_html({
-                "Arithmetic intensity": f"{v1_05_ledger.arithmetic_intensity:.2f} ops/byte",
-                "Hardware crossover": f"{v1_05_diagnosis['crossover']:.2f} ops/byte",
-                "Roofline wall": _diagnosis_labels.get(v1_05_diagnosis["roofline_wall"], v1_05_diagnosis["roofline_wall"]),
-                "Diagnosed wall": _diagnosis_labels.get(v1_05_diagnosis["diagnosed_wall"], v1_05_diagnosis["diagnosed_wall"]),
-                "Recommended family": v1_05_diagnosis["recommendation"],
-                "Selected design": v1_05_design_result.design_label,
-            })}
-          </div>
+          {v1_05_fields_html({
+              "Arithmetic intensity": f"{v1_05_ledger.arithmetic_intensity:.2f} ops/byte",
+              "Hardware crossover": f"{v1_05_diagnosis['crossover']:.2f} ops/byte",
+              "Roofline wall": _diagnosis_labels.get(v1_05_diagnosis["roofline_wall"], v1_05_diagnosis["roofline_wall"]),
+              "Diagnosed wall": _diagnosis_labels.get(v1_05_diagnosis["diagnosed_wall"], v1_05_diagnosis["diagnosed_wall"]),
+              "Recommended family": v1_05_diagnosis["recommendation"],
+              "Selected design": v1_05_design_result.design_label,
+          })}
           {v1_05_table_html(
               ("Design", "Activation", "Latency", "Bandwidth", "Feasible", "Quality risk"),
               _design_rows,
@@ -1365,9 +1324,21 @@ def _(
             },
             summary="Part D source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_05_optimization_checkpoint,
+        _part_d_checkpoint,
     ])
+
+    _synthesis_decision = gated_hypothesis_card(
+        v1_05_final_decision,
+        title="Final Architecture Decision",
+        subtitle="What is the operator budget decision for production deployment?",
+        gate_label="Executive Gate",
+        accent="#A51C30",
+    )
+    _synthesis_note = instrumentation_console(
+        v1_05_budget_note,
+        title="Technical Budget Memo",
+        subtitle="Record the binding amount, selected kernel design, evidence metrics, and V1-06 architecture implications:",
+    )
 
     _synthesis = mo.vstack([
         mo.Html(f"""
@@ -1382,22 +1353,20 @@ def _(
         mo.Html(f"""
         <div class="mlsysbook-panel">
           <h2>Decision Record</h2>
-          <div class="mlsysbook-grid">
-            {v1_05_fields_html({
-                "Track": v1_05_compute.label,
-                "Tensor": v1_05_compute.tensor_label,
-                "Binding amount": f"{v1_05_binding_ratio['name']} at {v1_05_binding_ratio['ratio']:.2f}x",
-                "Selected design": v1_05_design_result.design_label,
-                "Batch/precision": v1_05_selected_batch_row["label"],
-                "Diagnosis": _diagnosis_labels.get(v1_05_diagnosis["diagnosed_wall"], v1_05_diagnosis["diagnosed_wall"]),
-                "Residual risk": v1_05_design_result.residual_risk,
-                "Next-lab implication": v1_05_story["next_lab"],
-            })}
-          </div>
+          {v1_05_fields_html({
+              "Track": v1_05_compute.label,
+              "Tensor": v1_05_compute.tensor_label,
+              "Binding amount": f"{v1_05_binding_ratio['name']} at {v1_05_binding_ratio['ratio']:.2f}x",
+              "Selected design": v1_05_design_result.design_label,
+              "Batch/precision": v1_05_selected_batch_row["label"],
+              "Diagnosis": _diagnosis_labels.get(v1_05_diagnosis["diagnosed_wall"], v1_05_diagnosis["diagnosed_wall"]),
+              "Residual risk": v1_05_design_result.residual_risk,
+              "Next-lab implication": v1_05_story["next_lab"],
+          })}
         </div>
         """),
-        v1_05_final_decision,
-        v1_05_budget_note,
+        _synthesis_decision,
+        _synthesis_note,
         mo.accordion({
             "Math Peek / Source Model - operator budget note": mo.md("""
             A complete operator budget note has five fields:
@@ -1450,12 +1419,7 @@ def _(
         "Synthesis": build_synthesis(),
     })
     v1_05_tabs
-    return (v1_05_tabs,)
-
-
-# ===========================================================================
-# ZONE D: LEDGER AND REPORT
-# ===========================================================================
+    return
 
 
 @app.cell(hide_code=True)
@@ -1464,7 +1428,6 @@ def _(
     mo,
     v1_05_alignment,
     v1_05_amount_checkpoint,
-    v1_05_batch_checkpoint,
     v1_05_batch_policy,
     v1_05_batch_prediction,
     v1_05_binding_ratio,
