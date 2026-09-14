@@ -108,7 +108,7 @@ import time
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Import TinyTorch components YOU BUILT!
 from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss
@@ -214,7 +214,7 @@ class AttentionTransformer:
         self.output_proj = Linear(embed_dim, vocab_size)
 
         # Collect parameters
-        self._params = [self.embedding.weight]
+        self._params = self.embedding.parameters() + self.pos_encoding.parameters()
         for i in range(num_layers):
             self._params.extend(self.attention_layers[i].parameters())
             self._params.extend(self.ln1_layers[i].parameters())
@@ -337,7 +337,7 @@ def generate_mixed_data(num_samples, seq_len=6):
     for _ in range(num_samples):
         seq = rng.integers(1, 27, size=seq_len)
 
-        if np.random.random() < 0.5:
+        if rng.random() < 0.5:
             # Reverse task
             input_seq = np.concatenate([[REVERSE_TOKEN], seq])
             target_seq = np.concatenate([[REVERSE_TOKEN], seq[::-1]])
@@ -435,11 +435,9 @@ def run_challenge(name, model, train_data, test_data, optimizer, loss_fn, epochs
     ) as progress:
         task = progress.add_task(f"[cyan]Training...", total=epochs)
 
-        best_acc = 0
         for epoch in range(epochs):
             train_loss, train_acc = train_epoch(model, train_loader, optimizer, loss_fn)
             test_acc, _ = evaluate(model, test_data)
-            best_acc = max(best_acc, test_acc)
 
             progress.update(task, advance=1)
 

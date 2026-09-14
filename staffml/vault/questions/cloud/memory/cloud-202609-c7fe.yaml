@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: cloud-202609-c7fe
+track: cloud
+level: L4
+zone: optimization
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Multi-Head Latent Attention KV Cache Sizing and Projection Absorption
+scenario: You are serving a 236B Mixture-of-Experts model using Multi-Head Latent Attention (MLA) on an 8x H100 (80 GB HBM3) node with TP=8. The model configuration has 60 layers, 128 attention heads, head dimension 128, compressed latent KV dimension 512, and decoupled RoPE key dimension 64. A systems engineer suggests allocating KV cache memory for full Multi-Head Attention Key and Value projections (16,384 dimensions per token) during generation.
+question: How does Multi-Head Latent Attention (MLA) reduce the per-token per-layer KV cache memory footprint compared to standard MHA and 8-head GQA, and how does matrix absorption during autoregressive decoding avoid expanding uncompressed keys and values in HBM?
+details:
+  realistic_solution: |
+    Under standard MHA with 128 heads and head dimension 128, each token requires storing full Key and Value vectors: 2 * 128 heads * 128 dim * 2 bytes (FP16) = 65,536 bytes (64 KiB) per layer per token. Under Grouped-Query Attention (GQA) with 8 KV heads, the footprint shrinks to 2 * 8 heads * 128 dim * 2 bytes = 4,096 bytes (4 KiB) per layer per token (a 16x reduction).
+
+    Under Multi-Head Latent Attention (MLA), Keys and Values are compressed into a shared latent vector c_t of dimension 512, accompanied by a decoupled RoPE Key vector k_t^R of dimension 64. The cached memory per token per layer is:
+    (512 + 64) elements * 2 bytes = 1,152 bytes (1.125 KiB) per layer per token.
+    This delivers a 56.9x reduction over MHA and a 3.55x reduction over 8-head GQA while preserving 128 distinct query heads.
+
+    During autoregressive decoding, uncompressed Key and Value states are never written to HBM. Because attention logits compute q_t^T * (c_i * W_UK), the Query projection weight W_Q and Key uncompression weight W_UK are absorbed prior to attention: q_tilde_t = q_t * W_UK^T. Dot products are performed directly between the 512-dim absorbed query and the 512-dim cached latent vectors c_i. Similarly, the attention output accumulates over cached latents first: (sum_i alpha_i * c_i) * W_UV, applying the Value uncompression matrix W_UV once per head at the end.
+  common_mistake: |
+    **The Pitfall:** Assuming MLA requires decompressing and storing full 128-head Key and Value tensors in HBM during autoregressive generation.
+    **The Rationale:** In standard attention implementations, Key and Value matrices are materialized across all heads before scaled dot-product attention calculation.
+    **The Consequence:** Sizing KV cache allocations at 64 KiB/token instead of 1.125 KiB/token, causing an artificial 57x reduction in maximum serving concurrency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 60 layers, 128 heads, head dim = 128.
+    - MLA Latent KV dim: 512, Decoupled RoPE dim: 64.
+    - Precision: FP16 (2 bytes/element).
+    - Sequence length: 4,096 tokens.
+
+    **Calculations:**
+    - MHA KV footprint per token per layer: 2 * 128 * 128 * 2 bytes = 65,536 bytes = 64.0 KiB.
+    - GQA (8 KV heads) per token per layer: 2 * 8 * 128 * 2 bytes = 4,096 bytes = 4.0 KiB.
+    - MLA KV footprint per token per layer: (512 + 64) * 2 bytes = 1,152 bytes = 1.125 KiB.
+    - Compression ratio vs MHA: 65,536 / 1,152 = 56.89x.
+    - Compression ratio vs GQA: 4,096 / 1,152 = 3.56x.
+    - Total KV cache for 4,096 tokens across 60 layers:
+      * MHA: 60 * 4096 * 64.0 KiB = 15.73 GiB per sequence.
+      * GQA: 60 * 4096 * 4.0 KiB = 0.983 GiB per sequence.
+      * MLA: 60 * 4096 * 1.125 KiB = 0.276 GiB (283.1 MiB) per sequence.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth-Bound.** MLA shrinks per-sequence KV cache from 0.98 GiB to 283 MiB, enabling a 3.5x concurrency boost on 80 GB GPUs without quality degradation.
+status: published
+provenance: human
+requires_explanation: true
+expected_time_minutes: 15
+validated: true
+validation_status: OK
+validation_date: '2026-09-04'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-09-04'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: verified
+  by: vj@eecs.harvard.edu
+  date: '2026-09-04'
+  notes: 'MLA KV compression math and matrix absorption verification'

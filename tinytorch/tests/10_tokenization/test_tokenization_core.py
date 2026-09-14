@@ -13,7 +13,7 @@ WHAT STUDENTS LEARN:
 -------------------
 1. Vocabulary: mapping token ↔ ID
 2. Subword tokenization (BPE): handle unknown words
-3. Special tokens: [CLS], [SEP], [PAD]
+3. Unknown characters use the reserved <UNK> token
 """
 
 import numpy as np
@@ -33,11 +33,9 @@ class TestTokenizerBasics:
         """
         WHAT: Verify tokenizer converts text to IDs.
 
-        WHY: encode("hello world") should give [id1, id2]
-        where id1 and id2 are integers.
+        WHY: Each character in "hello world" needs its own integer ID.
 
-        STUDENT LEARNING: Each token gets a unique integer ID.
-        "hello" might be 156, "world" might be 234.
+        STUDENT LEARNING: Repeated characters reuse the same vocabulary entry.
         """
         # Build vocab from test text
         tokenizer = CharTokenizer()
@@ -57,11 +55,10 @@ class TestTokenizerBasics:
         """
         WHAT: Verify tokenizer converts IDs back to text.
 
-        WHY: decode(encode(text)) should give back something close
-        to the original text.
+        WHY: Known characters round-trip exactly, including whitespace and case.
 
-        STUDENT LEARNING: Tokenization should be (mostly) reversible.
-        Some normalization may occur (case, whitespace).
+        STUDENT LEARNING: CharTokenizer preserves known characters; BPE
+        intentionally normalizes whitespace.
         """
         # Build vocab from test text
         tokenizer = CharTokenizer()
@@ -71,7 +68,7 @@ class TestTokenizerBasics:
         token_ids = tokenizer.encode(text)
         decoded = tokenizer.decode(token_ids)
 
-        assert "hello" in decoded.lower() and "world" in decoded.lower(), (
+        assert decoded == text, (
             f"decode(encode(text)) should recover the text.\n"
             f"  Original: '{text}'\n"
             f"  Recovered: '{decoded}'"

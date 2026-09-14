@@ -253,7 +253,8 @@ class SimpleCNN:
 
         # Flatten: (batch, 8, 3, 3) → (batch, 72)
         batch_size = out.shape[0]
-        out = Tensor(out.data.reshape(batch_size, -1))
+        # Preserve the graph so gradients reach the convolutional filters.
+        out = out.reshape(batch_size, -1)
 
         # Final classification
         out = self.fc.forward(out)
@@ -270,7 +271,7 @@ class SimpleCNN:
 def train_epoch(model, dataloader, criterion, optimizer):
     """Train for one epoch."""
     total_loss = 0.0
-    n_batches = 0
+    n_samples = 0
 
     for batch_images, batch_labels in dataloader:
         # Forward pass
@@ -284,10 +285,11 @@ def train_epoch(model, dataloader, criterion, optimizer):
         optimizer.step()
         optimizer.zero_grad()
 
-        total_loss += loss.data.item()
-        n_batches += 1
+        batch_size = batch_images.shape[0]
+        total_loss += loss.data.item() * batch_size
+        n_samples += batch_size
 
-    return total_loss / n_batches
+    return total_loss / n_samples
 
 
 def evaluate_accuracy(model, images, labels):
@@ -295,7 +297,7 @@ def evaluate_accuracy(model, images, labels):
     logits = model(images)
     predictions = np.argmax(logits.data, axis=1)
     accuracy = 100.0 * np.mean(predictions == labels.data)
-    avg_loss = np.mean((predictions - labels.data) ** 2)
+    avg_loss = float(CrossEntropyLoss()(logits, labels).data)
     return accuracy, avg_loss
 
 def press_enter_to_continue() :

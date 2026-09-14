@@ -38,11 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.attention import MultiHeadAttention, scaled_dot_product_attention
-from tinytorch.core.autograd import enable_autograd
-
-enable_autograd()
-
-
+import tinytorch.core.autograd  # completes every operation with its backward half
 class TestScaledDotProductAttention:
     """
     Test the core attention computation: softmax(QK^T / sqrt(d_k)) V

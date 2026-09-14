@@ -291,7 +291,7 @@ class _MultiheadAttention(nn.Module):
         self.res_attention = res_attention
         self.sdp_attn = _ScaledDotProductAttention(d_model, n_heads, attn_dropout=attn_dropout, res_attention=self.res_attention, lsa=lsa)
 
-        # Poject output
+        # Project output
         self.to_out = nn.Sequential(nn.Linear(n_heads * d_v, d_model), nn.Dropout(proj_dropout))
 
 

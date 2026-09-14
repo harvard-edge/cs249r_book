@@ -179,3 +179,29 @@ class TestKVCacheAdvanced:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.parametrize('dimension', range(5))
+def test_cache_rejects_nonpositive_dimensions(dimension):
+    dimensions = [1, 4, 1, 2, 8]
+    dimensions[dimension] = 0
+    with pytest.raises(ValueError, match='positive integer'):
+        KVCache(*dimensions)
+
+
+def test_invalid_update_is_atomic_and_does_not_broadcast():
+    cache = KVCache(2, 2, 2, 2, 4)
+    key = Tensor(np.ones((2, 2, 1, 4)))
+    bad_value = Tensor(np.ones((1, 2, 1, 4)))
+    with pytest.raises(ValueError, match='shape'):
+        cache.update(0, key, bad_value)
+    assert not np.any(cache.caches[0][0].data)
+    with pytest.raises(ValueError, match='layer index'):
+        cache.update(-1, key, key)
+    with pytest.raises(ValueError, match='layer index'):
+        cache.get(-1)
+    cache.advance()
+    cache.advance()
+    with pytest.raises(ValueError, match='full'):
+        cache.advance()
+    assert cache.seq_pos == 2

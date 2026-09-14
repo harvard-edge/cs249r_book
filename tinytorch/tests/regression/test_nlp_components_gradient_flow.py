@@ -19,12 +19,9 @@ import pytest
 import numpy as np
 rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 # Enable autograd
-enable_autograd()
-
-
 def test_tokenization_basic():
     """
     Test Module 10: Tokenization
@@ -34,26 +31,21 @@ def test_tokenization_basic():
     """
     print("Testing Module 10: Tokenization...")
 
-    try:
-        from tinytorch.core.tokenization import CharacterTokenizer
+    from tinytorch.core.tokenization import CharTokenizer
 
-        tokenizer = CharacterTokenizer()
-        text = "Hello World"  # Avoid comma which might not be in vocab
+    text = "Hello World"
+    tokenizer = CharTokenizer(sorted(set(text)))
 
-        # Tokenize
-        indices = tokenizer.encode(text)
-        assert isinstance(indices, list), "Tokenizer should return list of indices"
-        assert all(isinstance(i, int) for i in indices), "Indices should be integers"
+    # Tokenize
+    indices = tokenizer.encode(text)
+    assert isinstance(indices, list), "Tokenizer should return list of indices"
+    assert all(isinstance(i, int) for i in indices), "Indices should be integers"
 
-        # Decode
-        decoded = tokenizer.decode(indices)
-        assert decoded == text, "Decode should reverse encode"
+    # Decode
+    decoded = tokenizer.decode(indices)
+    assert decoded == text, "Decode should reverse encode"
 
-        print(f"  ✅ Tokenizer works: '{text}' → {len(indices)} tokens → '{decoded}'")
-    except (ImportError, NameError) as e:
-        # Tokenization module may have minor issues, skip this test
-        print(f"  ⚠️  Tokenization test skipped (module has minor issue: {e})")
-        print(f"     This is OK - tokenization is preprocessing, no gradients needed")
+    print(f"  ✅ Tokenizer works: '{text}' → {len(indices)} tokens → '{decoded}'")
     print("")
 
 
@@ -64,7 +56,7 @@ def test_embedding_gradient_flow():
     Verifies:
     1. Embedding lookup preserves requires_grad
     2. Gradients flow back to embedding weights
-    3. EmbeddingBackward correctly accumulates gradients
+    3. EmbeddingFunction correctly accumulates gradients
     """
     print("Testing Module 11: Embedding gradient flow...")
 
@@ -149,13 +141,10 @@ def test_positional_encoding_gradient_flow():
     # Check gradients
     assert x.grad is not None, "Input gradients should exist"
 
-    # Note: Position embeddings may use slicing which currently doesn't have backward
-    # This is OK - the important thing is that input gradients flow through
-    if pos_enc.position_embeddings.grad is not None:
-        print(f"  ✅ PositionalEncoding: gradients flow to both input and positions")
-    else:
-        print(f"  ✅ PositionalEncoding: gradients flow to input (positions use slicing)")
-        print(f"     Note: Positional embeddings often fixed in transformers anyway")
+    assert pos_enc.position_embeddings.grad is not None
+    expected = np.zeros_like(pos_enc.position_embeddings.data)
+    expected[:5] = 2  # Each used position appears in both batch examples.
+    np.testing.assert_allclose(pos_enc.position_embeddings.grad, expected)
     print("")
 
 
@@ -516,10 +505,8 @@ def test_full_gpt_model_gradient_flow():
         else:
             print(f"    ❌ {name}: NO GRADIENT")
 
-    # Note: positional encodings may not receive gradients in some sequences
-    # (positions beyond actual sequence length). Allow 1 parameter without grad.
-    assert params_with_grads >= total_params - 1, \
-        f"Expected at least {total_params - 1} parameters to have gradients, got {params_with_grads}"
+    assert params_with_grads == total_params, \
+        f"Expected all {total_params} parameters to have gradients, got {params_with_grads}"
 
     print(f"  ✅ GPT Model: ALL {total_params} parameters receive gradients!")
     print("")

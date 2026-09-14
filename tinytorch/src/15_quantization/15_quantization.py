@@ -12,18 +12,16 @@
 #     name: python3
 # ---
 
-#| default_exp perf.quantization
-
 # %% [markdown]
 """
 # Module 15: Quantization - Reduced Precision for Efficiency
 
-Welcome to Module 15! You're about to build a complete INT8 quantization system that can reduce model size by 4x with minimal accuracy loss.
+Welcome to Module 15! You're about to build a complete INT8 quantization system that stores each weight in one byte instead of four, and you will measure what that rounding costs.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete ML pipeline with profiling (Module 14)
 **You'll Build**: INT8 quantization system with calibration and memory savings
-**You'll Enable**: 4x memory reduction and 2-4x speedup for production deployment
+**You'll Enable**: Modeling the 4x weight-storage reduction of INT8. TinyTorch keeps its quantized codes in float32 Tensor storage, so this module simulates quantization; it does not reduce the actual NumPy allocation.
 
 **Connection Map**:
 ```
@@ -33,17 +31,17 @@ Profiling (14) → Quantization (15)
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement INT8 quantization with proper scaling
-2. Build quantization-aware training for minimal accuracy loss
-3. Apply post-training quantization to existing models
-4. Measure actual memory and compute savings
-5. Understand quantization error and mitigation strategies
+1. Implement INT8 quantization with a proper scale and zero point
+2. Build a QuantizedLinear layer that simulates a forward pass with INT8 weight codes
+3. Apply post-training quantization, with calibration, to a whole model
+4. Distinguish modeled INT8 memory savings from the actual storage measured by the Profiler
+5. Measure quantization error per layer and know when it matters
 
-Let's make models 4x smaller!
+Let's explore the accuracy and storage tradeoffs of lower precision!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/15_quantization/quantization_dev.py
+**Learning Side:** You work in modules/15_quantization/quantization.ipynb
 **Building Side:** Code exports to tinytorch.perf.quantization
 
 ```python
@@ -58,33 +56,6 @@ from tinytorch.perf.quantization import quantize_int8, QuantizedLinear, quantize
 - **Integration:** Works seamlessly with existing models for complete optimization pipeline
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| export
-import numpy as np
-rng = np.random.default_rng(7)
-import time
-from typing import Tuple, Dict, List, Optional
-import warnings
-
-# Import dependencies from other modules
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear, Sequential
-from tinytorch.core.activations import ReLU
-
-# Constants for INT8 quantization
-INT8_MIN_VALUE = -128
-INT8_MAX_VALUE = 127
-INT8_RANGE = 256  # Number of possible INT8 values (from -128 to 127 inclusive)
-EPSILON = 1e-8  # Small value for numerical stability (constant tensor detection)
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-BYTES_PER_INT8 = 1  # INT8 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
-
-if __name__ == "__main__":
-    print("Quantization module imports complete")
-
 # %% [markdown]
 """
 ## 📋 Module Dependencies
@@ -93,7 +64,6 @@ if __name__ == "__main__":
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
-- `time` (for performance measurements)
 - `typing` (for type annotations)
 
 **TinyTorch Dependencies**:
@@ -110,12 +80,35 @@ Module 14 (Profiling) ───────────────────�
 ```
 
 Students completing this module will have built a complete
-quantization system that achieves 4x memory reduction.
+quantization system and measured its 4x reduction in weight storage.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp perf.quantization
+#| export
+import numpy as np
+rng = np.random.default_rng(7)
+from typing import Tuple, Dict, List, Optional, Any
+
+# Import dependencies from other modules
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear, Sequential
+from tinytorch.core.activations import ReLU
+
+# Constants for INT8 quantization
+INT8_MIN_VALUE = -128
+INT8_MAX_VALUE = 127
+INT8_RANGE = 256  # Number of possible INT8 values (from -128 to 127 inclusive)
+EPSILON = 1e-8  # Stabilize relative-error measurements near zero variance
+
+# Constants for memory calculations
+BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+BYTES_PER_INT8 = 1  # INT8 size in bytes
+MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-## 💡 Motivation: Why Quantization Matters
+## 💡 Introduction: Why Quantization Matters
 
 Before we learn quantization, let's profile a model to see how much memory
 FP32 weights actually consume. This will show us why reduced precision matters.
@@ -128,66 +121,78 @@ def explore_motivation_profiling():
 
     profiler = Profiler()
 
+    # Illustrative budgets for a model's weights on two device classes. They
+    # are round numbers chosen to make the table's verdicts concrete, not
+    # measurements of any particular phone or microcontroller.
+    MOBILE_BUDGET_MB = 100
+    EDGE_BUDGET_MB = 10
+
     # Create models of increasing size
     print("Profiling Memory Usage (FP32 Precision):\n")
+    print(f"   Budgets: mobile {MOBILE_BUDGET_MB} MB, edge {EDGE_BUDGET_MB} MB\n")
     print("   Parameters   |  FP32 Memory  |  Device Fit?")
     print("   -------------|---------------|---------------")
 
     model_configs = [
         (256, 256, "Tiny"),
-        (512, 512, "Small"),
-        (1024, 1024, "Medium"),
-        (2048, 2048, "Large"),
+        (1024, 1024, "Small"),
+        (2048, 2048, "Medium"),
+        (4096, 4096, "Large"),
+        (4096, 8192, "XL"),
     ]
 
+    largest_mb = 0.0
+    over_mobile = 0
+    over_edge = 0
     for in_feat, out_feat, name in model_configs:
         model = Linear(in_feat, out_feat)
-        input_data = Tensor(rng.standard_normal((1, in_feat)))
 
-        # Profile the model
-        profile = profiler.profile_forward_pass(model, input_data)
-
-        params = profile['parameters']
+        # Count parameters with the profiler, then convert to FP32 bytes
+        params = profiler.count_parameters(model)
         memory_fp32_mb = params * BYTES_PER_FLOAT32 / MB_TO_BYTES
-        memory_fp32_gb = memory_fp32_mb / 1000
+        largest_mb = max(largest_mb, memory_fp32_mb)
 
         # Check if it fits on different devices
-        fits_mobile = "Y" if memory_fp32_mb < 100 else "N"
-        fits_edge = "Y" if memory_fp32_mb < 10 else "N"
+        fits_mobile = memory_fp32_mb < MOBILE_BUDGET_MB
+        fits_edge = memory_fp32_mb < EDGE_BUDGET_MB
+        over_mobile += 0 if fits_mobile else 1
+        over_edge += 0 if fits_edge else 1
 
-        print(f"   {params:>10,}  |  {memory_fp32_mb:7.1f} MB  |  Mobile:{fits_mobile} Edge:{fits_edge}")
+        print(f"   {params:>10,}  |  {memory_fp32_mb:7.1f} MB  |  "
+              f"Mobile:{'Y' if fits_mobile else 'N'} Edge:{'Y' if fits_edge else 'N'}")
+
+    n = len(model_configs)
+    int8_largest_mb = largest_mb * BYTES_PER_INT8 / BYTES_PER_FLOAT32
+    int8_verdict = "fits" if int8_largest_mb < MOBILE_BUDGET_MB else "still exceeds"
 
     print("\nKey Observations:")
     print("   Every parameter uses 4 bytes (32 bits) in FP32")
-    print("   Larger models quickly exceed mobile device memory (~100MB limit)")
-    print("   Edge devices have even tighter constraints (~10MB)")
+    print(f"   {over_mobile} of {n} layers exceed the mobile budget; {over_edge} of {n} exceed the edge budget")
     print("   Memory grows linearly with parameter count")
 
     print("\nThe Problem:")
     print("   Do we really need 32-bit precision for inference?")
     print("   FP32: Can represent 2^32 = 4.3 billion unique values")
-    print("   Neural networks are naturally robust to noise")
-    print("   Most weights are in range [-3, 3] after training")
+    print("   Trained weights cluster in a narrow range around zero, so most of that range is never used")
 
     print("\nThe Solution:")
     print("   Quantize to INT8 (8-bit integers):")
-    print("   FP32 -> INT8: 32 bits -> 8 bits (4x compression!)")
-    print("   Memory: 100MB -> 25MB (now fits on mobile!)")
-    print("   Speed: INT8 operations are 2-4x faster on hardware")
-    print("   Accuracy: Minimal loss (<1% typically) with proper calibration\n")
+    print(f"   FP32 -> INT8: 32 bits -> 8 bits ({BYTES_PER_FLOAT32 // BYTES_PER_INT8}x compression)")
+    print(f"   Memory: {largest_mb:.0f} MB -> {int8_largest_mb:.0f} MB (the largest layer {int8_verdict} the mobile budget)")
+    print("   Accuracy: rounding to 256 levels costs something; this module measures how much, per layer\n")
 
 if __name__ == "__main__":
     explore_motivation_profiling()
 
 # %% [markdown]
 """
-## 💡 Introduction: The Memory Wall Problem
+### The Memory Wall Problem
 
 Imagine trying to fit a library in your backpack. Neural networks face the same challenge - models are getting huge, but devices have limited memory!
 
 ### The Precision Paradox
 
-Modern neural networks use 32-bit floating point numbers with incredible precision:
+Modern neural networks use 32-bit floating point numbers with far more precision than inference needs:
 
 ```
 FP32 Number: 3.14159265359...
@@ -237,22 +242,22 @@ After Quantization (INT8):
 - Faster loading from disk
 - More models in GPU memory
 
-**Speed Improvements:**
-- 2-4× faster inference (hardware dependent)
-- Lower power consumption
-- Better user experience
+**Speed (a hardware note):**
+- CPUs and accelerators with INT8 instructions multiply more numbers per cycle than in FP32
+- Fewer bytes move across the memory bus per weight
+- Neither is measured in this module: NumPy has no INT8 matrix multiply, so we simulate the arithmetic and count the bytes
 
-**Accuracy Preservation:**
-- <1% accuracy loss with proper techniques
-- Sometimes even improves generalization!
+**Accuracy:**
+- Rounding every weight onto a 256-level grid perturbs the output
+- How much depends on the layer; the systems analysis at the end of this module measures it
 
 **Why This Matters:**
-- **Mobile AI:** Deploy powerful models on phones
+- **Mobile AI:** Deploy larger models on phones
 - **Edge Computing:** Run AI without cloud connectivity
 - **Data Centers:** Serve more users with same hardware
-- **Environmental:** Reduce energy consumption by 2-4×
+- **Environmental:** Fewer bytes moved per inference means less energy per inference
 
-Today you'll build the production-quality quantization system that makes all this possible!
+Today you'll build the quantization system that makes all this possible.
 """
 
 # %% [markdown]
@@ -273,17 +278,19 @@ FP32 Numbers (Continuous):        INT8 Numbers (Discrete):
 
   ...  -1.7  -1.2  -0.3  0.0  0.8  1.5  2.1  ...
          ↓     ↓     ↓    ↓    ↓    ↓    ↓
-      -128  -95   -38    0   25   48   67   127
+       -128   -95   -34  -14   40   87  127
+
+(scale = 3.8/255 ≈ 0.0149, zero_point = -14: FP32 zero lands on INT8 -14)
 ```
 
-### The Magic Formula
+### The Quantization Formula
 
 Every quantization system uses this fundamental relationship:
 
 ```
 Quantization (FP32 → INT8):
 ┌─────────────────────────────────────────────────────────┐
-│  quantized = round(float_value / scale + zero_point)     │
+│  quantized = round(float_value / scale + zero_point)    │
 └─────────────────────────────────────────────────────────┘
 
 Dequantization (INT8 → FP32):
@@ -297,11 +304,11 @@ Dequantization (INT8 → FP32):
 **1. Scale (s)** - How big each INT8 step is in FP32 space:
 ```
 Small Scale (high precision):       Large Scale (low precision):
- FP32: [0.0, 0.255]                 FP32: [0.0, 25.5]
-   ↓     ↓     ↓                       ↓     ↓     ↓
- INT8:  0    128   255              INT8:  0    128   255
-        │     │     │                      │     │     │
-      0.0   0.127  0.255                 0.0   12.75  25.5
+ FP32: [-0.128, 0.127]              FP32: [-12.8, 12.7]
+   ↓      ↓      ↓                     ↓      ↓      ↓
+ INT8: -128     0     127           INT8: -128     0     127
+        │       │      │                   │       │      │
+     -0.128    0.0   0.127              -12.8     0.0   12.7
 
  Scale = 0.001 (very precise)        Scale = 0.1 (less precise)
 ```
@@ -362,10 +369,10 @@ INT8: ████████ (8 bits)                           - Sufficient p
 INT4: ████ (4 bits)                               - Often too little
 
 Memory:    100%    50%    25%    12.5%
-Accuracy:  100%   99.9%  99.5%   95%
 ```
 
-INT8 gives us 4× memory reduction with <1% accuracy loss - the perfect balance for production systems!
+INT8 gives 4× memory reduction. How much accuracy it costs is measured, not assumed:
+the per-layer sensitivity sweep at the end of this module does that measurement.
 """
 
 # %% [markdown]
@@ -407,14 +414,14 @@ Quantization System Architecture:
 - **Automatic calibration** - Find optimal quantization parameters
 - **Error minimization** - Preserve accuracy during compression
 - **Memory tracking** - Measure actual savings achieved
-- **Production patterns** - Industry-standard algorithms
+- **The same scheme PyTorch uses** - min-max affine quantization, as in `torch.quantize_per_tensor`
 
 Let's start with the fundamental building block!
 """
 
 # %% [markdown]
 """
-## 🏗️ INT8 Quantization - The Foundation
+## 🏗️ INT8 Quantization: The Foundation
 
 This is the core function that converts any FP32 tensor to INT8. Think of it as a smart compression algorithm that preserves the most important information.
 
@@ -426,7 +433,7 @@ Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Ap
 │ Input: [-1.5, 0.2, 2.8] │    │ Min: -1.5               │  │ quantized = round(      │
 │                         │    │ Max: 2.8                │  │   value / scale + zp)   │
 │ Find min/max values     │ →  │ Range: 4.3              │ →│                         │
-│                         │    │ Scale: 4.3/255 = 0.017  │  │                         │
+│                         │    │ Scale: 4.3/255=0.01686  │  │                         │
 │                         │    │ Zero Point: -39         │  │ Result: [-128,-27, 127] │
 └─────────────────────────┘    └─────────────────────────┘  └─────────────────────────┘
 ```
@@ -454,11 +461,13 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
 
     APPROACH:
     1. Find min/max values in tensor data
-    2. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
-    3. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
+    2. Handle the constant tensor (min_val == max_val) as a special case; see HINTS
+    3. Nudge the range to include zero: min_val = min(min_val, 0), max_val = max(max_val, 0)
+    4. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
+    5. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
        Formula: zero_point = round(INT8_MIN - (min_val / scale))
-    4. Apply quantization formula: round(value / scale + zero_point)
-    5. Clamp to INT8 range [-128, 127]
+    6. Apply quantization formula round(value / scale + zero_point),
+       clamp to the INT8 range [-128, 127], and cast to int8
 
     Args:
         tensor: Input FP32 tensor to quantize
@@ -467,6 +476,14 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
         q_tensor: Quantized INT8 tensor
         scale: Scaling factor (float)
         zero_point: Zero point offset (int)
+
+    NOTE: the returned codes are computed as int8, but TinyTorch's Tensor
+    stores every array as float32, so q_tensor.data holds INT8-range values
+    in a float32 array (the codes print as -128.0 and 127.0). This is
+    *simulated* quantization: the rounding is exactly what INT8 hardware
+    does, but the array still occupies four bytes per element. The memory
+    saving is accounted for analytically in QuantizedLinear.memory_usage()
+    and _measure_layer_bytes(), not read off the dtype.
 
     EXAMPLE:
     >>> tensor = Tensor([[-1.0, 0.0, 2.0], [0.5, 1.5, -0.5]])
@@ -477,10 +494,16 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     HINTS:
     - Use np.round() for quantization
     - Clamp with np.clip(values, -128, 127)
-    - Handle edge case where min_val == max_val (set scale=1.0)
+    - Constant tensor (every element equals c): there is no range to map, so
+      encode every element as code 0 and pick zero_point and scale so that
+      (0 - zero_point) * scale == c. For nonzero c, use scale = |c| and
+      zero_point = -1 (c > 0) or +1 (c < 0). For c = 0, use scale = 1
+      and zero_point = 0. Fractional constants need a fractional scale too.
     """
     ### BEGIN SOLUTION
     data = tensor.data
+    if data.size == 0 or not np.all(np.isfinite(data)):
+        raise ValueError("Quantization requires nonempty finite values")
 
     # Step 1: Find dynamic range
     min_val = float(np.min(data))
@@ -490,34 +513,45 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     # All elements have the same value c, so there is no range to map. We encode
     # every element as q=0 and choose zero_point/scale so dequantization recovers
     # the constant via (0 - zero_point) * scale = c.
-    if abs(max_val - min_val) < EPSILON:
+    if max_val == min_val:
         c = min_val
-        if abs(c) <= INT8_MAX_VALUE:
-            # |c| fits the INT8 range: scale=1.0 and zero_point = -round(c).
+        if c == 0:
             scale = 1.0
-            zero_point = int(np.round(-c))
+            zero_point = 0
         else:
-            # |c| exceeds the INT8 range. Keeping scale=1.0 would force
-            # zero_point = -c, which np.clip would saturate to +-128 and
-            # silently corrupt the value. Use zero_point = +-1 and scale = |c|
-            # instead, so (0 - zero_point) * scale = c holds without clamping.
+            # Encode the magnitude in the scale, preserving both fractional
+            # and large constants with a zero point that fits in one byte.
             zero_point = -1 if c > 0 else 1
             scale = abs(c)
         quantized_data = np.zeros_like(data, dtype=np.int8)
         return Tensor(quantized_data), scale, zero_point
 
-    # Step 3: Calculate scale and zero_point for standard quantization
+    # Step 3: Nudge the range to include zero before computing scale.
+    # If min_val and max_val share a sign (every post-ReLU activation, for
+    # instance), the zero_point implied by the raw range falls outside
+    # [-128, 127]. Clamping it there destroys the affine mapping and silently
+    # corrupts every value.
+    # Widening the range so it straddles zero is what PyTorch and TFLite do,
+    # and it costs at most one quantization level of precision.
+    min_val = min(min_val, 0.0)
+    max_val = max(max_val, 0.0)
+
+    # Step 4: Calculate scale
     # Map [min_val, max_val] to [INT8_MIN_VALUE, INT8_MAX_VALUE] (INT8 range)
     scale = (max_val - min_val) / (INT8_RANGE - 1)
+
+    # Step 5: Calculate zero_point (the code that min_val maps to is -128)
     zero_point = int(np.round(INT8_MIN_VALUE - min_val / scale))
 
-    # Clamp zero_point to valid INT8 range
+    # zero_point is now guaranteed inside the INT8 range by construction;
+    # clamp defensively rather than as a correctness crutch.
     zero_point = int(np.clip(zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
 
-    # Step 4: Apply quantization formula: q = (x / scale) + zero_point
+    # Step 6: Apply quantization formula q = (x / scale) + zero_point, clamp to
+    # the INT8 range, and cast to int8. Tensor() will widen the int8 array back
+    # to float32 (see the NOTE in the docstring), so the codes are exact but the
+    # array is not one byte per element.
     quantized_data = np.round(data / scale + zero_point)
-
-    # Step 5: Clamp to INT8 range and convert to int8
     quantized_data = np.clip(quantized_data, INT8_MIN_VALUE, INT8_MAX_VALUE).astype(np.int8)
 
     return Tensor(quantized_data), scale, zero_point
@@ -536,8 +570,8 @@ This test validates our INT8 quantization function works correctly with various 
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-int8", "locked": true, "points": 5}
 def test_unit_quantize_int8():
-    """Test INT8 quantization implementation."""
-    print("Unit Test: INT8 Quantization...")
+    """🧪 Test INT8 quantization implementation."""
+    print("🧪 Unit Test: INT8 Quantization...")
 
     # Test basic quantization
     tensor = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
@@ -552,17 +586,22 @@ def test_unit_quantize_int8():
     # Test dequantization preserves approximate values
     dequantized = (q_tensor.data - zero_point) * scale
     error = np.mean(np.abs(tensor.data - dequantized))
-    # INT8 quantization has limited precision (256 levels), so error tolerance is higher
-    # For a range of 5.0 (1.0 to 6.0), quantization error can be up to ~0.2
-    # Using slightly higher tolerance to account for numerical precision variations
-    assert error < 0.25, f"Quantization error too high: {error:.4f} (expected < 0.25 for INT8, range=5.0)"
+    # Round-to-nearest bounds the error at scale/2 -- one half of a quantization
+    # step. Asserting against that real bound rather than a loose constant is
+    # what catches a broken scale or a clamped zero_point; a tolerance of 0.25
+    # here (25x the true bound) would let both through unnoticed.
+    max_error = scale / 2
+    assert error <= max_error * 1.01, (
+        f"Quantization error {error:.6f} exceeds the INT8 bound scale/2 = {max_error:.6f}. "
+        f"A round-trip should never lose more than half a quantization step."
+    )
 
     # Test edge case: constant tensor -- dequantize must recover the original value,
-    # not zero. Previously zero_point was hardcoded to 0, so (0 - 0) * 1.0 = 0.0
-    # for every element regardless of what the constant was.
+    # not zero. A zero_point of 0 gives (0 - 0) * 1.0 = 0.0 for every element
+    # regardless of what the constant was, so the zero_point must carry it.
     constant_tensor = Tensor([[2.0, 2.0], [2.0, 2.0]])
     q_const, scale_const, zp_const = quantize_int8(constant_tensor)
-    assert scale_const == 1.0
+    assert scale_const > 0
     restored_const = (q_const.data.astype(np.float32) - zp_const) * scale_const
     assert np.allclose(restored_const, 2.0), (
         f"Constant tensor dequantized to {restored_const} instead of 2.0. "
@@ -579,7 +618,7 @@ def test_unit_quantize_int8():
 
     # Large constant outside the INT8 range. With scale=1.0 the zero_point would
     # be clamped to the INT8 range and silently corrupt the value, so the
-    # constant must still be recovered exactly via the |c| > 127 branch.
+    # constant must still be recovered exactly (the |c| > 127 case in the HINTS).
     large_tensor = Tensor([[500.0, 500.0]])
     q_large, scale_large, zp_large = quantize_int8(large_tensor)
     restored_large = (q_large.data.astype(np.float32) - zp_large) * scale_large
@@ -588,14 +627,20 @@ def test_unit_quantize_int8():
         "zero_point must not be clamped for |c| > 127."
     )
 
-    print("INT8 quantization works correctly!")
+    # A fixed scale of 1 would erase fractional constants such as 0.25.
+    for value in (0.0, 0.25, -0.5):
+        q, scale, zero_point = quantize_int8(Tensor([value, value]))
+        restored = (q.data - zero_point) * scale
+        assert np.allclose(restored, value), f"Constant {value} reconstructed as {restored}"
+
+    print("✅ INT8 quantization works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantize_int8()
 
 # %% [markdown]
 """
-## 🏗️ INT8 Dequantization - Restoring Precision
+## 🏗️ INT8 Dequantization: Restoring Precision
 
 Dequantization is the inverse process - converting compressed INT8 values back to usable FP32. This is where we "decompress" our quantized data.
 
@@ -606,7 +651,7 @@ INT8 Values + Parameters → FP32 Reconstruction
 
 ┌───────────────────────────────────┐
 │ Quantized: [-128, -27, 127]       │
-│ Scale: 0.017                      │
+│ Scale: 0.01686 (= 4.3/255)        │
 │ Zero Point: -39                   │
 └───────────────────────────────────┘
                  │
@@ -633,9 +678,8 @@ INT8 Values + Parameters → FP32 Reconstruction
 - **Hardware flexibility** - can use FP32 or specialized INT8 operations
 
 **When Dequantization Happens:**
-- **During forward pass** - before matrix multiplications
-- **For gradient computation** - during backward pass
-- **Educational approach** - production uses INT8 GEMM directly
+- **During forward pass** - before matrix multiplications (this module's QuantizedLinear does exactly this)
+- **Educational approach** - production uses INT8 GEMM directly and rescales the accumulated result once
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dequantize_int8", "solution": true}
@@ -689,8 +733,8 @@ This test validates our dequantization function correctly restores FP32 values f
 
 # %% nbgrader={"grade": true, "grade_id": "test-dequantize-int8", "locked": true, "points": 5}
 def test_unit_dequantize_int8():
-    """Test INT8 dequantization implementation."""
-    print("Unit Test: INT8 Dequantization...")
+    """🧪 Test INT8 dequantization implementation."""
+    print("🧪 Unit Test: INT8 Dequantization...")
 
     # Test round-trip: quantize → dequantize
     original = Tensor([[-1.5, 0.0, 3.2], [1.1, -0.8, 2.7]])
@@ -704,14 +748,14 @@ def test_unit_dequantize_int8():
     # Verify output is float32
     assert restored.data.dtype == np.float32
 
-    print("INT8 dequantization works correctly!")
+    print("✅ INT8 dequantization works correctly!")
 
 if __name__ == "__main__":
     test_unit_dequantize_int8()
 
 # %% [markdown]
 """
-## 🏗️ QuantizedLinear - The Heart of Efficient Networks
+## 🏗️ QuantizedLinear: The Heart of Efficient Networks
 
 ### Why We Need Quantized Layers
 
@@ -759,7 +803,7 @@ Memory Saved: 4× for weights storage!
 Speed: Depends on dequantization overhead vs INT8 GEMM support
 ```
 
-### Calibration - Finding Optimal Input Quantization
+### Calibration: Finding Optimal Input Quantization
 
 ```
 Calibration Process:
@@ -781,7 +825,7 @@ Calibration Process:
 
 # %% [markdown]
 """
-## 🏗️ QuantizedLinear Class - Efficient Neural Network Layer
+## 🏗️ QuantizedLinear Class: Efficient Neural Network Layer
 
 This class replaces regular Linear layers with quantized versions that use 4× less memory while preserving functionality.
 
@@ -813,7 +857,7 @@ Creation Time:                       Runtime:
 
 **Memory Layout:**
 
-Regular Linear layers store weights in FP32 (4 bytes each), while QuantizedLinear stores them in INT8 (1 byte each) plus a small overhead for quantization parameters (scales and zero points). This achieves approximately 4× memory reduction with minimal overhead.
+Regular Linear layers store weights in FP32 (4 bytes each). QuantizedLinear simulates INT8 codes in float32 arrays; its memory report models packed one-byte codes plus scale and zero-point metadata. The approximately 4× saving belongs to that packed representation, not to these NumPy arrays.
 
 **Production vs Educational Trade-off:**
 - **Our approach:** Dequantize → FP32 computation (easier to understand)
@@ -824,7 +868,7 @@ Regular Linear layers store weights in FP32 (4 bytes each), while QuantizedLinea
 # %% nbgrader={"grade": false, "grade_id": "quantized_linear", "solution": true}
 #| export
 class QuantizedLinear:
-    """Quantized version of Linear layer using INT8 arithmetic."""
+    """Linear layer whose weights are stored as INT8 values (the arithmetic is simulated in FP32)."""
 
     def __init__(self, linear_layer: Linear):
         """
@@ -843,8 +887,15 @@ class QuantizedLinear:
         >>> original_layer.weight = Tensor(rng.standard_normal((128, 64)) * 0.1)
         >>> original_layer.bias = Tensor(rng.standard_normal(64) * 0.01)
         >>> quantized_layer = QuantizedLinear(original_layer)
-        >>> print(quantized_layer.q_weight.data.dtype)
-        int8
+        >>> print(quantized_layer.q_weight.data.min(), quantized_layer.q_weight.data.max())
+        -128.0 127.0
+
+        NOTE: q_weight holds INT8-RANGE values but its dtype is float32, because
+        TinyTorch's Tensor stores everything as float32. This is *simulated*
+        quantization: it reproduces the accuracy effects exactly, but not the
+        memory saving. Real INT8 inference stores these values in an int8 array,
+        which is where the actual 4x reduction comes from. We compute the saving
+        analytically in memory_usage() and _measure_layer_bytes() rather than reading it off dtype.
 
         HINTS:
         - Use quantize_int8() to convert weight and bias tensors
@@ -900,18 +951,23 @@ class QuantizedLinear:
             all_values.extend(inp.data.flatten())
 
         all_values = np.array(all_values)
+        if all_values.size == 0 or not np.all(np.isfinite(all_values)):
+            raise ValueError("Calibration requires nonempty finite samples")
 
-        # Calculate input quantization parameters
-        min_val = float(np.min(all_values))
-        max_val = float(np.max(all_values))
+        # Calculate input quantization parameters, widening the range to
+        # straddle zero exactly as quantize_int8 does (post-ReLU inputs are
+        # all non-negative, and a zero_point outside the INT8 range would
+        # otherwise be clamped and corrupt every value)
+        min_val = min(float(np.min(all_values)), 0.0)
+        max_val = max(float(np.max(all_values)), 0.0)
 
-        if abs(max_val - min_val) < EPSILON:
+        if max_val == min_val:
             self.input_scale = 1.0
             self.input_zero_point = 0
         else:
             self.input_scale = (max_val - min_val) / (INT8_RANGE - 1)
             self.input_zero_point = int(np.round(INT8_MIN_VALUE - min_val / self.input_scale))
-            self.input_zero_point = np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE)
+            self.input_zero_point = int(np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
         ### END SOLUTION
 
     def forward(self, x: Tensor) -> Tensor:
@@ -934,6 +990,8 @@ class QuantizedLinear:
         (1, 3)
 
         HINTS:
+        - If calibrate() has set input_scale, round the input onto its grid and
+          back first (clip to the INT8 range), so saturation is visible
         - Use dequantize_int8() to restore weights to FP32 before computation
         - Use x.matmul() for matrix multiplication
         - Add bias after matmul if it exists (dequantize bias first)
@@ -943,6 +1001,13 @@ class QuantizedLinear:
         ### BEGIN SOLUTION
         # For educational purposes, we dequantize and compute in FP32
         # Production systems use specialized INT8 GEMM operations
+
+        # Round the input onto the calibrated grid and back, so the activations
+        # carry the same rounding (and saturation) they would on INT8 hardware
+        if self.input_scale is not None:
+            q_x = np.clip(np.round(x.data / self.input_scale + self.input_zero_point),
+                          INT8_MIN_VALUE, INT8_MAX_VALUE)
+            x = Tensor((q_x - self.input_zero_point) * self.input_scale)
 
         # Dequantize weights
         weight_fp32 = dequantize_int8(self.q_weight, self.weight_scale, self.weight_zero_point)
@@ -970,7 +1035,7 @@ class QuantizedLinear:
         return params
 
     def memory_usage(self) -> Dict[str, float]:
-        """Calculate memory usage in bytes."""
+        """Model packed INT8 bytes, including metadata; not actual NumPy storage."""
         ### BEGIN SOLUTION
         # Original FP32 usage
         original_weight_bytes = self.original_layer.weight.data.size * BYTES_PER_FLOAT32
@@ -984,9 +1049,10 @@ class QuantizedLinear:
         if self.q_bias is not None:
             quantized_bias_bytes = self.q_bias.data.size * BYTES_PER_INT8
 
-        # Add overhead for scales and zero points (small)
-        # 2 floats: one scale for weights, one scale for bias (if present)
-        overhead_bytes = BYTES_PER_FLOAT32 * 2
+        # Overhead for the quantization parameters (a scale and a zero point):
+        # a few bytes, negligible next to the arrays
+        # Each quantized array needs its own float32 scale and integer zero point.
+        overhead_bytes = BYTES_PER_FLOAT32 * 2 * (1 + int(self.q_bias is not None))
 
         quantized_total = quantized_weight_bytes + quantized_bias_bytes + overhead_bytes
         original_total = original_weight_bytes + original_bias_bytes
@@ -1011,8 +1077,8 @@ This test validates our QuantizedLinear layer works correctly and achieves memor
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantized-linear", "locked": true, "points": 5}
 def test_unit_quantized_linear():
-    """Test QuantizedLinear implementation."""
-    print("Unit Test: QuantizedLinear...")
+    """🧪 Test QuantizedLinear implementation."""
+    print("🧪 Unit Test: QuantizedLinear...")
 
     # Create original linear layer
     original = Linear(4, 3)
@@ -1041,18 +1107,19 @@ def test_unit_quantized_linear():
     print(f"  Original bytes: {memory_info['original_bytes']}")
     print(f"  Quantized bytes: {memory_info['quantized_bytes']}")
 
-    # The compression should be close to 4× (allowing for quantization parameter overhead)
-    assert memory_info['compression_ratio'] > 2.5, f"Should achieve ~4× compression, got {memory_info['compression_ratio']:.2f}×"
+    # Tiny layers expose metadata overhead: 15 codes plus two scale/zero-point pairs.
+    assert memory_info['quantized_bytes'] == 15 + 16
+    assert np.isclose(memory_info['compression_ratio'], 60 / 31)
 
     print(f"  Memory reduction: {memory_info['compression_ratio']:.1f}x")
-    print("QuantizedLinear works correctly!")
+    print("✅ QuantizedLinear works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantized_linear()
 
 # %% [markdown]
 """
-## 🔧 Integration: Scaling to Full Neural Networks
+## 🏗️ Model Quantization: Scaling to Full Networks
 
 ### The Model Quantization Challenge
 
@@ -1075,7 +1142,7 @@ Now let's implement the functions that make this transformation possible!
 
 # %% [markdown]
 """
-## 🔧 Model Quantization - Scaling to Full Networks
+### From One Layer to a Whole Model
 
 Quantizing individual layers is useful, but real applications need to quantize entire neural
 networks. We'll build this capability in two steps:
@@ -1104,7 +1171,7 @@ Input Model:                    Quantized Model:
 
 # %% [markdown]
 """
-## 🏗️ Collecting Layer Inputs - Calibration Data Flow
+## 🏗️ Collecting Layer Inputs: Calibration Data Flow
 
 Before we can calibrate a quantized layer, we need to know what its inputs look like
 at runtime. This helper forwards calibration samples through all preceding layers
@@ -1178,8 +1245,8 @@ This test validates that we correctly forward calibration data through preceding
 
 # %% nbgrader={"grade": true, "grade_id": "test-collect-layer-inputs", "locked": true, "points": 3}
 def test_unit_collect_layer_inputs():
-    """Test collecting intermediate activations for calibration."""
-    print("Unit Test: Collect Layer Inputs...")
+    """🧪 Test collecting intermediate activations for calibration."""
+    print("🧪 Unit Test: Collect Layer Inputs...")
 
     # Create a simple model
     layer1 = Linear(4, 8)
@@ -1207,14 +1274,14 @@ def test_unit_collect_layer_inputs():
     inputs_limited = _collect_layer_inputs(model, 2, samples, max_samples=2)
     assert len(inputs_limited) == 2, "Should respect max_samples"
 
-    print("Collect layer inputs works correctly!")
+    print("✅ Collect layer inputs works correctly!")
 
 if __name__ == "__main__":
     test_unit_collect_layer_inputs()
 
 # %% [markdown]
 """
-## 🏗️ Quantizing a Single Layer - The Replacement Step
+## 🏗️ Quantizing a Single Layer: The Replacement Step
 
 This helper takes one Linear layer, wraps it in a QuantizedLinear, and optionally
 calibrates it using pre-collected activation samples. This is the atomic operation
@@ -1257,8 +1324,11 @@ def _quantize_single_layer(layer: Linear, calibration_inputs: Optional[List[Tens
     >>> original = Linear(8, 3)
     >>> original.weight = Tensor(rng.standard_normal((8, 3)) * 0.5)
     >>> quantized = _quantize_single_layer(original)
-    >>> print(quantized.q_weight.data.dtype)
-    int8
+    >>> print(quantized.q_weight.data.min(), quantized.q_weight.data.max())
+    -128.0 127.0
+
+    NOTE: values are INT8-range but stored as float32 (see QuantizedLinear) --
+    simulated quantization, so the memory saving is computed, not measured.
 
     HINT:
     - QuantizedLinear(layer) handles weight/bias quantization
@@ -1286,8 +1356,8 @@ This test validates that we correctly quantize one Linear layer with optional ca
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-single-layer", "locked": true, "points": 3}
 def test_unit_quantize_single_layer():
-    """Test single layer quantization with and without calibration."""
-    print("Unit Test: Quantize Single Layer...")
+    """🧪 Test single layer quantization with and without calibration."""
+    print("🧪 Unit Test: Quantize Single Layer...")
 
     # Create a linear layer
     layer = Linear(4, 3)
@@ -1311,14 +1381,14 @@ def test_unit_quantize_single_layer():
     output = q_layer.forward(x)
     assert output.shape == (2, 3), f"Output shape should be (2, 3), got {output.shape}"
 
-    print("Quantize single layer works correctly!")
+    print("✅ Quantize single layer works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantize_single_layer()
 
 # %% [markdown]
 """
-## 🔧 Model Quantization - The Composition Function
+## 🏗️ Model Quantization: The Composition Function
 
 Now we compose the helpers into the full model quantization function. For each Linear
 layer in the model, we collect its calibration inputs and replace it with a quantized version.
@@ -1412,8 +1482,8 @@ This test validates our model quantization function correctly replaces Linear la
 
 # %% nbgrader={"grade": true, "grade_id": "test-quantize-model", "locked": true, "points": 5}
 def test_unit_quantize_model():
-    """Test model quantization implementation."""
-    print("Unit Test: Model Quantization...")
+    """🧪 Test model quantization implementation."""
+    print("🧪 Unit Test: Model Quantization...")
 
     # Create test model using explicit layer composition (TinyTorch pattern)
     layer1 = Linear(4, 8)
@@ -1433,8 +1503,12 @@ def test_unit_quantize_model():
     x = Tensor(rng.standard_normal((2, 4)))
     original_output = model.forward(x)
 
-    # Create calibration data
-    calibration_data = [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
+    # Create calibration data. Calibration fixes each layer's input range, and
+    # an input outside that range saturates, so the set must cover the inputs
+    # the layer will see; the batch under test is included so this check
+    # measures rounding error, not saturation (the calibration exercise in the
+    # book shows what saturation does).
+    calibration_data = [x] + [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
 
     # Quantize model
     quantize_model(model, calibration_data)
@@ -1452,14 +1526,14 @@ def test_unit_quantize_model():
     print(f"  Model quantization error: {error:.4f}")
     assert error < 0.2, f"Model quantization error too high: {error}"
 
-    print("Model quantization works correctly!")
+    print("✅ Model quantization works correctly!")
 
 if __name__ == "__main__":
     test_unit_quantize_model()
 
 # %% [markdown]
 """
-## 🔧 Model Size Comparison - Measuring the Impact
+## 🏗️ Model Size Comparison: Measuring the Impact
 
 To compare memory usage between original and quantized models, we need to measure
 bytes at the individual layer level first, then aggregate. We'll build this in two steps:
@@ -1482,7 +1556,7 @@ Per-Layer Measurement:
 
 # %% [markdown]
 """
-## 🏗️ Measuring a Single Layer - Per-Layer Byte Accounting
+## 🏗️ Measuring a Single Layer: Per-Layer Byte Accounting
 
 This helper measures the parameter count and byte usage for one layer. It handles
 the key distinction: FP32 layers store parameters at 4 bytes each, while QuantizedLinear
@@ -1495,13 +1569,14 @@ Byte Accounting per Layer Type:
   ┌─────────────────────────┐      ┌─────────────────────────────────┐
   │ weight: N × 4 bytes     │      │ q_weight: N × 1 byte            │
   │ bias:   M × 4 bytes     │      │ q_bias:   M × 1 byte            │
-  │                         │      │ overhead: ~8 bytes (scale+zp)    │
-  │ Total: (N+M) × 4       │      │ Total: (N+M) × 1 + overhead     │
+  │                         │      │ overhead: ~8 bytes (scale+zp)   │
+  │ Total: (N+M) × 4        │      │ Total: (N+M) × 1 + overhead     │
   └─────────────────────────┘      └─────────────────────────────────┘
 ```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "measure_layer_bytes", "solution": true}
+#| export
 def _measure_layer_bytes(layer, is_quantized: bool = False) -> Tuple[int, int]:
     """
     Measure parameter count and byte usage for a single layer.
@@ -1558,8 +1633,8 @@ This test validates that we correctly measure bytes for both FP32 and quantized 
 
 # %% nbgrader={"grade": true, "grade_id": "test-measure-layer-bytes", "locked": true, "points": 3}
 def test_unit_measure_layer_bytes():
-    """Test per-layer byte measurement for FP32 and quantized layers."""
-    print("Unit Test: Measure Layer Bytes...")
+    """🧪 Test per-layer byte measurement for FP32 and quantized layers."""
+    print("🧪 Unit Test: Measure Layer Bytes...")
 
     # Test FP32 Linear layer
     linear = Linear(10, 5)
@@ -1584,14 +1659,14 @@ def test_unit_measure_layer_bytes():
     print(f"  FP32: {params} params, {bytes_} bytes")
     print(f"  INT8: {params_q} params, {bytes_q} bytes")
     print(f"  Ratio: {bytes_ / bytes_q:.1f}x")
-    print("Measure layer bytes works correctly!")
+    print("✅ Measure layer bytes works correctly!")
 
 if __name__ == "__main__":
     test_unit_measure_layer_bytes()
 
 # %% [markdown]
 """
-## 🔧 Model Size Analysis - The Composition Function
+## 🏗️ Model Size Analysis: The Composition Function
 
 Now we aggregate per-layer measurements across the full model to produce a comprehensive
 comparison between original and quantized versions.
@@ -1616,6 +1691,7 @@ Aggregation Flow:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze_model_sizes", "solution": true}
+#| export
 
 def analyze_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     """
@@ -1692,8 +1768,8 @@ This test validates our model size analysis function correctly measures compress
 
 # %% nbgrader={"grade": true, "grade_id": "test-compare-sizes", "locked": true, "points": 5}
 def test_unit_analyze_model_sizes():
-    """Test model size analysis."""
-    print("Unit Test: Model Size Analysis...")
+    """🧪 Test model size analysis."""
+    print("🧪 Unit Test: Model Size Analysis...")
 
     # Create and quantize a model for testing (using Sequential from tinytorch.core.layers)
     layer1_orig = Linear(100, 50)
@@ -1726,20 +1802,20 @@ def test_unit_analyze_model_sizes():
 
     print(f"  Compression ratio: {comparison['compression_ratio']:.1f}x")
     print(f"  Memory saved: {comparison['memory_saved_percent']:.1f}%")
-    print("Model size analysis works correctly!")
+    print("✅ Model size analysis works correctly!")
 
 if __name__ == "__main__":
     test_unit_analyze_model_sizes()
 
 # %% [markdown]
 """
-## 🔧 Consolidated Quantization Classes for Export
+## 🔧 Integration: The Quantizer Class
 
 Now that we've implemented all quantization components, let's create consolidated classes
 for export to the tinytorch package. This allows milestones to use the complete quantization system.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "quantization_export", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "quantization_export", "solution": false}
 #| export
 class Quantizer:
     """
@@ -1766,12 +1842,13 @@ class Quantizer:
         return dequantize_int8(q_tensor, scale, zero_point)
 
     @staticmethod
-    def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, any]:
+    def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, Any]:
         """
-        Quantize all Linear layers in a model and return stats.
+        Return quantized parameter artifacts and modeled packed storage statistics.
 
-        Unlike the standalone quantize_model() which modifies in-place,
-        this returns a dictionary with quantization info for benchmarking.
+        This does not replace layers or produce an executable model. Use the
+        standalone quantize_model() for that. calibration_data is retained for
+        API compatibility; this parameter-only report does not calibrate activations.
 
         Returns:
             Dict with quantized_layers, original_size_mb, quantized_size_mb, compression_ratio
@@ -1858,39 +1935,44 @@ if __name__ == "__main__":
 
 # %%
 def analyze_quantization_accuracy():
-    """Analyze accuracy vs memory trade-off for quantization."""
-    print("\nAnalyzing Quantization Accuracy Trade-offs")
+    """Measure how much quantizing each layer perturbs the model output."""
+    print("\nMeasuring Per-Layer Quantization Sensitivity")
 
-    # Simulate quantization impact on different layer types
-    layer_types = [
-        ("Embeddings", 0.99, "Low impact - lookup tables"),
-        ("Attention", 0.97, "Moderate impact - many small ops"),
-        ("MLP", 0.98, "Low impact - large matrix muls"),
-        ("Output", 0.95, "Higher impact - final predictions")
-    ]
+    # A small MLP: quantize one Linear layer at a time and compare outputs
+    layers = [Linear(64, 32), ReLU(), Linear(32, 16), ReLU(), Linear(16, 10)]
+    x = Tensor(rng.standard_normal((32, 64)))
+    baseline = Sequential(*layers).forward(x).data
+    baseline_power = np.mean(baseline ** 2)
 
-    print(f"{'Layer Type':<15} {'Acc Retention':<15} {'Observation'}")
+    print(f"{'Layer':<12} {'Params':<10} {'Relative output error'}")
     print("-" * 50)
 
-    for layer, retention, note in layer_types:
-        print(f"{layer:<15} {retention:>13.1%}  {note}")
+    for idx, layer in enumerate(layers):
+        if not isinstance(layer, Linear):
+            continue
+        swapped = list(layers)
+        swapped[idx] = _quantize_single_layer(layer)
+        output = Sequential(*swapped).forward(x).data
+        rel_error = np.mean((output - baseline) ** 2) / baseline_power
+        params = sum(p.data.size for p in layer.parameters())
+        print(f"Linear {idx:<5} {params:<10,} {rel_error:.2e}")
 
-    print("\nKey Insight: Overall model accuracy retention: ~98-99% typical")
-    print("Output layers most sensitive to quantization")
+    print("\nKey Insight: per-tensor INT8 perturbs the output by a small, measurable amount.")
+    print("Measure sensitivity like this before deciding which layers to keep in FP32.")
 
 if __name__ == "__main__":
     analyze_quantization_accuracy()
 
 # %% [markdown]
 """
-## 📊 Advanced Quantization Strategies - Production Techniques
+### Advanced Quantization Strategies: Production Techniques
 
 This analysis compares different quantization approaches used in production systems, revealing the trade-offs between accuracy, complexity, and performance.
 
 ```
 Strategy Comparison Framework:
 
-┌──────────────────────────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────────────────────────┐
 │                          Three Advanced Strategies                             │
 ├──────────────────────────┬──────────────────────────┬──────────────────────────┤
 │       Strategy 1         │       Strategy 2         │       Strategy 3         │
@@ -1898,9 +1980,9 @@ Strategy Comparison Framework:
 ├──────────────────────────┼──────────────────────────┼──────────────────────────┤
 │                          │                          │                          │
 │ ┌──────────────────────┐ │ ┌──────────────────────┐ │ ┌──────────────────────┐ │
-│ │ Weights:             │ │ │ Channel 1: scale₁   │ │ │ Sensitive: FP32      │ │
-│ │ [W₁₁ W₁₂ W₁₃]        │ │ │ Channel 2: scale₂   │ │ │ Regular: INT8        │ │
-│ │ [W₂₁ W₂₂ W₂₃] scale  │ │ │ Channel 3: scale₃   │ │ │                      │ │
+│ │ Weights:             │ │ │ Channel 1: scale₁    │ │ │ Sensitive: FP32      │ │
+│ │ [W₁₁ W₁₂ W₁₃]        │ │ │ Channel 2: scale₂    │ │ │ Regular: INT8        │ │
+│ │ [W₂₁ W₂₂ W₂₃] scale  │ │ │ Channel 3: scale₃    │ │ │                      │ │
 │ │ [W₃₁ W₃₂ W₃₃]        │ │ │                      │ │ │ Input: FP32          │ │
 │ └──────────────────────┘ │ │ Better precision     │ │ │ Output: FP32         │ │
 │                          │ │ per channel          │ │ │ Hidden: INT8         │ │
@@ -1940,45 +2022,30 @@ Pros: Better precision       Cons: More complex
 ```
 Model Architecture:            Precision Assignment:
 ┌─────────────────────────┐     ┌─────────────────────────┐
-│ Input Layer  (sensitive) │     │ Keep in FP32 (precision) │
-│ Hidden 1     (bulk)     │ →   │ Quantize to INT8        │
-│ Hidden 2     (bulk)     │     │ Quantize to INT8        │
-│ Output Layer (sensitive)│     │ Keep in FP32 (quality)   │
+│ Input Layer (sensitive) │     │ Keep in FP32 (precision)│
+│ Hidden 1    (bulk)      │ →   │ Quantize to INT8        │
+│ Hidden 2    (bulk)      │     │ Quantize to INT8        │
+│ Output Layer (sensitive)│     │ Keep in FP32 (quality)  │
 └─────────────────────────┘     └─────────────────────────┘
 
 Pros: Optimal trade-off      Cons: Requires expertise
 ```
 
-**Experimental Design:**
-```
-Comparative Testing Protocol:
-
-1. Create identical test model   →  2. Apply each strategy        →  3. Measure results
-   ┌───────────────────────┐     ┌───────────────────────┐     ┌───────────────────────┐
-   │ 128 → 64 → 10 MLP      │     │ Per-tensor quantization │     │ MSE error calculation  │
-   │ Identical weights       │     │ Per-channel simulation  │     │ Compression measurement│
-   │ Same test input         │     │ Mixed precision setup   │     │ Speed comparison       │
-   └───────────────────────┘     └───────────────────────┘     └───────────────────────┘
-```
-
-**Expected Strategy Rankings:**
-1. **Mixed Precision** - Best accuracy, moderate complexity
-2. **Per-Channel** - Good accuracy, higher complexity
-3. **Per-Tensor** - Baseline accuracy, simplest implementation
-
-This analysis reveals which strategies work best for different deployment scenarios and accuracy requirements.
+Our implementation is per-tensor. Per-channel scales and mixed precision are the two
+refinements production toolchains add on top of it; the per-layer sensitivity you
+measured above is exactly the input a mixed-precision decision needs.
 """
 
 # %% [markdown]
 """
-## 📊 Measuring Quantization Savings with Profiler
+### Measuring Quantization Savings with Profiler
 
 Now let's use the Profiler tool from Module 14 to measure the actual memory savings from quantization. This demonstrates end-to-end workflow: profile baseline (M14) -> apply quantization (M15) -> measure savings (M14+M15).
 
 This is the production workflow: measure -> compress -> validate -> deploy.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "demo-profiler-quantization", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "demo-profiler-quantization", "solution": false}
 # Import Profiler from Module 14
 from tinytorch.perf.profiling import Profiler
 
@@ -1990,9 +2057,7 @@ def explore_quantization_with_profiler():
     profiler = Profiler()
 
     # Create a simple model
-    from tinytorch.core.layers import Linear
     model = Linear(512, 256)
-    model.name = "baseline_model"
 
     print("\nBEFORE: FP32 Model")
     print("-" * 70)
@@ -2007,21 +2072,17 @@ def explore_quantization_with_profiler():
     print(f"   Peak memory: {memory_stats['peak_memory_mb']:.2f} MB")
     print(f"   Precision: FP32 (4 bytes per parameter)")
 
-    # Quantize the model (in-place modification)
+    # Quantize the layer
     print("\nQuantizing to INT8...")
-    # quantize_model expects a model with .layers attribute, so wrap single layer in Sequential
-    wrapped_model = Sequential(model)
-    quantize_model(wrapped_model)  # Modifies model in-place, returns None
-    quantized_model = wrapped_model.layers[0] if wrapped_model.layers else model
-    quantized_model.name = "quantized_model"
+    quantized_model = QuantizedLinear(model)
+    usage = quantized_model.memory_usage()
 
     print("\nAFTER: INT8 Quantized Model")
     print("-" * 70)
 
-    # Measure quantized (simulated - in practice INT8 uses 1 byte)
-    # For demonstration, we show the theoretical savings
+    # INT8 storage is simulated here, so memory_usage() reports the analytic byte count
     quantized_param_count = profiler.count_parameters(quantized_model)
-    theoretical_memory_mb = param_count * BYTES_PER_INT8 / MB_TO_BYTES
+    theoretical_memory_mb = usage['quantized_bytes'] / MB_TO_BYTES
 
     print(f"   Parameters: {quantized_param_count:,} (same count, different precision)")
     print(f"   Parameter memory (theoretical): {theoretical_memory_mb:.2f} MB")
@@ -2048,79 +2109,12 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Verification: Prove Quantization Works
-
-Before running the full integration test, let's create a verification function that
-proves quantization actually reduces memory using real `.nbytes` measurements.
-"""
-
-# %%
-#| export
-def verify_quantization_works(original_model, quantized_model):
-    """
-    Verify quantization actually reduces memory using real .nbytes measurements.
-
-    This is NOT a theoretical calculation - we measure actual bytes consumed
-    by numpy arrays to prove the optimization is real.
-
-    Args:
-        original_model: Model with FP32 parameters (Sequential with .parameters())
-        quantized_model: Model with INT8 quantized parameters (Sequential with QuantizedLinear layers)
-
-    Returns:
-        dict: Verification results with actual_reduction, original_mb, quantized_mb
-
-    Example:
-        >>> original = Sequential(Linear(100, 50))
-        >>> quantized = Sequential(Linear(100, 50))
-        >>> quantize_model(quantized)
-        >>> results = verify_quantization_works(original, quantized)
-        >>> assert results['actual_reduction'] >= 3.5  # Real 4× reduction
-    """
-    print("Verifying actual memory reduction with .nbytes...")
-
-    # Collect actual bytes from original FP32 model
-    original_bytes = sum(
-        param.data.nbytes for param in original_model.parameters()
-        if hasattr(param, 'data') and hasattr(param.data, 'nbytes')
-    )
-
-    # Collect actual bytes from quantized INT8 model
-    quantized_bytes = sum(
-        layer.q_weight.data.nbytes + (layer.q_bias.data.nbytes if layer.q_bias is not None else 0)
-        for layer in quantized_model.layers
-        if isinstance(layer, QuantizedLinear)
-    )
-
-    # Calculate actual reduction
-    actual_reduction = original_bytes / max(quantized_bytes, 1)
-
-    # Display results
-    print(f"   Original model: {original_bytes / MB_TO_BYTES:.2f} MB (FP32)")
-    print(f"   Quantized model: {quantized_bytes / MB_TO_BYTES:.2f} MB (INT8)")
-    print(f"   Actual reduction: {actual_reduction:.1f}x")
-    print(f"   {'PASS' if actual_reduction >= 3.5 else 'FAIL'} Meets 4x reduction target")
-
-    # Verify target met
-    assert actual_reduction >= 3.5, f"Expected ~4x reduction, got {actual_reduction:.1f}x"
-
-    print(f"\nVERIFIED: Quantization achieves real {actual_reduction:.1f}x memory reduction!")
-
-    return {
-        'actual_reduction': actual_reduction,
-        'original_mb': original_bytes / MB_TO_BYTES,
-        'quantized_mb': quantized_bytes / MB_TO_BYTES,
-        'verified': actual_reduction >= 3.5
-    }
-
-# %% [markdown]
-"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly before module completion.
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20, "solution": false, "schema_version": 3}
+# %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20}
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -2235,7 +2229,7 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 15")
 
-# %% [markdown] nbgrader={"grade": false, "grade_id": "quantization-reflection", "solution": true}
+# %% [markdown]
 """
 ## 🤔 ML Systems Reflection Questions
 
@@ -2248,30 +2242,12 @@ For a model with 100M parameters:
 - Quantized memory usage: _____ GB
 - Memory bandwidth reduction when loading from disk: _____ ×
 
-### BEGIN SOLUTION
-**Answer 1: Memory Architecture Impact**
-- Original memory usage: **0.4 GB** (100M parameters × 4 bytes = 400MB = 0.4 GB)
-- Quantized memory usage: **0.1 GB** (100M parameters × 1 byte = 100MB = 0.1 GB)
-- Memory bandwidth reduction: **4×** (loading 100MB instead of 400MB from disk)
-
-**Key Insight**: Quantization reduces not just RAM usage, but also disk I/O, network transfer time, and memory bandwidth pressure. A 4× reduction in bandwidth means 4× faster model loading and 4× less network traffic when deploying models.
-### END SOLUTION
-
 ### Question 2: Quantization Error Analysis
 Your quantization maps a continuous range to 256 discrete values (INT8).
 For weights uniformly distributed in [-0.1, 0.1]:
 - Quantization scale: _____
 - Maximum quantization error: _____
 - Signal-to-noise ratio approximately: _____ dB
-
-### BEGIN SOLUTION
-**Answer 2: Quantization Error Analysis**
-- Quantization scale: **0.0007843** (range 0.2 / 255 steps = 0.0007843)
-- Maximum quantization error: **±0.000392** (scale / 2 = ±0.0003922)
-- Signal-to-noise ratio: **~48 dB** (20 × log10(signal_range / quantization_step) ≈ 20 × log10(255) ≈ 48 dB)
-
-**Key Insight**: For 8-bit quantization, theoretical SNR is approximately 6 dB per bit × 8 bits = 48 dB. This is sufficient for neural networks because weights typically have bounded ranges and networks are robust to small perturbations.
-### END SOLUTION
 
 ### Question 3: Hardware Efficiency
 Modern processors have specialized INT8 instructions (like AVX-512 VNNI).
@@ -2280,46 +2256,17 @@ Compared to FP32 operations:
 - Why might actual speedup be less than this theoretical maximum? _____
 - What determines whether quantization improves or hurts performance? _____
 
-### BEGIN SOLUTION
-**Answer 3: Hardware Efficiency**
-- INT8 operations per SIMD: **4× more** (512-bit register can hold 64 INT8 values vs 16 FP32 values)
-- Why actual speedup is less: **Dequantization overhead, memory bandwidth bottlenecks, and non-compute operations** (data movement, activation functions, etc. remain in FP32)
-- Performance determinant: **Hardware INT8 support availability** (modern CPUs with VNNI, GPUs with Tensor Cores, mobile chips with Neural Engine) and **compute vs memory-bound workload** (compute-bound benefits more from INT8 ops, memory-bound benefits from reduced bandwidth)
-
-**Key Insight**: Theoretical 4× speedup requires: (1) Hardware with native INT8 instructions, (2) Large matrix multiplications where compute dominates, (3) Minimal dequantization overhead. Real-world speedups are typically 2-3× due to mixed precision operations and data movement costs.
-### END SOLUTION
-
 ### Question 4: Calibration Strategy Trade-offs
 Your calibration process finds optimal scales using sample data.
 - Too little calibration data: Risk of _____
 - Too much calibration data: Cost of _____
 - Per-channel vs per-tensor quantization trades _____ for _____
 
-### BEGIN SOLUTION
-**Answer 4: Calibration Strategy Trade-offs**
-- Too little calibration data: Risk of **suboptimal quantization parameters that don't represent the true activation distribution**, leading to **clipping of outliers and accuracy degradation**
-- Too much calibration data: Cost of **increased calibration time** and **diminishing returns** (accuracy stops improving after ~100-1000 samples typically)
-- Per-channel vs per-tensor trades: **Complexity and overhead** (more scales to store/compute) for **better precision** (each channel optimized independently, preserving more information)
-
-**Key Insight**: Calibration is about finding representative data statistics. The rule of thumb: 100-1000 diverse samples usually suffice. Per-channel quantization is worth the complexity for sensitive layers (first/last layers, attention) but overkill for bulk middle layers.
-### END SOLUTION
-
 ### Question 5: Production Deployment
 In mobile/edge deployment scenarios:
 - When is 4× memory reduction worth <1% accuracy loss? _____
 - Why might you keep certain layers in FP32? _____
 - How does quantization affect battery life? _____
-
-### BEGIN SOLUTION
-**Answer 5: Production Deployment**
-- When 4× reduction worth <1% loss: **Always in memory-constrained environments** (mobile devices with <4GB RAM, edge devices with <512MB, embedded systems). Also when **serving cost matters** (4× smaller = 4× more users per server) or **latency critical** (4× faster loading from disk/network).
-
-- Keep layers in FP32: **First layer** (input quantization loses information), **last layer** (output precision matters for final predictions), **attention layers** (sensitive to precision for softmax stability), and **layers with extreme activation ranges** (quantization error amplifies).
-
-- Battery life impact: **2-4× improvement** due to (1) **less memory access** = lower DRAM power, (2) **INT8 operations use less energy** than FP32 ALUs, (3) **faster inference** = shorter active time. Typical mobile inference: 60% energy from memory, 30% from compute, 10% other.
-
-**Key Insight**: Quantization is essential for edge AI. The 1% accuracy loss is usually imperceptible to users, but 4× memory savings and 2-3× speedup enable entirely new applications (real-time on-device AI, offline functionality, privacy-preserving local inference).
-### END SOLUTION
 """
 
 # %% [markdown]
@@ -2359,12 +2306,12 @@ def demo_quantization():
     error = np.mean(np.abs(weights.data - restored.data))
 
     print(f"Original FP32: {original_bytes:,} bytes")
-    print(f"Quantized INT8: {quantized_bytes:,} bytes")
-    print(f"Compression: {original_bytes / quantized_bytes:.0f}x smaller!")
+    print(f"Modeled packed INT8: {quantized_bytes:,} bytes")
+    print(f"Packed storage model: {original_bytes / quantized_bytes:.0f}x smaller (actual Tensor codes remain float32)")
     print(f"INT8 range: [{q_weights.data.min()}, {q_weights.data.max()}]")
     print(f"Restoration error: {error:.6f}")
 
-    print("\n✨ Same values, 4x less memory!")
+    print("\n✨ Rounded values with a modeled 4x reduction in packed code storage!")
 
 # %%
 if __name__ == "__main__":
@@ -2383,16 +2330,23 @@ Congratulations! You've built a complete INT8 quantization system that can reduc
 - Implemented QuantizedLinear layer with calibration support
 - Created model-level quantization for complete neural networks
 - Analyzed quantization trade-offs across different distributions and strategies
-- Measured real memory savings and performance improvements
+- Measured the memory savings analytically (INT8 storage is simulated in float32 here)
 - All tests pass (validated by `test_module()`)
 
 ### Systems Insights Discovered
 - Memory scaling: INT8 reduces storage by 4x (32 bits to 8 bits per parameter)
 - Calibration trade-offs: Sample data quality affects quantization accuracy
-- Hardware efficiency: Specialized INT8 instructions provide 2-4x speedup
+- Hardware efficiency: INT8 kernels on real hardware run 2-4x faster; NumPy here only simulates the arithmetic
 - Deployment benefits: Smaller models fit on mobile and edge devices
+
+### Ready for Next Steps
+Your quantization pipeline shrinks a trained model without retraining it. That
+makes it the first optimization you would reach for when a model has to fit on
+hardware it was not trained on. Reducing precision to INT8 delivers 4x memory
+savings with minimal accuracy loss, which makes quantization one of the most
+impactful optimizations you will learn.
 
 Export with: `tito module complete 15`
 
-Quantization is one of the most impactful optimization techniques — reducing precision to INT8 delivers 4x memory savings with minimal accuracy loss.
+**Next**: Module 16 will add compression: pruning, distillation, and low-rank approximation to shrink models further!
 """

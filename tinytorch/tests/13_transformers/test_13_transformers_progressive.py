@@ -8,7 +8,7 @@ DEPENDENCY CHAIN: 01_tensor → ... → 11_embeddings → 12_attention → 13_tr
    Future modules (14_profiling, 19_benchmarking, etc.) are NOT tested here.
 
 🎯 WHAT THIS TESTS:
-- Module 13: TransformerBlock, TinyGPT, encoder-decoder architecture
+- Module 13: TransformerBlock, GPT, causal decoder architecture
 - Integration: Transformers work with attention (12) and prior modules
 - Regression: All previous modules still work correctly
 """
@@ -31,127 +31,105 @@ class TestTransformerCore:
         """
         ✅ TEST: TransformerBlock class exists
         """
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-            
-            assert TransformerBlock is not None
-            
-        except ImportError:
-            assert True, "TransformerBlock not implemented yet"
+        from tinytorch.core.transformers import TransformerBlock
+
+        assert TransformerBlock is not None
+
 
     def test_transformer_block_initialization(self):
         """
         ✅ TEST: TransformerBlock can be initialized
         """
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-            
-            embed_dim = 64
-            num_heads = 8
-            ff_dim = 256
-            
-            block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
+        from tinytorch.core.transformers import TransformerBlock
 
-            assert hasattr(block, 'forward'), "Block missing forward"
-            
-        except ImportError:
-            assert True, "TransformerBlock not implemented yet"
+        embed_dim = 64
+        num_heads = 8
+        ff_dim = 256
+
+        block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
+
+        assert hasattr(block, 'forward'), "Block missing forward"
+
 
     def test_transformer_block_forward(self):
         """
         ✅ TEST: TransformerBlock forward pass
         """
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-            from tinytorch.core.tensor import Tensor
-            
-            embed_dim = 64
-            num_heads = 8
-            ff_dim = 256
-            batch_size = 2
-            seq_len = 10
-            
-            block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
+        from tinytorch.core.transformers import TransformerBlock
+        from tinytorch.core.tensor import Tensor
 
-            x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
-            
-            output = block(x)
-            
-            assert output.shape == x.shape, f"Block output shape wrong: {output.shape}"
-            
-        except ImportError:
-            assert True, "TransformerBlock not implemented yet"
+        embed_dim = 64
+        num_heads = 8
+        ff_dim = 256
+        batch_size = 2
+        seq_len = 10
 
-    def test_tinygpt_exists(self):
-        """
-        ✅ TEST: TinyGPT class exists
-        """
-        try:
-            from tinytorch.core.transformers import TinyGPT
-            
-            assert TinyGPT is not None
-            
-        except ImportError:
-            assert True, "TinyGPT not implemented yet"
+        block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
 
-    def test_tinygpt_initialization(self):
-        """
-        ✅ TEST: TinyGPT can be initialized
-        """
-        try:
-            from tinytorch.core.transformers import TinyGPT
-            
-            vocab_size = 1000
-            embed_dim = 64
-            num_heads = 4
-            num_layers = 2
-            
-            model = TinyGPT(
-                vocab_size=vocab_size,
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                num_layers=num_layers
-            )
-            
-            assert hasattr(model, 'forward'), "TinyGPT missing forward"
-            
-        except ImportError:
-            assert True, "TinyGPT not implemented yet"
-        except TypeError:
-            assert True, "TinyGPT may have different signature"
+        x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
 
-    def test_tinygpt_forward(self):
+        output = block(x)
+
+        assert output.shape == x.shape, f"Block output shape wrong: {output.shape}"
+
+
+    def test_gpt_exists(self):
         """
-        ✅ TEST: TinyGPT forward pass produces logits
+        ✅ TEST: GPT class exists
         """
-        try:
-            from tinytorch.core.transformers import TinyGPT
-            from tinytorch.core.tensor import Tensor
-            
-            vocab_size = 100
-            embed_dim = 32
-            num_heads = 4
-            num_layers = 2
-            
-            model = TinyGPT(
-                vocab_size=vocab_size,
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                num_layers=num_layers
-            )
-            
-            # Token IDs input
-            token_ids = Tensor(np.array([[1, 5, 10, 3]]))  # (batch=1, seq_len=4)
-            
-            logits = model(token_ids)
-            
-            # Output should be (batch, seq_len, vocab_size)
-            assert logits.shape[-1] == vocab_size, f"Logits vocab dim wrong: {logits.shape}"
-            
-        except ImportError:
-            assert True, "TinyGPT not implemented yet"
-        except TypeError:
-            assert True, "TinyGPT may have different interface"
+        from tinytorch.core.transformers import GPT
+
+        assert GPT is not None
+
+
+    def test_gpt_initialization(self):
+        """
+        ✅ TEST: GPT can be initialized
+        """
+        from tinytorch.core.transformers import GPT
+
+        vocab_size = 1000
+        embed_dim = 64
+        num_heads = 4
+        num_layers = 2
+
+        model = GPT(
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            num_layers=num_layers
+        )
+
+        assert hasattr(model, 'forward'), "GPT missing forward"
+
+
+    def test_gpt_forward(self):
+        """
+        ✅ TEST: GPT forward pass produces logits
+        """
+        from tinytorch.core.transformers import GPT
+        from tinytorch.core.tensor import Tensor
+
+        vocab_size = 100
+        embed_dim = 32
+        num_heads = 4
+        num_layers = 2
+
+        model = GPT(
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            num_layers=num_layers
+        )
+
+        # Token IDs input
+        token_ids = Tensor(np.array([[1, 5, 10, 3]]))  # (batch=1, seq_len=4)
+
+        logits = model(token_ids)
+
+        # Output should be (batch, seq_len, vocab_size)
+        assert logits.shape[-1] == vocab_size, f"Logits vocab dim wrong: {logits.shape}"
+
 
 
 class TestTransformerWithAttention:
@@ -163,23 +141,20 @@ class TestTransformerWithAttention:
         """
         ✅ TEST: TransformerBlock internally uses attention
         """
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-            from tinytorch.core.attention import MultiHeadAttention
-            
-            block = TransformerBlock(64, 8, ff_dim=256)
+        from tinytorch.core.transformers import TransformerBlock
+        from tinytorch.core.attention import MultiHeadAttention
 
-            # Block should have attention component
-            has_attention = (
-                hasattr(block, 'attention') or 
-                hasattr(block, 'self_attention') or
-                hasattr(block, 'mha')
-            )
-            
-            assert has_attention, "TransformerBlock should have attention"
-            
-        except ImportError:
-            assert True, "Integration not ready"
+        block = TransformerBlock(64, 8, ff_dim=256)
+
+        # Block should have attention component
+        has_attention = (
+            hasattr(block, 'attention') or
+            hasattr(block, 'self_attention') or
+            hasattr(block, 'mha')
+        )
+
+        assert has_attention, "TransformerBlock should have attention"
+
 
 
 class TestTransformerWithTraining:
@@ -191,87 +166,84 @@ class TestTransformerWithTraining:
         """
         ✅ TEST: Transformer parameters can be trained
         """
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.losses import MSELoss
-            from tinytorch.core.optimizers import SGD
-            from tinytorch.core.tensor import Tensor
-            
-            embed_dim = 32
-            
-            block = TransformerBlock(embed_dim, 4, ff_dim=128)
-            fc = Linear(embed_dim, 1)
-            loss_fn = MSELoss()
-            
-            # Collect parameters
-            params = []
-            if hasattr(block, 'parameters'):
-                params.extend(block.parameters())
-            if hasattr(fc, 'parameters'):
-                params.extend(fc.parameters())
-            
-            optimizer = SGD(params, lr=0.01)
-            
-            # Forward
-            x = Tensor(rng.standard_normal((2, 5, embed_dim)))
-            target = Tensor(rng.standard_normal((2, 1)))
-            
-            block_out = block(x)
-            pooled = Tensor(block_out.data.mean(axis=1))
-            pred = fc(pooled)
-            
-            loss = loss_fn(pred, target)
-            
-            if hasattr(loss, 'backward'):
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            
-            assert loss.data.size == 1
-            
-        except ImportError:
-            assert True, "Transformer training not ready"
+        from tinytorch.core.transformers import TransformerBlock
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.losses import MSELoss
+        from tinytorch.core.optimizers import SGD
+        from tinytorch.core.tensor import Tensor
 
-    def test_tinygpt_training_step(self):
+        embed_dim = 32
+
+        block = TransformerBlock(embed_dim, 4, ff_dim=128)
+        fc = Linear(embed_dim, 1)
+        loss_fn = MSELoss()
+
+        # Collect parameters
+        params = []
+        if hasattr(block, 'parameters'):
+            params.extend(block.parameters())
+        if hasattr(fc, 'parameters'):
+            params.extend(fc.parameters())
+
+        optimizer = SGD(params, lr=0.01)
+
+        # Forward
+        x = Tensor(rng.standard_normal((2, 5, embed_dim)))
+        target = Tensor(rng.standard_normal((2, 1)))
+
+        block_out = block(x)
+        pooled = block_out.mean(axis=1)
+        pred = fc(pooled)
+
+        loss = loss_fn(pred, target)
+
+        before = [p.data.copy() for p in params]
+        optimizer.zero_grad()
+        loss.backward()
+        assert all(p.grad is not None for p in params)
+        optimizer.step()
+        assert not np.array_equal(before[0], params[0].data), "Upstream weights must update"
+
+        assert loss.data.size == 1
+
+
+    def test_gpt_training_step(self):
         """
-        ✅ TEST: TinyGPT can execute training step
+        ✅ TEST: GPT can execute training step
         """
-        try:
-            from tinytorch.core.transformers import TinyGPT
-            from tinytorch.core.losses import CrossEntropyLoss
-            from tinytorch.core.optimizers import Adam
-            from tinytorch.core.tensor import Tensor
-            
-            vocab_size = 50
-            
-            model = TinyGPT(
-                vocab_size=vocab_size,
-                embed_dim=32,
-                num_heads=4,
-                num_layers=2
-            )
-            
-            params = model.parameters() if hasattr(model, 'parameters') else []
-            optimizer = Adam(params, lr=0.001)
-            loss_fn = CrossEntropyLoss()
-            
-            # Training data
-            input_ids = Tensor(np.array([[1, 5, 10]]))
-            target_ids = Tensor(np.array([[5, 10, 3]]))
-            
-            # Forward
-            logits = model(input_ids)
-            
-            # Compute loss (simplified)
-            if logits.shape[-1] == vocab_size:
-                # Flatten for loss
-                pass  # Loss computation depends on implementation
-            
-        except ImportError:
-            assert True, "TinyGPT training not ready"
-        except TypeError:
-            assert True, "TinyGPT interface may differ"
+        from tinytorch.core.transformers import GPT
+        from tinytorch.core.losses import CrossEntropyLoss
+        from tinytorch.core.optimizers import Adam
+        from tinytorch.core.tensor import Tensor
+
+        vocab_size = 50
+
+        model = GPT(
+            vocab_size=vocab_size,
+            embed_dim=32,
+            num_heads=4,
+            num_layers=2
+        )
+
+        params = model.parameters() if hasattr(model, 'parameters') else []
+        optimizer = Adam(params, lr=0.001)
+        loss_fn = CrossEntropyLoss()
+
+        # Training data
+        input_ids = Tensor(np.array([[1, 5, 10]]))
+        target_ids = Tensor(np.array([[5, 10, 3]]))
+
+        # Forward
+        logits = model(input_ids)
+
+        loss = loss_fn(logits.reshape(-1, vocab_size), target_ids.reshape(-1))
+        before = model.embedding_layer.token_embedding.weight.data.copy()
+        optimizer.zero_grad()
+        loss.backward()
+        assert all(p.grad is not None for p in params)
+        optimizer.step()
+        assert not np.array_equal(before, model.embedding_layer.token_embedding.weight.data)
+
 
 
 class TestRegressionPrevention:
@@ -331,27 +303,21 @@ class TestRegressionPrevention:
 
     def test_convolutions_still_work(self):
         """✅ Module 09"""
-        try:
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.tensor import Tensor
-            conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
-            y = conv(x)
-            assert y.shape[0] == 2
-        except ImportError:
-            pass
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.tensor import Tensor
+        conv = Conv2d(3, 8, kernel_size=3, padding=1)
+        x = Tensor(rng.standard_normal((2, 3, 8, 8)))
+        y = conv(x)
+        assert y.shape[0] == 2
 
     def test_attention_still_works(self):
         """✅ Module 12"""
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.tensor import Tensor
-            mha = MultiHeadAttention(32, 4)
-            x = Tensor(rng.standard_normal((1, 5, 32)))
-            out = mha(x)
-            assert out.shape == x.shape
-        except ImportError:
-            pass
+        from tinytorch.core.attention import MultiHeadAttention
+        from tinytorch.core.tensor import Tensor
+        mha = MultiHeadAttention(32, 4)
+        x = Tensor(rng.standard_normal((1, 5, 32)))
+        out = mha(x)
+        assert out.shape == x.shape
 
 
 class TestModule13Completion:
@@ -362,38 +328,31 @@ class TestModule13Completion:
     def test_transformer_foundation_complete(self):
         """
         ✅ FINAL TEST: Transformers ready for profiling
-        
+
         🎯 SUCCESS = Ready for Module 14: Profiling!
         """
         capabilities = {
             "TransformerBlock exists": False,
             "TransformerBlock forward works": False,
-            "TinyGPT exists": False,
+            "GPT exists": False,
         }
-        
-        try:
-            from tinytorch.core.transformers import TransformerBlock
-            from tinytorch.core.tensor import Tensor
-            
-            # Test 1: TransformerBlock exists
-            capabilities["TransformerBlock exists"] = True
-            
-            # Test 2: Forward
-            block = TransformerBlock(32, 4, ff_dim=128)
-            x = Tensor(rng.standard_normal((1, 5, 32)))
-            out = block(x)
-            if out.shape == x.shape:
-                capabilities["TransformerBlock forward works"] = True
-            
-            # Test 3: TinyGPT
-            try:
-                from tinytorch.core.transformers import TinyGPT
-                capabilities["TinyGPT exists"] = True
-            except ImportError:
-                pass
-            
-            completed = sum(capabilities.values())
-            assert completed >= 2, f"Transformers not ready: {capabilities}"
-            
-        except ImportError:
-            assert True, "Transformers not implemented yet"
+
+        from tinytorch.core.transformers import TransformerBlock
+        from tinytorch.core.tensor import Tensor
+
+        # Test 1: TransformerBlock exists
+        capabilities["TransformerBlock exists"] = True
+
+        # Test 2: Forward
+        block = TransformerBlock(32, 4, ff_dim=128)
+        x = Tensor(rng.standard_normal((1, 5, 32)))
+        out = block(x)
+        if out.shape == x.shape:
+            capabilities["TransformerBlock forward works"] = True
+
+        # Test 3: GPT
+        from tinytorch.core.transformers import GPT
+        capabilities["GPT exists"] = True
+
+        completed = sum(capabilities.values())
+        assert completed == len(capabilities), f"Transformers not ready: {capabilities}"

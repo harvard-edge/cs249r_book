@@ -16,7 +16,7 @@
 """
 # Module 18: Memoization - Computational Reuse for Inference
 
-Welcome to Module 18! You'll implement memoization, a fundamental optimization pattern. We'll apply it to transformers through KV caching for 10-15x faster text generation.
+Welcome to Module 18! You'll implement memoization, a fundamental optimization pattern. We'll apply it to transformers through KV caching, which avoids recomputing earlier tokens during text generation.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete transformer architecture (Module 13) and profiling tools (Module 14)
@@ -35,14 +35,14 @@ By the end of this module, you will:
 2. Apply memoization to transformers through KV caching
 3. Implement KVCache with efficient memory management and O(1) updates
 4. Build cache-aware attention that reuses previously computed keys and values
-5. Measure dramatic speedup gains (10-15x) and understand memory trade-offs
+5. Compare operation counts with measured speedup and understand memory trade-offs
 
 Let's make inference blazingly fast through computational reuse!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/18_memoization/kvcaching_dev.py`
-**Building Side:** Code exports to `tinytorch.generation.kv_cache`
+**Learning Side:** You work in `modules/18_memoization/memoization.ipynb`
+**Building Side:** Code exports to `tinytorch.perf.memoization`
 
 ```python
 # How to use this module:
@@ -52,25 +52,9 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 **Why this matters:**
 - **Learning:** Complete caching system demonstrating production optimization techniques
 - **Production:** Proper organization matching Hugging Face's generation/ module structure
-- **Consistency:** All generation optimizations in generation.kv_cache
+- **Consistency:** All generation optimizations in perf.memoization
 - **Integration:** Works seamlessly with transformers for complete inference optimization
 """
-
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| default_exp perf.memoization
-#| export
-
-import numpy as np
-rng = np.random.default_rng(7)
-import time
-from typing import Tuple, Optional, Dict, List
-
-# Import TinyTorch components from previous modules
-from tinytorch.core.tensor import Tensor
-
-# Internal constants for memory calculations (not exported)
-_BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-_MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -97,6 +81,22 @@ Students completing this module will have built efficient caching
 that makes production LLM serving economically viable.
 """
 
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp perf.memoization
+#| export
+
+import numpy as np
+rng = np.random.default_rng(7)
+import time
+from typing import Tuple, Optional, Dict, List
+
+# Import TinyTorch components from previous modules
+from tinytorch.core.tensor import Tensor
+
+# Internal constants for memory calculations (not exported)
+_BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+_MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+
 # %% [markdown]
 """
 ## 💡 Introduction: Why Memoization Matters for Transformers
@@ -109,17 +109,17 @@ In machine learning systems, memoization is a fundamental optimization pattern: 
 Memoization Pattern:
 ┌─────────────────────────────────────────────────────────────┐
 │  Without Memoization (Naive):                               │
-│  f(x) called 100 times → 100 computations                  │
+│  f(x) called 100 times → 100 computations                   │
 │                                                             │
-│  With Memoization (Cached):                                │
-│  f(x) called 100 times → 1 computation + 99 cache lookups  │
+│  With Memoization (Cached):                                 │
+│  f(x) called 100 times → 1 computation + 99 cache lookups   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 **Key Insight**: For transformers, K and V matrices for previous tokens NEVER change, yet naive generation recomputes them every step. This is the inefficiency we'll eliminate.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "motivation-profile", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "motivation-profile", "solution": false}
 def profile_naive_generation():
     """
     Profile transformer generation to discover the O(n²) bottleneck.
@@ -135,52 +135,42 @@ def profile_naive_generation():
 
     profiler = Profiler()
 
-    def naive_attention_step(seq_len, hidden_dim=64):
-        """
-        Simulates one step of attention computation.
-        Without caching, this processes ALL previous tokens every time.
-        """
-        # Q, K, V for entire sequence
-        q = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
-        k = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
-        v = Tensor(rng.standard_normal((1, seq_len, hidden_dim)))
+    class NaiveAttentionStep:
+        """One generation step without a cache: attention over the whole sequence."""
 
-        # Attention: Q @ K.T then @ V
-        # This is O(seq_len²) in complexity
-        scores = q @ k.T  # (1, seq_len, seq_len)
-        output = scores @ v
+        def forward(self, x):
+            # Without caching, every step recomputes K and V for ALL tokens so far
+            # (projections omitted: the O(seq_len²) part is the score matrix)
+            q, k, v = x.data, x.data, x.data
+            scores = np.matmul(q, np.transpose(k, (0, 2, 1)))  # (1, seq_len, seq_len)
+            return Tensor(np.matmul(scores, v))
 
-        return output
+    step = NaiveAttentionStep()
 
     # Profile at increasing sequence lengths
-    print("🔬 Profiling Transformer Generation (Without Caching):\n")
+    print("🧪 Profiling Transformer Generation (Without Caching):\n")
     print("   Seq Len  |  Latency (ms)  |  Growth")
     print("   ---------|----------------|----------")
 
-    sequence_lengths = [10, 20, 40, 80, 160]
+    sequence_lengths = [64, 128, 256, 512, 1024]
     latencies = []
 
     for seq_len in sequence_lengths:
-        # Measure latency for this sequence length
-        latency = profiler.measure_latency(
-            lambda: naive_attention_step(seq_len),
-            None,
-            warmup=5,
-            iterations=20
-        )
+        x = Tensor(rng.standard_normal((1, seq_len, 64)))
+        latency = profiler.measure_latency(step, x, warmup=5, iterations=20)
         latencies.append(latency)
 
         # Calculate growth rate
         if len(latencies) > 1:
             growth = latencies[-1] / latencies[-2]
-            print(f"   {seq_len:3d}      |  {latency:6.2f}        |  {growth:.2f}×")
+            print(f"   {seq_len:5d}    |  {latency:6.2f}        |  {growth:.2f}×")
         else:
-            print(f"   {seq_len:3d}      |  {latency:6.2f}        |  baseline")
+            print(f"   {seq_len:5d}    |  {latency:6.2f}        |  baseline")
 
     print("\n💡 Key Observations:")
     print("   • Latency grows QUADRATICALLY with sequence length")
     print("   • Each new token forces recomputation of ALL previous K,V pairs")
-    print("   • For 160 tokens: ~4× time vs 80 tokens (2² growth)")
+    print("   • Doubling the sequence roughly quadruples the time once the arrays are big")
 
     print("\n🎯 The Problem:")
     print("   K and V values for previous tokens NEVER change,")
@@ -191,13 +181,10 @@ def profile_naive_generation():
     print("   • First compute: Calculate and store K,V")
     print("   • Later steps: Reuse stored K,V")
     print("   • Complexity: O(n²) → O(n)")
-    print("   • Speedup: 10-15× for typical generation\n")
+    print("   • K,V projection ratio: (n+1)/2 for n generated tokens (≈50× at n=100)\n")
 
-# Run profiling when module is executed directly
-# NOTE: Commented out to run tests. Profiling requires proper Profiler API usage.
-# Uncomment to run profiling (requires matplotlib installed)
-# if __name__ == "__main__":
-#     profile_naive_generation()
+if __name__ == "__main__":
+    profile_naive_generation()
 
 # %% [markdown]
 """
@@ -241,20 +228,20 @@ Total: 1 + 2 + 3 + ... + n = n(n+1)/2 = O(n²) complexity!
 For a 100-token sequence, this means **5,050 total K,V computations** — but only 100 are
 actually necessary (one per token). That's **4,950 redundant computations**!
 
-### Real-World Impact
-
 This inefficiency makes production LLM serving economically impossible without optimization:
 - **ChatGPT/GPT-4**: Would be too slow for real-time chat without caching
 - **Code completion**: IDEs couldn't provide instant suggestions
 - **Mobile deployment**: On-device generation would drain batteries instantly
 - **API serving**: Server costs would be 10x+ higher
 
-**The Solution**: Cache key-value pairs after computing them once, transforming O(n²) into O(n).
+**The Solution**: Cache key-value pairs after computing them once. Across n steps,
+K,V projection work falls from O(n²) to O(n). Attention is different: each new
+query still reads all prior keys and values, so total score work remains O(n²).
 """
 
 # %% [markdown]
 """
-## 📐 Foundations: The Key-Value Caching Insight
+### The Key-Value Caching Insight
 
 ### Mathematical Foundation
 
@@ -305,15 +292,15 @@ Attention: Q₃ × cached[K₁, K₂, K₃] × cached[V₁, V₂, V₃]
 
 ```
 Traditional Approach:
-Memory: O(1)          (no storage needed)
+Extra persistent KV storage: none (temporary attention arrays still allocate)
 Compute: O(n²)        (recompute everything)
 
 Cached Approach:
 Memory: O(n × d_k)    (store all K,V pairs)
 Compute: O(n)         (only compute new pairs)
 
-For n=100, d_k=64:
-Memory cost: 6.4 KB per layer
+For n=100, d_k=64 (float32, one attention head):
+Memory cost: 2 x 100 x 64 x 4 bytes = 50 KB
 Compute savings: 50x reduction in K,V computations
 ```
 
@@ -331,7 +318,7 @@ Our KVCache needs to efficiently handle:
 1. **Multi-layer storage**: Each transformer layer needs its own K,V cache
 2. **Multi-head attention**: Each attention head has separate K,V pairs
 3. **Batch processing**: Support multiple sequences simultaneously (batch inference)
-4. **Dynamic updates**: Efficiently append new tokens without copying data
+4. **Dynamic updates**: Write new tokens into reserved slots without reallocating the history
 5. **Memory management**: Pre-allocate space to avoid dynamic resizing overhead
 
 ### Cache Architecture Visualization
@@ -405,7 +392,7 @@ class KVCache:
     ⚠️  IMPORTANT: INFERENCE-ONLY (No Gradient Tracking)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     KV caching is designed ONLY for inference (generation), NOT training.
-    - During generation: No gradients computed (model.eval() mode)
+    - During generation: Cache operations detach values; eval() alone does not disable gradients
     - Cache operations use .data (no gradient tracking)
     - This is correct and intentional for maximum speed
     - DO NOT use caching during training (use standard forward pass)
@@ -413,7 +400,7 @@ class KVCache:
     Architecture:
     - Pre-allocates cache tensors with maximum sequence length
     - Tracks current sequence position for efficient O(1) updates
-    - Provides update() method to append new K,V pairs without copying
+    - Provides update() method to append new K,V pairs without reallocating storage
     - Provides get() method to retrieve cached values for attention
     - Handles multiple layers and attention heads properly
 
@@ -426,8 +413,8 @@ class KVCache:
     ```
 
     Performance:
-    - Update: O(1) - just index assignment
-    - Get: O(1) - just slicing (no data copy)
+    - Update: constant in context length; copies one token across all heads
+    - Get: O(context length) - Tensor construction copies the sliced prefix
     - Memory: O(num_layers × batch × heads × max_seq × head_dim)
     """
 
@@ -466,6 +453,11 @@ class KVCache:
         - Pre-allocation avoids dynamic resizing overhead during generation
         """
         ### BEGIN SOLUTION
+        for name, value in (("batch_size", batch_size), ("max_seq_len", max_seq_len),
+                            ("num_layers", num_layers), ("num_heads", num_heads),
+                            ("head_dim", head_dim)):
+            if not isinstance(value, (int, np.integer)) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.num_layers = num_layers
@@ -491,7 +483,7 @@ class KVCache:
         """
         Update cache with new key-value pairs for given layer.
 
-        TODO: Efficiently append new K,V to cache without data copying
+        TODO: Efficiently append new K,V to cache without reallocating the cache
 
         APPROACH:
         1. Validate layer_idx is in range [0, num_layers-1]
@@ -534,7 +526,7 @@ class KVCache:
             ValueError: If layer_idx is out of range or sequence is full
         """
         ### BEGIN SOLUTION
-        if layer_idx >= self.num_layers:
+        if not isinstance(layer_idx, (int, np.integer)) or not 0 <= layer_idx < self.num_layers:
             raise ValueError(
                 f"Invalid layer index for cache update\n"
                 f"  ❌ layer_idx={layer_idx} is out of range [0, {self.num_layers - 1}]\n"
@@ -549,6 +541,10 @@ class KVCache:
                 f"  💡 The cache was pre-allocated for {self.max_seq_len} tokens maximum. Autoregressive generation cannot exceed this limit.\n"
                 f"  🔧 Either: (1) call cache.reset() to start a new sequence, or (2) create a larger cache with max_seq_len > {self.max_seq_len}"
             )
+
+        expected_shape = (self.batch_size, self.num_heads, 1, self.head_dim)
+        if key.shape != expected_shape or value.shape != expected_shape:
+            raise ValueError(f"Cache update requires key and value shape {expected_shape}")
 
         # Get cache for this layer
         key_cache, value_cache = self.caches[layer_idx]
@@ -577,7 +573,8 @@ class KVCache:
         6. Wrap sliced data in new Tensor objects and return
 
         Returns only the valid portion of the cache (up to current seq_pos).
-        This is O(1) because we're just slicing NumPy arrays (view, not copy).
+        The NumPy slice is a view, but wrapping it in Tensor copies the prefix.
+        Retrieval therefore grows with the number of cached tokens.
 
         IMPORTANT: Returns Tensors without gradient tracking since caching
         is inference-only. The returned tensors can be used in attention
@@ -610,7 +607,7 @@ class KVCache:
             ValueError: If layer_idx is out of range
         """
         ### BEGIN SOLUTION
-        if layer_idx >= self.num_layers:
+        if not isinstance(layer_idx, (int, np.integer)) or not 0 <= layer_idx < self.num_layers:
             raise ValueError(
                 f"Invalid layer index for cache retrieval\n"
                 f"  ❌ layer_idx={layer_idx} is out of range [0, {self.num_layers - 1}]\n"
@@ -640,6 +637,8 @@ class KVCache:
         Call this after all layers have processed the current token and
         updated their caches. This moves the write pointer forward.
         """
+        if self.seq_pos >= self.max_seq_len:
+            raise ValueError("Cannot advance: KV cache is full")
         self.seq_pos += 1
 
     def reset(self) -> None:
@@ -682,7 +681,7 @@ class KVCache:
 
 # %% [markdown]
 """
-### 🔬 Unit Test: KVCache Implementation
+### 🧪 Unit Test: KVCache Implementation
 
 This test validates that our cache correctly stores and retrieves key-value pairs across multiple layers and sequence positions.
 
@@ -693,8 +692,8 @@ This test validates that our cache correctly stores and retrieves key-value pair
 
 # %% nbgrader={"grade": true, "grade_id": "test-kvcache", "locked": true, "points": 10}
 def test_unit_kvcache():
-    """🔬 Unit Test: KVCache Implementation"""
-    print("🔬 Unit Test: KVCache Implementation...")
+    """🧪 Unit Test: KVCache Implementation"""
+    print("🧪 Unit Test: KVCache Implementation...")
 
     # Test parameters (small transformer for testing)
     batch_size, max_seq_len = 2, 8
@@ -762,27 +761,26 @@ def test_unit_kvcache():
 
     print("✅ KVCache implementation works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_kvcache()
 
 # %% [markdown]
 """
-## 🏗️ Implementation: Cache-Aware Generation
+## 🏗️ Cache-Aware Generation
 
 ### Integration Strategy
 
-Now we need a clean way to enable KV caching in our existing transformer models without breaking the existing code. We'll create an `enable_kv_cache()` function that:
+Now we need a clean way to enable KV caching in our existing transformer models without editing Module 12 or Module 13. We'll write an `enable_kv_cache()` function that:
 
 1. Creates a KVCache instance sized for the model
-2. Patches the model's attention layers to use caching
+2. Puts a `CachedAttention` stand-in in front of each block's attention layer
 3. Returns the cache for manual control if needed
 
-The actual integration with attention happens through monkey-patching where we:
-1. Check if cache is enabled
-2. Only compute K,V for new token (not all tokens)
-3. Update cache with new K,V
-4. Use cached K,V for attention computation
+The stand-in owns the original attention layer and decides, on every call, which of two paths to take:
+1. A full sequence (training, or an ordinary forward pass) goes straight to the original attention
+2. A single new token is projected to K,V once, written into the cache, and attended against everything cached so far
+
+`disable_kv_cache()` removes the stand-ins and the model is exactly as it was. Nothing inside the model is patched: `block.attention` simply points at a different object for a while, the same wrapping pattern PyTorch uses for `DataParallel` and quantization stubs, which stand in front of a module and forward to it.
 
 ### Generation Flow Comparison
 
@@ -820,7 +818,7 @@ We built KV caching in Module 18 (this module), but our transformer (Modules 12-
 - Violates clean module boundaries
 
 **✅ GOOD Solution**: Module 18 ADDS caching to existing models without modification!
-- Use composition + monkey-patching (like `enable_autograd()`)
+- Use composition (wrap the model, keep its classes untouched)
 - Module 18 wraps/enhances Module 12, not modifies it
 - Students learn systems engineering: "Add capabilities, don't break old code"
 
@@ -849,17 +847,23 @@ To use KV caching in your transformer generation:
 ### Performance Expectations
 
 ```
-Expected Speedup by Sequence Length:
-┌───────────┬──────────┬───────────┬──────────┐
-│ Seq Len   │ No Cache │ With Cache│ Speedup  │
-├───────────┼──────────┼───────────┼──────────┤
-│  10 tokens│ ~80 tok/s│ ~600 tok/s│   7.5x   │
-│  25 tokens│ ~40 tok/s│ ~500 tok/s│  12.5x   │
-│  50 tokens│ ~25 tok/s│ ~400 tok/s│  16.0x   │
-│ 100 tokens│ ~12 tok/s│ ~200 tok/s│  16.7x   │
-└───────────┴──────────┴───────────┴──────────┘
+K,V projection work avoided, starting from one token:
+┌───────────┬───────────────┬───────────────┬──────────┐
+│ Seq Len   │ No Cache (ops)│ Cached (ops)  │ Ratio    │
+├───────────┼───────────────┼───────────────┼──────────┤
+│  10 tokens│      O(n²)=55 │      O(n)=10  │   5.5x   │
+│  25 tokens│     O(n²)=325 │      O(n)=25  │  13.0x   │
+│  50 tokens│    O(n²)=1275 │      O(n)=50  │  25.5x   │
+│ 100 tokens│    O(n²)=5050 │      O(n)=100 │  50.5x   │
+└───────────┴───────────────┴───────────────┴──────────┘
 
-Key Insight: Speedup increases with sequence length!
+These counts describe K,V projections (n(n+1)/2 vs n), not all attention
+operations or wall-clock time. Attention still scores every cached key for
+each new query. Full-sequence forwards score t² pairs at context t, while
+a cached forward scores t pairs. Timing also includes the MLP, sampling,
+prefix copies, and Python overhead; this table does not predict speedup.
+
+Key Insight: The ratio grows with sequence length!
 Why? Longer sequences = more redundant computation without cache.
 ```
 
@@ -871,8 +875,8 @@ Why? Longer sequences = more redundant computation without cache.
 - For GPT-3 (96 layers, 96 heads, seq_len=2048, head_dim=128): ~18 GB per sequence
 
 **Trade-off Analysis:**
-- **10x+ speedup** for typical generation lengths (50-200 tokens)
-- **Modest memory cost** compared to model parameters (often <1% of model size)
+- **(n+1)/2 fewer K,V projections** for n generated tokens (25× at 50, 100× at 200)
+- **Memory cost grows with context**: 2 × layers × heads × seq_len × head_dim × 4 bytes per sequence
 - **Enables real-time interaction** that's impossible without caching
 
 **Best Practices:**
@@ -910,9 +914,6 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
         5. Compute attention: softmax(Q @ K^T / sqrt(d)) @ V
         6. Reshape and project to output
     """
-    import numpy as np
-    from tinytorch.core.tensor import Tensor
-
     batch_size = x.shape[0]
     num_heads = attention.num_heads
     head_dim = attention.head_dim
@@ -922,16 +923,10 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     K_new = attention.k_proj.forward(x)
     V_new = attention.v_proj.forward(x)
 
-    # Step 2: Reshape to multi-head format (batch, num_heads, 1, head_dim)
-    Q_heads = Tensor(np.transpose(
-        Q_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
-    K_heads = Tensor(np.transpose(
-        K_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
-    V_heads = Tensor(np.transpose(
-        V_new.reshape(batch_size, 1, num_heads, head_dim).data, (0, 2, 1, 3)
-    ))
+    # Step 2: Split into heads (batch, num_heads, 1, head_dim), reusing Module 12's helper
+    Q_heads = attention._split_heads(Q_new, batch_size, 1)
+    K_heads = attention._split_heads(K_new, batch_size, 1)
+    V_heads = attention._split_heads(V_new, batch_size, 1)
 
     # Step 3: Update cache with new K, V
     cache_obj.update(layer_idx, K_heads, V_heads)
@@ -958,9 +953,8 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     # Apply attention to values
     attention_output = np.matmul(attention_weights, V_all.data)
 
-    # Step 6: Reshape and project to output
-    attention_output_transposed = np.transpose(attention_output, (0, 2, 1, 3))
-    concat_output = Tensor(attention_output_transposed.reshape(batch_size, 1, num_heads * head_dim))
+    # Step 6: Merge heads back (Module 12's helper) and project to output
+    concat_output = attention._merge_heads(Tensor(attention_output), batch_size, 1)
 
     return attention.out_proj.forward(concat_output)
 
@@ -1036,6 +1030,8 @@ def _create_cache_storage(model):
             )
 
     # Calculate head dimension
+    if model.num_heads <= 0:
+        raise ValueError("num_heads must be positive")
     head_dim = model.embed_dim // model.num_heads
     if model.embed_dim % model.num_heads != 0:
         raise ValueError(
@@ -1129,146 +1125,125 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### _cached_attention_forward -- Path Dispatch for Cached Attention
+### CachedAttention -- The Stand-In That Chooses the Path
 
-This helper decides which attention path to take for a given input.
-It separates the DECISION logic from the COMPUTATION logic, making
-both independently testable.
+`CachedAttention` takes the place of a block's attention layer while the cache is
+enabled. It keeps the original layer as `self.attention` and decides which path
+each call takes. Keeping the DECISION here and the COMPUTATION in
+`_cached_generation_step` makes both independently testable.
 
 ```
-Input x arrives at attention layer:
+Input x arrives at the stand-in:
 
-  x.shape[1] > 1?  ──YES──→ PATH 1: TRAINING
-       │                     Use original attention (gradient flow)
+  x.shape[1] > 1?  ──YES──→ FULL SEQUENCE
+       │                     Forward to the original attention (mask, gradients, training)
        NO
        │
-  cache.seq_pos == 0? ──YES──→ PATH 2: FIRST TOKEN
-       │                       Use original attention (nothing cached yet)
-       NO
-       │
-       └──→ PATH 3: CACHED GENERATION
-            Use _cached_generation_step() for O(n) computation
+       └──→ ONE NEW TOKEN
+            _cached_generation_step(): project K,V once, write them into the
+            cache, attend over everything cached so far (O(n), not O(n²))
 ```
 
-This three-path dispatch is the core decision logic that determines
-whether to use the cache or fall back to standard attention.
+The first token of a prompt takes the single-token path too. The cache is empty,
+so it attends only to itself, and its K,V are written for every later token to
+use. The position each token needs comes from the model: `_cached_generate` calls
+`model.forward(token, start_pos=cache.seq_pos)`, which is why Module 13's
+`GPT.forward` and Module 11's embedding layer accept `start_pos`.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-attention", "solution": true}
 #| export
-def _cached_attention_forward(block, x, cache_obj, layer_idx, original_forward):
+class CachedAttention:
     """
-    Dispatch attention through the correct path based on context.
+    Stand-in for one block's attention layer while a KV cache is enabled.
 
-    TODO: Implement three-path dispatch for cached attention
-
-    APPROACH:
-    1. Check if seq_len > 1 (training mode) -> use original_forward
-    2. Check if cache is empty (seq_pos == 0) -> use original_forward
-    3. Otherwise (cached generation) -> use _cached_generation_step
-
-    EXAMPLE:
-    >>> # Training path (seq_len=10 > 1):
-    >>> output = _cached_attention_forward(block, x_train, cache, 0, orig_fwd)
-    >>> # -> calls original_forward(x_train, None)
-    >>>
-    >>> # Cached path (seq_len=1, cache has history):
-    >>> output = _cached_attention_forward(block, x_gen, cache, 0, orig_fwd)
-    >>> # -> calls _cached_generation_step(x_gen, block.attention, cache, 0)
-
-    HINTS:
-    - x.shape[1] gives the sequence length
-    - cache_obj.seq_pos tracks how many tokens are already cached
-    - PATH 1 and PATH 2 both call original_forward(x, mask=None)
-    - PATH 3 calls _cached_generation_step(x, block.attention, cache_obj, layer_idx)
-
-    Args:
-        block: Transformer block containing the attention layer
-        x: Input tensor, shape (batch, seq_len, embed_dim)
-        cache_obj: KVCache instance
-        layer_idx: Which transformer layer (0-indexed)
-        original_forward: The original (un-patched) attention forward method
-
-    Returns:
-        Output tensor from whichever path was selected
+    Holds the original attention layer and the cache. enable_kv_cache() puts one
+    of these at block.attention; disable_kv_cache() puts the original back.
     """
-    ### BEGIN SOLUTION
-    seq_len = x.shape[1]
 
-    # PATH 1: TRAINING (seq_len > 1)
-    # Full sequence - use original attention for gradient flow
-    if seq_len > 1:
-        return original_forward(x, None)
+    def __init__(self, attention, cache_obj, layer_idx):
+        self.attention = attention      # the original MultiHeadAttention layer
+        self.cache = cache_obj
+        self.layer_idx = layer_idx
 
-    # PATH 2: FIRST TOKEN (cache empty)
-    # Nothing to retrieve yet - use original attention
-    if cache_obj.seq_pos == 0:
-        return original_forward(x, None)
+    def parameters(self):
+        """The stand-in owns no weights of its own."""
+        return self.attention.parameters()
 
-    # PATH 3: CACHED GENERATION
-    # Use helper function for the O(n) cached computation
-    return _cached_generation_step(x, block.attention, cache_obj, layer_idx)
-    ### END SOLUTION
+    def forward(self, x, mask=None):
+        """
+        Route one call to the right path.
+
+        TODO: Implement the two-path dispatch
+
+        APPROACH:
+        1. If x holds more than one position (x.shape[1] > 1), this is a full
+           sequence: return self.attention.forward(x, mask) unchanged
+        2. Otherwise x is one new token: return
+           _cached_generation_step(x, self.attention, self.cache, self.layer_idx)
+
+        EXAMPLE:
+        >>> stand_in = CachedAttention(block.attention, cache, layer_idx=0)
+        >>> stand_in.forward(x_train)   # (1, 10, D): original attention, cache untouched
+        >>> stand_in.forward(x_token)   # (1, 1, D): cached step, cache updated
+
+        HINTS:
+        - x.shape[1] is the sequence length
+        - The cached step handles an empty cache itself (the first token attends to itself)
+        """
+        ### BEGIN SOLUTION
+        if x.shape[1] > 1:
+            return self.attention.forward(x, mask)
+        return _cached_generation_step(x, self.attention, self.cache, self.layer_idx)
+        ### END SOLUTION
+
+    def __call__(self, x, mask=None):
+        return self.forward(x, mask)
 
 # %% [markdown]
 """
-### 🧪 Unit Test: _cached_attention_forward
+### 🧪 Unit Test: CachedAttention
 
-**What we're testing**: Three-path dispatch logic for cached attention
-**Why it matters**: Wrong path selection causes silent correctness bugs (training uses cache, or generation ignores cache)
-**Expected**: Training inputs use original forward; cached generation uses _cached_generation_step
+**What we're testing**: The stand-in routes full sequences to the original attention and single tokens through the cache, and the cached path reproduces uncached causal attention
+**Why it matters**: Wrong routing causes silent correctness bugs (training reads the cache, or generation ignores it), and a cache that changes the numbers is not an optimization
+**Expected**: Full-sequence output identical to the original layer with the cache untouched; token-by-token outputs match the causal attention output at every position
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-cached-attention", "locked": true, "points": 10}
-def test_unit_cached_attention_forward():
-    """🧪 Test _cached_attention_forward dispatches to correct path."""
-    print("🧪 Unit Test: _cached_attention_forward...")
+def test_unit_cached_attention():
+    """🧪 Test CachedAttention routes calls correctly and matches uncached attention."""
+    print("🧪 Unit Test: CachedAttention...")
+    from tinytorch.core.attention import MultiHeadAttention
 
-    # Track which path was taken
-    path_taken = []
+    embed_dim, num_heads, seq_len = 32, 4, 5
+    attention = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
+    cache = KVCache(batch_size=1, max_seq_len=16, num_layers=1,
+                    num_heads=num_heads, head_dim=embed_dim // num_heads)
+    stand_in = CachedAttention(attention, cache, layer_idx=0)
 
-    class MockBlock:
-        def __init__(self):
-            self.attention = self
+    # Path 1: a full sequence goes to the original layer, unchanged
+    x = Tensor(rng.standard_normal((1, seq_len, embed_dim)))
+    causal = Tensor(np.tril(np.ones((1, seq_len, seq_len))))
+    full = attention.forward(x, causal)
+    routed = stand_in.forward(x, causal)
+    assert np.allclose(routed.data, full.data), "Full sequences must use the original attention"
+    assert cache.seq_pos == 0, "A full-sequence call must not touch the cache"
 
-    block = MockBlock()
+    # Path 2: one token at a time through the cache reproduces the causal result
+    for t in range(seq_len):
+        out_t = stand_in.forward(x[:, t:t+1, :])
+        cache.advance()
+        assert out_t.shape == (1, 1, embed_dim), "One token in, one token out"
+        assert np.allclose(out_t.data[0, 0], full.data[0, t], atol=1e-5), \
+            f"Cached output at position {t} differs from uncached causal attention"
+    assert cache.seq_pos == seq_len, "Each advance() should cache one more token"
 
-    def mock_original_forward(x, mask=None):
-        path_taken.append("original")
-        return x
-
-    # Create a real cache for testing
-    cache = KVCache(batch_size=1, max_seq_len=64, num_layers=2,
-                    num_heads=4, head_dim=32)
-
-    # Test PATH 1: Training (seq_len > 1)
-    path_taken.clear()
-    x_train = Tensor(rng.standard_normal((1, 10, 128)))  # seq_len=10
-    result = _cached_attention_forward(block, x_train, cache, 0, mock_original_forward)
-    assert "original" in path_taken, "Training path should use original forward"
-    assert result.shape == x_train.shape, "Should return same shape"
-
-    # Test PATH 2: First token (cache empty, seq_pos=0)
-    path_taken.clear()
-    cache.reset()
-    assert cache.seq_pos == 0
-    x_first = Tensor(rng.standard_normal((1, 1, 128)))  # seq_len=1, but cache empty
-    result = _cached_attention_forward(block, x_first, cache, 0, mock_original_forward)
-    assert "original" in path_taken, "First token should use original forward"
-
-    # Test PATH 3: Cached generation (seq_len=1, cache has history)
-    # We can't easily test the full _cached_generation_step path without
-    # real attention layers, so we verify the dispatch logic by checking
-    # that PATH 1 and PATH 2 conditions are correctly handled above.
-    # PATH 3 would be triggered when seq_len=1 and cache.seq_pos > 0.
-    print("   PATH 1 (training): dispatches to original forward")
-    print("   PATH 2 (first token): dispatches to original forward")
-    print("   PATH 3 (cached): would dispatch to _cached_generation_step")
-
-    print("✅ _cached_attention_forward path dispatch works correctly!")
+    print("   Full sequence: routed to the original attention, cache untouched")
+    print(f"   {seq_len} single tokens: cached path matches causal attention at every position")
+    print("✅ CachedAttention routes correctly and matches uncached attention!")
 
 if __name__ == "__main__":
-    test_unit_cached_attention_forward()
+    test_unit_cached_attention()
 
 
 # %% [markdown]
@@ -1286,24 +1261,25 @@ prompt = [token_1, token_2, token_3]
 cache  = empty
 
 Step 0 (prefill): Process prompt tokens one at a time
-  → each token's K,V is written into the cache via PATH 3
+  → each token's K,V is written into the cache by _cached_generation_step
   → get logits for next token prediction
 
 Step 1: Generate token_4
   → input: just [token_4] (length 1!)
   → attention uses cached K,V + new K,V
-  → O(1) new computation per layer
+  → One new K,V projection; attention reads the growing prefix
 
 Step 2: Generate token_5
   → input: just [token_5] (length 1!)
   → cache grows: K,V for tokens 1-4
-  → O(1) new computation per layer
+  → One new K,V projection; attention reads the growing prefix
 
   ...continues until max_new_tokens reached
 ```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-generate", "solution": true}
+#| export
 def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     """
     Run autoregressive generation using the KV cache.
@@ -1315,10 +1291,11 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     2. Get the last token's logits and sample next token
     3. Loop for max_new_tokens steps:
        a. Feed ONLY the new token through the model (seq_len=1)
-       b. Cache is automatically updated by patched attention
+       b. The CachedAttention stand-ins write each token's K,V into the cache
        c. Advance cache position after each token
        d. Sample next token from logits with temperature scaling
-    4. Return list of generated token indices
+    4. Return list of generated token indices; do not forward the last sampled
+       token because no later prediction needs its logits
 
     EXAMPLE:
     >>> generated = _cached_generate(model, prompt=[0, 1, 2],
@@ -1327,16 +1304,16 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     >>> len(generated)  # 5 new tokens
 
     HINTS:
-    - Prefill: feed each prompt token one at a time via model.forward(token_tensor)
-      so the patched attention populates the cache through PATH 3
-    - Generation: model.forward(single_token_tensor) processes one token
+    - Prefill: feed each prompt token one at a time via model.forward(token_tensor, start_pos=cache.seq_pos)
+      so every token, including the first, writes its K,V into the cache at its true position
+    - Generation: model.forward(single_token_tensor, start_pos=cache.seq_pos) processes one token
     - Use temperature scaling: logits / temperature before softmax
     - Use rng.choice with softmax probabilities to sample
     - Advance cache.advance() after each token (both prefill and generation)
     - Stable softmax: subtract max before exp to avoid overflow
 
     Args:
-        model: Transformer model with cached attention (already patched)
+        model: Transformer model whose attention layers are wrapped by enable_kv_cache
         prompt_tokens: List of integer token IDs for the prompt
         max_new_tokens: Number of new tokens to generate
         temperature: Sampling temperature (higher = more random)
@@ -1346,38 +1323,51 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
         List of generated token IDs (integers)
     """
     ### BEGIN SOLUTION
+    if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be a nonnegative integer")
+    if not np.isfinite(temperature) or temperature < 0:
+        raise ValueError("temperature must be finite and nonnegative")
+    if len(prompt_tokens) == 0:
+        raise ValueError("prompt_tokens must contain at least one token")
+    # The last sampled token is returned, not fed back into the model.
+    if len(prompt_tokens) + max_new_tokens > cache.max_seq_len:
+        raise ValueError("Prompt and generation exceed cache capacity")
     generated = []
+    cache.reset()   # a fresh sequence: the cursor back to slot 0, no rows from the last request
+
+    if max_new_tokens == 0:
+        return generated
 
     # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
-    # We feed each token individually so the patched attention dispatches
-    # through PATH 3 (_cached_generation_step) for tokens after the first,
-    # which writes their K,V into the cache.  The first token (seq_pos==0)
-    # goes through PATH 2 (original forward) -- its K,V slot stays zero,
-    # but subsequent generation tokens still attend to the rest of the
-    # populated cache, which is far better than an entirely empty cache.
-    for i in range(len(prompt_tokens)):
-        token_tensor = Tensor(np.array([[prompt_tokens[i]]]))  # (1, 1)
-        logits = model.forward(token_tensor)
+    # Each token goes through the CachedAttention stand-ins, which write its
+    # K,V into the cache. start_pos=cache.seq_pos gives the token its true
+    # position, so a single-token forward computes exactly what the full
+    # sequence would have computed for that position.
+    for token in prompt_tokens:
+        token_tensor = Tensor(np.array([[token]]))  # (1, 1)
+        logits = model.forward(token_tensor, start_pos=cache.seq_pos)
         cache.advance()
 
     # Get logits for last prompt token (predicts next token)
     last_logits = logits.data[0, -1, :]  # (vocab_size,)
 
     # Phase 2: GENERATE - one token at a time using cache
-    for _ in range(max_new_tokens):
-        # Temperature-scaled sampling
-        scaled_logits = last_logits / max(temperature, 1e-8)
-        max_logit = np.max(scaled_logits)
-        exp_logits = np.exp(scaled_logits - max_logit)
-        probs = exp_logits / np.sum(exp_logits)
-
-        # Sample next token
-        next_token = int(rng.choice(len(probs), p=probs))
+    for step in range(max_new_tokens):
+        # Zero temperature means greedy decoding, including tied logits.
+        if temperature == 0:
+            next_token = int(np.argmax(last_logits))
+        else:
+            scaled_logits = last_logits / temperature
+            exp_logits = np.exp(scaled_logits - np.max(scaled_logits))
+            probs = exp_logits / np.sum(exp_logits)
+            next_token = int(rng.choice(len(probs), p=probs))
         generated.append(next_token)
+        if step == max_new_tokens - 1:
+            break
 
         # Feed single token through model (cache handles history)
         token_tensor = Tensor(np.array([[next_token]]))  # (1, 1)
-        logits = model.forward(token_tensor)  # (1, 1, vocab_size)
+        logits = model.forward(token_tensor, start_pos=cache.seq_pos)  # (1, 1, vocab_size)
         cache.advance()
 
         last_logits = logits.data[0, -1, :]
@@ -1410,7 +1400,7 @@ def test_unit_cached_generate():
             self.max_seq_len = 128
             self.blocks = []
 
-        def forward(self, x):
+        def forward(self, x, start_pos=0):
             # Return random logits shaped (batch, seq_len, vocab_size)
             batch_size = x.shape[0]
             seq_len = x.shape[1]
@@ -1433,8 +1423,8 @@ def test_unit_cached_generate():
         assert 0 <= token < vocab_size, f"Token {token} out of vocab range [0, {vocab_size})"
 
     # Test 3: Cache position advanced correctly
-    # prompt (3 tokens) + generated (5 tokens) = 8 advances
-    expected_pos = len(prompt) + max_new
+    # The final sampled token needs no forward pass: 3 + 5 - 1 = 7 advances.
+    expected_pos = len(prompt) + max_new - 1
     assert cache.seq_pos == expected_pos, f"Expected cache pos={expected_pos}, got {cache.seq_pos}"
 
     # Test 4: Generate with low temperature (more deterministic)
@@ -1454,7 +1444,7 @@ if __name__ == "__main__":
 
 This is the main entry point that composes the helpers above. It:
 1. Creates cache storage via `_create_cache_storage()`
-2. Patches each block's attention via `_cached_attention_forward()`
+2. Puts a `CachedAttention` stand-in in front of each block's attention
 3. Returns the cache for manual control
 
 ```
@@ -1464,8 +1454,7 @@ enable_kv_cache(model)
        │         └──→ KVCache created & attached
        │
        ├──→ For each block:
-       │       └──→ Patch attention.forward to use
-       │            _cached_attention_forward()
+       │       └──→ block.attention = CachedAttention(block.attention, cache, layer_idx)
        │
        └──→ Return cache object
 ```
@@ -1475,19 +1464,21 @@ enable_kv_cache(model)
 #| export
 def enable_kv_cache(model):
     """
-    Enable KV caching for a transformer model WITHOUT modifying Module 12/13 code.
+    Enable KV caching for a transformer model without editing its layers.
 
-    TODO: Compose helpers to create cache and patch attention layers
+    TODO: Compose helpers to create the cache and wrap the attention layers
 
     APPROACH:
-    1. Call _create_cache_storage(model) to validate and create cache
-    2. For each block, save original forward and patch with _cached_attention_forward
+    1. Call _create_cache_storage(model) to validate and create the cache
+    2. For each block, replace block.attention with a CachedAttention stand-in
+       that owns the original layer (unwrap first if one is already there)
     3. Print confirmation with cache statistics
-    4. Return cache object
+    4. Return the cache object
 
-    This function demonstrates **non-invasive optimization** - adding capabilities
-    to existing systems without breaking them. Similar to how Module 06 (Autograd)
-    uses enable_autograd() to add gradient tracking to Tensors.
+    This is the wrapping pattern: a stand-in owns the original object and
+    forwards to it, and removing the stand-in restores the original. Module 06
+    used a different pattern, completing each operation class with @method_of,
+    because there the added half is permanent; here it has to be removable.
 
     Args:
         model: A GPT-style transformer model with:
@@ -1510,33 +1501,18 @@ def enable_kv_cache(model):
 
     HINTS:
     - _create_cache_storage handles validation, KVCache creation, and model attachment
-    - Use a factory function (make_cached_forward) to capture layer_idx in closure
-    - Save original forward as block._original_attention_forward before patching
-    - _cached_attention_forward handles the three-path dispatch logic
+    - isinstance(block.attention, CachedAttention) tells you a stand-in is already in place
+    - The stand-in needs the original layer, the cache, and its layer index
     """
     ### BEGIN SOLUTION
     # Step 1: Validate model and create cache
     cache, head_dim = _create_cache_storage(model)
 
-    # Step 2: Patch each transformer block's attention
+    # Step 2: Put a stand-in in front of each block's attention layer
     for layer_idx, block in enumerate(model.blocks):
-        # Save original forward (avoid double-patching)
-        # hasattr() is LEGITIMATE: monkey-patching safety check
-        if not hasattr(block, '_original_attention_forward'):
-            block._original_attention_forward = block.attention.forward
-
-        # Create cached version using factory for correct closure binding
-        def make_cached_forward(layer_idx, original_forward, cache_obj):
-            """Factory to create cached forward with correct layer_idx closure."""
-            def cached_forward(x, mask=None):
-                return _cached_attention_forward(
-                    block, x, cache_obj, layer_idx, original_forward
-                )
-            return cached_forward
-
-        block.attention.forward = make_cached_forward(
-            layer_idx, block._original_attention_forward, cache
-        )
+        if isinstance(block.attention, CachedAttention):   # enabled twice: start from the original
+            block.attention = block.attention.attention
+        block.attention = CachedAttention(block.attention, cache, layer_idx)
 
     # Step 3: Print confirmation
     print(f"⚡ KV Cache enabled for model!")
@@ -1551,6 +1527,7 @@ def enable_kv_cache(model):
     ### END SOLUTION
 
 
+# %% nbgrader={"grade": false, "grade_id": "kv-disable-cache", "solution": false}
 #| export
 def disable_kv_cache(model):
     """
@@ -1566,23 +1543,17 @@ def disable_kv_cache(model):
         disable_kv_cache(model)  # Back to normal
         ```
     """
-    # Educational Note: hasattr() is LEGITIMATE here because:
-    # Checking if monkey-patch markers exist before restoration
-    if not hasattr(model, '_cache_enabled') or not model._cache_enabled:
+    if not getattr(model, '_cache_enabled', False):
         print("⚠️  KV cache not enabled on this model")
         return
 
-    # Restore original attention forwards
+    # Take the stand-ins out; each one still holds the original layer
     for block in model.blocks:
-        # Educational Note: hasattr() is LEGITIMATE here because:
-        # Checking for monkey-patch backup before restoration
-        if hasattr(block, '_original_attention_forward'):
-            block.attention.forward = block._original_attention_forward
+        if isinstance(block.attention, CachedAttention):
+            block.attention = block.attention.attention
 
     # Clean up
     model._cache_enabled = False
-    # Educational Note: hasattr() is LEGITIMATE here because:
-    # Safe cleanup check before deleting dynamically added attribute
     if hasattr(model, '_kv_cache'):
         delattr(model, '_kv_cache')
 
@@ -1652,7 +1623,6 @@ def test_unit_noninvasive_integration():
 
     print("✅ Non-invasive cache integration works correctly!")
 
-# Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_noninvasive_integration()
 
@@ -1664,7 +1634,7 @@ if __name__ == "__main__":
 Let's analyze the performance characteristics and trade-offs of KV caching. Understanding these trade-offs is essential for making informed decisions about when and how to use caching in production systems.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-memory", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "analyze-memory", "solution": false}
 def analyze_kvcache_memory():
     """
     📊 Analyze KV cache memory usage across different configurations.
@@ -1683,12 +1653,12 @@ def analyze_kvcache_memory():
         - Large models (1024D): ~32 MB
 
     Key Insight:
-        Cache overhead is 10-30% of model parameters, but enables
-        10-15× speedup. Memory is cheap, compute is expensive!
+        Cache size is set by context length, not by parameter count. The
+        ratio below compares it to one transformer block's parameters (~12·d²).
 
     Production Context:
-        GPT-3 (175B params, 2048 context): ~4GB cache per sequence
-        This memory cost is acceptable given the massive speedup.
+        GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~18 GB per
+        sequence in FP32, which is why serving systems budget memory per user.
     """
     print("📊 Analyzing KV Cache Memory Usage...")
     print()
@@ -1701,7 +1671,7 @@ def analyze_kvcache_memory():
         (1024, 16, 256, "Large"),
     ]
 
-    print("Model Config | Cache Memory | Per Layer | Memory Overhead")
+    print("Model Config | Cache Memory | Per Layer | Cache / Block Params")
     print("-" * 60)
 
     for embed_dim, num_layers, seq_len, name in configs:
@@ -1710,8 +1680,9 @@ def analyze_kvcache_memory():
         memory_per_layer = 2 * batch_size * seq_len * embed_dim * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
         total_memory = memory_per_layer * num_layers
 
-        # Model parameter memory (approximate)
-        params_per_layer = embed_dim * embed_dim * _BYTES_PER_FLOAT32  # QKV projections
+        # Model parameter memory: a transformer block has about 12·d² parameters
+        # (4·d² in attention projections, 8·d² in the MLP)
+        params_per_layer = 12 * embed_dim * embed_dim
         model_memory = params_per_layer * num_layers * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
 
         overhead_pct = (total_memory / model_memory) * 100 if model_memory > 0 else 0
@@ -1722,14 +1693,14 @@ def analyze_kvcache_memory():
     print("💡 Key Insights:")
     print("   • Cache memory scales linearly with sequence length (O(n))")
     print("   • Longer sequences require proportionally more cache memory")
-    print("   • Cache overhead is typically 10-30% of model parameters")
+    print("   • The ratio compares the cache to block parameters (~12·d² each); it grows with context")
     print()
     print("🚀 Production Context:")
-    print("   • GPT-3 (175B params, 2048 context): ~4GB cache memory")
-    print("   • Trade-off: 2× memory enables 10-15× speedup")
+    print("   • GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~18 GB per sequence in FP32")
+    print("   • Trade-off: memory per cached token buys away the O(n²) attention recomputation")
     print("   • Worth it for inference-heavy workloads!")
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "locked": false}
+# %% nbgrader={"grade": false, "grade_id": "analyze-speedup", "solution": false}
 def analyze_kvcache_speedup():
     """
     📊 Measure KV cache speedup vs vanilla attention.
@@ -1739,10 +1710,9 @@ def analyze_kvcache_speedup():
         concrete complexity analysis. Compares O(n²) vs O(n) growth.
 
     Demonstrates:
-        - Naive approach: O(n²) operations per token
-        - Cached approach: O(n) operations per token
-        - Speedup increases with generation length
-        - 100-token generation: ~50× fewer operations
+        - Naive approach: attention over the whole context for every new token
+        - Cached approach: one token of new work per step
+        - Measured wall-clock speedup on a tiny GPT, next to the attention score-pair ratio
 
     Key Insight:
         Speedup is SUPER-LINEAR with generation length because:
@@ -1756,46 +1726,50 @@ def analyze_kvcache_speedup():
     print("\n📊 Analyzing KV Cache Speedup...")
     print()
 
-    import time
+    from tinytorch.core.transformers import GPT
 
-    # Create test configuration
-    batch_size = 1
-    embed_dim = 256
-    num_heads = 8
-    head_dim = embed_dim // num_heads
+    # A tiny GPT: big enough to show the trend, small enough to run in seconds
+    model = GPT(vocab_size=64, embed_dim=64, num_layers=2, num_heads=4, max_seq_len=256)
+    prompt = [1, 2, 3, 4]
+    prompt_tensor = Tensor(np.array([prompt]))  # GPT.generate takes a (1, seq_len) Tensor
 
-    print("Generation Length | Without Cache | With Cache | Speedup")
-    print("-" * 55)
+    cache = enable_kv_cache(model)  # _cached_generate resets it for every new sequence
+
+    print("Generation Length | Without Cache | With Cache | Measured | Attention ops ratio")
+    print("-" * 80)
 
     for gen_length in [10, 25, 50, 100]:
-        # Simulate without cache: O(n²) for each new token
-        # Each token processes entire context
-        ops_without = sum(i for i in range(1, gen_length + 1))
+        # Without cache: model.generate() re-runs the whole sequence for every token.
+        # CachedAttention only changes single-token forwards, so the full-sequence
+        # path below is the plain Module 13 attention.
+        start = time.perf_counter()
+        model.generate(prompt_tensor, max_new_tokens=gen_length, temperature=1.0)
+        time_without = (time.perf_counter() - start) * 1000
 
-        # Simulate with cache: O(n) for each new token
-        # Each token only processes itself
-        ops_with = gen_length
+        # With cache: one token of work per step
+        start = time.perf_counter()
+        _cached_generate(model, prompt, gen_length, 1.0, cache)
+        time_with = (time.perf_counter() - start) * 1000
 
-        # Estimate time (arbitrary units)
-        time_without = ops_without / 1000  # ms
-        time_with = ops_with / 1000  # ms
-        speedup = ops_without / ops_with
+        measured = time_without / max(time_with, 1e-6)
+        contexts = np.arange(len(prompt), len(prompt) + gen_length)
+        # Full forwards score t² query/key pairs; cached forwards score t.
+        # Token-by-token prefill also scores 1 + ... + (prompt_len - 1) pairs.
+        ops_ratio = np.sum(contexts ** 2) / (np.sum(contexts) + sum(range(len(prompt))))
 
-        print(f"{gen_length:17d} | {time_without:12.1f} ms | {time_with:10.1f} ms | {speedup:6.1f}×")
+        print(f"{gen_length:17d} | {time_without:10.1f} ms | {time_with:8.1f} ms | {measured:6.1f}× | {ops_ratio:6.1f}×")
 
+    disable_kv_cache(model)
     print()
     print("💡 Key Insights:")
-    print("   • Speedup increases with generation length (longer = better ROI)")
-    print("   • 100-token generation: ~50× fewer operations!")
-    print("   • Cache eliminates O(n²) recomputation per token")
+    print("   • Speedup grows with generation length (longer = better ROI)")
+    print("   • The score-pair ratio is an operation count, not a wall-clock ceiling;")
+    print("     projections, the MLP, prefix copies, and Python overhead also affect timing")
     print()
     print("🚀 Production Reality:")
-    print("   • ChatGPT uses KV caching for ALL generation")
-    print("   • Without caching: 100-token response takes ~17 seconds")
-    print("   • With caching: 100-token response takes ~0.1 seconds")
-    print("   • This optimization makes conversational AI possible!")
+    print("   • Every production LLM server caches K/V; without it, per-token cost")
+    print("     grows with the conversation and long chats become unaffordable")
 
-# Run analysis when developing this module
 if __name__ == "__main__":
     analyze_kvcache_memory()
     analyze_kvcache_speedup()
@@ -1829,7 +1803,7 @@ def test_module():
     print()
     test_unit_create_cache_storage()
     print()
-    test_unit_cached_attention_forward()
+    test_unit_cached_attention()
     print()
     test_unit_cached_generate()
     print()
@@ -1840,7 +1814,7 @@ def test_module():
     print()
 
     # Integration Test: Complete KV Cache Workflow
-    print("🔬 Integration Test: Complete KV Cache Workflow...")
+    print("🧪 Integration Test: Complete KV Cache Workflow...")
     batch_size, max_seq_len = 1, 128
     num_layers, num_heads, head_dim = 4, 8, 64
 
@@ -1872,7 +1846,7 @@ def test_module():
     print()
 
     # Integration Test: Memory Tracking
-    print("🔬 Integration Test: Memory Tracking...")
+    print("🧪 Integration Test: Memory Tracking...")
     mem_info = cache.get_memory_usage()
     assert mem_info['total_mb'] > 0
     assert mem_info['cache_tensors'] == num_layers * 2
@@ -1882,10 +1856,6 @@ def test_module():
     print("=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 18")
-
-# Run comprehensive module test
-if __name__ == "__main__":
-    test_module()
 
 
 # %% [markdown]
@@ -1910,11 +1880,11 @@ maximum sequence length of 2048, and batch size of 8. Calculate the KV cache siz
 is the cache? Is this overhead acceptable?
 
 ### Question 2: Speed vs Memory Trade-off
-Your KVCache makes generation 10× faster but uses several GB of RAM.
+Your KVCache removes the O(n²) recomputation but holds memory for every cached token.
 
 Consider a production API serving 1000 users simultaneously:
-- Without cache: Each generation is slow (10 sec) but uses minimal memory
-- With cache: Each generation is fast (1 sec) but uses 100 MB cache per user = 100 GB total!
+- Without cache: each generation is slow (per-token cost grows with context) but uses no extra memory
+- With cache: each generation is fast but holds, say, 100 MB of cache per user = 100 GB total!
 
 **Questions**:
 - For an interactive chatbot, is this trade-off worth it? Why?
@@ -1947,7 +1917,7 @@ Your `KVCache` has `max_seq_len=2048`. A chatbot conversation reaches 2048 token
 - Why do production systems (ChatGPT) limit conversation length (e.g., 4096 or 8192 tokens)?
 - Which eviction strategy would you choose for a medical chatbot that needs full conversation history?
 
-### Question 5: Production Reality - Multi-User Serving
+### Question 5: Production Reality: Multi-User Serving
 ChatGPT serves millions of users. Each user's conversation needs its own KV cache.
 
 **Memory calculation for 10,000 concurrent conversations**:
@@ -1973,7 +1943,8 @@ ChatGPT serves millions of users. Each user's conversation needs its own KV cach
 K,V values for all previous tokens at each step. With KV caching, you compute once and reuse!
 This is why ChatGPT responds so fast—it's not recomputing everything every token.
 
-This optimization turns O(n²) generation into O(n), enabling practical LLM deployment.
+At context length n, caching reduces attention work per new token from O(n²) to O(n).
+Total attention work across n generated tokens still grows as O(n²).
 """
 
 # %%
@@ -2004,7 +1975,7 @@ def demo_memoization():
     k_all, v_all = cache.get(0)
     print(f"Retrieved: K{k_all.shape}, V{v_all.shape}")
 
-    print("\n✨ Compute once, reuse forever—10× faster generation!")
+    print("\n✨ Compute once, reuse for every later token!")
 
 # %%
 if __name__ == "__main__":
@@ -2021,32 +1992,33 @@ Congratulations! You've built the optimization that makes production language mo
 ### Key Accomplishments
 - Built KVCache class with efficient memory management for K,V tensors across layers
 - Implemented non-invasive cache integration using enable_kv_cache()
-- Measured 10-15× speedup through analysis functions showing O(n²)→O(n) improvement
-- Understood memory-compute trade-off (2× memory enables 10× speedup)
+- Measured the O(n²)→O(n) reduction in attention work and the wall-clock speedup it buys
+- Understood the memory-compute trade-off: memory per cached token buys away recomputation
 - Discovered why speedup increases with generation length
 - All tests pass ✅ (validated by `test_module()`)
 
-### Systems Insights Gained
+### Systems Insights Discovered
 - **Recomputation Elimination**: Caching K/V eliminates O(n²) redundant work per token
-- **Memory-Speed Trade-off**: Doubling memory enables order-of-magnitude speedup
-- **Scaling Benefits**: Longer generation = better cache return on investment (~50× at 100 tokens)
+- **Memory-Speed Trade-off**: Cache memory grows with context length; it buys away the O(n²) recomputation
+- **Scaling Benefits**: Longer generation = better cache return on investment ((n+1)/2 in K,V projections, ~50× at 100 tokens)
 - **Production Critical**: This single optimization makes ChatGPT-scale inference possible
 - **Non-Invasive Design**: Add capabilities forward without breaking existing modules
 
-### Real-World Impact
+**Real-World Impact**
+
 Without KV caching:
-- 100-token generation: ~17 seconds
-- Conversational AI: economically infeasible
-- User experience: unacceptably slow
+- Every new token recomputes attention over the whole context, so per-token cost grows with n
+- Total attention score work for n tokens: sum of t² over t=1..n, or O(n³)
+- User experience: responses slow down as the conversation gets longer
 
 With KV caching:
-- 100-token generation: ~0.1 seconds (~50× faster!)
-- Conversational AI: production-ready at scale
-- User experience: real-time interaction
+- Each new token computes its own K, V once and reads the rest from the cache
+- Total attention score work: sum of t over t=1..n, or O(n²)
+- Per-token attention still reads a growing prefix; caching reduces its cost, not its growth
 
 This optimization is THE technique that transformed language models from research demonstrations into products serving millions of users daily.
 
-### Production Skills Developed
+Skills you practiced:
 - **Systems Optimization**: Identify and eliminate computational bottlenecks
 - **Memory-Compute Trade-offs**: Accept memory cost for speed gains
 - **Non-Breaking Enhancement**: Add features without modifying existing code
@@ -2055,7 +2027,8 @@ This optimization is THE technique that transformed language models from researc
 ### Ready for Next Steps
 Your KV caching implementation demonstrates the principle: "spend memory to save time"!
 
-**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 
 Export with: `tito module complete 18`
+
+**Next**: Module 19 (Benchmarking) will teach you how to measure and compare these optimizations quantitatively!
 """

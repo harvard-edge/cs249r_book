@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.embeddings import Embedding
 from tinytorch.core.attention import MultiHeadAttention
 from tinytorch.core.transformers import TransformerBlock
@@ -32,9 +32,6 @@ from tinytorch.core.layers import Linear
 from tinytorch.core.losses import CrossEntropyLoss
 
 # Enable autograd
-enable_autograd()
-
-
 class TestEmbeddingGradientFlow:
     """
     Critical Test: Verify gradients flow through embeddings.

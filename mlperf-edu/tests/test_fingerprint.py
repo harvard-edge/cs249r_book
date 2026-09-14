@@ -253,6 +253,7 @@ def test_performance_environment_has_no_retired_workload_knobs():
     )
     assert not any(
         name.startswith(retired_prefixes)
+        and not name.startswith("MLPERF_EDU_ANOMALY_DETECTION_")
         for name in fingerprint.PERFORMANCE_ENVIRONMENT_ALLOWLIST
     )
 

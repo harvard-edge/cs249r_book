@@ -111,17 +111,23 @@ class SystemResetCommand(BaseCommand):
                         core_cleared += 1
                     except Exception as e:
                         errors.append(f"tinytorch/core/{py_file.name}: {e}")
+            # Clean bytecode cache in core
+            for pycache in core_dir.glob("**/__pycache__"):
+                if pycache.is_dir():
+                    shutil.rmtree(pycache, ignore_errors=True)
 
         # 3. Reset progress (unless --keep-progress)
         progress_reset = False
         if not args.keep_progress:
-            progress_file = project_root / ".tinytorch" / "progress.json"
-            if progress_file.exists():
-                try:
-                    progress_file.unlink()
-                    progress_reset = True
-                except Exception as e:
-                    errors.append(f"progress.json: {e}")
+            for dir_name in [".tito", ".tinytorch"]:
+                for file_name in ["progress.json", "milestones.json"]:
+                    progress_file = project_root / dir_name / file_name
+                    if progress_file.exists():
+                        try:
+                            progress_file.unlink()
+                            progress_reset = True
+                        except Exception as e:
+                            errors.append(f"{dir_name}/{file_name}: {e}")
 
         # Report results
         if args.ci:

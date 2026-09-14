@@ -123,7 +123,6 @@ def test_conv_to_linear_dimension_match():
         print(f"✅ Correctly caught dimension mismatch: {e}")
 
     print("🎯 Conv->Linear dimension test PASSED!")
-    return True
 
 
 def test_conv_output_size_calculation():
@@ -144,7 +143,6 @@ def test_conv_output_size_calculation():
         print(f"  Input={input_size}, Kernel={kernel}, Stride={stride}, Pad={padding} -> Output={output} ✓")
 
     print("✅ All convolution size calculations correct!")
-    return True
 
 
 def test_typical_cnn_architectures():
@@ -188,7 +186,6 @@ def test_typical_cnn_architectures():
     assert x.shape == (batch_size, 10)
 
     print("✅ LeNet-style architecture dimensions flow correctly!")
-    return True
 
 
 if __name__ == "__main__":

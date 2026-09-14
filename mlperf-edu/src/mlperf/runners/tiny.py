@@ -35,6 +35,8 @@ from mlperf.runners.common import (
     configured_seed,
     select_torch_device,
     synchronize_device,
+    apply_precision,
+    resolve_precision,
 )
 
 
@@ -170,6 +172,8 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
     paths = mlperf_tiny_kws_paths()
     model, adapter = load_mlperf_tiny_kws(paths["float_model"], paths["int8_model"])
     model = model.to(device).eval()
+    precision = resolve_precision("MLPERF_EDU_KEYWORD_SPOTTING_PRECISION")
+    model, execution_dtype = apply_precision(model, precision, device)
     inputs, labels = _load_mlperf_tiny_kws_accuracy_set(
         asset.root,
         scale=float(adapter["input_scale"]),
@@ -237,7 +241,8 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
             "samples": len(inputs),
             "input_shape": [1, 49, 10],
             "source_input_dtype": "int8",
-            "execution_dtype": "float32",
+            "execution_dtype": execution_dtype,
+            "requested_precision": precision,
             "adapter": "fused-tflite-weights-to-pytorch-v1",
         },
         "metrics": {
@@ -276,7 +281,7 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
         report_path=report_path,
         weights_path=paths["float_model"],
         weights_n_params=n_params,
-        weights_dtype="float32",
+        weights_dtype=execution_dtype,
         dataset_name=asset.name,
         dataset_files=list(asset.files),
         rng_seed=seed,
@@ -405,6 +410,8 @@ def run_anomaly_detection_max(workload: Workload, output_dir: Path) -> dict[str,
     asset = ensure_mlperf_tiny_anomaly(download=True)
     paths = mlperf_tiny_anomaly_paths()
     model = load_mlperf_tiny_anomaly(paths["float_model"]).to(device).eval()
+    precision = resolve_precision("MLPERF_EDU_ANOMALY_DETECTION_PRECISION")
+    model, execution_dtype = apply_precision(model, precision, device)
     inputs, labels, names = _load_mlperf_tiny_anomaly_accuracy_set(asset.root)
     inputs = inputs.to(device)
 
@@ -496,7 +503,8 @@ def run_anomaly_detection_max(workload: Workload, output_dir: Path) -> dict[str,
             "windows_per_sample": 196,
             "input_shape": [640],
             "source_input_dtype": "float32-little-endian",
-            "execution_dtype": "float32",
+            "execution_dtype": execution_dtype,
+            "requested_precision": precision,
             "feature_extractor": "librosa-0.11.0-upstream-recipe",
             "adapter": "fused-tflite-weights-to-pytorch-v1",
         },
@@ -538,7 +546,7 @@ def run_anomaly_detection_max(workload: Workload, output_dir: Path) -> dict[str,
         report_path=report_path,
         weights_path=paths["float_model"],
         weights_n_params=n_params,
-        weights_dtype="float32",
+        weights_dtype=execution_dtype,
         dataset_name=asset.name,
         dataset_files=list(asset.files),
         rng_seed=seed,
@@ -666,6 +674,8 @@ def run_visual_wake_words_max(workload: Workload, output_dir: Path) -> dict[str,
     asset = ensure_mlperf_tiny_vww(download=True)
     paths = mlperf_tiny_vww_paths()
     model = load_mlperf_tiny_vww(paths["float_model"]).to(device).eval()
+    precision = resolve_precision("MLPERF_EDU_VISUAL_WAKE_WORDS_PRECISION")
+    model, execution_dtype = apply_precision(model, precision, device)
     inputs, labels = _load_mlperf_tiny_vww_accuracy_set(asset.root)
     inputs = inputs.to(device)
     labels = labels.to(device)
@@ -738,7 +748,8 @@ def run_visual_wake_words_max(workload: Workload, output_dir: Path) -> dict[str,
             "samples": len(inputs),
             "input_shape": [3, 96, 96],
             "source_input_dtype": "uint8-jpeg",
-            "execution_dtype": "float32",
+            "execution_dtype": execution_dtype,
+            "requested_precision": precision,
             "input_scaling": "divide-by-255",
             "adapter": "fused-tflite-weights-to-pytorch-v1",
         },
@@ -779,7 +790,7 @@ def run_visual_wake_words_max(workload: Workload, output_dir: Path) -> dict[str,
         report_path=report_path,
         weights_path=paths["float_model"],
         weights_n_params=n_params,
-        weights_dtype="float32",
+        weights_dtype=execution_dtype,
         dataset_name=asset.name,
         dataset_files=list(asset.files),
         rng_seed=seed,

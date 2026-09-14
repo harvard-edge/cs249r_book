@@ -30,7 +30,7 @@ from mlperf.runners.common import (
 )
 
 MLPERF_V05_REFERENCE = (
-    "https://github.com/mlcommons/training/tree/master/retired_benchmarks/recommendation"
+    "https://github.com/mlcommons/training/tree/master/retired_benchmarks/ncf"
 )
 
 

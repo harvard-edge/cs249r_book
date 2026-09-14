@@ -43,11 +43,12 @@ def detect_projects(files: list[str]) -> list[str]:
     found: list[str] = []
     seen: set[str] = set()
     for f in files:
-        top = f.split("/", 1)[0]
-        key = dir_to_key.get(top)
-        if key and key not in seen:
-            found.append(key)
-            seen.add(key)
+        for p_dir, key in dir_to_key.items():
+            if f == p_dir or f.startswith(f"{p_dir}/"):
+                if key not in seen:
+                    found.append(key)
+                    seen.add(key)
+                break
     return found
 
 

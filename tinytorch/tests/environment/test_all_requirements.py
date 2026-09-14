@@ -36,7 +36,7 @@ def parse_requirements_file(filepath: Path) -> List[Tuple[str, Optional[str], Op
     if not filepath.exists():
         return packages
 
-    with open(filepath, 'r') as f:
+    with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
 
@@ -164,17 +164,34 @@ def check_package_functionality(package_name: str, import_name: str) -> Tuple[bo
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", "--version"],
                 capture_output=True,
-                text=True
+                text=True, encoding='utf-8', errors='replace'
             )
-            return result.returncode == 0, "Command available"
+            if result.returncode != 0:
+                return False, f"`pytest --version` failed: {result.stderr.strip()[:120]}"
+            return True, f"Command available ({result.stdout.strip()})"
 
         elif package_name.lower() == 'jupyterlab':
+            # Run jupyter lab via the active interpreter directly to avoid stale shebangs
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "jupyter", "lab", "--version"],
+                    capture_output=True,
+                    text=True, encoding='utf-8', errors='replace'
+                )
+                if result.returncode == 0:
+                    return True, f"Command available ({result.stdout.strip()})"
+            except Exception:
+                pass
+            exe = Path(sys.executable).parent / "jupyter"
+            cmd = [str(exe)] if exe.exists() else ["jupyter"]
             result = subprocess.run(
-                ["jupyter", "lab", "--version"],
+                cmd + ["lab", "--version"],
                 capture_output=True,
-                text=True
+                text=True, encoding='utf-8', errors='replace'
             )
-            return result.returncode == 0, "Command available"
+            if result.returncode != 0:
+                return False, f"`jupyter lab --version` failed: {result.stderr.strip()[:120]}"
+            return True, f"Command available ({result.stdout.strip()})"
 
         elif package_name.lower() == 'jupytext':
             import jupytext
@@ -282,7 +299,7 @@ class TestRequirementsFileValidity:
         """Requirements file must be readable."""
         assert req_file.exists(), f"Requirements file not found: {req_file}"
 
-        content = req_file.read_text()
+        content = req_file.read_text(encoding='utf-8')
         assert len(content) > 0, f"Requirements file is empty: {req_file}"
 
         print(f"✅ Requirements file readable: {req_file}")
@@ -293,7 +310,7 @@ class TestRequirementsFileValidity:
         packages = parse_requirements_file(req_file)
 
         # Should have at least one package (unless it's all comments)
-        lines = req_file.read_text().splitlines()
+        lines = req_file.read_text(encoding='utf-8').splitlines()
         non_comment_lines = [l for l in lines if l.strip() and not l.strip().startswith('#')]
 
         if non_comment_lines:

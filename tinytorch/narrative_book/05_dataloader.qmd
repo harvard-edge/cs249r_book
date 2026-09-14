@@ -1,0 +1,217 @@
+# Data Loading and Batching {#sec-dataloader}
+
+After Chapter 4 you can take a batch of inputs, push it through `Linear` layers and activations, and reduce the result to one scalar loss. Every one of those pieces expects its input to arrive as a single $(B, D)$ tensor, $B$ samples stacked into $B$ rows of $D$ features. Nothing so far explains where that tensor comes from. A dataset is a pile of individual samples, and the question this chapter answers is the one a practitioner asks the first time they write `for x, y in loader`. How do $N$ separate samples become a stream of $(B, D)$ batches, in what order, and why does the order matter?
+
+The answer is three small pieces. A `Dataset` answers "how many samples, and give me sample $i$." A shuffle decides the order in which the indices are visited. A `DataLoader` walks that order in strides of $B$ and stacks each stride into one tensor. All three fit in about sixty lines of Python, and the mechanism is index bookkeeping followed by materializing one batch at a time.
+
+@fig-dataloader-pipeline shows the full pipeline as a production framework runs it. TinyTorch builds the dataset contract, the shuffled index sequence, and the collate step, which the figure spreads across stages 1 and 2, in a single process with no workers and no queue. The rest of the figure, the worker pool, the shared-memory queue, the pinned host buffer, and the copy to the GPU, is what production adds, and it is the subject of the last section.
+
+![The full data pipeline as a production framework runs it. TinyTorch implements the dataset contract, the per-epoch shuffle, and collation in one process; the worker pool, the shared-memory queue, pinned host memory, and the GPU copy (stages 2 through 5) are production additions covered at the end of this chapter.](assets/images/diagrams/05_dataloader-diag-1.svg){#fig-dataloader-pipeline}
+
+---
+
+## The Problem
+
+Suppose the training data is a list of samples and the labels arrive sorted by class. The obvious loop feeds them one at a time, in file order:
+
+```python
+samples = [([i, i + 0.5], 0 if i < 5 else 1) for i in range(10)]   # x_i, y_i
+
+for x, y in samples:          # one sample per step, in stored order
+    pass                      # forward(x), loss(y), update
+```
+
+Two things go wrong, and the second is worse than the first.
+
+The first is waste. Chapter 3 built `Linear.forward` as a matrix multiply on a $(B, D)$ input, and every call carries a fixed cost, Python dispatch, a result allocation, the loop setup inside the kernel, that does not depend on $B$. At $B = 1$ that fixed cost is paid once per sample. At $B = 64$ it is paid once per 64 samples, and the arithmetic itself is the same. Feeding one row at a time throws away the batching that the whole forward pass was designed around.
+
+The second is bias. Group the loop above into fours and look at the labels each group carries:
+
+```python
+batches = [samples[i:i + 4] for i in range(0, 10, 4)]
+print([[y for _, y in batch] for batch in batches])
+# [[0, 0, 0, 0], [0, 1, 1, 1], [1, 1]]
+```
+
+The first batch is entirely class 0. The loss computed on it says only one thing, "predict 0 more often," and the parameter update moves in that direction with nothing pulling the other way. The next batch says "predict 1" and the update reverses. On a real dataset with a thousand samples per class, the model spends a thousand steps learning class 0, then a thousand steps forgetting it in favor of class 1. The gradient of each batch is a poor stand-in for the gradient of the whole dataset because the batch was not a fair sample of it. There is a third problem, the time spent waiting for each sample to be read from disk, but it only bites when samples live on disk rather than in memory, so it waits for the production section.
+
+---
+
+## The Idea
+
+Three roles, kept separate, solve both problems.
+
+| Role | Question it answers | Interface |
+| :--- | :--- | :--- |
+| **Dataset** | How many samples are there, and what is sample $i$? | `__len__()` returns $N$; `__getitem__(i)` returns $(\mathbf{x}_i, y_i)$ |
+| **Order** | In what sequence are the indices visited? | A list of the integers $0$ through $N-1$, shuffled once per epoch |
+| **DataLoader** | How do $B$ consecutive samples become one tensor? | Walks the order in strides of $B$, stacks each stride into $(B, D)$ |
+
+: The three roles of a data pipeline. Each one can be replaced without touching the other two. {#tbl-data-pipeline-layers tbl-colwidths="[18,42,40]"}
+
+A **Dataset** is any object that can count itself and answer index lookups. It knows nothing about batches or order. That is what makes the split useful. A dataset of ten rows in memory and a dataset of ten million images on disk present the same two methods, and the loader on top of them does not change.
+
+An **epoch** is one complete pass over the dataset, every sample visited exactly once. At the start of each epoch the loader writes down the indices $0, 1, \dots, N-1$ and shuffles them. The shuffled list is a **permutation**, written $\pi$, of the indices. Position $k$ of the epoch visits sample $\pi(k)$, and because $\pi$ is a rearrangement rather than a redraw, every index appears exactly once. This is sampling *without replacement*. Drawing indices at random *with* replacement would visit some samples twice and others not at all in a given epoch, and the loss would be tuned to whichever samples happened to be drawn more often.
+
+Shuffling fixes the bias problem because a batch cut from a random permutation is a uniformly random subset of the dataset. Write $\ell_i$ for the loss on sample $i$ and $\mathcal{B}$ for the set of $B$ indices in one batch. The batch loss is the average $\frac{1}{B}\sum_{i \in \mathcal{B}} \ell_i$. When $\mathcal{B}$ is a uniform random subset, the expected value of that average is the full-dataset average,
+
+$$\mathbb{E}\left[\frac{1}{B}\sum_{i \in \mathcal{B}} \ell_i\right] = \frac{1}{N}\sum_{i=1}^{N} \ell_i,$$
+
+and the same equality holds for the gradient, since the gradient of an average is the average of the gradients. At fixed model parameters, a uniformly selected batch gives an unbiased estimate of the full-dataset gradient. During training, parameters change between batches and batches from the same permutation are dependent, so this statement does not make successive updates independent. A batch of consecutive class-0 samples is not a uniform subset, and the equality fails; that is the bias the sorted loop suffered from.
+
+Batching fixes the waste problem, and the operation that does it is **collation**: take $B$ samples, each a tensor of shape $(D,)$, and stack them into one tensor of shape $(B, D)$. The rows do not have to come from adjacent places in the dataset; the copy is what makes them adjacent in memory. In this implementation, sample retrieval and tensor construction also copy. Following those calls in the next section separates the necessary collation step from the wrapper's additional allocations.
+
+---
+
+## The Code
+
+::: {.callout-note title="Source Code Mapping"}
+The listings in this section are extracted from Module 05 (`src/05_dataloader/05_dataloader.py`) by name when the book is built, so a renamed class in the module fails the build instead of drifting from the chapter. The module also carries image augmentations (`RandomCrop`, `RandomHorizontalFlip`, `Compose`) that this chapter leaves out.
+:::
+
+The listings use the copying `Tensor` constructor from @sec-tensors. Reading a row and constructing a batch both create input data for the model; they do not go through `Function.apply`. This is the start of the forward computation, before there is a model operation to record. Read the code in the order one request executes: `__iter__` chooses indices, `TensorDataset.__getitem__` returns samples, and `_collate_batch` groups and stacks their fields.
+
+### The dataset contract
+
+Start with what the rest of the framework needs from a dataset. The training loop we write in Chapter 8 says `for x, y in loader`, and it should say exactly that whether the samples are ten rows in a Python list, sixty thousand handwritten digits in one array in RAM, or ten million JPEG files on disk that each have to be decoded. The model, the loss, and the loop must not change when the data does.
+
+The naive design bakes the data source into the loader, so a loader for in-memory arrays and a loader for image folders become two classes with two copies of the batching logic. So the contract is two methods, `__len__` and `__getitem__`, and nothing else, and Module 05 writes it down as an abstract base class so that forgetting one of them fails at construction rather than in the middle of an epoch.
+
+{{< include _listings/05_dataloader/Dataset.qmd >}}
+
+`TensorDataset` is the dataset for data that is already in memory. It holds any number of tensors that agree on their first dimension, and sample $i$ is row $i$ of each of them.
+
+{{< include _listings/05_dataloader/TensorDataset.qmd >}}
+
+Look at what `__getitem__` costs. `tensor.data[idx]` is NumPy row indexing, which is a view, the zero-copy trick from Chapter 1; then `Tensor(...)` wraps it, and Chapter 1's constructor copies. So fetching a sample copies its $D$ floats into a fresh tensor, 784 floats for a digit, about 3 KB. Module 05 accepts that copy on purpose. The copied sample can be modified without changing the stored dataset. That ownership rule is simple to inspect, but the copy can matter when lookup itself is cheap, as it is for this in-memory dataset. PyTorch's `TensorDataset` returns the view instead, and the production section counts what that saves. Notice the negative-index handling, which mirrors Python lists so that `dataset[-1]` is the last sample, and the tuple return, which is why the loop can unpack `x, y` without the loader knowing there are two of them. The only way to get data out of a `TensorDataset` is to ask for a specific index, which is the point of the contract. The order of visits is someone else's decision.
+
+### Collation
+
+Now the other side of the contract. `Linear.forward` from Chapter 3 computes `x.matmul(W)`, and that matrix multiply wants its $B$ inputs in one block, row $i$ at positions $iD$ through $iD + D - 1$, strides $(D, 1)$. What the dataset hands us is $B$ separate small tensors, each in its own buffer. Four samples drawn as 7, 8, 1, 5 live in four unrelated allocations. No stride trick makes four buffers look like one $(4, 2)$ tensor.
+
+The naive way is to skip the batch and call `forward` four times, once per sample. That pays the per-call fixed cost from The Problem four times over and leaves us averaging four separate losses by hand, which is the $B = 1$ loop we set out to escape.
+
+Collation allocates a buffer and places each sample's values in its row. `np.stack` performs that step. The next line, `Tensor(batched_data)`, copies the stacked array again. Including `TensorDataset.__getitem__`, each feature value is copied three times on this path: into a sample tensor, into the stacked array, and into the returned batch tensor. For `B` samples of `D` features, that is `3 * B * D` copied values, excluding labels and other fields. This counts work; it does not compare elapsed copy time with matrix arithmetic. The extra copies are the cost of applying the same ownership rule at each boundary.
+
+{{< include _listings/05_dataloader/collate_batch.qmd >}}
+
+`np.stack(..., axis=0)` allocates a `(B, D)` array and writes each sample's row at offset $iD$, which is the stride equation from Chapter 1 with strides $(D, 1)$ carried out in C. The method groups by position first, so a dataset that returns `(x, y)` yields one stacked `X` and one stacked `Y`, and a dataset that returns three tensors per sample yields three batches, without the loader having to know. PyTorch's `default_collate` is this function with `torch.stack` doing the copy.
+
+### The loader
+
+The last piece owns the order. Chapter 8's loop is going to read `for epoch in range(E): for x, y in loader:` and expect two things from that inner line, a different order every epoch and one batch at a time.
+
+The naive way to get batches is to build them all up front, shuffle the dataset once, cut it into $\lceil N/B \rceil$ tensors, and hand back the list. That list is a second copy of the whole dataset sitting next to the first, another 47 million floats in the 60,000 by 784 case, and it has to be rebuilt every epoch. The naive way to get a random order is worse. Draw $N$ indices at random with replacement and roughly a third of the samples never come up in that epoch, because the chance that a particular index is missed in $N$ draws tends to $1/e$ as $N$ grows.
+
+The loader instead holds one list of $N$ integers and nothing else. It shuffles that list in place at the start of each epoch, walks it in strides of $B$, and asks the dataset for the samples of one stride only when the loop reaches it. The index list costs memory proportional to the dataset length. The sampled tensors and stacked arrays add temporary storage proportional to a batch, while the dataset itself remains wherever its implementation stores it. No list of all collated batches is built.
+
+One detail remains. Unless $B$ divides $N$, the last stride is short. With $N = 10$ and $B = 4$ the batches have 4, 4, and 2 samples, so an epoch has $\lceil N / B \rceil = 3$ batches. In integer arithmetic that ceiling is `(N + B - 1) // B`. The short batch is real data, and dropping it would mean those samples are never seen in that epoch; the loader keeps it, and the layers handle the smaller $B$ because nothing in `Linear.forward` assumed a particular batch size.
+
+{{< include _listings/05_dataloader/DataLoader.qmd >}}
+
+Two things to notice. First, `__iter__` is a generator, so the index list is rebuilt and the permutation drawn fresh every time a `for` loop starts over the loader; that is what "shuffle once per epoch" means in code, and it is why Chapter 8 gets a different order on every pass through its outer loop. Second, a batch is never materialized before it is needed. The generator retains its index list and current sample list while suspended at `yield`; the caller holds the returned batch. The next request resumes the loop and prepares the next batch synchronously. There is no background work between yields, and the caller can increase memory use by retaining old batches. `random.shuffle` is Python's in-place Fisher-Yates shuffle, which produces each of the $N!$ permutations with equal probability in one pass over the list. PyTorch splits this class in two, a `RandomSampler` that owns the permutation and a `DataLoader` that owns the strides, and the bridge section covers what else it adds.
+
+---
+
+## A Worked Trace
+
+Ten samples with two features each, $\mathbf{x}_i = [i,\ i + 0.5]$, and labels stored sorted, five zeros followed by five ones. I chose the features so that every row announces its own index, which makes the collated batch easy to read by eye.
+
+```python
+import random
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.dataloader import TensorDataset, DataLoader
+
+N, D = 10, 2
+inputs = Tensor(np.array([[i, i + 0.5] for i in range(N)]))
+targets = Tensor(np.array([0 if i < 5 else 1 for i in range(N)]))
+
+dataset = TensorDataset(inputs, targets)
+x3, y3 = dataset[3]
+print(x3.shape, x3.data.tolist(), y3.data.tolist())          # (2,) [3.0, 3.5] 0.0
+print(np.shares_memory(x3.data, inputs.data))                # False: the fetch copied
+```
+
+Sample 3 is a fresh tensor of shape $(2,)$ holding the third row, and its label is a scalar tensor. Without shuffling, the loader reproduces the sorted-batch problem from the opening; the label rows of the three batches are `[0, 0, 0, 0]`, `[0, 1, 1, 1]`, and `[1, 1]`, and `len(loader)` is $\lceil 10/4 \rceil = 3$.
+
+With `shuffle=True` the order changes. I seed Python's random generator first so the run is reproducible and you can check the numbers below by hand:
+
+```python
+random.seed(0)
+loader = DataLoader(dataset, batch_size=4, shuffle=True)
+for epoch in range(2):
+    for X, Y in loader:
+        print(epoch, X.shape, X.data.strides, X.data.ravel().tolist(), Y.data.tolist())
+```
+
+With seed 0 the first epoch's permutation on my machine is $\pi_1 = [7, 8, 1, 5, 3, 4, 2, 0, 9, 6]$, and you will see the same one, because `random.seed(0)` fixes the generator's state. The loader cuts it into strides of four.
+
+| Batch | Slice of $\pi_1$ | Sample indices | Labels | Shape |
+| :---: | :---: | :---: | :---: | :---: |
+| 0 | `[0:4]` | $[7, 8, 1, 5]$ | $[1, 1, 0, 1]$ | $(4, 2)$ |
+| 1 | `[4:8]` | $[3, 4, 2, 0]$ | $[0, 0, 0, 0]$ | $(4, 2)$ |
+| 2 | `[8:12]` | $[9, 6]$ | $[1, 1]$ | $(2, 2)$ |
+
+: Epoch 1 with seed 0. Every index appears exactly once across the three batches, and the last batch is short. {#tbl-dataloader-epoch1 tbl-colwidths="[12,20,28,22,18]"}
+
+Batch 0's buffer, read flat, is `[7.0, 7.5, 8.0, 8.5, 1.0, 1.5, 5.0, 5.5]` with shape $(4, 2)$ and strides `(8, 4)` in bytes, which is $(2, 1)$ in elements. These are the four scattered samples from the collation subsection. Sample 7 began at element offset 14 of the dataset's buffer and sample 1 at offset 2; each was copied by the fetch, by `np.stack`, and by the final `Tensor` construction, and now they sit at offsets 0 and 4 of one new buffer, adjacent, in the order the permutation drew them, eight floats in all. The label tensor is `[1.0, 1.0, 0.0, 1.0]` with shape $(4,)$. Batch 1 happens to be all class 0, which is the kind of thing a random draw of four from ten will do now and then; the difference from the sorted loop is that the next epoch will not repeat it.
+
+The second `for X, Y in loader` draws a new permutation, $\pi_2 = [9, 4, 8, 6, 0, 1, 7, 2, 3, 5]$.
+
+| Batch | Slice of $\pi_2$ | Sample indices | Labels | Shape |
+| :---: | :---: | :---: | :---: | :---: |
+| 0 | `[0:4]` | $[9, 4, 8, 6]$ | $[1, 0, 1, 1]$ | $(4, 2)$ |
+| 1 | `[4:8]` | $[0, 1, 7, 2]$ | $[0, 0, 1, 0]$ | $(4, 2)$ |
+| 2 | `[8:12]` | $[3, 5]$ | $[0, 1]$ | $(2, 2)$ |
+
+: Epoch 2 with the same loader. A fresh permutation changes both the order and which samples share a batch. {#tbl-dataloader-epoch2 tbl-colwidths="[12,20,28,22,18]"}
+
+Each index appears exactly once in a completed epoch, and features and labels keep the same index throughout retrieval and collation. Those are invariants. A fresh shuffle can change pairings, as it did in the two tables, but it can also repeat a previous pairing or even a whole permutation. Randomness gives a distribution over orders, not a guarantee that consecutive orders differ.
+
+The short batch exposes a contract that the training loop must preserve. If the three batch-mean losses are `L0`, `L1`, and `L2`, the epoch mean is `(4*L0 + 4*L1 + 2*L2) / 10`, not `(L0 + L1 + L2) / 3`. The loader supplies all ten samples; the trainer in @sec-training must give each sample equal weight when reporting loss or accumulating an update. Keeping the final batch is only useful if the consumer handles its actual size.
+
+---
+
+## From TinyTorch to Production
+
+PyTorch's `torch.utils.data` keeps the three roles exactly as built here, with the order given its own class. A `Dataset` implements `__len__` and `__getitem__`; a `Sampler` produces the index sequence (`RandomSampler` is the per-epoch permutation, `SequentialSampler` is `range(N)`); and `DataLoader` walks the sampler in strides of `batch_size` and calls a `collate_fn` whose default is `torch.stack` along a new leading axis, which is `_collate_batch` above with the same copy. Its `TensorDataset` indexes the stored tensor directly and hands back a view, so the fetch copy that Module 05 pays is skipped and only the stack copies. `len(loader)` is the same ceiling division. What changes is where the samples come from and what happens to a batch after collation.
+
+When `__getitem__` reads and decodes a file, the synchronous design makes the model wait for that work. With no overlap, a step takes loading time plus model-compute time. A background producer can prepare the next batch while the current batch is in use; in an ideal steady state, the slower stage then determines throughput. Worker startup, uneven sample costs, and finite queues keep that ideal from being an automatic speedup.
+
+PyTorch exposes this extension through `num_workers`: zero keeps loading in the main process, while a positive value enables worker processes. `prefetch_factor` controls how many batches each worker prepares in advance. This changes scheduling and memory use while preserving the dataset and collation contracts. [PyTorch data loading documentation](https://docs.pytorch.org/docs/2.14/data.html). TinyTorch leaves scheduling synchronous so one `next` request can be traced from index selection to the returned tensors.
+
+Moving a finished batch from a worker to the main process is the next cost. Python's default way to hand data between processes pickles it,[^fn-pickle-worker-handoff] which serializes and copies every byte. PyTorch instead places the batch tensor in **shared memory**, a region of RAM that the operating system maps into both processes at once, and sends only a small handle across; the main process then reads the same bytes the worker wrote, with no copy. The final hop is host memory to the GPU. Ordinary process memory is *pageable*, meaning the operating system may move it or swap it to disk at any moment, so the GPU's copy engine cannot be pointed at it directly. With `pin_memory=True` the loader copies each batch into **pinned memory**, host memory the operating system promises to leave in place, and the GPU's **DMA** (direct memory access) engine then pulls it across the PCIe link[^fn-pcie-host-device-copy] without involving the CPU. A nonblocking transfer can return before the copy completes. Overlap with computation additionally requires appropriate stream scheduling and hardware support; setting the flag alone does not establish an overlapping pipeline. This is the "pinned memory" stage in @fig-dataloader-pipeline.
+
+| Concern | TinyTorch (this chapter) | PyTorch `torch.utils.data` |
+| :--- | :--- | :--- |
+| Order | `random.shuffle(indices)` inside `__iter__` | `Sampler` classes; `generator=` for a seeded, reproducible order |
+| Lookup | `TensorDataset` copies one row per fetch, in one process | `Dataset.__getitem__` in `num_workers` processes, reading and decoding files |
+| Collation | `np.stack` inside `_collate_batch` | `default_collate` calling `torch.stack` in C |
+| Handoff | None (same process) | Shared-memory tensors between worker and main process |
+| Host to device | None | `pin_memory=True` plus DMA copy overlapped with compute |
+| Short last batch | Always kept | `drop_last=True` to discard it |
+
+: What the two loaders share and where they differ. The contract and the arithmetic are identical; the additions all address the cost of getting samples from disk to the GPU. {#tbl-dataloader-vs-pytorch tbl-colwidths="[18,36,46]"}
+
+Everything in the mental model carries over. The dataset contract is two methods, the permutation is redrawn every epoch and visits each index once, an epoch has $\lceil N/B \rceil$ batches, and a batch is a contiguous tensor whose row $i$ is sample $\pi(k+i)$ for the stride starting at $k$. The module also supplies `RandomCrop`, `RandomHorizontalFlip`, and `Compose`, but `TensorDataset.__getitem__` does not invoke them. A custom dataset can call a transform during lookup, or a caller can transform data beforehand. The choice affects whether each epoch draws new transformations. Merely constructing a transform does not insert it into the loader, and TinyTorch adds no worker parallelism.
+
+Three things to look for in your own training runs. If the GPU utilization readout is low and the profiler shows the step waiting on the loader, the fix is on the CPU side: more workers, `pin_memory=True`, or cheaper decoding by storing pre-resized images. If a compiled or graph-captured model (XLA, TensorRT, `torch.compile`) recompiles once per epoch, the culprit is usually the short last batch changing the input shape, and `drop_last=True` removes it. And if two runs with the same seed diverge, check that the shuffle's generator was seeded and that each worker's random state is derived from it; the batch order is part of the experiment, and a loader with unseeded shuffling is a different experiment every time.
+
+[^fn-pickle-worker-handoff]: **Pickling**: Python's built-in serialization, which turns an object into a byte string that another process can rebuild. For a 77 MB batch of 128 images at $224 \times 224 \times 3$ floats, pickling means writing, sending, and reading all 77 MB, which on one core costs tens of milliseconds per batch, comparable to the decode time the workers were added to hide.
+
+[^fn-pcie-host-device-copy]: **PCIe** (Peripheral Component Interconnect Express): the link between a computer's CPU and its expansion cards, including the GPU. A PCIe Gen4 x16 slot moves about 32 GB/s in each direction, so the 77 MB batch above takes roughly 2.5 ms to cross, which is why the copy is overlapped with compute rather than waited on.
+
+---
+
+## Summary
+
+You built the three pieces that turn a pile of samples into a stream of batches: a `Dataset` that answers `len` and index lookups, a per-epoch permutation that fixes the visiting order, and a `DataLoader` that walks the permutation in strides of $B$ and collates each stride into one contiguous $(B, D)$ tensor by copying rows back to back. With shuffling enabled, batches come from a permutation rather than repeated independent draws. A completed epoch visits each sample once, and collation must preserve feature-label pairing. The final batch can be smaller, so consumers must use its actual sample count when combining batch means. Production loaders keep the contract and the arithmetic unchanged and add workers, shared memory, and pinned host buffers only to hide the cost of reading samples from disk. Chapter 6 takes for granted that each training step receives one contiguous $(B, D)$ input batch and its targets, and asks how the gradient of the loss with respect to every parameter is computed from them.
+
+---
+
+## Exercises
+
+1. **A dataset that does not fit in memory**: Implement a `MemmapDataset` whose `__getitem__` reads row $i$ from a flat binary file on disk (with `numpy.memmap`, or a seek-and-read of $D$ floats) instead of from a tensor in RAM. The loader from this chapter should work on it unchanged. Separate the index list, current sample buffers, returned batch, and file mapping when accounting for memory. Which costs grow with sample count, and which grow with batch size?
+2. **Weighted sampling**: In a dataset with 99 percent negative and 1 percent positive samples, a uniform permutation cut into batches of 32 produces many batches with no positive sample at all. Implement a `WeightedSampler` that draws indices *with* replacement, index $i$ with probability proportional to a weight $w_i$, and plug it into `DataLoader.__iter__` in place of `random.shuffle`. Which of the two invariants from the worked trace does it give up?
+3. **How much prefetching is enough**: Each sample takes $t_{\text{io}} = 5$ ms to read and decode on one CPU core, and one training step takes $t_{\text{compute}} = 8$ ms on the GPU, with batch size 1. Work out the steady-state time per step when (a) loading and compute run in the same thread, (b) one background worker prepares the next sample during compute, and (c) $W$ workers share the loading. For which $W$ does the GPU stop waiting?

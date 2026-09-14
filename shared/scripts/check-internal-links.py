@@ -8,7 +8,7 @@ Scope on purpose:
     reachability is Lychee's job in CI; doing it here would make
     pre-commit slow and network-flaky.
 
-Why a separate tool from `book/binder`:
+Why a separate tool from `binder`:
   - The book toolchain owns Quarto cross-references (`@fig-foo`,
     `@sec-bar`), bibliography keys, label hygiene, etc.
   - This tool owns plain Markdown link integrity and works repo-wide

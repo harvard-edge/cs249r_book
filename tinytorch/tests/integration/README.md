@@ -45,7 +45,7 @@ This pattern catches the most common and frustrating bugs students encounter.
 </tr>
 </thead>
 <tbody>
-<tr><td><b>`test_dataloader_integration.py`</b></td><td>Data pipeline issues</td><td>05</td></tr>
+<tr><td><b>`test_dataloader_integration.py`</b></td><td>DataLoader inside a training loop</td><td>05, 08</td></tr>
 <tr><td><b>`test_module_dependencies.py`</b></td><td>Module dependency drift</td><td>All</td></tr>
 <tr><td><b>`test_optimizers_integration.py`</b></td><td>Optimizer/training interactions</td><td>06-08</td></tr>
 </tbody>
@@ -54,7 +54,6 @@ This pattern catches the most common and frustrating bugs students encounter.
 ### 🔬 Scenario Tests
 
 These test complete use cases:
-- `test_xor_thorough.py` - XOR learning (classic test)
 - `test_cnn_integration.py` - CNN on images
 - `test_nlp_pipeline_flow.py` - Language model pipeline flow
 - `test_training_capabilities.py` - End-to-end training capabilities

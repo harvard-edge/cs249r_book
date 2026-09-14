@@ -263,13 +263,13 @@ class TinyTorchStatusAnalyzer:
             # Test if module can be imported
             try:
                 # Create a temporary file to test import
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
                     # Write a minimal test to check if the module can be imported
                     test_code = f"""
 import sys
 sys.path.insert(0, '{module_path}')
 try:
-    exec(open('{dev_file}').read())
+    exec(open('{dev_file}', encoding='utf-8').read())
     print("SUCCESS: Module imports and runs")
 except Exception as e:
     print(f"ERROR: {{e}}")

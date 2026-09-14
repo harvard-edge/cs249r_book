@@ -94,12 +94,14 @@ class TestMLPerf:
         # Create and run minimal benchmark
         mlperf = MLPerf()
 
-        # Should at least be able to list available benchmarks
-        if hasattr(mlperf, 'list_benchmarks'):
-            benchmarks = mlperf.list_benchmarks()
-            assert isinstance(benchmarks, (list, dict)), (
-                "list_benchmarks should return a list or dict"
-            )
+        class Classifier:
+            def forward(self, x):
+                return Tensor([[0.0, 1.0]])
+        result = mlperf.run_standard_benchmark(
+            Classifier(), 'keyword_spotting', test_inputs=[Tensor([[1.0]])], labels=np.array([1]))
+        assert result['accuracy'] == 1.0
+        assert result['num_runs'] == 1
+        assert result['p99_latency_ms'] > 0
 
 
 class TestBenchmarkMetrics:

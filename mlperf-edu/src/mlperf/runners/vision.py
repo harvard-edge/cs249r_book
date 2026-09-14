@@ -27,6 +27,8 @@ from mlperf.runners.common import (
     configured_seed,
     select_torch_device,
     synchronize_device,
+    apply_precision,
+    resolve_precision,
 )
 
 
@@ -129,6 +131,7 @@ def run_image_classification_max(
     repetitions = int(
         os.environ.get("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_REPETITIONS", "50")
     )
+    precision = resolve_precision("MLPERF_EDU_IMAGE_CLASSIFICATION_PRECISION")
     if batch_size <= 0 or repetitions <= 0:
         raise ValueError(
             "image-classification batch size and repetitions must be positive"
@@ -171,6 +174,7 @@ def run_image_classification_max(
         num_workers=0,
     )
     model = load_mlperf_tiny_float_resnet(evaluation_paths["float_model"]).to(device)
+    model, execution_dtype = apply_precision(model, precision, device)
     n_params = sum(parameter.numel() for parameter in model.parameters())
 
     with torch.inference_mode():
@@ -247,6 +251,8 @@ def run_image_classification_max(
         "seed": seed,
         "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
+            "execution_dtype": execution_dtype,
+            "requested_precision": precision,
             "batch_size": batch_size,
             "repetitions": repetitions,
             "evaluation_samples": 200,
@@ -291,7 +297,7 @@ def run_image_classification_max(
         report_path=report_path,
         weights_path=evaluation_paths["float_model"],
         weights_n_params=n_params,
-        weights_dtype="float32",
+        weights_dtype=execution_dtype,
         dataset_name=dataset_asset.name,
         dataset_files=[*dataset_asset.files, evaluation_paths["performance_indices"]],
         rng_seed=seed,

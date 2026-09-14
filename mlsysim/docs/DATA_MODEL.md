@@ -1,6 +1,6 @@
 # MLSysSim Data Model
 
-Eight **zoos** (typed registries) plus support layers. Book LEGO cells and
+Ten **zoos** (typed registries) plus support layers. Book LEGO cells and
 tutorials should prefer zoos + `mlsysim.physics.*` + explicit operands.
 Measurement units live in `core/units.py`, physical constants in
 `physics/constants.py`, and domain values in registries; the former
@@ -15,7 +15,9 @@ that populate Layers A–D of that stack.
 
 | Zoo | Registry | Role |
 |-----|----------|------|
-| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, … | Chip/board/appliance specs (datasheet truth). **Canonical paths only** — no bare `Hardware.H100`. |
+| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Embodied.*`, … | Chip/board/appliance specs (datasheet truth). **Canonical paths only** — no bare `Hardware.H100`. |
+| Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*` | Cyber-physical machine platforms and archetypes across the four Physical AI classes. |
+| Agents | `Agents.Coding.*`, `Agents.Deliberation.*`, `Agents.MultiAgent.*`, `Agents.Interactive.*` | Agentic ML system profiles, execution harnesses, and test-time search architectures. |
 | Models | `Models.*` | Workloads and architectures (parameters, layers, FLOPs). |
 | Datasets | `Datasets.*` | Data zoo — ImageNet, MNIST, CIFAR, etc. |
 | Platforms | `Platforms.*` | Abstract deployment envelopes (RAM, storage, latency ranges). Replaces `Systems.Tiers`. |

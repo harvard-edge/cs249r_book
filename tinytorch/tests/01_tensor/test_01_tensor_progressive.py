@@ -60,7 +60,7 @@ class TestModule01TensorCore:
             assert t2.shape == (2, 2), "Numpy integration failed"
 
         except ImportError:
-            assert True, "Tensor not implemented yet (expected)"
+            raise
 
     def test_tensor_operations(self):
         """Test basic tensor operations work."""
@@ -77,7 +77,7 @@ class TestModule01TensorCore:
                 assert np.array_equal(result.data, expected), "Tensor addition failed"
 
         except ImportError:
-            assert True, "Tensor operations not implemented yet (expected)"
+            raise
 
 
 class TestProgressiveStack:
@@ -108,8 +108,7 @@ class TestProgressiveStack:
             assert isinstance(t.data, np.ndarray), "Tensor-numpy integration broken"
 
         except ImportError:
-            # If tensor not implemented, that's expected
-            assert sys.version_info >= (3, 8), "Python environment broken"
+            raise
 
 
 class TestDependencyValidation:
@@ -122,9 +121,7 @@ class TestDependencyValidation:
             t = Tensor([1, 2, 3])
             assert t.shape == (3,), "Module 01 Tensor export broken"
         except ImportError:
-            # If not implemented, verify basic environment works
-            import platform
-            assert platform.system() in ['Darwin', 'Linux', 'Windows'], "Basic environment broken"
+            raise
 
     def test_module_01_tensor_uses_numpy(self):
         """Test Module 01 Tensor correctly uses NumPy foundation."""
@@ -141,7 +138,7 @@ class TestDependencyValidation:
                 assert True, "Module 01 advanced features present"
 
         except ImportError:
-            assert True, "Module 01 not implemented yet"
+            raise
 
 
 class TestRegressionPrevention:

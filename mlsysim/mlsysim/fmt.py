@@ -672,8 +672,7 @@ def fmt_usd(
     for percentages). It exists so the Pandoc/LaTeX escaping detail of a prose
     dollar sign lives in exactly one place: a bare ``$`` in body prose opens a
     math span and silently swallows downstream tokens, so currency must render
-    as the escaped ``\\$`` (see ``.claude/rules/numbers-and-math-in-prose.md``
-    §4). Authors never type a dollar sign and never type ``prefix=``; they call
+    as the escaped ``\\$``. Authors never type a dollar sign and never type ``prefix=``; they call
     ``fmt_usd(...)`` and the escaping, the optional ``~`` approximation marker,
     and integer rounding are all handled here.
 
@@ -1415,6 +1414,7 @@ _RATE_UNITS = {
     "deploys/week",
     "checkpoints/hour",
     "windows/month",
+    "false wake/month",  # singular: a rate of exactly 1 must not read "1 false wakes"
     "false wakes/month",
     "feature reads/request",
     "queries/month",
@@ -1876,8 +1876,7 @@ def _compact_unit_suffix(display_unit) -> str:
     if str(display_unit) in {"dollar", "USD", "EUR"}:
         raise ValueError(
             "fmt_qty() does not format currency. Use fmt_usd(amount, ...) so the "
-            "dollar sign is escaped for prose and no literal 'USD' is emitted. "
-            "See .claude/rules/numbers-and-math-in-prose.md §4."
+            "dollar sign is escaped for prose and no literal 'USD' is emitted."
         )
     try:
         label = f"{_coerce_unit(display_unit):~P}"
@@ -2354,6 +2353,18 @@ def _pick_latency_unit(qty):
     if mag < 3600:
         return minute
     return hour
+
+
+def _pick_frequency_unit(qty):
+    mag = abs(qty.to(ureg.hertz).magnitude)
+    if mag >= 1e9:
+        return ureg.gigahertz
+    if mag >= 1e6:
+        return ureg.megahertz
+    if mag >= 1e3:
+        return ureg.kilohertz
+    return ureg.hertz
+
 
 
 def fmt_power(
@@ -2905,7 +2916,9 @@ def _memory_capacity_unit_label(display_unit):
     return None
 
 
-def fmt_memory_capacity(quantity, *, unit=None, precision=None, commas=False):
+def fmt_memory_capacity(
+    quantity, *, unit=None, precision=None, commas=False, approx=False
+):
     """Format branded hardware memory capacities.
 
     Hardware spec sheets commonly label binary memory capacities with decimal
@@ -2928,6 +2941,7 @@ def fmt_memory_capacity(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
+        approx=approx,
         unit_label=_memory_capacity_unit_label(display_unit),
         trim_trailing_zeros=auto_precision,
     )
@@ -3070,6 +3084,80 @@ def fmt_latency(duration, *, unit=None, precision=None, commas=False):
         commas=commas,
         style="symbol",
         trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_frequency(quantity, *, unit=None, precision=None, commas=False):
+    """Format frequency quantities for prose (Hz, kHz, MHz, GHz)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_frequency() requires a Pint Quantity.")
+    if (1 * quantity).dimensionality != (1 * ureg.hertz).dimensionality:
+        raise ValueError(f"fmt_frequency unit must have frequency dimensionality (1/s), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_frequency_unit(quantity)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+
+
+def fmt_acceleration(quantity, *, unit=None, precision=None, commas=False):
+    """Format acceleration quantities for prose (m/s²)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_acceleration() requires a Pint Quantity.")
+    accel_dim = (1 * (ureg.meter / (ureg.second**2))).dimensionality
+    if (1 * quantity).dimensionality != accel_dim:
+        raise ValueError(f"fmt_acceleration unit must have acceleration dimensionality (m/s²), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.meter / (ureg.second**2))
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+
+
+def fmt_torque(quantity, *, unit=None, precision=None, commas=False):
+    """Format torque/moment quantities for prose (N·m)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_torque() requires a Pint Quantity.")
+    torque_dim = (1 * (ureg.newton * ureg.meter)).dimensionality
+    if (1 * quantity).dimensionality != torque_dim:
+        raise ValueError(f"fmt_torque unit must have torque dimensionality (N·m), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton * ureg.meter)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label="N·m",
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_token_rate(
+    value,
+    *,
+    unit="tokens/s",
+    precision=0,
+    commas=True,
+    scale=None,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+    allow_negative=False,
+):
+    """Format an LLM token generation or ingestion rate (tokens/s)."""
+    return fmt_rate(
+        value,
+        unit=unit,
+        precision=precision,
+        commas=commas,
+        scale=scale,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        allow_negative=allow_negative,
     )
 
 

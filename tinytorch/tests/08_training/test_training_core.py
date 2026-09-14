@@ -42,10 +42,7 @@ class TestTrainingLoop:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         from tinytorch.core.optimizers import SGD
-        from tinytorch.core.autograd import enable_autograd
-
-        enable_autograd()
-
+        import tinytorch.core.autograd
         layer = Linear(2, 1)
         initial_weights = layer.weight.data.copy()
 
@@ -83,11 +80,7 @@ class TestTrainingLoop:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         from tinytorch.core.optimizers import SGD
-        from tinytorch.core.autograd import enable_autograd
-
-        enable_autograd()
-
-        # Simple linear regression
+        import tinytorch.core.autograd
         layer = Linear(1, 1)
         # Use smaller learning rate to prevent gradient explosion
         optimizer = SGD(layer.parameters(), lr=0.01)
@@ -131,10 +124,7 @@ class TestTrainingLoop:
         from tinytorch.core.losses import MSELoss
         from tinytorch.core.optimizers import SGD
         from tinytorch.core.training import Trainer
-        from tinytorch.core.autograd import enable_autograd
-
-        enable_autograd()
-
+        import tinytorch.core.autograd
         def build_model():
             layer = Linear(1, 1)
             layer.weight.data = np.array([[1.0]], dtype=np.float32)
@@ -187,10 +177,7 @@ class TestTrainingUtilities:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         from tinytorch.core.optimizers import SGD
-        from tinytorch.core.autograd import enable_autograd
-
-        enable_autograd()
-
+        import tinytorch.core.autograd
         layer = Linear(2, 1)
         optimizer = SGD(layer.parameters(), lr=0.1)
 

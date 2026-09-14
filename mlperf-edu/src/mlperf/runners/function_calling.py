@@ -773,9 +773,32 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
         )
     samples = _load_resumable_samples(samples_path, tasks)
     resumed_examples = len(samples)
-    execution_dtype = torch.float32
-    if device.type in {"cuda", "mps"}:
-        execution_dtype = torch.bfloat16
+    # The default binds dtype to the device: float32 on CPU, bfloat16 on an
+    # accelerator. That is the contract's behaviour and is preserved, but it
+    # means a CPU-versus-accelerator comparison varies precision and backend
+    # together. MLPERF_EDU_FUNCTION_CALLING_PRECISION pins the dtype explicitly
+    # so the two axes can be separated, which the Machine lens needs in order to
+    # report a backend ratio that is not confounded with a dtype change.
+    _dtype_by_name = {
+        "float32": torch.float32,
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+    }
+    _requested_precision = os.environ.get("MLPERF_EDU_FUNCTION_CALLING_PRECISION")
+    if _requested_precision:
+        _requested_precision = _requested_precision.lower()
+        if _requested_precision not in _dtype_by_name:
+            raise ValueError(
+                "MLPERF_EDU_FUNCTION_CALLING_PRECISION must be one of "
+                + ", ".join(sorted(_dtype_by_name))
+                + f"; got {_requested_precision!r}"
+            )
+        execution_dtype = _dtype_by_name[_requested_precision]
+    else:
+        execution_dtype = torch.float32
+        if device.type in {"cuda", "mps"}:
+            execution_dtype = torch.bfloat16
+        _requested_precision = "device-default"
     if len(samples) < len(tasks):
         tokenizer = AutoTokenizer.from_pretrained(snapshot, local_files_only=True)
         model = (
@@ -817,7 +840,24 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
     if not math.isfinite(evaluation_seconds) or evaluation_seconds <= 0:
         raise RuntimeError("function-calling evaluation duration must be positive")
     score = float(evaluation["non_live_ast_accuracy"])
-    target = float(workload.quality_value or TARGET_ACCURACY)
+    # The target is inherited from the contract, never substituted. A
+    # missing contract target used to fall back to the constant below,
+    # which would have silently replaced an inherited target with one
+    # baked into this runner. That is exactly the discretion the suite
+    # exists to remove, so it raises instead. `is None` rather than a
+    # truthiness test, because a legitimate target of 0.0 is falsy.
+    if workload.quality_value is None:
+        raise ValueError(
+            "function-calling has no inherited quality target in its contract; "
+            "refusing to substitute the runner constant TARGET_ACCURACY"
+        )
+    target = float(workload.quality_value)
+    if abs(target - TARGET_ACCURACY) > 1e-9:
+        raise ValueError(
+            "function-calling contract target "
+            f"{target} disagrees with the pinned reference TARGET_ACCURACY; "
+            "resolve which is authoritative before recording a verdict"
+        )
     tolerance = float(workload.quality_tolerance or 0.0)
     target_met = score + tolerance >= target
     report = {

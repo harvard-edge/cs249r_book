@@ -37,7 +37,7 @@ class TestTrainingCore:
             assert Trainer is not None, "Trainer class not found"
             
         except ImportError:
-            assert True, "Trainer not implemented yet"
+            raise
 
     def test_trainer_initialization(self):
         """
@@ -61,9 +61,9 @@ class TestTrainingCore:
             assert hasattr(trainer, 'optimizer'), "Trainer missing optimizer"
             
         except ImportError:
-            assert True, "Trainer initialization not ready yet"
+            raise
         except TypeError:
-            assert True, "Trainer signature may differ"
+            raise
 
     def test_training_step(self):
         """
@@ -86,18 +86,17 @@ class TestTrainingCore:
             batch_x = Tensor(rng.standard_normal((4, 5)))
             batch_y = Tensor(rng.standard_normal((4, 2)))
             
-            # Run training step
-            if hasattr(trainer, 'train_step'):
-                loss = trainer.train_step(batch_x, batch_y)
-                assert loss is not None, "Training step returned None"
-            elif hasattr(trainer, 'step'):
-                loss = trainer.step(batch_x, batch_y)
-                assert loss is not None, "Step returned None"
-                
+            # The public unit of training is an epoch; one batch is one step.
+            before = model.weight.data.copy()
+            loss = trainer.train_epoch([(batch_x, batch_y)])
+            assert np.isfinite(loss)
+            assert trainer.step == 1
+            assert not np.array_equal(model.weight.data, before)
+
         except ImportError:
-            assert True, "Training step not ready yet"
+            raise
         except TypeError:
-            assert True, "Training step signature may differ"
+            raise
 
     def test_training_epoch(self):
         """
@@ -125,17 +124,14 @@ class TestTrainingCore:
             # Create trainer
             trainer = Trainer(model=model, optimizer=optimizer, loss_fn=loss_fn)
             
-            # Run epoch
-            if hasattr(trainer, 'train_epoch'):
-                avg_loss = trainer.train_epoch(dataloader)
-                assert avg_loss is not None, "Epoch returned None"
-            elif hasattr(trainer, 'fit'):
-                trainer.fit(dataloader, epochs=1)
-                
+            avg_loss = trainer.train_epoch(dataloader)
+            assert np.isfinite(avg_loss)
+            assert trainer.step == len(dataloader)
+
         except ImportError:
-            assert True, "Training epoch not ready yet"
+            raise
         except TypeError:
-            assert True, "Epoch method signature may differ"
+            raise
 
 
 class TestManualTrainingLoop:
@@ -200,7 +196,7 @@ class TestManualTrainingLoop:
             assert len(losses) == 3, "Training loop didn't complete"
             
         except ImportError as e:
-            assert True, f"Manual training loop not ready: {e}"
+            raise
 
     def test_learning_verification(self):
         """
@@ -235,15 +231,10 @@ class TestManualTrainingLoop:
                     loss.backward()
                     optimizer.step()
             
-            # Loss should decrease
-            if len(losses) > 1 and losses[-1] < losses[0]:
-                assert True, "Learning verified"
-            else:
-                # Even if autograd isn't working, test passes
-                assert True, "Training executed"
-                
+            assert losses[-1] < losses[0], "Training must reduce loss on this fixed problem"
+
         except ImportError as e:
-            assert True, f"Learning verification not ready: {e}"
+            raise
 
 
 class TestTrainingUtilities:
@@ -277,7 +268,7 @@ class TestTrainingUtilities:
             assert all(isinstance(l, float) for l in losses), "Losses not floats"
             
         except ImportError as e:
-            assert True, f"Loss tracking not ready: {e}"
+            raise
 
     def test_batch_processing(self):
         """
@@ -307,7 +298,7 @@ class TestTrainingUtilities:
             assert sum(outputs) == 100, "Batch processing incomplete"
             
         except ImportError as e:
-            assert True, f"Batch processing not ready: {e}"
+            raise
 
 
 class TestRegressionPrevention:
@@ -403,7 +394,7 @@ class TestRegressionPrevention:
             assert hasattr(x, 'grad'), "Autograd grad attribute broken"
             
         except TypeError:
-            assert True, "Autograd may use different interface"
+            raise
         except Exception as e:
             assert False, f"Module 06 regression: {e}"
 
@@ -477,24 +468,18 @@ class TestModule08Completion:
             if sum(1 for _ in dataloader) == 5:
                 capabilities["Batch iteration"] = True
             
-            # Test 4: Manual training loop
-            try:
-                for batch_x, batch_y in dataloader:
-                    pred = layer(batch_x)
-                    loss = loss_fn(pred, batch_y)
-                    if hasattr(loss, 'backward'):
-                        optimizer.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-                capabilities["Manual training loop"] = True
-            except:
-                pass
-            
-            completed = sum(capabilities.values())
-            total = len(capabilities)
-            
-            # Pass if basic training infrastructure exists
-            assert completed >= 3, f"Training not ready: {capabilities}"
+            # Test 4: Manual training loop. A failure here is a real failure --
+            # swallowing it would let "training is broken" score 3/4 and pass.
+            for batch_x, batch_y in dataloader:
+                pred = layer(batch_x)
+                loss = loss_fn(pred, batch_y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            capabilities["Manual training loop"] = True
+
+            missing = [k for k, v in capabilities.items() if not v]
+            assert not missing, f"Training capabilities missing: {missing}"
             
         except ImportError as e:
             assert False, f"Module 08 import failed: {e}"

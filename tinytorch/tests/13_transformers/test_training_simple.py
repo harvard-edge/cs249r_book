@@ -150,7 +150,6 @@ def test_transformer_memorization():
 
     print("\n✅ Transformer successfully memorized dataset!")
     print(f"   Loss decreased {loss_decrease_pct:.1f}% in {elapsed:.1f}s")
-    return True
 
 
 def test_transformer_convergence_rate():
@@ -230,7 +229,6 @@ def test_transformer_convergence_rate():
         f"Convergence too slow: {step} steps (expected <700). Training may be unstable."
 
     print(f"✅ Convergence rate is acceptable ({step} steps)")
-    return True
 
 
 if __name__ == "__main__":

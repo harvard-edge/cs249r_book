@@ -20,6 +20,27 @@ from pathlib import Path
 import pytest
 
 
+def _jupyter(*args):
+    """Run jupyter from the interpreter running the tests, not from PATH.
+
+    Prefers `python -m jupyter` so it uses the active test interpreter directly
+    and avoids rigid or stale shebang headers in venv/bin/ scripts.
+    """
+    try:
+        res = subprocess.run(
+            [sys.executable, "-m", "jupyter"] + list(args),
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        if res.returncode == 0 or "No module named jupyter" not in res.stderr:
+            return res
+    except Exception:
+        pass
+    exe = Path(sys.executable).parent / "jupyter"
+    cmd = [str(exe)] if exe.exists() else ["jupyter"]
+    return subprocess.run(cmd + list(args), capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
+
+
 class TestPythonEnvironment:
     """Verify Python environment is correctly configured."""
 
@@ -30,29 +51,32 @@ class TestPythonEnvironment:
         )
         print(f"✅ Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 
-    def test_virtual_environment_active(self):
-        """Virtual environment should be active."""
-        # Check if we're in a virtual environment
-        in_venv = (
-            os.environ.get('VIRTUAL_ENV') is not None or
-            (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix) or
-            hasattr(sys, 'real_prefix')
-        )
+    def test_package_installer_available(self):
+        """A package installer must be available: pip or uv.
 
-        if not in_venv:
-            print("⚠️  Virtual environment not active (optional but recommended)")
-        else:
-            print(f"✅ Virtual environment active: {sys.prefix}")
-
-    def test_pip_available(self):
-        """pip must be available for package management."""
-        result = subprocess.run(
+        This asserted pip specifically until 2026-09-09, which failed on every
+        correctly configured machine, because the project's environment is built
+        by uv and uv does not install pip into it. What a student needs is an
+        installer, not one particular installer.
+        """
+        pip = subprocess.run(
             [sys.executable, "-m", "pip", "--version"],
-            capture_output=True,
-            text=True
+            capture_output=True, text=True, encoding='utf-8', errors='replace'
         )
-        assert result.returncode == 0, "pip not available"
-        print(f"✅ pip available: {result.stdout.strip()}")
+        if pip.returncode == 0:
+            print(f"✅ pip available: {pip.stdout.strip()}")
+            return
+
+        uv = subprocess.run(
+            ["uv", "--version"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace'
+        )
+        assert uv.returncode == 0, (
+            "No package installer found. Install one of:\n"
+            "  pip:  python -m ensurepip --upgrade\n"
+            "  uv:   curl -LsSf https://astral.sh/uv/install.sh | sh"
+        )
+        print(f"✅ uv available: {uv.stdout.strip()}")
 
 
 class TestCoreDependencies:
@@ -118,7 +142,7 @@ class TestCoreDependencies:
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "--version"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "pytest not available"
         print(f"✅ pytest available: {result.stdout.strip()}")
@@ -168,31 +192,19 @@ class TestJupyterEnvironment:
 
     def test_jupyter_command_available(self):
         """Jupyter command must be available."""
-        result = subprocess.run(
-            ["jupyter", "--version"],
-            capture_output=True,
-            text=True
-        )
+        result = _jupyter("--version")
         assert result.returncode == 0, "jupyter command not found"
         print(f"✅ jupyter command available:\n{result.stdout.strip()}")
 
     def test_jupyter_lab_command(self):
         """JupyterLab command must be available."""
-        result = subprocess.run(
-            ["jupyter", "lab", "--version"],
-            capture_output=True,
-            text=True
-        )
+        result = _jupyter("lab", "--version")
         assert result.returncode == 0, "jupyter lab command not found"
         print(f"✅ jupyter lab command available: {result.stdout.strip()}")
 
     def test_jupyter_kernelspec(self):
         """Jupyter kernel must be configured."""
-        result = subprocess.run(
-            ["jupyter", "kernelspec", "list"],
-            capture_output=True,
-            text=True
-        )
+        result = _jupyter("kernelspec", "list")
         assert result.returncode == 0, "Cannot list Jupyter kernels"
         assert "python3" in result.stdout, "Python3 kernel not found"
         print(f"✅ Jupyter kernel configured:\n{result.stdout.strip()}")
@@ -298,45 +310,6 @@ class TestSystemResources:
         assert free_gb >= 1.0, f"Low disk space: {free_gb:.1f}GB (need at least 1GB)"
         print(f"✅ Disk space: {free_gb:.1f}GB available")
 
-    def test_memory_available(self):
-        """Check available system memory."""
-        try:
-            import psutil
-            mem = psutil.virtual_memory()
-            free_gb = mem.available / (1024**3)
-            total_gb = mem.total / (1024**3)
-
-            if free_gb < 2.0:
-                print(f"⚠️  Low memory: {free_gb:.1f}GB free / {total_gb:.1f}GB total (may cause issues)")
-            else:
-                print(f"✅ Memory: {free_gb:.1f}GB free / {total_gb:.1f}GB total")
-        except ImportError:
-            print("⚠️  psutil not available - memory check skipped (optional)")
-
-    def test_python_interpreter_architecture(self):
-        """Check Python interpreter architecture."""
-        import platform
-
-        arch = platform.machine()
-        system = platform.system()
-
-        print(f"✅ Architecture: {arch} on {system}")
-
-        # Warn about Rosetta on Apple Silicon
-        if system == "Darwin" and arch == "x86_64":
-            try:
-                result = subprocess.run(
-                    ["sysctl", "-n", "machdep.cpu.brand_string"],
-                    capture_output=True,
-                    text=True
-                )
-                if "Apple" in result.stdout:
-                    print("⚠️  Running x86_64 Python on Apple Silicon (Rosetta)")
-                    print("   Consider using native arm64 Python for better performance")
-            except:
-                pass
-
-
 class TestGitConfiguration:
     """Verify Git is configured for version control."""
 
@@ -345,38 +318,10 @@ class TestGitConfiguration:
         result = subprocess.run(
             ["git", "--version"],
             capture_output=True,
-            text=True
+            text=True, encoding='utf-8', errors='replace'
         )
         assert result.returncode == 0, "git command not found"
         print(f"✅ Git available: {result.stdout.strip()}")
-
-    def test_git_user_configured(self):
-        """Git user.name and user.email should be configured."""
-        name_result = subprocess.run(
-            ["git", "config", "user.name"],
-            capture_output=True,
-            text=True
-        )
-        email_result = subprocess.run(
-            ["git", "config", "user.email"],
-            capture_output=True,
-            text=True
-        )
-
-        if name_result.returncode != 0 or email_result.returncode != 0:
-            print("⚠️  Git user not configured (optional but recommended)")
-        else:
-            print(f"✅ Git user configured: {name_result.stdout.strip()} <{email_result.stdout.strip()}>")
-
-    def test_git_repository_initialized(self):
-        """Project should be a git repository."""
-        git_dir = Path(".git")
-
-        if not git_dir.exists():
-            print("⚠️  Not a git repository (optional)")
-        else:
-            print("✅ Git repository initialized")
-
 
 class TestStudentProtection:
     """Verify student protection system is configured."""
@@ -391,7 +336,7 @@ class TestStudentProtection:
         if module_dirs:
             test_file = list(module_dirs[0].glob("*.py"))
             if test_file:
-                content = test_file[0].read_text()
+                content = test_file[0].read_text(encoding='utf-8')
                 assert len(content) > 0, "Cannot read source files"
                 print(f"✅ Source files readable: {test_file[0]}")
 

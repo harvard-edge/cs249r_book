@@ -18,12 +18,24 @@ Usage:
 import subprocess
 import sys
 import os
+import re
 import pytest
 from pathlib import Path
 
 
 # Get the tinytorch root directory
 TINYTORCH_ROOT = Path(__file__).parent.parent.parent
+
+
+def reported_accuracy(output: str, label: str) -> float:
+    """Read one named final-results row, never a target or progress percentage."""
+    # 2026-09-11: max(any percentage) let missing/poor final accuracy pass.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    matches = re.findall(re.escape(label) + r"[ \t│|:]+(\d+(?:\.\d+)?)%", plain)
+    assert len(matches) == 1, f"Expected one final {label!r} metric, found {matches}"
+    value = float(matches[0])
+    assert 0 <= value <= 100, f"Invalid accuracy: {value}%"
+    return value
 
 
 def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tuple[int, str, str]:
@@ -41,7 +53,11 @@ def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tu
     # Use the bin/tito script directly
     tito_script = TINYTORCH_ROOT / "bin" / "tito"
 
+    # Invoke bin/tito with the interpreter running the tests, not the shebang's
+    # `env python3`. Otherwise the milestone runs under whatever python3 happens
+    # to be first on PATH, which may not be the venv pytest is running in.
     cmd = [
+        sys.executable,
         str(tito_script),
         "milestone", "run", milestone_id,
         "--skip-checks"  # Skip prerequisite checks since we're testing
@@ -59,7 +75,7 @@ def run_milestone(milestone_id: str, part: int = None, timeout: int = 300) -> tu
         cmd,
         cwd=TINYTORCH_ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding='utf-8', errors='replace',
         timeout=timeout,
         env=env,
         input="n\nn\nn\n"  # Answer 'n' to any prompts
@@ -121,16 +137,8 @@ class TestMilestoneRuns:
         # Should use TinyDigits (not CIFAR)
         assert "TinyDigits" in stdout or "tinydigits" in stdout.lower() or "8x8" in stdout
 
-        # Should achieve reasonable accuracy (>70%)
-        # Look for accuracy numbers in the output
-        import re
-        accuracy_matches = re.findall(r'(\d+(?:\.\d+)?)\s*%', stdout)
-        if accuracy_matches:
-            # Get the highest accuracy mentioned (likely final test accuracy)
-            accuracies = [float(a) for a in accuracy_matches if float(a) <= 100]
-            if accuracies:
-                max_accuracy = max(accuracies)
-                assert max_accuracy >= 70, f"CNN accuracy too low: {max_accuracy}%"
+        accuracy = reported_accuracy(stdout, "Test Accuracy")
+        assert accuracy >= 70, f"CNN final test accuracy too low: {accuracy}%"
 
     @pytest.mark.slow
     def test_milestone_05_transformer(self):
@@ -142,14 +150,8 @@ class TestMilestoneRuns:
         # Should mention attention/transformer
         assert "attention" in stdout.lower() or "transformer" in stdout.lower()
 
-        # Should achieve good accuracy on reversal task (>90%)
-        import re
-        accuracy_matches = re.findall(r'(\d+(?:\.\d+)?)\s*%', stdout)
-        if accuracy_matches:
-            accuracies = [float(a) for a in accuracy_matches if float(a) <= 100]
-            if accuracies:
-                max_accuracy = max(accuracies)
-                assert max_accuracy >= 90, f"Transformer accuracy too low: {max_accuracy}%"
+        accuracy = reported_accuracy(stdout, "1. Reversal")
+        assert accuracy >= 95, f"Transformer final reversal accuracy too low: {accuracy}%"
 
     @pytest.mark.slow
     def test_milestone_06_mlperf(self):
@@ -180,7 +182,7 @@ class TestMilestoneSequence:
         # The individual test_milestone_05_transformer test validates the actual learning objective
         if milestone_id == "05":
             # Check that reversal (Challenge 1) passed - this is the core learning objective
-            assert "Reversal" in stdout and "PASSED" in stdout, (
+            assert reported_accuracy(stdout, "1. Reversal") >= 95, (
                 f"Milestone 05 reversal challenge should pass:\n"
                 f"stdout: {stdout[-2000:] if len(stdout) > 2000 else stdout}"
             )

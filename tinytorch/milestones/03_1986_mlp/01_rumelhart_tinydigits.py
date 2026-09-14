@@ -72,7 +72,7 @@ import pickle
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Import TinyTorch components YOU BUILT!
 from tinytorch import Tensor, Linear, ReLU, CrossEntropyLoss, SGD
@@ -175,7 +175,7 @@ class DigitMLP:
         # Flatten if needed (8×8 → 64)
         if len(x.data.shape) > 2:
             batch_size = x.data.shape[0]
-            x = Tensor(x.data.reshape(batch_size, -1))
+            x = x.reshape(batch_size, -1)
 
         # Hidden layer
         x = self.fc1(x)
@@ -468,6 +468,7 @@ def train_mlp():
     with Live(console=console, refresh_per_second=10) as live:
         for epoch in range(epochs):
             epoch_loss = 0.0
+            sample_count = 0
             batch_count = 0
 
             for batch_images, batch_labels in train_loader:
@@ -482,7 +483,8 @@ def train_mlp():
                 optimizer.step()
                 optimizer.zero_grad()
 
-                epoch_loss += loss.data
+                epoch_loss += float(loss.data) * batch_images.shape[0]
+                sample_count += batch_images.shape[0]
                 batch_count += 1
 
                 # Update spinner with current batch progress
@@ -491,7 +493,7 @@ def train_mlp():
                 spinner_text.append(f"Epoch {epoch+1:2d}/{epochs}  Batch {batch_count}/{len(train_loader)}")
                 live.update(spinner_text)
 
-            avg_loss = epoch_loss / batch_count
+            avg_loss = epoch_loss / sample_count
 
             # Evaluate on both train and test to detect overfitting
             train_acc, _ = evaluate_accuracy(model, train_images, train_labels)

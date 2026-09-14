@@ -35,17 +35,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Import order matters: autograd must be enabled AFTER all modules are imported
-# so that enable_autograd() can patch their forward methods correctly.
+# so that Module 06's backward completions are attached to them.
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid, Tanh, GELU
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
-from tinytorch.core.autograd import enable_autograd
-
-enable_autograd()
-
-
-# -----------------------------------------------
+import tinytorch.core.autograd  # completes every operation with its backward half
 # Finite difference helpers
 # -----------------------------------------------
 

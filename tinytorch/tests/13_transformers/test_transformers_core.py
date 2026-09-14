@@ -26,7 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.transformers import TransformerBlock
 
@@ -94,8 +94,6 @@ class TestTransformerGradients:
         output = x + f(x)
         d_output/d_x = 1 + df/dx (always ≥ 1!)
         """
-        enable_autograd()
-
         block = TransformerBlock(embed_dim=64, num_heads=4)
         x = Tensor(rng.standard_normal((1, 5, 64)), requires_grad=True)
 

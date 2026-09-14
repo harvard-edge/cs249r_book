@@ -15,7 +15,9 @@ from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
+    apply_precision,
     configured_seed,
+    resolve_precision,
     select_torch_device,
     synchronize_device,
 )
@@ -136,6 +138,7 @@ def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[st
         os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_REPETITIONS", 5)
     )
     max_length = int(os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_LENGTH", 128))
+    precision = resolve_precision("MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION")
     if batch_size < 1 or repetitions < 1 or max_length < 1:
         raise ValueError(
             "text classification requires positive batch, repetition, and length values"
@@ -163,6 +166,7 @@ def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[st
         .to(device)
         .eval()
     )
+    model, execution_dtype = apply_precision(model, precision, device)
     sentences, labels = _load_sst2_validation(sst2_paths()["validation"])
     encoded = tokenizer(
         sentences,
@@ -247,7 +251,8 @@ def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[st
             "max_length": max_length,
             "padding": "max_length",
             "truncation": True,
-            "execution_dtype": "float32",
+            "execution_dtype": execution_dtype,
+            "requested_precision": precision,
         },
         "metrics": {
             "accuracy": accuracy,
@@ -286,7 +291,7 @@ def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[st
         weights_name=DISTILBERT_REPO_ID,
         weights_revision=DISTILBERT_REVISION,
         weights_n_params=n_params,
-        weights_dtype="float32",
+        weights_dtype=execution_dtype,
         dataset_name=asset.name,
         dataset_files=list(asset.files),
         rng_seed=seed,

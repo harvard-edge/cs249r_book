@@ -80,15 +80,15 @@ export default defineConfig({
         // --- Destinations ---
         const destinations = [
           { 
-            path: resolve(__dirname, '../book/quarto/tools/scripts/socratiQ'), 
+            path: resolve(__dirname, '../books/tools/scripts/socratiQ'), 
             name: "Quarto Source" 
           },
           { 
-            path: resolve(__dirname, '../book/quarto/_build/html-vol1/tools/scripts/socratiQ'), 
+            path: resolve(__dirname, '../books/_build/html-vol1/tools/scripts/socratiQ'), 
             name: "Quarto Build Vol1" 
           },
           { 
-            path: resolve(__dirname, '../book/quarto/_build/html-vol2/tools/scripts/socratiQ'), 
+            path: resolve(__dirname, '../books/_build/html-vol2/tools/scripts/socratiQ'), 
             name: "Quarto Build Vol2" 
           }
         ];

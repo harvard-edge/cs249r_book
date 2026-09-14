@@ -954,8 +954,8 @@ settle the plan.
 **Source model**
 
 Hardware identity comes from `{v2_02_packet['hardware_ref']}`. Track thresholds
-are notebook-local teaching envelopes for this Wave 5 lab and are recorded in
-the report source trace.
+are teaching envelopes chosen for this lab and are recorded in the lab
+report.
 """
                     )
                 }

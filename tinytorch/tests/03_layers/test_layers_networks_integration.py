@@ -329,3 +329,16 @@ class TestLayerNetworkInterfaceStandards:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_full_dropout_keeps_zero_gradient_connection():
+    """Module 06 must reach the input even when every activation is dropped."""
+    import tinytorch.core.autograd
+    from tinytorch.core.layers import Dropout
+
+    x = Tensor([[1, 2], [3, 4]], requires_grad=True)
+    output = Dropout(1.0)(x)
+    assert output.requires_grad
+    output.sum().backward()
+    np.testing.assert_array_equal(output.data, np.zeros((2, 2)))
+    np.testing.assert_array_equal(x.grad, np.zeros((2, 2)))

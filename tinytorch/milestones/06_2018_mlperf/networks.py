@@ -194,7 +194,7 @@ class MinimalTransformer:
 
         # Embedding layers
         self.token_embed = Embedding(vocab_size, embed_dim)
-        self.pos_encode = PositionalEncoding(embed_dim, seq_len)
+        self.pos_encode = PositionalEncoding(max_seq_len=seq_len, embed_dim=embed_dim)
 
         # Attention
         self.attention = MultiHeadAttention(embed_dim, num_heads)
@@ -223,7 +223,7 @@ class MinimalTransformer:
         ff = self.ff1(x)
         ff = self.relu(ff)
         ff = self.ff2(ff)
-        x = Tensor(x.data + ff.data, requires_grad=x.requires_grad)  # Residual
+        x = x + ff  # Keep both residual branches connected to autograd.
 
         # Output
         logits = self.output(x)
@@ -260,13 +260,6 @@ def get_network(name: str):
     if name.lower() not in networks:
         raise ValueError(f"Unknown network: {name}. Available: {list(networks.keys())}")
     return networks[name.lower()]()
-
-
-# Import Tensor for residual connection
-try:
-    from tinytorch.core.tensor import Tensor
-except ImportError:
-    Tensor = None
 
 
 # ============================================================================

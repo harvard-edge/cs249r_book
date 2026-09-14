@@ -133,7 +133,7 @@ All contributions must pass:
 **For Contributors** (improving the framework):
 - **Source Files**: Edit `src/NN_name/NN_name.py` files (source of truth, e.g., `src/01_tensor/01_tensor.py`)
 - **Notebooks**: Generated from source files using `tito dev export`
-- **Structure**: Follow the standardized module structure
+- **Structure**: Follow the module anatomy in `MODULE_ANATOMY.md` (the 13-section spine, cell grammar, naming, and export rules); `python tools/release_check.py --fast` checks it
 - **Testing**: Include immediate testing after each implementation
 - **Systems Analysis**: MANDATORY memory and performance analysis
 - **Documentation**: Clear explanations for educational value
@@ -248,7 +248,7 @@ Your commits will be included in the next release with appropriate version bump.
 - **`README.md`** - Repository structure and project overview
 
 ### Quick References
-- **Module Structure**: See any `src/NN_name/` directory (e.g., `src/01_tensor/`)
+- **Module Structure**: `MODULE_ANATOMY.md` is the specification; `src/02_activations/` is the shortest complete example
 - **Testing Patterns**: Check `tests/NN_name/` directories (e.g., `tests/01_tensor/`)
 - **Example Code**: Look at `milestones/` for end-to-end working examples
 

@@ -15,6 +15,10 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("matplotlib")
+
 ROOT = Path(__file__).resolve().parents[1]
 PAPER_TEX = ROOT / "paper" / "paper.tex"
 FIGURE_DIR = ROOT / "paper" / "figures"
@@ -76,6 +80,14 @@ def test_every_included_figure_regenerates_from_committed_inputs(tmp_path, monke
     module.fig_runtime(workloads, reports, evidence)
     module.fig_training_curves(workloads, reports)
 
+    plot_script = ROOT / "paper" / "generate_paper_plots.py"
+    if plot_script.is_file():
+        plot_spec = importlib.util.spec_from_file_location("generate_paper_plots", plot_script)
+        plot_mod = importlib.util.module_from_spec(plot_spec)
+        plot_spec.loader.exec_module(plot_mod)
+        if hasattr(plot_mod, "generate_plots"):
+            plot_mod.generate_plots(out_dir=tmp_path)
+
     produced = {path.stem for path in tmp_path.glob("*.pdf")}
     missing = [name for name in included_figures() if name not in produced]
     assert not missing, (
@@ -120,7 +132,6 @@ def test_quality_figure_covers_every_executed_contract():
     counting bars would compute a higher pass rate than the text claims, which
     is precisely the selective-denominator impression the paper avoids.
     """
-    import yaml
 
     module = load_generator()
     workloads = module.load_registry(ROOT / "registry")

@@ -10,7 +10,7 @@ from .types import (
 )
 from .reliability import Reliability
 from .orchestration import Orchestration as OrchestrationProfile
-from ..core.units import ureg, Q_, Gbps, GB, TB, watt, MB, kilowatt, pJ, bit
+from ..core.units import ureg, Q_, Gbps, GB, TB, TiB, watt, MB, kilowatt, pJ, bit
 from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
 from ..core.registry import Registry
@@ -46,7 +46,7 @@ class Nodes(Registry):
         accelerators_per_node=8,
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
-        host_memory=2 * TB,
+        host_memory=2 * TiB,
         metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
     )
     DGX_A100 = Node(
@@ -220,7 +220,7 @@ class Pods(Registry):
     TPUv4_4096 = PodEnvelope(
         name="Cloud TPU v4 Pod (4096 chips)",
         chips=4096,
-        memory=131 * TB,
+        memory=128 * TiB,
         power=3 * ureg.megawatt,
         metadata=Metadata(
             provenance=pc.CLUSTER_TIER_CONVENTIONS,

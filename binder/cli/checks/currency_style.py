@@ -1,0 +1,368 @@
+r"""Currency style checks for book currency notation.
+
+Policy:
+  * Reader-facing prices use ``$``.
+  * Source prose and LEGO currency prefixes escape the dollar sign as ``\$``.
+  * ``USD`` appears only once, in the shared notation definition that says
+    dollar-denominated costs are U.S. dollars unless noted otherwise.
+
+The checker scans source files that can render visible text in the book:
+QMD prose/cells, quiz JSON, and SVG labels. It can also scan rendered HTML
+artifacts for currency/LaTeX collisions that source checks cannot see.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Iterable
+
+
+TARGET_SUFFIXES = {".qmd", ".json", ".svg"}
+HTML_SUFFIXES = {".html", ".htm"}
+USD_PATTERN = re.compile(r"\bUSD\b")
+DOUBLE_DOLLAR_PATTERN = re.compile(r"\$\$")
+# Currency must be rendered exclusively through ``fmt_usd()`` (the currency
+# member of the fmt_* family). Decorating a formatter call with a dollar sign
+# via ``prefix=``/``suffix=`` is the pre-fmt_usd pattern and is forbidden: it
+# is the only place a raw or escaped ``$`` should never appear, because the
+# escaping then lives at the call site instead of inside ``fmt_usd``. This
+# also guards against regressions back to the unescaped ``prefix="$"`` form.
+CURRENCY_FMT_DECORATION_PATTERN = re.compile(
+    r"(prefix|suffix)\s*=\s*(['\"])[^'\"]*\$[^'\"]*\2"
+)
+RAW_LATEX_PATTERN = re.compile(
+    r"\\(?:frac|text|times|left|right|begin|end)\b|\\\(|\\\)"
+)
+CURRENCY_MATH_SPAN_PATTERN = re.compile(
+    r"\\\([^)]*\b\d[\d,]*(?:\.\d+)?[KMBT]\),\s+[A-Za-z][\w-]*"
+)
+# The notation body is shared by all volumes and lives outside any one of them.
+NOTATION_REL_PATH = Path("books/shared/_partials/_notation_body.qmd")
+NOTATION_DEFINITION = (
+    "*   Currency: Dollar amounts use the dollar sign (`$`); unless otherwise "
+    "noted, dollar-denominated costs are U.S. dollars (USD)."
+)
+NOTATION_RENDERED_CONTEXT = "U.S. dollars (USD)"
+
+
+@dataclass(frozen=True)
+class Violation:
+    """One currency-style finding in a source file or rendered HTML page."""
+
+    file: str
+    line: int
+    code: str
+    message: str
+    context: str = ""
+    suggestion: str = ""
+
+
+# 2026-09-12: a local render leaves .quarto/idx/*.json caches under books/;
+# scanning them reported 264 false USD literals. Skip generated trees.
+GENERATED_DIRS = frozenset({".quarto", "_build", "__pycache__", ".venv", "venv", "node_modules"})
+
+
+def _is_generated(rel: Path) -> bool:
+    """True when *rel* sits inside a render cache or other generated tree."""
+    return any(part in GENERATED_DIRS or part.endswith("_files") for part in rel.parts[:-1])
+
+
+def iter_target_files(paths: Iterable[Path]) -> list[Path]:
+    """Return content source files that can carry visible currency text."""
+    files: list[Path] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if path.is_dir():
+            files.extend(
+                p
+                for p in path.rglob("*")
+                if p.is_file() and p.suffix.lower() in TARGET_SUFFIXES
+                and not _is_generated(p.relative_to(path))
+            )
+        elif path.is_file() and path.suffix.lower() in TARGET_SUFFIXES:
+            files.append(path)
+    return sorted(dict.fromkeys(files))
+
+
+def iter_html_files(paths: Iterable[Path]) -> list[Path]:
+    """Return rendered HTML files under *paths*."""
+    files: list[Path] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if path.is_dir():
+            files.extend(
+                p
+                for p in path.rglob("*")
+                if p.is_file() and p.suffix.lower() in HTML_SUFFIXES
+            )
+        elif path.is_file() and path.suffix.lower() in HTML_SUFFIXES:
+            files.append(path)
+    return sorted(dict.fromkeys(files))
+
+
+def _is_allowed_notation_definition(path: Path, line: str) -> bool:
+    """Return True if *line* is the one sanctioned ``USD`` definition in the notation partial."""
+    # Match on the trailing "_partials/_notation_body.qmd" rather than the whole
+    # path, so the check holds whether it runs from the repository root or from
+    # books/.
+    tail = Path(*path.parts[-2:]) if len(path.parts) >= 2 else path
+    expected_tail = Path(*NOTATION_REL_PATH.parts[-2:])
+    return tail == expected_tail and line.strip() == NOTATION_DEFINITION
+
+
+def _audit_file(path: Path) -> list[Violation]:
+    """Return currency violations for one source file.
+
+    Flags each literal ``USD`` outside ``{python}`` cells (except the notation
+    definition line), and, in ``.qmd`` files, any ``prefix=``/``suffix=``
+    string argument containing a dollar sign.
+    """
+    violations: list[Violation] = []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    in_python_cell = False
+
+    for lineno, line in enumerate(lines, 1):
+        if line.startswith("```{python}"):
+            in_python_cell = True
+            continue
+        if in_python_cell and line.strip() == "```":
+            in_python_cell = False
+            continue
+
+        # Pint uses USD as a currency unit in LEGO cells; prose policy is separate.
+        if in_python_cell:
+            pass
+        elif "USD" in line and not _is_allowed_notation_definition(path, line):
+            for _match in USD_PATTERN.finditer(line):
+                violations.append(
+                    Violation(
+                        file=str(path),
+                        line=lineno,
+                        code="currency_usd_literal",
+                        message=(
+                            "Use `$` for dollar amounts; `USD` is defined once "
+                            "in the notation file."
+                        ),
+                        context=line.strip()[:180],
+                        suggestion=(
+                            "Render dollar amounts with `fmt_usd(value, ...)` "
+                            "(escapes `$` automatically); for plain prose use "
+                            "`$`. Keep the currency-code definition only in "
+                            "books/shared/_partials/_notation_body.qmd."
+                        ),
+                    )
+                )
+
+        if path.suffix.lower() == ".qmd":
+            for match in CURRENCY_FMT_DECORATION_PATTERN.finditer(line):
+                kind = match.group(1)
+                violations.append(
+                    Violation(
+                        file=str(path),
+                        line=lineno,
+                        code="currency_fmt_prefix_suffix",
+                        message=(
+                            f"Currency in a `{kind}=` formatter argument is no "
+                            "longer allowed; route all dollar amounts through "
+                            "`fmt_usd()`, which owns the escaped `$`."
+                        ),
+                        context=line.strip()[:180],
+                        suggestion=(
+                            "Replace `fmt(value, ..., prefix=\"$\")` /"
+                            " `prefix=\"\\\\$\"` with `fmt_usd(value, ...)`. Use "
+                            "`approx=True` for `~$`, and `suffix=\"M\"`/`\"/GB\"` "
+                            "for scale or rate labels (no `$` in the suffix)."
+                        ),
+                    )
+                )
+
+    return violations
+
+
+class _VisibleTextParser(HTMLParser):
+    """Collect visible prose text while skipping code, scripts, styles, and math."""
+
+    _SKIP_TAGS = {"script", "style", "code", "pre"}
+
+    def __init__(self) -> None:
+        """Initialize depth counters and the ``(line, text)`` chunk lists for prose and math."""
+        super().__init__(convert_charrefs=True)
+        self._skip_depth = 0
+        self._math_depth = 0
+        self.chunks: list[tuple[int, str]] = []
+        self.math_chunks: list[tuple[int, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Track entry into skipped elements and elements with a ``math`` class.
+
+        Once inside a skipped or math element, every nested start tag deepens
+        the corresponding counter so the matching end tags unwind it.
+        """
+        classes = {
+            token
+            for key, value in attrs
+            if key == "class" and value
+            for token in value.split()
+        }
+        starts_math = "math" in classes
+        if self._math_depth or starts_math:
+            self._math_depth += 1
+        if self._skip_depth or tag in self._SKIP_TAGS or starts_math:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        """Unwind the math and skip depth counters by one level each."""
+        if self._math_depth:
+            self._math_depth -= 1
+        if self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        """Record non-blank text as a math chunk inside math elements, else as visible prose."""
+        if self._math_depth and data.strip():
+            self.math_chunks.append((self.getpos()[0], data))
+        elif not self._skip_depth and data.strip():
+            self.chunks.append((self.getpos()[0], data))
+
+
+def _context(text: str, start: int, end: int, *, width: int = 80) -> str:
+    """Return a whitespace-collapsed excerpt around a match, capped at 220 characters."""
+    context = text[max(0, start - width) : min(len(text), end + width)]
+    return re.sub(r"\s+", " ", context).strip()[:220]
+
+
+def _is_allowed_rendered_notation_usd(path: Path, context: str) -> bool:
+    """Return True for the rendered notation page's own ``U.S. dollars (USD)`` definition."""
+    return path.name == "notation.html" and NOTATION_RENDERED_CONTEXT in context
+
+
+def audit_rendered_file(path: Path) -> list[Violation]:
+    """Scan one rendered HTML file for visible currency/math artifacts."""
+    parser = _VisibleTextParser()
+    parser.feed(path.read_text(encoding="utf-8", errors="replace"))
+
+    violations: list[Violation] = []
+    checks = [
+        (
+            USD_PATTERN,
+            "rendered_usd_literal",
+            "Rendered HTML contains visible `USD`; only notation.html may define it.",
+            "Use `$` in reader-facing content; keep `USD` only in the notation definition.",
+        ),
+        (
+            DOUBLE_DOLLAR_PATTERN,
+            "rendered_double_dollar",
+            "Rendered HTML contains visible `$$`, usually from combining a literal dollar sign with a formatted currency value.",
+            "Remove the prose-side `$` when the LEGO value already uses `prefix=\"\\\\$\"`.",
+        ),
+        (
+            RAW_LATEX_PATTERN,
+            "rendered_raw_latex",
+            "Rendered HTML contains visible raw LaTeX outside a math span.",
+            "Move the expression into normal Markdown math or export a math-safe value from the LEGO cell.",
+        ),
+    ]
+
+    for line, chunk in parser.chunks:
+        for pattern, code, message, suggestion in checks:
+            for match in pattern.finditer(chunk):
+                context = _context(chunk, match.start(), match.end())
+                if code == "rendered_usd_literal" and _is_allowed_rendered_notation_usd(path, context):
+                    continue
+                violations.append(
+                    Violation(
+                        file=str(path),
+                        line=line,
+                        code=code,
+                        message=message,
+                        context=context,
+                        suggestion=suggestion,
+                    )
+                )
+
+    for line, chunk in parser.math_chunks:
+        for match in CURRENCY_MATH_SPAN_PATTERN.finditer(chunk):
+            violations.append(
+                Violation(
+                    file=str(path),
+                    line=line,
+                    code="rendered_currency_math_span",
+                    message=(
+                        "Rendered HTML has currency/prose-looking text inside a "
+                        "math span, usually from an unescaped currency dollar."
+                    ),
+                    context=_context(chunk, match.start(), match.end()),
+                    suggestion=(
+                        "Escape prose currency dollars as `\\$`, or use "
+                        "`fmt(..., prefix=\"\\\\$\")` for LEGO currency values."
+                    ),
+                )
+            )
+
+    return violations
+
+
+def audit_rendered_html(paths: Iterable[Path]) -> list[Violation]:
+    """Scan rendered HTML files for visible currency/math artifacts."""
+    violations: list[Violation] = []
+    for path in iter_html_files(paths):
+        try:
+            violations.extend(audit_rendered_file(path))
+        except OSError:
+            continue
+    return violations
+
+
+def audit(paths: Iterable[Path]) -> list[Violation]:
+    """Scan target content files for disallowed literal ``USD``."""
+    violations: list[Violation] = []
+    for path in iter_target_files(paths):
+        try:
+            violations.extend(_audit_file(path))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return violations
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: audit source files (default ``books``) or, with ``--rendered-html``, HTML output.
+
+    Prints violations as text, or as a JSON list with ``--json``.
+    Returns 1 if any violation was found, otherwise 0.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("paths", nargs="*", type=Path, default=[Path("books")])
+    parser.add_argument(
+        "--rendered-html",
+        action="store_true",
+        help="Scan rendered HTML instead of source files",
+    )
+    parser.add_argument("--json", action="store_true", help="Emit JSON")
+    args = parser.parse_args(argv)
+
+    if args.rendered_html:
+        violations = audit_rendered_html(args.paths)
+    else:
+        violations = audit(args.paths or [Path("books")])
+    if args.json:
+        print(json.dumps([v.__dict__ for v in violations], indent=2, ensure_ascii=False))
+        return 1 if violations else 0
+
+    for violation in violations:
+        print(f"{violation.file}:{violation.line} [{violation.code}] {violation.message}")
+        if violation.context:
+            print(f"  source: {violation.context}")
+        if violation.suggestion:
+            print(f"  fix: {violation.suggestion}")
+    print(f"Total violations: {len(violations)}")
+    return 1 if violations else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

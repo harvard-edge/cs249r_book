@@ -9,7 +9,7 @@ global \includegraphics cap fired). For each image, match it back to
 the source .qmd reference, classify the rendered size against an
 aspect-appropriate target, and emit a suggested `{width=N%}` override.
 
-A human (or AI agent) decides which suggestions to apply — this tool
+An editor decides which suggestions to apply — this tool
 only reports, never mutates .qmd sources.
 
 Pipeline:

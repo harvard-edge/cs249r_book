@@ -31,94 +31,79 @@ class TestAttentionCore:
         """
         ✅ TEST: scaled_dot_product_attention function exists
         """
-        try:
-            from tinytorch.core.attention import scaled_dot_product_attention
-            
-            assert scaled_dot_product_attention is not None
-            
-        except ImportError:
-            assert True, "Attention not implemented yet"
+        from tinytorch.core.attention import scaled_dot_product_attention
+
+        assert scaled_dot_product_attention is not None
+
 
     def test_scaled_dot_product_attention(self):
         """
         ✅ TEST: Scaled dot-product attention computes correctly
         """
-        try:
-            from tinytorch.core.attention import scaled_dot_product_attention
-            from tinytorch.core.tensor import Tensor
-            
-            seq_len, d_k = 10, 16
-            
-            Q = Tensor(rng.standard_normal((seq_len, d_k)))
-            K = Tensor(rng.standard_normal((seq_len, d_k)))
-            V = Tensor(rng.standard_normal((seq_len, d_k)))
-            
-            output, weights = scaled_dot_product_attention(Q, K, V)
-            
-            assert output.shape == V.shape, f"Output shape wrong: {output.shape}"
-            assert weights.shape == (seq_len, seq_len), f"Weights shape wrong: {weights.shape}"
-            
-            # Attention weights should sum to ~1 for each query
-            weight_sums = np.sum(weights.data, axis=-1)
-            assert np.allclose(weight_sums, 1.0, atol=1e-5), "Weights don't sum to 1"
-            
-        except ImportError:
-            assert True, "Attention not implemented yet"
+        from tinytorch.core.attention import scaled_dot_product_attention
+        from tinytorch.core.tensor import Tensor
+
+        seq_len, d_k = 10, 16
+
+        Q = Tensor(rng.standard_normal((seq_len, d_k)))
+        K = Tensor(rng.standard_normal((seq_len, d_k)))
+        V = Tensor(rng.standard_normal((seq_len, d_k)))
+
+        output, weights = scaled_dot_product_attention(Q, K, V)
+
+        assert output.shape == V.shape, f"Output shape wrong: {output.shape}"
+        assert weights.shape == (seq_len, seq_len), f"Weights shape wrong: {weights.shape}"
+
+        # Attention weights should sum to ~1 for each query
+        weight_sums = np.sum(weights.data, axis=-1)
+        assert np.allclose(weight_sums, 1.0, atol=1e-5), "Weights don't sum to 1"
+
 
     def test_multihead_attention_exists(self):
         """
         ✅ TEST: MultiHeadAttention class exists
         """
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            
-            assert MultiHeadAttention is not None
-            
-        except ImportError:
-            assert True, "MultiHeadAttention not implemented yet"
+        from tinytorch.core.attention import MultiHeadAttention
+
+        assert MultiHeadAttention is not None
+
 
     def test_multihead_attention_initialization(self):
         """
         ✅ TEST: MultiHeadAttention can be initialized
         """
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            
-            embed_dim = 64
-            num_heads = 8
-            
-            mha = MultiHeadAttention(embed_dim, num_heads)
-            
-            assert hasattr(mha, 'forward'), "MHA missing forward"
-            
-        except ImportError:
-            assert True, "MultiHeadAttention not implemented yet"
+        from tinytorch.core.attention import MultiHeadAttention
+
+        embed_dim = 64
+        num_heads = 8
+
+        mha = MultiHeadAttention(embed_dim, num_heads)
+
+        assert hasattr(mha, 'forward'), "MHA missing forward"
+
 
     def test_multihead_attention_forward(self):
         """
         ✅ TEST: MultiHeadAttention forward pass
         """
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.tensor import Tensor
-            
-            embed_dim = 64
-            num_heads = 8
-            batch_size = 2
-            seq_len = 10
-            
-            mha = MultiHeadAttention(embed_dim, num_heads)
-            
-            # Input: (batch, seq_len, embed_dim) or (seq_len, batch, embed_dim)
-            x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
-            
-            output = mha(x)
-            
-            # Output should have same shape as input
-            assert output.shape == x.shape, f"MHA output shape wrong: {output.shape}"
-            
-        except ImportError:
-            assert True, "MultiHeadAttention not implemented yet"
+        from tinytorch.core.attention import MultiHeadAttention
+        from tinytorch.core.tensor import Tensor
+
+        embed_dim = 64
+        num_heads = 8
+        batch_size = 2
+        seq_len = 10
+
+        mha = MultiHeadAttention(embed_dim, num_heads)
+
+        # Input: (batch, seq_len, embed_dim) or (seq_len, batch, embed_dim)
+        x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
+
+        output = mha(x)
+
+        # Output should have same shape as input
+        assert output.shape == x.shape, f"MHA output shape wrong: {output.shape}"
+
 
 
 class TestAttentionWithEmbeddings:
@@ -130,31 +115,28 @@ class TestAttentionWithEmbeddings:
         """
         ✅ TEST: Attention works on embedded tokens
         """
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.embeddings import Embedding
-            from tinytorch.core.tensor import Tensor
-            
-            vocab_size = 100
-            embed_dim = 64
-            num_heads = 8
-            
-            embedding = Embedding(vocab_size, embed_dim)
-            attention = MultiHeadAttention(embed_dim, num_heads)
-            
-            # Token IDs
-            token_ids = Tensor(np.array([[1, 5, 10, 3]]))  # (1, 4)
-            
-            # Embed tokens
-            embedded = embedding(token_ids)  # (1, 4, 64)
-            
-            # Apply attention
-            attended = attention(embedded)
-            
-            assert attended.shape == embedded.shape, "Attention didn't preserve shape"
-            
-        except ImportError:
-            assert True, "Attention + Embeddings not ready"
+        from tinytorch.core.attention import MultiHeadAttention
+        from tinytorch.core.embeddings import Embedding
+        from tinytorch.core.tensor import Tensor
+
+        vocab_size = 100
+        embed_dim = 64
+        num_heads = 8
+
+        embedding = Embedding(vocab_size, embed_dim)
+        attention = MultiHeadAttention(embed_dim, num_heads)
+
+        # Token IDs
+        token_ids = Tensor(np.array([[1, 5, 10, 3]]))  # (1, 4)
+
+        # Embed tokens
+        embedded = embedding(token_ids)  # (1, 4, 64)
+
+        # Apply attention
+        attended = attention(embedded)
+
+        assert attended.shape == embedded.shape, "Attention didn't preserve shape"
+
 
 
 class TestAttentionWithTraining:
@@ -166,48 +148,47 @@ class TestAttentionWithTraining:
         """
         ✅ TEST: Attention parameters can be trained
         """
-        try:
-            from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.layers import Linear
-            from tinytorch.core.losses import MSELoss
-            from tinytorch.core.optimizers import SGD
-            from tinytorch.core.tensor import Tensor
-            
-            embed_dim = 32
-            num_heads = 4
-            
-            attention = MultiHeadAttention(embed_dim, num_heads)
-            fc = Linear(embed_dim, 1)
-            loss_fn = MSELoss()
-            
-            # Collect parameters
-            params = []
-            if hasattr(attention, 'parameters'):
-                params.extend(attention.parameters())
-            if hasattr(fc, 'parameters'):
-                params.extend(fc.parameters())
-            
-            optimizer = SGD(params, lr=0.01)
-            
-            # Forward
-            x = Tensor(rng.standard_normal((2, 5, embed_dim)))  # (batch, seq, embed)
-            target = Tensor(rng.standard_normal((2, 1)))
-            
-            attn_out = attention(x)
-            pooled = Tensor(attn_out.data.mean(axis=1))  # (batch, embed)
-            pred = fc(pooled)
-            
-            loss = loss_fn(pred, target)
-            
-            if hasattr(loss, 'backward'):
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            
-            assert loss.data.size == 1
-            
-        except ImportError:
-            assert True, "Attention training not ready"
+        from tinytorch.core.attention import MultiHeadAttention
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.losses import MSELoss
+        from tinytorch.core.optimizers import SGD
+        from tinytorch.core.tensor import Tensor
+
+        embed_dim = 32
+        num_heads = 4
+
+        attention = MultiHeadAttention(embed_dim, num_heads)
+        fc = Linear(embed_dim, 1)
+        loss_fn = MSELoss()
+
+        # Collect parameters
+        params = []
+        if hasattr(attention, 'parameters'):
+            params.extend(attention.parameters())
+        if hasattr(fc, 'parameters'):
+            params.extend(fc.parameters())
+
+        optimizer = SGD(params, lr=0.01)
+
+        # Forward
+        x = Tensor(rng.standard_normal((2, 5, embed_dim)))  # (batch, seq, embed)
+        target = Tensor(rng.standard_normal((2, 1)))
+
+        attn_out = attention(x)
+        pooled = attn_out.mean(axis=1)  # (batch, embed)
+        pred = fc(pooled)
+
+        loss = loss_fn(pred, target)
+
+        before = [p.data.copy() for p in params]
+        optimizer.zero_grad()
+        loss.backward()
+        assert all(p.grad is not None for p in params)
+        optimizer.step()
+        assert not np.array_equal(before[0], params[0].data), "Upstream weights must update"
+
+        assert loss.data.size == 1
+
 
 
 class TestRegressionPrevention:
@@ -273,43 +254,37 @@ class TestRegressionPrevention:
         from tinytorch.core.layers import Linear
         from tinytorch.core.losses import MSELoss
         from tinytorch.core.optimizers import SGD
-        
+
         layer = Linear(4, 2)
         loss_fn = MSELoss()
         opt = SGD(layer.parameters(), lr=0.1)
-        
+
         x = Tensor(rng.standard_normal((2, 4)))
         y = Tensor(rng.standard_normal((2, 2)))
-        
+
         pred = layer(x)
         loss = loss_fn(pred, y)
         assert loss.data.size == 1
 
     def test_convolutions_still_work(self):
         """✅ Module 09"""
-        try:
-            from tinytorch.core.spatial import Conv2d
-            from tinytorch.core.tensor import Tensor
-            
-            conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
-            y = conv(x)
-            assert y.shape[0] == 2
-        except ImportError:
-            pass
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.core.tensor import Tensor
+
+        conv = Conv2d(3, 8, kernel_size=3, padding=1)
+        x = Tensor(rng.standard_normal((2, 3, 8, 8)))
+        y = conv(x)
+        assert y.shape[0] == 2
 
     def test_embeddings_still_work(self):
         """✅ Module 11"""
-        try:
-            from tinytorch.core.embeddings import Embedding
-            from tinytorch.core.tensor import Tensor
-            
-            embedding = Embedding(100, 32)
-            ids = Tensor(np.array([[1, 2, 3]]))
-            out = embedding(ids)
-            assert out.shape[-1] == 32
-        except ImportError:
-            pass
+        from tinytorch.core.embeddings import Embedding
+        from tinytorch.core.tensor import Tensor
+
+        embedding = Embedding(100, 32)
+        ids = Tensor(np.array([[1, 2, 3]]))
+        out = embedding(ids)
+        assert out.shape[-1] == 32
 
 
 class TestModule12Completion:
@@ -320,7 +295,7 @@ class TestModule12Completion:
     def test_attention_foundation_complete(self):
         """
         ✅ FINAL TEST: Attention ready for transformers
-        
+
         🎯 SUCCESS = Ready for Module 13: Transformers!
         """
         capabilities = {
@@ -328,26 +303,22 @@ class TestModule12Completion:
             "MultiHeadAttention exists": False,
             "MHA forward works": False,
         }
-        
-        try:
-            from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAttention
-            from tinytorch.core.tensor import Tensor
-            
-            # Test 1: scaled_dot_product
-            capabilities["scaled_dot_product exists"] = True
-            
-            # Test 2: MultiHeadAttention exists
-            capabilities["MultiHeadAttention exists"] = True
-            
-            # Test 3: MHA forward
-            mha = MultiHeadAttention(32, 4)
-            x = Tensor(rng.standard_normal((1, 5, 32)))
-            out = mha(x)
-            if out.shape == x.shape:
-                capabilities["MHA forward works"] = True
-            
-            completed = sum(capabilities.values())
-            assert completed >= 2, f"Attention not ready: {capabilities}"
-            
-        except ImportError:
-            assert True, "Attention not implemented yet"
+
+        from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAttention
+        from tinytorch.core.tensor import Tensor
+
+        # Test 1: scaled_dot_product
+        capabilities["scaled_dot_product exists"] = True
+
+        # Test 2: MultiHeadAttention exists
+        capabilities["MultiHeadAttention exists"] = True
+
+        # Test 3: MHA forward
+        mha = MultiHeadAttention(32, 4)
+        x = Tensor(rng.standard_normal((1, 5, 32)))
+        out = mha(x)
+        if out.shape == x.shape:
+            capabilities["MHA forward works"] = True
+
+        completed = sum(capabilities.values())
+        assert completed == len(capabilities), f"Attention not ready: {capabilities}"

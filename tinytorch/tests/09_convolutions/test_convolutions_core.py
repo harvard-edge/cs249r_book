@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+import tinytorch.core.autograd  # completes every operation with its backward half
 
 
 class TestConv2DLayer:
@@ -315,8 +315,6 @@ class TestConvGradientFlow:
         STUDENT LEARNING: Conv gradient is a "transposed convolution"
         (deconvolution). It spreads the output gradient back to input.
         """
-        enable_autograd()
-
         conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
         # NCHW format
         x = Tensor(rng.standard_normal((1, 1, 8, 8)), requires_grad=True)
@@ -340,8 +338,6 @@ class TestConvGradientFlow:
         STUDENT LEARNING: Weight gradient is computed by convolving
         input with output gradient. Each weight sees where it contributed.
         """
-        enable_autograd()
-
         conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
         conv.weight.requires_grad = True  # Enable gradient tracking for weights
         # NCHW format

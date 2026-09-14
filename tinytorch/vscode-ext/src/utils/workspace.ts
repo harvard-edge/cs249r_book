@@ -21,7 +21,7 @@ export function getProjectRoot(): string | undefined {
       return root;
     }
 
-    // One level down: workspace contains tinytorch/
+    // Monorepo checkout: workspace contains tinytorch/
     const nested = path.join(root, 'tinytorch');
     if (isTinyTorchRoot(nested)) {
       return nested;

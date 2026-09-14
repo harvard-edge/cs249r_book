@@ -541,11 +541,12 @@ def test_report_accepts_module_alias_for_assignment_filter(tmp_path, monkeypatch
     result = command._report(args)
 
     assert result == 0
+    # `nbgrader export` has no --course-dir alias (unlike generate_assignment /
+    # collect / autograde / feedback); it only honours CourseDirectory.root.
     assert calls == [[
         "nbgrader",
         "export",
-        "--course-dir",
-        str(tmp_path / "assignments"),
+        f"--CourseDirectory.root={tmp_path / 'assignments'}",
         "--assignment",
         "01_tensor",
         "--student",

@@ -32,7 +32,7 @@ if ! command -v quarto >/dev/null 2>&1; then
 fi
 
 python3 -m build --wheel "${MLSYSIM_DIR}"
-python3 -m build --wheel "${LABS_DIR}" --outdir "${REPO_ROOT}/wheels"
+python3 -m build --wheel "${LABS_DIR}" --outdir "${LABS_DIR}/wheels"
 
 # Verify the built wheel version matches what labs reference via micropip.
 # A mismatch causes BadZipFile in the browser (micropip fetches a 404 HTML page).
@@ -50,8 +50,8 @@ if [ ! -f "${BUILT_WHL}" ]; then
   echo "ERROR: Expected wheel not found after build: ${BUILT_WHL}" >&2
   exit 1
 fi
-mkdir -p "${REPO_ROOT}/wheels"
-cp "${BUILT_WHL}" "${REPO_ROOT}/wheels/"
+mkdir -p "${LABS_DIR}/wheels"
+cp "${BUILT_WHL}" "${LABS_DIR}/wheels/"
 
 # Confirm every lab references the built wheel version.
 BAD_LABS=""
@@ -79,7 +79,7 @@ except ImportError:
 p = pathlib.Path('${LABS_DIR}/pyproject.toml')
 print(tomllib.loads(p.read_text())['project']['version'])
 ")
-LAB_HELPER_WHL="${REPO_ROOT}/wheels/mlsysbook_labs-${LAB_HELPER_VERSION}-py3-none-any.whl"
+LAB_HELPER_WHL="${LABS_DIR}/wheels/mlsysbook_labs-${LAB_HELPER_VERSION}-py3-none-any.whl"
 if [ ! -f "${LAB_HELPER_WHL}" ]; then
   echo "ERROR: Expected lab helper wheel not found after build: ${LAB_HELPER_WHL}" >&2
   exit 1
@@ -103,7 +103,7 @@ echo "Lab helper wheel version check passed: ${LAB_HELPER_VERSION}"
 rm -rf "${LABS_DIR}/_wasm_build" "${LABS_DIR}/_build"
 mkdir -p "${LABS_DIR}/_wasm_build/wheels"
 cp "${MLSYSIM_DIR}"/dist/mlsysim-*.whl "${LABS_DIR}/_wasm_build/wheels/"
-cp "${REPO_ROOT}"/wheels/mlsysbook_labs-*.whl "${LABS_DIR}/_wasm_build/wheels/"
+cp "${LABS_DIR}"/wheels/mlsysbook_labs-*.whl "${LABS_DIR}/_wasm_build/wheels/"
 
 expected=0
 exported=0

@@ -67,7 +67,7 @@ def test_transformer_to_linear_3d_to_2d():
         embed_dim=embed_dim,
         num_heads=num_heads,
         mlp_ratio=4,
-        dropout_prob=0.1
+        dropout_prob=0.0  # This deterministic teaching block does not implement dropout.
     )
     output_proj = Linear(embed_dim, vocab_size)
 
@@ -80,16 +80,9 @@ def test_transformer_to_linear_3d_to_2d():
     assert transformer_out.shape == (batch_size, seq_length, embed_dim)
     print(f"Transformer output shape: {transformer_out.shape}")
 
-    # The bug: Direct pass to Linear fails
-    try:
-        # This is what the broken example tried to do
-        output = output_proj(transformer_out)
-        # If Linear can handle 3D, this might work
-        if output.shape == (batch_size, seq_length, vocab_size):
-            print("✅ Linear handles 3D input (broadcasting)")
-            return True
-    except (ValueError, AssertionError) as e:
-        print(f"Expected error with 3D input: {e}")
+    # Linear now supports leading batch/sequence dimensions directly.
+    direct = output_proj(transformer_out)
+    assert direct.shape == (batch_size, seq_length, vocab_size)
 
     # Solution 1: Reshape to 2D, apply Linear, reshape back
     print("\n📝 Solution 1: Reshape -> Linear -> Reshape")
@@ -104,6 +97,7 @@ def test_transformer_to_linear_3d_to_2d():
     output_3d = output_2d.reshape(batch, seq, vocab_size)
     assert output_3d.shape == (batch_size, seq_length, vocab_size)
     print(f"Reshaped back to 3D: {output_3d.shape}")
+    np.testing.assert_allclose(output_3d.data, direct.data, rtol=1e-5, atol=1e-5)
     print("✅ Solution 1 works!")
 
     # Solution 2: Take only last token (for generation)
@@ -115,10 +109,10 @@ def test_transformer_to_linear_3d_to_2d():
     next_token_logits = output_proj(last_token)
     assert next_token_logits.shape == (batch_size, vocab_size)
     print(f"Next token predictions: {next_token_logits.shape}")
+    np.testing.assert_allclose(next_token_logits.data, direct.data[:, -1, :], rtol=1e-5, atol=1e-5)
     print("✅ Solution 2 works!")
 
     print("\n🎯 Transformer->Linear reshape test PASSED!")
-    return True
 
 
 def test_full_gpt_architecture_shapes():
@@ -178,7 +172,6 @@ def test_full_gpt_architecture_shapes():
     print(f"Next token logits: {next_token_logits.shape}")
 
     print("✅ Complete GPT architecture shapes flow correctly!")
-    return True
 
 
 def test_attention_kv_cache_shapes():
@@ -236,38 +229,8 @@ def test_embedding_dimension_compatibility():
     assert output.shape == (batch_size, seq_length, embed_dim)
 
     print("✅ Embedding->Transformer dimensions compatible!")
-    return True
 
 
 if __name__ == "__main__":
-    print("="*60)
-    print("REGRESSION TEST: Transformer 3D to Linear 2D Reshaping")
-    print("="*60)
-
-    # Import required modules for testing
-    try:
-        from tinytorch.core.attention import MultiHeadAttention
-    except ImportError:
-        # Create a simple mock if not available
-        class MultiHeadAttention:
-            def __init__(self, embed_dim, num_heads):
-                self.embed_dim = embed_dim
-                self.num_heads = num_heads
-
-            def __call__(self, q, k, v):
-                # Return query shape for testing
-                return q
-
-    # Run all tests
-    all_pass = True
-    all_pass &= test_transformer_to_linear_3d_to_2d()
-    all_pass &= test_full_gpt_architecture_shapes()
-    all_pass &= test_attention_kv_cache_shapes()
-    all_pass &= test_embedding_dimension_compatibility()
-
-    if all_pass:
-        print("\n🏆 ALL REGRESSION TESTS PASSED!")
-        print("The Transformer->Linear reshape bug is prevented.")
-    else:
-        print("\n❌ SOME TESTS FAILED")
-        sys.exit(1)
+    import pytest
+    raise SystemExit(pytest.main([__file__, '-v']))

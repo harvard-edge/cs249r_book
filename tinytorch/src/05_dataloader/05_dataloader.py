@@ -12,9 +12,6 @@
 #     name: python3
 # ---
 
-#| default_exp core.dataloader
-#| export
-
 # %% [markdown]
 """
 # Module 05: DataLoader - Efficient Data Pipeline for ML Training
@@ -38,7 +35,7 @@ By the end of this module, you will:
 2. Implement Dataset abstraction and TensorDataset for tensor-based data
 3. Build DataLoader with intelligent batching, shuffling, and memory-efficient iteration
 4. Experience data pipeline performance characteristics firsthand
-5. Create download functions for real computer vision datasets
+5. Apply augmentation transforms (flip, crop) inside the data pipeline
 
 Let's transform scattered data into organized learning batches!
 
@@ -50,8 +47,8 @@ Let's transform scattered data into organized learning batches!
 ```python
 # How to use this module:
 from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
-# Note: Dataset download utilities (download_mnist, download_cifar10) will be
-# available in a future release.
+# Real data: datasets/tinydigits/ ships with TinyTorch; milestones/data_manager.py
+# downloads MNIST and CIFAR-10 for the milestones.
 ```
 
 **Why this matters:**
@@ -60,22 +57,6 @@ from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
 - **Efficiency:** Optimized data pipelines are crucial for training speed and memory usage
 - **Integration:** Works seamlessly with training loops to create complete ML systems
 """
-
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| export
-
-# Essential imports for data loading
-import random
-import sys
-import time
-from abc import ABC, abstractmethod
-from typing import Iterator, List, Tuple
-
-import numpy as np
-rng = np.random.default_rng(7)
-
-# Import real Tensor class from tinytorch package
-from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
@@ -103,9 +84,26 @@ Students completing this module will have built the data loading
 infrastructure that powers all training in TinyTorch.
 """
 
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.dataloader
+#| export
+
+# Essential imports for data loading
+import random
+import sys
+import time
+from abc import ABC, abstractmethod
+from typing import Iterator, List, Tuple
+
+import numpy as np
+rng = np.random.default_rng(7)
+
+# Import real Tensor class from tinytorch package
+from tinytorch.core.tensor import Tensor
+
 # %% [markdown]
 """
-## 💡 Understanding the Data Pipeline
+## 💡 Introduction: Understanding the Data Pipeline
 
 Before we implement anything, let's understand what happens when neural networks "eat" data. The journey from raw data to trained models follows a specific pipeline that every ML engineer must master.
 
@@ -130,11 +128,18 @@ Raw Data Storage          Dataset Interface         DataLoader Batching         
 
 **Batch Processing (DataLoader)**: GPUs are parallel machines - they're much faster processing 32 images simultaneously than 1 image 32 times.
 
-**Memory Efficiency**: Loading all 50,000 images into memory would require ~150GB. Instead, we load only the current batch (~150MB).
+**Memory Efficiency**: A file-backed Dataset can read samples on demand. Our
+TensorDataset instead holds all source tensors in memory; DataLoader adds one
+batch at a time. Sample extraction and collation copy values, so batching does
+not make the source dataset disappear or provide zero-copy access.
 
-**Training Variety**: Shuffling ensures the model sees different combinations each epoch, preventing memorization.
+**Training Variety**: Shuffling changes sample order and batch composition each epoch. It reduces order effects but does not by itself prevent overfitting.
 
-### The Dataset Abstraction
+"""
+
+# %% [markdown]
+"""
+## 📐 Foundations: The Dataset Abstraction
 
 The Dataset class provides a uniform interface for accessing data, regardless of whether it's stored as files, in memory, in databases, or generated on-the-fly:
 
@@ -260,7 +265,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ TensorDataset - When Data Lives in Memory
+## 🏗️ TensorDataset: When Data Lives in Memory
 
 Now let's implement TensorDataset, the most common dataset type for when your data is already loaded into tensors. This is perfect for datasets like MNIST where you can fit everything in memory.
 
@@ -361,7 +366,8 @@ class TensorDataset(Dataset):
         All tensors must have the same size in their first dimension.
         """
         ### BEGIN SOLUTION
-        assert len(tensors) > 0, "Must provide at least one tensor"
+        if len(tensors) == 0:
+            raise ValueError("TensorDataset needs at least one tensor")
 
         # Store all tensors
         self.tensors = tensors
@@ -408,9 +414,11 @@ class TensorDataset(Dataset):
         TODO: Return the sample at the given index
 
         APPROACH:
-        1. Validate index is within bounds
-        2. Extract data at index from each tensor
-        3. Wrap each slice in a Tensor and return as tuple
+        1. Normalize a negative index by adding len(self), so dataset[-1]
+           means the last sample, as it would for a list
+        2. Validate the normalized index is within bounds
+        3. Extract data at index from each tensor
+        4. Wrap each slice in a Tensor and return as tuple
 
         Args:
             idx: Sample index
@@ -424,14 +432,22 @@ class TensorDataset(Dataset):
         >>> dataset = TensorDataset(features, labels)
         >>> sample = dataset[1]
         >>> # Returns: (Tensor([3, 4]), Tensor(1))
+        >>> last = dataset[-1]        # negative indices count from the end
+        >>> # Returns: (Tensor([5, 6]), Tensor(0))
 
         HINTS:
-        - Check idx < len(self) to prevent out-of-bounds access
+        - Add len(self) to a negative idx first, then bounds-check the result
+        - Check 0 <= idx < len(self) to prevent out-of-bounds access
+        - Report the index the caller passed in the error, not the normalized one
         - Use generator expression with tuple() for clean syntax
         """
         ### BEGIN SOLUTION
+        original_idx = idx
+        if idx < 0:
+            idx += len(self)
+
         if idx >= len(self) or idx < 0:
-            raise IndexError(f"Index {idx} out of range for dataset of size {len(self)}")
+            raise IndexError(f"Index {original_idx} out of range for dataset of size {len(self)}")
 
         # Return tuple of slices from all tensors
         return tuple(Tensor(tensor.data[idx]) for tensor in self.tensors)
@@ -495,7 +511,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ DataLoader - The Batch Factory
+## 🏗️ DataLoader: The Batch Factory
 
 Now we build the DataLoader, the component that transforms individual dataset samples into the batches that neural networks crave. This is where data loading becomes a systems challenge.
 
@@ -612,6 +628,8 @@ class DataLoader:
             shuffle: Whether to shuffle data each epoch
         """
         ### BEGIN SOLUTION
+        if isinstance(batch_size, bool) or not isinstance(batch_size, (int, np.integer)) or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer")
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -731,7 +749,7 @@ class DataLoader:
 
 # %% [markdown]
 """
-## 🏗️ Data Augmentation - Preventing Overfitting Through Variety
+## 🏗️ Data Augmentation: Preventing Overfitting Through Variety
 
 Data augmentation is one of the most effective techniques for improving model generalization. By applying random transformations during training, we artificially expand the dataset and force the model to learn robust, invariant features.
 
@@ -758,18 +776,19 @@ For CIFAR-10 and similar image datasets:
 ```
 RandomHorizontalFlip (50% probability):
 ┌──────────┐     ┌──────────┐
-│  🐱 →    │  →  │    ← 🐱  │
+│ cat →    │  →  │    ← cat │
 │          │     │          │
 └──────────┘     └──────────┘
 Cars, cats, dogs look similar when flipped!
 
 RandomCrop with Padding:
 ┌──────────┐     ┌────────────┐     ┌──────────┐
-│   🐱     │  →  │░░░░░░░░░░░░│  →  │  🐱      │
-│          │     │░░  🐱     ░│     │          │
+│   cat    │  →  │░░░░░░░░░░░░│  →  │  cat     │
+│          │     │░░  cat   ░░│     │          │
 └──────────┘     │░░░░░░░░░░░░│     └──────────┘
-  Original        Pad edges        Random crop
-                  (with zeros)     (back to 32×32)
+  Original       └────────────┘       Random crop
+                   Pad edges         (back to 32×32)
+                  (with zeros)
 ```
 
 ### Training vs Evaluation
@@ -793,7 +812,6 @@ Why? During evaluation, we want consistent, reproducible predictions. Augmentati
 """
 
 # %% nbgrader={"grade": false, "grade_id": "augmentation-transforms", "solution": true}
-
 #| export
 
 class RandomHorizontalFlip:
@@ -857,10 +875,10 @@ class RandomHorizontalFlip:
         >>> img = np.array([[1, 2, 3], [4, 5, 6]])  # 2x3 image
         >>> # 50% chance output is [[3, 2, 1], [6, 5, 4]]
 
-        HINT: Think about all the possible position of the width axis to flip
+        HINT: Find the width axis first; it differs for HW, CHW, and HWC layouts
         """
         ### BEGIN SOLUTION
-        if np.random.random() < self.p:
+        if rng.random() < self.p:
             is_tensor = isinstance(x, Tensor)
             data = x.data if is_tensor else x
 
@@ -1224,8 +1242,17 @@ class RandomCrop:
         return Tensor(cropped) if is_tensor else cropped
         ### END SOLUTION
 
-#| export
+# %% [markdown]
+"""
+### Compose: Chaining Transforms
 
+Augmentations are rarely used alone. `Compose` takes a list of transforms and
+applies them in order, passing each output to the next, so a pipeline such as
+"flip, then crop" becomes one callable the DataLoader can apply per sample.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "compose", "solution": false}
+#| export
 class Compose:
     """
     Compose multiple transforms into a pipeline.
@@ -1408,6 +1435,13 @@ def test_unit_dataloader():
     assert shuffle_features == expected_features, "Shuffle should preserve all data"
     assert no_shuffle_features == expected_features, "No shuffle should preserve all data"
 
+    for invalid_size in (0, -1, 1.5, True):
+        try:
+            DataLoader(dataset, batch_size=invalid_size)
+            assert False, "Invalid batch size must fail at construction"
+        except ValueError:
+            pass
+
     print("✅ DataLoader works correctly!")
 
 if __name__ == "__main__":
@@ -1476,7 +1510,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Working with Real Datasets
+## 🔧 Integration: Working with Real Datasets
 
 Now that you've built the DataLoader abstraction, you're ready to use it with real data!
 
@@ -1538,11 +1572,12 @@ This is what your model sees during training!
 
 **Tiny Datasets (ships with TinyTorch):**
 ```python
-# 8×8 handwritten digits - instant, no downloads!
-import numpy as np
-data = np.load('datasets/tiny/digits_8x8.npz')
-images = Tensor(data['images'])  # (1797, 8, 8)
-labels = Tensor(data['labels'])  # (1797,)
+# 8×8 handwritten digits - ships with TinyTorch, no download
+import pickle
+with open('datasets/tinydigits/train.pkl', 'rb') as f:
+    data = pickle.load(f)
+images = Tensor(data['images'])  # (150, 8, 8)
+labels = Tensor(data['labels'])  # (150,)
 
 dataset = TensorDataset(images, labels)
 loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -1556,8 +1591,8 @@ for batch_images, batch_labels in loader:
 
 **Full Datasets (for serious training):**
 ```python
-# See milestones/data_manager.py for optional MNIST download utilities
-# See milestones/04_1998_cnn/02_lecun_cifar10.py for CIFAR-10 download
+# milestones/data_manager.py: get_mnist() and get_cifar10() download the full sets
+# milestones/04_1998_cnn/02_lecun_cifar10.py shows them feeding a DataLoader
 ```
 
 ### What You've Accomplished
@@ -1580,9 +1615,186 @@ You've built the **data loading infrastructure** that powers all modern ML:
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Data Pipeline Performance
+### Common Pitfalls and Best Practices
 
-**Note:** This section provides performance analysis tools for understanding DataLoader behavior. The analysis functions are defined below but not run automatically. To explore performance characteristics, uncomment and run `analyze_dataloader_performance()` or `analyze_memory_usage()` manually.
+Before we move to integration testing, let's cover common mistakes students and practitioners make with data loading:
+
+### Common Mistakes to Avoid
+
+**1. Forgetting to Shuffle Training Data**
+```python
+# ❌ WRONG - No shuffling means same batches every epoch
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
+
+# ✅ CORRECT - Shuffle for training, but not for validation
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+```
+**Why it matters:** Without shuffling, your model sees the same batch combinations every epoch, leading to overfitting to batch-specific patterns rather than general patterns.
+
+**2. Batch Size Too Large (Out of Memory)**
+```python
+# ❌ WRONG - Batch size might exceed GPU memory
+loader = DataLoader(dataset, batch_size=1024)  # Might cause OOM!
+
+# ✅ CORRECT - Start small and increase gradually
+loader = DataLoader(dataset, batch_size=32)    # Safe starting point
+# Monitor GPU memory, then try 64, 128, etc.
+```
+**Why it matters:** Batch size directly determines peak memory usage. Too large = crash. Too small = slow training.
+
+**3. Improper Train/Validation Split**
+```python
+# ❌ WRONG - Validation data leaking into training
+all_data = dataset
+train_loader = DataLoader(all_data, shuffle=True)  # No split!
+
+# ✅ CORRECT - Separate train and validation
+train_size = int(0.8 * len(dataset))
+train_data = TensorDataset(images[:train_size], labels[:train_size])
+val_data = TensorDataset(images[train_size:], labels[train_size:])
+train_loader = DataLoader(train_data, shuffle=True)
+val_loader = DataLoader(val_data, shuffle=False)
+```
+**Why it matters:** Using the same data for training and validation gives falsely optimistic performance metrics.
+
+**4. Not Handling Uneven Batches**
+```python
+# Dataset with 1000 samples, batch_size=128
+# Creates: [128, 128, 128, 128, 128, 128, 128, 104] samples per batch
+# Your model must handle variable batch sizes!
+
+# Example: Don't assume batch_size in forward pass
+def forward(self, x):
+    batch_size = x.shape[0]  # ✅ Get actual batch size
+    # Don't hardcode: batch_size = 128  # ❌ Breaks on last batch
+```
+
+### Best Practices for Production
+
+**1. Batch Size Selection Strategy**
+```
+Start with: 32 (almost always works)
+↓
+Monitor GPU memory usage
+↓
+If memory < 80%: double to 64
+If memory > 90%: keep at 32
+↓
+Repeat until you find the sweet spot (usually 32-256)
+```
+
+**2. Data Augmentation Placement**
+- **Option A:** In Dataset's `__getitem__` (random crop, flip, etc.)
+- **Option B:** After DataLoader in training loop (batch-level operations)
+- **Rule:** Image-level augmentation in Dataset, batch-level in loop
+
+**3. Shuffling Strategy**
+- **Training:** Always shuffle (`shuffle=True`)
+- **Validation:** Never shuffle (`shuffle=False`)
+- **Testing:** Never shuffle (`shuffle=False`)
+- **Reason:** Validation/test need reproducible metrics
+
+**4. Memory-Constrained Scenarios**
+
+With larger batch sizes, you process more data per step, but large batches may not fit in memory. When that happens, techniques like gradient accumulation can simulate larger batches using smaller ones that fit. For now, just choose a batch size that fits comfortably in your available memory.
+
+These patterns will save you hours of debugging and help you build robust data pipelines!
+"""
+
+# %% [markdown]
+"""
+### Bringing It Together
+
+Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
+"""
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Training Workflow
+
+**What we're testing**: Complete training loop with train/val split
+**Why it matters**: DataLoader must work seamlessly in real training pipelines
+**Expected**: All samples processed correctly with proper batch shapes
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": false}
+def test_unit_training_integration():
+    """🧪 Test DataLoader integration with training workflow."""
+    print("🧪 Unit Test: Training Workflow...")
+
+    # Create a realistic dataset
+    num_samples = 1000
+    num_features = 20
+    num_classes = 5
+
+    # Synthetic classification data
+    features = Tensor(rng.standard_normal((num_samples, num_features)))
+    labels = Tensor(rng.integers(0, num_classes, num_samples))
+
+    dataset = TensorDataset(features, labels)
+
+    # Create train/val splits
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+
+    # Manual split (in production, you'd use proper splitting utilities)
+    train_indices = list(range(train_size))
+    val_indices = list(range(train_size, len(dataset)))
+
+    # Create subset datasets
+    train_samples = [dataset[i] for i in train_indices]
+    val_samples = [dataset[i] for i in val_indices]
+
+    # Convert back to tensors for TensorDataset
+    train_features = Tensor(np.stack([sample[0].data for sample in train_samples]))
+    train_labels = Tensor(np.stack([sample[1].data for sample in train_samples]))
+    val_features = Tensor(np.stack([sample[0].data for sample in val_samples]))
+    val_labels = Tensor(np.stack([sample[1].data for sample in val_samples]))
+
+    train_dataset = TensorDataset(train_features, train_labels)
+    val_dataset = TensorDataset(val_features, val_labels)
+
+    # Create DataLoaders
+    batch_size = 32
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    print("📊 Dataset splits:")
+    print(f"  Training: {len(train_dataset)} samples, {len(train_loader)} batches")
+    print(f"  Validation: {len(val_dataset)} samples, {len(val_loader)} batches")
+
+    # Simulate training loop
+    print("\n🏃 Simulated Training Loop:")
+
+    epoch_samples = 0
+    batch_count = 0
+
+    for batch_idx, (batch_features, batch_labels) in enumerate(train_loader):
+        batch_count += 1
+        epoch_samples += len(batch_features.data)
+
+        # Simulate forward pass (just check shapes)
+        assert batch_features.data.shape[0] <= batch_size, "Batch size exceeded"
+        assert batch_features.data.shape[1] == num_features, "Wrong feature count"
+        assert len(batch_labels.data) == len(batch_features.data), "Mismatched batch sizes"
+
+        if batch_idx < 3:  # Show first few batches
+            print(f"  Batch {batch_idx + 1}: {batch_features.data.shape[0]} samples")
+
+    print(f"  Total: {batch_count} batches, {epoch_samples} samples processed")
+
+    # Validate that all samples were seen
+    assert epoch_samples == len(train_dataset), f"Expected {len(train_dataset)}, processed {epoch_samples}"
+
+    print("✅ Training integration works correctly!")
+
+if __name__ == "__main__":
+    test_unit_training_integration()
+
+# %% [markdown]
+"""
+## 📊 Systems Analysis: Data Pipeline Performance
 
 Now let's understand data pipeline performance like production ML engineers. Understanding where time and memory go is crucial for building systems that scale.
 
@@ -1814,192 +2026,17 @@ def analyze_collation_overhead():
     print("• Optimal: Balance between batch size and iteration overhead")
 
 
-# Run the systems analysis (uncomment to run)
-# if __name__ == "__main__":
-#     analyze_dataloader_performance()
-#     analyze_memory_usage()
-#     analyze_collation_overhead()
-
-# %% [markdown]
-"""
-## ⚠️ Common Pitfalls and Best Practices
-
-Before we move to integration testing, let's cover common mistakes students and practitioners make with data loading:
-
-### ⚠️ Common Mistakes to Avoid
-
-**1. Forgetting to Shuffle Training Data**
-```python
-# ❌ WRONG - No shuffling means same batches every epoch
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
-
-# ✅ CORRECT - Shuffle for training, but not for validation
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-```
-**Why it matters:** Without shuffling, your model sees the same batch combinations every epoch, leading to overfitting to batch-specific patterns rather than general patterns.
-
-**2. Batch Size Too Large (Out of Memory)**
-```python
-# ❌ WRONG - Batch size might exceed GPU memory
-loader = DataLoader(dataset, batch_size=1024)  # Might cause OOM!
-
-# ✅ CORRECT - Start small and increase gradually
-loader = DataLoader(dataset, batch_size=32)    # Safe starting point
-# Monitor GPU memory, then try 64, 128, etc.
-```
-**Why it matters:** Batch size directly determines peak memory usage. Too large = crash. Too small = slow training.
-
-**3. Improper Train/Validation Split**
-```python
-# ❌ WRONG - Validation data leaking into training
-all_data = dataset
-train_loader = DataLoader(all_data, shuffle=True)  # No split!
-
-# ✅ CORRECT - Separate train and validation
-train_size = int(0.8 * len(dataset))
-train_data = dataset[:train_size]
-val_data = dataset[train_size:]
-train_loader = DataLoader(train_data, shuffle=True)
-val_loader = DataLoader(val_data, shuffle=False)
-```
-**Why it matters:** Using the same data for training and validation gives falsely optimistic performance metrics.
-
-**4. Not Handling Uneven Batches**
-```python
-# Dataset with 1000 samples, batch_size=128
-# Creates: [128, 128, 128, 128, 128, 128, 128, 104] samples per batch
-# Your model must handle variable batch sizes!
-
-# Example: Don't assume batch_size in forward pass
-def forward(self, x):
-    batch_size = x.shape[0]  # ✅ Get actual batch size
-    # Don't hardcode: batch_size = 128  # ❌ Breaks on last batch
-```
-
-### 🚀 Best Practices for Production
-
-**1. Batch Size Selection Strategy**
-```
-Start with: 32 (almost always works)
-↓
-Monitor GPU memory usage
-↓
-If memory < 80%: double to 64
-If memory > 90%: keep at 32
-↓
-Repeat until you find the sweet spot (usually 32-256)
-```
-
-**2. Data Augmentation Placement**
-- **Option A:** In Dataset's `__getitem__` (random crop, flip, etc.)
-- **Option B:** After DataLoader in training loop (batch-level operations)
-- **Rule:** Image-level augmentation in Dataset, batch-level in loop
-
-**3. Shuffling Strategy**
-- **Training:** Always shuffle (`shuffle=True`)
-- **Validation:** Never shuffle (`shuffle=False`)
-- **Testing:** Never shuffle (`shuffle=False`)
-- **Reason:** Validation/test need reproducible metrics
-
-**4. Memory-Constrained Scenarios**
-
-With larger batch sizes, you process more data per step, but large batches may not fit in memory. When that happens, techniques like gradient accumulation can simulate larger batches using smaller ones that fit. For now, just choose a batch size that fits comfortably in your available memory.
-
-These patterns will save you hours of debugging and help you build robust data pipelines!
-"""
-
-# %% [markdown]
-"""
-## 🔧 Integration: Bringing It Together
-
-Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
-"""
-
-# %% [markdown]
-"""
-### 🧪 Integration Test: Training Workflow
-
-Let's test how our DataLoader integrates with a complete training workflow, simulating real ML pipeline usage.
-
-**What we're testing**: Complete training loop with train/val split
-**Why it matters**: DataLoader must work seamlessly in real training pipelines
-**Expected**: All samples processed correctly with proper batch shapes
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": true}
-def test_unit_training_integration():
-    """🧪 Test DataLoader integration with training workflow."""
-    print("🧪 Integration Test: Training Workflow...")
-
-    # Create a realistic dataset
-    num_samples = 1000
-    num_features = 20
-    num_classes = 5
-
-    # Synthetic classification data
-    features = Tensor(rng.standard_normal((num_samples, num_features)))
-    labels = Tensor(rng.integers(0, num_classes, num_samples))
-
-    dataset = TensorDataset(features, labels)
-
-    # Create train/val splits
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-
-    # Manual split (in production, you'd use proper splitting utilities)
-    train_indices = list(range(train_size))
-    val_indices = list(range(train_size, len(dataset)))
-
-    # Create subset datasets
-    train_samples = [dataset[i] for i in train_indices]
-    val_samples = [dataset[i] for i in val_indices]
-
-    # Convert back to tensors for TensorDataset
-    train_features = Tensor(np.stack([sample[0].data for sample in train_samples]))
-    train_labels = Tensor(np.stack([sample[1].data for sample in train_samples]))
-    val_features = Tensor(np.stack([sample[0].data for sample in val_samples]))
-    val_labels = Tensor(np.stack([sample[1].data for sample in val_samples]))
-
-    train_dataset = TensorDataset(train_features, train_labels)
-    val_dataset = TensorDataset(val_features, val_labels)
-
-    # Create DataLoaders
-    batch_size = 32
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-
-    print("📊 Dataset splits:")
-    print(f"  Training: {len(train_dataset)} samples, {len(train_loader)} batches")
-    print(f"  Validation: {len(val_dataset)} samples, {len(val_loader)} batches")
-
-    # Simulate training loop
-    print("\n🏃 Simulated Training Loop:")
-
-    epoch_samples = 0
-    batch_count = 0
-
-    for batch_idx, (batch_features, batch_labels) in enumerate(train_loader):
-        batch_count += 1
-        epoch_samples += len(batch_features.data)
-
-        # Simulate forward pass (just check shapes)
-        assert batch_features.data.shape[0] <= batch_size, "Batch size exceeded"
-        assert batch_features.data.shape[1] == num_features, "Wrong feature count"
-        assert len(batch_labels.data) == len(batch_features.data), "Mismatched batch sizes"
-
-        if batch_idx < 3:  # Show first few batches
-            print(f"  Batch {batch_idx + 1}: {batch_features.data.shape[0]} samples")
-
-    print(f"  Total: {batch_count} batches, {epoch_samples} samples processed")
-
-    # Validate that all samples were seen
-    assert epoch_samples == len(train_dataset), f"Expected {len(train_dataset)}, processed {epoch_samples}"
-
-    print("✅ Training integration works correctly!")
 
 if __name__ == "__main__":
-    test_unit_training_integration()
+    analyze_dataloader_performance()
+
+
+if __name__ == "__main__":
+    analyze_memory_usage()
+
+
+if __name__ == "__main__":
+    analyze_collation_overhead()
 
 # %% [markdown]
 """
@@ -2074,7 +2111,7 @@ def test_module():
 
 Answer these to deepen your understanding of data loading and its systems implications:
 
-### 1. The Batch Memory Budget
+### Question 1: The Batch Memory Budget
 **Question**: You're loading a large image dataset. Each image is a tensor of shape (3, 224, 224) stored as float32 (4 bytes per value). Your batch size is 256.
 
 - How much memory does one image require? _____
@@ -2091,7 +2128,7 @@ Answer these to deepen your understanding of data loading and its systems implic
 
 ---
 
-### 2. To Shuffle or Not to Shuffle?
+### Question 2: To Shuffle or Not to Shuffle?
 **Question**: You're training on a medical dataset where samples are ordered by patient (first 1000 samples = Patient A, next 1000 = Patient B, etc.). Consider these scenarios:
 
 **Scenario 1: Training with shuffle=True**
@@ -2110,7 +2147,7 @@ Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
 - The model sees 30+ batches of only Patient A's data first
 - It might overfit to Patient A's specific characteristics
 - Early batches update weights strongly toward Patient A's patterns
-- This is called "catastrophic learning" of patient-specific features
+- This is ordering bias; in the extreme it produces catastrophic forgetting of earlier patients' features
 
 **Your DataLoader's shuffle prevents this by mixing patients in every batch!**
 
@@ -2118,7 +2155,7 @@ Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
 
 ---
 
-### 3. Data Loading Bottlenecks
+### Question 3: Data Loading Bottlenecks
 **Question**: Your program reports these timings per batch:
 
 ```
@@ -2161,7 +2198,7 @@ Result: Eliminate repeated decode overhead
 
 ---
 
-### 4. Memory Explosion with Large Datasets
+### Question 4: Memory Explosion with Large Datasets
 **Question**: You're training on 100GB of high-resolution medical scans. Your DataLoader code:
 
 ```python
@@ -2203,7 +2240,7 @@ loader = DataLoader(dataset, batch_size=32)
 
 ---
 
-### 5. The Shuffle Memory Trap
+### Question 5: The Shuffle Memory Trap
 **Question**: You implement shuffling like this:
 
 ```python
@@ -2233,7 +2270,7 @@ def __iter__(self):
 
 **Memory usage:**
 - Bad shuffle: 50GB (all samples in memory)
-- Your shuffle: 400KB (50M indices × 8 bytes each)
+- Your shuffle: 400MB (50M indices × 8 bytes each)
 
 **Why this matters:** You can shuffle 100 million samples using just 800MB of RAM!
 
@@ -2241,7 +2278,7 @@ def __iter__(self):
 
 ---
 
-### Bonus Challenge: Data Pipeline Design Patterns
+### Bonus Question: Data Pipeline Design Patterns
 
 Your DataLoader implements three fundamental patterns:
 
@@ -2328,22 +2365,21 @@ Congratulations! You've built a complete data loading pipeline for ML training!
 - **Data loading can become a bottleneck without proper optimization**
 - **Memory usage scales linearly with batch size and feature dimensions**
 
-### Ready for Next Steps
-Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
-Export with: `tito module complete 05`
-
-**Apply your knowledge:**
-- Milestone 03: Train MLP on TinyDigits
-- Milestone 04: Train CNN on CIFAR-10 images
-
-**Then continue with:** Module 06 (Autograd) for automatic differentiation!
-
-### Real-World Connection
-You've implemented the same patterns used in:
+The same patterns appear in:
 - **PyTorch's DataLoader**: Same interface design for batching and shuffling
 - **TensorFlow's Dataset API**: Similar abstraction for data pipeline optimization
 - **Production ML**: Essential for handling large-scale training efficiently
 - **Research**: Standard foundation for all deep learning experiments
 
-Your data loading pipeline is now ready to power neural network training!
+### Ready for Next Steps
+Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
+Your data pipeline is the input side of every training loop you will write.
+
+Apply your knowledge:
+- Milestone 03: Train MLP on TinyDigits
+- Milestone 04: Train CNN on CIFAR-10 images
+
+Export with: `tito module complete 05`
+
+**Next**: Module 06 will add autograd, so the batches you just built can actually drive learning!
 """

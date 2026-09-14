@@ -11,7 +11,7 @@ except ImportError:
     np = None
 
 try:
-    from book.tools.figures.style import (
+    from binder.tools.figures.style import (
         COLORS,
         WEB_FIG_DPI,
         bar_compare,

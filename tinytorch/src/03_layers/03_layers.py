@@ -20,7 +20,7 @@ Welcome to Module 03! You're about to build the fundamental building blocks that
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensor class (Module 01) with all operations and activations (Module 02)
-**You'll Build**: Linear layers and Dropout regularization
+**You'll Build**: A Layer base class, Linear layers, Dropout regularization, and a Sequential container
 **You'll Enable**: Multi-layer neural networks, trainable parameters, and forward passes
 
 **Connection Map**:
@@ -34,18 +34,19 @@ By the end of this module, you will:
 1. Implement Linear layers with proper weight initialization
 2. Add Dropout for regularization during training
 3. Understand parameter management and counting
-4. Test individual layer components
+4. Compose layers into a network, first by hand and then with a Sequential container
+5. Test individual layer components
 
 Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/03_layers/layers_dev.py
+**Learning Side:** You work in `modules/03_layers/layers.ipynb`
 **Building Side:** Code exports to tinytorch.core.layers
 
 ```python
 # Final package structure:
-from tinytorch.core.layers import Linear, Dropout  # This module
+from tinytorch.core.layers import Layer, Linear, Dropout, Sequential  # This module
 from tinytorch.core.tensor import Tensor  # Module 01 - foundation
 from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 ```
@@ -56,32 +57,6 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 - **Consistency:** All layer operations and parameter management in core.layers
 - **Integration:** Works seamlessly with tensors and activations for complete neural networks
 """
-
-# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
-#| default_exp core.layers
-#| export
-
-import numpy as np
-# Module-level RNG is seeded so Linear weight init is deterministic by default.
-# This is what the integration test suite (and any cross-run reproducibility)
-# relies on. Demo scripts that want fresh weights every run rebind this name
-# to an unseeded RNG locally before constructing their model — see
-# milestones/01_1958_perceptron/01_rosenblatt_forward.py for the pattern.
-rng = np.random.default_rng(7)
-
-# Import from TinyTorch package (previous modules must be completed and exported)
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.activations import ReLU, Sigmoid
-
-# Constants for weight initialization
-# Note: True Xavier/Glorot uses sqrt(2/(fan_in+fan_out)), but we use the simpler
-# LeCun-style sqrt(1/fan_in) for pedagogical clarity. Both achieve stable gradients.
-INIT_SCALE_FACTOR = 1.0  # LeCun-style initialization: sqrt(1/fan_in)
-HE_SCALE_FACTOR = 2.0  # He initialization uses sqrt(2/fan_in) for ReLU
-
-# Constants for dropout
-DROPOUT_MIN_PROB = 0.0  # Minimum dropout probability (no dropout)
-DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 
 # %% [markdown]
 """
@@ -96,7 +71,7 @@ DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 - `tinytorch.core.tensor.Tensor` (Module 01)
 - `tinytorch.core.activations.ReLU, Sigmoid` (Module 02)
 
-**Important**: This module depends on Tensor and Activations.
+This module depends on Tensor and Activations.
 Ensure previous modules are completed and exported.
 
 **Dependency Flow**:
@@ -109,6 +84,33 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
 Students completing this module will have built the neural network
 layers that enable multi-layer architectures.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
+#| default_exp core.layers
+#| export
+
+import inspect
+import numpy as np
+# Module-level RNG is seeded so Linear weight init is deterministic by default.
+# This is what the integration test suite (and any cross-run reproducibility)
+# relies on. Demo scripts that want fresh weights every run rebind this name
+# to an unseeded RNG locally before constructing their model — see
+# milestones/01_1958_perceptron/01_rosenblatt_forward.py for the pattern.
+rng = np.random.default_rng(7)
+
+# Import from TinyTorch package (previous modules must be completed and exported)
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.activations import ReLU, Sigmoid
+
+# Constant for weight initialization
+# Note: True Xavier/Glorot uses sqrt(2/(fan_in+fan_out)), but we use the simpler
+# LeCun-style sqrt(1/fan_in) for pedagogical clarity. Both keep the output
+# variance of a layer close to its input variance.
+INIT_SCALE_FACTOR = 1.0  # LeCun-style initialization: sqrt(1/fan_in)
+
+# Constants for dropout
+DROPOUT_MIN_PROB = 0.0  # Minimum dropout probability (no dropout)
+DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 
 # %% [markdown]
 """
@@ -170,26 +172,26 @@ Memory usage: 4 bytes/param × 203,530 = ~795 KB for weights alone
 """
 ## 🏗️ Implementation: Building Layer Foundation
 
-Let's build our layer system step by step. We'll implement two essential layer types:
+Let's build our layer system step by step. We'll implement two essential layer types on top of a shared base class, then add a container that chains them:
 
 1. **Linear Layer** - The workhorse of neural networks
 2. **Dropout Layer** - Prevents overfitting
+3. **Sequential** - Chains layers so a network is one callable object
 
 ### Key Design Principles:
-- All methods defined INSIDE classes (no monkey-patching)
-- Forward methods return new tensors, preserving immutability
-- parameters() method enables optimizer integration
-- Gradient tracking is handled separately from layer definitions
+- Forward methods never modify the input in place; they return a Tensor computed from it
+- parameters() lists exactly the tensors a layer learns. Module 07 will add optimizers that update whatever this list returns
+- Gradient tracking is not the layer's job. Module 06 will add it to Tensor without changing these classes
 """
 
 # %% [markdown]
 """
-### 🏗️ Layer Base Class - Foundation for All Layers
+### Layer Base Class: Foundation for All Layers
 
 All neural network layers share common functionality: forward pass, parameter management, and callable interface. The base Layer class provides this consistent interface.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "layer-base", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "layer-base", "solution": false}
 #| export
 class Layer:
     """
@@ -199,7 +201,10 @@ class Layer:
     - forward(x): Compute layer output
     - parameters(): Return list of trainable parameters
 
-    The __call__ method is provided to make layers callable.
+    The __call__ method is provided to make layers callable, and it forwards
+    any extra arguments (such as Dropout's training flag) to forward().
+    The default parameters() returns an empty list, which is right for any
+    layer without learnable weights.
     """
 
     def forward(self, x):
@@ -241,7 +246,7 @@ class Layer:
 
 # %% [markdown]
 """
-### 🏗️ Linear Layer - The Foundation of Neural Networks
+### Linear Layer: The Foundation of Neural Networks
 
 Linear layers (also called Dense or Fully Connected layers) are the fundamental building blocks of neural networks. They implement the mathematical operation:
 
@@ -265,7 +270,7 @@ Input Features     Weight Matrix        Bias Vector      Output Features
 Example: MNIST Digit Recognition
 [32, 784]       @  [784, 10]          + [10]        =  [32, 10]
   ↑                   ↑                    ↑             ↑
-32 images         784 pixels          10 classes    10 probabilities
+32 images         784 pixels          10 classes    10 class scores (logits)
                   to 10 classes       adjustments   per image
 ```
 
@@ -459,15 +464,21 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Edge Case Tests: Linear Layer
+### 🧪 Unit Test: Linear Edge Cases
 
 Additional tests for edge cases and error handling.
+
+**What we're testing**: Linear layer behavior at the boundaries -- empty batches,
+single samples, and mismatched input widths
+**Why it matters**: Edge cases are where a layer that "works" quietly stops
+working, usually the first time a real dataset has a ragged final batch
+**Expected**: Correct shapes at every boundary, clear errors on genuine mismatches
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
 def test_unit_edge_cases_linear():
     """🧪 Test Linear layer edge cases."""
-    print("🧪 Edge Case Tests: Linear Layer...")
+    print("🧪 Unit Test: Linear Edge Cases...")
 
     layer = Linear(10, 5)
 
@@ -502,15 +513,21 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Parameter Collection Tests: Linear Layer
+### 🧪 Unit Test: Linear Parameter Collection
 
 Tests to ensure Linear layer parameters can be collected for optimization.
+
+**What we're testing**: parameters() returns the weight and bias, in a form the
+optimizer accepts
+**Why it matters**: The optimizer trains exactly what parameters() hands it. A
+parameter left out of that list is a parameter that silently never learns
+**Expected**: Both tensors returned, with the shapes the layer was built with
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
 def test_unit_parameter_collection_linear():
     """🧪 Test Linear layer parameter collection."""
-    print("🧪 Parameter Collection Test: Linear Layer...")
+    print("🧪 Unit Test: Linear Parameter Collection...")
 
     layer = Linear(10, 5)
 
@@ -533,7 +550,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🎲 Dropout Layer - Preventing Overfitting
+### Dropout Layer: Preventing Overfitting
 
 Dropout is a regularization technique that randomly "turns off" neurons during training. This forces the network to not rely too heavily on any single neuron, making it more robust and generalizable.
 
@@ -576,11 +593,11 @@ Dropout Memory Usage:
 ┌─────────────────────────────┐
 │ Input Tensor: X MB          │
 ├─────────────────────────────┤
-│ Random Mask: X/4 MB         │  (boolean mask, 1 byte/element)
+│ Random Mask: X MB           │  (float32 mask, 4 bytes/element)
 ├─────────────────────────────┤
 │ Output Tensor: X MB         │
 └─────────────────────────────┘
-        Total: ~2.25X MB peak memory
+        Total: ~3X MB peak memory (input, mask, and output all live at once)
 
 Computational Overhead: Minimal (element-wise operations)
 ```
@@ -695,7 +712,7 @@ class Dropout(Layer):
         (4,)
 
         HINTS:
-        - np.random.random(shape) gives uniform [0, 1) values
+        - rng.random(shape) gives uniform [0, 1) values
         - Threshold with < keep_prob to get a boolean mask
         - Scale factor is 1.0 / keep_prob
         """
@@ -737,7 +754,7 @@ class Dropout(Layer):
             return x
 
         if self.p == DROPOUT_MAX_PROB:
-            return Tensor(np.zeros_like(x.data))
+            return x * 0.0  # Keep the operation path; Module 06 will propagate zero gradients.
 
         mask = self._generate_dropout_mask(x.data.shape)
         return x * mask
@@ -831,7 +848,6 @@ def test_unit_generate_dropout_mask():
     print("🧪 Unit Test: Dropout Mask Generation...")
 
     d = Dropout(0.5)
-    rng = np.random.default_rng(7)
     mask = d._generate_dropout_mask((1000,))
 
     # Shape must match the requested shape
@@ -850,7 +866,6 @@ def test_unit_generate_dropout_mask():
 
     # Test with different dropout probability
     d2 = Dropout(0.3)
-    rng = np.random.default_rng(7)
     mask2 = d2._generate_dropout_mask((2000,))
 
     # Values should be 0.0 or 1/(1-0.3) ≈ 1.4286
@@ -871,7 +886,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Sequential - Layer Container for Composition
+## 🏗️ Sequential: Layer Container for Composition
 
 `Sequential` chains layers together, calling forward() on each in order.
 
@@ -924,9 +939,10 @@ class Sequential:
             output = model.forward(x, training=True)    # train: Dropout active
         """
         for layer in self.layers:
-            try:
+            # Only layers whose forward takes a `training` flag (Dropout) receive it
+            if 'training' in inspect.signature(layer.forward).parameters:
                 x = layer.forward(x, training=training)
-            except TypeError:
+            else:
                 x = layer.forward(x)
         return x
 
@@ -935,10 +951,14 @@ class Sequential:
         return self.forward(x, training=training)
 
     def parameters(self):
-        """Collect all parameters from all layers."""
+        """Collect each parameter once, even when layers share a weight."""
         params = []
+        seen = set()
         for layer in self.layers:
-            params.extend(layer.parameters())
+            for param in layer.parameters():
+                if id(param) not in seen:
+                    params.append(param)
+                    seen.add(id(param))
         return params
 
     def __repr__(self):
@@ -983,7 +1003,6 @@ def test_unit_dropout_layer():
 
     # Test training mode with partial dropout
     # Note: This is probabilistic, so we test statistical properties
-    rng = np.random.default_rng(7)  # For reproducible test
     x_large = Tensor(np.ones((1000,)))  # Large tensor for statistical significance
     y_train = dropout.forward(x_large, training=True)
 
@@ -1042,7 +1061,7 @@ MNIST Classification Network (3-Layer MLP):
 │                 │    │   + Dropout     │    │   + Dropout     │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
         ↓                       ↓                       ↓                       ↓
-   "Raw pixels"          "First hidden features"        "Second hidden features"        "Output predictions"
+   "Raw pixels"            "Hidden 1"             "Hidden 2"            "Predictions"
 
 Data Flow:
 [32, 784] → Linear(784,256) → ReLU → Dropout(0.5) → Linear(256,128) → ReLU → Dropout(0.3) → Linear(128,10) → [32, 10]
@@ -1104,7 +1123,7 @@ Layer Memory Components:
 ├─────────────────────────────────────────────────────────────┤
 │                   TEMPORARY MEMORY                          │
 ├─────────────────────────────────────────────────────────────┤
-│ • Dropout masks: batch_size × features × 1 byte             │
+│ • Dropout masks: batch_size × features × 4 bytes (float32)  │
 │ • Computation buffers for matrix operations                 │
 │ • Total: Peak during forward/backward passes                │
 └─────────────────────────────────────────────────────────────┘
@@ -1131,7 +1150,7 @@ Layer Operation Complexity:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": false}
 def analyze_layer_memory():
     """📊 Analyze memory usage patterns in layer operations."""
     print("📊 Analyzing Layer Memory Usage...")
@@ -1170,11 +1189,10 @@ def analyze_layer_memory():
 
         print(f"Hidden={hidden_size:4d}: {total_params:7,} params = {memory_mb:5.1f} MB")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_layer_memory()
 
-# %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": false}
 def analyze_layer_performance():
     """📊 Analyze computational complexity of layer operations."""
     import time
@@ -1186,17 +1204,17 @@ def analyze_layer_performance():
     layer = Linear(784, 256)
 
     print("\nLinear Layer MACs Analysis:")
-    print("Batch Size → Matrix Multiply MACs → Bias Add MACs → Total MACs")
-    print("Note: FLOPs = 2 × MACs (one multiply + one add per MAC)")
+    print("Batch Size → Matrix Multiply MACs → Bias Adds → Estimated FLOPs")
+    print("Convention: 2 FLOPs per matrix MAC, 1 FLOP per bias addition")
 
     for batch_size in batch_sizes:
         # Matrix multiplication: (batch, in) @ (in, out) = batch * in * out MACs
-        matmul_flops = batch_size * 784 * 256
-        # Bias addition: batch * out MACs
-        bias_flops = batch_size * 256
-        total_flops = matmul_flops + bias_flops
+        matmul_macs = batch_size * 784 * 256
+        # Bias addition has no multiplication, so count one FLOP per output.
+        bias_adds = batch_size * 256
+        total_flops = 2 * matmul_macs + bias_adds
 
-        print(f"{batch_size:10d} → {matmul_flops:15,} → {bias_flops:13,} → {total_flops:11,}")
+        print(f"{batch_size:10d} → {matmul_macs:15,} → {bias_adds:13,} → {total_flops:11,}")
 
     # Add timing measurements
     print("\nLinear Layer Timing Analysis:")
@@ -1227,7 +1245,6 @@ def analyze_layer_performance():
     print("🚀 Dropout adds minimal computational overhead (element-wise operations)")
     print("🚀 Larger batches amortize overhead, improving throughput efficiency")
 
-# Run the analysis
 if __name__ == "__main__":
     analyze_layer_performance()
 
@@ -1267,15 +1284,12 @@ def test_module():
     # Test realistic neural network construction with manual composition
     print("🧪 Integration Test: Multi-layer Network...")
 
-    # Use ReLU imported from package at module level
-    ReLU_class = ReLU
-
     # Build individual layers for manual composition
     layer1 = Linear(784, 128)
-    activation1 = ReLU_class()
+    activation1 = ReLU()
     dropout1 = Dropout(0.5)
     layer2 = Linear(128, 64)
-    activation2 = ReLU_class()
+    activation2 = ReLU()
     dropout2 = Dropout(0.3)
     layer3 = Linear(64, 10)
 
@@ -1307,6 +1321,11 @@ def test_module():
     infer_output = dropout_test.forward(test_x, training=False)
     assert np.array_equal(test_x.data, infer_output.data), "Inference mode should pass through unchanged"
 
+    # Reusing the same layer must collect its weights only once.
+    shared = Linear(2, 2)
+    shared_model = Sequential(shared, ReLU(), Sequential(shared))
+    assert shared_model.parameters() == [shared.weight, shared.bias]
+
     print("✅ Multi-layer network integration works!")
 
     print("\n" + "=" * 50)
@@ -1319,7 +1338,7 @@ def test_module():
 
 Answer these to deepen your understanding of layer operations and their systems implications:
 
-### 1. Parameter Scaling and Memory
+### Question 1: Parameter Scaling and Memory
 **Question**: Consider three different network architectures for MNIST (28x28 = 784 input features, 10 output classes):
 - Architecture A: 784 -> 128 -> 10
 - Architecture B: 784 -> 256 -> 10
@@ -1334,7 +1353,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 2. Dropout Training vs Inference
+### Question 2: Dropout Training vs Inference
 **Question**: You have a Dropout layer with p=0.5 in your network. During training, we scale surviving values by 1/(1-p) = 2.0.
 
 **Consider**:
@@ -1349,7 +1368,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 3. Weight Initialization Trade-offs
+### Question 3: Weight Initialization Trade-offs
 **Question**: We initialize weights with scale = sqrt(1/in_features) (LeCun-style). For Linear(1000, 10), how does this compare to Linear(10, 1000)?
 
 **Calculate**:
@@ -1363,7 +1382,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 4. Layer Ordering Effects
+### Question 4: Layer Ordering Effects
 **Question**: In a typical layer block, we compose: Linear -> Activation -> Dropout. What happens if you change the order to: Linear -> Dropout -> Activation?
 
 **Consider**:
@@ -1377,7 +1396,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### 5. Production Deployment Memory
+### Question 5: Production Deployment Memory
 **Question**: You're deploying a 3-layer network (784->256->128->10) to a mobile device with 10MB free memory.
 
 **Calculate**:
@@ -1392,7 +1411,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 
 ---
 
-### Bonus Challenge: Manual Composition Analysis
+### Bonus Question: Manual Composition Analysis
 
 **Question**: We deliberately built individual layers and composed them manually rather than using a Sequential container. What did you see explicitly that a Sequential would hide?
 
@@ -1457,6 +1476,17 @@ Congratulations! You've built the fundamental building blocks that make neural n
 - Demonstrated manual layer composition for building neural networks
 - Analyzed memory scaling and computational complexity of layer operations
 - All tests pass ✅ (validated by `test_module()`)
+
+### Systems Insights Discovered
+- **Parameter memory is the floor**: a Linear layer stores in_features x out_features
+  weights, and during training the activations kept for backward can exceed
+  that by 10-100x depending on batch size
+- **Initialization is not cosmetic**: LeCun scaling (sqrt(1/fan_in)) keeps activation variance
+  stable across depth, which is what makes deep stacks trainable at all
+- **Dropout costs memory, not just compute**: the mask is a full float32 tensor
+  the same shape as the activations it gates
+- **Composition is the whole idea**: layers are interchangeable because they all
+  agree on one contract, forward(x) -> Tensor
 
 ### Ready for Next Steps
 Your layer implementation enables building complete neural networks! The Linear layer provides learnable transformations, manual composition chains them together, and Dropout prevents overfitting.

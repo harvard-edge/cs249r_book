@@ -57,9 +57,7 @@ class TestTensorFoundation:
         inputs = Tensor(rng.standard_normal((32, 10)))
 
         # Should support matrix multiplication (key for Dense layers)
-        # This tests if the tensor data can be used with numpy operations
-        output_data = inputs.data @ weights.data
-        output = Tensor(output_data)
+        output = inputs @ weights
 
         assert output.shape == (32, 20)
 
@@ -74,8 +72,8 @@ class TestTensorMemoryManagement:
         original_data = np.array([1, 2, 3])
         t = Tensor(original_data)
 
-        # Tensor should maintain reference to data
-        assert np.shares_memory(t.data, original_data) or np.array_equal(t.data, original_data)
+        assert not np.shares_memory(t.data, original_data)
+        np.testing.assert_array_equal(t.data, original_data)
 
     def test_tensor_copy_semantics(self):
         """Test tensor copying doesn't break."""
@@ -113,8 +111,7 @@ class TestTensorIntegrationReadiness:
         bias = Tensor(rng.standard_normal(128))
 
         # Dense layer operation: x @ W + b
-        output_data = x.data @ weights.data + bias.data
-        output = Tensor(output_data)
+        output = x @ weights + bias
 
         assert output.shape == (32, 128)
 
@@ -126,11 +123,11 @@ class TestTensorIntegrationReadiness:
         image = Tensor(rng.standard_normal((8, 32, 32, 3)))
 
         # Should support reshaping for spatial operations
-        flattened = Tensor(image.data.reshape(8, -1))
+        flattened = image.reshape(8, -1)
         assert flattened.shape == (8, 32*32*3)
 
         # Should support slicing for convolution-like operations
-        patch = Tensor(image.data[:, :3, :3, :])  # 3x3 patch
+        patch = image[:, :3, :3, :]  # 3x3 patch
         assert patch.shape == (8, 3, 3, 3)
 
     def test_ready_for_autograd(self):
@@ -141,5 +138,5 @@ class TestTensorIntegrationReadiness:
         t = Tensor(np.array([1.0, 2.0, 3.0]))
 
         # Should support operations that will need gradients
-        squared = Tensor(t.data ** 2)
+        squared = t * t
         assert squared.shape == t.shape

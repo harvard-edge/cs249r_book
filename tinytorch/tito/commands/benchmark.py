@@ -240,7 +240,7 @@ class BenchmarkCommand(BaseCommand):
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = benchmark_dir / f"baseline_{timestamp_str}.json"
 
-        with open(results_file, 'w') as f:
+        with open(results_file, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
 
         console.print(f"\n[green]✅ Results saved to: {results_file}[/green]")
@@ -346,7 +346,7 @@ class BenchmarkCommand(BaseCommand):
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = benchmark_dir / f"capstone_{timestamp_str}.json"
 
-        with open(results_file, 'w') as f:
+        with open(results_file, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
 
         # Display results
@@ -393,7 +393,7 @@ class BenchmarkCommand(BaseCommand):
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = benchmark_dir / f"capstone_simplified_{timestamp_str}.json"
 
-        with open(results_file, 'w') as f:
+        with open(results_file, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
 
         console.print(f"\n[green]✅ Results saved to: {results_file}[/green]")
@@ -571,7 +571,7 @@ class BenchmarkCommand(BaseCommand):
                 timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
                 submission_file = submission_dir / f"{benchmark_type}_submission_{timestamp_str}.json"
 
-                with open(submission_file, 'w') as f:
+                with open(submission_file, 'w', encoding='utf-8') as f:
                     json.dump(submission, f, indent=2)
 
                 console.print(f"\n[green]✅ Submission prepared: {submission_file}[/green]")
@@ -593,7 +593,7 @@ class BenchmarkCommand(BaseCommand):
         profile_file = Path.home() / ".tinytorch" / "profile.json"
         if profile_file.exists():
             try:
-                with open(profile_file, 'r') as f:
+                with open(profile_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception:
                 return None
@@ -601,7 +601,9 @@ class BenchmarkCommand(BaseCommand):
 
     def _get_config(self) -> Dict[str, Any]:
         """Get community configuration."""
-        config_file = self.config.project_root / ".tinytorch" / "config.json"
+        tito_config = self.config.project_root / ".tito" / "config.json"
+        legacy_config = self.config.project_root / ".tinytorch" / "config.json"
+        config_file = tito_config if (tito_config.exists() or not legacy_config.exists()) else legacy_config
         default_config = {
             "website": {
                 "base_url": "https://tinytorch.ai",
@@ -617,7 +619,7 @@ class BenchmarkCommand(BaseCommand):
 
         if config_file.exists():
             try:
-                with open(config_file, 'r') as f:
+                with open(config_file, 'r', encoding='utf-8') as f:
                     user_config = json.load(f)
                     # Merge with defaults
                     default_config.update(user_config)
@@ -625,9 +627,9 @@ class BenchmarkCommand(BaseCommand):
             except Exception:
                 pass
 
-        # Create default config if it doesn't exist
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_file, 'w') as f:
+        # Create default config in .tito if it doesn't exist
+        tito_config.parent.mkdir(parents=True, exist_ok=True)
+        with open(tito_config, 'w', encoding='utf-8') as f:
             json.dump(default_config, f, indent=2)
 
         return default_config

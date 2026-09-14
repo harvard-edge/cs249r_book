@@ -45,7 +45,7 @@ class TestEntireFoundationStack:
             assert t2.shape == (4, 5), "Foundation broken: Multi-dim tensors"
 
         except ImportError:
-            assert True, "Tensor foundation not implemented yet"
+            raise
 
     def test_activation_foundation_intact(self):
         """Verify Module 03 (Activations) foundation is solid."""
@@ -66,7 +66,7 @@ class TestEntireFoundationStack:
             assert y.shape == x.shape, "Foundation broken: Sigmoid"
 
         except ImportError:
-            assert True, "Activation foundation not implemented yet"
+            raise
 
     def test_layer_foundation_intact(self):
         """Verify Module 04 (Layers) foundation is solid."""
@@ -79,7 +79,7 @@ class TestEntireFoundationStack:
             assert callable(layer), "Foundation broken: Layer callable"
 
         except ImportError:
-            assert True, "Layer foundation not implemented yet"
+            raise
 
 
 class TestDenseNetworkCapability:
@@ -105,7 +105,7 @@ class TestDenseNetworkCapability:
             assert output.shape == (32, 5), "Dense broken: Wrong output shape"
 
         except ImportError:
-            assert True, "Dense layer not implemented yet"
+            raise
 
     def test_multi_layer_network(self):
         """Test building multi-layer networks."""
@@ -134,7 +134,7 @@ class TestDenseNetworkCapability:
             assert np.all(predictions.data <= 1), "Network output invalid"
 
         except ImportError:
-            assert True, "Multi-layer networks not ready yet"
+            raise
 
 
 class TestXORProblemSolution:
@@ -175,7 +175,7 @@ class TestXORProblemSolution:
             assert total_params >= 9, "XOR network has insufficient capacity"
 
         except ImportError:
-            assert True, "XOR network not ready yet"
+            raise
 
     def test_nonlinear_problem_solvability(self):
         """Test that non-linear problems are now solvable."""
@@ -206,7 +206,7 @@ class TestXORProblemSolution:
                 assert output.shape[0] == 4, "Pattern processing broken"
 
         except ImportError:
-            assert True, "Non-linear problem solving not ready yet"
+            raise
 
 
 class TestFoundationMilestoneReadiness:
@@ -242,7 +242,7 @@ class TestFoundationMilestoneReadiness:
             assert np.allclose(prob_sums, 1.0), "Softmax probabilities broken"
 
         except ImportError:
-            assert True, "MNIST MLP not ready yet"
+            raise
 
     def test_classification_capability(self):
         """Test basic classification capability."""
@@ -271,7 +271,7 @@ class TestFoundationMilestoneReadiness:
             assert np.allclose(np.sum(class_probs.data, axis=1), 1.0), "Probabilities don't sum to 1"
 
         except ImportError:
-            assert True, "Classification capability not ready yet"
+            raise
 
 
 class TestCompleteStackValidation:
@@ -315,7 +315,7 @@ class TestCompleteStackValidation:
             assert hasattr(layer3, 'weight'), "Layer 3 not trainable"
 
         except ImportError:
-            assert True, "End-to-end neural network not ready yet"
+            raise
 
     def test_foundation_stability_under_load(self):
         """Test foundation remains stable under computational load."""
@@ -342,4 +342,4 @@ class TestCompleteStackValidation:
                 assert output.shape == (256, 10), f"Foundation unstable at iteration {i}"
 
         except ImportError:
-            assert True, "Foundation stress testing not ready yet"
+            raise

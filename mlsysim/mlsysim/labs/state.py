@@ -31,6 +31,7 @@ class DesignLedger:
         self.file_path = self.config_dir / "ledger.json"
 
         self._state = LedgerState()
+        self._last_load_error: Optional[str] = None
 
         # WASM save tasks remain tracked until flush() observes them. Keeping
         # completed tasks lets a later flush() re-raise persistence failures.
@@ -48,6 +49,11 @@ class DesignLedger:
         if any.
         """
         return self._last_save_error
+
+    @property
+    def last_load_error(self) -> Optional[str]:
+        """Error message from the most recent failed load."""
+        return self._last_load_error
 
     @property
     def save_pending(self) -> bool:
@@ -75,6 +81,7 @@ class DesignLedger:
 
     def load(self) -> LedgerState:
         """Loads the ledger from the best available persistent storage."""
+        self._last_load_error = None
 
         # WASM loading is asynchronous, so synchronous load()
         # simply returns the current in-memory state.
@@ -88,10 +95,10 @@ class DesignLedger:
                     data = json.load(f)
 
                 data["history"] = self._parse_history(data)
-
                 self._state = LedgerState(**data)
 
-            except Exception:
+            except Exception as e:
+                self._last_load_error = f"{type(e).__name__}: {e}"
                 self._state = LedgerState()
 
         return self._state
@@ -100,6 +107,7 @@ class DesignLedger:
         """
         Async load for WASM environments using IndexedDB.
         """
+        self._last_load_error = None
 
         if not self.is_wasm:
             return self.load()
@@ -187,14 +195,12 @@ class DesignLedger:
 
             if raw:
                 data = json.loads(raw)
-
                 data["history"] = self._parse_history(data)
-
                 self._state = LedgerState(**data)
 
         except Exception as e:
+            self._last_load_error = f"{type(e).__name__}: {e}"
             print(f"Failed to load from IndexedDB: {e}")
-
             self._state = LedgerState()
 
         return self._state

@@ -828,7 +828,24 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
         "reference_statistics_sha256": f"sha256:{EDM_CIFAR10_FID_REFERENCE_SHA256}",
     }
     results_path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
-    target = float(workload.quality_value or TARGET_FID)
+    # The target is inherited from the contract, never substituted. A
+    # missing contract target used to fall back to the constant below,
+    # which would have silently replaced an inherited target with one
+    # baked into this runner. That is exactly the discretion the suite
+    # exists to remove, so it raises instead. `is None` rather than a
+    # truthiness test, because a legitimate target of 0.0 is falsy.
+    if workload.quality_value is None:
+        raise ValueError(
+            "image-generation has no inherited quality target in its contract; "
+            "refusing to substitute the runner constant TARGET_FID"
+        )
+    target = float(workload.quality_value)
+    if abs(target - TARGET_FID) > 1e-9:
+        raise ValueError(
+            "image-generation contract target "
+            f"{target} disagrees with the pinned reference TARGET_FID; "
+            "resolve which is authoritative before recording a verdict"
+        )
     tolerance = float(workload.quality_tolerance or 0.0)
     target_met = fid <= target + tolerance
     generation_report_evidence = (

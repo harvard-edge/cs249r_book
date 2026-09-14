@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mlsysim import Systems
-from mlsysim.core.units import GB, MW, TB, bit, kilowatt, pJ, second
+from mlsysim.core.units import GB, MW, TB, TiB, bit, kilowatt, pJ, second
 
 
 def test_reference_25k_h100_cluster_totals():
@@ -84,7 +84,7 @@ def test_rack_profiles():
     assert rack.nodes_per_rack == 4
     assert rack.node is Systems.Nodes.DGX_H100
     assert rack.accelerator_count == 32
-    assert rack.node.host_memory.to(TB).magnitude == pytest.approx(2.0)
+    assert rack.node.host_memory.to(TiB).magnitude == pytest.approx(2.0)
     assert rack.non_accelerator_power.to(kilowatt).magnitude == pytest.approx(11.1)
     assert rack.accelerator_power.to(kilowatt).magnitude == pytest.approx(22.4)
     assert rack.total_power.to(kilowatt).magnitude == pytest.approx(33.5)

@@ -38,57 +38,155 @@ os.environ['TINYTORCH_QUIET'] = '1'
 # This runs BEFORE any tests to ensure the package is properly built.
 # Without this, tests would silently pass because imports return None.
 
-def _validate_package_exported():
+# ---------------------------------------------------------------------------
+# Module registry: maps each of the 20 TinyTorch modules to
+#   - the file path it exports to  (relative to tinytorch/tinytorch/)
+#   - a key symbol that must be importable and non-None after export
+#   - whether its absence is a hard failure (foundational) or a warning
+#     (progressive — student may not have completed the module yet)
+#
+# Export paths come directly from each src file's
+# `#| default_exp <path>` directive (e.g. 09_convolutions → core.spatial).
+# ---------------------------------------------------------------------------
+_MODULE_REGISTRY = [
+    # (module_num, title,          export_file,              import_path,                    key_symbol,   required)
+    ( 1, "Tensor",          "core/tensor.py",          "tinytorch.core.tensor",         "Tensor",               True),
+    ( 2, "Activations",     "core/activations.py",     "tinytorch.core.activations",    "ReLU",                 True),
+    ( 3, "Layers",          "core/layers.py",          "tinytorch.core.layers",         "Linear",               True),
+    ( 4, "Losses",          "core/losses.py",          "tinytorch.core.losses",         "MSELoss",              True),
+    ( 5, "DataLoader",      "core/dataloader.py",      "tinytorch.core.dataloader",     "DataLoader",           False),
+    ( 6, "Autograd",        "core/autograd.py",        "tinytorch.core.autograd",       "no_grad",      False),
+    ( 7, "Optimizers",      "core/optimizers.py",      "tinytorch.core.optimizers",     "SGD",                  False),
+    ( 8, "Training",        "core/training.py",        "tinytorch.core.training",       "Trainer",              False),
+    # Module 09 exports to core.spatial — not core.convolutions
+    ( 9, "Convolutions",    "core/spatial.py",         "tinytorch.core.spatial",        "Conv2d",               False),
+    (10, "Tokenization",    "core/tokenization.py",    "tinytorch.core.tokenization",   "CharTokenizer",        False),
+    (11, "Embeddings",      "core/embeddings.py",      "tinytorch.core.embeddings",     "Embedding",            False),
+    (12, "Attention",       "core/attention.py",       "tinytorch.core.attention",      "MultiHeadAttention",   False),
+    (13, "Transformers",    "core/transformers.py",    "tinytorch.core.transformers",   "TransformerBlock",     False),
+    # Modules 14-19 live in the perf sub-package
+    (14, "Profiling",       "perf/profiling.py",       "tinytorch.perf.profiling",      "Profiler",             False),
+    (15, "Quantization",    "perf/quantization.py",    "tinytorch.perf.quantization",   "Quantizer",            False),
+    (16, "Compression",     "perf/compression.py",     "tinytorch.perf.compression",    "Compressor",           False),
+    (17, "Acceleration",    "perf/acceleration.py",    "tinytorch.perf.acceleration",   "vectorized_matmul",    False),
+    (18, "Memoization",     "perf/memoization.py",     "tinytorch.perf.memoization",    "KVCache",              False),
+    (19, "Benchmarking",    "perf/benchmarking.py",    "tinytorch.perf.benchmarking",   "Benchmark",            False),
+    # Module 20 exports to the top-level olympics package
+    (20, "Capstone",        "olympics.py",             "tinytorch.olympics",            None,                   False),
+]
+
+
+def _check_module_exported(num, title, export_file, import_path, key_symbol):
     """
-    Validate that tinytorch package is properly exported.
+    Check a single module: file exists + symbol is importable and non-None.
 
-    This prevents a critical bug where tests pass because:
-    1. tinytorch/__init__.py uses try/except for imports
-    2. Missing exports result in Tensor = None (not ImportError)
-    3. Tests import None and may pass vacuously
-
-    Returns tuple: (is_valid, error_message)
+    Returns a list of error strings (empty = all good).
     """
     errors = []
+    pkg_dir = project_root / "tinytorch"
 
-    # Check 1: Core module files exist
-    core_dir = project_root / "tinytorch" / "core"
-    required_modules = [
-        "tensor.py",
-        "activations.py",
-        "layers.py",
-        "losses.py",
-    ]
+    # File-existence check
+    file_path = pkg_dir / export_file
+    if not file_path.exists():
+        errors.append(
+            f"Module {num:02d} ({title}): missing exported file "
+            f"tinytorch/{export_file}"
+        )
+        # No point checking the import if the file isn't there
+        return errors
 
-    for module in required_modules:
-        module_path = core_dir / module
-        if not module_path.exists():
-            errors.append(f"Missing: tinytorch/core/{module}")
+    # Import + non-None symbol check (only when a key symbol is specified)
+    if key_symbol is not None:
+        try:
+            import importlib
+            mod = importlib.import_module(import_path)
+            obj = getattr(mod, key_symbol, None)
+            if obj is None:
+                errors.append(
+                    f"Module {num:02d} ({title}): "
+                    f"{import_path}.{key_symbol} is None "
+                    f"(exported but symbol is missing or failed silently)"
+                )
+        except Exception as exc:
+            errors.append(
+                f"Module {num:02d} ({title}): "
+                f"error importing {import_path} — {type(exc).__name__}: {exc}"
+            )
 
-    # Check 2: Tensor class is actually importable (not None)
+    return errors
+
+
+def _validate_package_exported():
+    """
+    Validate that the tinytorch package is properly exported for all 20 modules.
+
+    Two-tier strategy matching TinyTorch's progressive pedagogy:
+
+    - **Foundational modules (01–04)** — required=True
+        Hard failures: if these are missing, nothing else can run.
+        Students must export at least these before the test suite starts.
+
+    - **Progressive modules (05–20)** — required=False
+        Soft warnings: printed to stderr but do NOT block test execution.
+        A student working on Module 06 should still be able to run the
+        Module 01–05 tests without the later modules being present.
+
+    This prevents the silent-pass bug where tinytorch/__init__.py
+    catches ImportError and sets symbols to None, causing tests to
+    import None and vacuously pass.
+
+    Returns:
+        tuple[bool, list[str]]: (is_valid, hard_error_messages)
+        Soft warnings are printed directly to stderr here.
+    """
+    import sys
+
+    hard_errors = []
+    soft_warnings = []
+
+    for num, title, export_file, import_path, key_symbol, required in _MODULE_REGISTRY:
+        module_errors = _check_module_exported(
+            num, title, export_file, import_path, key_symbol
+        )
+        if module_errors:
+            if required:
+                hard_errors.extend(module_errors)
+            else:
+                soft_warnings.extend(module_errors)
+
+    # Additionally verify that the Tensor class is actually instantiable,
+    # not just importable — guards against empty stub implementations.
     try:
         from tinytorch import Tensor
         if Tensor is None:
-            errors.append("Tensor is None (import failed silently)")
-    except ImportError as e:
-        errors.append(f"Cannot import Tensor: {e}")
-
-    # Check 3: Verify Tensor is actually the class, not a stub
-    try:
-        from tinytorch import Tensor
-        if Tensor is not None:
-            # Try to instantiate - this catches incomplete implementations
+            hard_errors.append(
+                "tinytorch.Tensor is None after import "
+                "(export failed silently — run: tito dev export --all)"
+            )
+        else:
             t = Tensor([1, 2, 3])
-            if not hasattr(t, 'data'):
-                errors.append("Tensor missing 'data' attribute")
-            if not hasattr(t, 'shape'):
-                errors.append("Tensor missing 'shape' attribute")
-    except Exception as e:
-        errors.append(f"Tensor instantiation failed: {e}")
+            for attr in ("data", "shape", "size", "dtype"):
+                if not hasattr(t, attr):
+                    hard_errors.append(
+                        f"Tensor is missing required attribute '{attr}'"
+                    )
+    except ImportError as exc:
+        hard_errors.append(f"Cannot import tinytorch.Tensor: {exc}")
+    except Exception as exc:
+        hard_errors.append(f"Tensor([1, 2, 3]) raised unexpectedly: {exc}")
 
-    if errors:
-        return False, errors
-    return True, []
+    # Print soft warnings so students see what's not yet exported
+    if soft_warnings:
+        print(
+            "\n[tinytorch] Modules not yet exported (OK for progressive "
+            "builds — export when you reach that module):",
+            file=sys.stderr,
+        )
+        for w in soft_warnings:
+            print(f"  ⚠  {w}", file=sys.stderr)
+        print("", file=sys.stderr)
+
+    return (not hard_errors), hard_errors
 
 
 def pytest_configure(config):
@@ -122,6 +220,54 @@ def pytest_configure(config):
                 f"This exports all module notebooks to the tinytorch package.\n"
                 f"{'='*70}\n"
             )
+
+# =============================================================================
+# Deterministic RNG: make test outcomes independent of execution order
+# =============================================================================
+# Nineteen tinytorch modules carry a module-level `rng = np.random.default_rng(7)`
+# that layer initialization draws from. Because the generator is shared and
+# mutable, how a layer initializes depends on how many random draws happened
+# earlier in the session -- so a test can pass alone and fail inside the suite.
+#
+# Two real tests were affected before this fixture existed: test_xor_learning
+# converged in isolation and landed in a local minimum under the full suite, and
+# test_deep_network_gradient_chain drew an initialization that killed every ReLU
+# and reported an exactly-zero gradient. Both created a local `rng` believing it
+# seeded Linear; it did not, because Linear reads its own module global.
+#
+# Reseeding every module generator before each test makes initialization
+# reproducible and the suite order-independent.
+
+_RNG_SEED = 7
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_rngs():
+    """Reseed every tinytorch module-level RNG before each test."""
+    try:
+        import importlib
+        import pkgutil
+        import numpy as _np
+        import tinytorch as _tt
+    except Exception:  # package not built yet; nothing to reseed
+        yield
+        return
+
+    targets = []
+    for info in pkgutil.walk_packages(_tt.__path__, "tinytorch."):
+        try:
+            mod = importlib.import_module(info.name)
+        except Exception:
+            continue
+        if isinstance(getattr(mod, "rng", None), _np.random.Generator):
+            targets.append(mod)
+
+    for mod in targets:
+        mod.rng = _np.random.default_rng(_RNG_SEED)
+    _np.random.seed(_RNG_SEED)
+
+    yield
+
 
 # Import test utilities to make them available
 try:
@@ -263,16 +409,28 @@ class TinyTorchTestReporter:
                 self.console.print(Panel(content, title="[red]Test Failed[/red]",
                                         border_style="red", padding=(0, 1)))
 
-    def print_summary(self):
-        """Print final summary."""
+    def print_summary(self, passed=None, failed=None, skipped=None):
+        """Print final summary.
+
+        Counts come from pytest's own stats when given. They used to come from
+        this object's tallies, which nothing incremented, so the summary read
+        "ALL PASSED | 0 passed, 0 total" on a run with failures. A student was
+        told everything passed while the run was red.
+        """
         if not self.use_rich:
             return
 
-        total = self.passed + self.failed + self.skipped
+        passed = self.passed if passed is None else passed
+        failed = self.failed if failed is None else failed
+        skipped = self.skipped if skipped is None else skipped
+        total = passed + failed + skipped
 
         self.console.print("\n" + "━" * 50)
-        status = "[green]ALL PASSED[/green]" if self.failed == 0 else f"[red]{self.failed} FAILED[/red]"
-        self.console.print(f"[bold]{status}[/bold] | {self.passed} passed, {self.skipped} skipped, {total} total")
+        if total == 0:
+            self.console.print("[yellow]NO TESTS RAN[/yellow]")
+            return
+        status = "[green]ALL PASSED[/green]" if failed == 0 else f"[red]{failed} FAILED[/red]"
+        self.console.print(f"[bold]{status}[/bold] | {passed} passed, {skipped} skipped, {total} total")
 
 
 # Global reporter instance
@@ -303,16 +461,26 @@ def pytest_runtest_makereport(item, call):
     if report.when == "call":
         # Get docstring from test function
         docstring = item.function.__doc__ if hasattr(item, 'function') else None
-
-        # Store for later use if needed
         report._tinytorch_docstring = docstring
+
+        # Actually hand the result to the educational reporter. Without this the
+        # reporter was inert: no per-test line, and no WHAT/WHY panel on failure,
+        # which is the whole point of --tinytorch.
+        if item.config.getoption("--tinytorch", default=False):
+            _reporter.print_test_result(report.nodeid, report.outcome,
+                                        docstring, report.longrepr)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Add educational summary at the end of test run."""
     # Check if we should show educational summary
     if config.getoption("--tinytorch", default=False):
-        _reporter.print_summary()
+        stats = terminalreporter.stats
+        _reporter.print_summary(
+            passed=len(stats.get("passed", [])),
+            failed=len(stats.get("failed", [])) + len(stats.get("error", [])),
+            skipped=len(stats.get("skipped", [])),
+        )
 
 
 # =============================================================================

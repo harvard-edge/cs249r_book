@@ -37,7 +37,12 @@ def main() -> int:
         "not an official MLCommons benchmark",
         "Committed Reference Evidence",
         "local reviewer handoff",
-        "unauthenticated integrity",
+        # The disclosure requirement is that the paper states the provenance
+        # manifests are NOT cryptographically signed. The old wording
+        # ("unauthenticated integrity" / "unauthenticated auditability") was
+        # self-contradictory; SHA-256 without signing gives integrity, not
+        # authentication. Reworded 2026-08-10, same disclosure intent.
+        "tamper-evident but unsigned",
         "cross-platform replication",
     ]
     for phrase in required:

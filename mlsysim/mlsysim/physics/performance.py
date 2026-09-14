@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mlsysim.core.units import ureg
-from mlsysim.core._validation import validate_positive, validate_at_least, validate_range
+from mlsysim.core._validation import validate_positive, validate_at_least, validate_range, validate_nonnegative
 
 
 def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
@@ -91,6 +91,74 @@ def calc_strong_scaling_speedup(num_devices, communication_fraction):
     validate_at_least(num_devices, 1, "num_devices")
     validate_range(communication_fraction, 0.0, 1.0, "communication_fraction")
     return num_devices / (1 + (num_devices - 1) * communication_fraction)
+
+
+def calc_universal_scalability_law(n, sigma, kappa):
+    """
+    Universal Scalability Law (Gunther, 1993).
+
+    Calculates relative system throughput / speedup C(N) under concurrency N,
+    accounting for both serialization contention (sigma) and coherency
+    crosstalk / coordination overhead (kappa).
+
+    Model:
+        C(N) = N / (1 + sigma * (N - 1) + kappa * N * (N - 1))
+
+    When kappa = 0, USL reduces exactly to Amdahl's Law with serial fraction sigma.
+    When kappa > 0, C(N) exhibits retrograde scaling beyond N* = sqrt((1 - sigma) / kappa).
+
+    Parameters
+    ----------
+    n : int or float
+        Concurrency level (number of workers, threads, or agents, >= 1).
+    sigma : float
+        Contention parameter representing serialized resource fraction (0.0 to 1.0).
+    kappa : float
+        Coherency / cross-talk parameter representing pairwise coordination (>= 0.0).
+
+    Returns
+    -------
+    float
+        Relative system capacity / speedup C(N).
+    """
+    validate_at_least(n, 1, "n")
+    validate_range(sigma, 0.0, 1.0, "sigma")
+    validate_nonnegative(kappa, "kappa")
+    denom = 1.0 + sigma * (n - 1) + kappa * n * (n - 1)
+    if denom <= 0.0:
+        return 0.0
+    return float(n / denom)
+
+
+def calc_usl_optimal_concurrency(sigma, kappa):
+    """
+    Optimal concurrency N* under the Universal Scalability Law.
+
+    Model:
+        N* = sqrt((1 - sigma) / kappa)  for kappa > 0
+        N* = inf                       for kappa == 0
+
+    Parameters
+    ----------
+    sigma : float
+        Contention parameter (0.0 to 1.0).
+    kappa : float
+        Coherency parameter (>= 0.0).
+
+    Returns
+    -------
+    float
+        The optimal concurrency level N* where throughput peaks before retrograde collapse.
+    """
+    import math
+
+    validate_range(sigma, 0.0, 1.0, "sigma")
+    validate_nonnegative(kappa, "kappa")
+    if kappa == 0.0:
+        return float("inf")
+    if sigma >= 1.0:
+        return 1.0
+    return float(math.sqrt((1.0 - sigma) / kappa))
 
 
 def calc_bottleneck(ops, model_bytes, device_flops, device_bw):

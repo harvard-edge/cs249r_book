@@ -141,11 +141,11 @@ MILESTONE_SCRIPTS = {
             {
                 "name": "Generation Speedup",
                 "script": "milestones/06_2018_mlperf/02_generation_speedup.py",
-                "description": "KV Caching for 10x faster Transformer",
-                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 18]  # Full training + Embeddings + Attention + Profiler + Memoization (18)
+                "description": "Verify cached GPT outputs and measure inference speed",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 18]  # GPT and its prerequisites + Memoization
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"
@@ -185,7 +185,7 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
     ],
     "06": [
         "Every line of code: YOUR implementations",
-        "Every byte saved: YOUR quantization and compression",
+        "Every candidate measured: YOUR quantization and compression",
         "Every gradient: YOUR autograd",
     ],
 }
@@ -197,7 +197,7 @@ MODULE_EXPORT_CHECKS = {
     3: [("tinytorch", "Linear"), ("tinytorch.core.layers", "Linear")],
     4: [("tinytorch", "CrossEntropyLoss"), ("tinytorch.core.losses", "CrossEntropyLoss")],
     5: [("tinytorch", "DataLoader"), ("tinytorch.core.dataloader", "DataLoader")],
-    6: [("tinytorch", "enable_autograd"), ("tinytorch.core.autograd", "enable_autograd")],
+    6: [("tinytorch", "no_grad"), ("tinytorch.core.autograd", "no_grad")],
     7: [("tinytorch", "SGD"), ("tinytorch.core.optimizers", "SGD")],
     8: [("tinytorch", "Trainer"), ("tinytorch.core.training", "Trainer")],
     9: [("tinytorch", "Conv2d"), ("tinytorch.core.spatial", "Conv2d")],
@@ -236,7 +236,7 @@ def _load_completed_module_numbers() -> set:
         return completed
 
     try:
-        with open(progress_file, 'r') as f:
+        with open(progress_file, 'r', encoding='utf-8') as f:
             progress_data = json.load(f)
     except (json.JSONDecodeError, IOError):
         return completed
@@ -300,7 +300,7 @@ class MilestoneSystem:
         # Try to load main milestones.yml first
         if config_path.exists():
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
 
                 # Convert to expected format
@@ -321,7 +321,7 @@ class MilestoneSystem:
         for era_path in era_paths:
             if era_path.exists():
                 try:
-                    with open(era_path, 'r') as f:
+                    with open(era_path, 'r', encoding='utf-8') as f:
                         era_config = yaml.safe_load(f)
 
                     if 'milestone' in era_config:
@@ -505,7 +505,7 @@ class MilestoneSystem:
         progress_file = Path(".tito") / "progress.json"
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     progress_data = json.load(f)
                     module_num = _module_progress_to_int(module_name)
                     completed_nums = {
@@ -526,7 +526,7 @@ class MilestoneSystem:
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -548,7 +548,7 @@ class MilestoneSystem:
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass
@@ -1442,7 +1442,7 @@ class MilestoneCommand(BaseCommand):
                 completed_modules = []
                 if progress_file.exists():
                     try:
-                        with open(progress_file, 'r') as f:
+                        with open(progress_file, 'r', encoding='utf-8') as f:
                             progress_data = json.load(f)
                             for mod in progress_data.get("completed_modules", []):
                                 try:
@@ -1564,7 +1564,7 @@ class MilestoneCommand(BaseCommand):
 
         if progress_file.exists():
             try:
-                with open(progress_file, 'r') as f:
+                with open(progress_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -1586,7 +1586,7 @@ class MilestoneCommand(BaseCommand):
         progress_dir.mkdir(exist_ok=True)
 
         try:
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_data, f, indent=2)
         except IOError:
             pass

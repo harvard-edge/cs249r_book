@@ -1,0 +1,792 @@
+{
+  "metadata": {
+    "source_file": "books/vol1/06_nn_architectures/06_nn_architectures.qmd",
+    "schema_version": 2,
+    "generated_on": "2026-09-01",
+    "total_sections": 12,
+    "sections_with_quizzes": 12,
+    "sections_without_quizzes": 0
+  },
+  "sections": [
+    {
+      "section_id": "#sec-network-architectures-architectural-principles-engineering-tradeoffs-362e",
+      "section_title": "Architectural Principles",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Inductive bias as the unifying concept mapping data structure to hardware behavior",
+            "Arithmetic intensity as the diagnostic for compute-bound vs bandwidth-bound regimes",
+            "Lighthouse workload signatures (ResNet-50, GPT-2, DLRM, MobileNetV2, KWS) and their dominant bottlenecks",
+            "Architecture choice as an infrastructure commitment locking in iron law terms"
+          ],
+          "question_strategy": "Open with an application MCQ on inductive bias (CNN vs MLP), probe roofline placement via SHORT reflection, test the misconception of inductive bias strength via TF, diagnose DLRM capacity constraint via MCQ, and synthesize architecture selection as an infrastructure commitment via SHORT.",
+          "difficulty_progression": "Foundational inductive bias concept -> quantitative roofline analysis -> inductive bias strength trade-offs -> lighthouse workload diagnosis -> cross-layer systems commitment.",
+          "integration": "Builds on the iron law of ML systems and arithmetic intensity from earlier foundational chapters.",
+          "ranking_explanation": "Tier 1: Establishes the chapter's core conceptual framework (inductive bias, lighthouse models, arithmetic intensity) and warrants a full quiz applying those frames to concrete engineering scenarios."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A team must choose between an MLP and a CNN for classifying $224 \\times 224$ pixel RGB medical images. A single dense first layer would require $224 \\times 224 \\times 3 = 150{,}528$ input weights per output unit (yielding roughly 150 million weights for a 1,000-unit layer), whereas a CNN uses a shared $3 \\times 3 \\times 3$ filter (27 weights). Using the chapter's framing of inductive bias, which statement best explains why the CNN is the superior starting point?",
+            "choices": [
+              "The CNN is strictly more expressive than the MLP, allowing it to approximate non-continuous functions that the Universal Approximation Theorem forbids.",
+              "The MLP is mathematically incapable of representing any 2D spatial feature mapping due to lack of convolutional instruction support.",
+              "The CNN eliminates gradient descent during optimization because convolutional spatial filters are deterministic, handcrafted operators.",
+              "The CNN's spatial locality and weight-sharing prior directly matches the 2D structure of image data, collapsing parameter storage by over $5{,}000\\times$ and drastically reducing sample complexity and memory traffic."
+            ],
+            "answer": "The correct answer is D. Inductive bias is an architecture's built-in structural assumption about data: a CNN assumes nearby pixels are strongly correlated and features are translation invariant, allowing it to share a small 27-weight filter across all spatial positions. That match between prior and data collapses parameter count by roughly $5{,}575\\times$ per detector, lowers sample complexity, and maximizes data reuse. The claim that CNNs are more expressive than MLPs inverts the mathematical relationship—CNNs are more constrained (less expressive) than MLPs, but far more learnable on spatial data. The assertion that MLPs cannot represent image functions is false because the Universal Approximation Theorem guarantees representation given sufficient width. The claim that CNN filters eliminate gradient descent is incorrect because CNN weights are learned via backpropagation.",
+            "learning_objective": "Apply the inductive bias concept to justify a CNN-over-MLP architecture choice on structured spatial data and explain how the bias reduces both sample complexity and memory traffic."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A dense MLP layer running batch-1 FP32 inference reports an arithmetic intensity of $\\approx 0.5\\text{ FLOP/byte}$, while an image convolution bottleneck layer achieves $>50\\text{ FLOP/byte}$ on the same accelerator. Using the roofline model and an accelerator ridge point of $150\\text{ FLOP/byte}$, explain why these kernels occupy opposite execution regimes and diagnose why upgrading to an accelerator with double the peak TFLOP/s will not speed up the batch-1 MLP.",
+            "answer": "Arithmetic intensity ($I = \\text{FLOPs}/\\text{bytes}$) defines the ratio of arithmetic operations performed to data moved from memory. The batch-1 dense layer reads each 4-byte FP32 weight to execute a single MAC (2 FLOPs), yielding $\\approx 0.5\\text{ FLOP/byte}$, which sits orders of magnitude below the $150\\text{ FLOP/byte}$ ridge point, placing it strictly in the memory-bandwidth-bound regime. The convolution reuses each loaded filter weight across thousands of spatial positions, amortizing weight memory traffic and pushing intensity toward or above the ridge point into the compute-bound regime. Upgrading peak TFLOP/s doubles compute capacity but leaves memory bandwidth unchanged; because the batch-1 MLP is stalled waiting for weight transfers from memory, its runtime will remain unchanged without higher bandwidth or larger batch sizes.",
+            "learning_objective": "Analyze how arithmetic intensity determines which side of the roofline a workload occupies and select the hardware upgrade that targets its actual bottleneck."
+          },
+          {
+            "question_type": "TF",
+            "question": "Because an inductive bias restricts the hypothesis space to a smaller set of representable functions, machine learning systems engineers should always select the architecture with the strongest possible inductive bias for every workload.",
+            "answer": "False. By the No Free Lunch theorem, an inductive bias only improves generalization and efficiency when its structural assumptions align with the true data-generating distribution. Imposing a strong spatial locality bias (such as a CNN) on tabular records or global language dependencies prevents the model from representing necessary non-local relationships, resulting in severe underfitting and degraded accuracy.",
+            "learning_objective": "Evaluate the trade-offs of inductive bias strength and justify why structural assumptions must align with data domain properties."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A production profiler reveals that a model's embedding tables consume over 1 TB of memory across cluster nodes, inference requests perform sparse random row lookups rather than dense matrix multiplies, and accelerator compute units remain over 95% idle. Which lighthouse archetype best represents this workload's dominant system constraint?",
+            "choices": [
+              "DLRM, because the binding constraint is memory capacity for terabyte-scale embedding tables accessed via sparse, irregular memory gathers.",
+              "ResNet-50, because it stresses dense matrix floating-point throughput across regular convolutional grids.",
+              "GPT-2, because autoregressive decoding is the canonical memory-bandwidth-limited serving workload.",
+              "MobileNetV2, because depthwise-separable convolutions produce low arithmetic intensity on server GPUs."
+            ],
+            "answer": "The correct answer is A. A terabyte-scale parameter footprint dominated by sparse, random embedding table lookups with largely idle compute units is the hallmark signature of DLRM (Deep Learning Recommendation Model). DLRM models are memory-capacity-bound and memory-latency-bound, requiring model-parallel table sharding across cluster memory. The ResNet-50 archetype represents compute-bound dense convolutions with high arithmetic intensity. The GPT-2 archetype represents bandwidth-bound autoregressive decoding dominated by streaming weights per token. The MobileNetV2 archetype represents latency-constrained mobile vision with depthwise separable convolutions.",
+            "learning_objective": "Classify a production workload by matching its profile signature (table size, access pattern, compute utilization) to the correct lighthouse archetype."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why does the chapter describe selecting a neural network architecture as 'signing a contract with physics' rather than merely selecting a mathematical modeling preference? Explain how architectural graph structure fixes terms in the iron law of ML systems ($T_{\\text{exec}} = D_{\\text{vol}}/\\text{BW} + O/(R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}) + L_{\\text{lat}}$).",
+            "answer": "Selecting an architecture fixes the fundamental computational graph and memory access pattern, permanently locking in the operation count $O$, the data movement volume $D_{\\text{vol}}$, and the sequential critical path length $L_{\\text{lat}}$. A CNN commits to spatial locality and weight reuse (high arithmetic intensity $O/D_{\\text{vol}}$); a transformer commits to quadratic pairwise score computation $\\mathcal{O}(S^2)$ and linear KV cache growth; an RNN commits to a serial time dependency $L_{\\text{lat}}$; and a DLRM commits to terabyte-scale embedding capacity. These topological choices dictate physical hardware cluster sizing, memory bandwidth demand, power draw, and deployment latency floors before compilation or runtime optimization begins.",
+            "learning_objective": "Explain how architectural choice acts as an infrastructure commitment that dictates physical hardware resource allocation and iron law execution terms."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-multilayer-perceptrons-dense-pattern-processing-bc11",
+      "section_title": "MLPs: Dense Pattern Processing",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Dense connectivity and unrestricted feature interaction scaling",
+            "Universal Approximation Theorem (UAT) vs practical learnability gap",
+            "Batch-1 GEMV arithmetic intensity and the 0.5 FLOP/byte bandwidth wall",
+            "Nested loop structure and Tensor Core tile alignment penalties",
+            "Manifold hypothesis and sample complexity on high-dimensional inputs"
+          ],
+          "question_strategy": "Open with an MCQ on dense layer parameter and memory scaling, probe the UAT vs learnability gap via SHORT, test the manifold hypothesis definition via FILL, diagnose the batch-1 GEMV bandwidth stall via MCQ, and analyze the nested loop MAC and memory access mechanics via SHORT.",
+          "difficulty_progression": "Structural parameter scaling -> statistical vs systems learnability -> manifold concept recall -> roofline bandwidth diagnosis -> execution loop mechanics.",
+          "integration": "Builds on arithmetic intensity, GEMM basics, and roofline analysis from foundational chapters.",
+          "ranking_explanation": "Tier 1: MLPs represent the unconstrained baseline against which all structured inductive biases are compared."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A fully connected layer connecting 2,048 input units to 2,048 output units stores approximately 4.19 million weights (~16.8 MB in FP32). When applied to high-resolution image inputs, dense layers suffer severe parameter explosion. Which statement best captures the systems mechanism behind the MLP's parameter and memory scaling?",
+            "choices": [
+              "Dense layers use non-linear activations whose element-wise memory footprints dwarf the weight tensors by several orders of magnitude.",
+              "MLP bias vectors grow quadratically with the output dimension, dominating total layer memory storage.",
+              "The MLP encodes no structural prior about the input, requiring every input-output pair to maintain an independent learnable parameter, yielding $\\mathcal{O}(M \\times N)$ parameter storage and weight memory traffic per sample.",
+              "Dense layers require storing three master copies of every weight matrix in hardware registers during inference forward passes."
+            ],
+            "answer": "The correct answer is C. Because an MLP assumes no spatial or sequential structure, it treats all input-output connections as equally plausible. A fully connected layer between $M$ inputs and $N$ outputs must materialize a full $M \\times N$ weight matrix, scaling parameters as $\\mathcal{O}(M \\times N)$. For batch-1 inference, every weight is loaded from memory once per sample, leading to $\\mathcal{O}(M \\times N)$ memory traffic. The claim that element-wise activations dwarf weights is incorrect because activation memory scales linearly ($\\mathcal{O}(N)$). The assertion that bias vectors scale quadratically is false because bias vectors are linear in output width ($\\mathcal{O}(N)$). The claim regarding three master copies in hardware registers is incorrect because inference requires only standard weight tensor access.",
+            "learning_objective": "Apply the MLP's unrestricted-interaction assumption to explain why parameter count and bytes-moved-per-sample both scale as O(M * N), and connect that scaling to its bandwidth behavior."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team cites the Universal Approximation Theorem (UAT) to argue that a wide 3-layer MLP should be used to classify $256 \\times 256$ RGB images instead of a CNN. Explain why UAT does not justify this design choice in practice, detailing both the statistical failure mode (sample complexity) and the systems failure mode (memory bandwidth and parameter explosion).",
+            "answer": "The Universal Approximation Theorem guarantees only mathematical representation capacity (a wide enough MLP can approximate any continuous function on a compact domain), but gives no constructive bound on sample complexity or trainability. Statistically, a $256 \\times 256$ RGB image contains 196,608 flattened input features; ignoring spatial locality forces the MLP to learn spatial relationships from scratch, requiring an exponentially large dataset to avoid severe overfitting. From a systems perspective, connecting 196,608 inputs to even 4,096 hidden units requires ~805 million weights (~1.61 GB in FP16 for one layer). At batch size 1, reading 805M weights to perform ~1.61 GFLOPs yields an arithmetic intensity of $\\approx 1.0\\text{ FLOP/byte}$ (or $0.5\\text{ FLOP/byte}$ in FP32), leaving high-throughput GPU Tensor Cores completely starved for memory bandwidth.",
+            "learning_objective": "Analyze the gap between UAT's representational guarantee and practical trainability, and connect both the statistical (sample complexity) and systems (memory-bandwidth) failure modes of a naive dense-MLP image classifier."
+          },
+          {
+            "question_type": "FILL",
+            "question": "The ____ hypothesis states that high-dimensional real-world data (such as natural images) actually resides on a much lower-dimensional structured surface embedded within the full input space, explaining why deep neural networks can generalize from feasible training budgets despite the curse of dimensionality.",
+            "answer": "manifold (or Manifold). The manifold hypothesis posits that high-dimensional data lies on a low-dimensional manifold embedded in the ambient space, allowing deep networks to unfold this structure into linearly separable representations.",
+            "learning_objective": "Explain the manifold hypothesis and its role in bridging the gap between high ambient input dimensionality and finite training sample complexity."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A single dense layer ($2{,}048 \\times 2{,}048$) running FP32 inference on an A100 GPU at batch size 1 achieves only ~4% of peak compute throughput, with profilers reporting an arithmetic intensity of $\\approx 0.5\\text{ FLOP/byte}$. What is the most effective engineering solution to move this kernel out of the memory-bandwidth-bound regime and raise hardware utilization?",
+            "choices": [
+              "Increase the batch size ($B > 1$), transforming the matrix-vector multiplication (GEMV) into a matrix-matrix multiplication (GEMM), which amortizes weight loading across $B$ samples and scales arithmetic intensity.",
+              "Replace the dense matrix multiplication with an unvectorized scalar loop to avoid GPU kernel launch overhead.",
+              "Upgrade to an accelerator with double the peak FP32 TFLOP/s while keeping the batch size at 1.",
+              "Replace the linear transformation with an element-wise activation function to eliminate all weight memory traffic."
+            ],
+            "answer": "The correct answer is A. At batch size 1, each weight is read from memory to compute a single multiply-accumulate (GEMV), yielding $I \\approx \\frac{2 \\cdot M \\cdot N}{4 \\cdot M \\cdot N} = 0.5\\text{ FLOP/byte}$ in FP32. Batching $B$ samples together transforms the kernel into a GEMM ($\\mathbf{X}\\mathbf{W}$ where $\\mathbf{X} \\in \\mathbb{R}^{B \\times M}$), performing $2 \\cdot B \\cdot M \\cdot N$ FLOPs for the same $4 \\cdot M \\cdot N$ weight bytes read (ignoring activation traffic), which scales arithmetic intensity linearly with $B$ and pushes execution into the compute-bound regime. An unvectorized scalar loop would severely degrade SIMD instruction throughput. Upgrading peak TFLOP/s leaves memory bandwidth unchanged and does not solve a bandwidth bottleneck. Eliminating the matrix multiplication would change the underlying mathematical function of the network.",
+            "learning_objective": "Analyze a batch-1 dense-layer kernel as bandwidth-bound from a FLOP/byte signature and select batching as the intensity-raising fix rather than a compute upgrade."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "In the nested loop implementation of an MLP forward pass (`for batch`, `for out`, `for in_`), calculate the exact number of multiply-accumulate (MAC) operations and memory accesses required to compute 100 hidden neurons from a 784-dimensional MNIST input vector at batch size 1, and explain how framework-level BLAS libraries optimize this pattern.",
+            "answer": "For 100 output neurons and 784 inputs at batch size 1, the layer computes $784 \\times 100 = 78{,}400\\text{ MACs}$ (equivalent to 156,800 FLOPs). Each output neuron reads 784 inputs and 784 weights, requiring $2 \\times 784 = 1{,}568$ memory accesses per neuron (totaling 156,800 operand reads for the layer). Deep learning frameworks replace naive nested loops with optimized BLAS libraries (such as cuBLAS or MKL), which tile matrix blocks into on-chip cache/shared memory, use SIMD/Tensor Core instructions, and vectorize dot products to maximize memory coalescing and operational throughput.",
+            "learning_objective": "Calculate the exact MAC and memory access count of an MLP layer and describe how BLAS libraries optimize the underlying nested loop structure."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-cnns-spatial-pattern-processing-5b8d",
+      "section_title": "CNNs: Spatial Pattern Processing",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Parameter sharing and local connectivity parameter reduction",
+            "Translation equivariance ($f(\\mathcal{T}(\\mathbf{x})) = \\mathcal{T}(f(\\mathbf{x}))$) vs translation invariance",
+            "Receptive field growth mechanics across stacked convolutional layers",
+            "im2col lowering transformation to GEMM and memory-duplication trade-off",
+            "ResNet-50 compute lighthouse vs MobileNetV2 latency lighthouse vs KWS TinyML lighthouse"
+          ],
+          "question_strategy": "Open with an MCQ calculating CNN vs dense parameter scaling, probe equivariance vs invariance via SHORT, order the im2col execution pipeline via ORDER, address the FLOPs-equal-speed misconception via TF, test depthwise separable factorization via FILL, and calculate receptive field growth via MCQ.",
+          "difficulty_progression": "Parameter count scaling -> mathematical equivariance/invariance -> lowering pipeline order -> hardware-mapping fallacy -> depthwise factorization -> receptive field mechanics.",
+          "integration": "Builds on spatial locality, roofline models, and hardware acceleration principles.",
+          "ranking_explanation": "Tier 1: CNNs are the foundational spatial architecture family and the basis for key vision lighthouse models."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A $3 \\times 3$ convolutional layer with 64 input channels and 64 output channels processes a $224 \\times 224$ feature map. How does the parameter count of this convolutional layer compare to an equivalent fully connected layer operating on the flattened input of the same dimensions?",
+            "choices": [
+              "The CNN requires $205\\text{ million}$ parameters, whereas the dense layer requires only $36{,}864$ parameters due to flattened matrix vectorization.",
+              "The CNN requires $3 \\times 3 \\times 64 \\times 64 = 36{,}864$ parameters (~37K), whereas the equivalent dense layer requires $224^2 \\times 64 \\times 64 \\approx 205\\text{ million}$ parameters, representing a $>5{,}500\\times$ parameter reduction.",
+              "Both architectures require exactly the same number of parameters because both perform 64-to-64 channel transformations.",
+              "The CNN requires 9 parameters because spatial weight sharing reduces all kernel weights across all channels to a single $3 \\times 3$ matrix."
+            ],
+            "answer": "The correct answer is B. A convolutional layer's parameters depend only on kernel size ($K \\times K$) and channel counts ($C_{\\text{in}} \\times C_{\\text{out}}$), giving $3 \\times 3 \\times 64 \\times 64 = 36{,}864$ parameters regardless of spatial resolution. An equivalent fully connected layer on a $224 \\times 224 \\times 64$ tensor must connect all $224^2 \\times 64$ inputs to 64 outputs, requiring $224^2 \\times 64 \\times 64 \\approx 205{,}520{,}896$ parameters (~205M), a roughly $5{,}575\\times$ reduction. The claim that the dense layer requires 37K parameters inverts the parameter counts. The claim that parameter counts are identical ignores spatial connectivity. The claim that the CNN requires only 9 parameters forgets that each input-output channel pair requires an independent $3 \\times 3$ filter.",
+            "learning_objective": "Calculate and compare parameter footprints between convolutional and fully connected layers to quantify the efficiency of spatial weight sharing."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Distinguish between translation equivariance ($f(\\mathcal{T}(\\mathbf{x})) = \\mathcal{T}(f(\\mathbf{x}))$) and translation invariance ($f(\\mathcal{T}(\\mathbf{x})) = f(\\mathbf{x})$). Explain why intermediate convolutional layers must maintain equivariance for object detection while final classification layers often apply global average pooling to achieve invariance.",
+            "answer": "Translation equivariance means that shifting the input shifts the output feature map by the exact same spatial offset, preserving precise positional and geometric relationships ('eye above nose'). Invariance means that transforming the input produces an identical, unchanging output, discarding spatial coordinates. Intermediate layers in object detection must remain equivariant so that downstream bounding box predictors can accurately localize object coordinates $(x, y, w, h)$. Final classification layers introduce invariance (via global average pooling) because the class label ('dog') must remain unchanged regardless of where the object appears in the frame.",
+            "learning_objective": "Compare translation equivariance and invariance, and justify their respective roles in intermediate feature extraction versus final classification."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the sequence of operations performed when executing a 2D convolution layer via the standard im2col lowering transformation followed by activation:\n(1) Multiply the unfolded patch matrix by the stacked filter weight matrix using a standard GEMM library call\n(2) Reshape and fold the resulting 2D GEMM output matrix back into the 4D spatial feature map tensor $(B, C_{\\text{out}}, H_{\\text{out}}, W_{\\text{out}})$\n(3) Unfold overlapping $K \\times K$ receptive field input patches into columns (or rows) of a 2D matrix\n(4) Add channel bias vectors and apply the element-wise nonlinear activation function (e.g., ReLU)\n(5) Receive the 4D input activation tensor of shape $(B, C_{\\text{in}}, H_{\\text{in}}, W_{\\text{in}})$",
+            "answer": "The correct order is (5) -> (3) -> (1) -> (2) -> (4). Step 1 is (5) Receive 4D input tensor $(B, C_{\\text{in}}, H_{\\text{in}}, W_{\\text{in}})$. Step 2 is (3) Unfold input patches into a 2D matrix via im2col. Step 3 is (1) Multiply unfolded input matrix by filter weights via GEMM. Step 4 is (2) Reshape 2D GEMM result into 4D output feature map. Step 5 is (4) Add bias and apply element-wise activation.",
+            "learning_objective": "Explain the operational sequence of the im2col transformation in lowering 2D convolutions to matrix multiplications."
+          },
+          {
+            "question_type": "TF",
+            "question": "Because MobileNetV2 requires roughly 14–15$\\times$ fewer FLOPs than ResNet-50 per $224 \\times 224$ image, it is guaranteed to execute at least 10$\\times$ faster on any data center GPU.",
+            "answer": "False. FLOPs measure arithmetic work, not execution latency. MobileNetV2 uses depthwise separable convolutions that have low arithmetic intensity and small channel dimensions per kernel, which can fail to saturate dense matrix units (such as Tensor Cores) on server GPUs. Because memory access and operator launch overhead can dominate compute, MobileNetV2 may achieve less than proportional speedup or even run slower than ResNet-50 on high-end GPUs.",
+            "learning_objective": "Evaluate the fallacy that FLOP count directly equals inference latency and explain why arithmetic intensity dictates hardware speedup."
+          },
+          {
+            "question_type": "FILL",
+            "question": "A depthwise separable convolution decomposes standard convolution into two sequential operations: a ____ convolution that applies spatial filters to each input channel independently, followed by a $1 \\times 1$ pointwise convolution that projects and mixes channels across the depth dimension.",
+            "answer": "depthwise. Depthwise separable convolution factorizes standard convolution into a depthwise convolution (spatial filtering per channel) and a pointwise convolution ($1 \\times 1$ cross-channel linear combination).",
+            "learning_objective": "Explain depthwise separable convolution components and explain how factorizing spatial and channel mixing reduces arithmetic complexity."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In a deep CNN using stacked $3 \\times 3$ convolutional filters with stride 1 and padding, by how much does the receptive field side length increase with each additional layer, and what is the architectural implication for detecting large objects?",
+            "choices": [
+              "Receptive field increases by 9 pixels per layer, allowing a 3-layer network to cover an entire $224 \\times 224$ image.",
+              "Receptive field side length doubles with each layer, scaling exponentially as $3^L$.",
+              "Receptive field side length grows linearly by 2 pixels per layer (a 3-layer stack sees a $7 \\times 7$ region), requiring deep stacks of layers or downsampling (pooling/striding) to detect objects spanning $100+$ pixels in high-resolution images.",
+              "Receptive field remains strictly fixed at $3 \\times 3$ across all layers because convolutional filter weights are shared across positions."
+            ],
+            "answer": "The correct answer is C. Each successive $3 \\times 3$ stride-1 convolutional layer expands the receptive field side length by $K - 1 = 2$ pixels (layer 1 sees $3 \\times 3$, layer 2 sees $5 \\times 5$, layer 3 sees $7 \\times 7$). To detect large objects spanning 100+ pixels in a $224 \\times 224$ image, networks must either use deep stacks of layers, strided convolutions, or pooling operations. The claim of 9 pixels confuses kernel area with linear side growth. The claim of exponential doubling is incorrect for stride-1 layers. The claim that receptive field remains $3 \\times 3$ confuses single-layer kernel size with cumulative receptive field depth.",
+            "learning_objective": "Calculate receptive field growth across stacked convolutional layers and analyze the depth-versus-downsampling trade-off in network design."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-rnns-sequential-pattern-processing-f804",
+      "section_title": "RNNs: Sequential Pattern Processing",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Temporal inductive bias and hidden state recurrence $\\mathbf{h}_t = f(\\mathbf{W}_{\\text{hh}}\\mathbf{h}_{t-1} + \\mathbf{W}_{\\text{hx}}\\mathbf{x}_t + \\mathbf{b}_h)$",
+            "$\\mathcal{O}(1)$ inference state memory vs $\\mathcal{O}(S)$ serial latency critical path",
+            "Backpropagation through time (BPTT) and vanishing/exploding gradient products of Jacobians",
+            "Batch parallelism vs un-parallelizable sequence-dimension dependency",
+            "TinyML and streaming audio niches where RNN constant memory remains optimal"
+          ],
+          "question_strategy": "Open with an MCQ on inference state vs BPTT training memory scaling, evaluate the sequential critical path vs hardware scaling via SHORT, test the misconception of RNN obsolescence via TF, order the single-step forward pass operations via ORDER, analyze BPTT Jacobian degradation via SHORT, and calculate per-step MACs via MCQ.",
+          "difficulty_progression": "Memory complexity comparison -> serial latency limits -> deployment viability niche -> execution loop ordering -> mathematical gradient mechanics -> per-step MAC arithmetic.",
+          "integration": "Builds on recurrent computation, latency floors ($L_{\\text{lat}}$), and sequence processing trade-offs.",
+          "ranking_explanation": "Tier 1: RNNs define the sequential stateful baseline and illustrate the trade-off between constant memory and serial execution."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "An RNN processes a sequence of length $S = 1{,}000$ tokens with hidden state dimension $d_{\\text{hidden}} = 128$. Which statement correctly describes the scaling of its inference state memory versus its training activation memory?",
+            "choices": [
+              "Inference state memory is $\\mathcal{O}(d_{\\text{hidden}})$ (constant $\\mathcal{O}(1)$ with respect to sequence length $S$), whereas training with backpropagation through time (BPTT) requires storing activations across all steps, scaling as $\\mathcal{O}(S \\cdot d_{\\text{hidden}})$.",
+              "Both inference state memory and training activation memory scale quadratically as $\\mathcal{O}(S^2)$ due to recurrent hidden-to-hidden weight matrices.",
+              "Inference state memory scales linearly as $\\mathcal{O}(S \\cdot d_{\\text{hidden}})$, while training memory is constant because weights are shared across all time steps.",
+              "Inference requires zero memory because recurrent states are discarded immediately after computing output probabilities."
+            ],
+            "answer": "The correct answer is A. During inference, an RNN only needs to retain the single active hidden state vector $\\mathbf{h}_{t-1}$ of size $d_{\\text{hidden}}$ to compute the next step, giving constant $\\mathcal{O}(1)$ state memory relative to sequence length $S$. During training, backpropagation through time (BPTT) requires computing gradients through all prior time steps, forcing the system to store intermediate hidden activations for all $S$ steps, which scales as $\\mathcal{O}(S \\cdot d_{\\text{hidden}})$. The claim of quadratic scaling confuses RNNs with naive transformer attention. The claim that inference memory scales with $S$ while training is constant reverses the operational realities. The claim that inference requires zero memory is false because the hidden state represents the sequence context.",
+            "learning_objective": "Compare the memory complexity of RNN inference (constant state) against BPTT training (linear in sequence length)."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why upgrading an accelerator from 10 TFLOP/s to 100 TFLOP/s cannot reduce the sequential critical path length of an RNN processing a single long sequence, and contrast this with the parallel sequence processing capability of a transformer.",
+            "answer": "An RNN computes $\\mathbf{h}_t = f(\\mathbf{W}_{\\text{hh}}\\mathbf{h}_{t-1} + \\mathbf{W}_{\\text{hx}}\\mathbf{x}_t)$, creating an unbreakable temporal dependency where time step $t$ cannot begin until step $t-1$ finishes. For a sequence of length $S$, this enforces an $\\mathcal{O}(S)$ serial critical path ($L_{\\text{lat}}$ in the iron law); adding compute units can accelerate the tiny matrix-vector multiplication at each step, but cannot parallelize across the sequence dimension. In contrast, a transformer processes all $S$ positions of a full sequence concurrently during training and prefill, mapping the entire sequence onto parallel hardware cores simultaneously.",
+            "learning_objective": "Analyze the sequential critical path of RNNs and explain why hardware parallelism cannot eliminate step-to-step dependencies."
+          },
+          {
+            "question_type": "TF",
+            "question": "Because transformers offer superior parallelization and representational capacity for long-range dependencies, recurrent neural networks are entirely obsolete and have no valid deployment use cases in modern ML systems.",
+            "answer": "False. For streaming inference on resource-constrained microcontrollers (TinyML) and always-on audio devices with strict power and memory budgets, an RNN's constant $\\mathcal{O}(1)$ state memory footprint (e.g., 2 KB for a 512-dim state) is vastly superior to the linear KV-cache growth and quadratic attention requirements of transformers, making RNNs a systems-justified choice.",
+            "learning_objective": "Justify edge and streaming use cases where RNN constant-state memory is superior to transformer memory scaling."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the mathematical and dataflow operations executed during a single time-step forward pass of a standard Elman RNN cell:\n(1) Multiply the previous hidden state vector $\\mathbf{h}_{t-1}$ by the recurrent weight matrix $\\mathbf{W}_{\\text{hh}}$\n(2) Multiply the current input vector $\\mathbf{x}_t$ by the input weight matrix $\\mathbf{W}_{\\text{hx}}$\n(3) Sum the recurrent contribution, input contribution, and hidden bias vector $\\mathbf{b}_h$\n(4) Apply the nonlinear activation function (e.g., $\\tanh$) to generate the new hidden state $\\mathbf{h}_t$\n(5) Multiply the new hidden state $\\mathbf{h}_t$ by the output weight matrix $\\mathbf{W}_{\\text{yh}}$ to produce output $\\mathbf{y}_t$",
+            "answer": "The correct order is (2) -> (1) -> (3) -> (4) -> (5) (or (1) and (2) computed in parallel -> (3) -> (4) -> (5)). Step 1 and 2 project the input $\\mathbf{x}_t \\mathbf{W}_{\\text{hx}}$ and previous hidden state $\\mathbf{h}_{t-1} \\mathbf{W}_{\\text{hh}}$. Step 3 is (3) Sum the projections with bias $\\mathbf{b}_h$. Step 4 is (4) Apply $\\tanh$ activation to produce $\\mathbf{h}_t$. Step 5 is (5) Project $\\mathbf{h}_t$ via $\\mathbf{W}_{\\text{yh}}$ to compute output $\\mathbf{y}_t$.",
+            "learning_objective": "Explain the operational dataflow and matrix operations executed within a single RNN time step."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "During backpropagation through time (BPTT) over $S$ time steps, the gradient of the loss with respect to the initial hidden state satisfies $\\frac{\\partial \\mathcal{L}}{\\partial \\mathbf{h}_0} \\propto \\prod_{t=1}^S \\frac{\\partial \\mathbf{h}_t}{\\partial \\mathbf{h}_{t-1}}$. Explain the mathematical mechanism that causes gradients to vanish or explode as $S$ grows large.",
+            "answer": "The gradient requires computing the product of $S$ Jacobian matrices $\\mathbf{J}_t = \\frac{\\partial \\mathbf{h}_t}{\\partial \\mathbf{h}_{t-1}} = \\operatorname{diag}(\\sigma'(\\mathbf{z}_t)) \\mathbf{W}_{\\text{hh}}^T$. If the singular values of the recurrent weight matrix $\\mathbf{W}_{\\text{hh}}$ and activation derivatives are consistently less than 1, their product decays exponentially ($< 1^S \\to 0$), causing vanishing gradients that prevent learning long-term dependencies. Conversely, if the maximum singular values exceed 1, the gradient product grows exponentially ($> 1^S \\to \\infty$), causing exploding gradients, numerical instability, and training divergence.",
+            "learning_objective": "Analyze how repeated Jacobian multiplication in BPTT leads to vanishing and exploding gradient failure modes."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In a standard RNN layer with input dimension $d_{\\text{in}} = 100$ and hidden state dimension $d_{\\text{hidden}} = 128$, how many total multiply-accumulate (MAC) operations are performed per sequence step to compute the unactivated hidden state?",
+            "choices": [
+              "12,800 MACs, because only the input projection performs matrix multiplication.",
+              "29,184 MACs, consisting of $128 \\times 128 = 16{,}384\\text{ MACs}$ for the recurrent projection plus $100 \\times 128 = 12{,}800\\text{ MACs}$ for the input projection.",
+              "1,280,000 MACs, because recurrence multiplies all hidden states across all past time steps simultaneously.",
+              "256 MACs, because an RNN updates only a single vector addition per step."
+            ],
+            "answer": "The correct answer is B. At each time step, the RNN performs two distinct matrix multiplications: the recurrent projection $\\mathbf{h}_{t-1} \\mathbf{W}_{\\text{hh}}$ requires $128 \\times 128 = 16{,}384\\text{ MACs}$, and the input projection $\\mathbf{x}_t \\mathbf{W}_{\\text{hx}}$ requires $100 \\times 128 = 12{,}800\\text{ MACs}$. Together, these sum to $16{,}384 + 12{,}800 = 29{,}184\\text{ MACs}$ per step per batch item. The choice of 12,800 MACs omits the recurrent projection. The choice of 1,280,000 MACs incorrectly assumes quadratic all-to-all history computation. The choice of 256 MACs confuses dimension addition with full matrix transformations.",
+            "learning_objective": "Calculate the per-step multiply-accumulate arithmetic cost of input and recurrent projections in an RNN layer."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df",
+      "section_title": "Attention: Dynamic Processing",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Content-dependent dynamic routing ($\text{Attention}(\\mathbf{Q},\\mathbf{K},\\mathbf{V}) = \text{softmax}(\\mathbf{Q}\\mathbf{K}^T/\\sqrt{d_k})\\mathbf{V}$)",
+            "$\\mathcal{O}(1)$ path length between any two tokens vs $\\mathcal{O}(S^2)$ score computation",
+            "Naive score materialization ($S \times S$ scores per head, quadratic memory wall) vs FlashAttention IO tiling",
+            "Attention scaling factor $\\sqrt{d_k}$ and numerical stability / variance control",
+            "Query, Key, Value projections and their parameter / MAC costs"
+          ],
+          "question_strategy": "Open with an MCQ on the mathematical purpose of $\\sqrt{d_k}$ scaling, calculate quadratic score matrix memory via SHORT, address the FlashAttention complexity misconception via TF, test QKV terminology recall via FILL, and calculate head MAC count via MCQ.",
+          "difficulty_progression": "Mathematical normalization rationale -> quantitative score memory calculation -> IO-aware tiling vs compute complexity -> architectural terminology -> all-pairs MAC calculation.",
+          "integration": "Builds on dot-product similarity, memory walls, and hardware memory hierarchies.",
+          "ranking_explanation": "Tier 1: Attention is the pivotal mechanism enabling dynamic connectivity and the foundation of modern transformers."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does scaled dot-product attention divide the query-key dot product $\\mathbf{Q}\\mathbf{K}^T$ by $\\sqrt{d_k}$ prior to applying the softmax normalization function?",
+            "choices": [
+              "To convert the matrix multiplication into a sparse graph lookup that reduces compute complexity from $\\mathcal{O}(S^2)$ to $\\mathcal{O}(S)$.",
+              "Under independent zero-mean unit-variance components, the dot product of two $d_k$-dimensional vectors has variance $d_k$; dividing by $\\sqrt{d_k}$ scales variance back to 1, preventing softmax from saturating into regions with vanishing gradients or causing 16-bit float overflow.",
+              "To force the sum of all elements in the unnormalized query-key matrix to equal exactly 1.0 before applying softmax.",
+              "To eliminate the need for Key weight matrices by making Query and Value representations mathematically identical."
+            ],
+            "answer": "The correct answer is B. For two independent random vectors with zero mean and unit variance, their dot product $\\sum_{i=1}^{d_k} q_i k_i$ has a mean of 0 and a variance of $d_k$. For large dimensions $d_k$, large-magnitude logits push the softmax function into saturated regions where gradients vanish, and in FP16 mixed-precision training, large logits can cause exponent overflow. Dividing by $\\sqrt{d_k}$ normalizes the variance to 1. The claim of reducing complexity from quadratic to linear is incorrect because scaling does not alter matrix dimensions. The assertion that unnormalized logits sum to 1 confuses scaling with softmax normalization. The claim that scaling eliminates Key matrices is false because scaling is applied after Q and K are projected.",
+            "learning_objective": "Explain the statistical and numerical stability rationale for dividing query-key dot products by sqrt(d_k) in scaled dot-product attention."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Consider a single transformer self-attention layer processing a sequence of length $S = 4{,}096$ with $N_{\\text{heads}} = 12$ attention heads in FP16 precision (2 bytes per score). Calculate the memory required to store the materialized attention score matrices $(\\mathbf{Q}\\mathbf{K}^T)$ for this single layer, and explain why doubling the context length to $S = 8{,}192$ creates a super-linear memory wall.",
+            "answer": "For $S = 4{,}096$ and 12 heads, the number of score elements in one layer is $S \\times S \\times N_{\\text{heads}} = 4{,}096 \\times 4{,}096 \\times 12 = 201{,}326{,}592\\text{ elements}$. At 2 bytes per element (FP16), this consumes $201{,}326{,}592 \\times 2 = 402{,}653{,}184\\text{ bytes} \\approx 402.7\\text{ MB}$ per layer (or ~33.6 MB per head). Because dense score interactions scale quadratically as $\\mathcal{O}(S^2)$, doubling the context length from 4,096 to 8,192 increases the score elements by a factor of $(8{,}192/4{,}096)^2 = 4\\times$, requiring $\\approx 1.61\\text{ GB}$ per layer. Across 32 retained layers during training, materialized score storage explodes from ~12.9 GB to ~51.5 GB, quickly exceeding available accelerator SRAM/HBM capacity.",
+            "learning_objective": "Calculate the memory footprint of materialized attention score matrices and analyze quadratic context scaling."
+          },
+          {
+            "question_type": "TF",
+            "question": "IO-aware algorithms like FlashAttention reduce the computational complexity of dense self-attention from $\\mathcal{O}(S^2)$ down to $\\mathcal{O}(S)$ floating-point operations.",
+            "answer": "False. FlashAttention does not reduce the fundamental arithmetic computation: dense self-attention still requires computing $\\mathcal{O}(S^2 \\cdot d)$ FLOPs. FlashAttention reduces high-bandwidth memory (HBM) data movement and eliminates intermediate score matrix materialization by tiling computation across on-chip SRAM and computing online softmax, reducing HBM memory traffic from $\\mathcal{O}(S^2)$ to $\\mathcal{O}(S)$ while keeping arithmetic complexity quadratic.",
+            "learning_objective": "Compare arithmetic complexity (FLOPs) and IO/memory traffic scaling in tiled attention algorithms like FlashAttention."
+          },
+          {
+            "question_type": "FILL",
+            "question": "In the scaled dot-product attention mechanism, the input sequence is projected into three distinct learned representations known as Queries, Keys, and ____, drawing a direct analogy to content-addressable retrieval systems.",
+            "answer": "Values (or values). Attention projects inputs into Queries, Keys, and Values, where Queries match Keys to compute weights that aggregate Values.",
+            "learning_objective": "Explain the three core projection components (Q, K, V) of the attention mechanism and describe their roles in content-based routing."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In an attention layer with sequence length $S = 512$ and per-head feature dimension $d_k = 64$, how many multiply-accumulate (MAC) operations are required to compute the query-key attention scores $(\\mathbf{Q}\\mathbf{K}^T)$ for a single attention head, excluding softmax normalization and value aggregation?",
+            "choices": [
+              "32,768 MACs, calculated as $512 \\times 64$.",
+              "262,144 MACs, calculated as $512 \\times 512$.",
+              "1,048,576 MACs, calculated as $512 \\times 512 \\times 4$.",
+              "16,777,216 MACs (~16.8 million MACs), calculated as $S \\times S \\times d_k = 512 \\times 512 \\times 64$."
+            ],
+            "answer": "The correct answer is D. Computing the score matrix $\\mathbf{Q}\\mathbf{K}^T$ for a single head involves multiplying an $S \\times d_k$ matrix by a $d_k \\times S$ matrix. This produces an $S \\times S$ output matrix where each of the $512 \\times 512 = 262{,}144$ entries requires a $d_k = 64$ dimensional dot product. The total arithmetic cost is $512 \\times 512 \\times 64 = 16{,}777{,}216\\text{ MACs}$ (approx. 16.8M MACs). The choice of 32,768 MACs computes only a single vector-matrix projection. The choice of 262,144 MACs counts output matrix elements without multiplying by feature depth $d_k$.",
+            "learning_objective": "Calculate the exact multiply-accumulate operation count required for pairwise query-key score computation in an attention head."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-transformers-attentiononly-architecture-1b56",
+      "section_title": "Transformers: Parallel Sequence Processing",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Parallel sequence processing and elimination of recurrence",
+            "Multi-Head Attention dimension partitioning and subspace specialization",
+            "Positional encodings to break permutation invariance",
+            "Autoregressive decoding bandwidth bottleneck ($I \\approx 1\\text{ FLOP/byte}$) vs prefill compute saturation",
+            "KV-cache memory sizing formula ($B \\times N_L \\times 2 \\times N_{\\text{heads}} \\times S \\times d_{\\text{head}} \\times \\text{bytes}$)",
+            "GPT-2 XL bandwidth lighthouse model profile"
+          ],
+          "question_strategy": "Open with an MCQ on positional encodings and permutation invariance, derive batch-1 autoregressive arithmetic intensity via SHORT, order the sublayer execution in a Transformer block via ORDER, calculate KV cache memory via SHORT, evaluate decoding compute saturation via TF, and analyze multi-head dimension partitioning via MCQ.",
+          "difficulty_progression": "Invariance properties -> batch-1 decoding intensity derivation -> block sublayer execution order -> KV cache capacity calculation -> decoding vs prefill regimes -> multi-head parameter mechanics.",
+          "integration": "Builds on attention mechanisms, memory bandwidth walls, and serving memory architectures.",
+          "ranking_explanation": "Tier 1: Transformers are the dominant modern architecture family for language and multimodal foundation models."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why do standard Transformer self-attention layers require explicit positional encodings (such as sinusoidal signals or learned positional embeddings) added to token embeddings?",
+            "choices": [
+              "Because matrix multiplication hardware cannot process tensors without fixed static padding across all dimensions.",
+              "Because layer normalization removes the mean and variance of token vectors, destroying word identity.",
+              "Because self-attention is mathematically permutation-invariant across sequence positions, meaning that without positional encodings, any permutation of the input tokens produces identical output representations.",
+              "Because positional encodings reduce the computational complexity of the attention matrix from $\\mathcal{O}(S^2)$ to $\\mathcal{O}(S)$."
+            ],
+            "answer": "The correct answer is C. The self-attention operation computes pairwise similarities based solely on vector dot products $\\mathbf{q}_i \\cdot \\mathbf{k}_j$; it contains no built-in notion of sequence ordering or token distance. If the input tokens are permuted, the resulting attention weights and output vectors permute identically without changing their values. Positional encodings inject sequence order information into the input representations before attention is applied. The claim regarding matrix hardware dimension constraints is unrelated to attention math. The claim that LayerNorm destroys word identity is incorrect because LayerNorm normalizes features across channels per token. The claim that positional encodings reduce complexity is false because positional encodings do not change matrix dimensions.",
+            "learning_objective": "Explain why self-attention is permutation-invariant and justify the role of positional encodings in sequence modeling."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Under a weight-only memory model in FP16 precision, an autoregressive language model generates 1 token per forward pass at batch size 1, performing approximately 2 FLOPs per parameter while streaming the entire weight matrix from High Bandwidth Memory (HBM). Calculate the theoretical arithmetic intensity of this decoding step and explain why it causes accelerator matrix units (Tensor Cores) to remain severely underutilized.",
+            "answer": "In FP16 precision, each model parameter occupies 2 bytes. Executing 2 FLOPs per parameter while reading 2 bytes per parameter from memory yields a theoretical arithmetic intensity of $I = \\frac{2\\text{ FLOPs}}{2\\text{ bytes}} = 1.0\\text{ FLOP/byte}$. Modern accelerator GPUs have ridge points between 100 and 200 FLOP/byte (for example, an A100 GPU with 312 TFLOP/s FP16 compute and 2.0 TB/s memory bandwidth has a ridge point of $\\approx 156\\text{ FLOP/byte}$). Because an arithmetic intensity of $1.0\\text{ FLOP/byte}$ is over two orders of magnitude below the ridge point, execution is strictly memory-bandwidth bound: the memory bus cannot stream weights fast enough to saturate the compute units, leaving Tensor Cores over 95% idle.",
+            "learning_objective": "Calculate the arithmetic intensity of batch-1 autoregressive decoding and evaluate why memory bandwidth bottlenecks single-token generation."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the sub-layer operations executed within a single standard Transformer encoder block during a forward pass:\n(1) Project input activations into Query, Key, and Value tensors via linear weight matrices\n(2) Compute multi-head scaled dot-product self-attention across all sequence positions\n(3) Apply residual skip connection addition and layer normalization to the attention output\n(4) Pass normalized representations through a position-wise two-layer feed-forward network (MLP)\n(5) Apply residual skip connection addition and layer normalization to the feed-forward output",
+            "answer": "The correct order is (1) -> (2) -> (3) -> (4) -> (5). Step 1 is (1) Linear Q, K, V projections. Step 2 is (2) Multi-head scaled dot-product attention. Step 3 is (3) First residual addition and layer normalization. Step 4 is (4) Position-wise feed-forward MLP. Step 5 is (5) Second residual addition and layer normalization.",
+            "learning_objective": "Explain the architectural layout and sub-layer execution order of a standard Transformer encoder block."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A production serving system deploys a 32-layer transformer with 32 attention heads, head dimension $d_{\\text{head}} = 128$, and context length $S = 2{,}048$ in FP16 precision (2 bytes per value). Calculate the memory footprint of the Key-Value (KV) cache for a single user request, and explain why KV-cache memory can surpass model weight memory under high concurrent batching.",
+            "answer": "For a single request, the KV cache stores key and value tensors across all layers: $\\text{Memory} = N_L \\times 2 \\times N_{\\text{heads}} \\times S \\times d_{\\text{head}} \\times \\text{bytes} = 32 \\times 2 \\times 32 \\times 2{,}048 \\times 128 \\times 2\\text{ bytes} = 1{,}073{,}741{,}824\\text{ bytes} = 1.07\\text{ GB}$ (exactly 1.0 GiB). While a 7B parameter FP16 model weight footprint is fixed at ~14 GB, serving 32 concurrent user requests requires $32 \\times 1.07\\text{ GB} \\approx 34.3\\text{ GB}$ of dynamic KV cache, more than double the static weight memory. This linear growth with concurrency and context length makes the KV cache the dominant serving memory bottleneck.",
+            "learning_objective": "Calculate the per-request Key-Value (KV) cache memory footprint and analyze how concurrency shifts serving memory bottlenecks from weights to activation state."
+          },
+          {
+            "question_type": "TF",
+            "question": "During autoregressive language model inference, single-token generation at batch size 1 achieves near-peak GPU floating-point throughput (TFLOP/s) because the matrix-vector multiplication is highly optimized.",
+            "answer": "False. Single-token generation at batch size 1 performs matrix-vector multiplications (GEMV) with an arithmetic intensity of $\\approx 1.0\\text{ FLOP/byte}$ in FP16, placing it deep in the memory-bandwidth-bound regime and achieving only a tiny fraction (often <5%) of peak TFLOP/s. Peak compute throughput is achieved during the prefill phase (processing the prompt in parallel) or during high-batch decoding where matrix-matrix operations (GEMM) amortize weight loading.",
+            "learning_objective": "Evaluate the difference in hardware utilization between memory-bound batch-1 decoding and compute-bound batched prefill."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In a Multi-Head Attention layer with model dimension $d_{\\text{model}} = 768$ and $N_{\\text{heads}} = 12$ heads, what is the per-head dimension $d_k$, and how does multi-head projection affect total computational FLOP complexity compared to a single attention head operating on the full 768 dimensions?",
+            "choices": [
+              "The per-head dimension is $d_k = 768$, increasing total projection FLOPs by $12\\times$ compared to a single head.",
+              "The per-head dimension is $d_k = 768 / 12 = 64$; running 12 heads of dimension 64 has the exact same total projection and score FLOP complexity as a single head of dimension 768, while enabling the model to jointly attend to information from 12 distinct representation subspaces.",
+              "The per-head dimension is $d_k = 12$, reducing total computational complexity by $64\\times$.",
+              "Multi-head attention eliminates the output projection matrix $\\mathbf{W}^O$, halving layer parameter count."
+            ],
+            "answer": "The correct answer is B. Multi-head attention partitions the model dimension across heads such that $d_k = d_{\\text{model}} / N_{\\text{heads}} = 768 / 12 = 64$. For $N_{\\text{heads}}$ heads, the $S \\times S$ score calculation requires $N_{\\text{heads}} \\times (S \\times S \\times d_k) = S^2 \\times (N_{\\text{heads}} \\cdot d_k) = S^2 \\cdot d_{\\text{model}}$ MACs, which is mathematically identical to the arithmetic cost of a single full-width attention head while providing the representational capacity of diverse attention subspaces. The claim that $d_k = 768$ misstates the per-head dimension. The claim of $d_k = 12$ inverts the head count and head dimension. The claim that multi-head attention eliminates the output projection matrix is false because $\\mathbf{W}^O$ is required to mix the concatenated head outputs.",
+            "learning_objective": "Analyze the dimension partitioning mechanics of multi-head attention and explain why multi-head projection preserves total computational complexity."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-sparse-architectures-recommendation-systems-5d19",
+      "section_title": "Sparse Architectures: RecSys",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "High-cardinality categorical features and lack of geometric structure in raw IDs",
+            "Embedding tables as memory capacity walls (TB+ scale)",
+            "DLRM architecture pipeline: Bottom MLP (dense) + Embedding Lookups (sparse) -> Interaction Layer (dot products) -> Top MLP",
+            "Memory capacity bound vs memory bandwidth bound (random gathers vs dense compute)",
+            "Scaling and partitioning strategies (model-parallel table sharding across cluster memory)"
+          ],
+          "question_strategy": "Open with an MCQ on the DLRM Interaction Layer's role, probe why DLRM is capacity-bound and escapes the iron law via SHORT, order the DLRM inference pipeline stages via ORDER, calculate embedding table memory footprints via SHORT, and analyze random memory access resistance to caching via MCQ.",
+          "difficulty_progression": "Architectural pipeline component -> capacity vs iron law limits -> end-to-end dataflow sequence -> quantitative capacity calculation -> memory subsystem access mechanics.",
+          "integration": "Builds on memory capacity planning, sparse memory access, and recommender workloads.",
+          "ranking_explanation": "Tier 1: Recommendation systems represent a dominant share of production data center inference and isolate the memory capacity bottleneck."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "In the Deep Learning Recommendation Model (DLRM) architecture, what is the primary computational role of the Interaction Layer?",
+            "choices": [
+              "It applies 2D convolutions over user and item IDs to extract hierarchical spatial features.",
+              "It normalizes categorical IDs across the batch using running mean and variance statistics.",
+              "It performs autoregressive token decoding to predict the next search query.",
+              "It computes pairwise dot products between the dense feature representations from the Bottom MLP and the sparse embedding vectors gathered from categorical tables to capture explicit feature interactions."
+            ],
+            "answer": "The correct answer is D. In DLRM, continuous numerical features are processed through a dense Bottom MLP, while categorical features are looked up in sparse embedding tables. The Interaction Layer takes these resulting dense vectors and computes all-to-all pairwise dot products, explicitly capturing interactions between numerical context and categorical embeddings before passing the concatenated results to the Top MLP. Convolutions are vision operators that do not apply to unstructured IDs. Batch normalization does not compute cross-feature dot product interactions. Autoregressive token decoding is a language model mechanism.",
+            "learning_objective": "Explain the architectural function and computational role of the Interaction Layer in DLRM recommendation models."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why industrial recommendation models like DLRM are classified as memory-capacity-bound rather than compute-bound, and why the standard execution form of the Iron Law of ML Systems ($T_{\\text{exec}} = D_{\\text{vol}}/\\text{BW} + O/(R_{\\text{peak}} \\cdot \\eta_{\\text{hw}}) + L_{\\text{lat}}$) cannot directly determine whether a DLRM model can be deployed on a single accelerator.",
+            "answer": "DLRM models rely on massive embedding tables for billions of users and items that consume hundreds of gigabytes to terabytes of storage, exceeding the physical memory capacity of any single GPU (e.g. 80 GB). While the dense MLPs perform relatively few FLOPs and sparse lookups move small amounts of data per query, the model cannot be loaded onto the device in the first place. The iron law models execution runtime assuming the workload fits on the hardware; it does not account for whether parameter capacity exceeds hardware memory limits. DLRM deployment feasibility is first gated by memory capacity planning and model-parallel table sharding across cluster memory before runtime terms apply.",
+            "learning_objective": "Analyze why recommendation systems are memory-capacity-bound and explain why capacity limits precede iron law execution terms."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the four primary computational stages executed during an end-to-end inference pass in a DLRM recommendation model:\n(1) Process continuous numerical features through the dense Bottom MLP to produce a dense representation\n(2) Look up sparse categorical IDs across embedding tables to gather discrete embedding vectors\n(3) Compute pairwise dot products (interactions) between the Bottom MLP output and all gathered embedding vectors\n(4) Concatenate interaction dot products with Bottom MLP features and pass through the Top MLP to predict click-through probability",
+            "answer": "The correct order is (1) and (2) in parallel -> (3) -> (4) (or (1) -> (2) -> (3) -> (4)). Step 1 and 2 are (1) Continuous features through Bottom MLP and (2) Categorical ID embedding table lookups. Step 3 is (3) Pairwise dot product feature interactions. Step 4 is (4) Top MLP classification for click-through rate prediction.",
+            "learning_objective": "Analyze and sequence the four main pipeline stages of DLRM inference dataflow."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "An e-commerce recommendation system maintains an item embedding table with 100 million items ($10^8$) and a user embedding table with 1 billion users ($10^9$), each using 128-dimensional FP32 vectors (4 bytes per parameter). Calculate the memory footprint of each table, verify why they cannot fit on a single 80 GB A100 GPU, and describe two systems strategies to handle this capacity wall.",
+            "answer": "The item table requires $10^8 \\times 128 \\times 4\\text{ bytes} = 51.2\\text{ GB}$. The user table requires $10^9 \\times 128 \\times 4\\text{ bytes} = 512.0\\text{ GB}$. Combined, they require $563.2\\text{ GB}$, which exceeds the 80 GB capacity of an A100 by $>7\\times$ (even the item table alone consumes ~64% of an 80 GB GPU). Two systems strategies to resolve this capacity wall: (1) Model-parallel table sharding, where embedding tables are partitioned across the memory of multiple GPUs or cluster nodes; (2) Hierarchical memory offloading, where frequently accessed embeddings are cached in GPU HBM while the vast majority of cold embeddings reside in host CPU DRAM or NVMe storage.",
+            "learning_objective": "Calculate embedding table capacity requirements and formulate systems strategies (sharding, offloading) to bypass the memory capacity wall."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why do sparse embedding table lookups in recommendation workloads resist standard hardware caching and memory prefetching mechanisms that accelerate CNNs and MLPs?",
+            "choices": [
+              "Because each incoming request queries arbitrary, non-contiguous row indices determined by sparse user and item IDs, producing irregular random gathers with minimal spatial locality across batches.",
+              "Because embedding tables are permanently encrypted in DRAM, preventing hardware prefetchers from reading address buses.",
+              "Because embedding lookups require performing high-order tensor contractions that stall CPU prefetch queues.",
+              "Because recommendation systems execute only on storage-class memory where hardware caching is disabled by operating system kernels."
+            ],
+            "answer": "The correct answer is A. Continuous numerical features in CNNs and MLPs access memory in contiguous or regularly strided patterns that hardware prefetchers and multi-level caches exploit effectively. In contrast, categorical IDs in recommendation requests arrive in pseudo-random order depending on real-time user traffic, accessing arbitrary rows scattered across multi-gigabyte tables. This irregular gather pattern causes frequent cache misses and uncoalesced memory reads, binding execution to random memory latency and memory bandwidth. The assertions regarding encryption, tensor contractions, and operating system storage disabling are technically incorrect explanations.",
+            "learning_objective": "Explain why sparse embedding table lookups produce irregular memory access patterns that defeat hardware prefetchers and caches."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-architectural-building-blocks-aa3a",
+      "section_title": "Shared Building Blocks",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Cross-architecture portability of primitives (GEMM, Parameter sharing, Skip connections, Normalization, Gating)",
+            "Skip connections ($\\mathbf{y} = \\mathcal{F}(\\mathbf{x}) + \\mathbf{x}$) and residual Jacobian conditioning ($\\mathbf{J} = \\mathbf{I} + \\mathcal{F}'(\\mathbf{x})$)",
+            "Normalization comparison: BatchNorm (batch/spatial axis, running stats, skew) vs LayerNorm (feature axis, per-sample) vs RMSNorm (root mean square only, no mean centering)",
+            "Gating as a universal routing primitive (LSTMs, Highway Networks, Attention, MoE)",
+            "Synthesis: How modern transformers recombine all building blocks"
+          ],
+          "question_strategy": "Open with an MCQ on residual Jacobian mathematical conditioning, compare BatchNorm vs LayerNorm systems trade-offs via SHORT, order the historical emergence and migration of building blocks via ORDER, test RMSNorm simplification via FILL, and analyze why Transformers adopted LayerNorm via MCQ.",
+          "difficulty_progression": "Mathematical residual conditioning -> comparative normalization analysis -> historical building-block evolution -> modern LLM normalization optimization -> architectural synthesis rationale.",
+          "integration": "Builds on backpropagation, gradient propagation, and operator fusion across chapters.",
+          "ranking_explanation": "Tier 1: Explains the reusable engineering primitives that underpin all modern deep learning architectures."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "In a residual block implementing $\\mathbf{y} = \\mathcal{F}(\\mathbf{x}) + \\mathbf{x}$, how does the additive identity shortcut mathematically condition the layer Jacobian $\\mathbf{J} = \\frac{\\partial \\mathbf{y}}{\\partial \\mathbf{x}}$ during backpropagation to prevent vanishing gradients in 100+ layer networks?",
+            "choices": [
+              "The shortcut forces the residual function $\\mathcal{F}(\\mathbf{x})$ to have zero weights, turning the network into an immutable linear identity operator.",
+              "The Jacobian takes the form $\\mathbf{J} = \\mathbf{I} + \\frac{\\partial \\mathcal{F}}{\\partial \\mathbf{x}}$, ensuring that even when residual path derivatives $\\frac{\\partial \\mathcal{F}}{\\partial \\mathbf{x}}$ are small, the block Jacobian remains near the identity matrix $\\mathbf{I}$, providing an unattenuated gradient pathway across layers.",
+              "The shortcut doubles the singular values of the weight matrix at every layer, ensuring gradients explode exponentially rather than vanish.",
+              "The shortcut eliminates the backpropagation chain rule by replacing gradient updates with forward-only finite differences."
+            ],
+            "answer": "The correct answer is B. For a plain network layer $\\mathbf{y} = \\mathcal{F}(\\mathbf{x})$, backpropagation multiplies arbitrary layer Jacobians $\\mathbf{J} = \\mathcal{F}'(\\mathbf{x})$; if their singular values are subunit ($< 1$), gradients vanish exponentially through depth ($< 1^{N_L} \\to 0$). In a residual block $\\mathbf{y} = \\mathcal{F}(\\mathbf{x}) + \\mathbf{x}$, the Jacobian is $\\mathbf{J} = \\mathbf{I} + \\mathcal{F}'(\\mathbf{x})$. When the residual branch derivatives $\\mathcal{F}'(\\mathbf{x})$ are small, each factor remains close to the identity matrix $\\mathbf{I}$, preserving gradient magnitude through deep stacks. The claim that $\\mathcal{F}$ has zero weights is false because $\\mathcal{F}$ learns the residual mapping. The claim of exponential explosion misstates the mathematical goal of conditioning. The claim that skip connections eliminate backpropagation is false.",
+            "learning_objective": "Analyze how identity skip connections condition the layer Jacobian (J = I + F'(x)) to ensure stable gradient propagation in deep networks."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Compare Batch Normalization (BatchNorm) and Layer Normalization (LayerNorm) along two critical systems dimensions: (a) sensitivity to mini-batch size during training, and (b) operational differences between training and inference (including training-serving skew).",
+            "answer": "(a) Mini-batch sensitivity: BatchNorm computes mean and variance across the batch dimension, making it highly sensitive to batch size (small batches yield noisy statistics that degrade training stability). LayerNorm computes statistics across the feature dimension independently for each sample, making it completely invariant to batch size. (b) Training vs. inference behavior: BatchNorm operates differently during training (where it calculates dynamic mini-batch statistics) versus inference (where it freezes running population statistics), creating a common source of training-serving skew if running statistics mismatch test distributions. LayerNorm executes the exact same per-sample computation identically during both training and inference, eliminating training-serving skew and simplifying deployment.",
+            "learning_objective": "Compare Batch Normalization and Layer Normalization across batch-size sensitivity and training-versus-inference execution behavior."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the historical emergence and cross-architecture migration of deep learning building blocks from earliest innovation to modern synthesis:\n(1) Dense linear operations (GEMM) established as the universal baseline in Multilayer Perceptrons\n(2) Local parameter sharing and spatial weight reuse introduced in Convolutional Neural Networks\n(3) Gating mechanisms (input/forget/output gates) introduced in LSTMs to control signal propagation\n(4) Additive identity skip connections and Batch Normalization introduced in ResNets to enable 100+ layer depth\n(5) Transformers synthesize GEMM projections, skip connections, layer normalization, and attention gating into a unified parallel architecture",
+            "answer": "The correct order is (1) -> (2) -> (3) -> (4) -> (5). Step 1 is (1) Dense GEMM baseline in MLPs (1980s). Step 2 is (2) Local parameter sharing in CNNs (1989/1998). Step 3 is (3) Gating mechanisms in LSTMs (1997). Step 4 is (4) Skip connections in ResNets (2015). Step 5 is (5) Synthesis of all primitives in Transformers (2017).",
+            "learning_objective": "Explain the historical emergence and cross-architecture migration of foundational deep learning building blocks."
+          },
+          {
+            "question_type": "FILL",
+            "question": "Modern efficient large language models (such as the LLaMA family) frequently replace standard LayerNorm with ____, which omits the mean-centering step and scales activations using only the root mean square of feature values, reducing memory reduction passes and improving inference latency.",
+            "answer": "RMSNorm (or root mean square normalization). RMSNorm simplifies LayerNorm by normalizing inputs with their root mean square alone: RMSNorm(x) = x / RMS(x) * gamma, omitting mean calculation.",
+            "learning_objective": "Explain how RMSNorm eliminates mean centering to improve memory reduction efficiency in transformer inference."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why did the Transformer architecture adopt Layer Normalization rather than Batch Normalization as its standard normalization building block?",
+            "choices": [
+              "Because Batch Normalization requires $10\\times$ more learnable parameters than Layer Normalization.",
+              "Because Layer Normalization can only run on CPU hardware, matching early NLP training cluster setups.",
+              "Because Transformers process variable-length sequences where batch padding distorts mini-batch statistics, and autoregressive generation requires each sequence position to be normalized independently of batch composition.",
+              "Because the Universal Approximation Theorem forbids using Batch Normalization with multi-head attention mechanisms."
+            ],
+            "answer": "The correct answer is C. In sequence modeling and autoregressive generation, input sentences have variable lengths requiring padding, and inference often runs at small or variable batch sizes. BatchNorm calculates statistics across the batch, which leaks information across sequence elements, suffers from padding distortions, and requires batch-size consistency. LayerNorm normalizes across the hidden feature dimension independently for each token and sample, making it perfectly suited for variable sequence lengths, autoregressive decoding, and distributed training. The claim regarding parameter counts is incorrect because both maintain scale and shift vectors proportional to layer width. The claim of CPU exclusivity is false. The claim regarding the Universal Approximation Theorem is fictitious.",
+            "learning_objective": "Justify why Layer Normalization is chosen over Batch Normalization for sequence-based Transformer architectures."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-systemlevel-building-blocks-41c5",
+      "section_title": "Computational Primitives",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Core computational primitives (Dense GEMM, Sliding window / Systolic array reuse, Dynamic computation)",
+            "Memory access primitives (Sequential DRAM burst, Strided access, Random access)",
+            "Energy cost of data movement (FP32 MAC ~4.6 pJ vs 32-bit DRAM read ~640 pJ, >100x ratio)",
+            "Data movement primitives (Broadcast, Scatter, Gather, Reduction)",
+            "Hardware design impact (Tensor Cores, Systolic arrays, HBM, Scratchpad SRAM)"
+          ],
+          "question_strategy": "Open with an MCQ on the energy cost ratio of DRAM access vs compute, define the four collective data movement primitives via SHORT, evaluate the im2col memory duplication trade-off via TF, test systolic array concept recall via FILL, compare hardware cache vs scratchpad SRAM via SHORT, and analyze sequential memory access efficiency via MCQ.",
+          "difficulty_progression": "Energy physical reality -> collective communication primitives -> memory-lowering trade-offs -> hardware architectural mechanisms -> on-chip memory management -> memory controller access patterns.",
+          "integration": "Directly bridges mathematical neural network operations with hardware microarchitecture and physical energy constraints.",
+          "ranking_explanation": "Tier 1: Primitives are the lowest-level execution abstractions that dictate hardware design and performance bottlenecks."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Based on Horowitz's reference energy models for CMOS hardware, roughly how does the energy required to read a single 32-bit word from off-chip DRAM compare to executing a single 32-bit floating-point multiply-accumulate (MAC) arithmetic operation?",
+            "choices": [
+              "Off-chip DRAM access requires exactly the same energy as a 32-bit floating-point multiply-accumulate operation (~4.6 pJ each).",
+              "A 32-bit floating-point multiply-accumulate operation requires over $100\\times$ more energy (~640 pJ) than reading from DRAM (~4.6 pJ).",
+              "Off-chip DRAM access requires roughly $2\\times$ less energy than arithmetic because DRAM capacitors store passive electrostatic charge.",
+              "Off-chip DRAM access requires over $100\\times$ more energy (~640 pJ) than executing an FP32 arithmetic operation (~4.6 pJ), making data movement rather than arithmetic the dominant energy cost in memory-heavy workloads."
+            ],
+            "answer": "The correct answer is D. In standard CMOS hardware reference models (such as Horowitz 45 nm), an FP32 multiply-add arithmetic operation consumes approximately 4.6 pJ, while fetching a 32-bit operand across off-chip PCB traces from external DRAM consumes approximately 640 pJ—an energy disparity of $>130\\times$. This fundamental physical reality explains why low-reuse architectures (like batch-1 MLPs) are energy-dominated by memory traffic, and why hardware accelerators invest heavily in on-chip SRAM caches and scratchpads to capture data reuse. The choices claiming equal energy, higher compute energy, or lower DRAM energy completely invert hardware energy physics.",
+            "learning_objective": "Evaluate the energy cost ratio of off-chip DRAM data movement versus floating-point arithmetic and explain its systems consequences."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Define the four fundamental collective data movement primitives (Broadcast, Scatter, Gather, Reduction) and identify one concrete neural network operation that exemplifies each primitive.",
+            "answer": "1. Broadcast replicates a single value or tensor to all destination units (e.g., sharing a single weight matrix across all batch elements during GEMM). 2. Scatter distributes distinct slices of a tensor to different destinations (e.g., partitioning matrix tiles across accelerator cores or routing tokens to distinct experts in Mixture-of-Experts). 3. Gather collects distributed values from multiple source locations into a single tensor (e.g., looking up non-contiguous embedding vectors from tables or pooling attention keys/values). 4. Reduction combines multiple input values into a single aggregated result through an associative operator like sum or max (e.g., accumulating partial dot products in matrix multiplication, computing softmax row sums, or aggregating gradients across workers).",
+            "learning_objective": "Explain the four fundamental data movement primitives (Broadcast, Scatter, Gather, Reduction) and match each to a neural network operation."
+          },
+          {
+            "question_type": "TF",
+            "question": "The im2col transformation converts a 2D convolution into a standard matrix multiplication (GEMM) without requiring any additional memory or duplicated data buffers in RAM.",
+            "answer": "False. The im2col transformation unfolds overlapping spatial patches into matrix columns, which duplicates interior input pixels up to $K^2$ times (9 times for $3 \\times 3$ filters with stride 1). This trade-off consumes substantial temporary memory in exchange for formatting the computation into a dense, regular GEMM that saturates optimized BLAS libraries and Tensor Cores.",
+            "learning_objective": "Evaluate the memory-duplication trade-off of the im2col transformation in lowering convolutions to GEMM."
+          },
+          {
+            "question_type": "FILL",
+            "question": "Google's Tensor Processing Unit (TPU) accelerates matrix multiplication and 2D convolution by organizing processing elements into a 2D ____ array, where activations and weights flow rhythmically across adjacent hardware registers to maximize data reuse without repeatedly accessing external DRAM.",
+            "answer": "systolic. A systolic array streams data rhythmically through a 2D grid of processing units, capturing high data reuse in hardware registers and minimizing off-chip memory traffic.",
+            "learning_objective": "Explain systolic arrays and how lockstep register dataflow captures data reuse for dense matrix and convolution operations."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain the architectural difference between hardware-managed caches (such as L1/L2 caches in general-purpose CPUs/GPUs) and programmer-controlled scratchpad SRAM in specialized AI accelerators, and explain why scratchpads provide superior energy efficiency and predictable latency for regular neural network tensor workloads.",
+            "answer": "Hardware-managed caches use tag matching, replacement policies (e.g., LRU), and cache coherency protocols implemented in silicon to automatically cache recently accessed addresses at runtime, incurring hardware area and energy overhead on every access. In contrast, scratchpad SRAM is mapped directly into the software address space without cache tags or hardware controllers; the compiler or programmer explicitly orchestrates DMA transfers to move exact tensor tiles into SRAM before computation. Because neural network loop bounds and tensor access patterns are known at compile time, scratchpads eliminate tag-lookup energy overhead, avoid cache conflict misses, and guarantee deterministic, predictable latency.",
+            "learning_objective": "Compare hardware-managed caches against software-controlled scratchpad SRAM in AI accelerators regarding energy efficiency and predictable latency."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which memory access pattern is the most energy-efficient and hardware-friendly for memory controllers due to DRAM burst-mode capability and hardware prefetching?",
+            "choices": [
+              "Contiguous sequential memory access, because it maximizes DRAM burst transfer efficiency, cache line utilization, and predictable prefetcher streaming.",
+              "Random pointer-chasing access, because it distributes memory requests across different physical memory banks to avoid bank conflicts.",
+              "Strided access with prime-numbered step sizes, because prime strides prevent cache line collision.",
+              "Scattered indirect gather access, because it minimizes total bytes transferred by reading single scalar floats."
+            ],
+            "answer": "The correct answer is A. Sequential contiguous access allows DRAM to operate in high-throughput burst mode (reading consecutive words along a row buffer without re-opening rows), fills entire cache lines with useful data (maximizing spatial locality), and enables hardware prefetchers to stream upcoming data into L1/L2 caches before it is requested. Random pointer-chasing and scattered indirect gathers cause severe row-buffer misses, uncoalesced memory transfers, and cache thrashing. Strided access with large step sizes wastes memory bandwidth by transferring full cache lines while utilizing only a single word.",
+            "learning_objective": "Classify memory access primitives and justify why sequential contiguous memory access achieves optimal bandwidth and energy efficiency."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-architecture-selection-framework-a442",
+      "section_title": "Architecture Selection Framework",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Data-to-architecture mapping (Tabular -> MLP, Spatial -> CNN, Sequential -> RNN, Relational -> Transformer, Categorical -> DLRM)",
+            "Computational complexity considerations and hardware mapping strategies",
+            "Algorithmic acceleration via Winograd minimal filtering ($F(2 \\times 2, 3 \\times 3)$ multiplication reduction)",
+            "Iterative Decision Framework flowchart (Data -> Candidates -> Constraints -> Scale Down / Select)",
+            "Wildlife camera monitoring case study (MobileNetV2 0.75 width, INT8, Cortex-A53, 512 MB RAM, <500 ms latency)",
+            "Throughput ceiling calculation (30 FPS ResNet-50 vs 10 TFLOP/s GPU headroom)"
+          ],
+          "question_strategy": "Open with an MCQ on Winograd $F(2 \\times 2, 3 \\times 3)$ multiplication reduction, analyze the wildlife camera case study architecture selection via SHORT, order the 5-step decision framework stages via ORDER, calculate video throughput headroom via SHORT, evaluate the decision framework scale-down loop via TF, and match tabular data to MLPs via MCQ.",
+          "difficulty_progression": "Algorithmic Winograd mechanics -> edge case study multi-constraint analysis -> framework stage sequencing -> throughput headroom arithmetic -> decision tree recovery paths -> data-to-architecture matching.",
+          "integration": "Synthesizes all architectural families, deployment paradigms, and physical system constraints into an actionable decision process.",
+          "ranking_explanation": "Tier 1: Provides the holistic engineering decision framework that connects theory to production deployment."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "For computing a $2 \\times 2$ output feature tile with a $3 \\times 3$ convolutional filter, how does the Winograd minimal filtering algorithm $F(2 \\times 2, 3 \\times 3)$ accelerate computation compared to standard direct convolution?",
+            "choices": [
+              "It eliminates all floating-point additions by transforming the convolution into a lookup table in DRAM.",
+              "It reduces the required multiplications from 36 down to 16, achieving a $2.25\\times$ multiplication reduction at the cost of additional transforms and sensitivity to numerical rounding errors.",
+              "It factorizes the $3 \\times 3$ kernel into two $1 \\times 1$ convolutions, halving parameter count.",
+              "It converts the 2D spatial convolution into a 1D recurrent sequence, reducing memory traffic by $9\\times$."
+            ],
+            "answer": "The correct answer is B. Direct convolution of a $2 \\times 2$ output tile with a $3 \\times 3$ filter computes $2 \\times 2 = 4$ output positions, each requiring $3 \\times 3 = 9$ multiplications, totaling $4 \\times 9 = 36$ multiplications. The Winograd algorithm $F(2 \\times 2, 3 \\times 3)$ transforms the $4 \\times 4$ input tile and $3 \\times 3$ filter into the Winograd domain, performs only $4 \\times 4 = 16$ element-wise multiplications, and transforms the result back, yielding a $\\frac{36}{16} = 2.25\\times$ multiplication reduction. The trade-off is increased additions/transformations and susceptibility to numerical rounding errors in low-precision formats. Winograd does not eliminate additions, does not factorize kernels into $1 \\times 1$ convolutions, and does not convert convolutions into RNNs.",
+            "learning_objective": "Explain how the Winograd minimal filtering algorithm F(2x2, 3x3) reduces multiplication count for small convolution kernels and identify its numerical precision trade-offs."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "In the wildlife monitoring edge deployment case study (50 species classification on a 2W battery-powered Cortex-A53 device with 512 MB RAM and a <500 ms latency target), explain why MobileNetV2 (0.75 width multiplier with INT8 quantization) was selected over ResNet-50 and KWS DS-CNN.",
+            "answer": "1. ResNet-50 (~25.6M params, ~8.2 GFLOPs, ~102.4 MB FP32) was rejected because its 8.2 GFLOP compute load and high power draw exceed the 2W solar/battery power envelope and 500 ms latency ceiling on the 2 GOPS Cortex-A53 SoC. 2. KWS DS-CNN (~43K params, ~20 MFLOPs) was rejected because its tiny capacity (designed for 12-class audio keyword spotting) lacks the representational power to separate 50 visual species with 90%+ accuracy. 3. MobileNetV2 (0.75 width multiplier with INT8 quantization) carries ~2.6M params (~2.6 MB INT8 model, ~418 MFLOPs), fitting comfortably in the 512 MB RAM budget with activations (~3.2 MB) and OS buffers (~50 MB), while executing in ~209 ms on the 2 GOPS INT8 engine (~41.8 mJ/inf), well within the <500 ms latency and 2W power budgets.",
+            "learning_objective": "Apply the multi-constraint architecture selection framework to justify selecting MobileNetV2 over ResNet-50 and KWS for an edge deployment."
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the five systematic stages of the Architecture Selection Framework when designing an edge or data center ML system:\n(1) Characterize input data structure (spatial, sequential, relational, tabular, categorical) and select candidate architectural families via inductive bias matching\n(2) Analyze physical deployment constraints (connectivity, power budget, latency ceiling, memory capacity, accuracy target)\n(3) Evaluate candidate model variants against hardware throughput and memory limits using roofline and capacity models\n(4) Validate runtime footprints (model weights + activations + OS/workspace buffers) and benchmark latency on target hardware\n(5) Perform deployment risk assessment and implement engineering mitigations (e.g., INT8 quantization, thermal throttling controls, OTA update pipeline)",
+            "answer": "The correct order is (1) -> (2) -> (3) -> (4) -> (5). Step 1 is (1) Data characterization & candidate family identification. Step 2 is (2) Deployment constraint analysis. Step 3 is (3) Candidate evaluation against hardware capacity. Step 4 is (4) Runtime memory & latency validation on target hardware. Step 5 is (5) Risk assessment and mitigation planning.",
+            "learning_objective": "Analyze the five stages of the Architecture Selection Framework from problem definition to hardware validation and risk mitigation."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "In a real-time video inference application requiring 30 FPS processing with ResNet-50 (~8.2 GFLOPs per frame), calculate the sustained compute throughput required. On a mid-range GPU delivering 10 TFLOP/s peak at 50% utilization (5 TFLOP/s effective), calculate the compute headroom factor and explain what happens to this headroom if the team switches to an object detection model requiring 100 GFLOPs per frame.",
+            "answer": "For ResNet-50 at 30 FPS, the sustained throughput required is $30\\text{ frames/s} \\times 8.2\\text{ GFLOPs/frame} = 246\\text{ GFLOP/s} = 0.246\\text{ TFLOP/s}$. On a GPU delivering 5 TFLOP/s effective throughput, the compute headroom factor is $\\frac{5.0\\text{ TFLOP/s}}{0.246\\text{ TFLOP/s}} \\approx 20.3\\times$. If switching to an object detection model requiring 100 GFLOPs/frame, the required sustained throughput jumps to $30\\text{ frames/s} \\times 100\\text{ GFLOPs/frame} = 3{,}000\\text{ GFLOP/s} = 3.0\\text{ TFLOP/s}$. This shrinks the headroom factor from $20.3\\times$ down to $\\frac{5.0}{3.0} \\approx 1.67\\times$, leaving minimal margin for multi-stream video feeds, OS jitter, or batching inefficiencies.",
+            "learning_objective": "Calculate sustained compute throughput for real-time video processing and analyze how model complexity impacts accelerator headroom."
+          },
+          {
+            "question_type": "TF",
+            "question": "In the systematic Architecture Selection Decision Framework, if a candidate model fails the inference speed or memory budget constraint check on the target device, the engineer must immediately abandon on-device edge execution and route all inference to a cloud data center.",
+            "answer": "False. The Architecture Selection Decision Framework provides an iterative 'Scale Down' loop: when a model breaches memory or latency constraints, the team should first apply model compression (such as INT8 quantization, pruning, or structural width multipliers) or evaluate a more efficient architectural variant (such as MobileNet instead of ResNet) before abandoning local edge deployment.",
+            "learning_objective": "Explain the iterative scale-down loop in the Architecture Selection Decision Framework when models breach memory or latency ceilings."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "When matching data characteristics to architecture families, which workload is best suited for a Multilayer Perceptron (MLP) rather than a CNN or Transformer?",
+            "choices": [
+              "A 4K satellite image stream where local texture patterns determine deforestation boundaries.",
+              "A multi-lingual speech audio stream with continuous temporal phoneme transitions.",
+              "A tabular customer credit-risk dataset with 50 heterogeneous, unordered financial indicators (age, income, credit score, debt ratio) where no spatial adjacency or sequential ordering exists.",
+              "A document translation dataset where word meaning depends on complex cross-paragraph attention interactions."
+            ],
+            "answer": "The correct answer is C. Tabular datasets with heterogeneous, independent numerical and categorical features have no spatial locality (swapping column order does not change data semantics) and no sequential temporal ordering. For such unstructured tabular data, MLPs with unrestricted dense feature interactions are the natural match. Satellite imagery requires CNNs to exploit 2D spatial locality. Speech audio requires RNNs or 1D CNNs to capture temporal sequence structure. Document translation requires Transformers to model long-range relational dependencies.",
+            "learning_objective": "Classify input data characteristics (tabular vs spatial vs sequential vs relational) to the appropriate neural network architecture family."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-fallacies-pitfalls-96b4",
+      "section_title": "Fallacies and Pitfalls",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Fallacy: More complex architectures always perform better than simpler ones",
+            "Pitfall: Selecting architectures based solely on accuracy metrics without analyzing computational requirements",
+            "Fallacy: An architecture has one dominant bottleneck across training and inference",
+            "Pitfall: Combining architectural patterns without analyzing interaction effects at the system level",
+            "Fallacy: Architecture wins on training hardware transfer directly to deployment hardware",
+            "Pitfall: Ignoring KV cache growth when estimating transformer serving costs"
+          ],
+          "question_strategy": "Open with an MCQ on the pitfall of ignoring KV cache memory during serving, explain the training-vs-inference bottleneck shift fallacy via SHORT, evaluate hybrid pattern interaction overhead via TF, and analyze training-vs-edge hardware mismatches via MCQ.",
+          "difficulty_progression": "Serving memory planning pitfall -> dual-regime bottleneck shifts -> architectural hybrid interaction effects -> cluster-to-edge hardware mismatches.",
+          "integration": "Directly reinforces real-world production traps and architectural trade-offs.",
+          "ranking_explanation": "Tier 2: Synthesizes common industry misconceptions and performance pitfalls across all architecture families."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why is estimating LLM transformer serving memory based solely on static model parameter footprint (e.g., 14 GB for a 7B FP16 model) a critical engineering pitfall in production deployments?",
+            "choices": [
+              "Because model weights expand by $10\\times$ in memory due to framework compilation graph overhead.",
+              "Because inference requires storing three full optimizer states (momentum and variance buffers) in GPU RAM.",
+              "Because transformers delete their weights after processing each token and must reload them from disk.",
+              "Because autoregressive decoding dynamically accumulates a Key-Value (KV) cache that scales linearly with context length and concurrency ($\\mathcal{O}(B \\times S)$), which at high concurrency or long context windows can rival or exceed the static weight memory."
+            ],
+            "answer": "The correct answer is D. Serving large language models requires memory for both static model weights and dynamic activation state. During autoregressive decoding, the system stores key and value vectors for all prior tokens in the KV cache ($B \\times N_L \\times 2 \\times N_{\\text{heads}} \\times S \\times d_{\\text{head}} \\times \\text{bytes}$). For a 7B model (14 GB weights), 32 concurrent users at 2,048 tokens require ~34.3 GB of KV cache alone, more than double the model weight footprint. The claim of 10x graph expansion is incorrect. Optimizer states are stored during training, not inference. Model weights remain resident in GPU memory during serving and are not reloaded from disk per token.",
+            "learning_objective": "Analyze the pitfall of budgeting transformer serving memory from weights alone and analyze KV cache scaling with concurrency and context length."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain the fallacy: 'An architecture has one dominant bottleneck across training and inference.' Use the Transformer architecture to illustrate how execution regime (full-sequence training/prefill vs. batch-1 autoregressive decoding) shifts the primary hardware bottleneck.",
+            "answer": "The fallacy assumes a model's system bottleneck is an immutable property of its mathematical graph. In reality, the bottleneck depends entirely on the execution regime. During training and prompt prefill, the transformer processes all sequence tokens in parallel using large matrix-matrix multiplications (GEMM), making execution compute-bound and limited by peak accelerator TFLOP/s. During batch-1 autoregressive decoding, the model generates one token at a time via matrix-vector operations (GEMV), streaming entire weight matrices from HBM for only 2 FLOPs per parameter ($I \\approx 1.0\\text{ FLOP/byte}$), making execution strictly memory-bandwidth-bound.",
+            "learning_objective": "Analyze how execution regime (training/prefill vs autoregressive decoding) shifts an architecture's bottleneck between compute throughput and memory bandwidth."
+          },
+          {
+            "question_type": "TF",
+            "question": "Because a hybrid neural network architecture combining convolutional layers with self-attention achieves higher top-1 accuracy on a benchmark leaderboard, it is guaranteed to maintain the high throughput and low memory traffic of the pure CNN baseline.",
+            "answer": "False. Combining architectural patterns introduces complex interaction effects at the systems level. Adding self-attention to a CNN introduces all-to-all quadratic score computations and destroys the predictable spatial streaming locality of convolutions. The hybrid creates intermediate memory traffic and irregular tensor layouts that can severely reduce hardware cache hit rates and throughput compared to a pure CNN.",
+            "learning_objective": "Evaluate the pitfall of combining architectural patterns without analyzing their interaction effects on memory locality and hardware efficiency."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A vision model trained on a cluster of $8 \\times \\text{A100}$ GPUs (640 GB total memory) achieves state-of-the-art accuracy. Why is assuming this model will deploy successfully to an edge device such as an NVIDIA Jetson Orin NX (16 GB memory) a dangerous fallacy, even if the model weights require only 8 GB?",
+            "choices": [
+              "Because total runtime memory during inference includes intermediate activation tensors, workspace scratchpads, and operating system buffers; under high batch sizes or high input resolutions, these activation and workspace buffers easily exceed the remaining 8 GB memory ceiling.",
+              "Because edge devices are mathematically incapable of executing the floating-point multiplication instructions used by server GPUs.",
+              "Because models trained on 8 GPUs permanently hardcode an 8-way tensor parallel communication protocol that fails if fewer than 8 physical GPUs are connected.",
+              "Because PyTorch and TensorFlow models can only run on cloud-hosted Linux kernels and cannot execute on embedded SoCs."
+            ],
+            "answer": "The correct answer is A. Model weight storage is only one component of runtime memory. During inference, the system must also allocate memory for intermediate activation feature maps, framework execution workspaces, CUDA runtime context, and operating system buffers. An 8 GB model on a 16 GB edge device leaves only 8 GB of shared system RAM; high-resolution inputs or concurrent streams can cause activation memory to breach this budget, triggering out-of-memory crashes. The assertions regarding floating-point incompatibility, permanent 8-way GPU communication hardcoding, and cloud-only execution are factually false.",
+            "learning_objective": "Analyze the fallacy that training cluster success transfers to edge hardware and evaluate total runtime memory components."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-architectures-summary-e642",
+      "section_title": "Summary",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Architecture is infrastructure: mapping structural inductive bias to the physical Iron Law",
+            "The five lighthouse models as diagnostic archetypes for physical bottlenecks",
+            "Inductive bias strength vs sample complexity vs hardware resource demands"
+          ],
+          "question_strategy": "Open with an MCQ synthesizing architecture selection as signing a physical contract with hardware, summarize the 5 lighthouse bottlenecks via SHORT, and evaluate inductive bias strength trade-offs via MCQ.",
+          "difficulty_progression": "High-level physical systems synthesis -> multi-archetype bottleneck summary -> cross-family trade-off evaluation.",
+          "integration": "Concludes the chapter by reinforcing the core takeaway that architecture selection is an infrastructure decision.",
+          "ranking_explanation": "Tier 2: Summary section synthesizing the entire chapter's conceptual and physical arguments."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "According to the chapter's summary, how does choosing a neural network architecture act as 'signing a physical contract with hardware'?",
+            "choices": [
+              "By forcing hardware vendors to synthesize custom ASIC chips for every newly published neural network paper.",
+              "By compiling the model graph into immutable read-only memory (ROM) upon framework initialization.",
+              "By fixing the fundamental mathematical operations $O$, data movement volumes $D_{\\text{vol}}$, and sequential critical paths $L_{\\text{lat}}$, which dictates hardware cluster provisioning, memory bandwidth demands, and latency ceilings before code is compiled.",
+              "By locking in the optimizer learning rate schedule so that training convergence is guaranteed regardless of dataset quality."
+            ],
+            "answer": "The correct answer is C. Architecture selection is an infrastructure commitment: choosing a CNN fixes spatial locality and weight reuse ($O/D_{\\text{vol}}$); choosing a transformer commits to quadratic score computation $\\mathcal{O}(S^2)$ and linear KV-cache growth; choosing an RNN commits to serial time-step dependencies ($L_{\\text{lat}}$); and choosing a DLRM commits to terabyte-scale memory capacity. These topological decisions set the terms of the iron law and dictate physical hardware requirements before software compilers or runtime optimizers execute. The claims regarding custom ASIC synthesis, ROM compilation, and optimizer locking misrepresent the systems meaning of the architectural contract.",
+            "learning_objective": "Explain how neural architecture selection acts as an infrastructure commitment that fixes physical execution terms in the iron law."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Summarize how the five lighthouse models in this chapter isolate five distinct system bottlenecks, identifying each model along with its primary hardware constraint and representative workload archetype.",
+            "answer": "1. ResNet-50 represents the Compute-Bound archetype, where high spatial weight reuse produces high arithmetic intensity, making peak floating-point throughput (TFLOP/s) the primary constraint. 2. GPT-2 XL represents the Memory-Bandwidth-Bound archetype, where batch-1 autoregressive decoding streams entire weight matrices for 2 FLOPs per parameter, making HBM bandwidth the bottleneck. 3. DLRM represents the Memory-Capacity-Bound archetype, where terabyte-scale sparse embedding tables exceed single-device capacity and require model-parallel table sharding. 4. MobileNetV2 represents the Latency-Bound Edge archetype, where depthwise separable convolutions reduce FLOPs but lower arithmetic intensity, making memory access and kernel dispatch overhead the constraint. 5. KWS (DS-CNN) represents the Power-Constrained TinyML archetype, where always-on microcontrollers require extreme quantization and milliwatt power budgets.",
+            "learning_objective": "Compare the five lighthouse models and map each to its primary hardware constraint and workload archetype."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which statement correctly synthesizes the relationship between inductive bias strength, sample complexity, and hardware resource demands across neural network architecture families?",
+            "choices": [
+              "Architectures with weak inductive biases (like MLPs) require less training data because they can represent any mathematical function.",
+              "Strong inductive biases increase parameter counts exponentially, causing immediate out-of-memory crashes on GPU accelerators.",
+              "Inductive bias strength has no relationship to training sample requirements because backpropagation optimizes all architectures at identical convergence rates.",
+              "Stronger inductive biases (such as CNN spatial locality) restrict the hypothesis space to match domain structure, reducing required training samples and memory traffic, whereas weaker or adaptive biases (such as MLPs and Transformers) offer greater expressiveness at the expense of higher sample complexity and heavier computational/memory demands."
+            ],
+            "answer": "The correct answer is D. Inductive bias encodes structural assumptions about data directly into the network graph. A strong, well-matched bias (like CNN translation equivariance) prunes the search space, allowing the model to generalize from fewer training examples while enabling weight reuse that lowers memory traffic. Weaker or adaptive biases (like MLPs and Transformers) make minimal assumptions, allowing them to represent arbitrary relationships and scale to massive datasets, but requiring vastly more training data, compute FLOPs, and memory bandwidth to learn structure from scratch. The claim that weak biases require less data reverses statistical learning theory. The claim that strong biases increase parameter counts is false because weight sharing drastically shrinks parameters. The claim that inductive bias has no effect on convergence ignores the learnability gap.",
+            "learning_objective": "Evaluate the trade-offs between inductive bias strength, sample complexity, and hardware resource demands across architecture families."
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -116,5 +116,57 @@ class TestDataLoaderBasics:
         )
 
 
+class TestTensorDatasetNegativeIndexing:
+    """Test TensorDataset supports standard Python negative indexing."""
+
+    def test_negative_one_returns_last_item(self):
+        """
+        WHAT: Verify dataset[-1] returns the last sample, matching normal
+        Python sequence semantics.
+
+        WHY: Every other indexable Python container (list, tuple, numpy array)
+        treats a negative index as counting from the end. A dataset that
+        rejects dataset[-1] surprises anyone who has used a Python sequence
+        before.
+        """
+        X = np.arange(20).reshape(5, 4).astype(np.float32)
+        y = np.arange(5).astype(np.float32)
+        dataset = TensorDataset(Tensor(X), Tensor(y))
+
+        last_features, last_label = dataset[-1]
+
+        assert np.array_equal(last_features.data, X[-1])
+        assert last_label.data == y[-1]
+
+    def test_negative_index_matches_equivalent_positive_index(self):
+        """
+        WHAT: Verify dataset[-2] equals dataset[len(dataset) - 2], for every
+        valid negative index, not just -1.
+        """
+        X = np.arange(40).reshape(10, 4).astype(np.float32)
+        y = np.arange(10).astype(np.float32)
+        dataset = TensorDataset(Tensor(X), Tensor(y))
+
+        for negative_idx in range(-1, -len(dataset) - 1, -1):
+            positive_idx = negative_idx + len(dataset)
+            neg_features, neg_label = dataset[negative_idx]
+            pos_features, pos_label = dataset[positive_idx]
+            assert np.array_equal(neg_features.data, pos_features.data)
+            assert neg_label.data == pos_label.data
+
+    def test_out_of_range_negative_index_still_raises(self):
+        """
+        WHAT: Verify an index too negative to map onto the dataset (beyond
+        -len(dataset)) still raises IndexError, rather than silently
+        wrapping around again.
+        """
+        X = np.arange(12).reshape(3, 4).astype(np.float32)
+        y = np.arange(3).astype(np.float32)
+        dataset = TensorDataset(Tensor(X), Tensor(y))
+
+        with pytest.raises(IndexError):
+            dataset[-4]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
