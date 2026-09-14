@@ -16,7 +16,7 @@ import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
 import { isDailyCompleted } from "@/lib/daily";
 import { RELEASE_ID } from "@/lib/stats";
-import { ECOSYSTEM_BASE } from "@/lib/env";
+import { ECOSYSTEM_BASE, GITHUB_REPO_URL } from "@/lib/env";
 
 function formatTrackLabel(t: string) {
   return t === "tinyml" ? "TinyML" : t.charAt(0).toUpperCase() + t.slice(1);
@@ -562,7 +562,7 @@ function HomePage() {
                 Built at{" "}
                 <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="hover:text-textTertiary transition-colors">Harvard University</a>
                 {" "}&middot;{" "}
-                <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer" className="hover:text-textTertiary transition-colors">Open Source</a>
+                <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" className="hover:text-textTertiary transition-colors">Open Source</a>
                 {" "}&middot;{" "}
                 <Link href="/about" className="hover:text-textTertiary transition-colors">About</Link>
                 {" "}&middot;{" "}

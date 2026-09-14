@@ -1,6 +1,8 @@
 // Shared utilities for GitHub issue reporting and community contribution
 
-const REPO = 'harvard-edge/cs249r_book';
+import { GITHUB_REPOSITORY as REPO } from './env';
+
+
 const LABELS = 'staffml';
 
 export type ReportCategory =

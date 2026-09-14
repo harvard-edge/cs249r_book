@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ECOSYSTEM_BASE } from "../lib/env";
+import { ECOSYSTEM_BASE, GITHUB_REPO_URL } from "../lib/env";
 import { RELEASE_ID, RELEASE_HASH, BUILD_DATE } from "../lib/stats";
 
 /**
@@ -71,7 +71,7 @@ export default function Footer() {
             Volume II
           </a>
           <a
-            href="https://github.com/harvard-edge/cs249r_book"
+            href={GITHUB_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-textSecondary transition-colors"

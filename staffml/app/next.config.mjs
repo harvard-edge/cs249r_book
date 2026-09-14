@@ -12,6 +12,12 @@ const nextConfig = {
   poweredByHeader: false,
   // When deployed to a subdirectory (e.g. /interviews/), set NEXT_PUBLIC_BASE_PATH=/interviews
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',
+  // GitHub Actions sets GITHUB_REPOSITORY on every build; forwarding it keeps
+  // the app's GitHub links correct through a repository rename (lib/env.ts).
+  env: {
+    NEXT_PUBLIC_GITHUB_REPOSITORY:
+      process.env.NEXT_PUBLIC_GITHUB_REPOSITORY || process.env.GITHUB_REPOSITORY || '',
+  },
   outputFileTracingRoot: path.join(process.cwd(), '../../'),
 };
 

@@ -20,3 +20,14 @@ export const ECOSYSTEM_BASE =
  * returning visitors aren't nagged.
  */
 export const IS_LIVE_DEPLOY = !/cs249r_book_dev/.test(ECOSYSTEM_BASE);
+
+/**
+ * GitHub repository ("owner/name") behind the source, issue, and star links.
+ *
+ * next.config.mjs forwards GITHUB_REPOSITORY, which GitHub Actions sets on
+ * every build, so renaming the repository needs no code change. The fallback
+ * covers local `next dev`.
+ */
+export const GITHUB_REPOSITORY =
+  process.env.NEXT_PUBLIC_GITHUB_REPOSITORY || "harvard-edge/cs249r_book";
+export const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPOSITORY}`;

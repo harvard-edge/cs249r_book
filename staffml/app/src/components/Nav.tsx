@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ECOSYSTEM_BASE } from "../lib/env";
+import { ECOSYSTEM_BASE, GITHUB_REPO_URL } from "../lib/env";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen,
   Menu, X, Map, Cpu, Server, ChevronDown, Info,
@@ -223,7 +223,7 @@ export default function Nav() {
             <a href={ECOSYSTEM_BASE} target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
               <BookOpen className="w-3.5 h-3.5" /> MLSysBook.ai
             </a>
-            <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
+            <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">
               <Star className="w-3.5 h-3.5" /> Star on GitHub
             </a>
             <a href={buildSiteIssueUrl()} target="_blank" rel="noopener noreferrer" className="text-textTertiary hover:text-textSecondary text-xs flex items-center gap-1.5">

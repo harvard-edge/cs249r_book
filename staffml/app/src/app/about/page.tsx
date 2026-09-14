@@ -14,6 +14,7 @@ import {
   RELEASE_HASH,
   BUILD_DATE,
 } from "@/lib/stats";
+import { GITHUB_REPO_URL } from "@/lib/env";
 
 import RecentPapers from "@/components/RecentPapers";
 import PaperCitationCard from "@/components/PaperCitationCard";
@@ -264,7 +265,7 @@ export default function AboutPage() {
             prompts grounded in the{' '}
             <a href="https://mlsysbook.ai" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">Machine Learning Systems</a>{' '}
             textbook and the{' '}
-            <a href="https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">MLSysIM</a>{' '}
+            <a href={`${GITHUB_REPO_URL}/tree/main/mlsysim`} target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline">MLSysIM</a>{' '}
             physics engine. Every hardware specification traces back to a centralized constants
             table maintained alongside the textbook.
           </p>
@@ -292,7 +293,7 @@ export default function AboutPage() {
               <strong className="text-textPrimary">Found an error?</strong>{' '}
               We take correctness seriously. If you spot a wrong number, a broken
               calculation, or a misleading scenario,{' '}
-              <a href="https://github.com/harvard-edge/cs249r_book/issues/new?labels=staffml,bug&template=staffml-error.md&title=[StaffML]+Math+error+in+question+ID" target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">
+              <a href={`${GITHUB_REPO_URL}/issues/new?labels=staffml,bug&template=staffml-error.md&title=[StaffML]+Math+error+in+question+ID`} target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">
                 open an issue on GitHub
               </a>. Community verification is how we keep improving.
             </p>
@@ -309,7 +310,7 @@ export default function AboutPage() {
             Contributions, feedback, and corrections are welcome.
           </p>
           <a
-            href="https://github.com/harvard-edge/cs249r_book"
+            href={GITHUB_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm font-medium transition-colors"

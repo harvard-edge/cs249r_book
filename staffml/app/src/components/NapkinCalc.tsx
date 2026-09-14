@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Calculator, ChevronDown, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { HARDWARE_SPECS, INTERCONNECTS, FORMULAS } from "@/lib/hardware";
+import { GITHUB_REPO_URL } from "@/lib/env";
 
 // AllReduce crosses the interconnect, not the GPU's own HBM. Node size and
 // link choice follow the simulator's convention (8 GPUs/node, NVLink within
@@ -206,7 +207,7 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
           <div className="mt-2 text-[9px] text-textTertiary/60 italic">
             Formulas from{" "}
             <a
-              href="https://github.com/harvard-edge/cs249r_book/blob/dev/mlsysim/docs/laws-explained.qmd"
+              href={`${GITHUB_REPO_URL}/blob/dev/mlsysim/docs/laws-explained.qmd`}
               target="_blank"
               rel="noopener noreferrer"
               className="underline decoration-dotted underline-offset-2 hover:text-textSecondary"

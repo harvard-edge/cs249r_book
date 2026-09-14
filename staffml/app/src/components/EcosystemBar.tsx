@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { ECOSYSTEM_BASE as BASE } from "../lib/env";
+import { ECOSYSTEM_BASE as BASE, GITHUB_REPO_URL } from "../lib/env";
 import { useTheme } from "@/components/ThemeProvider";
 
 const ASSET_PREFIX = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -106,10 +106,10 @@ const LEFT_MENUS: MenuGroup[] = [
 const RIGHT_MENUS: MenuGroup[] = [
   {
     id: "github", label: "GitHub", icon: "bi-github", alignEnd: true, items: [
-      { icon: "bi-chat", label: "Discussions", href: "https://github.com/harvard-edge/cs249r_book/discussions", external: true },
-      { icon: "bi-pencil", label: "Edit this page", href: "https://github.com/harvard-edge/cs249r_book", external: true },
-      { icon: "bi-bug", label: "Report an issue", href: "https://github.com/harvard-edge/cs249r_book/issues/new", external: true },
-      { icon: "bi-code", label: "View source", href: "https://github.com/harvard-edge/cs249r_book", external: true },
+      { icon: "bi-chat", label: "Discussions", href: `${GITHUB_REPO_URL}/discussions`, external: true },
+      { icon: "bi-pencil", label: "Edit this page", href: GITHUB_REPO_URL, external: true },
+      { icon: "bi-bug", label: "Report an issue", href: `${GITHUB_REPO_URL}/issues/new`, external: true },
+      { icon: "bi-code", label: "View source", href: GITHUB_REPO_URL, external: true },
     ]
   },
 ];
@@ -513,7 +513,7 @@ export default function EcosystemBar() {
               <i className="bi bi-envelope" /> <span className="hidden nav-xl:inline">Subscribe</span>
             </a>
             <a
-              href="https://github.com/harvard-edge/cs249r_book"
+              href={GITHUB_REPO_URL}
               target="_blank"
               rel="noopener noreferrer"
               style={linkStyle('star')}
@@ -637,7 +637,7 @@ export default function EcosystemBar() {
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-envelope" style={{ fontSize: 14 }} /> Subscribe
             </a>
-            <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
+            <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-star" style={{ fontSize: 14 }} /> Star
             </a>
@@ -645,7 +645,7 @@ export default function EcosystemBar() {
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-heart" style={{ fontSize: 14 }} /> Support
             </a>
-            <a href="https://github.com/harvard-edge/cs249r_book" target="_blank" rel="noopener noreferrer"
+            <a href={GITHUB_REPO_URL} target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-github" style={{ fontSize: 14 }} /> GitHub
             </a>

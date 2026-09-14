@@ -4,13 +4,12 @@
 // "only ask." Honor-system: any of star / "I already starred" / dismiss
 // retires the gate forever. No username verification, no daily cap.
 
+import { GITHUB_REPOSITORY, GITHUB_REPO_URL } from "./env";
+
 const STORAGE_KEY = "staffml_star_gate";
 const REVEALS_KEY = "staffml_lifetime_reveals";
 const STAR_COUNT_KEY = "staffml_star_count_cache";
 const REVEAL_THRESHOLD = 5;
-const REPO_OWNER = "harvard-edge";
-const REPO_NAME = "cs249r_book";
-const REPO_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}`;
 const STAR_COUNT_TTL_MS = 24 * 60 * 60 * 1000;
 
 type DismissMethod = "starred" | "honor" | "dismissed";
@@ -73,7 +72,7 @@ export function shouldShowGate(): boolean {
 
 /** Repo URL for the star CTA. */
 export function getStarUrl(): string {
-  return REPO_URL;
+  return GITHUB_REPO_URL;
 }
 
 /** Threshold of lifetime reveals before the gate first surfaces. */
@@ -106,7 +105,7 @@ export async function fetchStarCount(): Promise<number | null> {
   } catch {}
 
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`, {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPOSITORY}`, {
       headers: { Accept: "application/vnd.github.v3+json" },
     });
     if (!res.ok) return null;
