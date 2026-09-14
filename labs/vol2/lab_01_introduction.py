@@ -1,18 +1,20 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
 @app.cell
 async def _():
+    import html
+    import math
     import marimo as mo
     import sys
-    import math
     from pathlib import Path
 
     if sys.platform == "emscripten":
         import micropip
+
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
@@ -21,6 +23,7 @@ async def _():
         if str(_labs_dir) not in sys.path:
             sys.path.insert(0, str(_labs_dir))
         from bootstrap import native_bootstrap
+
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
@@ -29,13 +32,19 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
+        get_lab_metadata,
+        get_lab_track_variant,
         get_track_profile,
-        render_system_design_lab,
-        system_design_context,
-        system_design_controls,
+        instrumentation_console,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_arc_context,
         track_context,
-        track_selector,
     )
 
     ledger = DesignLedger()
@@ -45,43 +54,66 @@ async def _():
         ACADEMIC_LAB_CSS,
         COLORS,
         LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
+        get_lab_metadata,
+        get_lab_track_variant,
         get_track_profile,
         go,
+        instrumentation_console,
         ledger,
         math,
-        mlsysim,
         mo,
-        render_system_design_lab,
-        system_design_context,
-        system_design_controls,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_arc_context,
         track_context,
-        track_selector,
     )
 
 
 @app.cell
-def _():
-    chapter = 1
-    lab_path = "vol2/lab_01_introduction.py"
-    return chapter, lab_path
+def _(get_lab_metadata):
+    v2_01_chapter = 1
+    v2_01_lab_path = "vol2/lab_01_introduction.py"
+    v2_01_metadata = get_lab_metadata(v2_01_lab_path)
+    return v2_01_chapter, v2_01_metadata
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_01_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_01_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (Microcontrollers & Wearables / Oura Ring & Cortex-M55)": "oura_ring",
+            "📱 Mobile Track (On-Device Personal AI / iPhone & Apple Silicon M4)": "iphone",
+            "🤖 Edge & Embodied Track (Robotics & Drones / Robotaxi & Jetson Orin)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)",
+        label="Select Course / Industry Track",
+    )
+    v2_01_track_picker
     return (v2_01_track_picker,)
 
 
 @app.cell
-def _(lab_path, system_design_context, v2_01_track_picker):
-    v2_01_context = system_design_context(lab_path=lab_path, track_id=v2_01_track_picker.value)
-    v2_01_profile = v2_01_context.profile
-    v2_01_track = v2_01_context.track
-    return v2_01_context, v2_01_profile, v2_01_track
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v2_01_metadata,
+    v2_01_track_picker,
+):
+    v2_01_track_id = v2_01_track_picker.value
+    v2_01_profile = get_track_profile(v2_01_track_id)
+    v2_01_variant = get_lab_track_variant(v2_01_metadata.lab_id, v2_01_profile.track_id)
+    v2_01_hardware = resolve_mlsysim_ref(v2_01_variant.hardware_ref)
+    v2_01_model = resolve_mlsysim_ref(v2_01_variant.model_ref)
+    # Cross-tier hardware targets: Hardware.Tiny.CortexM55, Hardware.Mobile.AppleM4, Hardware.Edge.JetsonOrin, Hardware.Cloud.H100
+    return v2_01_profile, v2_01_variant
 
 
 @app.cell
@@ -242,7 +274,7 @@ def _(math):
             "d_max": 20_000,
             "d_step": 100,
             "mtbf_default": 100_000,
-            "mtbf_min": 10_000,
+            "mtbf_min": 100_00,
             "mtbf_max": 500_000,
             "mtbf_step": 5_000,
             "recovery_default": 20,
@@ -453,7 +485,6 @@ def _(math):
         }
 
     return (
-        v2_01_TRACK_LENSES,
         v2_01_fmt_count,
         v2_01_fmt_pct,
         v2_01_lens_for,
@@ -473,42 +504,89 @@ def _(v2_01_lens_for, v2_01_profile):
 
 
 @app.cell(hide_code=True)
-def _(ACADEMIC_LAB_CSS, COLORS, LAB_CSS, mo, v2_01_lens, v2_01_profile, v2_01_track_picker):
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    track_arc_context,
+    track_context,
+    v2_01_lens,
+    v2_01_metadata,
+    v2_01_profile,
+    v2_01_variant,
+):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell" style="margin-bottom: 20px;">
+        <div style="border-left: 4px solid #A51C30; padding: 12px 18px; background: white; border-radius: 0 8px 8px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <div style="font-size: 0.72rem; font-weight: 800; color: #A51C30; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                ML Systems Textbook &middot; Volume II &middot; Chapter 1 &middot; Foundational Lab 01
+            </div>
+            <h1 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.85rem; font-weight: 800;">
+                Scale Changes the Unit: The Scale Illusion
+            </h1>
+            <p style="margin: 0 0 12px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+                Explore how scaling an ML workload transforms the unit of analysis from an individual processor to a coordinated fleet.
+                Quantify single-node memory/throughput boundaries, diagnose the C3 (Compute, Communication, Coordination) trade-off,
+                and calculate fleet failure cadence.
+            </p>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <span class="mlsysbook-chip" style="background: #FEE2E2; color: #991B1B; font-weight: 700;">Track: {v2_01_profile.label}</span>
+                <span class="mlsysbook-chip" style="background: #E0F2FE; color: #0369A1;">Stakeholder: {v2_01_lens['stakeholder']}</span>
+                <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">Hardware: {v2_01_variant.hardware_ref}</span>
+                <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">Model: {v2_01_variant.model_ref}</span>
+                <span class="mlsysbook-chip" style="background: #FEF3C7; color: #92400E;">Focus: Fleet Laws &amp; C3 Breakdown</span>
+                <span class="mlsysbook-chip" style="background: #EDE9FE; color: #5B21B6;">Deliverable: Fleet Scale Memo</span>
+            </div>
+        </div>
+    </div>
+    """)
+
+    scenario_panel = mo.Html(f"""
+    <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.1rem;">System Scenario: {v2_01_profile.label} Fleet Scale</h3>
+        <p style="color: #334155; font-size: 0.9rem; line-height: 1.6;">
+            {v2_01_variant.workload_summary} You are operating as the <strong>{v2_01_lens['stakeholder']}</strong>
+            managing a fleet of <strong>{v2_01_lens['scale_unit']}</strong>. When scaling up, isolated micro-optimizations
+            in compute kernels fail to improve end-to-end goodput if communication barriers or node failures dominate the step.
+        </p>
+        <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px 18px; margin-top: 12px;">
+            <div style="font-size: 0.8rem; font-weight: 700; color: #1E293B; margin-bottom: 8px;">The Architectural Invariants of Fleet Scale:</div>
+            <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #334155; line-height: 1.6;">
+                <li><strong>The Whole-Fleet Invariant:</strong> Scale shifts the unit of analysis from the single machine to the fleet. Optimizing an individual node without considering collective coordination, synchronization, and communication creates bottlenecks rather than throughput.</li>
+                <li><strong>The Single-Node Limit Invariant:</strong> No single device can scale infinitely. When model state or inference demand exceeds local physical memory or compute budgets, sharding and distribution become physical obligations.</li>
+                <li><strong>The C3 Decomposition Law:</strong> Step latency is bounded by the three C's: <i>T</i><sub>step</sub> = <i>T</i><sub>compute</sub>/<i>N</i> + <i>T</i><sub>comm</sub>(<i>N</i>) + <i>T</i><sub>coord</sub>(<i>N</i>) &minus; <i>T</i><sub>overlap</sub>. Micro-optimizing compute when communication or coordination dominates yields negligible goodput return.</li>
+                <li><strong>The Routine Failure Law:</strong> Component MTBF divides across <i>N</i> devices: MTBF<sub>system</sub> = MTBF<sub>component</sub> / <i>N</i>. At fleet scale, failure ceases to be an anomaly and becomes the steady-state operating condition.</li>
+            </ul>
+        </div>
+    </div>
+    """)
+
+    objectives_panel = mo.Html(f"""
+    <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">LEARNING OBJECTIVES</div>
+        <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.88rem; color: #334155; line-height: 1.6;">
+            <li><strong>Analyze fleet-level scaling amounts:</strong> Contrast linear capacity growth against compounding coordination surfaces and failure probabilities for {v2_01_profile.label}.</li>
+            <li><strong>Locate single-node physical limits:</strong> Compute state footprints across parameter formats and identify the precise point where distribution becomes unavoidable.</li>
+            <li><strong>Diagnose C3 trade-offs:</strong> Decompose step latency into compute, communication, and synchronization, isolating when communication exceeds healthy 40% boundaries.</li>
+            <li><strong>Formulate resilient operating envelopes:</strong> Model fleet MTBF decay, quantify daily lost hours, and defend a robust deployment memo for downstream infrastructure.</li>
+        </ul>
+        <div style="margin-top: 10px; font-size: 0.84rem; color: #0284C7; font-style: italic;">
+            CORE QUESTION: "Why do single-processor mental models fail at fleet scale, and how do we co-design compute, communication, and resilience?"
+        </div>
+    </div>
+    """)
+
+    track_mission_card = track_context(v2_01_profile)
+    arc_card = track_arc_context(v2_01_profile, v2_01_metadata.lab_id)
+
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div class="mlsysbook-lab-header" style="--mlsysbook-accent:{COLORS['BlueLine']};">
-            <div class="mlsysbook-meta">Machine Learning Systems at Scale - Volume II - Lab 01</div>
-            <h1>Scale Changes the Unit</h1>
-            <p>
-                Work through one shared concept sequence: the fleet is the unit,
-                single-node limits force distributed capacity, C3 determines useful
-                work, and routine failure sets the operating envelope.
-            </p>
-            <div class="mlsysbook-chip-row">
-                <span class="mlsysbook-chip">Track: {v2_01_profile.label}</span>
-                <span class="mlsysbook-chip">Stakeholder: {v2_01_lens['stakeholder']}</span>
-                <span class="mlsysbook-chip">Fleet unit: {v2_01_lens['scale_unit']}</span>
-            </div>
-        </div>
-        """),
-        mo.callout(mo.md(
-            "**Chapter invariant:** scale changes the unit of analysis from a single "
-            "machine to a fleet. Coordination, communication, capacity, and failure "
-            "cadence become first-order amounts."
-        ), kind="info"),
-        mo.md("### Track selector"),
-        v2_01_track_picker,
-        mo.md("""
-### Reading Map
-
-- **Part A:** Scale Moment and Machine Learning Fleet.
-- **Part B:** Single-node stack to distributed fleet stack.
-- **Part C:** C3 taxonomy and the fleet law.
-- **Part D:** Reliability gap and routine failure.
-- **Synthesis:** Fleet operating envelope for the next compute-infrastructure decision.
-"""),
+        header_html,
+        scenario_panel,
+        objectives_panel,
+        track_mission_card,
+        arc_card,
     ])
     return
 
@@ -698,7 +776,18 @@ def _(mo):
         },
         label="Carry-forward question for Compute Infrastructure",
     )
-    return v2_01_synthesis_envelope, v2_01_synthesis_question
+    v2_01_student_id = mo.ui.text(label="Lead Architect / Student ID", value="ARCH-101")
+    v2_01_synthesis_notes = mo.ui.text_area(
+        label="Engineering Decision Log & Rationale",
+        placeholder="Document your fleet envelope, C3 mitigation priorities, and MTBF risk posture...",
+        value="Fleet scale confirms that single-node limits force distribution. C3 trade-off analysis indicates that communication and synchronization require explicit overlap and smaller failure domains to maintain >80% goodput.",
+    )
+    return (
+        v2_01_student_id,
+        v2_01_synthesis_envelope,
+        v2_01_synthesis_notes,
+        v2_01_synthesis_question,
+    )
 
 
 @app.cell
@@ -742,9 +831,16 @@ def _(
 @app.cell(hide_code=True)
 def _(
     COLORS,
+    MathPeek,
     apply_plotly_theme,
+    big_takeaways,
+    build_lab_report,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     mo,
+    report_export_panel,
+    source_trace,
     v2_01_a,
     v2_01_b,
     v2_01_c,
@@ -752,6 +848,7 @@ def _(
     v2_01_fmt_count,
     v2_01_fmt_pct,
     v2_01_lens,
+    v2_01_metadata,
     v2_01_metric_card,
     v2_01_part_a_checkpoint,
     v2_01_part_a_fleet,
@@ -771,13 +868,16 @@ def _(
     v2_01_part_d_prediction,
     v2_01_part_d_recovery,
     v2_01_profile,
+    v2_01_student_id,
     v2_01_synthesis_envelope,
+    v2_01_synthesis_notes,
     v2_01_synthesis_question,
     v2_01_table,
+    v2_01_variant,
 ):
     def v2_01_section_header(letter, title, concept):
         return mo.Html(f"""
-        <div style="margin:24px 0 12px 0;">
+        <div style="margin:16px 0 12px 0;">
             <div style="display:flex; align-items:center; gap:12px;">
                 <div style="background:{COLORS['BlueLine']}; color:white; border-radius:50%;
                             width:32px; height:32px; display:inline-flex; align-items:center;
@@ -786,8 +886,8 @@ def _(
                 <div style="font-size:0.72rem; font-weight:800; color:{COLORS['TextMuted']};
                             text-transform:uppercase; letter-spacing:0.12em;">Concept Module</div>
             </div>
-            <h2 style="margin:10px 0 4px 0;">{title}</h2>
-            <div style="color:#475569; line-height:1.55; max-width:850px;">{concept}</div>
+            <h2 style="margin:10px 0 4px 0; font-size:1.35rem; color:#0F172A;">{title}</h2>
+            <div style="color:#475569; line-height:1.55; max-width:850px; font-size:0.92rem;">{concept}</div>
         </div>
         """)
 
@@ -801,7 +901,7 @@ def _(
             f"**{labels[actual]}**. Update the memo around the measured amount."
         ), kind="warn")
 
-    def v2_01_build_part_a():
+    def build_part_a():
         labels = {
             "capacity": "raw capacity",
             "coordination": "coordination surface",
@@ -853,11 +953,18 @@ def _(
                 f"The question is no longer whether {v2_01_lens['single_unit']} works. "
                 f"The question is what happens across {v2_01_lens['scale_unit']}."
             ),
-            mo.md("### Prediction"),
-            v2_01_part_a_prediction,
-            mo.md("### Manipulation"),
-            v2_01_part_a_fleet,
-            mo.md("### Evidence"),
+            gated_hypothesis_card(
+                v2_01_part_a_prediction,
+                title="1. Formulate Fleet Growth Hypothesis",
+                subtitle=f"Predict which system metric compounds most aggressively as {v2_01_lens['scale_unit']} scale up:",
+                gate_label="Hypothesis Gate A",
+            ),
+            instrumentation_console(
+                v2_01_part_a_fleet,
+                title="Fleet Sizing Controls",
+                subtitle=f"Sweep the number of {v2_01_lens['scale_unit']} to inspect non-linear coordination growth:",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.as_html(fig),
             mo.Html(table),
             mo.Html(f"""
@@ -869,29 +976,25 @@ def _(
             """),
             v2_01_prediction_callout(v2_01_part_a_prediction.value, v2_01_a["first_order"], labels),
             boundary,
-            mo.accordion({
-                "Math Peek / Source Model": mo.md("""
-Capacity alone is linear:
-
-$$ Capacity_{fleet} = N * Capacity_{unit} $$
-
-The coordination surface grows faster in this introductory model:
-
-$$ CoordinationIndex = N * log_2(N) $$
-
-Fleet health compounds the per-unit survival probability:
-
-$$ P(healthy fleet) = p_{unit}^{N} $$
-
-The chapter claim is not that these simple equations are the final simulator.
-The claim is that the unit changed: the report must carry fleet amounts.
-""")
-            }),
-            mo.md("### Checkpoint"),
-            v2_01_part_a_checkpoint,
+            MathPeek(
+                formula="CoordinationIndex = N \\cdot \\log_2(N); \\quad P(\\text{healthy}) = p_{\\text{unit}}^N",
+                variables={
+                    "FleetSize (N)": f"{v2_01_a['n']:,.0f}",
+                    "UnitReliability (p_unit)": f"{v2_01_lens['unit_reliability']}",
+                    "HealthyFleetProb": f"{100*v2_01_a['health']:.2f}%",
+                    "CoordinationIndex": f"{v2_01_a['coord_index']:,.0f}",
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT A: FLEET METRIC BINDING</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Reporting Priority Selection</h4>
+                {v2_01_part_a_checkpoint}
+            </div>
+            """),
         ])
 
-    def v2_01_build_part_b():
+    def build_part_b():
         actual = "single" if v2_01_b["single_unit_feasible"] else ("memory" if v2_01_b["binding"] == "memory/capacity" else "throughput")
         labels = {
             "single": "single-unit feasible",
@@ -940,11 +1043,18 @@ The claim is that the unit changed: the report must carry fleet amounts.
                 f"The selected track realizes the same concept through {v2_01_lens['budget_label']}. "
                 "The activity asks for the first point where local optimization stops being the right unit of work."
             ),
-            mo.md("### Prediction"),
-            v2_01_part_b_prediction,
-            mo.md("### Manipulation"),
-            mo.hstack([v2_01_part_b_model_b, v2_01_part_b_state], gap=2),
-            mo.md("### Evidence"),
+            gated_hypothesis_card(
+                v2_01_part_b_prediction,
+                title="2. Formulate Single-Node Boundary Hypothesis",
+                subtitle="Predict what resource constraint fails first before multi-node distribution is deployed:",
+                gate_label="Hypothesis Gate B",
+            ),
+            instrumentation_console(
+                mo.hstack([v2_01_part_b_model_b, v2_01_part_b_state], gap=2),
+                title="Model Scale & Representation Knobs",
+                subtitle="Configure workload scale and representation precision to evaluate physical state boundaries:",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.as_html(fig),
             mo.Html(table),
             mo.Html(f"""
@@ -956,28 +1066,25 @@ The claim is that the unit changed: the report must carry fleet amounts.
             """),
             v2_01_prediction_callout(v2_01_part_b_prediction.value, actual, labels),
             boundary,
-            mo.accordion({
-                "Math Peek / Source Model": mo.md("""
-The single-unit question is an amount check, not a preference:
-
-$$ StateGB = ParamsB * bytesPerParam $$
-
-$$ Units_{memory} = ceil(StateGB / UnitBudgetGB) $$
-
-$$ Units_{demand} = ceil(Demand / UnitCapacity) $$
-
-$$ Units_{required} = max(Units_{memory}, Units_{demand}) $$
-
-When required units exceed one, distribution is no longer optional. The
-remaining design question is which form of distribution matches the binding
-amount.
-""")
-            }),
-            mo.md("### Checkpoint"),
-            v2_01_part_b_choice,
+            MathPeek(
+                formula="Units_{\\text{required}} = \\max\\left(\\lceil \\frac{\\text{StateGB}}{\\text{UnitBudgetGB}} \\rceil, \\lceil \\frac{\\text{Demand}}{\\text{UnitCapacity}} \\rceil\\right)",
+                variables={
+                    "StateFootprint": f"{v2_01_b['state_gb']:.2f} GB",
+                    "UnitMemoryBudget": f"{v2_01_lens['memory_budget_gb']:.3g} GB",
+                    "RequiredUnits": f"{v2_01_b['required_units']}",
+                    "BindingLimit": v2_01_b['binding'],
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT B: ARCHITECTURAL SHARDING</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Capacity Distribution Policy</h4>
+                {v2_01_part_b_choice}
+            </div>
+            """),
         ])
 
-    def v2_01_build_part_c():
+    def build_part_c():
         labels = {
             "compute": "Compute",
             "communication": "Communication",
@@ -1045,14 +1152,21 @@ amount.
                 "The fleet law turns the scaled system into an amount budget: local compute, communication, "
                 "coordination, and overlap. The track changes what those terms mean, not the concept."
             ),
-            mo.md("### Prediction"),
-            v2_01_part_c_prediction,
-            mo.md("### Manipulation"),
-            mo.vstack([
-                v2_01_part_c_width,
-                mo.hstack([v2_01_part_c_comm_reduction, v2_01_part_c_coordination], gap=2),
-            ]),
-            mo.md("### Evidence"),
+            gated_hypothesis_card(
+                v2_01_part_c_prediction,
+                title="3. Formulate C3 Dominance Hypothesis",
+                subtitle="Predict which axis of the Compute, Communication, Coordination trilemma will dominate step latency:",
+                gate_label="Hypothesis Gate C",
+            ),
+            instrumentation_console(
+                mo.vstack([
+                    v2_01_part_c_width,
+                    mo.hstack([v2_01_part_c_comm_reduction, v2_01_part_c_coordination], gap=2),
+                ]),
+                title="C3 Scaling & Overlap Knobs",
+                subtitle="Modulate fleet parallelism, communication reduction/compression, and barrier synchronization overhead:",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.as_html(fig),
             mo.Html(table),
             mo.Html(f"""
@@ -1064,27 +1178,26 @@ amount.
             """),
             v2_01_prediction_callout(v2_01_part_c_prediction.value, v2_01_c["dominant"], labels),
             boundary,
-            mo.accordion({
-                "Math Peek / Source Model": mo.md("""
-The chapter's fleet law decomposes each distributed step:
-
-$$ T_{step}(N) = T_{compute}/N + T_{comm}(N) + T_{sync}(N) - T_{overlap} $$
-
-The diagnostic rule is to optimize the dominant term:
-
-- high compute fraction -> local math or accelerator efficiency
-- high communication fraction -> compression, overlap, topology, or fabric
-- low goodput -> checkpointing, elastic recovery, fewer barriers, scheduling
-
-The introductory red thresholds follow the C3 traffic-light pattern:
-communication above 40% or goodput below 75% deserves immediate action.
-""")
-            }),
-            mo.md("### Checkpoint"),
-            v2_01_part_c_mitigation,
+            MathPeek(
+                formula="T_{\\text{step}}(N) = \\frac{T_{\\text{comp}}}{N} + T_{\\text{comm}}(N) + T_{\\text{sync}}(N) - T_{\\text{overlap}}",
+                variables={
+                    "LocalComputeTime": f"{v2_01_c['compute_s']:.3f} s ({100*v2_01_c['compute_fraction']:.1f}%)",
+                    "CommunicationTime": f"{v2_01_c['comm_s']:.3f} s ({100*v2_01_c['comm_fraction']:.1f}%)",
+                    "CoordinationTime": f"{v2_01_c['sync_s']:.3f} s ({100*v2_01_c['sync_fraction']:.1f}%)",
+                    "OverlapCredit": f"-{v2_01_c['overlap_s']:.3f} s",
+                    "EffectiveStepTime": f"{v2_01_c['step_s']:.3f} s",
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT C: BOTTLENECK MITIGATION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Dominant Constraint Mitigation</h4>
+                {v2_01_part_c_mitigation}
+            </div>
+            """),
         ])
 
-    def v2_01_build_part_d():
+    def build_part_d():
         actual = "routine" if v2_01_d["routine"] else "rare"
         if v2_01_d["failures_per_day"] >= 5 * v2_01_lens["routine_failures_per_day"]:
             actual = "dominant"
@@ -1098,101 +1211,91 @@ communication above 40% or goodput below 75% deserves immediate action.
             max(v2_01_lens["d_min"], v2_01_lens["d_default"] // 2),
             v2_01_lens["d_default"],
             min(v2_01_lens["d_max"], max(v2_01_lens["d_default"] * 2, v2_01_lens["d_default"] + v2_01_lens["d_step"])),
-            v2_01_lens["d_max"],
         ]
-        sizes = sorted(set(int(size) for size in sizes))
-        failures = [24.0 / (v2_01_part_d_mtbf.value / max(1, size)) for size in sizes]
+        rates = [24.0 / (max(1.0, float(v2_01_part_d_mtbf.value)) / s) for s in sizes]
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=sizes,
-            y=failures,
-            mode="lines+markers",
-            name="failures/day",
-            line=dict(color=COLORS["RedLine"], width=3),
-        ))
-        fig.add_hline(
-            y=v2_01_lens["routine_failures_per_day"],
-            line_dash="dash",
-            line_color=COLORS["BlueLine"],
-            annotation_text="routine threshold",
-        )
-        fig.add_trace(go.Scatter(
-            x=[v2_01_d["n"]],
-            y=[v2_01_d["failures_per_day"]],
-            mode="markers",
-            marker=dict(size=14, color=COLORS["OrangeLine"], line=dict(color="white", width=2)),
-            name="current",
+        fig.add_trace(go.Bar(
+            x=[f"{v2_01_fmt_count(s)} units" for s in sizes],
+            y=rates,
+            marker_color=[COLORS["GreenLine"] if r < v2_01_lens["routine_failures_per_day"] else COLORS["RedLine"] for r in rates],
+            name="Failures/day",
         ))
         fig.update_layout(
-            height=350,
-            xaxis_title=v2_01_lens["scale_unit"],
-            yaxis_title="Expected events per day",
+            height=330,
+            yaxis_title=f"{v2_01_lens['failure_event']} per day",
             margin=dict(l=55, r=20, t=24, b=50),
         )
         apply_plotly_theme(fig)
         table = v2_01_table(
-            ["Reliability amount", "Current value", "Decision meaning"],
+            ["Reliability metric", "Current value", "Engineering implication"],
             [
-                ["System MTBF", f"{v2_01_d['system_mtbf']:.2f} hours", "time between fleet events"],
-                ["Failures per day", f"{v2_01_d['failures_per_day']:.2f}", v2_01_lens["failure_event"]],
-                ["Lost time per day", f"{v2_01_d['lost_hours_per_day']:.2f} hours", "recovery load"],
-                ["Goodput after recovery", v2_01_fmt_pct(v2_01_d["goodput"]), "useful operating time"],
-                ["Failure probability in 8 hours", v2_01_fmt_pct(v2_01_d["p_failure_shift"]), "shift-level exposure"],
+                ["Per-unit MTBF", f"{v2_01_part_d_mtbf.value:,.0f} hours", "single-unit hardware expectation"],
+                ["Fleet MTBF", f"{v2_01_d['system_mtbf']:.2f} hours", "mean interval between fleet-wide events"],
+                ["Expected failures / day", f"{v2_01_d['failures_per_day']:.2f}", "events requiring restart, failover, or retry"],
+                ["Lost hours / day", f"{v2_01_d['lost_hours_per_day']:.2f} hours", "time consumed by recovery cadence"],
+                ["Fleet goodput", v2_01_fmt_pct(v2_01_d["goodput"]), "fraction of day spent on useful work"],
             ],
         )
         boundary = mo.callout(
             mo.md(
-                f"**Routine-failure boundary:** this fleet expects {v2_01_d['failures_per_day']:.2f} "
-                f"{v2_01_lens['failure_event']} events per day. Manual response is no longer an architecture."
+                f"**Routine failure state:** the fleet experiences {v2_01_d['failures_per_day']:.2f} events/day "
+                f"and loses {v2_01_d['lost_hours_per_day']:.2f} hours/day to recovery. Manual operations cannot sustain this envelope."
             ),
             kind="danger",
         ) if v2_01_d["routine"] else mo.callout(
-            mo.md("The selected failure domain remains below the routine-failure threshold."),
+            mo.md("Failure cadence remains within the manual/low-automation envelope, but continues to compound with scale."),
             kind="success",
         )
         return mo.vstack([
             v2_01_section_header(
                 "D",
-                "Rare Events Become Routine",
-                f"The failure mode for this track is {v2_01_lens['failure_mode']}. "
-                "The activity turns per-unit reliability into fleet failure cadence and recovery load."
+                "Reliability Gap and Routine Failure",
+                "At fleet scale, rare component faults compound into routine system events. The design target "
+                "is recovery speed, checkpoint quality, and blast-radius control."
             ),
-            mo.md("### Prediction"),
-            v2_01_part_d_prediction,
-            mo.md("### Manipulation"),
-            mo.vstack([
-                v2_01_part_d_fleet,
-                mo.hstack([v2_01_part_d_mtbf, v2_01_part_d_recovery], gap=2),
-            ]),
-            mo.md("### Evidence"),
+            gated_hypothesis_card(
+                v2_01_part_d_prediction,
+                title="4. Formulate Fleet Reliability Hypothesis",
+                subtitle="Predict how rare per-unit failures manifest when aggregating over thousands of units:",
+                gate_label="Hypothesis Gate D",
+            ),
+            instrumentation_console(
+                mo.vstack([
+                    v2_01_part_d_fleet,
+                    mo.hstack([v2_01_part_d_mtbf, v2_01_part_d_recovery], gap=2),
+                ]),
+                title="Reliability & Blast Radius Knobs",
+                subtitle="Adjust fleet failure-domain size, component MTBF, and mean-time-to-recover (MTTR):",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.as_html(fig),
             mo.Html(table),
             mo.Html(f"""
             <div style="display:flex; gap:12px; flex-wrap:wrap; margin:12px 0;">
-                {v2_01_metric_card("System MTBF", f"{v2_01_d['system_mtbf']:.2f} h", "component MTBF divided by fleet size", COLORS["BlueLine"])}
-                {v2_01_metric_card("Events/day", f"{v2_01_d['failures_per_day']:.2f}", v2_01_lens["failure_event"], COLORS["RedLine"] if v2_01_d["routine"] else COLORS["GreenLine"])}
-                {v2_01_metric_card("Goodput", v2_01_fmt_pct(v2_01_d["goodput"]), "after recovery load", COLORS["RedLine"] if v2_01_d["goodput"] < 0.90 else COLORS["GreenLine"])}
+                {v2_01_metric_card("Failures / day", f"{v2_01_d['failures_per_day']:.2f}", v2_01_lens["failure_event"], COLORS["RedLine"] if v2_01_d["routine"] else COLORS["GreenLine"])}
+                {v2_01_metric_card("Lost hours / day", f"{v2_01_d['lost_hours_per_day']:.2f}h", f"{v2_01_part_d_recovery.value} min MTTR", COLORS["OrangeLine"])}
+                {v2_01_metric_card("Fleet goodput", v2_01_fmt_pct(v2_01_d["goodput"]), "after recovery loss", COLORS["RedLine"] if v2_01_d["goodput"] < 0.90 else COLORS["GreenLine"])}
             </div>
             """),
             v2_01_prediction_callout(v2_01_part_d_prediction.value, actual, labels),
             boundary,
-            mo.accordion({
-                "Math Peek / Source Model": mo.md("""
-For independent components, the fleet-level interruption clock shrinks with N:
-
-$$ MTBF_{system} = MTBF_{component} / N $$
-
-The probability of at least one event during a window t is:
-
-$$ P(event before t) = 1 - exp(-t / MTBF_{system}) $$
-
-This is why the chapter says failure becomes steady state. The design target is
-not perfect hardware; it is recovery speed, checkpoint quality, and blast-radius
-control.
-""")
-            }),
-            mo.md("### Checkpoint"),
-            v2_01_part_d_policy,
+            MathPeek(
+                formula="MTBF_{\\text{system}} = \\frac{MTBF_{\\text{component}}}{N}; \\quad \\text{LostHours} = \\frac{24 \\cdot \\text{MTTR}}{MTBF_{\\text{system}}}",
+                variables={
+                    "ComponentMTBF": f"{v2_01_part_d_mtbf.value:,.0f} hrs",
+                    "SystemMTBF": f"{v2_01_d['system_mtbf']:.2f} hrs",
+                    "DailyFailures": f"{v2_01_d['failures_per_day']:.2f}",
+                    "RecoveryMTTR": f"{v2_01_part_d_recovery.value} mins",
+                    "LostHoursPerDay": f"{v2_01_d['lost_hours_per_day']:.2f} hrs",
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT D: RECOVERY ARCHITECTURE</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Fault Tolerance Strategy</h4>
+                {v2_01_part_d_policy}
+            </div>
+            """),
         ])
 
     def build_synthesis():
@@ -1204,19 +1307,89 @@ control.
             "power": "What power/cooling envelope sustains the selected fleet?",
             "failure_domain": "What failure domain size should compute infrastructure expose?",
         }
+
+        passed = not v2_01_c["red_state"] and v2_01_d["goodput"] >= 0.85
+
+        _report = build_lab_report(
+            v2_01_metadata,
+            student_id=v2_01_student_id.value or "ARCH-101",
+            track=v2_01_profile.label,
+            scenario=v2_01_variant.workload_summary,
+            learning_objectives=(
+                "Analyze fleet-level scaling amounts and compounding coordination surfaces.",
+                "Locate single-node physical limits and memory/throughput bottlenecks.",
+                "Diagnose C3 trade-offs across compute, communication, and synchronization.",
+                "Formulate resilient operating envelopes under routine component failure.",
+            ),
+            predictions={
+                "part_a_fleet_unit": v2_01_part_a_prediction.value,
+                "part_b_single_node_limit": v2_01_part_b_prediction.value,
+                "part_c_c3_tradeoff": v2_01_part_c_prediction.value,
+                "part_d_routine_failure": v2_01_part_d_prediction.value,
+            },
+            knob_settings={
+                "fleet_size": v2_01_part_a_fleet.value,
+                "model_parameters_b": v2_01_part_b_model_b.value,
+                "state_bytes_per_param": v2_01_part_b_state.value,
+                "c3_fleet_width": v2_01_part_c_width.value,
+                "c3_comm_reduction_pct": v2_01_part_c_comm_reduction.value,
+                "c3_coordination_pct": v2_01_part_c_coordination.value,
+                "failure_domain_size": v2_01_part_d_fleet.value,
+                "component_mtbf_hours": v2_01_part_d_mtbf.value,
+                "recovery_minutes": v2_01_part_d_recovery.value,
+            },
+            binding_constraints={
+                "part_a_coordination": f"coordination index {v2_01_a['coord_index']:,.0f}",
+                "part_b_capacity": f"required {v2_01_b['required_units']} units binding on {v2_01_b['binding']}",
+                "part_c_dominant": f"dominant axis {v2_01_c['dominant']} with {100*v2_01_c['comm_fraction']:.1f}% comm share",
+                "part_d_cadence": f"{v2_01_d['failures_per_day']:.2f} failures/day ({v2_01_d['lost_hours_per_day']:.2f} lost hrs/day)",
+            },
+            evidence_summary={
+                "fleet_health_pct": round(100 * v2_01_a["health"], 2),
+                "required_units": v2_01_b["required_units"],
+                "binding_constraint": v2_01_b["binding"],
+                "dominant_c3_axis": v2_01_c["dominant"],
+                "c3_goodput_pct": round(100 * v2_01_c["goodput"], 2),
+                "daily_failures": round(v2_01_d["failures_per_day"], 2),
+                "fleet_goodput_pct": round(100 * v2_01_d["goodput"], 2),
+            },
+            final_decision={
+                "operating_envelope": envelope,
+                "carry_forward_question": question_labels[question],
+                "authorization_status": "APPROVED" if passed else "PROVISIONAL",
+            },
+            big_takeaways=(
+                "Scale transforms the fundamental unit of analysis from individual nodes to collective fleets.",
+                "Single-node physical memory and compute limits make distributed sharding non-optional.",
+                "The C3 trilemma governs distributed throughput: communication and coordination bound scaling speed.",
+                "At scale, component failures compound into steady-state routine operational events.",
+                "Downstream Chapter 2 Compute Infrastructure must directly co-design interconnect fabrics and recovery domains.",
+            ),
+            residual_risk=v2_01_synthesis_notes.value,
+        )
+
         return mo.vstack([
             v2_01_section_header(
                 "S",
-                "Fleet Scale Memo",
-                "The synthesis converts the four concept modules into one operating-envelope decision for the next infrastructure chapter."
+                "Fleet Scale Synthesis & Deployment Review",
+                "Synthesize findings across capacity, C3 balance, and reliability into a defensible deployment memo."
             ),
-            v2_01_synthesis_envelope,
-            v2_01_synthesis_question,
+            gated_hypothesis_card(
+                v2_01_synthesis_envelope,
+                title="5. Select Operating Envelope Strategy",
+                subtitle="Choose the operational risk posture that balances scale efficiency against recovery overhead:",
+                gate_label="Synthesis Gate 1",
+            ),
+            instrumentation_console(
+                mo.vstack([v2_01_synthesis_question, v2_01_student_id, v2_01_synthesis_notes]),
+                title="Synthesis Governance & Downstream Hand-Off",
+                subtitle="Designate carry-forward architectural questions and document sign-off rationale:",
+            ),
             mo.Html(f"""
             <div style="background:#0f172a; color:#e2e8f0; border-radius:10px; padding:20px 24px; margin:16px 0;">
                 <div style="font-size:0.72rem; font-weight:800; color:#93c5fd;
                             text-transform:uppercase; letter-spacing:0.12em;">{v2_01_lens['report_name']}</div>
-                <h3 style="margin:8px 0 10px 0; color:white;">Selected envelope: {envelope}</h3>
+                <h3 style="margin:8px 0 10px 0; color:white;">Selected envelope: {envelope.upper()}</h3>
                 <p style="line-height:1.6; margin:0 0 12px 0;">
                     For <strong>{v2_01_profile.label}</strong>, the memo treats
                     <strong>{v2_01_lens['scale_unit']}</strong> as the unit of analysis.
@@ -1226,25 +1399,67 @@ control.
                     Part C is dominated by <strong>{v2_01_c['dominant']}</strong>
                     with goodput <strong>{v2_01_fmt_pct(v2_01_c['goodput'])}</strong>.
                     Part D estimates <strong>{v2_01_d['failures_per_day']:.2f}</strong>
-                    routine events per day.
+                    routine events per day ({v2_01_d['lost_hours_per_day']:.2f} lost hrs/day).
                 </p>
                 <div style="border-top:1px solid #334155; padding-top:12px; color:#bfdbfe;">
-                    Carry-forward question: {question_labels[question]}
+                    <strong>Downstream Carry-Forward:</strong> {question_labels[question]}
                 </div>
             </div>
             """),
-            mo.callout(mo.md(
-                "A complete fleet memo names the unit, the selected operating envelope, "
-                "the binding amount, the C3 bottleneck, the recovery policy, and the next "
-                "infrastructure question."
-            ), kind="info"),
+            big_takeaways([
+                "Scale transforms the fundamental unit of analysis from individual nodes to collective fleets.",
+                "Single-node physical memory and compute limits make distributed sharding non-optional.",
+                "The C3 trilemma governs distributed throughput: communication and coordination bound scaling speed.",
+                "At scale, component failures compound into steady-state routine operational events.",
+                "Downstream Chapter 2 Compute Infrastructure must directly co-design interconnect fabrics and recovery domains.",
+            ]),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin: 18px 0; background: #FFFDFD;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; margin-bottom: 6px;">LEAD ARCHITECT AUTHORIZATION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Fleet Scale Architecture Sign-Off: {v2_01_lens['stakeholder']}</h4>
+                <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                    <span style="display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 0.8rem; background: {'#ECFDF5' if passed else '#FEF2F2'}; color: {'#065F46' if passed else '#991B1B'}; border: 1px solid {'#A7F3D0' if passed else '#FECACA'};">
+                        {'APPROVED FOR DEPLOYMENT' if passed else 'PROVISIONAL &mdash; C3/RELIABILITY WARNING'}
+                    </span>
+                    <span style="font-size: 0.85rem; color: #475569;">
+                        Envelope: <code>{envelope}</code> &middot; Binding: <code>{v2_01_b['binding']}</code> &middot; Goodput: <code>{v2_01_fmt_pct(v2_01_c['goodput'])}</code>
+                    </span>
+                </div>
+            </div>
+            """),
+            source_trace(
+                {
+                    "Report builder": "mlsysbook_labs.build_lab_report",
+                    "Report export": "mlsysbook_labs.report_export_panel",
+                    "Ledger": "DesignLedger.save(chapter=1)",
+                    "Track variant": "mlsysbook_labs.get_lab_track_variant",
+                },
+                collapsed=True,
+                summary="The report and ledger snapshot are generated from local controls and source-traced helpers.",
+            ),
+            mo.md("## Download Report"),
+            report_export_panel(_report),
+            mo.Html(f"""
+            <div style="border: 1px solid #CBD5E1; border-radius: 8px; padding: 16px 20px; margin-top: 20px; background: #F8FAFC;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                    What's Next &middot; Volume II Curriculum Continuum
+                </div>
+                <h4 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.05rem;">
+                    Next Lab: Volume II, Chapter 2 &mdash; Compute Infrastructure: Accelerators, Memory Hierarchies &amp; Interconnects
+                </h4>
+                <p style="margin: 0; font-size: 0.88rem; color: #334155; line-height: 1.5;">
+                    Carry your fleet scale envelope into Chapter 2, where you will size accelerator clusters, compute rooflines,
+                    HBM bandwidth, and PCIe/NVLink topologies to fulfill your workload's distributed capacity needs.
+                </p>
+            </div>
+            """),
         ])
 
     v2_01_tabs = mo.ui.tabs({
-        "Part A - Fleet Unit": v2_01_build_part_a(),
-        "Part B - Distributed Capacity": v2_01_build_part_b(),
-        "Part C - C3 Trade-Off": v2_01_build_part_c(),
-        "Part D - Routine Failure": v2_01_build_part_d(),
+        "Part A -- Fleet Unit": build_part_a(),
+        "Part B -- Distributed Capacity": build_part_b(),
+        "Part C -- C3 Trade-Off": build_part_c(),
+        "Part D -- Routine Failure": build_part_d(),
         "Synthesis": build_synthesis(),
     })
     v2_01_tabs
@@ -1253,15 +1468,13 @@ control.
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
-    chapter,
     ledger,
     mo,
     v2_01_a,
     v2_01_b,
     v2_01_c,
+    v2_01_chapter,
     v2_01_d,
-    v2_01_fmt_count,
     v2_01_fmt_pct,
     v2_01_lens,
     v2_01_part_a_checkpoint,
@@ -1318,30 +1531,25 @@ def _(
         "operating_envelope": v2_01_synthesis_envelope.value,
         "carry_forward_question": v2_01_synthesis_question.value,
     }
-    ledger.save(track=v2_01_profile.track_id, chapter=chapter, design=v2_01_ledger_design)
+    ledger.save(track=v2_01_profile.track_id, chapter=v2_01_chapter, design=v2_01_ledger_design)
 
-    mo.Html(f"""
-    <div class="lab-hud" style="background:#0f172a; border-radius:10px; padding:18px 24px;
-                margin-top:26px; font-family:'SF Mono', 'Fira Code', monospace;">
-        <div style="color:#94a3b8; font-size:0.7rem; font-weight:800;
-                    text-transform:uppercase; letter-spacing:0.14em; margin-bottom:10px;">
-            Design Ledger - Lab V2-01 Saved
-        </div>
-        <div style="color:#cbd5e1; font-size:0.82rem; line-height:1.8;">
-            <span style="color:#64748b;">track:</span>
-            <span style="color:{COLORS['BlueLine']};">{v2_01_profile.label}</span><br/>
-            <span style="color:#64748b;">fleet unit:</span> {v2_01_lens['scale_unit']}<br/>
-            <span style="color:#64748b;">Part A amount:</span> {v2_01_a['first_order']}
-            at {v2_01_fmt_count(v2_01_part_a_fleet.value)} units<br/>
-            <span style="color:#64748b;">Part B required units:</span>
-            {v2_01_fmt_count(v2_01_b['required_units'])} ({v2_01_b['binding']})<br/>
-            <span style="color:#64748b;">Part C axis:</span> {v2_01_c['dominant']}
-            with goodput {v2_01_fmt_pct(v2_01_c['goodput'])}<br/>
-            <span style="color:#64748b;">Part D cadence:</span>
-            {v2_01_d['failures_per_day']:.2f} events/day
-        </div>
+    _passed = not v2_01_c["red_state"] and v2_01_d["goodput"] >= 0.85
+    mo.Html(
+        f"""
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">Vol2 &middot; Lab 01</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v2_01_profile.label}</span>
+      <span class="hud-label">STATUS</span>
+      <span class="hud-value" style="color: {'#10B981' if _passed else '#F59E0B'};">{'PASS' if _passed else 'REVIEW'}</span>
+      <span class="hud-label">C3 GOODPUT</span>
+      <span class="hud-value">{v2_01_fmt_pct(v2_01_c['goodput'])}</span>
+      <span class="hud-label">FAILURES/DAY</span>
+      <span class="hud-value">{v2_01_d['failures_per_day']:.2f}</span>
     </div>
-    """)
+    """
+    )
     return
 
 
