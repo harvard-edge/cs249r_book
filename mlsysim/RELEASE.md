@@ -80,7 +80,7 @@ configured on pypi.org. Do this once:
    |-------------|----------------------------|
    | PyPI Project name | `mlsysim`            |
    | Owner       | `harvard-edge`             |
-   | Repository name  | `cs249r_book`         |
+   | Repository name  | the name in `harvard-edge/cs249r_book` |
    | Workflow name    | `mlsysim-pypi-publish.yml` |
    | Environment name | `pypi-mlsysim`        |
 

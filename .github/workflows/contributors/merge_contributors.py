@@ -17,8 +17,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = os.environ.get("GITHUB_REPOSITORY", "harvard-edge/cs249r_book")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+# owner/name: GitHub's own name in Actions; locally, the name the repository's
+# files currently use (kept current by .github/scripts/sync-repository-name.py).
+REPO = os.environ.get("GITHUB_REPOSITORY") or next(
+    line.strip()
+    for line in (REPO_ROOT / ".github" / "repository").read_text().splitlines()
+    if line.strip() and not line.startswith("#")
+)
 OUTPUT = REPO_ROOT / "site" / "about" / "contributors.json"
 ALLCONTRIB = REPO_ROOT / ".all-contributorsrc"
 

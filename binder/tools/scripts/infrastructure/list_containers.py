@@ -111,7 +111,7 @@ def main():
         print("❌ No container information found in workflow logs")
         print("\n📋 Manual identification required:")
         print("1. Go to: https://github.com/orgs/harvard-edge/packages")
-        print("2. Look for containers from cs249r_book repository")
+        print("2. Look for containers from the harvard-edge/cs249r_book repository")
         print("3. Check creation dates and sizes")
         print("4. Keep the most recent quarto-linux container")
         return

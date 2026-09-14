@@ -27,6 +27,7 @@ import os
 import json
 import random
 import hashlib
+from pathlib import Path
 
 import requests
 import pandas as pd
@@ -43,7 +44,17 @@ EXCLUDED_USERS = {
     "Matthew Steward",
 }
 
-OWNER, REPO = os.environ.get("GITHUB_REPOSITORY", "harvard-edge/cs249r_book").split("/")
+# owner/name: GitHub's own name in Actions; locally, the name the repository's
+# files currently use (kept current by .github/scripts/sync-repository-name.py).
+_RECORD = Path(__file__).resolve().parents[3] / ".github" / "repository"
+OWNER, REPO = (
+    os.environ.get("GITHUB_REPOSITORY")
+    or next(
+        line.strip()
+        for line in _RECORD.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    )
+).split("/")
 BRANCH = "dev"
 RESULTS_PER_PAGE = 1000
 
