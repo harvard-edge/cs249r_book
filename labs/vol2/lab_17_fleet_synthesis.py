@@ -1,23 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# -----------------------------------------------------------------------------
-# LAB V2-17: THE FLEET SYNTHESIS
-#
-# Chapter invariant: the fleet, not the model, is the object of engineering.
-# A defensible deployment review follows the binding C3 term across
-# infrastructure, communication, coordination, serving, operations, and
-# governance until the displaced cost is visible.
-#
-# Packet modules:
-#   Part A - Fleet architecture ledger replay
-#   Part B - Multi-constraint fleet review
-#   Part C - Guardrail conflict revision
-#   Part D - Deployment review board decision
-#   Synthesis - Final Volume II fleet memo
-# -----------------------------------------------------------------------------
 
 
 @app.cell
@@ -48,10 +32,14 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         lab_header,
         learning_objectives,
         report_export_panel,
@@ -65,20 +53,23 @@ async def _():
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
+    # MLSysBook reference tiers: Hardware.Tiny.CortexM55, Hardware.Mobile.AppleM4, Hardware.Edge.JetsonOrin, Hardware.Cloud.H100
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
         LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
-        lab_header,
+        instrumentation_console,
         ledger,
-        learning_objectives,
         math,
         mo,
         report_export_panel,
@@ -86,7 +77,6 @@ async def _():
         source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -95,14 +85,21 @@ def _(get_lab_metadata):
     v2_17_lab_path = "vol2/lab_17_fleet_synthesis.py"
     v2_17_chapter = 17
     v2_17_metadata = get_lab_metadata(v2_17_lab_path)
-    return v2_17_chapter, v2_17_lab_path, v2_17_metadata
+    return v2_17_chapter, v2_17_metadata
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_17_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_17_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (ARM Cortex-M55 / ESP32-S3 & Wearable Firmware / Battery Limits)": "oura_ring",
+            "📱 Mobile Track (Apple Silicon / Snapdragon & On-Device Thermal / Privacy Limits)": "iphone",
+            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Safety-Critical Autonomy Limits)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)",
+        label="Select Course / Industry Track",
+    )
     v2_17_track_picker
     return (v2_17_track_picker,)
 
@@ -120,13 +117,7 @@ def _(
     v2_17_variant = get_lab_track_variant(v2_17_metadata.lab_id, v2_17_profile.track_id)
     v2_17_hardware = resolve_mlsysim_ref(v2_17_variant.hardware_ref)
     v2_17_model = resolve_mlsysim_ref(v2_17_variant.model_ref)
-    return (
-        v2_17_hardware,
-        v2_17_model,
-        v2_17_profile,
-        v2_17_track_id,
-        v2_17_variant,
-    )
+    return v2_17_hardware, v2_17_model, v2_17_profile, v2_17_variant
 
 
 @app.cell
@@ -1058,25 +1049,28 @@ def _(html_lib, math):
         return apply_plotly_theme(fig)
 
     return (
-        v2_17_axis_label,
         v2_17_axis_options,
         v2_17_board_fig,
         v2_17_board_review,
         v2_17_constraint_review,
-        v2_17_escape,
         v2_17_ledger_replay,
         v2_17_markdown_table,
-        v2_17_recommended_revision,
+        v2_17_review_fig,
         v2_17_revision_fig,
         v2_17_revision_review,
-        v2_17_review_fig,
         v2_17_score_fig,
         v2_17_track_packet,
     )
 
 
 @app.cell
-def _(v2_17_hardware, v2_17_model, v2_17_profile, v2_17_track_packet, v2_17_variant):
+def _(
+    v2_17_hardware,
+    v2_17_model,
+    v2_17_profile,
+    v2_17_track_packet,
+    v2_17_variant,
+):
     v2_17_packet = v2_17_track_packet(v2_17_profile, v2_17_variant, v2_17_hardware, v2_17_model)
     return (v2_17_packet,)
 
@@ -1085,8 +1079,6 @@ def _(v2_17_hardware, v2_17_model, v2_17_profile, v2_17_track_packet, v2_17_vari
 def _(
     ACADEMIC_LAB_CSS,
     LAB_CSS,
-    lab_header,
-    learning_objectives,
     mo,
     source_trace,
     track_arc_context,
@@ -1095,41 +1087,82 @@ def _(
     v2_17_packet,
     v2_17_profile,
 ):
-    mo.vstack(
+    _shell = mo.vstack(
         [
             LAB_CSS,
             ACADEMIC_LAB_CSS,
-            lab_header(
-                v2_17_metadata,
-                "Synthesize the full Volume II fleet into a deployment review board decision.",
-                chips=("Fleet stack", "C3", "guardrails", "deployment review"),
-            ),
-            learning_objectives(
-                (
-                    "Assemble a fleet architecture ledger from earlier Volume II concept decisions.",
-                    "Run a multi-constraint review across capacity, communication, reliability, security, robustness, carbon, and governance.",
-                    "Revise the architecture when guardrails conflict and explain where risk moved.",
-                    "Produce a deployment review memo with selected plan, rejected alternative, validation evidence, and residual risks.",
-                )
-            ),
+            mo.Html(f"""
+            <div class="mlsysbook-lab-shell">
+                <div class="lab-shell-header" style="border-left: 5px solid #A51C30; padding-left: 16px; margin-bottom: 20px;">
+                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 0.72rem; font-weight: 800; color: #A51C30; text-transform: uppercase; letter-spacing: 0.08em;">
+                            ML Systems Textbook &middot; Volume II &middot; Chapter 17 &middot; Capstone Lab 17
+                        </span>
+                    </div>
+                    <h1 style="margin: 0 0 10px 0; color: #0F172A; font-size: 1.85rem; font-weight: 800; line-height: 1.2;">
+                        The Fleet Synthesis: Co-Designing Distributed Systems at Scale
+                    </h1>
+                    <p style="margin: 0 0 12px 0; color: #475569; font-size: 0.95rem; line-height: 1.5; max-width: 850px;">
+                        Synthesize the entire Volume II distributed curriculum into an executive deployment review board decision.
+                        Follow the active C3 constraint across hardware, networking, storage, coordination, reliability, serving, and governance.
+                    </p>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <span class="mlsysbook-chip" style="background: #FFF1F2; color: #A51C30; border: 1px solid #FECDD3; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700;">
+                            Track: {v2_17_profile.label}
+                        </span>
+                        <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155; border: 1px solid #CBD5E1; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;">
+                            Stakeholder: {v2_17_packet['stakeholder']}
+                        </span>
+                        <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155; border: 1px solid #CBD5E1; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;">
+                            Hardware: {v2_17_packet['hardware_ref']}
+                        </span>
+                        <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155; border: 1px solid #CBD5E1; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;">
+                            Model: {v2_17_packet['model_ref']}
+                        </span>
+                        <span class="mlsysbook-chip" style="background: #EFF6FF; color: #1E40AF; border: 1px solid #BFDBFE; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700;">
+                            Focus: Conjunctive Fleet Guardrails
+                        </span>
+                        <span class="mlsysbook-chip" style="background: #FEF3C7; color: #92400E; border: 1px solid #FDE68A; padding: 3px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700;">
+                            Deliverable: Deployment Review Memo
+                        </span>
+                    </div>
+                </div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+                <h3 style="margin-top: 0; color: #0F172A; font-size: 1.1rem;">System Scenario: {v2_17_packet['label']} Fleet Synthesis</h3>
+                <p style="color: #334155; font-size: 0.9rem; line-height: 1.6;">
+                    The fleet, not the model, is the true object of engineering. A defensible deployment review follows the binding C3
+                    term across infrastructure, communication, coordination, serving, operations, and governance until the displaced cost is visible.
+                </p>
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px 18px; margin-top: 12px;">
+                    <div style="font-size: 0.8rem; font-weight: 700; color: #1E293B; margin-bottom: 8px;">The Architectural Invariants of Fleet Synthesis:</div>
+                    <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #334155; line-height: 1.6;">
+                        <li><strong>The Whole-Fleet Invariant:</strong> Optimization in one layer (e.g. quantization, kernel fusion) that degrades another (e.g. tail latency, auditability, recovery MTTR) is technical debt, not progress.</li>
+                        <li><strong>Conjunctive Gate Invariant:</strong> Production release requires: Launch = &bigwedge;<sub><i>i</i></sub> (Metric<sub><i>i</i></sub> &le; Guardrail<sub><i>i</i></sub>). A near-perfect aggregate score cannot mask a single critical boundary violation.</li>
+                        <li><strong>Displaced Cost Invariant:</strong> Cost and latency cannot be destroyed; they are displaced into queues, energy, retry storms, or governance debt.</li>
+                        <li><strong>Defense In Depth:</strong> Every deployment must name an explicit rejected alternative, a primary validation suite, and a named residual risk owner.</li>
+                    </ul>
+                </div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-bottom: 20px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">LEARNING OBJECTIVES</div>
+                <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.88rem; color: #334155; line-height: 1.6;">
+                    <li><strong>Assemble fleet ledger:</strong> Replay earlier Volume II architectural decisions and identify the binding amount.</li>
+                    <li><strong>Execute multi-constraint stress review:</strong> Evaluate the candidate plan across capacity, communication, reliability, security, robustness, carbon, and governance.</li>
+                    <li><strong>Resolve guardrail conflicts:</strong> Defensibly revise the architecture by relaxing, deferring, monitoring, or redesigning, tracking where risk moves.</li>
+                    <li><strong>Author executive deployment board decision:</strong> Sign off on deployment readiness with a defensible rejected alternative and named residual risks.</li>
+                </ul>
+                <div style="background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 6px; padding: 10px 14px; margin-top: 14px; font-size: 0.85rem; color: #0369A1;">
+                    <strong>CORE QUESTION:</strong> <em>\"How do all distributed systems dimensions cohere into a single, defensible production fleet deployment?\"</em>
+                </div>
+            </div>
+            """),
             track_context(v2_17_profile),
             track_arc_context(v2_17_profile, v2_17_metadata.lab_id),
-            mo.md(
-                f"""
-### Reading Map
-
-The conclusion chapter frames the fleet as one coupled system. This capstone
-uses that frame to connect the six principles to a review board decision:
-
-| Module | Reading anchor | Output |
-|---|---|---|
-| Part A | Six principles and complete production system | Fleet architecture ledger and binding amount |
-| Part B | Closing diagnostic and production constraints | Multi-constraint guardrail review |
-| Part C | Fallacies and pitfalls | Explicit trade-off revision |
-| Part D | Competencies mastered | Deployment board decision |
-| Synthesis | Systems that scale, endure, and serve | Final {v2_17_packet['report_artifact']} |
-                """
-            ),
             source_trace(
                 {
                     "book_anchor": v2_17_metadata.book_anchor,
@@ -1142,6 +1175,7 @@ uses that frame to connect the six principles to a review board decision:
             ),
         ]
     )
+    _shell
     return
 
 
@@ -1465,14 +1499,17 @@ def _(
 @app.cell(hide_code=True)
 def _(
     COLORS,
+    MathPeek,
     apply_plotly_theme,
+    big_takeaways,
     build_lab_report,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     ledger,
     mo,
     report_export_panel,
     source_trace,
-    v2_17_axis_label,
     v2_17_board,
     v2_17_board_fig,
     v2_17_carbon_cap_pct,
@@ -1563,37 +1600,40 @@ def _(
             [
                 mo.md(
                     f"""
-## Part A - Assemble The Fleet Architecture Ledger
+    ## Part A - Assemble The Fleet Architecture Ledger
 
-**Scenario.** {v2_17_packet['stakeholder']} is preparing a deployment review
-for **{v2_17_packet['label']}**. The board asks for one architecture ledger
-rather than disconnected prior-lab answers.
+    **Scenario.** {v2_17_packet['stakeholder']} is preparing a deployment review
+    for **{v2_17_packet['label']}**. The board asks for one architecture ledger
+    rather than disconnected prior-lab answers.
 
-**Track architecture goal:** {v2_17_packet['lens']['architecture_goal']}
+    **Track architecture goal:** {v2_17_packet['lens']['architecture_goal']}
                     """
                 ),
-                v2_17_partA_pred,
-                mo.hstack([v2_17_partA_evidence_floor, v2_17_partA_preset_weight], widths="equal"),
+                gated_hypothesis_card(
+                    v2_17_partA_pred,
+                    gate_label="Hypothesis Gate A",
+                    title="1. Formulate Binding Fleet Amount Hypothesis",
+                    subtitle=f"Predict which fleet dimension dominates the deployment review for {v2_17_packet['label']}.",
+                ),
+                instrumentation_console(
+                    mo.hstack([v2_17_partA_evidence_floor, v2_17_partA_preset_weight], widths="equal"),
+                    title="Ledger Replay Controls",
+                    subtitle="Adjust ledger coverage threshold and default preset confidence weight.",
+                ),
                 v2_17_score_fig(go, apply_plotly_theme, COLORS, v2_17_ledger_result),
                 mo.md(f"**Binding amount:** `{binding['amount']}` with score `{binding['score_pct']:.1f}%`."),
                 mo.md("**Binding Score Table**\n\n" + score_table),
                 mo.md("**Volume II Ledger Replay**\n\n" + ledger_table),
                 boundary,
-                mo.accordion(
+                MathPeek(
+                    r"\text{score} = \text{track\_pressure} + \text{ledger\_evidence} + \text{preset\_evidence} + \text{debt\_penalty}",
                     {
-                        "Math Peek / source model": mo.md(
-                            """
-Binding score is a teaching model:
-
-`score = track pressure + ledger evidence + preset evidence + evidence-debt penalty`.
-
-The evidence-debt penalty is applied to governance and reliability when matching
-ledger coverage falls below the selected floor. This implements the conclusion
-diagnostic: start with the observed evidence, map it to the binding C3/fleet
-stack term, then name the layer that owns the intervention.
-                            """
-                        )
-                    }
+                        "track pressure": f"{binding['track_pressure']:.1f}",
+                        "ledger evidence": f"{binding['evidence_points']:.1f}",
+                        "evidence debt penalty": f"{binding['evidence_debt_penalty']:.1f}",
+                        "binding score": f"{binding['score_pct']:.1f}%",
+                        "diagnostic rule": "start with observed evidence, map to binding C3 term, name layer that owns intervention",
+                    },
                 ),
                 source_trace(
                     {
@@ -1643,11 +1683,11 @@ stack term, then name the layer that owns the intervention.
             [
                 mo.md(
                     """
-## Part B - Run A Multi-Constraint Fleet Review
+    ## Part B - Run A Multi-Constraint Fleet Review
 
-The board now stresses the candidate architecture. The launch rule is conjunctive:
-capacity, communication, reliability, security/privacy, robustness, carbon, and
-governance must all remain inside their guardrails.
+    The board now stresses the candidate architecture. The launch rule is conjunctive:
+    capacity, communication, reliability, security/privacy, robustness, carbon, and
+    governance must all remain inside their guardrails.
                     """
                 ),
                 v2_17_partB_pred,
@@ -1657,21 +1697,14 @@ governance must all remain inside their guardrails.
                 v2_17_review_fig(go, apply_plotly_theme, COLORS, v2_17_review),
                 mo.md("**Guardrail Review Table**\n\n" + review_table),
                 failure,
-                mo.accordion(
+                MathPeek(
+                    r"\text{feasible} = \bigwedge_{i} (\text{ratio}_i \le 1.0),\quad \text{ratio}_i = \frac{\text{observed\_amount}_i}{\text{guardrail\_limit}_i}",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-Launch feasibility is not a weighted average:
-
-`capacity_ok and communication_ok and reliability_ok and security_ok and robustness_ok and carbon_ok and governance_ok`.
-
-The current binding guardrail is `{v2_17_review['binding_guardrail']}` at
-`{v2_17_review['binding_ratio']:.2f}x` its limit. This mirrors the chapter's
-fleet-law logic: compute, communication, and coordination terms interact with
-serving and governance obligations.
-                            """
-                        )
-                    }
+                        "binding guardrail": v2_17_review['binding_guardrail'],
+                        "binding ratio": f"{v2_17_review['binding_ratio']:.2f}x",
+                        "feasible": "YES" if v2_17_review['feasible'] else "NO",
+                        "correlations": "higher demand compounds communication; failures compound MTTR",
+                    },
                 ),
                 source_trace(
                     {
@@ -1717,32 +1750,34 @@ serving and governance obligations.
             [
                 mo.md(
                     """
-## Part C - Revise When Guardrails Conflict
+    ## Part C - Revise When Guardrails Conflict
 
-The board will not accept a hidden average score. Choose what to relax, monitor,
-defer, or redesign, then inspect where the risk moved.
+    The board will not accept a hidden average score. Choose what to relax, monitor,
+    defer, or redesign, then inspect where the risk moved.
                     """
                 ),
-                v2_17_partC_pred,
-                mo.hstack([v2_17_revision_axis, v2_17_revision_action, v2_17_revision_intensity], widths="equal"),
+                gated_hypothesis_card(
+                    v2_17_partC_pred,
+                    gate_label="Hypothesis Gate C",
+                    title="3. Guardrail Conflict Revision Hypothesis",
+                    subtitle=f"Predict the defensible revision strategy when guardrails conflict for {v2_17_packet['label']}.",
+                ),
+                instrumentation_console(
+                    mo.hstack([v2_17_revision_axis, v2_17_revision_action, v2_17_revision_intensity], widths="equal"),
+                    title="Trade-off Revision Controls",
+                    subtitle="Select target guardrail axis, choose revision action, and set intervention intensity.",
+                ),
                 v2_17_revision_fig(go, apply_plotly_theme, COLORS, v2_17_revision),
                 mo.md("**Before/After Guardrail Table**\n\n" + revision_table),
                 status_card,
-                mo.accordion(
+                MathPeek(
+                    r"\text{after\_ratio} = \text{before\_ratio} - \text{relief} + \text{displaced\_overhead}",
                     {
-                        "Math Peek / source model": mo.md(
-                            """
-Revision accounting follows:
-
-`after_ratio = before_ratio - relief + displaced_overhead`.
-
-Relaxation may lower a local target while raising residual governance risk.
-Monitoring can reduce unknown risk while adding operational load. Deferral
-reduces demand and carbon by narrowing scope. Redesign attacks the binding
-guardrail but adds schedule, cost, and validation burden.
-                            """
-                        )
-                    }
+                        "target guardrail": v2_17_revision['target_guardrail'],
+                        "revision action": v2_17_revision['action_label'],
+                        "residual risk": f"{v2_17_revision['residual_risk_pct']:.0f}%",
+                        "displacement law": "overhead cannot be eliminated; it is displaced into queues, schedules, or governance debt",
+                    },
                 ),
                 source_trace(
                     {
@@ -1778,15 +1813,26 @@ guardrail but adds schedule, cost, and validation burden.
             [
                 mo.md(
                     """
-## Part D - Defend The Deployment Review Board Decision
+    ## Part D - Defend The Deployment Review Board Decision
 
-Now convert the evidence into a board packet: selected plan, rejected
-alternative, validation package, source trace, and residual risk.
+    Now convert the evidence into a board packet: selected plan, rejected
+    alternative, validation package, source trace, and residual risk.
                     """
                 ),
-                v2_17_partD_pred,
-                mo.hstack([v2_17_selected_plan, v2_17_rejected_plan], widths="equal"),
-                mo.hstack([v2_17_validation_package, v2_17_residual_risk], widths="equal"),
+                gated_hypothesis_card(
+                    v2_17_partD_pred,
+                    gate_label="Hypothesis Gate D",
+                    title="4. Deployment Board Authorization Hypothesis",
+                    subtitle=f"Predict the minimum packet required for executive sign-off on {v2_17_packet['label']}.",
+                ),
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_17_selected_plan, v2_17_rejected_plan], widths="equal"),
+                        mo.hstack([v2_17_validation_package, v2_17_residual_risk], widths="equal"),
+                    ]),
+                    title="Board Packet Controls",
+                    subtitle="Select deployment plan, specify rejected alternative, select validation test suite, and acknowledge residual risk.",
+                ),
                 v2_17_board_fig(go, apply_plotly_theme, COLORS, v2_17_board),
                 mo.md("**Board Readiness Table**\n\n" + board_table),
                 mo.callout(
@@ -1796,20 +1842,15 @@ alternative, validation package, source trace, and residual risk.
                     ),
                     kind=outcome_kind,
                 ),
-                mo.accordion(
+                MathPeek(
+                    r"\text{packet} = \text{selected\_plan} \land \text{rejected\_alternative} \land \text{validation\_suite} \land (\text{residual\_risk} \ne \varnothing)",
                     {
-                        "Math Peek / source model": mo.md(
-                            """
-Defensible deployment review:
-
-`decision_packet = selected_plan + rejected_alternative + validation_evidence + residual_risk + source_trace`.
-
-The packet is incomplete if the rejected alternative is the same as the selected
-plan, the validation package misses the active guardrail, or residual risk is
-unnamed.
-                            """
-                        )
-                    }
+                        "selected plan": v2_17_board['selected_plan'],
+                        "rejected alternative": v2_17_board['rejected_plan'],
+                        "validation suite": v2_17_board['validation_label'],
+                        "residual risk": v2_17_board['residual_risk'],
+                        "board requirement": "defensible review board decision requires explicit rejected alternative and named residual owner",
+                    },
                 ),
                 source_trace(
                     {
@@ -1977,65 +2018,121 @@ unnamed.
             )
         status_kind = "success" if not incomplete else "warn"
         status_text = "Ledger snapshot saved." if not incomplete else "Complete all required predictions, checkpoints, and board choices before final save."
+        passed = v2_17_board["outcome"] == "APPROVE"
         return mo.vstack(
             [
-                mo.md(
-                    f"""
-## Synthesis - Final Volume II Fleet Memo
-
-**Report frame:** {v2_17_packet['lens']['report_frame']}
-
-**Selected plan:** `{selected_label}`
-
-**Rejected alternative:** `{rejected_label}`
-
-**Binding fleet amount:** `{v2_17_ledger_result['binding']['amount']}`
-
-**Binding guardrail:** `{v2_17_review['binding_guardrail']}`
-
-**Validation package:** `{v2_17_board['validation_label']}`
-
-**Residual risk:** {v2_17_board['residual_risk']}
-
-**Track closure:** {v2_17_packet['lens']['close']}
-                    """
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">LEAD ARCHITECT MEMO & REFLECTIONS</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Fleet Synthesis Architecture Memorandum</h4>
+                    {v2_17_student_id}
+                    <div style="margin-top: 12px;">{v2_17_final_note}</div>
+                </div>
+                """),
+                mo.callout(
+                    mo.md(
+                        f"**Deployment Review Summary:** Selected `{selected_label}` (rejected alternative: `{rejected_label}`). "
+                        f"Binding fleet amount: `{v2_17_ledger_result['binding']['amount']}`. "
+                        f"Active guardrail: `{v2_17_review['binding_guardrail']}`.  \n\n"
+                        f"**Validation Evidence:** `{v2_17_board['validation_label']}` &middot; **Residual Risk:** {v2_17_board['residual_risk']}  \n\n"
+                        f"**Track Closure:** {v2_17_packet['lens']['close']}"
+                    ),
+                    kind=status_kind,
                 ),
-                mo.hstack([v2_17_student_id], widths="equal"),
-                v2_17_final_note,
                 mo.callout(mo.md(f"**Report status:** {status_text}"), kind=status_kind),
+                mo.Html(f"""
+                <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+                    <div style="flex:1; min-width:220px; background:white; border:1px solid #d9dee8;
+                                border-radius:10px; padding:16px; border-top:3px solid {COLORS['GreenLine']};">
+                        <div style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">
+                            Selected deployment plan</div>
+                        <div style="font-size:1.05rem; font-weight:800; color:#1f2937; margin-top:5px;">
+                            {selected_label}</div>
+                    </div>
+                    <div style="flex:1; min-width:220px; background:white; border:1px solid #d9dee8;
+                                border-radius:10px; padding:16px; border-top:3px solid {COLORS['OrangeLine']};">
+                        <div style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">
+                            Binding fleet amount</div>
+                        <div style="font-size:1.05rem; font-weight:800; color:#1f2937; margin-top:5px;">
+                            {v2_17_ledger_result['binding']['amount']}</div>
+                    </div>
+                    <div style="flex:1; min-width:220px; background:white; border:1px solid #d9dee8;
+                                border-radius:10px; padding:16px; border-top:3px solid {COLORS['RedLine']};">
+                        <div style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">
+                            Rejected alternative</div>
+                        <div style="font-size:1.05rem; font-weight:800; color:#1f2937; margin-top:5px;">
+                            {rejected_label}</div>
+                    </div>
+                </div>
+                """),
+                big_takeaways([
+                    "The fleet is the object of engineering; prior decisions cohere into one architecture ledger.",
+                    "Launch feasibility is conjunctive across capacity, communication, reliability, security, robustness, carbon, and governance.",
+                    "A revision is only defensible when it names what risk was relaxed, monitored, deferred, or redesigned.",
+                    "Every production release requires a selected plan, rejected alternative, validation evidence, and named residual risk owner.",
+                    "Scale cannot eliminate physical limits; the discipline of MLSys is keeping trade-offs visible and governed.",
+                ]),
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin: 18px 0; background: #FFFDFD;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; margin-bottom: 6px;">LEAD ARCHITECT AUTHORIZATION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Deployment Board Authorization: {v2_17_packet['stakeholder']}</h4>
+                    <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                        <span style="display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 0.8rem; background: {'#ECFDF5' if passed else '#FEF2F2'}; color: {'#065F46' if passed else '#991B1B'}; border: 1px solid {'#A7F3D0' if passed else '#FECACA'};">
+                            {'APPROVED BY DEPLOYMENT BOARD' if passed else 'PROVISIONAL / BLOCKED BY BOARD REVIEW'}
+                        </span>
+                        <span style="font-size: 0.85rem; color: #475569;">
+                            Plan: <code>{selected_label}</code> &middot; Binding: <code>{v2_17_ledger_result['binding']['amount']}</code>
+                        </span>
+                    </div>
+                </div>
+                """),
+                mo.md("## Download Report"),
                 report_export_panel(report),
+                mo.Html(f"""
+                <div style="border: 1px solid #CBD5E1; border-radius: 8px; padding: 16px 20px; margin-top: 20px; background: #F8FAFC;">
+                    <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                        Volume II Capstone Complete &middot; Systems at Scale
+                    </div>
+                    <h4 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.05rem;">
+                        Congratulations! You have completed the Volume II Distributed Systems &amp; Fleet Architecture Curriculum.
+                    </h4>
+                    <p style="margin: 0; font-size: 0.88rem; color: #334155; line-height: 1.5;">
+                        You have mastered the end-to-end discipline of ML systems: sizing compute, provisioning networking fabrics,
+                        handling routine faults, orchestrating diverse workloads, serving under tight SLOs, securing private pipelines,
+                        bounding carbon intensity, and enforcing sociotechnical fairness.
+                    </p>
+                </div>
+                """),
             ]
         )
 
-    v2_17_tabs = mo.ui.tabs(
-        {
-            "Part A - Ledger": build_part_a(),
-            "Part B - Guardrails": build_part_b(),
-            "Part C - Revision": build_part_c(),
-            "Part D - Board": build_part_d(),
-            "Synthesis": build_synthesis(),
-        }
-    )
+    v2_17_tabs = mo.ui.tabs({
+        "Part A -- Architecture Ledger": build_part_a(),
+        "Part B -- Multi-Constraint Review": build_part_b(),
+        "Part C -- Guardrail Revision": build_part_c(),
+        "Part D -- Board Authorization": build_part_d(),
+        "Synthesis": build_synthesis(),
+    })
     v2_17_tabs
     return
 
 
-@app.cell(hide_code=True)
-def _(COLORS, mo, v2_17_board, v2_17_ledger_result, v2_17_review, v2_17_revision):
+@app.cell
+def _(COLORS, mo, v2_17_board, v2_17_packet):
     _status_color = COLORS["GreenLine"] if v2_17_board["outcome"] == "APPROVE" else COLORS["OrangeLine"] if v2_17_board["outcome"] == "PROVISIONAL" else COLORS["RedLine"]
     mo.Html(
         f"""
-<div class="lab-hud mlsysbook-panel" style="border-left:4px solid {_status_color};">
-  <h2>Fleet Synthesis HUD</h2>
-  <div class="mlsysbook-grid">
-    <div class="mlsysbook-field"><strong>Ledger coverage</strong>{v2_17_ledger_result['coverage_pct']:.0f}%</div>
-    <div class="mlsysbook-field"><strong>Binding amount</strong>{v2_17_ledger_result['binding']['amount']}</div>
-    <div class="mlsysbook-field"><strong>Binding guardrail</strong>{v2_17_review['binding_guardrail']} ({v2_17_review['binding_ratio']:.2f}x)</div>
-    <div class="mlsysbook-field"><strong>Revision status</strong>{v2_17_revision['status']}</div>
-    <div class="mlsysbook-field"><strong>Board outcome</strong>{v2_17_board['outcome']}</div>
-  </div>
-</div>
-"""
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">Vol2 &middot; Lab 17</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v2_17_packet['label']}</span>
+      <span class="hud-label">STATUS</span>
+      <span class="hud-value" style="color:{_status_color}; font-weight:800;">{v2_17_board['outcome']}</span>
+      <span class="hud-label">METRIC</span>
+      <span class="hud-value">Fleet Readiness</span>
+    </div>
+    """
     )
     return
 
