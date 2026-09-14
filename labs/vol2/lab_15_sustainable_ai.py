@@ -1,22 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# -----------------------------------------------------------------------------
-# LAB V2-15: THE CARBON BUDGET
-#
-# Chapter invariant: sustainable AI is an amount system. Energy, carbon
-# intensity, utilization, embodied carbon, quality, latency, cost, reliability,
-# and governance all have to fit the selected track's operating envelope.
-#
-# Packet modules:
-#   Part A - Carbon Is An Amount Stack
-#   Part B - Placement And Utilization Change The Carbon Bill
-#   Part C - Mitigation Must Preserve Guardrails
-#   Part D - Carbon-Aware Policy Is A Guardrail Bundle
-#   Synthesis
-# -----------------------------------------------------------------------------
 
 
 @app.cell
@@ -44,10 +29,14 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -59,18 +48,21 @@ async def _():
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
-
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
         LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html,
+        instrumentation_console,
         ledger,
         math,
         mo,
@@ -79,7 +71,6 @@ async def _():
         source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -91,10 +82,17 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_15_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_15_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (ARM Cortex-M55 / ESP32-S3 & Low-Power Carbon Budgeting)": "oura_ring",
+            "📱 Mobile Track (Apple Silicon / Snapdragon & Thermal Envelope / Embodied Carbon)": "iphone",
+            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Real-Time Carbon Footprint)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (H100/B200 Clusters & Grid Intensity / Hyperscale PUE)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (H100/B200 Clusters & Grid Intensity / Hyperscale PUE)",
+        label="Select Course / Industry Track",
+    )
     v2_15_track_picker
     return (v2_15_track_picker,)
 
@@ -117,7 +115,6 @@ def _(
         v2_15_model,
         v2_15_profile,
         v2_15_system,
-        v2_15_track_id,
         v2_15_variant,
     )
 
@@ -175,64 +172,64 @@ def _(COLORS, html, math, mo):
             body_rows.append(f"<tr>{cells}</tr>")
         return mo.Html(
             f"""
-<div style="overflow-x:auto; margin:12px 0;">
-  <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
+    <div style="overflow-x:auto; margin:12px 0;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
     <thead>
       <tr style="background:{v2_15_color('Surface2', '#f8fafc')}; color:{v2_15_color('Text', '#1f2937')};">
         {head}
       </tr>
     </thead>
     <tbody>{"".join(body_rows)}</tbody>
-  </table>
-</div>
-<style>
-  table td, table th {{
+      </table>
+    </div>
+    <style>
+      table td, table th {{
     border:1px solid {v2_15_color('Border', '#d9dee8')};
     padding:8px 10px;
     text-align:left;
     vertical-align:top;
-  }}
-</style>
-"""
+      }}
+    </style>
+    """
         )
 
     def v2_15_metric_card(label, value, subvalue="", color=None):
         accent = color or v2_15_color("BlueLine", "#2563eb")
         return mo.Html(
             f"""
-<div style="padding:15px 17px; border:1px solid {v2_15_color('Border', '#d9dee8')};
+    <div style="padding:15px 17px; border:1px solid {v2_15_color('Border', '#d9dee8')};
             border-radius:8px; min-width:150px; text-align:center; background:white;">
-  <div style="color:{v2_15_color('TextMuted', '#64748b')}; font-size:0.76rem;
+      <div style="color:{v2_15_color('TextMuted', '#64748b')}; font-size:0.76rem;
               font-weight:800; text-transform:uppercase;">{html.escape(label)}</div>
-  <div style="font-size:1.55rem; font-weight:850; color:{accent};
+      <div style="font-size:1.55rem; font-weight:850; color:{accent};
               font-family:ui-monospace, SFMono-Regular, Consolas, monospace; line-height:1.35;">
     {html.escape(str(value))}
-  </div>
-  <div style="font-size:0.72rem; color:{v2_15_color('TextMuted', '#64748b')};">
+      </div>
+      <div style="font-size:0.72rem; color:{v2_15_color('TextMuted', '#64748b')};">
     {html.escape(str(subvalue))}
-  </div>
-</div>
-"""
+      </div>
+    </div>
+    """
         )
 
     def v2_15_part_banner(letter, title, why, color):
         return mo.Html(
             f"""
-<div style="margin:18px 0 14px 0;">
-  <div style="display:flex; align-items:center; gap:12px;">
+    <div style="margin:18px 0 14px 0;">
+      <div style="display:flex; align-items:center; gap:12px;">
     <div style="background:{color}; color:white; border-radius:50%; width:34px; height:34px;
                 display:inline-flex; align-items:center; justify-content:center; font-size:0.92rem;
                 font-weight:850; flex-shrink:0;">{letter}</div>
     <div style="flex:1; height:2px; background:{v2_15_color('Border', '#d9dee8')};"></div>
     <div style="font-size:0.72rem; font-weight:800; color:{v2_15_color('TextMuted', '#64748b')};
                 text-transform:uppercase; letter-spacing:0.12em;">Part {letter}</div>
-  </div>
-  <div style="font-size:1.48rem; font-weight:850; color:{v2_15_color('Text', '#172033')};
+      </div>
+      <div style="font-size:1.48rem; font-weight:850; color:{v2_15_color('Text', '#172033')};
               margin-top:8px; line-height:1.2;">{html.escape(title)}</div>
-  <div style="color:{v2_15_color('TextSec', '#475467')}; font-size:0.93rem; margin-top:6px;
+      <div style="color:{v2_15_color('TextSec', '#475467')}; font-size:0.93rem; margin-top:6px;
               line-height:1.55; max-width:820px;">{html.escape(why)}</div>
-</div>
-"""
+    </div>
+    """
         )
 
     def v2_15_reveal_card(title, prediction, actual, detail, kind="info"):
@@ -245,18 +242,18 @@ def _(COLORS, html, math, mo):
         color, background = palette.get(kind, palette["info"])
         return mo.Html(
             f"""
-<div style="background:{background}; border:1px solid {color}; border-left:5px solid {color};
+    <div style="background:{background}; border:1px solid {color}; border-left:5px solid {color};
             border-radius:8px; padding:14px 18px; margin:12px 0;">
-  <div style="font-size:0.82rem; font-weight:850; color:{color};
+      <div style="font-size:0.82rem; font-weight:850; color:{color};
               text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">
     {html.escape(title)}
-  </div>
-  <div style="font-size:0.9rem; color:{v2_15_color('Text', '#172033')}; line-height:1.65;">
+      </div>
+      <div style="font-size:0.9rem; color:{v2_15_color('Text', '#172033')}; line-height:1.65;">
     You predicted <strong>{html.escape(str(prediction))}</strong>. Actual:
     <strong>{html.escape(str(actual))}</strong>. {html.escape(str(detail))}
-  </div>
-</div>
-"""
+      </div>
+    </div>
+    """
         )
 
     def v2_15_failure_card(active, title, detail, recovery):
@@ -276,12 +273,10 @@ def _(COLORS, html, math, mo):
     return (
         v2_15_color,
         v2_15_failure_card,
-        v2_15_math_peek,
         v2_15_metric_card,
         v2_15_model_gflops,
         v2_15_model_params_m,
         v2_15_num,
-        v2_15_part_banner,
         v2_15_pct,
         v2_15_qty,
         v2_15_reveal_card,
@@ -457,7 +452,14 @@ def _(v2_15_model_gflops, v2_15_model_params_m, v2_15_qty):
 
 
 @app.cell
-def _(v2_15_hardware, v2_15_model, v2_15_profile, v2_15_system, v2_15_track_packet, v2_15_variant):
+def _(
+    v2_15_hardware,
+    v2_15_model,
+    v2_15_profile,
+    v2_15_system,
+    v2_15_track_packet,
+    v2_15_variant,
+):
     v2_15_packet = v2_15_track_packet(
         v2_15_profile,
         v2_15_variant,
@@ -469,7 +471,7 @@ def _(v2_15_hardware, v2_15_model, v2_15_profile, v2_15_system, v2_15_track_pack
 
 
 @app.cell
-def _(math, v2_15_region_catalog):
+def _(v2_15_region_catalog):
     def v2_15_part_a_result(packet, workload_mult, utilization_pct):
         utilization = max(0.20, utilization_pct / 100.0)
         active_energy = (
@@ -911,7 +913,12 @@ def _(mo, v2_15_packet):
         },
         label="Checkpoint: which amount should the policy carry forward?",
     )
-    return partA_checkpoint, partA_prediction, partA_utilization, partA_workload
+    return (
+        partA_checkpoint,
+        partA_prediction,
+        partA_utilization,
+        partA_workload,
+    )
 
 
 @app.cell(hide_code=True)
@@ -961,7 +968,13 @@ def _(mo):
         },
         label="Checkpoint: what is the next operational lever?",
     )
-    return partB_checkpoint, partB_prediction, partB_region, partB_schedule, partB_utilization
+    return (
+        partB_checkpoint,
+        partB_prediction,
+        partB_region,
+        partB_schedule,
+        partB_utilization,
+    )
 
 
 @app.cell(hide_code=True)
@@ -1053,16 +1066,29 @@ def _(mo):
         },
         label="Checkpoint: what should the launch review do?",
     )
+    v2_15_student_id = mo.ui.text(
+        label="Student / Engineer ID",
+        placeholder="e.g. MLSYS-ENG-9042",
+        value="",
+    )
     decision_input = mo.ui.text_area(
         label="Engineering memo note",
         placeholder="One sentence: selected policy, binding amount, rejected alternative, residual risk.",
     )
-    return partD_carbon_price, partD_checkpoint, partD_policy, partD_prediction, decision_input
+    return (
+        decision_input,
+        partD_carbon_price,
+        partD_checkpoint,
+        partD_policy,
+        partD_prediction,
+        v2_15_student_id,
+    )
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
     source_trace,
@@ -1073,38 +1099,116 @@ def _(
     v2_15_profile,
     v2_15_variant,
 ):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 15 &middot; LAB 15
+        </div>
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          Sustainable AI: The Carbon Budget, Energy Ceiling &amp; Operational Guardrails
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Treat sustainability as a closed amount system: measure energy, grid carbon intensity, utilization, embodied carbon, and hardware lifecycles while enforcing latency, cost, and quality operational guardrails.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_15_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_15_packet['stakeholder']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Hardware:</strong> {v2_15_packet['hardware_ref']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Model:</strong> {v2_15_packet['model_ref']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Primary Metric:</strong> kg CO2e/day
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> p99 &le; SLO &amp; Quality &ge; Floor
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_15_profile.label} Carbon Budget &amp; Operating Envelope
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_15_variant.workload_summary} Sustainability is an engineering amount stack: operational energy,
+          grid carbon intensity, hardware embodied carbon, and utilization overheads must fit within fixed physical envelopes.
+          Greenwashing occurs when energy gains are reported without lifecycle embodied carbon or when rebound effects increase aggregate fleet power.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Sustainable ML Systems:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Energy &amp; Facility Invariant:</strong> Compute energy expands by datacenter infrastructure: <i>E</i><sub>facility</sub> = <i>PUE</i> &middot; <i>E</i><sub>IT</sub>. On battery-powered mobile and wearables, energy capacity is finite and irreversible.</li>
+            <li><strong>The Lifecycle Carbon Accounting Law:</strong> Sustainability accounts for the full physical asset: <i>C</i><sub>lifecycle</sub> = <i>C</i><sub>operational</sub> + <i>C</i><sub>embodied</sub>. Extending hardware retirement schedules amortizes manufacturing emissions.</li>
+            <li><strong>Geographic &amp; Temporal Carbon Optimization:</strong> Carbon intensity of electric grids fluctuates by geography and hour: <i>C</i><sub>op</sub> = &int; <i>P</i>(<i>t</i>) &middot; <i>I</i><sub>grid</sub>(<i>t</i>) <i>dt</i>. Flexible workloads migrate spatially to low-carbon grids or temporally to peak renewable windows.</li>
+            <li><strong>The Rebound Principle / Jevons Guardrail:</strong> Algorithmic and hardware efficiency gains must not be silently consumed by unconstrained service request scaling. Carbon budgeting requires an explicit demand ceiling.</li>
+            <li><strong>Conjunctive Operational Release Gate:</strong> Carbon reduction is deployable only when all service guardrails hold simultaneously: Launchable = Carbon<sub>ok</sub> &and; Quality<sub>ok</sub> &and; Latency<sub>ok</sub> &and; Cost<sub>ok</sub> &and; Reliability<sub>ok</sub>.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+
+    objectives_html = mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.6;">
+                <li><strong>Model the lifecycle carbon stack:</strong> quantify operational energy, regional grid carbon intensity, and amortized embodied carbon for {v2_15_profile.label}.</li>
+                <li><strong>Identify the binding sustainability amount:</strong> determine whether facility energy, carbon intensity, or embodied hardware dominates the bill.</li>
+                <li><strong>Evaluate spatial and temporal optimization:</strong> exploit cleaner regional grids and deferrable scheduling windows while respecting p99 latency and freshness limits.</li>
+                <li><strong>Enforce conjunctive operational guardrails:</strong> reject greenwashing mitigations that violate quality floors, latency SLOs, cost caps, or reliability thresholds.</li>
+                <li><strong>Author an authorized sustainability memo:</strong> commit a carbon-aware policy with explicit residual risk and governance sign-off into the system ledger.</li>
+            </ul>
+        </div>
+        <div style="display: flex; gap: 24px; padding-top: 12px; border-top: 1px solid {COLORS['Border']}; font-size: 0.82rem; color: {COLORS['TextMuted']};">
+            <div>
+                <strong>PREREQUISITES:</strong> Energy modeling &middot; PUE calculations &middot; Grid carbon intensity &middot; Embodied carbon &middot; SLO guardrails
+            </div>
+            <div style="margin-left: auto;">
+                <strong>DURATION:</strong> ~50 min <span style="color: {COLORS['TextSec']};">(A: 12 &middot; B: 12 &middot; C: 12 &middot; D: 14 min)</span>
+            </div>
+        </div>
+        <div style="margin-top: 14px; padding: 10px 14px; background: {COLORS['BlueLL']}; border-left: 3px solid {COLORS['BlueLine']}; border-radius: 0 6px 6px 0; font-size: 0.85rem; color: {COLORS['Text']};">
+            <strong>CORE QUESTION:</strong> <em>&ldquo;How much carbon can this system eliminate before operational guardrails reject the mitigation?&rdquo;</em>
+        </div>
+    </div>
+    """)
+
+    reading_html = mo.Html(f"""
+    <div style="border: 1px solid {COLORS['Border']}; background: #FAFAFA; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
+      <div style="font-size: 0.85rem; font-weight: 700; color: #1E293B; margin-bottom: 6px;">Recommended Reading</div>
+      <p style="font-size: 0.82rem; color: #475569; margin: 0 0 8px 0;">
+        Complete these foundational readings before beginning this lab:
+      </p>
+      <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.82rem; color: #334155; line-height: 1.5;">
+        <li><strong>The Energy Ceiling &amp; PUE:</strong> datacenter power usage effectiveness, cooling overheads, and hardware thermal design power.</li>
+        <li><strong>Embodied Carbon &amp; Lifecycle Accounting:</strong> silicon fabrication emissions, server lifecycle amortization, and hardware turnover rates.</li>
+        <li><strong>Geographic &amp; Temporal Optimization:</strong> regional grid carbon intensity, marginal vs. average emissions, and diurnal clean energy windows.</li>
+        <li><strong>Carbon Shadow Pricing &amp; Jevons Paradox:</strong> internal carbon tariffs, demand capping, and rebound prevention in AI systems.</li>
+      </ul>
+    </div>
+    """)
+
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
-        mo.Html(
-            f"""
-<div style="background:linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
-            border-radius:16px; padding:32px 40px; margin-bottom:8px; color:white;">
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
-    <div>
-      <div style="font-size:0.72rem; font-weight:800; color:#cbd5e1; text-transform:uppercase;
-                  letter-spacing:0.14em; margin-bottom:8px;">
-        Vol 2 - Lab 15 - Sustainable AI
-      </div>
-      <div style="font-size:2rem; font-weight:850; line-height:1.15; margin-bottom:10px;">
-        The Carbon Budget
-      </div>
-      <div style="font-size:0.96rem; color:#d1d5db; max-width:760px; line-height:1.6;">
-        Sustainability is an amount system. You will measure energy, carbon intensity,
-        utilization, embodied carbon, and guardrails before choosing a carbon-aware
-        policy for {v2_15_packet['track_label']}.
-      </div>
-    </div>
-    <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
-      <span class="badge badge-info">{v2_15_packet['track_label']}</span>
-      <span class="badge badge-info">{v2_15_packet['hardware_ref']}</span>
-      <span class="badge badge-info">{v2_15_packet['model_ref']}</span>
-      <span class="badge badge-warn">4 Parts + Synthesis</span>
-    </div>
-  </div>
-</div>
-"""
-        ),
+        header_html,
+        objectives_html,
+        reading_html,
         track_context(v2_15_profile),
         track_arc_context(v2_15_profile, v2_15_metadata.lab_id),
         source_trace(
@@ -1124,7 +1228,7 @@ def _(
                     "service budgets, and mitigation multipliers"
                 ),
             },
-            collapsed=False,
+            collapsed=True,
             summary="Registry-backed track and hardware context plus notebook-local sustainability assumptions.",
         ),
     ])
@@ -1133,11 +1237,14 @@ def _(
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
+    MathPeek,
     apply_plotly_theme,
+    big_takeaways,
     build_lab_report,
     decision_input,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     ledger,
     mo,
     partA_checkpoint,
@@ -1163,22 +1270,22 @@ def _(
     v2_15_chapter,
     v2_15_color,
     v2_15_failure_card,
-    v2_15_math_peek,
     v2_15_metadata,
     v2_15_metric_card,
     v2_15_num,
     v2_15_packet,
     v2_15_part_a_result,
     v2_15_part_b_result,
-    v2_15_part_banner,
     v2_15_pct,
     v2_15_policy_candidates,
     v2_15_prediction_key_for_part_b,
     v2_15_profile,
     v2_15_region_catalog,
     v2_15_reveal_card,
+    v2_15_status,
     v2_15_status_html,
     v2_15_strategy_candidates,
+    v2_15_student_id,
     v2_15_table,
     v2_15_variant,
 ):
@@ -1216,23 +1323,37 @@ def _(
             ("Binding amount", actual, f"{v2_15_num(ratios[actual], 2)}x budget", v2_15_status_html(ratios[actual] <= 1.0)),
         ]
 
-        return mo.vstack([
-            v2_15_part_banner(
-                "A",
-                "Carbon Is An Amount Stack",
-                "Measure operational energy, grid carbon, and embodied carbon before choosing a mitigation.",
-                v2_15_color("BlueLine", "#2563eb"),
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {v2_15_color('BlueLine', '#2563eb')}; background:{v2_15_color('BlueLL', '#eff6ff')};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{v2_15_color('BlueLine', '#2563eb')};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Lifecycle Carbon Briefing &middot; {v2_15_packet['stakeholder']}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;{v2_15_packet['service_name']} cannot deploy on accuracy alone. Measure operational energy, grid carbon intensity, and amortized embodied carbon to determine which amount binds the system.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_15_packet['stakeholder']} &middot; {v2_15_packet['track_label']}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partA_prediction,
+                title="1. Formulate Binding Sustainability Amount Hypothesis",
+                subtitle=f"Predict which sustainability amount will bind {v2_15_packet['track_label']} before running the lifecycle simulator.",
             ),
-            mo.callout(
-                mo.md(
-                    f"**Scenario:** {v2_15_packet['stakeholder']} is asked to approve "
-                    f"{v2_15_packet['service_name']} for {v2_15_packet['track_label']}. "
-                    "The decision cannot rely on model quality alone; it needs an amount stack."
-                ),
-                kind="info",
+        ]
+        if partA_prediction.value is None:
+            return mo.vstack(items)
+
+        items.extend([
+            instrumentation_console(
+                mo.hstack([partA_workload, partA_utilization], justify="center", gap=2),
+                title="Workload &amp; Utilization Operating Knobs",
+                subtitle="Scale request demand and average hardware utilization percentage",
             ),
-            partA_prediction,
-            mo.hstack([partA_workload, partA_utilization], justify="center", gap=2),
             v2_15_failure_card(
                 result["fails"],
                 f"Binding amount: {actual}",
@@ -1258,25 +1379,29 @@ def _(
                 "The binding amount is the largest normalized budget ratio, not necessarily the largest raw number.",
                 "success" if predicted == actual else "warn",
             ),
-            v2_15_math_peek(
-                "Math Peek / Source Model - energy, carbon, and lifecycle boundary",
-                f"""
-```
-IT_energy_kWh        = units * average_workload_power_W * active_hours / 1000
-facility_energy_kWh  = IT_energy_kWh * PUE
-operational_CO2e_kg  = facility_energy_kWh * grid_intensity_g_per_kWh / 1000
-embodied_CO2e_day    = units * embodied_kg_per_unit / lifetime_days
-lifecycle_CO2e_day   = operational_CO2e_kg + embodied_CO2e_day
-```
-
-Chapter connection: `Carbon footprint analysis` and the lifecycle-estimation
-callout require operational and embodied carbon in the same accounting boundary.
-The hardware/model identity comes from the selected track registry; track fleet
-size and non-H100 embodied values are notebook-local teaching assumptions.
-"""
+            MathPeek(
+                r"E_{\text{facility}} = E_{\text{IT}} \cdot PUE, \quad C_{\text{op}} = E_{\text{fac}} \cdot I_{\text{grid}}, \quad C_{\text{emb}} = \frac{N \cdot C_{\text{unit}}}{T_{\text{lifetime}}}, \quad C_{\text{total}} = C_{\text{op}} + C_{\text{emb}}",
+                {
+                    "facility energy": f"{result['facility_energy_kwh']:.2f} kWh/day",
+                    "operational carbon": f"{result['operational_kg']:.2f} kg CO2e/day",
+                    "embodied carbon": f"{result['embodied_kg_day']:.2f} kg CO2e/day",
+                    "binding amount": actual,
+                    "chapter source": "Volume II, Chapter 15: The Energy Ceiling & Carbon Footprint Analysis",
+                },
             ),
-            partA_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Lifecycle Carbon Decision</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Binding sustainability amount: <code>{actual}</code> ({v2_15_num(ratios[actual], 2)}x budget).
+                    Which amount should the policy carry forward into placement and scheduling?
+                </p>
+                {partA_checkpoint}
+            </div>
+            """),
         ])
+        return mo.vstack(items)
 
     def build_part_b():
         result = v2_15_part_b_result(
@@ -1326,22 +1451,37 @@ size and non-H100 embodied values are notebook-local teaching assumptions.
         bar_fig.update_layout(height=330, yaxis=dict(title="kg CO2e/day"), margin=dict(t=45, b=80, l=60, r=20))
         apply_plotly_theme(bar_fig)
 
-        return mo.vstack([
-            v2_15_part_banner(
-                "B",
-                "Placement And Utilization Change The Carbon Bill",
-                "Cleaner grids help only if utilization, freshness, p99 latency, and reliability remain inside the track envelope.",
-                v2_15_color("GreenLine", "#047857"),
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {v2_15_color('GreenLine', '#047857')}; background:{v2_15_color('GreenLL', '#ecfdf3')};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{v2_15_color('GreenLine', '#047857')};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Spatial &amp; Temporal Optimization Briefing &middot; Operations Lead
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Cleaner regional grids and delayed scheduling slash operational emissions, but higher utilization degrades tail latency and queueing stability. Keep latency and freshness inside the track SLO.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; Operations Lead &middot; {v2_15_packet['track_label']}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partB_prediction,
+                title="2. Formulate Placement &amp; Scheduling Limit Hypothesis",
+                subtitle="Predict which operational factor will limit carbon optimization after spatial and temporal shifts.",
             ),
-            mo.callout(
-                mo.md(
-                    f"**Scenario:** operations wants to run {v2_15_packet['workload_unit']} at higher utilization. "
-                    "You must decide whether region, schedule, or demand governance changes the carbon bill without breaking service."
-                ),
-                kind="info",
+        ]
+        if partB_prediction.value is None:
+            return mo.vstack(items)
+
+        items.extend([
+            instrumentation_console(
+                mo.hstack([partB_region, partB_schedule, partB_utilization], justify="center", gap=2),
+                title="Placement, Scheduling &amp; Target Utilization",
+                subtitle="Select execution grid, temporal batch window, and server target utilization",
             ),
-            partB_prediction,
-            mo.hstack([partB_region, partB_schedule, partB_utilization], justify="center", gap=2),
             v2_15_failure_card(
                 (not result["carbon_ok"]) or (not result["service_ok"]),
                 f"Placement/utilization boundary: {result['binding']}",
@@ -1365,26 +1505,32 @@ size and non-H100 embodied values are notebook-local teaching assumptions.
                 "Prediction vs actual",
                 partB_prediction.value or "no prediction yet",
                 actual_key,
-                "Utilization, region, and schedule are evaluated together; the cleanest grid is not launchable if service guardrails fail.",
+                "Grid carbon intensity only dominates if tail latency, freshness limits, and reliability remain inside SLA boundaries.",
                 "success" if partB_prediction.value == actual_key else "warn",
             ),
-            v2_15_math_peek(
-                "Math Peek / Source Model - utilization and carbon-aware placement",
-                f"""
-```
-useful_utilization = useful_work / available_capacity
-IT_energy          = active_energy * (0.72 + 0.38 / useful_utilization)
-carbon_kg          = IT_energy * PUE_region * carbon_intensity_region * schedule_multiplier
-service_ok         = p99 <= SLO and delay <= freshness_limit and reliability >= floor
-```
-
-Chapter connection: the `Geographic and temporal optimization` section says
-where and when a job runs can dominate algorithmic efficiency gains, but the
-service-level guardrails still determine whether the schedule is usable.
-"""
+            MathPeek(
+                r"I_{\text{eff}} = \frac{I_{\text{grid}}}{PUE}, \quad T_{\text{queue}} \approx \frac{\rho}{1-\rho} \cdot \frac{T_{\text{service}}}{2}, \quad C_{\text{saved}} = E \cdot (I_{\text{base}} - I_{\text{clean}})",
+                {
+                    "selected grid intensity": f"{result['region']['carbon_g_kwh']:.0f} g/kWh",
+                    "p99 latency / deadline": f"{result['p99_ms']:.1f} ms",
+                    "freshness delay": f"{result['delay_h']:.2f} hours",
+                    "limiting constraint": actual_key,
+                    "chapter source": "Volume II, Chapter 15: Geographic and Temporal Optimization & Queueing",
+                },
             ),
-            partB_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Spatial/Temporal Optimization Decision</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Operating in <code>{result['region']['label']}</code> with <code>{result['schedule']['label']}</code>.
+                    Commit your scheduling rule:
+                </p>
+                {partB_checkpoint}
+            </div>
+            """),
         ])
+        return mo.vstack(items)
 
     def build_part_c():
         part_b = v2_15_part_b_result(
@@ -1441,22 +1587,37 @@ service-level guardrails still determine whether the schedule is usable.
         )
         apply_plotly_theme(frontier_fig)
 
-        return mo.vstack([
-            v2_15_part_banner(
-                "C",
-                "Mitigation Must Preserve Guardrails",
-                "A sustainability mitigation only counts when it changes the binding amount and still passes quality, latency, cost, reliability, and governance.",
-                v2_15_color("OrangeLine", "#d97706"),
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {v2_15_color('OrangeLine', '#d97706')}; background:{v2_15_color('OrangeLL', '#fffbeb')};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{v2_15_color('OrangeLine', '#d97706')};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Mitigation Guardrail Briefing &middot; Technical Review Board
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;A sustainability mitigation only counts if it reduces the binding amount while passing quality, latency, cost, reliability, and governance. Aggressive compression or voltage scaling must not hide silent accuracy collapse.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; Technical Review Board &middot; {v2_15_packet['track_label']}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partC_prediction,
+                title="3. Formulate Mitigation Guardrail Hypothesis",
+                subtitle="Predict which operational constraint will bind first when mitigation aggressiveness increases.",
             ),
-            mo.callout(
-                mo.md(
-                    f"**Scenario:** a review board asks which mitigation should be attached to "
-                    f"{v2_15_packet['service_name']}. You must name the guardrail that can reject it."
-                ),
-                kind="info",
+        ]
+        if partC_prediction.value is None:
+            return mo.vstack(items)
+
+        items.extend([
+            instrumentation_console(
+                mo.hstack([partC_strategy, partC_intensity, partC_governance], justify="center", gap=2),
+                title="Mitigation Strategy &amp; Governance Attachment",
+                subtitle="Select mitigation family, aggressive compression intensity, and formal governance trace",
             ),
-            partC_prediction,
-            mo.hstack([partC_strategy, partC_intensity, partC_governance], justify="center", gap=2),
             v2_15_failure_card(
                 not selected["passes"],
                 f"Mitigation guardrail: {selected['binding']}",
@@ -1482,28 +1643,31 @@ service-level guardrails still determine whether the schedule is usable.
                 "The selected strategy is checked against every guardrail, so the blocker may not be carbon.",
                 "success" if partC_prediction.value == actual_guardrail else "warn",
             ),
-            v2_15_math_peek(
-                "Math Peek / Source Model - mitigation guardrail predicate",
-                f"""
-```
-mitigated_carbon   = carbon_base * strategy_carbon_multiplier
-mitigated_quality  = quality_base + strategy_quality_delta
-mitigated_latency  = latency_base * strategy_latency_multiplier
-mitigated_cost     = cost_base * strategy_cost_multiplier
-launchable_strategy =
-  carbon <= budget and quality >= floor and latency <= SLO and
-  cost <= budget and reliability >= floor and governance_ok
-```
-
-Chapter connection: the Google 4 Ms and engineering guidelines reduce different
-terms. The lab makes the conjunction explicit so a local efficiency win cannot
-hide quality, reliability, or governance debt.
-"""
+            MathPeek(
+                r"C_{\text{mit}} = C_{\text{base}} \cdot \mu_{\text{strategy}}, \quad Q_{\text{mit}} = Q_{\text{base}} + \Delta Q, \quad T_{\text{mit}} = T_{\text{base}} + \Delta T, \quad \text{Valid} = \bigwedge_i \left(M_i \in \text{Envelope}_i\right)",
+                {
+                    "mitigated lifecycle carbon": f"{selected['lifecycle_kg']:.2f} kg/day",
+                    "quality score": f"{selected['quality_pct']:.1f}%",
+                    "latency": f"{selected['latency_ms']:.1f} ms",
+                    "binding guardrail": actual_guardrail,
+                    "chapter source": "Volume II, Chapter 15: Mitigation Guardrails & The Google 4 Ms",
+                },
             ),
-            partC_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Mitigation Guardrail Decision</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Evaluated mitigation: <code>{selected['label']}</code> &mdash; Status: <b>{v2_15_status(selected['passes'])}</b>.
+                    What guardrail policy should carry forward into Part D?
+                </p>
+                {partC_checkpoint}
+            </div>
+            """),
         ])
+        return mo.vstack(items)
 
-    def build_part_d_and_report():
+    def build_part_d():
         part_a = v2_15_part_a_result(v2_15_packet, partA_workload.value, partA_utilization.value)
         part_b = v2_15_part_b_result(
             v2_15_packet,
@@ -1517,6 +1681,31 @@ hide quality, reliability, or governance debt.
         selected = next(item for item in policy_packet["candidates"] if item["policy_id"] == partD_policy.value)
         launch_policy = selected if selected["passes"] else policy_packet["recommended"]
         rejected = policy_packet["rejected"]
+
+        items = [
+            mo.Html(f"""
+            <div style="border-left:4px solid {v2_15_color('RedLine', '#b42318')}; background:{v2_15_color('RedLL', '#fef3f2')};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{v2_15_color('RedLine', '#b42318')};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Policy Release Briefing &middot; Lead Sustainability Architect
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Sustainability policy changes the objective function. A carbon price penalizes fossil emissions while the rebound guardrail blocks Jevons paradox rebound. Enforce the full conjunction.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; Lead Architect &middot; {v2_15_packet['track_label']}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                partD_prediction,
+                title="4. Formulate Carbon-Aware Policy Gate Hypothesis",
+                subtitle="Predict which policy candidate will satisfy the full conjunction of carbon and operational guardrails.",
+            ),
+        ]
+        if partD_prediction.value is None:
+            return mo.vstack(items)
 
         rows = []
         for item in policy_packet["candidates"]:
@@ -1550,8 +1739,77 @@ hide quality, reliability, or governance debt.
         policy_fig.update_layout(height=330, yaxis=dict(title="Lifecycle kg CO2e/day"), margin=dict(t=45, b=95, l=60, r=20))
         apply_plotly_theme(policy_fig)
 
-        _incomplete = []
-        for label, widget in (
+        items.extend([
+            instrumentation_console(
+                mo.hstack([partD_policy, partD_carbon_price], justify="center", gap=2),
+                title="Policy Candidate &amp; Carbon Shadow Price Controls",
+                subtitle="Select deployment policy rule and internal carbon price per ton",
+            ),
+            v2_15_failure_card(
+                not selected["passes"],
+                f"Policy guardrail: {selected['binding']}",
+                (
+                    f"{selected['label']} produces lifecycle carbon {v2_15_num(selected['lifecycle_kg'], 2)} kg/day, "
+                    f"quality {v2_15_num(selected['quality_pct'], 1)}%, latency {v2_15_num(selected['latency_ms'], 1)} ms, "
+                    f"cost ${v2_15_num(selected['cost_usd'], 1)} under ${partD_carbon_price.value}/ton."
+                ),
+                "raise carbon price, switch to guarded policy, or adopt the recommended passing configuration",
+            ),
+            mo.hstack([
+                v2_15_metric_card("Selected", selected["label"], "policy", v2_15_color("BlueLine", "#2563eb")),
+                v2_15_metric_card("Binding", selected["binding"], "guardrail", v2_15_color("RedLine", "#b42318") if not selected["passes"] else v2_15_color("GreenLine", "#047857")),
+                v2_15_metric_card("Recommended", policy_packet["recommended"]["label"], "policy", v2_15_color("GreenLine", "#047857")),
+                v2_15_metric_card("Rejected", rejected["label"], "alternative", v2_15_color("RedLine", "#b42318")),
+            ], justify="center", gap=1),
+            mo.ui.plotly(policy_fig),
+            v2_15_table(("Policy", "Operational carbon", "Lifecycle carbon", "Quality", "Latency", "Cost/day", "Binding", "Status"), rows),
+            v2_15_reveal_card(
+                "Prediction vs actual",
+                partD_prediction.value or "no prediction yet",
+                policy_packet["recommended"]["policy_id"],
+                "The recommended policy is the lowest lifecycle-carbon option that passes every launch guardrail.",
+                "success" if partD_prediction.value == policy_packet["recommended"]["policy_id"] else "warn",
+            ),
+            MathPeek(
+                r"\text{Launchable} = (C \le B_C) \wedge (Q \ge Q_{\min}) \wedge (T \le \text{SLO}) \wedge (\text{Cost} + P_C \cdot \text{Tons} \le B_{\$}) \wedge (R \ge R_{\min}) \wedge \text{Gov}_{ok} \wedge \text{Rebound}_{ok}",
+                {
+                    "selected policy": selected["label"],
+                    "binding guardrail": selected["binding"],
+                    "carbon price": f"${partD_carbon_price.value}/ton",
+                    "lifecycle carbon": f"{selected['lifecycle_kg']:.2f} kg/day",
+                    "chapter source": "Volume II, Chapter 15: Policy Formulation, Carbon Shadow Prices & Fallacies",
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Policy Authorization Decision</h4>
+                <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                    Selected policy: <code>{selected['label']}</code> &mdash; Status: <b>{v2_15_status(selected['passes'])}</b>.
+                    What action should the launch review take?
+                </p>
+                {partD_checkpoint}
+            </div>
+            """),
+        ])
+        return mo.vstack(items)
+
+    def build_synthesis():
+        part_a = v2_15_part_a_result(v2_15_packet, partA_workload.value, partA_utilization.value)
+        part_b = v2_15_part_b_result(
+            v2_15_packet,
+            partA_workload.value,
+            partB_utilization.value,
+            partB_region.value,
+            partB_schedule.value,
+        )
+        strategy_packet = v2_15_strategy_candidates(v2_15_packet, part_b, partC_intensity.value, partC_governance.value)
+        policy_packet = v2_15_policy_candidates(v2_15_packet, part_b, strategy_packet, partD_carbon_price.value)
+        selected = next(item for item in policy_packet["candidates"] if item["policy_id"] == partD_policy.value)
+        launch_policy = selected if selected["passes"] else policy_packet["recommended"]
+        rejected = policy_packet["rejected"]
+
+        complete_widgets = (
             ("Part A prediction", partA_prediction),
             ("Part A checkpoint", partA_checkpoint),
             ("Part B prediction", partB_prediction),
@@ -1560,12 +1818,12 @@ hide quality, reliability, or governance debt.
             ("Part C checkpoint", partC_checkpoint),
             ("Part D prediction", partD_prediction),
             ("Part D checkpoint", partD_checkpoint),
-        ):
-            if widget.value is None:
-                _incomplete.append(label)
+        )
+        incomplete = [label for label, widget in complete_widgets if widget.value is None]
         if not str(decision_input.value).strip():
-            _incomplete.append("Engineering memo note")
+            incomplete.append("Engineering memo note")
 
+        passed = launch_policy["passes"]
         ledger_design = {
             "track_id": v2_15_profile.track_id,
             "selected_policy": launch_policy["label"],
@@ -1581,11 +1839,12 @@ hide quality, reliability, or governance debt.
             "residual_risk": v2_15_packet["failure_story"],
             "v2_16_responsible_ai_implication": v2_15_packet["v2_16_implication"],
         }
-        if not _incomplete:
+        if not incomplete:
             ledger.save(track=v2_15_profile.track_id, chapter=v2_15_chapter, design=ledger_design)
 
         report = build_lab_report(
             v2_15_metadata,
+            student_id=str(v2_15_student_id.value).strip(),
             track=v2_15_profile.label,
             scenario=v2_15_variant.workload_summary,
             learning_objectives=(
@@ -1680,75 +1939,88 @@ hide quality, reliability, or governance debt.
                 "part_d": policy_packet,
                 "ledger_design": ledger_design,
             },
-            incomplete_fields=tuple(_incomplete),
+            incomplete_fields=tuple(incomplete),
         )
 
-        return mo.vstack([
-            v2_15_part_banner(
-                "D",
-                "Carbon-Aware Policy Is A Guardrail Bundle",
-                "A launch policy must pass carbon, quality, latency, cost, reliability, governance, and rebound checks together.",
-                v2_15_color("PurpleLine", "#7c3aed"),
-            ),
-            mo.callout(
-                mo.md(
-                    f"**Scenario:** launch review requires a selected policy, rejected alternative, residual risk, "
-                    f"and the V2-16 responsibility implication for {v2_15_packet['track_label']}."
-                ),
-                kind="info",
-            ),
-            partD_prediction,
-            mo.hstack([partD_policy, partD_carbon_price], justify="center", gap=2),
-            v2_15_failure_card(
-                not selected["passes"],
-                f"Policy guardrail: {selected['binding']}",
-                (
-                    f"{selected['label']} has lifecycle carbon {v2_15_num(selected['lifecycle_kg'], 2)} kg/day, "
-                    f"quality {v2_15_num(selected['quality_pct'], 1)}%, latency {v2_15_num(selected['latency_ms'], 1)} ms, "
-                    f"cost ${v2_15_num(selected['cost_usd'], 1)}, reliability {v2_15_num(selected['reliability_pct'], 1)}%."
-                ),
-                f"use {policy_packet['recommended']['label']} or revise failed guardrails before launch",
-            ),
-            mo.hstack([
-                v2_15_metric_card("Selected", launch_policy["label"], "launch policy", v2_15_color("GreenLine", "#047857") if launch_policy["passes"] else v2_15_color("RedLine", "#b42318")),
-                v2_15_metric_card("Binding", launch_policy["binding"], "policy guardrail", v2_15_color("OrangeLine", "#d97706")),
-                v2_15_metric_card("Rejected", rejected["label"], "alternative", v2_15_color("RedLine", "#b42318")),
-                v2_15_metric_card("V2-16", "responsibility", "next implication", v2_15_color("BlueLine", "#2563eb")),
-            ], justify="center", gap=1),
-            mo.ui.plotly(policy_fig),
-            v2_15_table(("Policy", "Operational carbon", "Lifecycle carbon", "Quality", "Latency", "Cost/day", "Binding", "Status"), rows),
-            v2_15_reveal_card(
-                "Prediction vs actual",
-                partD_prediction.value or "no prediction yet",
-                policy_packet["recommended"]["policy_id"],
-                "The recommended policy is the lowest lifecycle-carbon option that passes every launch guardrail.",
-                "success" if partD_prediction.value == policy_packet["recommended"]["policy_id"] else "warn",
-            ),
-            v2_15_math_peek(
-                "Math Peek / Source Model - policy launch predicate",
-                f"""
-```
-launchable =
-  carbon <= carbon_budget and quality >= quality_floor and latency <= SLO and
-  cost + carbon_price * tonnes <= cost_budget and reliability >= floor and
-  governance_ok and rebound_guardrail
-```
+        status_text = "SAVED TO LEDGER" if not incomplete else "INCOMPLETE"
+        status_kind = "success" if not incomplete else "warn"
 
-Chapter connection: policy changes the objective function. The carbon price
-makes carbon visible in cost, while the rebound guardrail prevents efficiency
-savings from being spent as unconstrained demand growth.
-"""
-            ),
-            partD_checkpoint,
-            decision_input,
+        items = [
+            mo.md("## Synthesis &mdash; Carbon-Aware Engineering Memo &amp; Governance Authorization"),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO &amp; REFLECTIONS</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Sustainability Engineering Memo</h4>
+                {v2_15_student_id}
+                <div style="margin-top: 12px;">{decision_input}</div>
+            </div>
+            """),
             mo.callout(
                 mo.md(
-                    f"**Synthesis memo:** Use `{launch_policy['label']}`. Binding amount from Part A is "
+                    f"**Synthesis memo:** Selected `{launch_policy['label']}`. Binding amount from Part A is "
                     f"`{part_a['binding']}`; current policy guardrail is `{launch_policy['binding']}`. "
-                    f"Reject `{rejected['label']}`. V2-16 implication: {v2_15_packet['v2_16_implication']}"
+                    f"Reject `{rejected['label']}`.  \n\n"
+                    f"**V2-16 implication:** {v2_15_packet['v2_16_implication']}"
                 ),
-                kind="success" if not _incomplete else "warn",
+                kind=status_kind,
             ),
+            mo.callout(
+                mo.md(
+                    f"**Status:** {status_text}. "
+                    + (
+                        "Complete all predictions, checkpoints, and your engineering memo note before final save."
+                        if incomplete
+                        else "Ledger snapshot successfully recorded for downstream labs."
+                    )
+                ),
+                kind=status_kind,
+            ),
+            mo.Html(f"""
+            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {v2_15_color('Border', '#d9dee8')};
+                            border-radius:10px; padding:16px; border-top:3px solid {v2_15_color('GreenLine', '#047857')};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{v2_15_color('TextMuted', '#64748b')}; text-transform:uppercase;">
+                        Selected release policy</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{v2_15_color('Text', '#1f2937')}; margin-top:5px;">
+                        {launch_policy['label']}</div>
+                </div>
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {v2_15_color('Border', '#d9dee8')};
+                            border-radius:10px; padding:16px; border-top:3px solid {v2_15_color('OrangeLine', '#d97706')};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{v2_15_color('TextMuted', '#64748b')}; text-transform:uppercase;">
+                        Binding amount</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{v2_15_color('Text', '#1f2937')}; margin-top:5px;">
+                        {part_a['binding']}</div>
+                </div>
+                <div style="flex:1; min-width:220px; background:white; border:1px solid {v2_15_color('Border', '#d9dee8')};
+                            border-radius:10px; padding:16px; border-top:3px solid {v2_15_color('RedLine', '#b42318')};">
+                    <div style="font-size:0.72rem; font-weight:700; color:{v2_15_color('TextMuted', '#64748b')}; text-transform:uppercase;">
+                        Rejected alternative</div>
+                    <div style="font-size:1.05rem; font-weight:800; color:{v2_15_color('Text', '#1f2937')}; margin-top:5px;">
+                        {rejected['label']}</div>
+                </div>
+            </div>
+            """),
+            big_takeaways([
+                "Sustainability requires full amount accounting (energy, grid carbon, embodied carbon) before optimization.",
+                "Regional grid carbon intensity and temporal scheduling can dominate per-operation computational efficiency.",
+                "Embodied hardware carbon and operational power trade places across wearables, mobile, edge, and cloud tracks.",
+                "A mitigation is valid only inside a conjunctive guardrail envelope preserving quality, latency, cost, and reliability.",
+                "Carbon shadow prices and demand governance are mandatory to prevent Jevons paradox rebound.",
+            ]),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin: 18px 0; background: #FFFDFD;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; margin-bottom: 6px;">LEAD ARCHITECT AUTHORIZATION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization: {v2_15_packet['stakeholder']}</h4>
+                <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                    <span style="display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 0.8rem; background: {'#ECFDF5' if passed else '#FEF2F2'}; color: {'#065F46' if passed else '#991B1B'}; border: 1px solid {'#A7F3D0' if passed else '#FECACA'};">
+                        {'APPROVED FOR DEPLOYMENT' if passed else 'BLOCKED BY GUARDRAIL CONJUNCTION'}
+                    </span>
+                    <span style="font-size: 0.85rem; color: #475569;">
+                        Policy: <code>{launch_policy['label']}</code> &middot; Binding: <code>{launch_policy['binding']}</code>
+                    </span>
+                </div>
+            </div>
+            """),
             source_trace(
                 {
                     "selected_track": v2_15_profile.track_id,
@@ -1763,27 +2035,48 @@ savings from being spent as unconstrained demand growth.
             ),
             mo.md("## Download Report"),
             report_export_panel(report),
-        ])
+            mo.Html(f"""
+            <div style="border: 1px solid #CBD5E1; border-radius: 8px; padding: 16px 20px; margin-top: 20px; background: #F8FAFC;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                    What's Next &middot; Volume II Synthesis Pipeline
+                </div>
+                <h4 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.05rem;">
+                    Next Lab: Volume II, Chapter 16 &mdash; Responsible AI: Fairness, Bias, Safety &amp; Auditability
+                </h4>
+                <p style="margin: 0; font-size: 0.88rem; color: #334155; line-height: 1.5;">
+                    Now that your sustainability budget and energy ceiling are established, investigate how compute and data pruning
+                    impact demographic subgroups, model fairness, safety boundaries, and explainability overhead in Chapter 16.
+                </p>
+            </div>
+            """),
+        ]
+        return mo.vstack(items)
 
-    def build_synthesis():
-        return build_part_d_and_report()
+    tabs = mo.ui.tabs({
+        "Part A -- Carbon Stack": build_part_a(),
+        "Part B -- Placement & Timing": build_part_b(),
+        "Part C -- Mitigation Guardrails": build_part_c(),
+        "Part D -- Policy Gate": build_part_d(),
+        "Synthesis": build_synthesis(),
+    })
+    tabs
+    return
 
-    mo.vstack([
-        build_part_a(),
-        build_part_b(),
-        build_part_c(),
-        build_synthesis(),
-        mo.Html(
-            f"""
-<div class="lab-hud">
-  <span class="hud-label">LAB</span>
-  <span class="hud-value">15 &middot; Sustainable AI</span>
-  <span class="hud-label">TRACK</span>
-  <span class="hud-value">{v2_15_profile.label}</span>
-</div>
-"""
-        ),
-    ])
+
+@app.cell
+def _(mo, v2_15_packet):
+    mo.Html(
+        f"""
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">Vol2 &middot; Lab 15</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v2_15_packet['track_label']}</span>
+      <span class="hud-label">METRIC</span>
+      <span class="hud-value">kg CO2e/day</span>
+    </div>
+    """
+    )
     return
 
 
