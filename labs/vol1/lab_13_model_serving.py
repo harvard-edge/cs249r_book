@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -36,6 +32,7 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         batching_tax,
+        big_takeaways,
         build_lab_report,
         cache_capacity,
         cold_start_latency,
@@ -61,6 +58,7 @@ async def _():
         LAB_CSS,
         apply_plotly_theme,
         batching_tax,
+        big_takeaways,
         build_lab_report,
         cache_capacity,
         cold_start_latency,
@@ -71,17 +69,14 @@ async def _():
         html,
         ledger,
         math,
-        mlsysim,
         mo,
         np,
         queueing_latency,
         report_export_panel,
         resolve_mlsysim_ref,
         serving_track_profile,
-        source_trace,
-        track_context,
         track_arc_context,
-        track_selector,
+        track_context,
     )
 
 
@@ -92,11 +87,20 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
+    _options = {
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
+        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
+        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+    }
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v1_13_track_picker = track_selector(default=_default_track)
-    v1_13_track_picker
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    v1_13_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_13_track_picker,)
 
 
@@ -108,6 +112,7 @@ def _(
     serving_track_profile,
     v1_13_track_picker,
 ):
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
     v1_13_track_id = v1_13_track_picker.value
     v1_13_profile = get_track_profile(v1_13_track_id)
     v1_13_variant = get_lab_track_variant("v1_13_tail_latency_trap", v1_13_profile.track_id)
@@ -120,7 +125,6 @@ def _(
         v1_13_model,
     )
     return (
-        v1_13_hardware,
         v1_13_model,
         v1_13_profile,
         v1_13_serving,
@@ -130,7 +134,14 @@ def _(
 
 
 @app.cell
-def _(batching_tax, cache_capacity, cold_start_latency, html, math, queueing_latency):
+def _(
+    batching_tax,
+    cache_capacity,
+    cold_start_latency,
+    html,
+    math,
+    queueing_latency,
+):
     def v1_13_track_packet(track_id, serving, variant):
         common = {
             "stakeholder": variant.stakeholder,
@@ -480,61 +491,115 @@ def _(batching_tax, cache_capacity, cold_start_latency, html, math, queueing_lat
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
-    source_trace,
+    track_arc_context,
     track_context,
-        track_arc_context,
     v1_13_metadata,
     v1_13_profile,
     v1_13_serving,
+    v1_13_track_picker,
     v1_13_variant,
 ):
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 13
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_13_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 13 &middot; Foundational Lab 13
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                The Tail Latency Trap
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              The Tail Latency Trap: Batching, Queueing &amp; Serving Frontiers
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Batching &middot; Queueing &middot; Replicas &middot; Launch Policy
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_13_variant.workload_summary} The average execution path can look healthy while tail latency violates {v1_13_variant.guardrail_metric}. Audit the trade-offs between throughput, formation delay, queueing dynamics, and capacity bounds.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 760px; line-height: 1.65;">
-                {v1_13_variant.workload_summary} The average path can look healthy
-                while p99 violates {v1_13_variant.guardrail_metric}.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~50 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_13_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_13_serving.hardware_ref}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_13_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Workload:</strong> {v1_13_serving.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_13_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_13_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> Tail Latency &amp; Dynamic Serving
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> serving launch memo
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">M/M/c Queue</span>
-                <span class="badge badge-warn">Batching Tax</span>
-                <span class="badge badge-fail">{v1_13_serving.state_kind}</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_13_profile.label} Model Serving
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_13_variant.stakeholder}</strong> responsible for deploying <strong>{v1_13_variant.model_ref}</strong> on <strong>{v1_13_variant.hardware_ref}</strong> under {v1_13_serving.label} demand. The serving system must satisfy <strong>{v1_13_serving.slo_ms:g} ms p99</strong> latency while respecting <strong>{v1_13_variant.guardrail_metric}</strong>.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of Model Serving:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Non-Linear Queueing Cliff (Kingman's Law):</strong> Queueing delay diverges non-linearly as utilization approaches unity: <em>W</em><sub><em>q</em></sub> &approx; (&rho; / (1 &minus; &rho;)) &middot; ((<em>c</em><sub><em>a</em></sub><sup>2</sup> + <em>c</em><sub><em>s</em></sub><sup>2</sup>) / 2) &middot; <em>t</em><sub><em>s</em></sub>. At high load, small arrival bursts trigger catastrophic tail latency collapse (<em>p</em>99 spikes) even while mean service time remains constant.</li>
+                <li><strong>The Batching Formation Tax Invariant:</strong> Dynamic batching increases throughput at the direct expense of request formation latency: <em>L</em><sub>batch</sub> = <em>t</em><sub>wait</sub> + <em>t</em><sub>compute</sub>(<em>B</em>). Optimal batch size is strictly bounded by the tail latency budget: <em>L</em><sub>batch</sub> &le; <em>SLO</em><sub><em>p99</em></sub>.</li>
+                <li><strong>The Live State &amp; Working Set Ceiling:</strong> Concurrently active requests bind accelerator memory (KV cache, activation buffers, execution state): <em>M</em><sub>total</sub> = <em>M</em><sub>weights</sub> + <em>N</em><sub>concurrent</sub> &middot; <em>M</em><sub>context</sub>. OOM evictions and thrashing must be prevented by hard admission control and capacity reserves.</li>
+                <li><strong>The Holistic Serving Frontier:</strong> Serving viability requires simultaneous satisfaction across four orthogonal constraints: <em>p</em>99 latency &le; SLO, utilization &le; safe ceiling, memory &le; device capacity, and operational cost/energy &le; financial envelope.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Measure batching as a trade:</strong>
+                    throughput gain and formation delay land in the same p99 budget.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose queueing tails:</strong>
+                    arrival rate and utilization can fail p99 while mean latency looks fine.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Manage state &amp; capacity:</strong>
+                    concurrency binds live memory ({v1_13_serving.state_kind}) and requires reserve margins.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Launch with guardrails:</strong>
+                    replicas, warm capacity, and cost/energy envelopes must pass together.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    For {v1_13_serving.label}, can a serving policy meet
+                    {v1_13_serving.slo_ms:g} ms p99 while protecting
+                    {v1_13_variant.guardrail_metric}?
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
+                            line-height: 1.6; margin-top: 10px;">
+                    Every track follows the same four concepts. The selected track changes
+                    persona, constraints, thresholds, evidence emphasis, failure mode, and
+                    report framing.
+                </div>
             </div>
         </div>
         """),
@@ -545,82 +610,13 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_13_serving, v1_13_variant):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Measure batching as a trade:</strong>
-                    throughput gain and formation delay land in the same p99 budget.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose queueing tails:</strong>
-                    arrival rate and utilization can fail p99 while mean latency looks fine.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Launch with guardrails:</strong>
-                    replicas, warm capacity, {v1_13_serving.state_kind}, and cost/energy must pass together.</div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Queueing theory from the Model Serving chapter &middot;
-                    Memory and state accounting from Hardware Acceleration and Inference at Scale
-                </div>
-            </div>
-            <div style="flex: 0 0 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Track Defaults
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    {v1_13_serving.arrival_qps:g} QPS &middot;
-                    {v1_13_serving.service_ms:g} ms service &middot;
-                    {v1_13_serving.slo_ms:g} ms p99 SLO
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                "For {v1_13_serving.label}, can a serving policy meet
-                {v1_13_serving.slo_ms:g} ms p99 while protecting
-                {v1_13_variant.guardrail_metric}?"
-            </div>
-        </div>
-    </div>
-    """)
+def _():
     return
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** - Complete before this lab:
-
-    - **The Model Serving chapter** - queuing theory, batching strategies,
-      live state/cache management, autoscaling, and cold start latency.
-    """), kind="info")
+def _():
     return
-
-
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -681,7 +677,7 @@ def _(mo, v1_13_serving):
         },
         label="Checkpoint: what batching decision belongs in the launch memo?",
     )
-    return (partA_arr, partA_batch, partA_checkpoint, partA_slo)
+    return partA_arr, partA_batch, partA_checkpoint, partA_slo
 
 
 @app.cell(hide_code=True)
@@ -742,7 +738,7 @@ def _(mo, v1_13_serving):
         },
         label="Checkpoint: what queueing rule should carry forward?",
     )
-    return (partB_arr, partB_checkpoint, partB_slo, partB_svc)
+    return partB_arr, partB_checkpoint, partB_slo, partB_svc
 
 
 @app.cell(hide_code=True)
@@ -793,7 +789,7 @@ def _(mo, v1_13_serving):
         },
         label="Checkpoint: which replica/autoscale posture should the report use?",
     )
-    return (partC_buffer, partC_checkpoint, partC_replicas, partC_warm_pool)
+    return partC_buffer, partC_checkpoint, partC_replicas, partC_warm_pool
 
 
 @app.cell(hide_code=True)
@@ -857,17 +853,12 @@ def _(mo, v1_13_policy_candidates, v1_13_serving, v1_13_track_id):
     )
 
 
-# ===========================================================================
-# ZONE C: MAIN LAB
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
     batching_tax,
-    cache_capacity,
+    big_takeaways,
     cold_start_latency,
     go,
     math,
@@ -899,13 +890,13 @@ def _(
     v1_13_fmt_amount,
     v1_13_html_table,
     v1_13_metric_card,
+    v1_13_model,
     v1_13_policy_candidates,
+    v1_13_profile,
     v1_13_request_cost,
+    v1_13_serving,
     v1_13_track_id,
     v1_13_track_packet,
-    v1_13_model,
-    v1_13_profile,
-    v1_13_serving,
     v1_13_variant,
 ):
     v1_13_packet = v1_13_track_packet(v1_13_track_id, v1_13_serving, v1_13_variant)
@@ -944,11 +935,11 @@ def _(
                 ),
             ),
             mo.md(f"""
-## Concept: Batching Is A Trade, Not A Free Win
+    ## Concept: Batching Is A Trade, Not A Free Win
 
-A batch can improve throughput per serving unit, but the first request in the
-batch waits while the batch forms. For {v1_13_serving.label}, that wait is paid
-inside the same {v1_13_serving.slo_ms:g} ms p99 budget as model service time.
+    A batch can improve throughput per serving unit, but the first request in the
+    batch waits while the batch forms. For {v1_13_serving.label}, that wait is paid
+    inside the same {v1_13_serving.slo_ms:g} ms p99 budget as model service time.
             """),
             partA_pred,
         ]
@@ -1031,15 +1022,15 @@ inside the same {v1_13_serving.slo_ms:g} ms p99 budget as model service time.
         ))
         items.append(mo.accordion({
             "Math Peek / Source Model - batching tax": mo.md(f"""
-```
-formation_delay_ms = (batch_size - 1) / (2 * arrival_qps) * 1000
-batched_service_ms = service_ms * (1 + 0.08*log2(batch_size)) / efficiency_gain
-total_p99_ms       = formation_delay + batched_service + queue_tail
-```
+    ```
+    formation_delay_ms = (batch_size - 1) / (2 * arrival_qps) * 1000
+    batched_service_ms = service_ms * (1 + 0.08*log2(batch_size)) / efficiency_gain
+    total_p99_ms       = formation_delay + batched_service + queue_tail
+    ```
 
-Current values: batch `{batch}`, arrival `{arrival:g}` QPS, total p99
-`{result.total_p99_ms:.1f}` ms. Source helper: `mlsysbook_labs.batching_tax`.
-Chapter anchor: Traffic-Aware Batching Strategy and the batching-tax formula.
+    Current values: batch `{batch}`, arrival `{arrival:g}` QPS, total p99
+    `{result.total_p99_ms:.1f}` ms. Source helper: `mlsysbook_labs.batching_tax`.
+    Chapter anchor: Traffic-Aware Batching Strategy and the batching-tax formula.
             """)
         }))
         items.append(partA_checkpoint)
@@ -1059,11 +1050,11 @@ Chapter anchor: Traffic-Aware Batching Strategy and the batching-tax formula.
                 ),
             ),
             mo.md("""
-## Concept: Queueing Makes Capacity Planning Nonlinear
+    ## Concept: Queueing Makes Capacity Planning Nonlinear
 
-Requests wait behind other requests. Once arrival rate pushes utilization toward
-1.0, mean latency rises and p99/p999 rise faster. The decision evidence is the
-latency distribution, not the average alone.
+    Requests wait behind other requests. Once arrival rate pushes utilization toward
+    1.0, mean latency rises and p99/p999 rise faster. The decision evidence is the
+    latency distribution, not the average alone.
             """),
             partB_pred,
         ]
@@ -1168,18 +1159,18 @@ latency distribution, not the average alone.
         ))
         items.append(mo.accordion({
             "Math Peek / Source Model - M/M/c tail": mo.md(f"""
-```
-mu       = 1000 / service_ms
-rho      = arrival_qps / (replicas * mu)
-p99      = service_ms + queue_tail(rho, replicas, service_cv)
-Little's Law: live_requests ~= arrival_qps * latency_seconds
-```
+    ```
+    mu       = 1000 / service_ms
+    rho      = arrival_qps / (replicas * mu)
+    p99      = service_ms + queue_tail(rho, replicas, service_cv)
+    Little's Law: live_requests ~= arrival_qps * latency_seconds
+    ```
 
-Current values: arrival `{arrival:g}` QPS, service `{svc:g}` ms,
-replicas `{v1_13_serving.replicas}`, rho `{selected.utilization:.2f}`,
-p99 `{selected.p99_latency_ms:.1f}` ms. Source helper:
-`mlsysbook_labs.queueing_latency`. Chapter anchor: Queuing Theory for Capacity
-Planning and Tail Latency and Headroom.
+    Current values: arrival `{arrival:g}` QPS, service `{svc:g}` ms,
+    replicas `{v1_13_serving.replicas}`, rho `{selected.utilization:.2f}`,
+    p99 `{selected.p99_latency_ms:.1f}` ms. Source helper:
+    `mlsysbook_labs.queueing_latency`. Chapter anchor: Queuing Theory for Capacity
+    Planning and Tail Latency and Headroom.
             """)
         }))
         items.append(partB_checkpoint)
@@ -1199,10 +1190,10 @@ Planning and Tail Latency and Headroom.
                 ),
             ),
             mo.md("""
-## Concept: Scale-Out Buys Headroom, Not A Free Guarantee
+    ## Concept: Scale-Out Buys Headroom, Not A Free Guarantee
 
-Replicas reduce utilization and usually lower p99. They also raise the standing
-capacity bill and create a warm-pool/cold-start obligation during scale-out.
+    Replicas reduce utilization and usually lower p99. They also raise the standing
+    capacity bill and create a warm-pool/cold-start obligation during scale-out.
             """),
             partC_pred,
         ]
@@ -1347,17 +1338,17 @@ capacity bill and create a warm-pool/cold-start obligation during scale-out.
         ))
         items.append(mo.accordion({
             "Math Peek / Source Model - replica frontier": mo.md(f"""
-```
-planned_replicas = ceil(visible_replicas * (1 + autoscale_buffer_pct/100))
-capacity_qps     = planned_replicas * 1000 / service_ms
-rho              = arrival_qps / capacity_qps
-cost_per_request = standing_capacity_cost / (arrival_qps * 3600)
-```
+    ```
+    planned_replicas = ceil(visible_replicas * (1 + autoscale_buffer_pct/100))
+    capacity_qps     = planned_replicas * 1000 / service_ms
+    rho              = arrival_qps / capacity_qps
+    cost_per_request = standing_capacity_cost / (arrival_qps * 3600)
+    ```
 
-Current values: visible `{partC_replicas.value}`, planned `{selected['planned']}`,
-rho `{selected['batching'].utilization:.2f}`, p99 `{selected['batching'].total_p99_ms:.1f}` ms,
-{v1_13_packet['cost_label']} `{v1_13_fmt_amount(selected['cost']['value'], selected['cost']['unit'])}`.
-Source helpers: `queueing_latency`, `batching_tax`, and `cold_start_latency`; cost coefficients are V1-13 scenario assumptions.
+    Current values: visible `{partC_replicas.value}`, planned `{selected['planned']}`,
+    rho `{selected['batching'].utilization:.2f}`, p99 `{selected['batching'].total_p99_ms:.1f}` ms,
+    {v1_13_packet['cost_label']} `{v1_13_fmt_amount(selected['cost']['value'], selected['cost']['unit'])}`.
+    Source helpers: `queueing_latency`, `batching_tax`, and `cold_start_latency`; cost coefficients are V1-13 scenario assumptions.
             """)
         }))
         items.append(partC_checkpoint)
@@ -1377,11 +1368,11 @@ Source helpers: `queueing_latency`, `batching_tax`, and `cold_start_latency`; co
                 ),
             ),
             mo.md("""
-## Concept: Feasibility Is A Conjunction
+    ## Concept: Feasibility Is A Conjunction
 
-A policy is not launchable because one metric looks good. It must pass p99/SLA,
-live-state capacity, cost or energy, and warm/fallback guardrails under the same
-track workload.
+    A policy is not launchable because one metric looks good. It must pass p99/SLA,
+    live-state capacity, cost or energy, and warm/fallback guardrails under the same
+    track workload.
             """),
             partD_pred,
         ]
@@ -1473,18 +1464,18 @@ track workload.
         risk_text = v1_13_packet["ops_risks"].get(partD_ops_risk.value, "Select a carry-forward operations risk.")
         items.append(mo.accordion({
             "Math Peek / Source Model - constrained policy gate": mo.md(f"""
-```
-feasible = p99_ok and capacity_ok and cost_ok and warm_start_ok
-live_required = ceil(arrival_qps * p99_ms / 1000 * (1 + reserve_pct/100))
-```
+    ```
+    feasible = p99_ok and capacity_ok and cost_ok and warm_start_ok
+    live_required = ceil(arrival_qps * p99_ms / 1000 * (1 + reserve_pct/100))
+    ```
 
-Selected policy: `{selected['candidate']['label']}`. Binding constraint:
-`{selected['binding']}`. Rejected alternative: `{rejected['candidate']['label']}`.
-Carry-forward risk: {risk_text}
+    Selected policy: `{selected['candidate']['label']}`. Binding constraint:
+    `{selected['binding']}`. Rejected alternative: `{rejected['candidate']['label']}`.
+    Carry-forward risk: {risk_text}
 
-Source helpers: `batching_tax`, `queueing_latency`, `cache_capacity`, and
-`cold_start_latency`; V1-13 notebook-local policy scoring supplies the conjunction
-and track-specific cost/energy labels.
+    Source helpers: `batching_tax`, `queueing_latency`, `cache_capacity`, and
+    `cold_start_latency`; V1-13 notebook-local policy scoring supplies the conjunction
+    and track-specific cost/energy labels.
             """)
         }))
         return mo.vstack(items)
@@ -1531,27 +1522,38 @@ and track-specific cost/energy labels.
                 f"name `{selected['binding']}` as the binding constraint, reject `{rejected['candidate']['label']}`, "
                 f"and carry forward: {risk_text}"
             ), kind="success" if selected["feasible"] else "warn"),
+            mo.Html(f"""
+            <div style="border-left: 4px solid #10B981; background: #F0FDF4; border-radius: 0 10px 10px 0; padding: 18px 24px; margin: 16px 0;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #059669; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                    Lead Architect Authorization &middot; Model Serving Release Sign-Off
+                </div>
+                <div style="font-size: 0.95rem; color: #065F46; line-height: 1.6;">
+                    <strong>Serving Verdict:</strong> {"RELEASE SIGN-OFF GRANTED" if selected["feasible"] else "BLOCK SERVING DEPLOYMENT"}.
+                    {"Serving policy satisfies all p99 latency SLOs, capacity reserves, and cost envelopes for " + v1_13_profile.label + "." if selected["feasible"] else "Policy violates tail latency or capacity boundaries; apply mitigations before deployment."}
+                </div>
+            </div>
+            """),
+            big_takeaways([
+                "Serving is a latency distribution plus capacity system; means conceal tail violations.",
+                "Dynamic batching trades request formation delay for compute efficiency within the p99 envelope.",
+                "Queueing delay explodes non-linearly with utilization; headroom is a safety requirement, not waste.",
+                "Live request state (KV cache, context memory) bounds concurrency as strictly as compute throughput.",
+            ]),
         ])
 
-    _tabs = mo.ui.tabs({
+    v1_13_tabs = mo.ui.tabs({
         "Part A: Batching Trade-off": build_part_a(),
         "Part B: Queueing Tail": build_part_b(),
         "Part C: Replica Frontier": build_part_c(),
         "Part D: Policy Gate": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    _tabs
+    v1_13_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: LEDGER HUD
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
     batching_tax,
     ledger,
     mo,
@@ -1578,12 +1580,12 @@ def _(
     partD_reject,
     queueing_latency,
     v1_13_evaluate_policy,
-    v1_13_policy_candidates,
-    v1_13_track_id,
-    v1_13_track_packet,
     v1_13_model,
+    v1_13_policy_candidates,
     v1_13_profile,
     v1_13_serving,
+    v1_13_track_id,
+    v1_13_track_packet,
     v1_13_variant,
 ):
     _packet = v1_13_track_packet(v1_13_track_id, v1_13_serving, v1_13_variant)
@@ -1621,41 +1623,41 @@ def _(
         capacity_reserve_pct=partD_capacity_reserve.value,
     )
 
-    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
-        ledger.save(chapter=13, design={
-            "chapter": "v1_13",
-            "track_id": v1_13_profile.track_id,
-            "scenario_id": v1_13_variant.scenario_id,
-            "hardware_ref": v1_13_serving.hardware_ref,
-            "model_ref": v1_13_serving.model_ref,
-            "completed": True,
-            "part_a_batch_prediction": partA_pred.value,
-            "part_a_batch_decision": partA_checkpoint.value,
-            "batch_size": partA_batch.value,
-            "batch_total_p99_ms": round(_batching.total_p99_ms, 3),
-            "batch_throughput_gain": round(_batching.throughput_gain, 3),
-            "part_b_queue_prediction": partB_pred.value,
-            "part_b_queue_decision": partB_checkpoint.value,
-            "arrival_qps": round(partB_arr.value, 3),
-            "utilization": round(_queue.utilization, 4),
-            "queue_p99_ms": round(_queue.p99_latency_ms, 3),
-            "queue_slo_ok": _queue.slo_ok,
-            "part_c_replica_prediction": partC_pred.value,
-            "part_c_replica_decision": partC_checkpoint.value,
-            "visible_replicas": partC_replicas.value,
-            "autoscale_buffer_pct": partC_buffer.value,
-            "warm_pool_units": partC_warm_pool.value,
-            "part_d_policy_prediction": partD_pred.value,
-            "selected_policy": _selected["candidate"]["label"],
-            "selected_policy_feasible": _selected["feasible"],
-            "binding_constraint": _selected["binding"],
-            "rejected_alternative": _rejected["candidate"]["label"],
-            "rejected_alternative_binding": _rejected["binding"],
-            "carry_forward_ops_risk": _packet["ops_risks"].get(partD_ops_risk.value, partD_ops_risk.value),
-            "cost_label": _packet["cost_label"],
-            "cost_per_request": round(_selected["cost"]["value"], 8),
-            "cost_unit": _selected["cost"]["unit"],
-        })
+    _ready = partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None
+    ledger.save(chapter=13, design={
+        "chapter": "v1_13",
+        "track_id": v1_13_profile.track_id,
+        "scenario_id": v1_13_variant.scenario_id,
+        "hardware_ref": v1_13_serving.hardware_ref,
+        "model_ref": v1_13_serving.model_ref,
+        "completed": _ready,
+        "part_a_batch_prediction": partA_pred.value,
+        "part_a_batch_decision": partA_checkpoint.value,
+        "batch_size": partA_batch.value,
+        "batch_total_p99_ms": round(_batching.total_p99_ms, 3),
+        "batch_throughput_gain": round(_batching.throughput_gain, 3),
+        "part_b_queue_prediction": partB_pred.value,
+        "part_b_queue_decision": partB_checkpoint.value,
+        "arrival_qps": round(partB_arr.value, 3),
+        "utilization": round(_queue.utilization, 4),
+        "queue_p99_ms": round(_queue.p99_latency_ms, 3),
+        "queue_slo_ok": _queue.slo_ok,
+        "part_c_replica_prediction": partC_pred.value,
+        "part_c_replica_decision": partC_checkpoint.value,
+        "visible_replicas": partC_replicas.value,
+        "autoscale_buffer_pct": partC_buffer.value,
+        "warm_pool_units": partC_warm_pool.value,
+        "part_d_policy_prediction": partD_pred.value,
+        "selected_policy": _selected["candidate"]["label"],
+        "selected_policy_feasible": _selected["feasible"],
+        "binding_constraint": _selected["binding"],
+        "rejected_alternative": _rejected["candidate"]["label"],
+        "rejected_alternative_binding": _rejected["binding"],
+        "carry_forward_ops_risk": _packet["ops_risks"].get(partD_ops_risk.value, partD_ops_risk.value),
+        "cost_label": _packet["cost_label"],
+        "cost_per_request": round(_selected["cost"]["value"], 8),
+        "cost_unit": _selected["cost"]["unit"],
+    })
 
     mo.Html(f"""
     <div class="lab-hud">
@@ -1664,10 +1666,24 @@ def _(
         <span class="hud-label">TRACK</span>
         <span class="hud-value">{v1_13_profile.label}</span>
         <span style="flex:1;"></span>
-        <span class="hud-label">SLO</span>
-        <span class="hud-value">{v1_13_serving.slo_ms:g} ms p99</span>
-        <span class="hud-label">POLICY</span>
-        <span class="hud-active">{_selected['candidate']['label']}</span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">serving_launch_memo</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">{"SAVED" if _ready else "ACTIVE"}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Selected policy</strong>{_selected["candidate"]["label"]}</div>
+        <div class="mlsysbook-field"><strong>P99 / SLO</strong>{_batching.total_p99_ms:.1f} ms / {v1_13_serving.slo_ms:g} ms</div>
+        <div class="mlsysbook-field"><strong>Binding constraint</strong>{_selected["binding"]}</div>
+        <div class="mlsysbook-field"><strong>Rejected alternative</strong>{_rejected["candidate"]["label"]}</div>
+        <div class="mlsysbook-field"><strong>Feasible</strong>{'Yes' if _selected["feasible"] else 'Mitigation needed'}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
     </div>
     """)
     return
