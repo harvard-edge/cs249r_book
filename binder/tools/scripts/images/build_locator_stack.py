@@ -3,7 +3,7 @@
 Generate the four-tier "systems organ locator" stack figure that opens every
 chapter of Physical AI.
 
-Usage: python3 books/vol4/build_locator_stack.py [slug ...]
+Usage: python3 binder/tools/scripts/images/build_locator_stack.py [slug ...]
 """
 
 import os
@@ -11,7 +11,8 @@ import shutil
 import subprocess
 import sys
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+BASE = os.path.join(REPO_ROOT, "books", "vol4")
 
 ACCENT = {
     1: ("crimson", "crimsonlight"),
