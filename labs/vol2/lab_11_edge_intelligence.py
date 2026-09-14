@@ -1904,9 +1904,15 @@ def _(
     return
 
 
+# =============================================================================
+# ZONE D: LEDGER AND REPORT
+# =============================================================================
+
+
 @app.cell(hide_code=True)
 def _(
     COLORS,
+    mo,
     pA_batch,
     pA_params,
     pB_contexts,
@@ -1940,7 +1946,30 @@ def _(
     _selected = next((_policy for _policy in _policies if _policy["policy_id"] == pD_policy.value), _policies[1])
     _status = "PASS" if _selected["passes"] else "FAIL"
     _status_color = COLORS["GreenLine"] if _status == "PASS" else COLORS["RedLine"]
-    return
+    return mo.Html(f"""
+    <div class="lab-hud">
+        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 11</span></div>
+        <div><span class="hud-label">TRACK</span> <span class="hud-value">{v2_11_profile.label}</span></div>
+        <div><span class="hud-label">DEVICE</span> <span class="hud-value">{v2_11_device.hardware_ref}</span></div>
+        <div><span class="hud-label">POLICY</span> <span class="hud-value">{_selected['label']}</span></div>
+        <div><span class="hud-label">BINDING</span> <span class="hud-value">{_selected['binding']}</span></div>
+        <div><span class="hud-label">STATUS</span> <span style="color:{_status_color}; font-family:var(--font-mono); font-weight:700;">{_status}</span></div>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger &amp; Verification</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Policy Decision</strong>{_selected['label']}</div>
+        <div class="mlsysbook-field"><strong>Guardrail Status</strong><span style="color:{_status_color}; font-weight:700;">{_status}</span></div>
+        <div class="mlsysbook-field"><strong>Binding Limit</strong>{_selected['binding']}</div>
+        <div class="mlsysbook-field"><strong>Training Memory</strong>{_selected['memory_mb']:.1f} MB / {v2_11_device.available_memory_mb:g} MB</div>
+        <div class="mlsysbook-field"><strong>Daily Energy</strong>{_selected['daily_energy_pct']:.1f}% budget</div>
+        <div class="mlsysbook-field"><strong>Evidence Age</strong>{_selected['evidence_age_hours']:.1f} hrs</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
+    </div>
+    """)
 
 
 if __name__ == "__main__":
