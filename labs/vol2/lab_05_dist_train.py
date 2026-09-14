@@ -45,6 +45,7 @@ async def _():
         get_lab_metadata,
         gated_hypothesis_card,
         instrumentation_console,
+        report_export_panel,
     )
 
     ledger = DesignLedger()
@@ -64,6 +65,7 @@ async def _():
         mo,
         render_distributed_memory_breakdown,
         render_distributed_step_breakdown,
+        report_export_panel,
     )
 
 
@@ -621,6 +623,7 @@ def _(
         Senior Systems Architect Audit
       </h3>
       <p style="color: #334155; line-height: 1.5; font-size: 0.95rem; margin-bottom: 12px;">
+        You predicted: <code>{pred_scaling_radio.value}</code> &mdash; Actual system regime: <strong>{audit_status}</strong>.<br/>
         {'<strong>Hypothesis Confirmed:</strong> You correctly anticipated the inter-node network cliff!' if pred_is_correct else '<strong>Hypothesis Miss:</strong> Review the topological interconnect hierarchy below.'}
       </p>
       <ul style="margin: 0 0 12px 20px; padding: 0; color: #475569; font-size: 0.9rem; line-height: 1.6;">
@@ -726,9 +729,11 @@ def _(
 def _(
     audit_card,
     build_lab_report,
+    cluster_name,
     curr_zero,
     dashboard_view,
     get_lab_metadata,
+    infeasible_topology,
     is_oom,
     mem_act,
     mem_grads,
@@ -740,13 +745,14 @@ def _(
     pred_is_correct,
     pred_scaling_radio,
     recompute_radio,
+    report_export_panel,
     step_ms,
     tokens_per_sec,
     tp_radio,
     tp_spans_nodes,
     vram_allocated_gb,
+    vram_per_gpu_gb,
 ):
-    # ZONE F: Design Ledger & Curriculum Tab Layout
     metadata = get_lab_metadata("vol2/lab_05_dist_train.py")
     report = build_lab_report(
         metadata,
@@ -766,112 +772,145 @@ def _(
         },
     )
 
-    part_a_view = mo.vstack([
-        mo.Html("""
-        <div style="margin-bottom: 14px;">
-          <h3 style="margin: 0 0 4px 0; color: #0F172A; font-size: 1.2rem;">Part A: 3D Cluster Topology &amp; Scaling Explorer</h3>
-          <p style="color: #64748B; font-size: 0.92rem; margin: 0;">
-            Real-time trade-offs between VRAM footprint, communication overhead, and bubble idle time based on your configuration in the Simulation Knobs above.
-          </p>
-        </div>
-        """),
-        dashboard_view,
-    ])
-
-    part_b_view = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px;">
-          <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem;">Part B: Memory Hierarchy &amp; ZeRO Sharding</h3>
-          <p style="color: #475569; font-size: 0.92rem; line-height: 1.6;">
-            A 70B parameter model in mixed-precision (FP16 weights + FP32 Adam optimizer) requires over <strong>1.1 Terabytes</strong> of state without sharding.
-            Observe how your selected 3D configuration shards each component:
-          </p>
-          <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 16px 0; color: #1E293B;">
-            <thead>
-              <tr style="background: #F8FAFC; border-bottom: 2px solid #CBD5E1; text-align: left;">
-                <th style="padding: 10px;">Component</th>
-                <th style="padding: 10px;">Unsharded Size</th>
-                <th style="padding: 10px;">Current Per-GPU Allocation</th>
-                <th style="padding: 10px;">Active Sharding Mechanism</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 8px 10px; font-weight: 600;">Model Weights</td>
-                <td style="padding: 8px 10px;">141.2 GB</td>
-                <td style="padding: 8px 10px; font-weight: 700; color: #006395;">{mem_weights:.1f} GB</td>
-                <td style="padding: 8px 10px;">Sharded across TP={int(tp_radio.value)} &times; PP={int(pp_radio.value)}{' &times; DP' if curr_zero == 3 else ''}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 8px 10px; font-weight: 600;">Gradients</td>
-                <td style="padding: 8px 10px;">141.2 GB</td>
-                <td style="padding: 8px 10px; font-weight: 700; color: #4A777A;">{mem_grads:.1f} GB</td>
-                <td style="padding: 8px 10px;">Sharded across TP={int(tp_radio.value)} &times; PP={int(pp_radio.value)}{' &times; DP' if curr_zero >= 2 else ''}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 8px 10px; font-weight: 600;">Adam Optimizer States</td>
-                <td style="padding: 8px 10px;">847.2 GB</td>
-                <td style="padding: 8px 10px; font-weight: 700; color: {'#A51C30' if is_oom else '#E06D53'};">{mem_opt:.1f} GB</td>
-                <td style="padding: 8px 10px;">Sharded across TP={int(tp_radio.value)} &times; PP={int(pp_radio.value)}{' &times; DP' if curr_zero >= 1 else ''}</td>
-              </tr>
-              <tr style="border-bottom: 1px solid #E2E8F0;">
-                <td style="padding: 8px 10px; font-weight: 600;">Forward Activations</td>
-                <td style="padding: 8px 10px;">~60.0 GB (unrecomputed)</td>
-                <td style="padding: 8px 10px; font-weight: 700; color: #D97706;">{mem_act:.1f} GB</td>
-                <td style="padding: 8px 10px;">{str(recompute_radio.value).capitalize()}</td>
-              </tr>
-              <tr style="background: #F8FAFC; font-weight: 700; border-top: 2px solid #CBD5E1;">
-                <td style="padding: 10px;">Total Per-GPU VRAM</td>
-                <td style="padding: 10px;">1,189.6 GB</td>
-                <td style="padding: 10px; color: {'#A51C30' if is_oom else '#16A34A'};">{vram_allocated_gb:.1f} GB</td>
-                <td style="padding: 10px;">{'OOM 💥 (Exceeds 80 GB)' if is_oom else 'FITS IN VRAM ✅'}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        """),
-    ])
-
-    part_c_view = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px;">
-          <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem;">Part C: Interconnect Physics &amp; The Cross-Node Cliff</h3>
-          <p style="color: #475569; font-size: 0.92rem; line-height: 1.6;">
-            A critical systems pitfall in distributed ML is confusing intra-node bandwidth with inter-node fabric bandwidth:
-          </p>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;">
-            <div style="background: #F0FDF4; border: 1px solid #BBF7D0; padding: 14px; border-radius: 6px;">
-              <h4 style="margin: 0 0 6px 0; color: #166534; font-size: 0.95rem;">Intra-Node NVLink 4.0</h4>
-              <div style="font-size: 1.3rem; font-weight: 800; color: #15803D;">900 GB/s</div>
-              <p style="font-size: 0.84rem; color: #166534; margin: 6px 0 0 0;">
-                Sub-microsecond latency and massive crossbar switch throughput. Ideal for high-frequency TP AllReduce operations (2 per layer).
+    def build_part_a():
+        return mo.vstack([
+            mo.Html("""
+            <div style="margin-bottom: 14px;">
+              <h3 style="margin: 0 0 4px 0; color: #0F172A; font-size: 1.2rem;">Part A: 3D Cluster Topology &amp; Scaling Explorer</h3>
+              <p style="color: #64748B; font-size: 0.92rem; margin: 0;">
+                Real-time trade-offs between VRAM footprint, communication overhead, and bubble idle time based on your configuration in the Simulation Knobs above.
               </p>
             </div>
-            <div style="background: {'#FEF2F2' if tp_spans_nodes else '#F8FAFC'}; border: 1px solid {'#FECACA' if tp_spans_nodes else '#E2E8F0'}; padding: 14px; border-radius: 6px;">
-              <h4 style="margin: 0 0 6px 0; color: {'#991B1B' if tp_spans_nodes else '#334155'}; font-size: 0.95rem;">Inter-Node InfiniBand NDR</h4>
-              <div style="font-size: 1.3rem; font-weight: 800; color: {'#B91C1C' if tp_spans_nodes else '#0F172A'};">50 GB/s (400 Gbps)</div>
-              <p style="font-size: 0.84rem; color: {'#991B1B' if tp_spans_nodes else '#64748B'}; margin: 6px 0 0 0;">
-                18&times; lower bandwidth than NVLink. When TP spans nodes (TP &gt; 8), AllReduce latency explodes from 84 ms to over 3,200 ms!
+            """),
+            dashboard_view,
+        ])
+
+    def build_part_b():
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px;">
+              <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem;">Part B: Memory Hierarchy &amp; ZeRO Sharding</h3>
+              <p style="color: #475569; font-size: 0.92rem; line-height: 1.6;">
+                A 70B parameter model in mixed-precision (FP16 weights + FP32 Adam optimizer) requires over <strong>1.1 Terabytes</strong> of state without sharding.
+                Observe how your selected 3D configuration shards each component:
               </p>
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 16px 0; color: #1E293B;">
+                <thead>
+                  <tr style="background: #F8FAFC; border-bottom: 2px solid #CBD5E1; text-align: left;">
+                    <th style="padding: 10px;">Component</th>
+                    <th style="padding: 10px;">Unsharded Size</th>
+                    <th style="padding: 10px;">Current Per-GPU Allocation</th>
+                    <th style="padding: 10px;">Active Sharding Mechanism</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="border-bottom: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 10px; font-weight: 600;">Model Weights</td>
+                    <td style="padding: 8px 10px;">141.2 GB</td>
+                    <td style="padding: 8px 10px; font-weight: 700; color: #006395;">{mem_weights:.1f} GB</td>
+                    <td style="padding: 8px 10px;">Sharded across TP={int(tp_radio.value)} &times; PP={int(pp_radio.value)}{' &times; DP' if curr_zero == 3 else ''}</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 10px; font-weight: 600;">Gradients</td>
+                    <td style="padding: 8px 10px;">141.2 GB</td>
+                    <td style="padding: 8px 10px; font-weight: 700; color: #4A777A;">{mem_grads:.1f} GB</td>
+                    <td style="padding: 8px 10px;">Sharded across TP={int(tp_radio.value)} &times; PP={int(pp_radio.value)}{' &times; DP' if curr_zero >= 2 else ''}</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 10px; font-weight: 600;">Adam Optimizer States</td>
+                    <td style="padding: 8px 10px;">847.2 GB</td>
+                    <td style="padding: 8px 10px; font-weight: 700; color: {'#A51C30' if is_oom else '#E06D53'};">{mem_opt:.1f} GB</td>
+                    <td style="padding: 8px 10px;">Sharded across TP={int(tp_radio.value)} &times; PP={int(pp_radio.value)}{' &times; DP' if curr_zero >= 1 else ''}</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #E2E8F0;">
+                    <td style="padding: 8px 10px; font-weight: 600;">Forward Activations</td>
+                    <td style="padding: 8px 10px;">~60.0 GB (unrecomputed)</td>
+                    <td style="padding: 8px 10px; font-weight: 700; color: #D97706;">{mem_act:.1f} GB</td>
+                    <td style="padding: 8px 10px;">{str(recompute_radio.value).capitalize()}</td>
+                  </tr>
+                  <tr style="background: #F8FAFC; font-weight: 700; border-top: 2px solid #CBD5E1;">
+                    <td style="padding: 10px;">Total Per-GPU VRAM</td>
+                    <td style="padding: 10px;">1,189.6 GB</td>
+                    <td style="padding: 10px; color: {'#A51C30' if is_oom else '#16A34A'};">{vram_allocated_gb:.1f} GB</td>
+                    <td style="padding: 10px;">{'OOM 💥 (Exceeds 80 GB)' if is_oom else 'FITS IN VRAM ✅'}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-          </div>
-        </div>
-        """),
-    ])
+            """),
+        ])
+
+    def build_part_c():
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px;">
+              <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem;">Part C: Interconnect Physics &amp; The Cross-Node Cliff</h3>
+              <p style="color: #475569; font-size: 0.92rem; line-height: 1.6;">
+                A critical systems pitfall in distributed ML is confusing intra-node bandwidth with inter-node fabric bandwidth:
+              </p>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;">
+                <div style="background: #F0FDF4; border: 1px solid #BBF7D0; padding: 14px; border-radius: 6px;">
+                  <h4 style="margin: 0 0 6px 0; color: #166534; font-size: 0.95rem;">Intra-Node NVLink 4.0</h4>
+                  <div style="font-size: 1.3rem; font-weight: 800; color: #15803D;">900 GB/s</div>
+                  <p style="font-size: 0.84rem; color: #166534; margin: 6px 0 0 0;">
+                    Sub-microsecond latency and massive crossbar switch throughput. Ideal for high-frequency TP AllReduce operations (2 per layer).
+                  </p>
+                </div>
+                <div style="background: {'#FEF2F2' if tp_spans_nodes else '#F8FAFC'}; border: 1px solid {'#FECACA' if tp_spans_nodes else '#E2E8F0'}; padding: 14px; border-radius: 6px;">
+                  <h4 style="margin: 0 0 6px 0; color: {'#991B1B' if tp_spans_nodes else '#334155'}; font-size: 0.95rem;">Inter-Node InfiniBand NDR</h4>
+                  <div style="font-size: 1.3rem; font-weight: 800; color: {'#B91C1C' if tp_spans_nodes else '#0F172A'};">50 GB/s (400 Gbps)</div>
+                  <p style="font-size: 0.84rem; color: {'#991B1B' if tp_spans_nodes else '#64748B'}; margin: 6px 0 0 0;">
+                    18&times; lower bandwidth than NVLink. When TP spans nodes (TP &gt; 8), AllReduce latency explodes from 84 ms to over 3,200 ms!
+                  </p>
+                </div>
+              </div>
+            </div>
+            """),
+        ])
+
+    def build_synthesis():
+        return mo.vstack([
+            mo.Html(audit_card),
+            mo.Html("""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION & SIGN-OFF</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Confirm your 3D parallelism topology, verify all physical invariants, and export your engineering audit record.
+                </p>
+            </div>
+            """),
+            report_export_panel(report),
+        ])
 
     tabs = mo.ui.tabs({
-        "Part A: 3D Topology Explorer": part_a_view,
-        "Part B: Memory Hierarchy & ZeRO": part_b_view,
-        "Part C: Interconnect Physics": part_c_view,
-        "Senior Architect Audit": mo.Html(audit_card),
-        "Design Ledger": mo.vstack([
-            mo.md("### Verification & Ledger Status"),
-            mo.md(f"**Hypothesis Assessment:** {'VERIFIED FIRST-PRINCIPLES RATIO ✅' if pred_is_correct else 'HYPOTHESIS MISS ⚠️'}"),
-            mo.md(f"**VRAM Requirement:** `{vram_allocated_gb:.1f} GB` (H100 80 GB limit)"),
-            mo.md(f"**Step Latency:** `{step_ms:,.0f} ms` | **Cluster Throughput:** `{tokens_per_sec:,.0f} tokens/s`"),
-        ]),
+        "Part A: 3D Topology Explorer": build_part_a(),
+        "Part B: Memory Hierarchy & ZeRO": build_part_b(),
+        "Part C: Interconnect Physics": build_part_c(),
+        "Synthesis": build_synthesis(),
     })
-    tabs
+
+    hud = mo.Html(f"""
+    <div class="lab-hud">
+        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 05</span></div>
+        <div><span class="hud-label">TRACK</span> <span class="hud-value">{cluster_name}</span></div>
+        <div><span class="hud-label">VRAM</span> <span class="hud-value">{vram_allocated_gb:.1f} GB</span></div>
+        <div><span class="hud-label">STEP</span> <span class="hud-value">{step_ms:,.0f} ms</span></div>
+        <div><span class="hud-label">THROUGHPUT</span> <span class="hud-value">{tokens_per_sec:,.0f} tok/s</span></div>
+        <div><span class="hud-label">STATUS</span> <span style="color:{'#10B981' if pred_is_correct and not is_oom and not infeasible_topology else '#EF4444'}; font-family:var(--font-mono); font-weight:700;">{'VERIFIED' if pred_is_correct else 'ACTIVE'}</span></div>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger &amp; Verification</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Hypothesis Assessment</strong>{'VERIFIED FIRST-PRINCIPLES RATIO ✅' if pred_is_correct else 'HYPOTHESIS MISS ⚠️'}</div>
+        <div class="mlsysbook-field"><strong>VRAM Allocation</strong>{vram_allocated_gb:.1f} GB / {vram_per_gpu_gb:.0f} GB</div>
+        <div class="mlsysbook-field"><strong>Step Latency</strong>{step_ms:,.0f} ms</div>
+        <div class="mlsysbook-field"><strong>Cluster Throughput</strong>{tokens_per_sec:,.0f} tokens/s</div>
+        <div class="mlsysbook-field"><strong>Topology Ranks</strong>TP={int(tp_radio.value)} &times; PP={int(pp_radio.value)} &times; DP={64 // max(1, int(tp_radio.value) * int(pp_radio.value))}</div>
+        <div class="mlsysbook-field"><strong>ZeRO Stage</strong>ZeRO-{curr_zero}</div>
+      </div>
+    </div>
+    """)
     return
 
 
