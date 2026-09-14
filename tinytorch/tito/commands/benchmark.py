@@ -305,14 +305,20 @@ class BenchmarkCommand(BaseCommand):
             # Fall back to simplified benchmarks
             return self._run_simplified_capstone(args)
 
-        # Run full capstone benchmarks
-        console.print("[cyan]Running full capstone benchmark suite...[/cyan]")
-        console.print("[dim]This may take a few minutes...[/dim]\n")
+        # NOTE: these metrics are NOT measured from the student's model yet.
+        # generate_submission is only used above as an availability check.
+        # The values below are fixed placeholders (same for every student,
+        # regardless of what they built) until this is wired up to actually
+        # run Module 19's Benchmark class against the student's Module 20
+        # model. Surface that honestly instead of presenting fabricated
+        # numbers as a real measurement.
+        console.print("[yellow]⚠️  Placeholder benchmark: these numbers are not yet measured from your model.[/yellow]")
+        console.print("[dim]Full instrumentation (Module 19 Benchmark + your model) is not implemented yet.[/dim]\n")
 
-        # For now, create a placeholder that shows the structure
-        # In production, this would use actual models and Module 19's Benchmark class
         results = {
             "benchmark_type": "capstone",
+            "is_placeholder": True,
+            "note": "Placeholder benchmark: metrics below are fixed values, not measured from your model. Full instrumentation is not implemented yet.",
             "timestamp": datetime.now().isoformat(),
             "system_info": self._get_system_info(),
             "track": args.track,
@@ -354,8 +360,10 @@ class BenchmarkCommand(BaseCommand):
 
         console.print(f"\n[green]✅ Results saved to: {results_file}[/green]")
 
-        # Prompt for submission
-        if not args.skip_submit:
+        # Prompt for submission (never for placeholder results: they are the
+        # same fixed numbers for every student and would be meaningless on a
+        # leaderboard, or actively misleading if compared against real scores)
+        if not args.skip_submit and not results.get("is_placeholder"):
             self._prompt_submission(results, "capstone")
 
         return 0
@@ -511,12 +519,20 @@ class BenchmarkCommand(BaseCommand):
         console.print("\n")
         console.print(results_table)
 
-        console.print(Panel(
-            f"[bold green]🏆 Capstone Benchmark Complete![/bold green]\n\n"
-            f"📊 Overall Score: [bold]{results.get('overall_score', 0)}/100[/bold]",
-            title="Success",
-            border_style="green"
-        ))
+        if results.get("is_placeholder"):
+            console.print(Panel(
+                f"[bold yellow]⚠️  These are placeholder values, not a real measurement[/bold yellow]\n\n"
+                f"{results.get('note', '')}",
+                title="Placeholder Benchmark",
+                border_style="yellow"
+            ))
+        else:
+            console.print(Panel(
+                f"[bold green]🏆 Capstone Benchmark Complete![/bold green]\n\n"
+                f"📊 Overall Score: [bold]{results.get('overall_score', 0)}/100[/bold]",
+                title="Success",
+                border_style="green"
+            ))
 
     def _prompt_submission(self, results: Dict[str, Any], benchmark_type: str) -> None:
         """Prompt user to submit benchmark results."""
