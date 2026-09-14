@@ -85,26 +85,14 @@ Syntactically, the command is immaculate POSIX shell. Semantically, because the 
 
 Cryptographic checksums (CRC32, SHA-256) cannot prevent fail-plausible errors: a payload containing `DROP DATABASE production;` possesses a valid cryptographic hash. Furthermore, redundant multi-agent quorums cannot resolve fail-plausible defects if all agents are parameterized by the same underlying model weights $\theta$. When queried with the same ambiguous prompt, identical model replicas exhibit correlated hallucinations, achieving a unanimous Byzantine consensus on a catastrophic action.
 
-Let an agent trajectory $\tau$ consist of a sequence of $N$ discrete execution steps:
+Let an agent trajectory $\tau$ consist of a sequence of $N$ discrete execution steps $\tau = ((s_0, a_0, o_0), (s_1, a_1, o_1), \dots, (s_{N-1}, a_{N-1}, o_{N-1}))$. At each step $t$, the neural policy $\pi_\theta(a_t \mid s_t)$ selects an action $a_t$ conditioned on the accumulated context $s_t$. Let $\epsilon_{\text{semantic}}(t)$ denote the probability that action $a_t$ contains a fail-plausible semantic defect that evades syntactic validation. Assuming per-step error independence as a lower bound, the probability $P_{\text{success}}(N)$ that a trajectory completes $N$ steps without generating a catastrophic semantic defect degrades exponentially: $P_{\text{success}}(N) = \prod_{t=0}^{N-1} (1 - \epsilon_{\text{semantic}}(t)) \le (1 - \epsilon_{\min})^N$.
 
-$$\tau = \left( (s_0, a_0, o_0), (s_1, a_1, o_1), \dots, (s_{N-1}, a_{N-1}, o_{N-1}) \right)$$
-
-At each step $t$, the neural policy $\pi_\theta(a_t \mid s_t)$ selects an action $a_t$ conditioned on the accumulated context $s_t$. Let $\epsilon_{\text{semantic}}(t)$ denote the probability that action $a_t$ contains a fail-plausible semantic defect that evades syntactic validation. Assuming per-step error independence as a lower bound, the probability $P_{\text{success}}(N)$ that a trajectory completes $N$ steps without generating a catastrophic semantic defect degrades exponentially:
-
-$$P_{\text{success}}(N) = \prod_{t=0}^{N-1} \left( 1 - \epsilon_{\text{semantic}}(t) \right) \le (1 - \epsilon_{\min})^N$$
-
-Even if a frontier foundation model achieves a remarkably low per-step semantic error rate of $\epsilon_{\text{semantic}} = 0.02$ (a 98 percent per-step success rate), an extended software refactoring or system administration trajectory spanning $N = 100$ steps exhibits a survival probability of:
-
-$$P_{\text{success}}(100) = (1 - 0.02)^{100} = (0.98)^{100} \approx 0.1326$$
-
-There is an $86.7\%$ probability of encountering at least one catastrophic semantic fault. When execution runs for hundreds of turns, failure is not an exceptional anomaly; it is the dominant operating regime.
+Even if a frontier foundation model achieves a remarkably low per-step semantic error rate of $\epsilon_{\text{semantic}} = 0.02$ (a 98 percent per-step success rate), an extended software refactoring or system administration trajectory spanning $N = 100$ steps exhibits a survival probability of $P_{\text{success}}(100) = (1 - 0.02)^{100} = (0.98)^{100} \approx 0.1326$. There is an 86.7 percent probability of encountering at least one catastrophic semantic fault. When execution runs for hundreds of turns, failure is not an exceptional anomaly; it is the dominant operating regime.
 
 What happens if an orchestrator attempts to handle these inevitable faults via naive restarting from step zero? The mathematical consequences for compute and latency are severe:
 
-* **Expected Attempts to Success:** The expected number of full trajectory executions required to achieve a single 100-step success is:
-  $$\mathbb{E}[\text{Attempts}] = \frac{1}{P_{\text{success}}(100)} = \frac{1}{0.1326} \approx 7.54\text{ attempts}$$
-* **Wasted Forward Steps:** Because geometric errors with rate $\epsilon = 0.02$ strike on average halfway through an attempt ($\mathbb{E}[t_{\text{fail}}] \approx 1/\epsilon = 50\text{ steps}$), the agent discards an average of 50 steps per failed run. Achieving one complete trajectory burns:
-  $$\mathbb{E}[\text{Wasted Steps}] \approx (7.54 - 1) \times 50 \approx 327\text{ discarded execution steps}$$
+* **Expected Attempts to Success:** The expected number of full trajectory executions required to achieve a single 100-step success is $\mathbb{E}[\text{Attempts}] = 1 / P_{\text{success}}(100) = 1 / 0.1326 \approx 7.54\text{ attempts}$.
+* **Wasted Forward Steps:** Because geometric errors with rate $\epsilon = 0.02$ strike on average halfway through an attempt ($\mathbb{E}[t_{\text{fail}}] \approx 1/\epsilon = 50\text{ steps}$), the agent discards an average of 50 steps per failed run. Achieving one complete trajectory burns $\mathbb{E}[\text{Wasted Steps}] \approx (7.54 - 1) \times 50 \approx 327\text{ discarded execution steps}$.
 * **Wasted FLOPs and Accelerator Hours:** For a 70B parameter dense model generating 2,048 tokens per turn, forward inference consumes approximately $2 \times 70 \times 10^9 \times 2{,}048 \approx 2.87 \times 10^{14}\text{ FLOPs}$ per step. Discarding 327 steps wastes nearly $10^{17}\text{ FLOPs}$—hours of GPU time on an 8x H100 node—purely recomputing discarded reasoning paths.
 
 Worse still, in an interactive environment, restarting from step zero leaves behind a trail of partially executed, non-idempotent mutations. Intermediate checkpointing and rollback are therefore not optional performance optimizations; they are the foundational requirement for long-horizon agent tractability.
@@ -121,13 +109,7 @@ Before exploring the Reversibility Boundary and Saga compensation patterns, veri
 
 ### The reversibility boundary
 
-Because failure is statistically inevitable in extended trajectories, an agent runtime must manage mutations based on their physical and semantic reversibility. In classical computer science, an operation $f: \mathcal{S} \to \mathcal{S}$ is strictly invertible if there exists a deterministic inverse function $f^{-1}$ such that:
-
-$$\forall s \in \mathcal{S}, \quad f^{-1}(f(s)) = s$$
-
-In an autonomous agent system, the global state space $\mathcal{S}$ is partitioned into two physically distinct domains separated by the **Reversibility Boundary**\index{Reversibility Boundary}, as schematized in @fig-vol3-checkpoint-reversibility-boundary:
-
-$$\mathcal{S} = \mathcal{S}_{\text{internal}} \times \mathcal{S}_{\text{external}}$$
+Because failure is statistically inevitable in extended trajectories, an agent runtime must manage mutations based on their physical and semantic reversibility. In classical computer science, an operation $f: \mathcal{S} \to \mathcal{S}$ is strictly invertible if there exists a deterministic inverse function $f^{-1}$ such that $f^{-1}(f(s)) = s$ for all $s \in \mathcal{S}$. In an autonomous agent system, the global state space $\mathcal{S}$ is partitioned into two physically distinct domains separated by the **Reversibility Boundary**\index{Reversibility Boundary}, $\mathcal{S} = \mathcal{S}_{\text{internal}} \times \mathcal{S}_{\text{external}}$, as schematized in @fig-vol3-checkpoint-reversibility-boundary:
 
 ::: {#fig-vol3-checkpoint-reversibility-boundary fig-env="figure" fig-pos="htb" fig-cap="**The Reversibility Boundary**: Partitioning of global agent state into an internal, zero-liability reversible domain (token context, KV cache, ephemeral OverlayFS UpperDir) and an external, high-liability irreversible actuation domain (cloud APIs, relational databases, network sockets). Mutations crossing the boundary mandate write-ahead logging, deterministic idempotency keys, and asynchronous oversight gates. Source: Conceptualized by author based on @gray1992 and @mohan1992aries." fig-alt="Architectural diagram showing the division of agent state into reversible internal domains and irreversible external actuation domains separated by the reversibility boundary."}
 ![](images/svg/reversibility_boundary.svg)
@@ -165,12 +147,7 @@ Why can we not simply wrap external tool invocations in a standard Two-Phase Com
 Applying 2PC across agentic actuation boundaries fails due to three fundamental systems bottlenecks:
 
 1. **Absence of Prepare Interfaces in Heterogeneous APIs:** External SaaS providers, cloud hypervisors, and enterprise webhooks do not implement XA-compliant or 2PC prepare/commit interfaces. An API endpoint such as `POST /v1/charges` or `DELETE /v1/instances` executes mutations immediately upon request authorization. There is no provisional "prepare" state that reserves the state change while holding locks pending a secondary commit confirmation.
-2. **Autoregressive Token Generation Latency:** In database systems, the duration between the prepare phase and the commit phase is measured in single-digit milliseconds. In an agent system, the duration between successive actions is governed by transformer autoregressive decoding. Decoding 512 tokens on an NVIDIA H100 GPU operating at $30\text{ ms}$ Time-to-First-Token (TTFT) and $8\text{ ms}$ per-token decode latency requires:
-
-   $$T_{\text{decode}} = 30\text{ ms} + (512 \times 8\text{ ms}) = 4{,}126\text{ ms} \approx 4.13\text{ s}$$
-
-   Holding row locks on production databases or reserving cloud resources across a 4-second stochastic inference pause introduces catastrophic lock contention, stalls concurrent transactions, and rapidly causes connection pool exhaustion across upstream services.
-
+2. **Autoregressive Token Generation Latency:** In database systems, the duration between the prepare phase and the commit phase is measured in single-digit milliseconds. In an agent system, the duration between successive actions is governed by transformer autoregressive decoding. Decoding 512 tokens on an NVIDIA H100 GPU operating at $30\text{ ms}$ Time-to-First-Token (TTFT) and $8\text{ ms}$ per-token decode latency requires $T_{\text{decode}} = 30\text{ ms} + (512 \times 8\text{ ms}) = 4{,}126\text{ ms} \approx 4.13\text{ s}$. Holding row locks on production databases or reserving cloud resources across a 4-second stochastic inference pause introduces catastrophic lock contention, stalls concurrent transactions, and rapidly causes connection pool exhaustion across upstream services.
 3. **Non-Deterministic Policy Stalling:** If the model enters a degenerative repetition loop, triggers a safety filter, or encounters a network partition during decoding, the distributed lock remains pinned indefinitely, precipitating cluster-wide deadlocks.
 
 These architectural divergences are formalized in @tbl-vol3-checkpointing-2pc-vs-sagas.
@@ -197,11 +174,7 @@ When an action fails or triggers an environment error, naive agent orchestrators
 [Agent Prompt]: The previous tool call failed with the error above. Please fix it and retry.
 ```
 
-In an agentic system, this pattern induces severe **Context Poisoning**\index{Context Poisoning}. Autoregressive transformers compute attention scores $A_{ij}$ over all historical tokens $j \le i$:
-
-$$\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left( \frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}} \right) \mathbf{V}$$
-
-When an agent's own flawed action, invalid assumptions, and resulting error traces are preserved in the active Key-Value (KV) cache, the self-attention mechanism assigns substantial probability mass to those historical tokens. The model exhibits strong **confirmation bias** and **recency bias**: rather than recognizing that its underlying hypothesis is invalid, it generates cosmetic permutations of the exact same broken command, as traced in @tbl-vol3-checkpointing-naive-retry-loop.
+In an agentic system, this pattern induces severe **Context Poisoning**\index{Context Poisoning}. Autoregressive transformers compute attention scores over all historical tokens $j \le i$ ($\text{softmax}(\mathbf{Q}\mathbf{K}^T / \sqrt{d_k})\mathbf{V}$). When an agent's own flawed action, invalid assumptions, and resulting error traces are preserved in the active Key-Value (KV) cache, the self-attention mechanism assigns substantial probability mass to those historical tokens. The model exhibits strong **confirmation bias** and **recency bias**: rather than recognizing that its underlying hypothesis is invalid, it generates cosmetic permutations of the exact same broken command, as traced in @tbl-vol3-checkpointing-naive-retry-loop.
 
 | Step | Phase         | Interacting Components    | Action and State Mutation                                   | Failure Mechanism / Consequence                                   |
 |:-----|:--------------|:--------------------------|:------------------------------------------------------------|:------------------------------------------------------------------|
@@ -243,9 +216,7 @@ After transmitting the payload, the agent runtime experiences a network timeout 
 
 If the agent assumes State A and retries the request, it provisions a second cluster, duplicating thousands of dollars per hour in hardware leases. If the agent assumes State B and proceeds to the next step, downstream tasks fail because the cluster endpoint was never captured.
 
-To eliminate this ambiguity, every state-mutating actuation that crosses the Reversibility Boundary must carry a deterministic, cryptographically secure **Idempotency Key**\index{Idempotency Key}. The idempotency key $K_{\text{idempotency}}$ must not be randomly generated at network transmission time; it must be derived deterministically as a hash of the trajectory ID and the causal step counter:
-
-$$K_{\text{idempotency}}(t) = \text{HMAC-SHA256}\left( \text{SecretKey}, \tau_{\text{id}} \parallel t \parallel \text{Hash}(a_t) \right)$$
+To eliminate this ambiguity, every state-mutating actuation that crosses the Reversibility Boundary must carry a deterministic, cryptographically secure **Idempotency Key**\index{Idempotency Key}. The idempotency key $K_{\text{idempotency}}$ must not be randomly generated at network transmission time; it must be derived deterministically as a hash of the trajectory ID and the causal step counter: $K_{\text{idempotency}}(t) = \text{HMAC-SHA256}(\text{SecretKey}, \tau_{\text{id}} \parallel t \parallel \text{Hash}(a_t))$.
 
 When the remote infrastructure gateway receives an actuation request, it records $K_{\text{idempotency}}(t)$ in a transactional deduplication store (e.g., Redis or DynamoDB backed by a lease lock). If a retry arrives bearing an identical key, the gateway bypasses physical actuation and returns the cached result of the original execution. The interaction flow resolving network timeouts is detailed in @tbl-vol3-checkpointing-idempotency-protocol.
 
@@ -271,11 +242,7 @@ This introduces a massive systems disparity:
 
 This represents a **five-to-seven order of magnitude latency divergence**. If the serving system blocks the active agent process synchronously while awaiting human authorization, the agent's attention Key-Value cache remains pinned in accelerator HBM.
 
-Consider an agent running a 70B parameter model with a 64,000-token context on an NVIDIA H100 node. As derived in @sec-vol3-working-sets, a 64k context in Grouped-Query Attention (GQA, 8 KV heads, $d_h=128$, FP16) consumes approximately:
-
-$$M_{\text{KV}} = 2 \times 80 \text{ layers} \times 8 \text{ heads} \times 128 \text{ dim} \times 64{,}000 \text{ tokens} \times 2 \text{ bytes} \approx 20.97\text{ GB}$$
-
-Holding $21\text{ GB}$ of HBM idle for an 8-hour human review window incurs an intolerable infrastructure cost. At prevailing cloud spot prices of \$3.50 per H100-hour, pinning accelerator memory across an 8-hour human pause wastes \$28.00 in idle silicon capital per agent—exceeding the entire computational cost of the trajectory itself.
+Consider an agent running a 70B parameter model with a 64,000-token context on an NVIDIA H100 node. As derived in @sec-vol3-working-sets, a 64k context in Grouped-Query Attention (GQA, 8 KV heads, $d_h=128$, FP16) consumes approximately $M_{\text{KV}} = 2 \times 80\text{ layers} \times 8\text{ heads} \times 128\text{ dim} \times 64{,}000\text{ tokens} \times 2\text{ bytes} \approx 20.97\text{ GB}$. Holding $21\text{ GB}$ of HBM idle for an 8-hour human review window incurs an intolerable infrastructure cost. At prevailing cloud spot prices of \$3.50 per H100-hour, pinning accelerator memory across an 8-hour human pause wastes \$28.00 in idle silicon capital per agent—exceeding the entire computational cost of the trajectory itself.
 
 To survive the Human Oversight Latency Tax, the runtime must implement **Asynchronous State Suspension**\index{Asynchronous State Suspension}: dehydrating the agent's execution state, flushing KV cache blocks to host DRAM or NVMe, unmounting ephemeral container storage, and evicting the execution thread from the GPU scheduler until an out-of-band authorization signal resumes execution.
 
@@ -285,11 +252,7 @@ The Irreversibility Dilemma thus establishes the fundamental dichotomy of autono
 
 To enable rapid recovery from infrastructure crashes and facilitate time-travel debugging without saturating storage buses, an agent runtime must capture consistent execution snapshots. A naive snapshotting approach that serializes the entire process memory space, filesystem tree, and raw GPU activation tensors at every turn triggers catastrophic I/O bottlenecks.
 
-Consider an agent managing an 80-step refactoring workflow. If each snapshot archives a 4 GB container filesystem layer and 20 GB of uncompressed KV activations, saving state at every step writes $80 \times 24\text{ GB} = 1.92\text{ TB}$ of data to disk. Over a PCIe 4.0 x16 interconnect operating at a real-world sequential write bandwidth of $B_{\text{storage}} \approx 6.5\text{ GB/s}$, the agent spends:
-
-$$T_{\text{I/O}} = \frac{1{,}920\text{ GB}}{6.5\text{ GB/s}} \approx 295.4\text{ s} \approx 4.9\text{ minutes}$$
-
-nearly five minutes purely waiting on disk I/O, introducing massive stall cycles into the deliberative reasoning loop.
+Consider an agent managing an 80-step refactoring workflow. If each snapshot archives a 4 GB container filesystem layer and 20 GB of uncompressed KV activations, saving state at every step writes $80 \times 24\text{ GB} = 1.92\text{ TB}$ of data to disk. Over a PCIe 4.0 x16 interconnect operating at a real-world sequential write bandwidth of $B_{\text{storage}} \approx 6.5\text{ GB/s}$, the agent spends $T_{\text{I/O}} = 1{,}920\text{ GB} / 6.5\text{ GB/s} \approx 295.4\text{ s} \approx 4.9\text{ minutes}$ purely waiting on disk I/O, introducing massive stall cycles into the deliberative reasoning loop.
 
 Resilient architectures decouple snapshot durability from physical memory duplication through two orthogonal systems mechanisms:
 
@@ -403,18 +366,10 @@ How does the performance of an append-only WAL compare to naive full-state snaps
    The entire delta payload spans $L \approx 3.8\text{ KB} \approx 4\text{ KB}$ per execution step.
 
 2. **Storage Volume Reduction:**
-   For an extended 80-step refactoring trajectory, the complete append-only WAL occupies:
-   $$M_{\text{WAL}} = 80 \text{ steps} \times 4\text{ KB/step} = 320\text{ KB}$$
-   Compared to naive full-state snapshots that write $1.92\text{ TB}$ across 80 steps (as calculated earlier in this section), the event-sourced WAL delivers a storage reduction factor of:
-   $$\text{Storage Reduction} = \frac{1.92 \times 10^{12}\text{ bytes}}{3.2 \times 10^5\text{ bytes}} = 6{,}000{,}000\times$$
-   The entire trajectory history fits comfortably in a fraction of a single CPU L3 cache.
+   For an extended 80-step refactoring trajectory, the complete append-only WAL occupies $M_{\text{WAL}} = 80 \text{ steps} \times 4\text{ KB/step} = 320\text{ KB}$. Compared to naive full-state snapshots that write $1.92\text{ TB}$ across 80 steps (as calculated earlier in this section), the event-sourced WAL delivers a storage reduction factor of $\frac{1.92 \times 10^{12}\text{ bytes}}{3.2 \times 10^5\text{ bytes}} = 6{,}000{,}000\times$. The entire trajectory history fits comfortably in a fraction of a single CPU L3 cache.
 
 3. **Serialization Latency and NVMe Bus Tax:**
-   Appending a 4 KB record to an NVMe SSD file buffer requires sub-microsecond CPU time. Executing a synchronous, blocking `fsync()` system call to flush the SSD write cache to non-volatile flash requires:
-   $$T_{\text{fsync}} \approx 20\text{ to }40\ \mu\text{s} \quad (0.02\text{ to }0.04\text{ ms})$$
-   Recall that generating 512 tokens on an H100 GPU requires $T_{\text{decode}} \approx 4{,}126\text{ ms}$. The relative durability overhead incurred by write-ahead logging before crossing the Reversibility Boundary is:
-   $$\text{Durability Tax} = \frac{T_{\text{fsync}}}{T_{\text{decode}}} = \frac{0.04\text{ ms}}{4{,}126\text{ ms}} \approx 0.00097\% \approx 10^{-5}$$
-   Durable persistence adds less than one-thousandth of 1 percent to turn latency.
+   Appending a 4 KB record to an NVMe SSD file buffer requires sub-microsecond CPU time. Executing a synchronous, blocking `fsync()` system call to flush the SSD write cache to non-volatile flash requires $T_{\text{fsync}} \approx 20\text{ to }40\ \mu\text{s} \ (0.02\text{ to }0.04\text{ ms})$. Recall that generating 512 tokens on an H100 GPU requires $T_{\text{decode}} \approx 4{,}126\text{ ms}$. The relative durability overhead incurred by write-ahead logging before crossing the Reversibility Boundary is $\text{Durability Tax} = T_{\text{fsync}} / T_{\text{decode}} = 0.04\text{ ms} / 4{,}126\text{ ms} \approx 0.00097\text{ percent} \approx 10^{-5}$. Durable persistence adds less than one-thousandth of 1 percent to turn latency.
 
 4. **Crash Hydration and RTO Bounds:**
    When a node panics, a replacement worker reads the 320 KB WAL sequentially from persistent NVMe storage in under $0.1\text{ ms}$ ($3.5\text{ GB/s}$ read bandwidth). Applying the left-fold composition operator over 80 records to reconstruct the active Agent Control Block requires approximately $2\text{ ms}$ of CPU time. Remounting the OverlayFS workspace takes under $10\text{ ms}$. The system achieves an end-to-end Recovery Time Objective of $\text{RTO} < 50\text{ ms}$—restoring full execution state four orders of magnitude faster than a prompt-based re-execution restart ($\approx 330\text{ s}$).
@@ -425,11 +380,7 @@ When an agent modifies files in its local workspace or forks speculative reasoni
 
 #### Host-side filesystem virtualization: OverlayFS
 
-To sandbox filesystem modifications, the agent runtime provisions an ephemeral **OverlayFS**\index{OverlayFS} mount for the workspace:
-
-$$\text{Workspace} = \text{OverlayFS}(\text{LowerDir}=\text{BaseRepo}, \text{UpperDir}=\Delta \text{Filesystem}, \text{WorkDir}=\text{Staging})$$
-
-The `LowerDir` contains the read-only production repository. When the agent reads a file, the request falls through directly to the `LowerDir`. When the agent modifies or creates a file, the Linux kernel intercepts the write operation and copies only the affected file blocks into the mutable `UpperDir`.
+To sandbox filesystem modifications, the agent runtime provisions an ephemeral **OverlayFS**\index{OverlayFS} mount for the workspace: $\text{Workspace} = \text{OverlayFS}(\text{LowerDir}=\text{BaseRepo}, \text{UpperDir}=\Delta \text{Filesystem}, \text{WorkDir}=\text{Staging})$. The `LowerDir` contains the read-only production repository. When the agent reads a file, the request falls through directly to the `LowerDir`. When the agent modifies or creates a file, the Linux kernel intercepts the write operation and copies only the affected file blocks into the mutable `UpperDir`.
 
 Creating a checkpoint at step $t$ requires zero data copying of the base repository: the runtime simply archives or snapshots the lightweight `UpperDir` (typically spanning tens of kilobytes rather than gigabytes). Rolling back to a prior checkpoint requires unmounting the workspace, discarding the corrupted `UpperDir`, and attaching a clean or previous `UpperDir` layer—an operation that completes in under $10\text{ milliseconds}$.
 
@@ -446,23 +397,11 @@ At the accelerator memory layer, speculative tree search (e.g., Tree-of-Thoughts
 
 : **Copy-on-Write PagedAttention Block Table Mapping**: Logical-to-physical block table virtualization across speculative trajectory forks sharing prefix activations. {#tbl-vol3-checkpointing-cow-page-tables tbl-colwidths="[15,20,20,15,20,10]"}
 
-Let an initial trajectory share a prompt sequence of length $S_{\text{shared}}$ tokens. Rather than allocating independent physical memory for each of $B$ speculative branches, the PagedAttention memory manager sets the logical block pointers for all $B$ child trajectories to reference the *identical physical HBM frames* allocated to the parent, incrementing the reference counter of each shared block frame:
-
-$$\forall b \in \{1, \dots, B\}, \quad \text{BlockTable}_b[0 \dots k] = \text{BlockTable}_{\text{parent}}[0 \dots k]$$
-
-$$\text{RefCount}(\text{Frame}_i) = B, \quad \forall i \le k$$
+Let an initial trajectory share a prompt sequence of length $S_{\text{shared}}$ tokens. Rather than allocating independent physical memory for each of $B$ speculative branches, the PagedAttention memory manager sets the logical block pointers for all $B$ child trajectories to reference the *identical physical HBM frames* allocated to the parent ($\text{BlockTable}_b[0 \dots k] = \text{BlockTable}_{\text{parent}}[0 \dots k]$), incrementing the reference counter of each shared block frame ($\text{RefCount}(\text{Frame}_i) = B$ for all $i \le k$).
 
 Physical memory allocation is deferred until a specific branch generates new tokens during its decode phase. When Branch $A$ emits a token that spills into a new block, the memory manager allocates a fresh physical frame $\text{Frame}_{\text{new}}$ exclusively for Branch $A$, leaving the parent frames unmutated and shared among the remaining branches.
 
-The total memory footprint $M_{\text{total}}$ across $B$ speculative branches under Copy-on-Write allocation is:
-
-$$M_{\text{total}} = M_{\text{prefix}}(S_{\text{shared}}) + \sum_{b=1}^B M_{\text{branch}}^{(b)}(S_{\text{unique}}^{(b)})$$
-
-Compared to naive duplication ($B \times [M_{\text{prefix}} + M_{\text{branch}}]$), CoW paging reduces High-Bandwidth Memory consumption by:
-
-$$\text{Memory Savings} = (B - 1) \cdot M_{\text{prefix}}(S_{\text{shared}})$$
-
-For a swarm of $B = 16$ candidate reasoning paths branching from a 32,000-token analysis prompt, CoW memory virtualization eliminates over $90\%$ of physical HBM allocation.
+The total memory footprint across $B$ speculative branches under Copy-on-Write allocation is $M_{\text{total}} = M_{\text{prefix}}(S_{\text{shared}}) + \sum_{b=1}^B M_{\text{branch}}^{(b)}(S_{\text{unique}}^{(b)})$. Compared to naive duplication ($B \times [M_{\text{prefix}} + M_{\text{branch}}]$), CoW paging reduces High-Bandwidth Memory consumption by $(B - 1) \cdot M_{\text{prefix}}(S_{\text{shared}})$. For a swarm of $B = 16$ candidate reasoning paths branching from a 32,000-token analysis prompt, CoW memory virtualization eliminates over 90 percent of physical HBM allocation.
 
 ### Checkpoint cadence and optimal snapshot intervals
 
@@ -475,28 +414,11 @@ This scheduling problem exposes a fundamental systems trade-off between **checkp
 
 #### First-principles derivation of the Young checkpoint trade-off
 
-We can derive the mathematically optimal balance from first principles [@young1974]. Consider an agent workflow running over an operational horizon $T$. System failures—encompassing both physical hardware faults and semantic hallucinations—follow a Poisson process with Mean Time Between Failures $M_{\text{MTBF}}$ (arrival rate $\lambda = 1 / M_{\text{MTBF}}$). Let:
+We can derive the mathematically optimal balance from first principles [@young1974]. Consider an agent workflow running over an operational horizon $T$. System failures—encompassing both physical hardware faults and semantic hallucinations—follow a Poisson process with Mean Time Between Failures $M_{\text{MTBF}}$ (arrival rate $\lambda = 1 / M_{\text{MTBF}}$). Let $T_{\text{save}}$ denote the time required to serialize and durably commit a consolidated checkpoint snapshot, and $\Delta t$ denote the temporal checkpoint interval.
 
-* $T_{\text{save}}$ denote the time required to serialize and durably commit a consolidated checkpoint snapshot.
-* $\Delta t$ denote the temporal checkpoint interval.
+Over an execution duration $T$, the system performs $T / \Delta t$ checkpoints. The fraction of wall-clock time spent performing state serialization is $\mathcal{O}_{\text{save}}(\Delta t) = T_{\text{save}} / \Delta t$. Failures occur at rate $\lambda = 1 / M_{\text{MTBF}}$. Under the Poisson arrival assumption, failure events are uniformly distributed across any given checkpoint interval. A failure strikes, on average, halfway through an interval ($\Delta t / 2$). When this occurs, the runtime must roll back to the last snapshot and re-execute all intervening reasoning turns. The fractional time lost to recovery recomputation is $\mathcal{O}_{\text{recompute}}(\Delta t) = (\Delta t / 2) / M_{\text{MTBF}} = \Delta t / (2 M_{\text{MTBF}})$.
 
-Over an execution duration $T$, the system performs $T / \Delta t$ checkpoints. The fraction of wall-clock time spent performing state serialization is:
-
-$$\mathcal{O}_{\text{save}}(\Delta t) = \frac{T_{\text{save}}}{\Delta t}$$
-
-Failures occur at rate $\lambda = 1 / M_{\text{MTBF}}$. Under the Poisson arrival assumption, failure events are uniformly distributed across any given checkpoint interval. A failure strikes, on average, halfway through an interval ($\Delta t / 2$). When this occurs, the runtime must roll back to the last snapshot and re-execute all intervening reasoning turns. The fractional time lost to recovery recomputation is:
-
-$$\mathcal{O}_{\text{recompute}}(\Delta t) = \frac{\Delta t / 2}{M_{\text{MTBF}}} = \frac{\Delta t}{2 M_{\text{MTBF}}}$$
-
-The total fractional compute waste $\mathcal{W}(\Delta t)$ is the sum of serialization overhead and recovery recomputation:
-
-$$\mathcal{W}(\Delta t) = \mathcal{O}_{\text{save}}(\Delta t) + \mathcal{O}_{\text{recompute}}(\Delta t) = \frac{T_{\text{save}}}{\Delta t} + \frac{\Delta t}{2 M_{\text{MTBF}}}$$
-
-Notice the opposing curves: as $\Delta t \to 0$, checkpoint overhead $\frac{T_{\text{save}}}{\Delta t} \to \infty$; as $\Delta t \to \infty$, recompute waste $\frac{\Delta t}{2 M_{\text{MTBF}}} \to \infty$. To find the optimal checkpoint interval $T_{\text{opt}} = \Delta t^*$ that minimizes total waste, we take the derivative with respect to $\Delta t$ and set it to zero:
-
-$$\frac{d\mathcal{W}}{d\Delta t} = -\frac{T_{\text{save}}}{\Delta t^2} + \frac{1}{2 M_{\text{MTBF}}} = 0$$
-
-Solving for $\Delta t^*$ yields Young's classical first-order checkpoint formula (@eq-checkpoint-young-formula):
+The total fractional compute waste $\mathcal{W}(\Delta t) = \mathcal{O}_{\text{save}}(\Delta t) + \mathcal{O}_{\text{recompute}}(\Delta t) = T_{\text{save}} / \Delta t + \Delta t / (2 M_{\text{MTBF}})$ exhibits opposing curves: as $\Delta t \to 0$, checkpoint overhead $T_{\text{save}} / \Delta t \to \infty$; as $\Delta t \to \infty$, recompute waste $\Delta t / (2 M_{\text{MTBF}}) \to \infty$. Setting the derivative $d\mathcal{W}/d\Delta t = -T_{\text{save}} / \Delta t^2 + 1 / (2 M_{\text{MTBF}}) = 0$ yields Young's classical first-order checkpoint formula (@eq-checkpoint-young-formula):
 
 $$T_{\text{opt}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}}$$ {#eq-checkpoint-young-formula}
 
@@ -508,25 +430,15 @@ Young's derivation assumes that process restart and hydration latency is negligi
 
 $$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}} \cdot \left[ 1 + \frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \right] - T_{\text{save}} \quad \left(\text{for } T_{\text{save}} < 2 M_{\text{MTBF}}\right)$$ {#eq-checkpoint-daly-formula}
 
-In modern agent runtimes, state serialization is lightweight ($T_{\text{save}} \ll M_{\text{MTBF}}$, typically seconds versus tens of minutes). As a result, the second-order correction term $\frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}}$ adjusts the interval by less than $1\%$. The intuitive first-order Young formula therefore serves as an exceptionally reliable operational guide for runtime schedulers.[^daly-appendix]
+In modern agent runtimes, state serialization is lightweight ($T_{\text{save}} \ll M_{\text{MTBF}}$, typically seconds versus tens of minutes). As a result, the second-order correction term $\frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}}$ adjusts the interval by less than 1 percent. The intuitive first-order Young formula therefore serves as an exceptionally reliable operational guide for runtime schedulers.[^daly-appendix]
 
 [^daly-appendix]: For the full perturbation expansion and Taylor derivation of Daly's formula under nonzero restart overhead $T_{\text{restart}}$, see @sec-vol3-appendix-math-daly.
 
-In an autonomous agent cluster, $M_{\text{MTBF}}$ must reflect both **physical infrastructure failures** (spot instance preemptions, hardware faults) and **fail-plausible semantic faults** requiring trajectory rollback:
+In an autonomous agent cluster, $M_{\text{MTBF}}$ must reflect both **physical infrastructure failures** (spot instance preemptions, hardware faults) and **fail-plausible semantic faults** requiring trajectory rollback: $1 / M_{\text{MTBF}} = 1 / \text{MTBF}_{\text{infra}} + 1 / \text{MTBF}_{\text{semantic}}$.
 
-$$\frac{1}{M_{\text{MTBF}}} = \frac{1}{\text{MTBF}_{\text{infra}}} + \frac{1}{\text{MTBF}_{\text{semantic}}}$$
+Suppose an agent fleet operates on cloud spot instances with a physical preemption mean time $\text{MTBF}_{\text{infra}} = 4\text{ hours} = 14{,}400\text{ s}$. Furthermore, empirical tracking indicates that the agent policy encounters a fail-plausible semantic defect requiring rollback on average every $\text{MTBF}_{\text{semantic}} = 30\text{ minutes} = 1{,}800\text{ s}$. The combined mean time between recovery events is $1 / M_{\text{MTBF}} = 1 / 14{,}400 + 1 / 1{,}800 = (1 + 8) / 14{,}400 = 9 / 14{,}400 = 1 / 1{,}600\text{ s}$, yielding $M_{\text{MTBF}} = 1{,}600\text{ seconds}$ ($\approx 26.7\text{ minutes}$).
 
-Suppose an agent fleet operates on cloud spot instances with a physical preemption mean time $\text{MTBF}_{\text{infra}} = 4\text{ hours} = 14{,}400\text{ s}$. Furthermore, empirical tracking indicates that the agent policy encounters a fail-plausible semantic defect requiring rollback on average every $\text{MTBF}_{\text{semantic}} = 30\text{ minutes} = 1{,}800\text{ s}$. The combined mean time between recovery events is:
-
-$$\frac{1}{M_{\text{MTBF}}} = \frac{1}{14{,}400} + \frac{1}{1{,}800} = \frac{1 + 8}{14{,}400} = \frac{9}{14{,}400} = \frac{1}{1{,}600\text{ s}}$$
-
-yielding $M_{\text{MTBF}} = 1{,}600\text{ seconds}$ ($\approx 26.7\text{ minutes}$).
-
-If serializing a full differential ACB and flushing the OverlayFS UpperDir layer requires $T_{\text{save}} = 2.5\text{ seconds}$, Young's optimal checkpoint interval calculates as:
-
-$$T_{\text{opt}} = \sqrt{2 \times 2.5\text{ s} \times 1{,}600\text{ s}} = \sqrt{8{,}000} \approx 89.44\text{ seconds}$$
-
-The runtime must commit a consistent state checkpoint approximately every 90 seconds. If individual agent reasoning turns average 15 seconds, the scheduler establishes an invariant: **Commit a differential checkpoint every 6 execution turns**.
+If serializing a full differential ACB and flushing the OverlayFS UpperDir layer requires $T_{\text{save}} = 2.5\text{ seconds}$, Young's optimal checkpoint interval calculates as $T_{\text{opt}} = \sqrt{2 \times 2.5\text{ s} \times 1{,}600\text{ s}} = \sqrt{8{,}000} \approx 89.44\text{ seconds}$. The runtime must commit a consistent state checkpoint approximately every 90 seconds. If individual agent reasoning turns average 15 seconds, the scheduler establishes an invariant: **Commit a differential checkpoint every 6 execution turns**.
 
 ::: {#chk-vol3-07-young-daly-cadence .callout-checkpoint title="Checkpoint interval and Young-Daly scaling"}
 
@@ -559,13 +471,7 @@ The runtime must orchestrate a sequence of compensating actions that semanticall
 
 ### The structure of an agent saga
 
-Originally formulated by Hector Garcia-Molina and Kenneth Salem [-@garciamolina1987sagas] for long-lived database transactions, a Saga decomposes a distributed execution sequence into a collection of $n$ discrete, forward transactions:
-
-$$\mathcal{T} = \{ T_1, T_2, \dots, T_n \}$$
-
-Each individual forward transaction $T_i$ commits its mutations locally and immediately releases any local locks. Crucially, each forward transaction $T_i$ is paired with a corresponding **Compensating Transaction**\index{Compensating Transaction} $C_i$:
-
-$$\mathcal{C} = \{ C_1, C_2, \dots, C_{n-1} \}$$
+Originally formulated by Hector Garcia-Molina and Kenneth Salem [-@garciamolina1987sagas] for long-lived database transactions, a Saga decomposes a distributed execution sequence into a collection of $n$ discrete, forward transactions $\mathcal{T} = \{ T_1, T_2, \dots, T_n \}$. Each individual forward transaction $T_i$ commits its mutations locally and immediately releases any local locks. Crucially, each forward transaction $T_i$ is paired with a corresponding **Compensating Transaction**\index{Compensating Transaction} $C_i \in \mathcal{C} = \{ C_1, C_2, \dots, C_{n-1} \}$.
 
 The forward transaction sequence and compensating rollback orchestration are diagrammed in @fig-vol3-checkpoint-agent-saga.
 
@@ -576,9 +482,7 @@ The forward transaction sequence and compensating rollback orchestration are dia
 A compensating transaction $C_i$ is a deterministic handler designed to semantically neutralize or invert the observable side effects of forward transaction $T_i$. The Saga Execution Coordinator enforces the following formal execution guarantees:
 
 * **Forward Progression Guarantee:** The sequence $T_1, T_2, \dots, T_n$ executes sequentially. If all $n$ transactions succeed, the saga commits and terminates.
-* **Backward Compensation Guarantee:** If transaction $T_k$ fails ($1 \le k \le n$), the forward trajectory halts immediately. The coordinator initiates a compensating rollback sequence, executing the compensating transactions in **strict reverse chronological order**:
-
-$$\text{Rollback Sequence} = C_{k-1} \to C_{k-2} \to \dots \to C_2 \to C_1$$
+* **Backward Compensation Guarantee:** If transaction $T_k$ fails ($1 \le k \le n$), the forward trajectory halts immediately. The coordinator initiates a compensating rollback sequence, executing the compensating transactions in **strict reverse chronological order**: $\text{Rollback Sequence} = C_{k-1} \to C_{k-2} \to \dots \to C_2 \to C_1$.
 
 Once $C_1$ completes, the external world is restored to a semantically consistent baseline, leaving zero dangling resources or orphaned infrastructure.
 
@@ -636,21 +540,9 @@ When forward transaction $T_i$ executes successfully, its returned execution met
 
 What is the end-to-end latency penalty incurred when an agent saga encounters a failure at step $k$?
 
-Let:
+Let $T_{\text{fwd}}(i)$ denote the latency of forward transaction $T_i$, $T_{\text{comp}}(j)$ denote the latency of compensating transaction $C_j$, and $p_i$ denote the probability that forward transaction $T_i$ succeeds, given that all prior transactions $T_1 \dots T_{i-1}$ succeeded.
 
-* $T_{\text{fwd}}(i)$ denote the latency of forward transaction $T_i$.
-* $T_{\text{comp}}(j)$ denote the latency of compensating transaction $C_j$.
-* $p_i$ denote the probability that forward transaction $T_i$ succeeds, given that all prior transactions $T_1 \dots T_{i-1}$ succeeded.
-
-If a failure occurs at step $k$, the forward transactions $T_1 \dots T_{k-1}$ have executed successfully, $T_k$ has executed and failed, and the compensating transactions $C_{k-1} \dots C_1$ must execute in reverse order. The total elapsed execution time $T_{\text{saga}}(k)$ spent before the system returns to a consistent baseline is:
-
-$$T_{\text{saga}}(k) = \sum_{i=1}^k T_{\text{fwd}}(i) + \sum_{j=1}^{k-1} T_{\text{comp}}(j)$$
-
-The probability $P(\text{fail at } k)$ that execution halts precisely at step $k$ is:
-
-$$P(\text{fail at } k) = (1 - p_k) \prod_{m=1}^{k-1} p_m$$
-
-The expected latency $\mathbb{E}[T_{\text{saga}}]$ across all possible execution outcomes over an $N$-step saga evaluates to @eq-checkpoint-expected-saga:
+If a failure occurs at step $k$, the forward transactions $T_1 \dots T_{k-1}$ have executed successfully, $T_k$ has executed and failed, and the compensating transactions $C_{k-1} \dots C_1$ must execute in reverse order. The total elapsed execution time spent before the system returns to a consistent baseline is $T_{\text{saga}}(k) = \sum_{i=1}^k T_{\text{fwd}}(i) + \sum_{j=1}^{k-1} T_{\text{comp}}(j)$. The probability $P(\text{fail at } k) = (1 - p_k) \prod_{m=1}^{k-1} p_m$ that execution halts precisely at step $k$ yields the expected latency $\mathbb{E}[T_{\text{saga}}]$ across all possible execution outcomes over an $N$-step saga (@eq-checkpoint-expected-saga):
 
 $$\mathbb{E}[T_{\text{saga}}] = \left( \prod_{m=1}^N p_m \right) \sum_{i=1}^N T_{\text{fwd}}(i) + \sum_{k=1}^N \left[ (1 - p_k) \prod_{m=1}^{k-1} p_m \right] T_{\text{saga}}(k)$$ {#eq-checkpoint-expected-saga}
 
@@ -665,24 +557,9 @@ We can ground @eq-checkpoint-expected-saga by walking through the numbers for th
 
 Let us compare the latency profiles:
 
-1. **Successful Execution:** If all transactions succeed (probability $0.99 \times 0.98 \times 0.95 \times 0.70 \approx 0.645$), total elapsed time is:
-   $$T_{\text{success}} = 1.2 + 0.9 + 4.5 + 2.0 = 8.6\text{ seconds}$$
-2. **Failure at Step 4:** If transaction 4 fails ($1 - p_4 = 0.30$):
-   * Forward execution elapsed: $1.2 + 0.9 + 4.5 + 2.0 = 8.6\text{ s}$
-   * Backward compensation sequence ($C_3 \to C_2 \to C_1$): $3.0 + 0.6 + 0.8 = 4.4\text{ s}$
-   * Total aborted run latency:
-     $$T_{\text{saga}}(4) = 8.6\text{ s} + 4.4\text{ s} = 13.0\text{ seconds}$$
-   The orchestrator spends $13.0\text{ seconds}$—over $1.5\times$ the forward execution budget—only to return to its initial state. In 30 percent of attempts reaching step 4, the runtime incurs massive latency and burns network bandwidth purely accumulating and dismantling state.
-
-3. **The Fail-Fast Reordering Optimization:**
-   What happens if the architect reorders the saga to validate the risky external dependency first?
-   If a read-only credit check or the vendor procurement transaction is scheduled at Step 1 ($k=1$):
-
-   * Forward execution until failure: $2.0\text{ s}$
-   * Backward compensation: $0\text{ s}$ (no prior infrastructure was provisioned; $C_0 = \emptyset$)
-   * Total aborted latency:
-     $$T_{\text{saga}}(1) = 2.0\text{ seconds}$$
-   Failing fast reduces aborted latency from $13.0\text{ s}$ to $2.0\text{ s}$—an **$85\%$ reduction in wasted rollback time**.
+1. **Successful Execution:** If all transactions succeed (probability $0.99 \times 0.98 \times 0.95 \times 0.70 \approx 0.645$), total elapsed time is $T_{\text{success}} = 1.2 + 0.9 + 4.5 + 2.0 = 8.6\text{ seconds}$.
+2. **Failure at Step 4:** If transaction 4 fails ($1 - p_4 = 0.30$), forward execution elapsed requires $1.2 + 0.9 + 4.5 + 2.0 = 8.6\text{ s}$ and the backward compensation sequence ($C_3 \to C_2 \to C_1$) requires $3.0 + 0.6 + 0.8 = 4.4\text{ s}$, yielding total aborted run latency $T_{\text{saga}}(4) = 8.6\text{ s} + 4.4\text{ s} = 13.0\text{ seconds}$. The orchestrator spends $13.0\text{ seconds}$—over $1.5\times$ the forward execution budget—only to return to its initial state. In 30 percent of attempts reaching step 4, the runtime incurs massive latency and burns network bandwidth purely accumulating and dismantling state.
+3. **The Fail-Fast Reordering Optimization:** What happens if the architect reorders the saga to validate the risky external dependency first? If a read-only credit check or the vendor procurement transaction is scheduled at Step 1 ($k=1$), forward execution until failure requires $2.0\text{ s}$ and backward compensation requires $0\text{ s}$ (no prior infrastructure was provisioned; $C_0 = \emptyset$), yielding total aborted latency $T_{\text{saga}}(1) = 2.0\text{ seconds}$. Failing fast reduces aborted latency from $13.0\text{ s}$ to $2.0\text{ s}$—an **85 percent reduction in wasted rollback time**.
 
 This derivation establishes an essential systems architectural rule: **Schedule distributed tool operations in ascending order of reliability ($p_i$) and descending order of compensation cost ($T_{\text{comp}}$) to minimize cumulative compensation debt upon failure.**
 
@@ -762,23 +639,11 @@ Why does an agent re-executed with identical prompt tokens and identical random 
 
 Even if all external software inputs are perfectly recorded, modern deep learning inference hardware is inherently non-deterministic at the bit level.
 
-In IEEE 754 floating-point arithmetic, addition is **not associative**:
+In IEEE 754 floating-point arithmetic, addition is **not associative**: $(a + b) + c \neq a + (b + c)$.
 
-$$(a + b) + c \neq a + (b + c)$$
+Consider three numbers represented in 16-bit Brain Floating Point (BF16, with 8 exponent bits and 7 mantissa bits): $a = 1.0 \times 2^0 = 1.0$, $b = 1.0 \times 2^{-8} \approx 0.00390625$, and $c = -1.0 \times 2^0 = -1.0$.
 
-Consider three numbers represented in 16-bit Brain Floating Point (BF16, with 8 exponent bits and 7 mantissa bits):
-
-$$a = 1.0 \times 2^0 = 1.0, \quad b = 1.0 \times 2^{-8} \approx 0.00390625, \quad c = -1.0 \times 2^0 = -1.0$$
-
-Evaluating $(a + c) + b$:
-
-$$(1.0 + (-1.0)) + b = 0.0 + 1.0 \times 2^{-8} = 1.0 \times 2^{-8}$$
-
-Evaluating $(a + b) + c$: When adding $b$ to $a$, the smaller operand $b$ must be shifted right by 8 bits to align exponents. Because BF16 possesses only 7 bits of mantissa, the bits of $b$ are shifted out entirely and truncated:
-
-$$a + b = 1.0 \quad (\text{under BF16 rounding})$$
-
-$$(a + b) + c = 1.0 + (-1.0) = 0.0$$
+Evaluating $(a + c) + b$ gives $(1.0 + (-1.0)) + b = 0.0 + 1.0 \times 2^{-8} = 1.0 \times 2^{-8}$. Evaluating $(a + b) + c$, however, requires shifting the smaller operand $b$ right by 8 bits to align exponents when adding $b$ to $a$. Because BF16 possesses only 7 bits of mantissa, the bits of $b$ are shifted out entirely and truncated, yielding $a + b = 1.0$ under BF16 rounding, and $(a + b) + c = 1.0 + (-1.0) = 0.0$.
 
 The two summation orders produce completely distinct floating-point results: $1.0 \times 2^{-8} \neq 0.0$. These sources of accelerator non-determinism are summarized in @tbl-vol3-checkpointing-hardware-nondeterminism.
 
@@ -799,13 +664,7 @@ On an NVIDIA H100 GPU containing 132 Streaming Multiprocessors (SMs) executing w
 4. **cuBLAS Split-K GEMM Reductions:** In projection layers and linear heads, dense general matrix multiplication (GEMM) operations employ cuBLAS split-K parallelization, partitioning large inner-product reduction loops along the $K$-dimension across separate thread blocks. These blocks accumulate partial sums into global HBM buffers via non-deterministic atomic additions whose completion order fluctuates with memory bus arbitration.
 5. **cuRAND/Philox Counter Desynchronization:** Hardware-accelerated stochastic sampling utilizes parallel PRNG kernels such as NVIDIA cuRAND Philox4x32-10. Under continuous batching with dynamic prompt lengths, worker warps advance PRNG counter states at variable rates. Unless the exact 64-bit generator key, seed, and sequence offset are pinned in the Agent Control Block, identical starting seeds produce diverging sampling streams across runs.
 
-Let $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$ denote the logit vector emitted by a foundation model before softmax. If the top two most probable tokens $v_1$ and $v_2$ have logits separated by a margin smaller than the hardware floating-point divergence threshold $\epsilon_{\text{fp}}$:
-
-$$\Delta z = |z_{v_1} - z_{v_2}| \le \epsilon_{\text{fp}}$$
-
-a single floating-point rounding variation flips the greedy $\text{argmax}$ token selection:
-
-$$\text{Token}_t = v_2 \quad \text{instead of} \quad v_1$$
+Let $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$ denote the logit vector emitted by a foundation model before softmax. If the top two most probable tokens $v_1$ and $v_2$ have logits separated by a margin smaller than the hardware floating-point divergence threshold $\epsilon_{\text{fp}}$ ($\Delta z = |z_{v_1} - z_{v_2}| \le \epsilon_{\text{fp}}$), a single floating-point rounding variation flips the greedy $\text{argmax}$ token selection to $\text{Token}_t = v_2$ instead of $v_1$.
 
 Consider the physical scale of this instability: in a 70B parameter model with vocabulary size $|\mathcal{V}| = 128{,}000$, output logits typically span magnitudes between $-20$ and $+20$. In 16-bit brain floating-point (BF16), the 7-bit mantissa provides approximately 2 to 3 decimal digits of precision ($\epsilon_{\text{mach}} = 2^{-7} \approx 0.0078$). Across thousands of parallel reduction operations and 132 SMs, microarchitectural thread-arrival jitter introduces logit noise on the order of $\epsilon_{\text{fp}} \approx 10^{-3}\text{ to }10^{-4}$. If candidate token $v_1$ ("`deploy`") has logit $14.802$ and candidate token $v_2$ ("`delete`") has logit $14.800$, the margin is $\Delta z = 0.002 \le \epsilon_{\text{fp}}$. A single reordered warp reduction flips the argmax from "`deploy`" to "`delete`".
 
@@ -839,8 +698,7 @@ During normal execution, the agent interacts with external environments through 
 When hydrating an agent after a node crash or during post-mortem root cause analysis, the runtime enforces **The Replay Invariant**\index{Replay Invariant}:
 
 ::: {#dfn-replay-invariant .callout-definition title="The replay invariant"}
-**During trajectory replay, external mutating tools are never re-executed.** The physical network interface controller is disabled or stubbed. When the agent process emits an action $a_t$, the runtime intercepts the invocation, validates that $a_t$ matches the logged action hash, and injects the recorded observation $o_t^{\text{recorded}}$ directly from the Write-Ahead Log:
-$$o_t^{\text{replay}} = \text{WAL}.\text{lookup}(\tau_{\text{id}}, t) \equiv o_t^{\text{record}}$$
+**During trajectory replay, external mutating tools are never re-executed.** The physical network interface controller is disabled or stubbed. When the agent process emits an action $a_t$, the runtime intercepts the invocation, validates that $a_t$ matches the logged action hash, and injects the recorded observation $o_t^{\text{recorded}}$ directly from the Write-Ahead Log: $o_t^{\text{replay}} = \text{WAL}.\text{lookup}(\tau_{\text{id}}, t) \equiv o_t^{\text{record}}$.
 :::
 
 By feeding previously recorded observations directly into the context window, the runtime decouples the replay from external environment volatility. Even if the remote database has evolved or third-party webhooks have changed, the agent observes the identical historical reality.
@@ -866,9 +724,7 @@ Time-travel debugging empowers developers to:
 
 1. **Step Backward and Forward:** Navigate an agent trajectory turn-by-turn, inspecting the exact token attention probabilities, KV cache states, and filesystem UpperDir diffs at each step.
 2. **Isolate Divergence Points:** Compare two executions that diverged from an identical baseline, computing semantic diffs across intermediate reasoning traces to isolate the exact turn where cognitive drift began.
-3. **Counterfactual Forking:** Rewind execution to turn $k$, mutate a system instruction, alter a tool schema, or provide an alternative observation, and fork a new trajectory branch $\tau'$:
-
-$$\tau' = \tau_{0 \dots k} \cup (s_{k+1}', a_{k+1}', \dots)$$
+3. **Counterfactual Forking:** Rewind execution to turn $k$, mutate a system instruction, alter a tool schema, or provide an alternative observation, and fork a new trajectory branch $\tau' = \tau_{0 \dots k} \cup (s_{k+1}', a_{k+1}', \dots)$.
 
 Because parent state blocks are managed via Copy-on-Write page tables and OverlayFS layers, counterfactual branches materialize in milliseconds without duplicating underlying disk or memory infrastructure.
 
@@ -881,15 +737,7 @@ The convergence of append-only Write-Ahead Logging, Copy-on-Write memory virtual
 
 Appending error strings directly into an agent's context window ("The previous tool call failed, please fix it") does not achieve dependable recovery. Because autoregressive transformers attend across all preceding tokens in the context window, the model's own flawed reasoning remains resident in the active Key-Value (KV) cache. The model exhibits strong confirmation bias and recency bias, generating cosmetic permutations of the exact same broken logic.
 
-Consider an agent executing a multi-step refactor. Let the probability of an unassisted model correcting its own defect given a poisoned context be $p_{\text{correct}} \le 0.15$. Across $k = 4$ conversational retry iterations, the cumulative probability of repeated failure evaluates to:
-
-$$P(\text{failure}) = (1 - p_{\text{correct}})^k \ge (1 - 0.15)^4 = (0.85)^4 \approx 0.522$$
-
-More critically, each retry appends hundreds of tokens of useless traceback data to the context window. For an agent operating with an 80k-token context, 4 failed retry turns waste:
-
-$$\text{Wasted Compute} = 4 \times 80{,}000 \text{ tokens} \times 2 P_{\text{model}} \approx 6.4 \times 10^{14} \text{ FLOPs}$$
-
-accelerating context degradation and driving up serving costs. Dependable recovery requires halting execution, pruning the poisoned turn from the KV cache, and restoring state from a verified checkpoint.
+Consider an agent executing a multi-step refactor. Let the probability of an unassisted model correcting its own defect given a poisoned context be $p_{\text{correct}} \le 0.15$. Across $k = 4$ conversational retry iterations, the cumulative probability of repeated failure evaluates to $P(\text{failure}) = (1 - p_{\text{correct}})^k \ge (1 - 0.15)^4 = (0.85)^4 \approx 0.522$. More critically, each retry appends hundreds of tokens of useless traceback data to the context window. For an agent operating with an 80k-token context, 4 failed retry turns waste $\text{Wasted Compute} = 4 \times 80{,}000 \text{ tokens} \times 2 P_{\text{model}} \approx 6.4 \times 10^{14} \text{ FLOPs}$, accelerating context degradation and driving up serving costs. Dependable recovery requires halting execution, pruning the poisoned turn from the KV cache, and restoring state from a verified checkpoint.
 :::
 
 ::: {.fallacy-pitfall}
@@ -897,15 +745,7 @@ accelerating context degradation and driving up serving costs. Dependable recove
 
 When an agent crosses the Reversibility Boundary, security policies frequently mandate human-in-the-loop review. Blocking the agent serving thread and holding GPU memory allocated while waiting for human authorization introduces a massive capital inefficiency.
 
-Human review latency $\tau_{\text{human}}$ ranges from 5 minutes to 24 hours ($300\text{ to }86{,}400\text{ s}$). For a 70B parameter model utilizing Grouped-Query Attention with an active 64k context, the KV cache pins $M_{\text{KV}} \approx 21\text{ GB}$ of HBM per agent instance. On an 8x H100 node leased at \$28.00/hour (\$3.50/GPU-hour), the capital idle cost $C_{\text{idle}}$ incurred while waiting for human review is:
-
-$$C_{\text{idle}} = \tau_{\text{human}} \times R_{\text{HBM}} = 8 \text{ hours} \times \$3.50/\text{GPU-hour} = \$28.00 \text{ per instance}$$
-
-If a platform runs 500 concurrent agents awaiting human approval across an enterprise workday, pinning accelerator memory incurs an idle capital waste of:
-
-$$\text{Fleet Waste} = 500 \times \$28.00 = \$14{,}000 \text{ per day}$$
-
-Runtimes must asynchronously suspend state: serializing the ACB to persistent storage, evicting KV cache blocks to host DRAM or NVMe, and reclaiming the GPU compute slots for active workloads until the human approval signal arrives.
+Human review latency $\tau_{\text{human}}$ ranges from 5 minutes to 24 hours ($300\text{ to }86{,}400\text{ s}$). For a 70B parameter model utilizing Grouped-Query Attention with an active 64k context, the KV cache pins $M_{\text{KV}} \approx 21\text{ GB}$ of HBM per agent instance. On an 8x H100 node leased at \$28.00/hour (\$3.50/GPU-hour), the capital idle cost incurred while waiting for human review is $C_{\text{idle}} = \tau_{\text{human}} \times R_{\text{HBM}} = 8 \text{ hours} \times \$3.50/\text{GPU-hour} = \$28.00 \text{ per instance}$. If a platform runs 500 concurrent agents awaiting human approval across an enterprise workday, pinning accelerator memory incurs an idle capital waste of $500 \times \$28.00 = \$14{,}000 \text{ per day}$. Runtimes must asynchronously suspend state: serializing the ACB to persistent storage, evicting KV cache blocks to host DRAM or NVMe, and reclaiming the GPU compute slots for active workloads until the human approval signal arrives.
 :::
 
 ::: {.fallacy-pitfall}
