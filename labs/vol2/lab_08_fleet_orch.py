@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
@@ -30,10 +30,14 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         source_trace,
         track_arc_context,
@@ -47,23 +51,22 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
+        instrumentation_console,
         ledger,
         math,
         mo,
         np,
         report_export_panel,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -72,24 +75,36 @@ def _(get_lab_metadata):
     v2_08_lab_path = "vol2/lab_08_fleet_orch.py"
     v2_08_chapter = 8
     v2_08_metadata = get_lab_metadata(v2_08_lab_path)
-    return v2_08_chapter, v2_08_lab_path, v2_08_metadata
+    return v2_08_chapter, v2_08_metadata
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_08_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_08_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (ARM Cortex-M55 / Duty-Cycle Windows & Sensing-Radio Slots)": "oura_ring",
+            "📱 Mobile Track (Apple Silicon / Unified Memory & Foreground-Background Scheduling)": "iphone",
+            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Real-Time Perception Deadlines)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (H100 Clusters & Gang Scheduling vs Topology Fragmentation)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 Clusters & Gang Scheduling vs Topology Fragmentation)",
+        label="Select Course / Industry Track",
+    )
     v2_08_track_picker
     return (v2_08_track_picker,)
 
 
 @app.cell
-def _(get_lab_track_variant, get_track_profile, v2_08_metadata, v2_08_track_picker):
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    v2_08_metadata,
+    v2_08_track_picker,
+):
     v2_08_track_id = v2_08_track_picker.value
     v2_08_profile = get_track_profile(v2_08_track_id)
     v2_08_variant = get_lab_track_variant(v2_08_metadata.lab_id, v2_08_track_id)
-    return v2_08_profile, v2_08_track_id, v2_08_variant
+    return v2_08_profile, v2_08_variant
 
 
 @app.cell
@@ -591,18 +606,12 @@ def _(html_lib, math, np):
         return candidates.get(key, {}).get("label", str(key).replace("_", " "))
 
     return (
-        v2_08_base_grid,
-        v2_08_clamp,
-        v2_08_contiguous_free,
         v2_08_evaluate_policy,
-        v2_08_fill_contiguous,
-        v2_08_fmt_amount,
         v2_08_fmt_hours,
         v2_08_html_table,
         v2_08_metric_card,
         v2_08_placement_model,
         v2_08_policy_candidates,
-        v2_08_policy_label,
         v2_08_priority_model,
         v2_08_queue_model,
         v2_08_track_packet,
@@ -615,6 +624,136 @@ def _(v2_08_profile, v2_08_track_packet, v2_08_variant):
     return (v2_08_packet,)
 
 
+@app.cell(hide_code=True)
+def _(ACADEMIC_LAB_CSS, mo, v2_08_packet, v2_08_profile, v2_08_variant):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 8 &middot; LAB 8
+        </div>
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          Fleet Orchestration: Queueing, Gang Scheduling, Preemption &amp; Topology
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Navigate the scheduling trap: understand the non-linear utilization knee, evaluate preemption churn vs. starvation,
+          diagnose spatial topology fragmentation, and balance multi-tenant fleet guardrails.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_08_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_08_packet['stakeholder']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>System:</strong> {v2_08_packet['system_ref']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Resource Unit:</strong> {v2_08_packet['resource_unit']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Primary Metric:</strong> {v2_08_variant.primary_metric}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> {v2_08_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_08_profile.label} Orchestration Architecture
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_08_packet['scenario']} In multi-tenant ML fleets, schedulers must allocate scarce accelerators across heterogeneous, bursting workloads. High average utilization does not imply a healthy cluster: queue delays explode non-linearly near capacity, preemption evictions trigger cascading checkpoint taxes, and spatial fragmentation strands unusable accelerators.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Fleet Orchestration:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Non-Linear Utilization Knee (&rho; &rarr; 1):</strong> Queueing delay scales as <i>W<sub>q</sub></i> &sim; &rho; / (1 - &rho;) &middot; (1 + <i>C<sub>s</sub></i><sup>2</sup>) / 2. Above 80% utilization with heavy-tailed job sizes, tail latency diverges rapidly, causing catastrophic SLO breaches.</li>
+            <li><strong>The Preemption Conservation Law:</strong> Preemption improves urgent latency only by transferring cost: every eviction incurs lost work, state reload, warmup delay, and background starvation.</li>
+            <li><strong>Spatial Contiguity &amp; Topology Invariant:</strong> Schedulable capacity requires contiguous, topology-valid allocation domains. Global free slots without local contiguity cause communication bottlenecks or gang-scheduling deadlocks.</li>
+            <li><strong>Conjunctive Policy Guardrail:</strong> A fleet orchestration policy is viable only if utilization, fairness, tail SLO, starvation bound, and topology constraints pass simultaneously under the same workload.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
+    return
+
+
+@app.cell(hide_code=True)
+def _(COLORS, mo, v2_08_packet):
+    mo.Html(f"""
+    <div style="border-left:4px solid {COLORS['BlueLine']};
+                background:white; border-radius:0 8px 8px 0;
+                padding:20px 28px; margin:8px 0 16px 0;
+                box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="margin-bottom:16px;">
+            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
+                <div>1. <strong>Analyze the queueing knee:</strong> model how arrival bursts and heavy job mix trigger the Kingman queue wall.</div>
+                <div>2. <strong>Quantify preemption tax:</strong> compute the recovery and starvation penalties paid to achieve low urgent latency.</div>
+                <div>3. <strong>Diagnose topology fragmentation:</strong> evaluate why global free capacity cannot satisfy gang-scheduled jobs without contiguous domains.</div>
+                <div>4. <strong>Formulate a viable scheduler policy:</strong> enforce multi-objective guardrails across utilization, fairness, SLO, and starvation.</div>
+            </div>
+        </div>
+        <div style="border-top:1px solid {COLORS['Border']}; margin:0 -28px; padding:0 28px;"></div>
+        <div style="display:flex; gap:32px; margin-top:16px; margin-bottom:16px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:220px;">
+                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
+                    M/G/1 queueing theory &middot; priority preemption cascades &middot; bin packing &middot; topology-aware gang scheduling
+                </div>
+            </div>
+            <div style="flex:0 0 180px;">
+                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
+                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
+                    Duration
+                </div>
+                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
+                    <strong>45-55 min</strong><br/>
+                    4 parts &middot; ~10-15 min each
+                </div>
+            </div>
+        </div>
+        <div style="border-top:1px solid {COLORS['Border']}; margin:0 -28px; padding:0 28px;"></div>
+        <div style="margin-top:16px;">
+            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
+                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
+                Core Question
+            </div>
+            <div style="font-size:1.05rem; color:{COLORS['Text']}; font-weight:600;
+                        line-height:1.5; font-style:italic;">
+                "Why can an accelerator cluster with 25% free capacity completely fail to admit a new workload under {v2_08_packet['guardrail_metric']}?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.callout(mo.md("""
+    **Recommended Reading** -- Complete before this lab:
+
+    - Fleet Orchestration chapter sections on cluster queueing theory and the non-linear utilization wall.
+    - Priority preemption and checkpoint recovery cascades under multi-tenant competition.
+    - Topology-aware placement and bin-packing algorithms for distributed accelerators.
+    - Policy trade-offs between max-min fairness, cluster utilization, and tenant SLOs.
+    """), kind="info")
+    return
+
+
 @app.cell
 def _(mo, v2_08_packet):
     v2_08_partA_pred = mo.ui.radio(
@@ -623,6 +762,7 @@ def _(mo, v2_08_packet):
             "Raw capacity alone decides whether the queue is healthy.": "raw_capacity",
             "High utilization is enough evidence that scheduling works.": "utilization_only",
         },
+        value="Arrival pressure and job mix will create the queue wall.",
         label="Part A prediction",
     )
     v2_08_arrival_multiplier = mo.ui.slider(
@@ -652,6 +792,7 @@ def _(mo, v2_08_packet):
             "Admit all work until capacity is fully used.": "admit_all",
             "Ignore job mix and tune only average service time.": "average_only",
         },
+        value="Hold headroom below the queueing knee.",
         label="Part A checkpoint",
     )
 
@@ -661,6 +802,7 @@ def _(mo, v2_08_packet):
             "Preemption is free if checkpoints exist.": "preemption_free",
             "Priority affects only the urgent class.": "urgent_only",
         },
+        value="Preemption lowers urgent latency but raises starvation and recovery tax.",
         label="Part B prediction",
     )
     v2_08_preempt_pct = mo.ui.slider(
@@ -690,6 +832,7 @@ def _(mo, v2_08_packet):
             "Let urgent work preempt without a churn budget.": "unbounded_preempt",
             "Disable preemption and accept urgent latency misses.": "no_preempt",
         },
+        value="Use bounded preemption with aging for waiting work.",
         label="Part B checkpoint",
     )
 
@@ -699,6 +842,7 @@ def _(mo, v2_08_packet):
             "B) Any free slots are equivalent once the job count fits.": "free_slots_only",
             "C) Topology affects speed but not scheduling feasibility.": "topology_only_speed",
         },
+        value="A) Total free slots can still be unusable when placement is fragmented.",
         label="Part C prediction",
     )
     v2_08_job_size = mo.ui.slider(
@@ -731,6 +875,7 @@ def _(mo, v2_08_packet):
             "Split across any free slots to maximize utilization.": "split_anywhere",
             "Preempt immediately to compact the pool.": "compact_now",
         },
+        value="Wait for or create a topology-valid placement.",
         label="Part C checkpoint",
     )
 
@@ -741,6 +886,7 @@ def _(mo, v2_08_packet):
             "The lowest urgent latency policy should win.": "latency_wins",
             "The fairest policy should win even if SLO fails.": "fairness_wins",
         },
+        value="The launch decision is the conjunction of all guardrails.",
         label="Part D prediction",
     )
     v2_08_policy = mo.ui.dropdown(
@@ -794,12 +940,18 @@ def _(mo, v2_08_packet):
         label="V2-09 performance implication",
     )
     v2_08_student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
+    v2_08_memo_decision = mo.ui.text_area(
+        label="Orchestration policy memo",
+        placeholder="Document selected policy, binding constraint, rejected alternative, preemption bounds, and V2-09 performance implications.",
+        full_width=True,
+    )
     return (
         v2_08_arrival_multiplier,
         v2_08_checkpoint_min,
         v2_08_fairness_floor,
         v2_08_heavy_mix,
         v2_08_job_size,
+        v2_08_memo_decision,
         v2_08_partA_checkpoint,
         v2_08_partA_pred,
         v2_08_partB_checkpoint,
@@ -823,29 +975,28 @@ def _(mo, v2_08_packet):
 
 @app.cell(hide_code=True)
 def _(
-    ACADEMIC_LAB_CSS,
     COLORS,
-    LAB_CSS,
+    MathPeek,
     apply_plotly_theme,
+    big_takeaways,
     build_lab_report,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     ledger,
     mo,
     np,
     report_export_panel,
-    source_trace,
-    track_arc_context,
-    track_context,
     v2_08_arrival_multiplier,
     v2_08_chapter,
     v2_08_checkpoint_min,
     v2_08_evaluate_policy,
     v2_08_fairness_floor,
-    v2_08_fmt_amount,
     v2_08_fmt_hours,
     v2_08_heavy_mix,
     v2_08_html_table,
     v2_08_job_size,
+    v2_08_memo_decision,
     v2_08_metadata,
     v2_08_metric_card,
     v2_08_packet,
@@ -860,7 +1011,6 @@ def _(
     v2_08_placement_policy,
     v2_08_policy,
     v2_08_policy_candidates,
-    v2_08_policy_label,
     v2_08_preempt_pct,
     v2_08_priority_model,
     v2_08_profile,
@@ -901,7 +1051,7 @@ def _(
                     box-shadow:0 1px 4px rgba(0,0,0,0.06);">
           <div style="font-size:0.72rem; font-weight:700; color:{color};
                       text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">
-            Part {part} Concept Module - {v2_08_packet['stakeholder']}
+            Part {part} Concept Module &middot; {v2_08_packet['stakeholder']}
           </div>
           <div style="font-weight:800; font-size:1.08rem; color:#0f172a; margin-bottom:6px;">
             {title}
@@ -912,49 +1062,8 @@ def _(
 
     def v2_08_prediction_feedback(selected, correct_key, correct, miss):
         if selected == correct_key:
-            return mo.callout(mo.md(f"You predicted `{selected}`; actual result is `{correct_key}`. {correct}"), kind="success")
-        return mo.callout(mo.md(f"You predicted `{selected}`; actual result is `{correct_key}`. {miss}"), kind="warn")
-
-    def v2_08_opening():
-        reading_rows = (
-            ("Part A", "Queueing pressure", "Pollaczek-Khinchine wait multiplier and the utilization knee."),
-            ("Part B", "Priority/preemption", "Preemption tax and starvation guardrails."),
-            ("Part C", "Placement/bin packing", "Fragmented free slots and topology locality score."),
-            ("Part D", "Policy gate", "Guardrail conjunction across utilization, fairness, SLO, starvation, and topology."),
-        )
-        return mo.vstack([
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.md(f"""
-# V2-08 - The Scheduling Trap
-
-**Chapter invariant:** schedulers allocate scarce resources. Queueing,
-priorities, placement/bin packing, and fairness/utilization interact, so the
-policy is valid only when the same workload passes all guardrails.
-            """),
-            track_context(v2_08_profile),
-            track_arc_context(v2_08_profile, v2_08_metadata.lab_id),
-            mo.callout(mo.md(
-                f"**Scenario:** {v2_08_packet['stakeholder']} must choose an orchestration policy for "
-                f"{v2_08_packet['label']}. The amount system is {v2_08_packet['arrival_unit']}, "
-                f"{v2_08_packet['resource_unit']}, p95 wait/latency in {v2_08_packet['latency_unit']}, "
-                "fair-share percent, and starvation time."
-            ), kind="info"),
-            mo.Html(v2_08_html_table(("Module", "Concept", "Reading connection"), reading_rows)),
-            source_trace({
-                "chapter": "Volume II, Chapter 8: Fleet Orchestration",
-                "anchors": (
-                    "Scheduling objectives and conflicts",
-                    "The queuing theory of GPU clusters",
-                    "Bin packing and topology-aware placement",
-                    "Priority preemption cascades",
-                    "Hierarchical fair-share",
-                    "From orchestration to optimization",
-                ),
-                "local_models": "Notebook-local v2_08_* teaching models document scenario constants in Math Peek blocks.",
-                "track_source": v2_08_packet["source_policy"],
-            }, summary="Source trace: V2-08 concept-module evidence"),
-        ])
+            return mo.callout(mo.md(f"**Hypothesis Confirmed:** You predicted `{selected}`; actual result is `{correct_key}`. {correct}"), kind="success")
+        return mo.callout(mo.md(f"**Hypothesis Divergence:** You predicted `{selected}`; actual result is `{correct_key}`. {miss}"), kind="warn")
 
     def v2_08_build_part_a():
         items = [
@@ -968,19 +1077,32 @@ policy is valid only when the same workload passes all guardrails.
                 ),
             ),
             mo.md("""
-## Concept: Utilization Is Not Queue Health
+    ## Concept: Utilization Is Not Queue Health
 
-The same capacity can feel healthy or broken depending on arrival pressure and
-service-time variability. Commit to a prediction, then move the workload mix
-until the queue crosses the track guardrail.
+    The same capacity can feel healthy or broken depending on arrival pressure and
+    service-time variability. Commit to a prediction, then move the workload mix
+    until the queue crosses the track guardrail.
             """),
-            v2_08_partA_pred,
+            gated_hypothesis_card(
+                v2_08_partA_pred,
+                title="1. Formulate Queueing Pressure Hypothesis",
+                subtitle=(
+                    f"Scenario: {v2_08_packet['stakeholder']} is configuring admission headroom. "
+                    "Predict how queue delay responds as utilization approaches capacity under heavy-tailed job variance."
+                ),
+            ),
         ]
         if v2_08_partA_pred.value is None:
             items.append(mo.callout(mo.md("Commit to the queueing prediction before opening the instrument."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([v2_08_arrival_multiplier, v2_08_heavy_mix, v2_08_service_cv], widths="equal"))
+        items.append(
+            instrumentation_console(
+                mo.hstack([v2_08_arrival_multiplier, v2_08_heavy_mix, v2_08_service_cv], widths="equal"),
+                title="Queueing & Workload Pressure Console",
+                subtitle="Tune arrival rate multiplier, heavy-job mix percentage, and service-time variability (Cs)",
+            )
+        )
         sweep_x = np.linspace(0.45, 1.9, 70)
         p95_values = []
         rho_values = []
@@ -1026,7 +1148,7 @@ until the queue crosses the track guardrail.
             margin=dict(l=60, r=70, t=55, b=45),
         )
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
+        items.append(mo.ui.plotly(fig))
         status_color = COLORS["RedLine"] if v2_08_queue["failure"] else COLORS["GreenLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
@@ -1066,29 +1188,36 @@ until the queue crosses the track guardrail.
         items.append(v2_08_prediction_feedback(
             v2_08_partA_pred.value,
             "queue_pressure",
-            "**Correct.** Queueing pressure is a joint result of arrival rate, capacity, and service-time variability.",
-            "**Queueing trap:** raw capacity and high utilization are incomplete evidence when job durations are heavy-tailed.",
+            "Queueing pressure is a joint result of arrival rate, capacity, and service-time variability.",
+            "Raw capacity and high utilization are incomplete evidence when job durations are heavy-tailed.",
         ))
-        items.append(mo.accordion({
-            "Math Peek / Source Model - queueing pressure": mo.md(f"""
-```
-rho              = lambda_effective / mu_capacity
-Wq / E[S]        = rho/(1-rho) * (1 + Cs^2)/2
-p95_guardrail_ok = p95_wait_or_latency <= track_guardrail
-```
-
-Current values: rho `{v2_08_queue['rho']:.3f}`, Cs `{v2_08_queue['cs']:.2f}`,
-wait multiplier `{v2_08_queue['wait_multiplier']:.2f}x`, p95
-`{v2_08_queue['p95_latency']:.1f} {v2_08_packet['latency_unit']}`.
-
-Chapter anchor: the M/G/1 queueing callout in Fleet Orchestration. Local
-scenario constants encode the selected track's arrival unit, service amount,
-and guardrail.
-            """)
-        }))
-        items.append(v2_08_partA_checkpoint)
-        if v2_08_partA_checkpoint.value is None:
-            items.append(mo.callout(mo.md("Checkpoint: choose the admission rule that should constrain priority decisions."), kind="info"))
+        items.append(MathPeek(
+            r"W_q / E[S] = \frac{\rho}{1 - \rho} \cdot \frac{1 + C_s^2}{2}, \quad \rho = \frac{\lambda_{eff}}{\mu}",
+            {
+                "effective utilization (\u03c1)": f"{v2_08_queue['rho']*100:.1f}%",
+                "service variability (Cs)": f"{v2_08_queue['cs']:.2f}",
+                "wait multiplier (Wq / E[S])": f"{v2_08_queue['wait_multiplier']:.2f}x",
+                "mean latency": f"{v2_08_queue['mean_latency']:.1f} {v2_08_packet['latency_unit']}",
+                "p95 latency": f"{v2_08_queue['p95_latency']:.1f} {v2_08_packet['latency_unit']}",
+                "queue depth": f"{v2_08_queue['queue_depth']:.1f} {v2_08_packet['arrival_unit']}",
+                "SLO guardrail": f"{v2_08_packet['queue_slo']:g} {v2_08_packet['latency_unit']}",
+                "chapter source": "Volume II, Chapter 8: The Queuing Theory of GPU Clusters",
+            },
+        ))
+        items.append(mo.Html(f"""
+        <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Production Admission Rule</h4>
+            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                What admission policy prevents queue explosion while maintaining high throughput?
+            </p>
+            {v2_08_partA_checkpoint}
+        </div>
+        """))
+        if v2_08_partA_checkpoint.value == "hold_headroom":
+            items.append(mo.callout(mo.md("Checkpoint saved: hold admission headroom below the knee to bound non-linear queue explosion."), kind="success"))
+        elif v2_08_partA_checkpoint.value is not None:
+            items.append(mo.callout(mo.md("Operating at 100% capacity risks explosive tail latency under bursting or heavy-tailed traffic."), kind="warn"))
         return mo.vstack(items)
 
     def v2_08_build_part_b():
@@ -1103,19 +1232,32 @@ and guardrail.
                 ),
             ),
             mo.md("""
-## Concept: Priority Moves Pain, It Does Not Remove It
+    ## Concept: Priority Moves Pain, It Does Not Remove It
 
-Preemption can make urgent work fast, but every eviction pays lost work,
-reload, warmup, and queue churn. The policy question is whether that tax is
-bounded.
+    Preemption can make urgent work fast, but every eviction pays lost work,
+    reload, warmup, and queue churn. The policy question is whether that tax is
+    bounded.
             """),
-            v2_08_partB_pred,
+            gated_hypothesis_card(
+                v2_08_partB_pred,
+                title="2. Formulate Priority & Preemption Hypothesis",
+                subtitle=(
+                    f"Scenario: Prioritizing {v2_08_packet['urgent_work']} requires preempting {v2_08_packet['background_work']}. "
+                    "Predict the fleet-level trade-off between urgent latency, checkpoint recovery tax, and starvation wait."
+                ),
+            ),
         ]
         if v2_08_partB_pred.value is None:
             items.append(mo.callout(mo.md("Commit to the preemption prediction before opening the trade-off chart."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([v2_08_preempt_pct, v2_08_urgent_share, v2_08_checkpoint_min], widths="equal"))
+        items.append(
+            instrumentation_console(
+                mo.hstack([v2_08_preempt_pct, v2_08_urgent_share, v2_08_checkpoint_min], widths="equal"),
+                title="Priority & Preemption Churn Console",
+                subtitle="Configure preemption aggressiveness, urgent work share, and checkpoint interval",
+            )
+        )
         sweep = np.linspace(0, 90, 46)
         urgent_curve = []
         starve_curve = []
@@ -1163,7 +1305,7 @@ bounded.
             margin=dict(l=60, r=70, t=55, b=45),
         )
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
+        items.append(mo.ui.plotly(fig))
         status_color = COLORS["RedLine"] if v2_08_priority["failure"] else COLORS["GreenLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
@@ -1201,29 +1343,35 @@ bounded.
         items.append(v2_08_prediction_feedback(
             v2_08_partB_pred.value,
             "latency_starvation_trade",
-            "**Correct.** Preemption improves one class by spending recovery and fairness budget from another.",
-            "**Priority trap:** a fast urgent path can still be an unhealthy scheduler if waiting work never ages into service.",
+            "Preemption improves one class by spending recovery and fairness budget from another.",
+            "A fast urgent path can still be an unhealthy scheduler if waiting work never ages into service.",
         ))
-        items.append(mo.accordion({
-            "Math Peek / Source Model - preemption tax": mo.md(f"""
-```
-recovery_min = checkpoint_interval/2 + reload_min + warmup_min
-tax          = preemption_events_per_hour * recovery_min * preempted_slots
-starvation_ok = waiting_time_h <= starvation_guard_h
-```
-
-Current values: recovery `{v2_08_priority['recovery_min']:.1f}` min/event,
-tax `{v2_08_priority['preemption_tax_slot_min_h']:.0f}` slot-min/h,
-starvation wait `{v2_08_fmt_hours(v2_08_priority['starvation_wait_h'])}`.
-
-Chapter anchor: Priority preemption cascades and preemption-tax discussion.
-The local model exposes the chapter consequence without claiming a production
-scheduler simulator.
-            """)
-        }))
-        items.append(v2_08_partB_checkpoint)
-        if v2_08_partB_checkpoint.value is None:
-            items.append(mo.callout(mo.md("Checkpoint: choose the priority rule that should constrain placement."), kind="info"))
+        items.append(MathPeek(
+            r"T_{recovery} = \frac{T_{ckpt}}{2} + T_{reload} + T_{warmup}, \quad \text{Tax} = E_{preempt} \cdot T_{recovery} \cdot N_{slots}",
+            {
+                "checkpoint interval": f"{v2_08_checkpoint_min.value} min",
+                "recovery time / event": f"{v2_08_priority['recovery_min']:.1f} min",
+                "expected preemption events": f"{v2_08_priority['preemption_events_h']:.2f}/h",
+                "preemption tax": f"{v2_08_priority['preemption_tax_slot_min_h']:.0f} slot-min/h",
+                "starvation wait": v2_08_fmt_hours(v2_08_priority['starvation_wait_h']),
+                "starvation guardrail": v2_08_fmt_hours(v2_08_packet['starvation_guard_h']),
+                "chapter source": "Volume II, Chapter 8: Priority Preemption Cascades",
+            },
+        ))
+        items.append(mo.Html(f"""
+        <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Production Preemption Rule</h4>
+            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                What priority rule balances urgent SLAs against cluster recovery tax?
+            </p>
+            {v2_08_partB_checkpoint}
+        </div>
+        """))
+        if v2_08_partB_checkpoint.value == "bounded_preempt":
+            items.append(mo.callout(mo.md("Checkpoint saved: bounded preemption with aging prevents starvation cascades while protecting urgent jobs."), kind="success"))
+        elif v2_08_partB_checkpoint.value is not None:
+            items.append(mo.callout(mo.md("Unbounded preemption induces recovery storms; disabling preemption breaches urgent SLAs."), kind="warn"))
         return mo.vstack(items)
 
     def v2_08_build_part_c():
@@ -1238,19 +1386,32 @@ scheduler simulator.
                 ),
             ),
             mo.md("""
-## Concept: Free Capacity Is Spatial
+    ## Concept: Free Capacity Is Spatial
 
-Global free amount is not the same as schedulable amount. Placement decides
-whether slots are contiguous, whether topology is valid, and whether the
-resulting job pays a communication or migration penalty.
+    Global free amount is not the same as schedulable amount. Placement decides
+    whether slots are contiguous, whether topology is valid, and whether the
+    resulting job pays a communication or migration penalty.
             """),
-            v2_08_partC_pred,
+            gated_hypothesis_card(
+                v2_08_partC_pred,
+                title="3. Formulate Placement & Topology Hypothesis",
+                subtitle=(
+                    f"Scenario: Schedulable gang jobs require contiguous domains. "
+                    "Predict whether a cluster with ample global free slots can fail to schedule due to fragmentation."
+                ),
+            ),
         ]
         if v2_08_partC_pred.value is None:
             items.append(mo.callout(mo.md("Commit to the placement prediction before opening the topology heatmap."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([v2_08_job_size, v2_08_placement_policy, v2_08_topology_weight], widths="equal"))
+        items.append(
+            instrumentation_console(
+                mo.hstack([v2_08_job_size, v2_08_placement_policy, v2_08_topology_weight], widths="equal"),
+                title="Placement & Spatial Topology Console",
+                subtitle="Configure pending job gang size, placement algorithm, and topology sensitivity",
+            )
+        )
         heat = v2_08_placement["grid"]
         colorscale = [
             [0.0, "#e2e8f0"],
@@ -1276,7 +1437,7 @@ resulting job pays a communication or migration penalty.
             margin=dict(l=80, r=20, t=40, b=50),
         )
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
+        items.append(mo.ui.plotly(fig))
         status_color = COLORS["GreenLine"] if v2_08_placement["feasible"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
@@ -1316,28 +1477,35 @@ resulting job pays a communication or migration penalty.
         items.append(v2_08_prediction_feedback(
             v2_08_partC_pred.value,
             "fragmentation_matters",
-            "**Correct.** The scheduler needs the right shape and location of capacity, not only a global count.",
-            "**Placement trap:** global free slots can be stranded by bin packing and topology constraints.",
+            "The scheduler needs the right shape and location of capacity, not only a global count.",
+            "Global free slots can be stranded by bin packing and topology constraints.",
         ))
-        items.append(mo.accordion({
-            "Math Peek / Source Model - locality and fragmentation": mo.md(f"""
-```
-fragmentation_index = (free_slots - largest_contiguous_block) / free_slots
-Cost_locality       = sum_{{i<j}} w(d(g_i, g_j))
-topology_ok         = feasible and topology_penalty <= limit
-```
-
-Current values: free slots `{v2_08_placement['free_slots']}`, largest
-contiguous block `{v2_08_placement['max_contiguous']}`, locality cost
-`{v2_08_placement['locality_cost']:.1f}`, topology penalty
-`{v2_08_placement['topology_penalty_pct']:.1f}%`.
-
-Chapter anchor: bin packing, fragmentation, and topology-aware placement.
-            """)
-        }))
-        items.append(v2_08_partC_checkpoint)
-        if v2_08_partC_checkpoint.value is None:
-            items.append(mo.callout(mo.md("Checkpoint: choose how placement should be framed in the policy memo."), kind="info"))
+        items.append(MathPeek(
+            r"\text{Frag} = \frac{\text{Free} - \text{MaxContig}}{\text{Free}}, \quad C_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j))",
+            {
+                "global free slots": str(v2_08_placement['free_slots']),
+                "largest contiguous block": f"{v2_08_placement['max_contiguous']} slots",
+                "fragmentation index": f"{v2_08_placement['fragmentation_index']:.2f}",
+                "locality cost": f"{v2_08_placement['locality_cost']:.1f}",
+                "topology penalty": f"{v2_08_placement['topology_penalty_pct']:.1f}%",
+                "topology guardrail": f"{v2_08_packet['topology_limit_pct']:.0f}%",
+                "chapter source": "Volume II, Chapter 8: Bin Packing and Topology-Aware Placement",
+            },
+        ))
+        items.append(mo.Html(f"""
+        <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Production Placement Rule</h4>
+            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                How should the scheduler handle fragmented allocations for multi-accelerator jobs?
+            </p>
+            {v2_08_partC_checkpoint}
+        </div>
+        """))
+        if v2_08_partC_checkpoint.value == "topology_valid":
+            items.append(mo.callout(mo.md("Checkpoint saved: wait for topology-valid contiguous slots to avoid communication penalties and gang deadlocks."), kind="success"))
+        elif v2_08_partC_checkpoint.value is not None:
+            items.append(mo.callout(mo.md("Splitting across non-contiguous domains incurs severe communication penalties that bottleneck distributed workloads."), kind="warn"))
         return mo.vstack(items)
 
     def v2_08_build_part_d():
@@ -1373,19 +1541,34 @@ Chapter anchor: bin packing, fragmentation, and topology-aware placement.
                 ),
             ),
             mo.md("""
-## Concept: Feasibility Is A Conjunction
+    ## Concept: Feasibility Is A Conjunction
 
-No single metric launches an orchestration policy. Utilization, fairness, SLO,
-starvation, and topology must all pass under the same workload.
+    No single metric launches an orchestration policy. Utilization, fairness, SLO,
+    starvation, and topology must all pass under the same workload.
             """),
-            v2_08_partD_pred,
+            gated_hypothesis_card(
+                v2_08_partD_pred,
+                title="4. Formulate Policy Gate Hypothesis",
+                subtitle=(
+                    f"Scenario: Multi-tenant production cluster policies. "
+                    "Predict the governing criterion for declaring an orchestration policy production-viable."
+                ),
+            ),
         ]
         if v2_08_partD_pred.value is None:
             items.append(mo.callout(mo.md("Commit to the policy-gate prediction before opening the candidate table."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([v2_08_policy, v2_08_rejected_policy], widths="equal"))
-        items.append(mo.hstack([v2_08_util_target, v2_08_fairness_floor, v2_08_starvation_guard], widths="equal"))
+        items.append(
+            instrumentation_console(
+                mo.vstack([
+                    mo.hstack([v2_08_policy, v2_08_rejected_policy], widths="equal"),
+                    mo.hstack([v2_08_util_target, v2_08_fairness_floor, v2_08_starvation_guard], widths="equal"),
+                ]),
+                title="Fleet Policy & Guardrail Admission Console",
+                subtitle="Select candidate policies, target utilization, fairness floor, and starvation bounds",
+            )
+        )
         policy_rows = []
         labels = []
         pass_counts = []
@@ -1430,7 +1613,7 @@ starvation, and topology must all pass under the same workload.
             margin=dict(l=60, r=20, t=45, b=80),
         )
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
+        items.append(mo.ui.plotly(fig))
         items.append(mo.Html(v2_08_html_table(
             ("Policy", "Utilization", "Fairness", "P95/SLO", "Starvation", "Topology", "Gate"),
             policy_rows,
@@ -1456,25 +1639,22 @@ starvation, and topology must all pass under the same workload.
         items.append(v2_08_prediction_feedback(
             v2_08_partD_pred.value,
             "all_guardrails",
-            "**Correct.** The scheduler policy launches only when every guardrail passes.",
-            "**Single-metric trap:** fastest, fairest, or most utilized can still be non-launchable.",
+            "The scheduler policy launches only when every guardrail passes.",
+            "Fastest, fairest, or most utilized can still be non-launchable.",
         ))
-        items.append(mo.accordion({
-            "Math Peek / Source Model - guardrail conjunction": mo.md(f"""
-```
-feasible = utilization_ok and fairness_ok and slo_ok and starvation_ok and topology_ok
-utilization_ok = min_util <= utilization_pct <= max_util
-fairness_ok    = fairness_pct >= fairness_floor
-slo_ok         = p95 <= track_slo
-starvation_ok  = starvation_h <= starvation_guard_h
-topology_ok    = placement_feasible and topology_penalty <= topology_limit
-```
-
-Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
-`{selected['binding']}`. Rejected alternative:
-`{rejected['candidate']['label']}`.
-            """)
-        }))
+        items.append(MathPeek(
+            r"\text{Feasible} = \text{Util}_{\text{ok}} \land \text{Fair}_{\text{ok}} \land \text{SLO}_{\text{ok}} \land \text{Starv}_{\text{ok}} \land \text{Topo}_{\text{ok}}",
+            {
+                "selected policy": selected['candidate']['label'],
+                "utilization": f"{selected['utilization_pct']:.1f}% (target: {v2_08_util_target.value}%)",
+                "fairness": f"{selected['fairness_pct']:.1f}% (floor: {v2_08_fairness_floor.value}%)",
+                "p95 latency": f"{selected['p95_latency']:.1f} {v2_08_packet['latency_unit']} (SLO: {v2_08_packet['queue_slo']:g})",
+                "starvation wait": f"{v2_08_fmt_hours(selected['starvation_h'])} (guardrail: {v2_08_fmt_hours(v2_08_starvation_guard.value)})",
+                "topology penalty": f"{selected['topology_penalty_pct']:.1f}% (limit: {v2_08_packet['topology_limit_pct']:.0f}%)",
+                "binding constraint": selected['binding'],
+                "chapter source": "Volume II, Chapter 8: Hierarchical Fair-Share & Guardrail Conjunction",
+            },
+        ))
         return mo.vstack(items)
 
     def build_synthesis():
@@ -1503,6 +1683,15 @@ Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
             "queue_before_kernel": "V2-09 kernel traces are interpretable only after queue pressure is relieved.",
             "bound_churn": "V2-09 tuning needs bounded preemption churn so profiles represent real execution rather than reload storms.",
         }.get(v2_08_v2_09_implication.value, v2_08_packet["v2_09_implication"])
+
+        _decision_text = v2_08_memo_decision.value or (
+            f"Adopt {selected['candidate']['label']} for {v2_08_packet['label']}. "
+            f"Binding guardrail: {selected['binding']}; rejected alternative: {rejected['candidate']['label']}. "
+            f"Operating point: utilization {selected['utilization_pct']:.1f}%, fairness {selected['fairness_pct']:.1f}%, "
+            f"p95 {selected['p95_latency']:.1f} {v2_08_packet['latency_unit']}, starvation {v2_08_fmt_hours(selected['starvation_h'])}. "
+            f"V2-09 downstream implication: {implication_text}"
+        )
+
         memo_rows = (
             ("Selected scheduler policy", selected["candidate"]["label"], selected["candidate"]["rationale"]),
             ("Binding resource/guardrail", selected["binding"], "all guardrails pass" if selected["feasible"] else "mitigation required"),
@@ -1513,20 +1702,17 @@ Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
             ("V2-09 implication", implication_text, "performance engineering handoff"),
         )
         incomplete = []
-        if v2_08_partA_pred.value is None:
-            incomplete.append("Part A queueing prediction")
-        if v2_08_partB_pred.value is None:
-            incomplete.append("Part B priority/preemption prediction")
-        if v2_08_partC_pred.value is None:
-            incomplete.append("Part C placement prediction")
-        if v2_08_partD_pred.value is None:
-            incomplete.append("Part D policy prediction")
-        if v2_08_partA_checkpoint.value is None:
-            incomplete.append("Part A checkpoint")
-        if v2_08_partB_checkpoint.value is None:
-            incomplete.append("Part B checkpoint")
-        if v2_08_partC_checkpoint.value is None:
-            incomplete.append("Part C checkpoint")
+        for label, widget in (
+            ("Part A queueing prediction", v2_08_partA_pred),
+            ("Part A checkpoint", v2_08_partA_checkpoint),
+            ("Part B priority prediction", v2_08_partB_pred),
+            ("Part B checkpoint", v2_08_partB_checkpoint),
+            ("Part C placement prediction", v2_08_partC_pred),
+            ("Part C checkpoint", v2_08_partC_checkpoint),
+            ("Part D policy prediction", v2_08_partD_pred),
+        ):
+            if widget.value is None:
+                incomplete.append(label)
 
         snapshot = {
             "track_id": v2_08_profile.track_id,
@@ -1581,6 +1767,7 @@ Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
                 "binding_guardrail": selected["binding"],
                 "policy_feasible": selected["feasible"],
                 "v2_09_implication": implication_text,
+                "decision": _decision_text,
                 "result_snapshot": snapshot,
             })
         report = build_lab_report(
@@ -1589,7 +1776,7 @@ Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
             track=v2_08_profile.label,
             scenario=v2_08_variant.workload_summary,
             learning_objectives=(
-                "Explain why queueing pressure emerges from job mix and arrival rate.",
+                "Explain why queueing pressure emerges non-linearly from job mix and arrival rate.",
                 "Quantify the priority/preemption trade-off between urgent latency and starvation risk.",
                 "Use placement evidence to distinguish global free capacity from topology-valid capacity.",
                 "Choose a scheduler policy by applying utilization, fairness, SLO, starvation, and topology guardrails together.",
@@ -1628,7 +1815,7 @@ Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
                 "v2_09_implication": implication_text,
             },
             reflections={
-                "policy_memo": f"Select {selected['candidate']['label']}; reject {rejected['candidate']['label']}; binding guardrail: {selected['binding']}.",
+                "policy_memo": _decision_text,
             },
             evidence_summary={
                 "queue_p95": f"{v2_08_queue['p95_latency']:.1f} {v2_08_packet['latency_unit']}",
@@ -1643,10 +1830,10 @@ Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
                 "v2_09_implication": implication_text,
             },
             big_takeaways=(
-                "High utilization can be the cause of queueing failure rather than proof of health.",
-                "Preemption is a trade between urgent latency and starvation/recovery tax.",
-                "Placement is performance because topology and fragmentation change usable capacity.",
-                "A scheduler policy launches only as a conjunction of guardrails.",
+                "High utilization can be the cause of queueing failure rather than proof of health: the non-linear utilization knee explodes tail latency.",
+                "Preemption is a conservation trade: urgent latency improves only by transferring recovery taxes and starvation risk to background work.",
+                "Placement is performance: global free capacity is useless if fragmented domains violate hardware interconnect topology.",
+                "Orchestration policy is a conjunction of guardrails: utilization, fairness, tail latency, starvation, and topology must all clear simultaneously.",
             ),
             residual_risk=selected["binding"] if not selected["feasible"] else "Policy assumptions must be revisited as workload mix and topology change.",
             source_trace={
@@ -1668,20 +1855,37 @@ Selected policy: `{selected['candidate']['label']}`. Binding guardrail:
             incomplete_fields=tuple(incomplete),
         )
         return mo.vstack([
-            mo.md("## Synthesis - Orchestration Policy Memo"),
-            v2_08_student_id,
-            v2_08_v2_09_implication,
-            mo.callout(mo.md(
-                f"**Memo frame for {v2_08_packet['label']}:** select "
-                f"`{selected['candidate']['label']}`, name `{selected['binding']}` as the binding guardrail, "
-                f"reject `{rejected['candidate']['label']}`, and carry forward: {implication_text}"
-            ), kind="success" if selected["feasible"] else "warn"),
+            mo.md("## Synthesis &mdash; Fleet Orchestration Policy Memo"),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO &amp; REFLECTIONS</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Fleet Orchestration Deployment Memo</h4>
+                {v2_08_student_id}
+                <div style="margin-top: 12px;">{v2_08_v2_09_implication}</div>
+                <div style="margin-top: 12px;">{v2_08_memo_decision}</div>
+            </div>
+            """),
             mo.Html(v2_08_html_table(("Memo field", "Decision/evidence", "Report framing"), memo_rows)),
+            mo.callout(mo.md(_decision_text), kind="success" if selected["feasible"] else "warn"),
+            big_takeaways([
+                "High utilization can be the cause of queueing failure rather than proof of health: the non-linear utilization knee explodes tail latency.",
+                "Preemption is a conservation trade: urgent latency improves only by transferring recovery taxes and starvation risk to background work.",
+                "Placement is performance: global free capacity is useless if fragmented domains violate hardware interconnect topology.",
+                "Orchestration policy is a conjunction of guardrails: utilization, fairness, tail latency, starvation, and topology must all clear simultaneously.",
+            ]),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION &amp; SIGN-OFF</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Fleet Architect Authorization</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Confirm your scheduler policy, verify all conjunctive guardrails, and export the official engineering audit record.
+                </p>
+            </div>
+            """),
             report_export_panel(report),
         ])
 
     tabs = mo.ui.tabs({
-        "Opening": v2_08_opening(),
         "Part A: Queueing Pressure": v2_08_build_part_a(),
         "Part B: Priority And Starvation": v2_08_build_part_b(),
         "Part C: Placement And Topology": v2_08_build_part_c(),
