@@ -1155,6 +1155,12 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo):
+    # =========================================================================
+    # LEAD ARCHITECT & SIGN-OFF CREDENTIALS
+    #
+    # Authorizing engineer identification and architectural memo note for
+    # recording deployment rationale, safety invariants, and residual risks.
+    # =========================================================================
     v2_14_student_id = mo.ui.text(label="Lead Architect / Engineer ID", value="")
     v2_14_memo_note = mo.ui.text_area(
         label="Architectural Rationale & Safety Disclosure",
@@ -1675,8 +1681,8 @@ def _(
                 {
                     "selected defense": result["defense"]["label"],
                     "robustness gain": f"{result['gain']:.1f} risk points",
-                    "latency overhead": f"{result['metrics']['latency']:.1f}%",
-                    "clean quality tax": f"{result['metrics']['quality']:.1f}%",
+                    "latency overhead": f"{result['latency_ms']:.1f} ms",
+                    "clean quality tax": f"{result['quality']:.1f}%",
                     "binding tax": v2_14_tax_label(result["binding_tax"]),
                     "chapter source": "Volume II, Chapter 14: Adversarial Defense & The Robustness Tax",
                 },
