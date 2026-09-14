@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -31,11 +27,15 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
         constraint_tax,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         iteration_frontier,
         part_workflow,
         report_export_panel,
@@ -69,9 +69,8 @@ async def _():
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
-        track_context,
         track_arc_context,
-        track_selector,
+        track_context,
         workflow_policy,
         workflow_track_profile,
     )
@@ -83,12 +82,19 @@ def _(get_lab_metadata):
     return (v1_03_metadata,)
 
 
-@app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_03_track_picker = track_selector(default=_default_track)
-    v1_03_track_picker
+@app.cell
+def _(mo):
+    # Top-Level Universal Track Selector
+    v1_03_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Jetson Orin & Hardware-in-the-Loop vs Tail Safety Walls)": "robotaxi",
+            "📱 Mobile Track (Apple Silicon & Neural Engine Integration vs Thermal Walls)": "iphone",
+            "⚡ TinyML Track (ESP32-S3 & Firmware Validation vs SRAM Boundaries)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)",
+        label="Select Course / Industry Track",
+    )
     return (v1_03_track_picker,)
 
 
@@ -100,6 +106,8 @@ def _(
     v1_03_track_picker,
     workflow_track_profile,
 ):
+    # Cross-tier hardware targets
+    # Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Max, Hardware.Tiny.Cortex_M55
     v1_03_track_id = v1_03_track_picker.value
     v1_03_profile = get_track_profile(v1_03_track_id)
     v1_03_variant = get_lab_track_variant("v1_03_constraint_tax", v1_03_profile.track_id)
@@ -111,26 +119,20 @@ def _(
         v1_03_hardware,
         v1_03_model,
     )
-    return (
-        v1_03_hardware,
-        v1_03_model,
-        v1_03_profile,
-        v1_03_track_id,
-        v1_03_variant,
-        v1_03_workflow,
-    )
+    return v1_03_profile, v1_03_variant, v1_03_workflow
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
-    source_trace,
-    track_context,
     track_arc_context,
+    track_context,
     v1_03_metadata,
     v1_03_profile,
+    v1_03_track_picker,
     v1_03_variant,
     v1_03_workflow,
 ):
@@ -138,49 +140,92 @@ def _(
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 03
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_03_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 3 &middot; Foundational Lab 03
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                The Constraint Tax
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              The Constraint Tax: Workflow Gates &amp; Release Policy
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Workflow Gates &middot; Iteration Risk &middot; Release Policy
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_03_variant.workload_summary} Trace how deployment constraints propagate backward across the engineering lifecycle, quantify iteration rework taxes, and co-design validation gates with automated rollback policies.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 820px; line-height: 1.65;">
-                {v1_03_variant.workload_summary} This lab traces how the selected
-                track's deployment constraint propagates backward through data,
-                model design, validation, release, and monitoring.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~45 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_03_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_03_workflow.constraint_name}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_03_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Constraint:</strong> {v1_03_workflow.constraint_name}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_03_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_03_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> Iteration &amp; Gate Economics
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> Release Policy Memo
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Constraint Propagation</span>
-                <span class="badge badge-warn">Iteration Tax</span>
-                <span class="badge badge-info">Gate Confidence</span>
-                <span class="badge badge-fail">Release Policy</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_03_profile.label} Workflow Optimization
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              Your team is deploying <strong>{v1_03_variant.model_ref}</strong> to <strong>{v1_03_variant.hardware_ref}</strong> under strict <strong>{v1_03_workflow.constraint_name}</strong>. Discovering a violation in late production stages incurs severe rework costs (<em>C</em><sub>rework</sub> &prop; 10<sup><em>k</em></sup>) and triggers emergency rollbacks. You must design pre-deployment verification gates that minimize avoidable iteration tax while protecting runtime reliability.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of ML Workflows:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Constraint Propagation Invariant:</strong> Physical deployment constraints propagate backwards into earlier lifecycle stages. A hardware constraint restricts model architecture and data curation choices before code is written.</li>
+                <li><strong>The Iteration Tax Law:</strong> The cost of defect correction scales exponentially with lifecycle distance: <em>C</em>(<em>s</em>) = <em>C</em><sub>0</sub> &middot; &beta;<sup><em>s</em></sup>, where discovering violations at deployment stage <em>s</em><sub>d</sub> costs orders of magnitude more than at development stage <em>s</em><sub>0</sub>.</li>
+                <li><strong>The Gate Precision-Latency Trade-Off:</strong> Verification gates trade evaluation fidelity against iteration velocity: higher gate fidelity reduces residual production risk at the expense of developer turnaround time.</li>
+                <li><strong>The Workflow Policy Guardrail:</strong> Automated release pipelines require formal gate thresholds and deterministic rollback criteria to prevent catastrophic silent regressions.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Trace propagation:</strong>
+                    follow {v1_03_workflow.constraint_name} across data, model, validation, release, and monitoring.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Measure iteration tax:</strong>
+                    compute the rework created by late discovery.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Balance gates:</strong>
+                    trade iteration speed against deployment confidence.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Write policy:</strong>
+                    choose gates, release rules, rollback rules, and residual blind spot.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    "When should {v1_03_workflow.label} test the deployment constraint so that rework is minimized and residual risk is acceptable?"
+                </div>
             </div>
         </div>
         """),
@@ -191,41 +236,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, part_workflow, v1_03_workflow):
+def _(mo, part_workflow, v1_03_workflow):
     mo.vstack([
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Learning Objectives
-        </div>
-        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Trace propagation:</strong>
-                follow {v1_03_workflow.constraint_name} across data, model, validation, release, and monitoring.</div>
-            <div style="margin-bottom: 3px;">2. <strong>Measure iteration tax:</strong>
-                compute the rework created by late discovery.</div>
-            <div style="margin-bottom: 3px;">3. <strong>Balance gates:</strong>
-                trade iteration speed against deployment confidence.</div>
-            <div style="margin-bottom: 3px;">4. <strong>Write policy:</strong>
-                choose gates, release rules, rollback rules, and residual blind spot.</div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                When should {v1_03_workflow.label} test the deployment constraint so
-                the team avoids expensive rework without making every iteration too slow?
-            </div>
-        </div>
-    </div>
-    """),
     part_workflow(
         "Constraint Tax Workflow",
         (
@@ -270,11 +282,6 @@ def _(COLORS, mo, part_workflow, v1_03_workflow):
     ),
     ])
     return
-
-
-# ===========================================================================
-# ZONE B: CONTROLS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -456,11 +463,6 @@ def _(
     )
 
 
-# ===========================================================================
-# ZONE C: PARTS
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
@@ -602,16 +604,16 @@ def _(
         _items.extend([
             mo.accordion({
                 "Math Peek / Source Model - workflow iron law": mo.md(f"""
-The chapter's workflow view maps lifecycle stages onto the iron law:
+    The chapter's workflow view maps lifecycle stages onto the iron law:
 
-$$
-T = \\frac{{D_{{vol}}}}{{BW}} + \\frac{{O}}{{R_{{peak}} \\cdot \\eta_{{hw}}}} + L_{{lat}}
-$$
+    $$
+    T = \\frac{{D_{{vol}}}}{{BW}} + \\frac{{O}}{{R_{{peak}} \\cdot \\eta_{{hw}}}} + L_{{lat}}
+    $$
 
-For **{v1_03_workflow.label}**, the deployment constraint is **{v1_03_workflow.constraint_name}**.
-If that constraint changes $L_{{lat}}$, $R_{{peak}}$, or feasible efficiency $\\eta_{{hw}}$,
-then data assumptions, model operations, validation evidence, and monitoring thresholds all move.
-""")
+    For **{v1_03_workflow.label}**, the deployment constraint is **{v1_03_workflow.constraint_name}**.
+    If that constraint changes $L_{{lat}}$, $R_{{peak}}$, or feasible efficiency $\\eta_{{hw}}$,
+    then data assumptions, model operations, validation evidence, and monitoring thresholds all move.
+    """)
             }),
             source_trace({
                 "chapter_anchor": "ML Workflow - Lifecycle Stages and Constraint Propagation Principle",
@@ -740,21 +742,21 @@ then data assumptions, model operations, validation evidence, and monitoring thr
         _items.extend([
             mo.accordion({
                 "Math Peek / Source Model - constraint propagation cost": mo.md(f"""
-The notebook uses the chapter's simplified correction model:
+    The notebook uses the chapter's simplified correction model:
 
-$$
-\\text{{rework}} = \\text{{base effort}} \\times 2^{{\\text{{stage}} - 1}}
-$$
+    $$
+    \\text{{rework}} = \\text{{base effort}} \\times 2^{{\\text{{stage}} - 1}}
+    $$
 
-For this track:
+    For this track:
 
-$$
-{v1_03_workflow.base_rework_days:.1f} \\times 2^{{{v1_03_tax.discovery_stage - 1}}}
-= {v1_03_tax.rework_days:.1f}\\;\\text{{person-days}}
-$$
+    $$
+    {v1_03_workflow.base_rework_days:.1f} \\times 2^{{{v1_03_tax.discovery_stage - 1}}}
+    = {v1_03_tax.rework_days:.1f}\\;\\text{{person-days}}
+    $$
 
-Stage 5 produces a 16x multiplier and stage 6 produces a 32x multiplier in the chapter framing.
-""")
+    Stage 5 produces a 16x multiplier and stage 6 produces a 32x multiplier in the chapter framing.
+    """)
             }),
             source_trace({
                 "api": "mlsysbook_labs.constraint_tax",
@@ -894,21 +896,21 @@ Stage 5 produces a 16x multiplier and stage 6 produces a 32x multiplier in the c
             _consequence,
             mo.accordion({
                 "Math Peek / Source Model - validation frontier": mo.md(f"""
-The source model estimates confidence from four gate dimensions:
+    The source model estimates confidence from four gate dimensions:
 
-$$
-\\text{{confidence}} = 18 + 0.28d + 0.27r + 0.22s + 0.12a
-$$
+    $$
+    \\text{{confidence}} = 18 + 0.28d + 0.27r + 0.22s + 0.12a
+    $$
 
-Residual risk falls toward a track-specific floor:
+    Residual risk falls toward a track-specific floor:
 
-$$
-\\text{{risk}} = \\max(\\text{{floor}}, \\text{{base risk}} - 0.62 \\cdot \\text{{confidence}})
-$$
+    $$
+    \\text{{risk}} = \\max(\\text{{floor}}, \\text{{base risk}} - 0.62 \\cdot \\text{{confidence}})
+    $$
 
-Current values: depth={v1_03_frontier.validation_depth_pct:.0f}%, realism={v1_03_frontier.hardware_realism_pct:.0f}%,
-data scale={v1_03_frontier.data_scale_pct:.0f}%, automation={v1_03_frontier.automation_pct:.0f}%.
-""")
+    Current values: depth={v1_03_frontier.validation_depth_pct:.0f}%, realism={v1_03_frontier.hardware_realism_pct:.0f}%,
+    data scale={v1_03_frontier.data_scale_pct:.0f}%, automation={v1_03_frontier.automation_pct:.0f}%.
+    """)
             }),
             source_trace({
                 "api": "mlsysbook_labs.iteration_frontier",
@@ -1017,20 +1019,20 @@ data scale={v1_03_frontier.data_scale_pct:.0f}%, automation={v1_03_frontier.auto
         _items.extend([
             mo.accordion({
                 "Math Peek / Source Model - policy tuple": mo.md(f"""
-The policy is a system design tuple, not paperwork:
+    The policy is a system design tuple, not paperwork:
 
-$$
-\\text{{policy}} =
-(\\text{{gate timing}}, \\text{{evidence requirement}}, \\text{{rollout}}, \\text{{rollback}}, \\text{{blind spot}})
-$$
+    $$
+    \\text{{policy}} =
+    (\\text{{gate timing}}, \\text{{evidence requirement}}, \\text{{rollout}}, \\text{{rollback}}, \\text{{blind spot}})
+    $$
 
-Current tuple:
+    Current tuple:
 
-- Gate timing: **{v1_03_policy.gate_label}** at **{v1_03_policy.gate_stage_name}**
-- Evidence requirement: **{v1_03_policy.release_policy}**
-- Rollback: **{v1_03_policy.rollback_rule}**
-- Residual blind spot: **{v1_03_policy.blind_spot}**
-""")
+    - Gate timing: **{v1_03_policy.gate_label}** at **{v1_03_policy.gate_stage_name}**
+    - Evidence requirement: **{v1_03_policy.release_policy}**
+    - Rollback: **{v1_03_policy.rollback_rule}**
+    - Residual blind spot: **{v1_03_policy.blind_spot}**
+    """)
             }),
             source_trace({
                 "api": "mlsysbook_labs.workflow_policy",
@@ -1084,6 +1086,16 @@ Current tuple:
             mo.Html("<div class=\"mlsysbook-panel\"><h2>Final Checkpoint</h2></div>"),
             v1_03_reflection,
             mo.Html(f"""
+            <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
+              <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+                Lead Systems Architect Authorization
+              </div>
+              <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
+                The workflow policy for <strong>{v1_03_workflow.label}</strong> is authorized for release. Verification gates detect <strong>{v1_03_workflow.constraint_name}</strong> violations with an estimated iteration turnaround of {v1_03_frontier.iteration_days:.1f} days and residual risk of {v1_03_frontier.residual_risk_pct:.1f}%.
+              </div>
+            </div>
+            """),
+            mo.Html(f"""
             <div class="mlsysbook-panel">
               <h2>Big Takeaways</h2>
               <ul class="mlsysbook-list">
@@ -1109,29 +1121,35 @@ Current tuple:
             """),
         ])
 
+    def build_part_a():
+        return v1_03_build_part_a()
+
+    def build_part_b():
+        return v1_03_build_part_b()
+
+    def build_part_c():
+        return v1_03_build_part_c()
+
+    def build_part_d():
+        return v1_03_build_part_d()
+
     def build_synthesis():
         return v1_03_build_synthesis()
 
-    _tabs = mo.ui.tabs({
-        "Part A: Propagation": v1_03_build_part_a(),
-        "Part B: Iteration Tax": v1_03_build_part_b(),
-        "Part C: Gate Confidence": v1_03_build_part_c(),
-        "Part D: Workflow Policy": v1_03_build_part_d(),
+    v1_03_tabs = mo.ui.tabs({
+        "Part A: Propagation": build_part_a(),
+        "Part B: Iteration Tax": build_part_b(),
+        "Part C: Gate Confidence": build_part_c(),
+        "Part D: Workflow Policy": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    _tabs
+    v1_03_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: SYNTHESIS AND REPORT
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
 def _(
     ledger,
-    mo,
     v1_03_frontier,
     v1_03_frontier_prediction,
     v1_03_gate_prediction,
@@ -1145,53 +1163,39 @@ def _(
     v1_03_variant,
     v1_03_workflow,
 ):
-    _ledger_ready = (
+    _ledger_ready = bool(
         v1_03_gate_prediction.value is not None
         and v1_03_tax_prediction.value is not None
         and v1_03_frontier_prediction.value is not None
         and v1_03_policy_prediction.value is not None
         and bool(str(v1_03_reflection.value or "").strip())
     )
-    if _ledger_ready:
-        ledger.save(chapter=3, design={
-            "chapter": "v1_03",
-            "track_id": v1_03_profile.track_id,
-            "scenario_id": v1_03_variant.scenario_id,
-            "hardware_ref": v1_03_workflow.hardware_ref,
-            "model_ref": v1_03_workflow.model_ref,
-            "completed": True,
-            "gate_prediction": v1_03_gate_prediction.value,
-            "tax_prediction": v1_03_tax_prediction.value,
-            "frontier_prediction": v1_03_frontier_prediction.value,
-            "policy_prediction": v1_03_policy_prediction.value,
-            "constraint_name": v1_03_workflow.constraint_name,
-            "discovery_stage": v1_03_tax.discovery_stage_name,
-            "selected_gate_id": v1_03_policy.gate_id,
-            "avoidable_rework_days": v1_03_tax.avoidable_rework_days,
-            "iteration_days": v1_03_frontier.iteration_days,
-            "confidence_pct": v1_03_frontier.confidence_pct,
-            "residual_risk_pct": v1_03_frontier.residual_risk_pct,
-            "risk_budget_pct": v1_03_risk_budget_pct,
-            "release_policy": v1_03_policy.release_policy,
-            "rollback_rule": v1_03_policy.rollback_rule,
-            "policy_summary": v1_03_policy.policy_summary,
-            "blind_spot": v1_03_policy.blind_spot,
-        })
+    ledger.save(chapter=3, design={
+        "chapter": "v1_03",
+        "track_id": v1_03_profile.track_id,
+        "scenario_id": v1_03_variant.scenario_id,
+        "hardware_ref": v1_03_workflow.hardware_ref,
+        "model_ref": v1_03_workflow.model_ref,
+        "completed": _ledger_ready,
+        "gate_prediction": v1_03_gate_prediction.value,
+        "tax_prediction": v1_03_tax_prediction.value,
+        "frontier_prediction": v1_03_frontier_prediction.value,
+        "policy_prediction": v1_03_policy_prediction.value,
+        "constraint_name": v1_03_workflow.constraint_name,
+        "discovery_stage": v1_03_tax.discovery_stage_name,
+        "selected_gate_id": v1_03_policy.gate_id,
+        "avoidable_rework_days": v1_03_tax.avoidable_rework_days,
+        "iteration_days": v1_03_frontier.iteration_days,
+        "confidence_pct": v1_03_frontier.confidence_pct,
+        "residual_risk_pct": v1_03_frontier.residual_risk_pct,
+        "risk_budget_pct": v1_03_risk_budget_pct,
+        "release_policy": v1_03_policy.release_policy,
+        "rollback_rule": v1_03_policy.rollback_rule,
+        "policy_summary": v1_03_policy.policy_summary,
+        "blind_spot": v1_03_policy.blind_spot,
+    })
 
     _status = "SAVED" if _ledger_ready else "ACTIVE"
-    mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">03 &middot; Constraint Tax</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_03_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">ARTIFACT</span>
-        <span class="hud-value">{v1_03_workflow.report_artifact}</span>
-        <span class="hud-label">LEDGER</span>
-        <span class="hud-active">{_status}</span>
-    </div>
-    """)
     return
 
 
@@ -1215,8 +1219,8 @@ def _(
     v1_03_risk_budget_pct,
     v1_03_tax,
     v1_03_tax_prediction,
-    v1_03_variant,
     v1_03_validation_depth,
+    v1_03_variant,
     v1_03_workflow,
 ):
     _incomplete = []
