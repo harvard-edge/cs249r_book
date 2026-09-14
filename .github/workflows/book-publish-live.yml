@@ -1225,8 +1225,12 @@ jobs:
           echo "🔍 Validating artifact names from API..."
           VOL1_HTML="${{ needs.call-production-build.outputs.linux_html_vol1_artifact }}"
           VOL2_HTML="${{ needs.call-production-build.outputs.linux_html_vol2_artifact }}"
+          VOL3_HTML="${{ needs.call-production-build.outputs.linux_html_vol3_artifact }}"
+          VOL4_HTML="${{ needs.call-production-build.outputs.linux_html_vol4_artifact }}"
           echo "📘 Vol1 HTML artifact: '$VOL1_HTML'"
           echo "📙 Vol2 HTML artifact: '$VOL2_HTML'"
+          echo "📗 Vol3 HTML artifact: '${VOL3_HTML:-not produced}'"
+          echo "📕 Vol4 HTML artifact: '${VOL4_HTML:-not produced}'"
           if [ -z "$VOL1_HTML" ] || [ -z "$VOL2_HTML" ]; then
             echo "❌ CRITICAL: Volume artifact names missing from build workflow outputs"
             exit 1
@@ -1285,6 +1289,28 @@ jobs:
         with:
           name: ${{ needs.call-production-build.outputs.linux_epub_vol2_artifact }}
           path: ./epub-vol2-temp
+        continue-on-error: true
+
+      # =================================================================
+      # Volume III Artifacts (HTML draft when deploy_target is all)
+      # =================================================================
+      - name: 📦 Download Volume III HTML Artifacts
+        if: (inputs.deploy_target == 'vol3' || inputs.deploy_target == 'all') && needs.call-production-build.outputs.linux_html_vol3_artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_html_vol3_artifact }}
+          path: ./html-vol3-temp
+        continue-on-error: true
+
+      # =================================================================
+      # Volume IV Artifacts (HTML draft when deploy_target is all)
+      # =================================================================
+      - name: 📦 Download Volume IV HTML Artifacts
+        if: (inputs.deploy_target == 'vol4' || inputs.deploy_target == 'all') && needs.call-production-build.outputs.linux_html_vol4_artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_html_vol4_artifact }}
+          path: ./html-vol4-temp
         continue-on-error: true
 
       - name: 📋 Verify Downloaded Artifacts
@@ -1367,6 +1393,40 @@ jobs:
           fi
 
           # =================================================================
+          # Prepare Volume III site (if artifacts exist)
+          # =================================================================
+          if [ -d "html-vol3-temp" ]; then
+            echo "🔄 Preparing Volume III site..."
+            mkdir -p vol3-site
+
+            # Find HTML content
+            if [ -d "html-vol3-temp/html-vol3" ]; then
+              cp -r html-vol3-temp/html-vol3/* vol3-site/
+            else
+              cp -r html-vol3-temp/* vol3-site/
+            fi
+
+            echo "✅ Volume III site prepared"
+          fi
+
+          # =================================================================
+          # Prepare Volume IV site (if artifacts exist)
+          # =================================================================
+          if [ -d "html-vol4-temp" ]; then
+            echo "🔄 Preparing Volume IV site..."
+            mkdir -p vol4-site
+
+            # Find HTML content
+            if [ -d "html-vol4-temp/html-vol4" ]; then
+              cp -r html-vol4-temp/html-vol4/* vol4-site/
+            else
+              cp -r html-vol4-temp/* vol4-site/
+            fi
+
+            echo "✅ Volume IV site prepared"
+          fi
+
+          # =================================================================
           # Landing page is rendered separately (see next step)
           # =================================================================
           echo "ℹ️ Landing page will be rendered in next step"
@@ -1383,6 +1443,12 @@ jobs:
           fi
           if [ -d "vol2-site" ]; then
             bash .github/scripts/flatten-vol-urls.sh vol2-site vol2
+          fi
+          if [ -d "vol3-site" ]; then
+            bash .github/scripts/flatten-vol-urls.sh vol3-site vol3
+          fi
+          if [ -d "vol4-site" ]; then
+            bash .github/scripts/flatten-vol-urls.sh vol4-site vol4
           fi
 
       - name: 🐍 Setup Python (for release manifests)
@@ -1457,6 +1523,12 @@ jobs:
 
           emit_manifest "vol1-site" "vol1" "$MANIFEST_VOL1"
           emit_manifest "vol2-site" "vol2" "$MANIFEST_VOL2"
+          if [ -d "vol3-site" ]; then
+            emit_manifest "vol3-site" "vol3" "vol3-v0.0.0-draft" || true
+          fi
+          if [ -d "vol4-site" ]; then
+            emit_manifest "vol4-site" "vol4" "vol4-v0.0.0-draft" || true
+          fi
 
       - name: 🔧 Setup Quarto (for landing page)
         if: inputs.deploy_target == 'all'
@@ -1567,6 +1639,28 @@ jobs:
             fi
           fi
 
+          # =================================================================
+          # Deploy Volume III to /vol3/ (if available)
+          # =================================================================
+          if [ -d "../vol3-site" ] && [ -n "$(ls -A ../vol3-site 2>/dev/null)" ]; then
+            echo "📦 Deploying Volume III to /vol3/..."
+            rm -rf vol3/
+            mkdir -p vol3
+            cp -r ../vol3-site/* vol3/
+            echo "✅ Volume III deployed to /vol3/"
+          fi
+
+          # =================================================================
+          # Deploy Volume IV to /vol4/ (if available)
+          # =================================================================
+          if [ -d "../vol4-site" ] && [ -n "$(ls -A ../vol4-site 2>/dev/null)" ]; then
+            echo "📦 Deploying Volume IV to /vol4/..."
+            rm -rf vol4/
+            mkdir -p vol4
+            cp -r ../vol4-site/* vol4/
+            echo "✅ Volume IV deployed to /vol4/"
+          fi
+
           # Root landing page (mlsysbook.ai/) is owned by site-publish-live.yml.
           # This workflow only deploys /$VOL1_PATH/ and /$VOL2_PATH/; it must
           # not write a root index.html (doing so would clobber the landing
@@ -1598,6 +1692,14 @@ jobs:
           if [ -d "vol2" ]; then
             echo "📊 Vol2 directory contents:"
             ls -la vol2/ | head -10
+          fi
+          if [ -d "vol3" ]; then
+            echo "📊 Vol3 directory contents:"
+            ls -la vol3/ | head -10
+          fi
+          if [ -d "vol4" ]; then
+            echo "📊 Vol4 directory contents:"
+            ls -la vol4/ | head -10
           fi
 
           # Add all files to git
@@ -1680,6 +1782,8 @@ jobs:
           echo "🌐 Site URLs:"
           echo "  - Volume I:  https://mlsysbook.ai/$VOL1_PATH/"
           echo "  - Volume II: https://mlsysbook.ai/$VOL2_PATH/"
+          [ -d "vol3" ] && echo "  - Volume III (Draft): https://mlsysbook.ai/vol3/"
+          [ -d "vol4" ] && echo "  - Volume IV (Draft):  https://mlsysbook.ai/vol4/"
           echo "  - TinyTorch: https://mlsysbook.ai/tinytorch/"
           echo "  - Hardware Kits: https://mlsysbook.ai/kits/"
           echo ""
@@ -2215,7 +2319,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access Your Published Textbook:" >> $GITHUB_STEP_SUMMARY
           echo "- 📖 [Volume I: Foundations](https://mlsysbook.ai/${{ vars.VOL1_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📘 [Volume II: At Scale](https://mlsysbook.ai/${{ vars.VOL2_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📘 [Volume II: Scaling](https://mlsysbook.ai/${{ vars.VOL2_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📗 [Volume III: Agentic (Draft)](https://mlsysbook.ai/vol3/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📕 [Volume IV: Physical AI (Draft)](https://mlsysbook.ai/vol4/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔥 [TinyTorch Framework](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
           echo "- ⚙️ [Hardware Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
