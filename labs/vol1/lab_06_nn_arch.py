@@ -1442,13 +1442,29 @@ def _(
         """),
     ])
 
-    mo.ui.tabs({
-        "Part A - Topology": _part_a,
-        "Part B - Memory Wall": _part_b,
-        "Part C - Inductive Bias": _part_c,
-        "Part D - Recommendation": _part_d,
-        "Synthesis": _synthesis,
+    def build_part_a():
+        return _part_a
+
+    def build_part_b():
+        return _part_b
+
+    def build_part_c():
+        return _part_c
+
+    def build_part_d():
+        return _part_d
+
+    def build_synthesis():
+        return _synthesis
+
+    v1_06_tabs = mo.ui.tabs({
+        "Part A - Topology": build_part_a(),
+        "Part B - Memory Wall": build_part_b(),
+        "Part C - Inductive Bias": build_part_c(),
+        "Part D - Recommendation": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
+    v1_06_tabs
     return
 
 

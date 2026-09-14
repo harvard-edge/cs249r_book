@@ -780,6 +780,7 @@ def _(
     intensity_val,
     lat_ms,
     ledger,
+    mo,
     throughput_val,
     track_key,
 ):
@@ -798,7 +799,19 @@ def _(
             "active_bottleneck": active_profile.bottleneck,
         },
     )
-    return
+    return mo.Html(f"""
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">02 &middot; ML Systems &amp; Roofline</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{track_key}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">HARDWARE</span>
+        <span class="hud-value">{active_hardware.name}</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">ACTIVE</span>
+    </div>
+    """)
 
 
 if __name__ == "__main__":
