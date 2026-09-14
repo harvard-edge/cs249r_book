@@ -66,9 +66,7 @@ This fundamental structural tension establishes the **Action-Boundary Principle*
 
 $$\text{Risk}(\mathcal{A}) \propto \text{ExpressivePower}(\mathcal{A}) \times \text{MutationAuthority}(\mathcal{A})$$
 
-Both the operational leverage and the systemic risk of an autonomous agent scale monotonically with the expressive power and mutation authority of its action interface. If an agent is granted raw, unmediated access to mutate external state based on autoregressively generated strings, system integrity collapses. Over an execution horizon of $N$ steps with per-step validity probability $p$, the probability of maintaining continuous system integrity decays exponentially:
-
-$$P_{\text{integrity}}(N) = \prod_{k=1}^N p_k \le p^N \xrightarrow[N \to \infty]{} 0$$
+Both the operational leverage and the systemic risk of an autonomous agent scale monotonically with the expressive power and mutation authority of its action interface. If an agent is granted raw, unmediated access to mutate external state based on autoregressively generated strings, system integrity collapses. Over an execution horizon of $N$ steps with per-step validity probability $p$, the probability of maintaining continuous system integrity decays exponentially: $P_{\text{integrity}}(N) = \prod_{k=1}^N p_k \le p^N \to 0$ as $N \to \infty$.
 
 To see the mathematical severity of this decay from first principles, consider an agent operating with a seemingly high per-step validity probability of $p = 0.98$ (a 98 percent success rate). Over a moderate trajectory horizon of $N = 30$ steps, the compound probability of surviving without a single corrupting mutation drops to $0.98^{30} \approx 0.545$—barely better than a coin flip. If per-step validity falls to $p = 0.95$, survival at 30 steps collapses to $0.95^{30} \approx 0.215$, and by 50 steps it plummets to $0.95^{50} \approx 0.077$—fewer than one in twelve runs completes safely. Unconstrained natural language generation simply cannot maintain compounding integrity over multi-step horizons.
 
@@ -165,13 +163,7 @@ Prior to executing the GPU softmax normalization, a custom CUDA kernel applies e
 
 $$z_{t, v}' = \begin{cases} z_{t, v} & \text{if } v \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } v \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$
 
-The normalized sampling distribution over the vocabulary is then computed via softmax:
-
-$$\Pr(x_t = v \mid x_{<t}) = \frac{\exp(z_{t, v}')}{\sum_{w \in \mathcal{V}} \exp(z_{t, w}')}$$
-
-Because $\exp(-\infty) = 0$, any token that would produce a syntax violation has an exact sampling probability of zero:
-
-$$\forall v \notin \mathcal{V}_{\text{valid}}(q_t), \quad \Pr(x_t = v \mid x_{<t}) = 0$$
+The normalized sampling distribution over the vocabulary is then computed via softmax: $\Pr(x_t = v \mid x_{<t}) = \exp(z_{t, v}') / \sum_{w \in \mathcal{V}} \exp(z_{t, w}')$. Because $\exp(-\infty) = 0$, any token that would produce a syntax violation has an exact sampling probability of zero: $\Pr(x_t = v \mid x_{<t}) = 0$ for all $v \notin \mathcal{V}_{\text{valid}}(q_t)$.
 
 Upon sampling token $x_t$, the automaton transitions deterministically to state $q_{t+1}$. To execute this masking at hardware line rate without stalling GPU streaming multiprocessors (SMs), the runtime compiles the DFA into a compressed vocabulary bitmask tensor $\mathbf{M} \in \{0, 1\}^{|Q| \times \lceil |\mathcal{V}| / 32 \rceil}$ ahead of time. For a realistic 500-state JSON schema and a 128,000-token vocabulary, $\mathbf{M}$ occupies only $500 \times 4{,}000\,\text{bytes} \approx 8\,\text{MB}$—fitting entirely within the $50\,\text{MB}$ dedicated L2 cache of an NVIDIA H100 GPU. Inside the decode sampling kernel, each warp executes a 32-bit bitwise AND operation (`__ballot_sync` and bitmask lookup) in a single clock cycle, completing logit masking in under $0.4\,\text{ms}$ per token with zero off-chip memory traffic.
 
@@ -183,15 +175,9 @@ In post-hoc host validation, the model generates an unconstrained text string. T
 
 However, the dominant cost is not the CPU validation itself, but the **failure penalty** when validation fails. Without logit masking, models exhibit a schema error rate $p_{\text{err}} \in [0.05, 0.15]$ on nested parameters. Every failure triggers an error reflection loop: the runtime appends an error traceback ($S_{\text{error}} \approx 150\text{ tokens}$) to the context and prompts the model to correct its mistake.
 
-Let us evaluate the latency and FLOP penalty of this retry loop from first principles. Let the accumulated context length be $S_{\text{context}} = 16,000$ tokens, and let a tool invocation take $T_{\text{gen}} = 60$ tokens to generate at an autoregressive decode speed of $20\,\text{ms/token}$ ($\tau_{\text{gen}} = 1,200\,\text{ms}$). On an NVIDIA H100 GPU, prefilling a 16,000-token prompt takes $\tau_{\text{prefill}} \approx 240\,\text{ms}$ and requires:
+Let us evaluate the latency and FLOP penalty of this retry loop from first principles. Let the accumulated context length be $S_{\text{context}} = 16,000$ tokens, and let a tool invocation take $T_{\text{gen}} = 60$ tokens to generate at an autoregressive decode speed of $20\,\text{ms/token}$ ($\tau_{\text{gen}} = 1,200\,\text{ms}$). On an NVIDIA H100 GPU, prefilling a 16,000-token prompt takes $\tau_{\text{prefill}} \approx 240\,\text{ms}$ and requires $\text{FLOPs}_{\text{prefill}} \approx 2 \cdot P \cdot S_{\text{context}} = 2 \cdot (70 \times 10^9) \cdot 16,000 \approx 2.24 \times 10^{15} \text{ FLOPs } (2.24\text{ PFLOPs})$ for a 70B parameter model. With an error rate of $p_{\text{err}} = 0.10$, the expected latency penalty per tool invocation is $\mathbb{E}[\Delta \tau_{\text{retry}}] = p_{\text{err}} \left( \tau_{\text{prefill}}(S_{\text{context}} + S_{\text{error}}) + \tau_{\text{gen}} \right) \approx 0.10 \cdot (240\,\text{ms} + 1,200\,\text{ms}) = 144\,\text{ms}$.
 
-$$\text{FLOPs}_{\text{prefill}} \approx 2 \cdot P \cdot S_{\text{context}} = 2 \cdot (70 \times 10^9) \cdot 16,000 \approx 2.24 \times 10^{15} \text{ FLOPs } (2.24\text{ PFLOPs})$$
-
-for a 70B parameter model. With an error rate of $p_{\text{err}} = 0.10$, the expected latency penalty per tool invocation is:
-
-$$\mathbb{E}[\Delta \tau_{\text{retry}}] = p_{\text{err}} \left( \tau_{\text{prefill}}(S_{\text{context}} + S_{\text{error}}) + \tau_{\text{gen}} \right) \approx 0.10 \cdot (240\,\text{ms} + 1,200\,\text{ms}) = 144\,\text{ms}$$
-
-In an unconstrained architecture, every tool call pays an average tax of $144\,\text{ms}$ of latency and burns $224\text{ TFLOPs}$ of accelerator compute solely recovering from syntax errors. By contrast, tensor-layer masking compiles the DFA once ahead of time ($10\text{ to }30\,\text{ms}$ during tool startup) and pays $< 0.4\,\text{ms}$ per token during sampling. Because $p_{\text{err}} = 0.00\%$, multi-turn repair loops are eliminated entirely, saving petascale compute across an enterprise deployment.
+In an unconstrained architecture, every tool call pays an average tax of $144\,\text{ms}$ of latency and burns $224\text{ TFLOPs}$ of accelerator compute solely recovering from syntax errors. By contrast, tensor-layer masking compiles the DFA once ahead of time ($10\text{ to }30\,\text{ms}$ during tool startup) and pays $< 0.4\,\text{ms}$ per token during sampling. Because $p_{\text{err}} = 0.00\text{ percent}$, multi-turn repair loops are eliminated entirely, saving petascale compute across an enterprise deployment.
 
 Once the system guarantees that token sequences compile deterministically into valid system calls, the next architectural challenge is structuring the wire protocol that connects the agent runtime to heterogeneous external services.
 
@@ -289,20 +275,13 @@ JSON is structurally verbose: every field requires delimiter quotes, colons, bra
 Consider an agent querying a SQL database, inspecting a directory tree, or retrieving a Git diff:
 
 - A modest $12\,\text{KB}$ tabular database query result converts into roughly $3,000\text{ to }3,600\text{ tokens}$.
-- If an agent executes an $N = 20$ step trajectory with an average tool response size of $5\,\text{KB}$ ($1,250\text{ tokens}$), the cumulative observation payload alone injects:
-  $$\mathcal{S}_{\text{observations}} = 20 \times 1,250 = 25,000\text{ tokens}$$
-  directly into the model's prompt context.
+- If an agent executes an $N = 20$ step trajectory with an average tool response size of $5\,\text{KB}$ ($1,250\text{ tokens}$), the cumulative observation payload alone injects $\mathcal{S}_{\text{observations}} = 20 \times 1,250 = 25,000\text{ tokens}$ directly into the model's prompt context.
 
 #### Wire transport vs. accelerator memory impact
 
 From a networking perspective, transmitting $12\,\text{KB}$ over local `stdio` IPC takes less than $1.2\,\mu\text{s}$ through Linux pipe buffers (operating at $> 10\,\text{GB/s}$ memory bandwidth). Over remote HTTP/SSE connections, JSON serialization, TLS encryption, and TCP packet segmentation add an acceptable $5\,\text{ms} \text{ to } 25\,\text{ms}$.
 
-The critical systems bottleneck is not the wire transport—it is **accelerator Key-Value (KV) cache memory**. In an autoregressive agent, every token received from an external tool remains resident in the KV cache across all subsequent trajectory steps. For a 70B parameter model utilizing Grouped-Query Attention (GQA) with $H_{kv} = 8$ key-value heads, head dimension $d_h = 128$, and $L = 80$ layers in FP16 precision ($2\text{ bytes}$ per parameter), the memory consumed solely by storing past tool observation returns is:
-
-$$B_{\text{obs}} = 2 \cdot L \cdot H_{kv} \cdot d_h \cdot \mathcal{S}_{\text{observations}} \cdot 2 \text{ bytes}$$
-$$B_{\text{obs}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 25,000 \cdot 2 \text{ bytes} \approx 8.19 \times 10^9 \text{ bytes } (8.19\,\text{GB})$$
-
-Over $8\,\text{GB}$ of physical HBM is permanently stranded per active agent stream solely retaining verbose JSON formatting strings.
+The critical systems bottleneck is not the wire transport—it is **accelerator Key-Value (KV) cache memory**. In an autoregressive agent, every token received from an external tool remains resident in the KV cache across all subsequent trajectory steps. For a 70B parameter model utilizing Grouped-Query Attention (GQA) with $H_{kv} = 8$ key-value heads, head dimension $d_h = 128$, and $L = 80$ layers in FP16 precision ($2\text{ bytes}$ per parameter), the memory consumed solely by storing past tool observation returns is $B_{\text{obs}} = 2 \cdot L \cdot H_{kv} \cdot d_h \cdot \mathcal{S}_{\text{observations}} \cdot 2 \text{ bytes} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 25,000 \cdot 2 \text{ bytes} \approx 8.19\,\text{GB}$. Over $8\,\text{GB}$ of physical HBM is permanently stranded per active agent stream solely retaining verbose JSON formatting strings.
 
 To mitigate this context bloat, high-performance agent runtimes implement three architectural controls:
 
@@ -316,27 +295,13 @@ Every tool exposed to an agent imposes an inescapable economic, latency, and mem
 
 To make an agent aware of an available tool, the tool's complete JSON schema—including its name, functional description, parameter names, type constraints, and field descriptions—must be serialized into text and injected into the model's system prompt context.
 
-Let $M$ denote the number of tools registered in the agent's catalog. Let $S(T_i)$ represent the serialized token footprint of tool $T_i$'s schema. The static tool prompt tax per step is:
+Let $M$ denote the number of tools registered in the agent's catalog, and let $S(T_i)$ represent the serialized token footprint of tool $T_i$'s schema. The static tool prompt tax per step is $\mathcal{T}_{\text{tax}} = \sum_{i=1}^{M} S(T_i)$. For an agent executing an $N$-step trajectory, the cumulative prefill compute dedicated solely to re-evaluating tool schemas scales as $\Phi_{\text{catalog}} = N \sum_{i=1}^M S(T_i) = N \cdot M \cdot \bar{S}_{\text{tool}}$.
 
-$$\mathcal{T}_{\text{tax}} = \sum_{i=1}^{M} S(T_i)$$
-
-For an agent executing an $N$-step trajectory, the cumulative prefill compute dedicated solely to re-evaluating tool schemas scales as:
-
-$$\Phi_{\text{catalog}} = N \sum_{i=1}^M S(T_i) = N \cdot M \cdot \bar{S}_{\text{tool}}$$
-
-Consider an enterprise agent equipped with a library of $M = 100$ fine-grained micro-tools (e.g., `git_status`, `git_diff`, `git_add`, `git_commit`, `k8s_get_pods`, `k8s_delete_pod`), with an average schema footprint of $\bar{S}_{\text{tool}} = 350$ tokens. The static tool catalog consumes $\mathcal{T}_{\text{tax}} = 35,000$ tokens on every single step. Across a modest $N = 30$ step trajectory, the agent spends:
-
-$$\Phi_{\text{catalog}} = 30 \times 35,000 = 1,050,000 \text{ prefill tokens}$$
-
-solely re-reading its capability definitions. This overhead produces three severe systems failures:
+Consider an enterprise agent equipped with a library of $M = 100$ fine-grained micro-tools (e.g., `git_status`, `git_diff`, `git_add`, `git_commit`, `k8s_get_pods`, `k8s_delete_pod`), with an average schema footprint of $\bar{S}_{\text{tool}} = 350$ tokens. The static tool catalog consumes $\mathcal{T}_{\text{tax}} = 35,000$ tokens on every single step. Across a modest $N = 30$ step trajectory, the agent spends $\Phi_{\text{catalog}} = 30 \times 35,000 = 1,050,000 \text{ prefill tokens}$ solely re-reading its capability definitions. This overhead produces three severe systems failures:
 
 1. **Inference Latency & Financial Cost:** Over a million prefill tokens are processed repeatedly, driving up the Cost-per-Verified-Goal (CPVG) and saturating accelerator prefill compute.
-2. **Context Working Set Displacement:** The static schema footprint consumes physical GPU HBM allocated to Key-Value (KV) cache activations. For a 70B parameter model ($L=80, d_h=128$), under standard Multi-Head Attention ($H=64$), $35,000$ tokens strand $91.7\,\text{GB}$ of KV-cache memory across the serving cluster:
-   $$B_{\text{tax}} = 2 \cdot L \cdot H \cdot d_h \cdot \mathcal{T}_{\text{tax}} \cdot 2 \text{ bytes} \approx 91.7\,\text{GB}$$
-   Even under modern Grouped-Query Attention (GQA) with $H_{kv}=8$ heads, the static catalog permanently strands $11.5\,\text{GB}$ of HBM per request stream, crowding out episodic memory and codebase context.
-3. **Attention Distraction & Tool Confusion:** As the catalog size $M$ exceeds 30, the attention distribution over parameter definitions flattens. The entropy of the attention distribution across tool descriptions increases:
-   $$\mathcal{H}(\boldsymbol{\alpha}) = -\sum_{i=1}^M \alpha_i \log \alpha_i$$
-   This attention dispersion sharply increases the probability of hallucinated tool names and parameter cross-talk.
+2. **Context Working Set Displacement:** The static schema footprint consumes physical GPU HBM allocated to Key-Value (KV) cache activations. For a 70B parameter model ($L=80, d_h=128$), under standard Multi-Head Attention ($H=64$), $35,000$ tokens strand $91.7\,\text{GB}$ of KV-cache memory across the serving cluster ($B_{\text{tax}} = 2 \cdot L \cdot H \cdot d_h \cdot \mathcal{T}_{\text{tax}} \cdot 2 \text{ bytes} \approx 91.7\,\text{GB}$). Even under modern Grouped-Query Attention (GQA) with $H_{kv}=8$ heads, the static catalog permanently strands $11.5\,\text{GB}$ of HBM per request stream, crowding out episodic memory and codebase context.
+3. **Attention Distraction & Tool Confusion:** As the catalog size $M$ exceeds 30, the attention distribution over parameter definitions flattens. The entropy of the attention distribution across tool descriptions increases ($\mathcal{H}(\boldsymbol{\alpha}) = -\sum_{i=1}^M \alpha_i \log \alpha_i$), sharply elevating the probability of hallucinated tool names and parameter cross-talk.
 
 ### Ousterhout's deep modules for agent interfaces
 
@@ -432,13 +397,7 @@ Because foundation models are optimized via reinforcement learning to persist un
 
 ### The mathematical formulation of idempotency
 
-Formally, an actuation operation $f$ acting on an environment state space $\mathcal{S}$ is **idempotent**\index{Idempotency} if applying it multiple times produces the exact same state mutation and output as applying it once:
-
-$$f(f(s)) = f(s) \quad \forall s \in \mathcal{S}$$
-
-In systems engineering terms, an idempotent tool interface guarantees **at-most-once physical execution semantics** at the environment layer, even when driven by an **at-least-once retry loop** at the stochastic agent layer:
-
-$$\Pr(\text{PhysicalMutations}(a) > 1 \mid \text{AgentInvocations}(a) \ge 1) = 0$$
+Formally, an actuation operation $f$ acting on an environment state space $\mathcal{S}$ is **idempotent**\index{Idempotency} if applying it multiple times produces the exact same state mutation and output as applying it once: $f(f(s)) = f(s)$ for all $s \in \mathcal{S}$. In systems engineering terms, an idempotent tool interface guarantees **at-most-once physical execution semantics** at the environment layer, even when driven by an **at-least-once retry loop** at the stochastic agent layer ($\Pr(\text{PhysicalMutations}(a) > 1 \mid \text{AgentInvocations}(a) \ge 1) = 0$).
 
 Tool operations fall into three operational classes:
 
@@ -455,9 +414,7 @@ Let $\text{AID} \in \mathbb{U}_{128}$ denote the Agent Identifier, $k \in \mathb
 $$\eta = \mathcal{H}_{\text{SHA256}}\Big( \text{AID} \,\|\, k \,\|\, \text{ToolName} \,\|\, \text{CanonicalJSON}(\mathbf{x}_{\text{args}}) \Big)$$
 
 ::: {.callout-note title="The canonical JSON requirement (RFC 8785)"}
-Lexicographical key sorting (`CanonicalJSON`) is mandatory [@rfc8785]. In standard JSON implementations, dictionary keys are serialized in arbitrary, non-deterministic order. If a model retrying a tool call outputs `{"path": "/tmp", "force": true}` on attempt 1, and `{"force": true, "path": "/tmp"}` on attempt 2, a standard string hash produces completely different digest values, defeating deduplication. Canonical serialization sorts keys lexicographically and strips extraneous whitespace, guaranteeing that semantically identical parameter sets produce identical cryptographic digests:
-
-$$\text{CanonicalJSON}\left(\{"b": 2, "a": 1\}\right) \equiv \text{CanonicalJSON}\left(\{"a": 1, "b": 2\}\right) = \text{'{"a":1,"b":2}'}$$
+Lexicographical key sorting (`CanonicalJSON`) is mandatory [@rfc8785]. In standard JSON implementations, dictionary keys are serialized in arbitrary, non-deterministic order. If a model retrying a tool call outputs `{"path": "/tmp", "force": true}` on attempt 1, and `{"force": true, "path": "/tmp"}` on attempt 2, a standard string hash produces completely different digest values, defeating deduplication. Canonical serialization sorts keys lexicographically and strips extraneous whitespace, guaranteeing that semantically identical parameter sets produce identical cryptographic digests ($\text{CanonicalJSON}(\{"b": 2, "a": 1\}) \equiv \text{CanonicalJSON}(\{"a": 1, "b": 2\}) = \text{'{"a":1,"b":2}'}$).
 :::
 
 ### The distributed lock, WAL, and replay pipeline
@@ -475,11 +432,9 @@ The actuation gateway evaluates the nonce against a three-state finite state mac
      ```redis
      SET idempotency:nonce "IN_FLIGHT" NX PX 30000
      ```
-   - If the lock is acquired, the gateway appends an `INTENT` record to the persistent Write-Ahead Log:
-     $$\text{WAL} \leftarrow \langle \text{INTENT}, \text{AID}, k, \eta, \text{ToolName}, \mathbf{x}_{\text{args}}, t_{\text{start}} \rangle$$
+   - If the lock is acquired, the gateway appends an `INTENT` record to the persistent Write-Ahead Log ($\text{WAL} \leftarrow \langle \text{INTENT}, \text{AID}, k, \eta, \text{ToolName}, \mathbf{x}_{\text{args}}, t_{\text{start}} \rangle$).
    - The tool executes inside the isolated sandbox hypervisor.
-   - Upon successful execution, the gateway transitions the Redis record to `COMPLETED` with an extended Time-To-Live (e.g., 24 hours), stores the serialized observation result $\mathcal{O}_{\text{result}}$, and commits the WAL record:
-     $$\text{WAL} \leftarrow \langle \text{COMMIT}, \eta, \mathcal{H}(\mathcal{O}_{\text{result}}), t_{\text{done}} \rangle$$
+   - Upon successful execution, the gateway transitions the Redis record to `COMPLETED` with an extended Time-To-Live (e.g., 24 hours), stores the serialized observation result $\mathcal{O}_{\text{result}}$, and commits the WAL record ($\text{WAL} \leftarrow \langle \text{COMMIT}, \eta, \mathcal{H}(\mathcal{O}_{\text{result}}), t_{\text{done}} \rangle$).
 2. **State `IN_FLIGHT` (Concurrent Retry or In-Progress Execution):**
    - If a duplicate request carrying nonce $\eta$ arrives while execution is already underway, the gateway detects the `IN_FLIGHT` status.
    - The gateway rejects the duplicate attempt with an HTTP `409 Conflict` or blocks asynchronously on a distributed condition variable. Under no circumstances is a second execution sandbox launched.
@@ -501,9 +456,7 @@ Two-Phase Commit fails completely for autonomous agent actuation:
 
 To coordinate multi-step agent trajectories across distributed environments, agent runtimes must implement **Sagas**\index{Sagas}, first formalized by Hector Garcia-Molina and Kenneth Salem in 1987 [@garciamolina1987sagas].
 
-A Saga models an execution trajectory as an ordered sequence of independent transactions, where every forward action $T_i$ is paired with a deterministic **compensating action** $C_i$:
-
-$$\mathcal{T}_{\text{saga}} = \Big( (T_1, C_1), \, (T_2, C_2), \, \dots, \, (T_n, C_n) \Big)$$
+A Saga models an execution trajectory as an ordered sequence of independent transactions, where every forward action $T_i$ is paired with a deterministic **compensating action** $C_i$: $\mathcal{T}_{\text{saga}} = ((T_1, C_1), (T_2, C_2), \dots, (T_n, C_n))$.
 
 The compensating action $C_i$ does not execute a magical database rollback; rather, it executes a forward semantic compensation that negates the real-world side effect of $T_i$ (@tbl-vol3-actuation-compensations).
 
@@ -516,9 +469,7 @@ The compensating action $C_i$ does not execute a magical database rollback; rath
 
 : **Forward Transactions and Semantic Compensating Actions**: Pairing forward mutating actions with authoritative compensation handlers in agent sagas. {#tbl-vol3-actuation-compensations tbl-colwidths="[25,25,25,25]"}
 
-If an agent trajectory fails at step $k \in \{1, \dots, n\}$ due to an unrecoverable exception or capability rejection, the supervisor orchestrator initiates **Backward Recovery**\index{Backward Recovery}. The runtime halts forward execution and executes the compensating transactions in reverse chronological order:
-
-$$\text{RecoveryPath} = \big( C_{k-1}, \, C_{k-2}, \, \dots, \, C_1 \big)$$
+If an agent trajectory fails at step $k \in \{1, \dots, n\}$ due to an unrecoverable exception or capability rejection, the supervisor orchestrator initiates **Backward Recovery**\index{Backward Recovery}. The runtime halts forward execution and executes the compensating transactions in reverse chronological order: $\text{RecoveryPath} = (C_{k-1}, C_{k-2}, \dots, C_1)$.
 
 #### Pivot steps and the point of no return
 
@@ -549,15 +500,9 @@ In production agent runtimes, tool execution times span five orders of magnitude
 3. **Remote RPC & Database Queries ($100 - 800\,\text{ms}$):** Querying external PostgreSQL clusters or invoking third-party REST APIs over the wide-area network (WAN).
 4. **Heavy Build & Test Pipelines ($5 - 120\,\text{s}$):** Compiling large codebases (`cargo build`), launching container sandboxes, or executing unit test suites.
 
-In a sequential trajectory of $N$ steps, total execution latency is the direct sum of model deliberation time and tool execution time:
+In a sequential trajectory of $N$ steps, total execution latency is the direct sum of model deliberation time and tool execution time: $\mathcal{T}_{\text{trajectory}} = \sum_{k=1}^N (\tau_{\text{delib}, k} + \tau_{\text{tool}, k})$. Because external tool latencies follow heavy-tailed distributions (often exhibiting Pareto-distributed tail behavior; see @sec-vol3-appendix-math-pareto), tail events dominate the end-to-end critical path.
 
-$$\mathcal{T}_{\text{trajectory}} = \sum_{k=1}^N \left( \tau_{\text{delib}, k} + \tau_{\text{tool}, k} \right)$$
-
-Because external tool latencies follow heavy-tailed distributions (often exhibiting Pareto-distributed tail behavior; see @sec-vol3-appendix-math-pareto), tail events dominate the end-to-end critical path.
-
-Consider an external API with an average latency of $300\,\text{ms}$, but with a 95th-percentile tail latency of $8\,\text{s}$ due to periodic rate-limiting and connection backoffs ($p_{\text{straggler}} = 0.05$). For an agent executing a sequence of $N = 25$ tool calls, the probability of encountering at least one severe tool straggler is:
-
-$$P(\ge 1\text{ straggler}) = 1 - (1 - p_{\text{straggler}})^N = 1 - (0.95)^{25} \approx 1 - 0.277 = 72.3\%$$
+Consider an external API with an average latency of $300\,\text{ms}$, but with a 95th-percentile tail latency of $8\,\text{s}$ due to periodic rate-limiting and connection backoffs ($p_{\text{straggler}} = 0.05$). For an agent executing a sequence of $N = 25$ tool calls, the probability of encountering at least one severe tool straggler is $P(\ge 1\text{ straggler}) = 1 - (1 - p_{\text{straggler}})^N = 1 - (0.95)^{25} \approx 1 - 0.277 = 72.3\text{ percent}$.
 
 Nearly three out of four agent trajectories will be stalled by an external tool straggler. If the serving runtime holds the model's KV-cache pinned in GPU HBM throughout an 8-second external stall, it incurs a severe Tool-Wait memory tax, blocking other concurrent requests from utilizing the accelerator. Runtimes must deploy asynchronous execution loops, context paging to host DRAM, and deterministic execution timeouts.
 
@@ -568,19 +513,13 @@ Tool execution is not only prone to latency variance; it is also prone to execut
 1. **Model Actuation Error ($\epsilon_{\text{model}}$):** The model emits valid syntax, but selects an incorrect tool or provides semantically invalid parameters (e.g., querying a non-existent database column).
 2. **Environment & Infrastructure Error ($\epsilon_{\text{tool}}$):** The external service encounters a network timeout, concurrency conflict, permission denial, or transient 500 error.
 
-The joint probability of completing a single step successfully is:
+The joint probability of completing a single step successfully is $p_k = (1 - \epsilon_{\text{model}})(1 - \epsilon_{\text{tool}})$. If execution failures are unhandled or trigger cascading misinterpretations, the compound probability of surviving an $N$-step trajectory without error collapses exponentially: $P_{\text{success}}(N) = \prod_{k=1}^N p_k = ((1 - \epsilon_{\text{model}})(1 - \epsilon_{\text{tool}}))^N$.
 
-$$p_k = (1 - \epsilon_{\text{model}})(1 - \epsilon_{\text{tool}})$$
+To appreciate this vulnerability from first principles, assume high reliability at both layers: an actuation failure rate of only $\epsilon_{\text{model}} = 0.02$ and a tool infrastructure error rate of $\epsilon_{\text{tool}} = 0.03$ (yielding a $95.06\text{ percent}$ single-step success rate):
 
-If execution failures are unhandled or trigger cascading misinterpretations, the compound probability of surviving an $N$-step trajectory without error collapses exponentially:
-
-$$P_{\text{success}}(N) = \prod_{k=1}^N p_k = \left( (1 - \epsilon_{\text{model}})(1 - \epsilon_{\text{tool}}) \right)^N$$
-
-To appreciate this vulnerability from first principles, assume high reliability at both layers: an actuation failure rate of only $\epsilon_{\text{model}} = 0.02$ and a tool infrastructure error rate of $\epsilon_{\text{tool}} = 0.03$ (yielding a $95.06\%$ single-step success rate):
-
-- Over $N = 10$ steps: $P_{\text{success}} = (0.9506)^{10} \approx 60.1\%$
-- Over $N = 25$ steps: $P_{\text{success}} = (0.9506)^{25} \approx 28.0\%$
-- Over $N = 50$ steps: $P_{\text{success}} = (0.9506)^{50} \approx 7.9\%$
+- Over $N = 10$ steps: $P_{\text{success}} = (0.9506)^{10} \approx 60.1\text{ percent}$
+- Over $N = 25$ steps: $P_{\text{success}} = (0.9506)^{25} \approx 28.0\text{ percent}$
+- Over $N = 50$ steps: $P_{\text{success}} = (0.9506)^{50} \approx 7.9\text{ percent}$
 
 Fewer than one in twelve 50-step workflows will finish without encountering an environmental or semantic tool failure.
 
@@ -610,8 +549,7 @@ As derived in @sec-vol3-actuation-protocols, static schema injection imposes a p
 
 1. **Accelerator Memory Exhaustion:** Prefilling hundreds of thousands of schema tokens saturates GPU HBM with KV-cache allocations, stranding compute capacity and preventing concurrent request batching.
 2. **Exponential Compute Latency:** The computational complexity of the initial attention prefill scales quadratically with prompt length $S$: $\mathcal{O}(S^2 \cdot d_{\text{model}})$. Evaluating an 800,000-token prompt imposes seconds or minutes of Time-To-First-Token (TTFT) latency.
-3. **Attention Degradation (Needle-in-a-Haystack Failure):** Empirical studies demonstrate that as context windows fill with homogeneous technical schemas, retrieval and selection accuracy decay exponentially [@patil2023gorilla]:
-   $$\Pr(\text{SelectCorrectTool} \mid M) \propto M^{-\gamma} \quad (\gamma > 0)$$
+3. **Attention Degradation (Needle-in-a-Haystack Failure):** Empirical studies demonstrate that as context windows fill with homogeneous technical schemas, retrieval and selection accuracy decay exponentially [@patil2023gorilla]: $\Pr(\text{SelectCorrectTool} \mid M) \propto M^{-\gamma}$ where $\gamma > 0$.
 
 To support enterprise tool ecosystems containing thousands of endpoints, agent runtimes must replace static schema injection with **Dynamic Tool Discovery and Just-In-Time Schema Selection**\index{Dynamic Tool Discovery}.
 
@@ -627,17 +565,9 @@ The two-stage retrieval pipeline operates as follows:
 
 #### Stage 1: Coarse semantic indexing and retrieval
 
-Every tool $T_i$ in the enterprise catalog is indexed offline within an approximate nearest neighbor (ANN) vector database (such as HNSW [@malkov2020hnsw]). The tool's representation is computed by passing its functional summary, operational keywords, and signature through a dense embedding model $\mathcal{E}_{\text{embed}}$:
+Every tool $T_i$ in the enterprise catalog is indexed offline within an approximate nearest neighbor (ANN) vector database (such as HNSW [@malkov2020hnsw]). The tool's representation is computed by passing its functional summary, operational keywords, and signature through a dense embedding model $\mathcal{E}_{\text{embed}}$: $\mathbf{e}_{T_i} = \mathcal{E}_{\text{embed}}(\text{ToolName}_i \,\|\, \text{Docstring}_i \,\|\, \text{Signature}_i) \in \mathbb{R}^d$. At trajectory step $t$, the agent runtime formulates a search query $\mathbf{q}_t$ from the agent's immediate deliberative thought tokens or recent interaction history: $\mathbf{q}_t = \mathcal{E}_{\text{embed}}(\text{AgentThought}_t) \in \mathbb{R}^d$.
 
-$$\mathbf{e}_{T_i} = \mathcal{E}_{\text{embed}}\big( \text{ToolName}_i \,\|\, \text{Docstring}_i \,\|\, \text{Signature}_i \big) \in \mathbb{R}^d$$
-
-At trajectory step $t$, the agent runtime formulates a search query $\mathbf{q}_t$ from the agent's immediate deliberative thought tokens or recent interaction history:
-
-$$\mathbf{q}_t = \mathcal{E}_{\text{embed}}\big( \text{AgentThought}_t \big) \in \mathbb{R}^d$$
-
-The retrieval engine executes a Maximum Inner Product Search (MIPS) to retrieve the top-$K$ candidate tools ($K \in [3, 8]$, where $K \ll M$):
-
-$$\mathcal{T}_{\text{active}} = \arg\max_{T_i \in \mathcal{T}_{\text{catalog}}}^{(K)} \left( \frac{\mathbf{q}_t^\top \mathbf{e}_{T_i}}{\|\mathbf{q}_t\| \|\mathbf{e}_{T_i}\|} \right)$$
+The retrieval engine executes a Maximum Inner Product Search (MIPS) to retrieve the top-$K$ candidate tools ($K \in [3, 8]$, where $K \ll M$): $\mathcal{T}_{\text{active}} = \arg\max_{T_i \in \mathcal{T}_{\text{catalog}}}^{(K)} [(\mathbf{q}_t^\top \mathbf{e}_{T_i}) / (\|\mathbf{q}_t\| \|\mathbf{e}_{T_i}\|)]$.
 
 #### Stage 2: Just-in-time schema binding and masking
 
@@ -708,11 +638,7 @@ Many tool invocations executed by agents are computationally expensive, financia
 
 To eliminate redundant execution, the actuation subsystem implements a **Content-Addressed Result Cache**\index{Content-Addressed Result Cache}.
 
-A tool operation is cacheable if its return is a deterministic function of its input parameters and immutable environment state. The cache key is computed as:
-
-$$\kappa_{\text{cache}} = \mathcal{H}_{\text{SHA256}}\Big( \text{ToolName} \,\|\, \text{Version} \,\|\, \text{CanonicalJSON}(\mathbf{x}_{\text{args}}) \,\|\, \text{EnvHash} \Big)$$
-
-where $\text{EnvHash}$ captures any relevant state dependencies (such as the target Git commit SHA for a compiler tool).
+A tool operation is cacheable if its return is a deterministic function of its input parameters and immutable environment state. The cache key is computed as $\kappa_{\text{cache}} = \mathcal{H}_{\text{SHA256}}(\text{ToolName} \,\|\, \text{Version} \,\|\, \text{CanonicalJSON}(\mathbf{x}_{\text{args}}) \,\|\, \text{EnvHash})$, where $\text{EnvHash}$ captures any relevant state dependencies (such as the target Git commit SHA for a compiler tool).
 
 When an agent issues a tool call matching an active entry in the result cache, the runtime completely bypasses external tool execution, returning the memoized observation payload in under $1\,\text{ms}$.
 
@@ -722,11 +648,7 @@ The integration of tool-result memoization with modern GPU serving engines (e.g.
 
 Modern large language model (LLM) serving engines organize KV-caches in radix trees. If an incoming request shares an identical token prefix with a previously executed request, the engine skips the compute-bound prefill phase for that prefix, reading the precomputed KV activations directly from GPU memory.
 
-When a tool output is memoized, the exact observation string returned across the actuation boundary is byte-for-byte identical across runs:
-
-$$\text{Observation}_{\text{cached}} = \text{Observation}_{\text{original}}$$
-
-Because the serialized context prefix remains invariant, the serving engine achieves a **100 percent KV-cache prefix hit** for the multi-thousand-token history up to that step. As demonstrated in @fig-vol3-actuation-prefix-synergy, this prefix reuse cuts Time-To-First-Token (TTFT) by $70\text{ to }90\%$ and slashes accelerator energy consumption, transforming what would be an expensive physical tool wait and prefill compute spike into an instantaneous memory lookup.
+When a tool output is memoized, the exact observation string returned across the actuation boundary is byte-for-byte identical across runs ($\text{Observation}_{\text{cached}} = \text{Observation}_{\text{original}}$). Because the serialized context prefix remains invariant, the serving engine achieves a **100 percent KV-cache prefix hit** for the multi-thousand-token history up to that step. As demonstrated in @fig-vol3-actuation-prefix-synergy, this prefix reuse cuts Time-To-First-Token (TTFT) by 70 to 90 percent and slashes accelerator energy consumption, transforming what would be an expensive physical tool wait and prefill compute spike into an instantaneous memory lookup.
 
 To ground this synergy in numbers: consider an agent that repeatedly executes a unit test suite via `pytest`. Executing the test runner inside an isolated container sandbox takes $12\,\text{seconds}$. Upon subsequent invocations with identical repository state ($\text{EnvHash}$), the content-addressed result cache returns the cached test output in $< 0.8\,\text{ms}$. Crucially, because the returned observation string is byte-for-byte identical, the GPU serving engine's Radix KV-cache achieves a 100 percent prefix hit across the preceding $14,000$ context tokens. Instead of waiting $12\,\text{s}$ for the test suite plus $210\,\text{ms}$ for context re-prefill ($2.9\text{ PFLOPs}$ on an H100), the step transitions in under $15\,\text{ms}$—an $800\times$ speedup that transforms an expensive physical I/O stall into an in-memory L1 cache hit.
 
@@ -800,7 +722,7 @@ The actuation boundary marks the definitive transition where non-deterministic n
 
 ::: {.callout-takeaways title="The actuation boundary invariants"}
 1. **The AI System Call and MMIO Invariant:** Tools are not natural language prompt suggestions; they are unprivileged user-space traps into structured, MMIO-style command descriptors, requiring complete mediation by a supervisor runtime that acts as a secure device driver.
-2. **Grammar-Constrained Decoding at the Tensor Layer:** Ahead-of-time compilation of schemas into Deterministic Finite Automata (DFAs) enables single-cycle CUDA warp logit masking during decode, eliminating runtime syntax errors ($p_{\text{err}} = 0.00\%$) and avoiding petascale FLOP penalties from multi-turn error reflections.
+2. **Grammar-Constrained Decoding at the Tensor Layer:** Ahead-of-time compilation of schemas into Deterministic Finite Automata (DFAs) enables single-cycle CUDA warp logit masking during decode, eliminating runtime syntax errors ($p_{\text{err}} = 0.00\text{ percent}$) and avoiding petascale FLOP penalties from multi-turn error reflections.
 3. **Deep Modules and Payload Management:** Minimizing context bloat through windowed paging, diff compression, and Ousterhout deep modules slashes the prompt token tax by over 95 percent, recovering gigabytes of stranded GPU KV-cache memory and preventing cross-attention dispersion.
 4. **Capability-Based Security and Monotonic Attenuation:** Ambient authority and Access Control Lists fail in agent runtimes due to indirect prompt injection and the Confused Deputy vulnerability. Authority must be mediated via unforgeable cryptographic Capability Leases that attenuate monotonically ($\mathcal{K}_{\text{child}} \sqsubseteq \mathcal{K}_{\text{parent}}$) down subagent delegation trees.
 5. **Idempotency, Sagas, and Heavy-Tailed Latency:** At-least-once stochastic retry loops must be reconciled with at-most-once physical execution using RFC 8785 canonical trajectory nonces, distributed Write-Ahead Logs, and Saga compensating transactions. Asynchronous scheduling and timeouts prevent heavy-tailed tool stragglers from inducing cluster-wide Tool-Wait memory stalls.
