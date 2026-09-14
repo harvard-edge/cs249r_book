@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
@@ -24,16 +24,24 @@ async def _():
 
         native_bootstrap(__file__)
 
+    import html
     import plotly.graph_objects as go
+    import mlsysim
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
         track_arc_context,
         track_context,
         track_selector,
@@ -46,18 +54,23 @@ async def _():
         ACADEMIC_LAB_CSS,
         COLORS,
         LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
+        instrumentation_console,
         ledger,
         mo,
         report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -68,20 +81,36 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_02_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_02_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (Microcontrollers & Wearables / Oura Ring & Cortex-M55)": "oura_ring",
+            "📱 Mobile Track (On-Device Personal AI / iPhone & Apple Silicon M4)": "iphone",
+            "🤖 Edge & Embodied Track (Robotics & Drones / Robotaxi & Jetson Orin)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)",
+        label="Select Course / Industry Track",
+    )
     v2_02_track_picker
     return (v2_02_track_picker,)
 
 
 @app.cell
-def _(get_lab_track_variant, get_track_profile, v2_02_track_picker):
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v2_02_metadata,
+    v2_02_track_picker,
+):
     v2_02_track_id = v2_02_track_picker.value
     v2_02_profile = get_track_profile(v2_02_track_id)
-    v2_02_variant = get_lab_track_variant("v2_02_compute_wall", v2_02_profile.track_id)
-    return (v2_02_profile, v2_02_track_id, v2_02_variant)
+    v2_02_variant = get_lab_track_variant(v2_02_metadata.lab_id, v2_02_profile.track_id)
+    v2_02_hardware = resolve_mlsysim_ref(v2_02_variant.hardware_ref)
+    v2_02_model = resolve_mlsysim_ref(v2_02_variant.model_ref)
+    # Cross-tier hardware targets: Hardware.Tiny.CortexM55, Hardware.Mobile.AppleM4, Hardware.Edge.JetsonOrin, Hardware.Cloud.H100
+    return v2_02_profile, v2_02_variant
 
 
 @app.cell
@@ -535,8 +564,8 @@ def _():
     def v2_02_fields_html(fields):
         return "\n".join(
             (
-                "<div class='mlsysbook-field'>"
-                f"<strong>{v2_02_escape(key)}</strong>{v2_02_escape(value)}"
+                "<div class='mlsysbook-field' style='margin-bottom:6px;'>"
+                f"<strong style='color:#1E293B;'>{v2_02_escape(key)}:</strong> <span style='color:#475569;'>{v2_02_escape(value)}</span>"
                 "</div>"
             )
             for key, value in fields.items()
@@ -547,17 +576,17 @@ def _():
         for title, value, detail, color in cards:
             chunks.append(
                 f"""
-<div style="flex:1; min-width:170px; background:white; border:1px solid #e2e8f0;
+    <div style="flex:1; min-width:170px; background:white; border:1px solid #e2e8f0;
             border-top:3px solid {color}; border-radius:8px; padding:14px 16px;">
-  <div style="font-size:0.72rem; color:#64748b; font-weight:700; text-transform:uppercase;">
+      <div style="font-size:0.72rem; color:#64748b; font-weight:700; text-transform:uppercase;">
     {v2_02_escape(title)}
-  </div>
-  <div style="font-size:1.35rem; font-weight:800; color:{color}; margin-top:4px;">
+      </div>
+      <div style="font-size:1.35rem; font-weight:800; color:{color}; margin-top:4px;">
     {v2_02_escape(value)}
-  </div>
-  <div style="font-size:0.78rem; color:#475569; line-height:1.35;">{v2_02_escape(detail)}</div>
-</div>
-"""
+      </div>
+      <div style="font-size:0.78rem; color:#475569; line-height:1.35;">{v2_02_escape(detail)}</div>
+    </div>
+    """
             )
         return "<div style='display:flex; flex-wrap:wrap; gap:12px; margin:14px 0;'>" + "\n".join(chunks) + "</div>"
 
@@ -582,7 +611,6 @@ def _():
 
     return (
         v2_02_candidate_rows,
-        v2_02_escape,
         v2_02_fields_html,
         v2_02_markdown_table,
         v2_02_metric_cards_html,
@@ -603,50 +631,88 @@ def _(v2_02_profile, v2_02_track_packet, v2_02_variant):
 
 
 @app.cell(hide_code=True)
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, track_arc_context, track_context, v2_02_metadata, v2_02_packet, v2_02_profile):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.Html(
-                f"""
-<div style="background:#0f172a; color:white; padding:32px 40px; border-radius:12px; margin-bottom:10px;">
-  <div style="font-size:0.72rem; font-weight:700; letter-spacing:0.16em; color:#94a3b8; text-transform:uppercase;">
-    Machine Learning Systems - Volume II - Lab 02
-  </div>
-  <h1 style="margin:8px 0 8px 0; color:#f8fafc; font-size:2.15rem; line-height:1.1;">
-    The Compute Infrastructure Wall
-  </h1>
-  <p style="margin:0; color:#cbd5e1; max-width:850px; line-height:1.55;">
-    Datacenter compute is constrained infrastructure. Power, cooling, accelerator mix,
-    placement, utilization, cost, and carbon are coupled budgets; peak FLOPs matter
-    only after those budgets can sustain the plan.
-  </p>
-  <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:18px;">
-    <span class="badge badge-info">{v2_02_profile.label}</span>
-    <span class="badge badge-warn">{v2_02_packet['accelerator_label']}</span>
-    <span class="badge badge-fail">{v2_02_packet['hardware_ref']}</span>
-  </div>
-</div>
-"""
-            ),
-            track_context(v2_02_profile),
-            track_arc_context(v2_02_profile, v2_02_metadata.lab_id),
-            mo.Html(
-                """
-<div class="mlsysbook-panel">
-  <div class="mlsysbook-section-label">Shared Concept Sequence</div>
-  <div class="mlsysbook-compact-fields">
-    <div class="mlsysbook-field"><strong>Part A</strong>Rack, power, and cooling budgets constrain accelerators before peak FLOPs do.</div>
-    <div class="mlsysbook-field"><strong>Part B</strong>Utilization converts capacity into economics and waste.</div>
-    <div class="mlsysbook-field"><strong>Part C</strong>Accelerator mix and placement change throughput, memory, cost, and carbon.</div>
-    <div class="mlsysbook-field"><strong>Part D</strong>The recommendation must satisfy power, utilization, cost, and carbon guardrails.</div>
-  </div>
-</div>
-"""
-            ),
-        ]
-    )
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    track_arc_context,
+    track_context,
+    v2_02_metadata,
+    v2_02_packet,
+    v2_02_profile,
+):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell" style="margin-bottom: 20px;">
+        <div style="border-left: 4px solid #A51C30; padding: 12px 18px; background: white; border-radius: 0 8px 8px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <div style="font-size: 0.72rem; font-weight: 800; color: #A51C30; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                ML Systems Textbook &middot; Volume II &middot; Chapter 2 &middot; Foundational Lab 02
+            </div>
+            <h1 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.85rem; font-weight: 800;">
+                Compute Infrastructure: The Compute Wall
+            </h1>
+            <p style="margin: 0 0 12px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+                Datacenter and edge compute are physically constrained infrastructure. Power delivery, heat dissipation, accelerator mix,
+                placement, utilization, cost, and carbon form tightly coupled budgets. Peak FLOPs matter only after physical constraints sustain the plan.
+            </p>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <span class="mlsysbook-chip" style="background: #FEE2E2; color: #991B1B; font-weight: 700;">Track: {v2_02_profile.label}</span>
+                <span class="mlsysbook-chip" style="background: #E0F2FE; color: #0369A1;">Stakeholder: {v2_02_packet['stakeholder']}</span>
+                <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">Hardware: {v2_02_packet['hardware_ref']}</span>
+                <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">Model: {v2_02_packet['model_ref']}</span>
+                <span class="mlsysbook-chip" style="background: #FEF3C7; color: #92400E;">Focus: Power Walls &amp; Rooflines</span>
+                <span class="mlsysbook-chip" style="background: #EDE9FE; color: #5B21B6;">Deliverable: Compute Sizing Memo</span>
+            </div>
+        </div>
+    </div>
+    """)
+
+    scenario_panel = mo.Html(f"""
+    <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.1rem;">System Scenario: {v2_02_profile.label} Compute Sizing</h3>
+        <p style="color: #334155; font-size: 0.9rem; line-height: 1.6;">
+            {v2_02_packet['workload_summary']} You are operating as the <strong>{v2_02_packet['stakeholder']}</strong>
+            evaluating compute deployments for <strong>{v2_02_packet['asset']}</strong> infrastructure. Sizing must balance thermal envelopes,
+            power density, arithmetic intensity, and Model FLOPs Utilization (MFU) against hard operational guardrails.
+        </p>
+        <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px 18px; margin-top: 12px;">
+            <div style="font-size: 0.8rem; font-weight: 700; color: #1E293B; margin-bottom: 8px;">The Architectural Invariants of Compute Infrastructure:</div>
+            <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #334155; line-height: 1.6;">
+                <li><strong>The Thermal &amp; Power Density Limit:</strong> Compute throughput is physically bounded by heat dissipation and site delivery: <i>P</i><sub>total</sub> = <i>N</i> &middot; <i>P</i><sub>accel</sub> + <i>P</i><sub>facility</sub>. Racks melt before algorithms finish if cooling capacity is exceeded.</li>
+                <li><strong>The Roofline Model:</strong> Kernel performance is bounded by the min of peak compute and memory bandwidth: GFLOPS = min(&pi;, &beta; &middot; <i>I</i>). Scaling compute cores yields zero speedup when arithmetic intensity falls below machine balance.</li>
+                <li><strong>The MFU Invariant:</strong> Model FLOPs Utilization (MFU) measures true efficiency: MFU = Observed TFLOPS / Theoretical Peak TFLOPS. Amortizing cluster CapEx requires keeping sustained MFU high across varying batch and sequence regimes.</li>
+                <li><strong>The Guardrail Envelope:</strong> Cost, thermals, and power cannot be treated as downstream afterthoughts; they are hard mathematical constraints in cluster sizing.</li>
+            </ul>
+        </div>
+    </div>
+    """)
+
+    objectives_panel = mo.Html(f"""
+    <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">LEARNING OBJECTIVES</div>
+        <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.88rem; color: #334155; line-height: 1.6;">
+            <li><strong>Analyze physical rack, power, and cooling limits:</strong> Determine whether thermal dissipation or site delivery rejects an accelerator topology before FLOPs do.</li>
+            <li><strong>Map utilization to economics and carbon:</strong> Connect target MFU with idle cost waste, operational saturation, and grid carbon emissions.</li>
+            <li><strong>Optimize heterogeneous mix and placement:</strong> Compare homogeneous vs. tier-specialized fleets across throughput, memory margins, and placement penalties.</li>
+            <li><strong>Defend an authorized infrastructure recommendation:</strong> Satisfy multi-constraint guardrails and synthesize a durable hand-off memo for downstream networking and storage.</li>
+        </ul>
+        <div style="margin-top: 10px; font-size: 0.84rem; color: #0284C7; font-style: italic;">
+            CORE QUESTION: "How do physical thermal and power boundaries constrain compute choices, and how do we co-design accelerators for high sustained MFU?"
+        </div>
+    </div>
+    """)
+
+    track_mission_card = track_context(v2_02_profile)
+    arc_card = track_arc_context(v2_02_profile, v2_02_metadata.lab_id)
+
+    mo.vstack([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        header_html,
+        scenario_panel,
+        objectives_panel,
+        track_mission_card,
+        arc_card,
+    ])
     return
 
 
@@ -689,7 +755,7 @@ def _(mo, v2_02_packet):
         },
         label="Part A checkpoint: which infrastructure budget belongs in the memo?",
     )
-    return (pA_accels, pA_checkpoint, pA_cooling, pA_pred, pA_racks)
+    return pA_accels, pA_checkpoint, pA_cooling, pA_pred, pA_racks
 
 
 @app.cell(hide_code=True)
@@ -725,7 +791,7 @@ def _(mo, v2_02_packet):
         },
         label="Part B checkpoint: what utilization decision feeds Part D?",
     )
-    return (pB_checkpoint, pB_demand, pB_pred, pB_util)
+    return pB_checkpoint, pB_demand, pB_pred, pB_util
 
 
 @app.cell(hide_code=True)
@@ -772,7 +838,7 @@ def _(mo):
         },
         label="Part C checkpoint: rejected alternative",
     )
-    return (pC_choice, pC_placement, pC_pred, pC_reject, pC_role)
+    return pC_choice, pC_placement, pC_pred, pC_reject, pC_role
 
 
 @app.cell(hide_code=True)
@@ -811,14 +877,18 @@ def _(mo):
         },
         label="Part D checkpoint: final infrastructure recommendation",
     )
-    return (pD_decision, pD_margin, pD_pred, pD_procurement, pD_region)
+    return pD_decision, pD_margin, pD_pred, pD_procurement, pD_region
 
 
 @app.cell(hide_code=True)
 def _(
     COLORS,
+    MathPeek,
     apply_plotly_theme,
+    big_takeaways,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     mo,
     pA_accels,
     pA_checkpoint,
@@ -839,6 +909,7 @@ def _(
     pD_pred,
     pD_procurement,
     pD_region,
+    source_trace,
     v2_02_candidate_rows,
     v2_02_fields_html,
     v2_02_markdown_table,
@@ -847,42 +918,13 @@ def _(
     v2_02_part_a_state,
     v2_02_part_b_state,
     v2_02_part_d_state,
+    v2_02_profile,
     v2_02_rejected_row,
     v2_02_select_row,
     v2_02_status_badge,
 ):
     def build_part_a():
-        items = [
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel">
-  <div class="mlsysbook-section-label">Part A - Concept Module</div>
-  <h2>Rack, Power, And Cooling Bind Before Peak FLOPs</h2>
-  <p>{v2_02_packet['stakeholder']} needs a feasible {v2_02_packet['report_frame']}.
-  The first question is not how many peak FLOPs the plan advertises; it is whether
-  the {v2_02_packet['asset']} can receive power and reject heat.</p>
-  <div class="mlsysbook-compact-fields">
-    {v2_02_fields_html({
-        "Chapter claim": "Selecting the fastest accelerator is counterproductive if cooling cannot remove the heat.",
-        "Your decision": "Choose the binding infrastructure budget to carry forward.",
-        "Track consequence": v2_02_packet["failure_noun"] + " failure changes what enough compute means.",
-    })}
-  </div>
-</div>
-"""
-            ),
-            mo.md("### 1. Structured Prediction"),
-            pA_pred,
-        ]
-        if pA_pred.value is None:
-            items.append(mo.callout(mo.md("Commit to the binding-budget prediction to unlock the rack instrument."), kind="warn"))
-            return mo.vstack(items)
-
         state = v2_02_part_a_state(v2_02_packet, pA_accels.value, pA_racks.value, pA_cooling.value)
-        items += [
-            mo.md("### 2. Manipulate The Physical Envelope"),
-            mo.hstack([pA_accels, pA_racks, pA_cooling], gap="1rem"),
-        ]
         fig = go.Figure()
         fig.add_trace(
             go.Bar(
@@ -905,97 +947,103 @@ def _(
         )
         fig.update_layout(height=360, yaxis_title="kW", margin=dict(l=50, r=20, t=30, b=40))
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
-        items.append(
-            mo.Html(
-                v2_02_metric_cards_html(
-                    [
-                        ("Accelerators", f"{state['total_accelerators']}", f"{pA_racks.value} x {pA_accels.value}", COLORS["BlueLine"]),
-                        ("Rack power", f"{state['rack_power_kw']:.2f} kW", f"limit {state['cooling_limit_kw']:.2f} kW", COLORS["OrangeLine"]),
-                        ("Sustained capacity", f"{state['sustained_tflops']:.0f}", "TFLOP/s-equivalent", COLORS["GreenLine"]),
-                        ("Binding budget", state["binding"], "after power/cooling/capacity checks", COLORS["RedLine"] if not state["feasible"] else COLORS["GreenLine"]),
-                    ]
-                )
-            )
-        )
+
         rows = [
             ("Cooling", f"{state['rack_power_kw']:.3f} kW/rack", f"{state['cooling_limit_kw']:.3f} kW/rack", "pass" if state["cooling_ok"] else "fail"),
             ("Site power", f"{state['fleet_power_kw']:.3f} kW", f"{v2_02_packet['site_power_kw']:.3f} kW", "pass" if state["site_ok"] else "fail"),
             ("Sustained capacity", f"{state['sustained_tflops']:.1f}", f"{state['demand_tflops']:.1f}", "pass" if state["capacity_ok"] else "fail"),
         ]
-        items.append(mo.md(v2_02_markdown_table(("Budget", "Current", "Limit / Need", "Status"), rows)))
-        if state["feasible"]:
-            items.append(mo.callout(mo.md(f"**Recovered envelope.** The current plan satisfies rack cooling, site power, and sustained capacity with `{state['binding']}` as the binding budget."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"**Infrastructure violation:** `{state['binding']}` rejects the plan. Change cooling tier, reduce density, or adjust rack count until the physical budget recovers."), kind="danger"))
-        if pA_pred.value == state["binding"] or (pA_pred.value == "power" and state["binding"] == "site power"):
-            items.append(mo.callout(mo.md("**Prediction check:** your prior matched the binding infrastructure budget."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"**Prediction check:** the instrument found `{state['binding']}`, not `{pA_pred.value}`. Peak capacity is not the first question when the physical envelope fails."), kind="warn"))
-        items += [
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - rack power and cooling": mo.md(
-                        f"""
-**Formula**
 
-`rack_power_kw = rack_overhead_kw + accelerators_per_rack * accelerator_power_kw`
+        pred_check = (
+            mo.callout(mo.md("Commit to a structured prediction before finalizing the memo."), kind="warn")
+            if pA_pred.value is None
+            else (
+                mo.callout(mo.md("**Prediction check:** your prior matched the binding infrastructure budget."), kind="success")
+                if (pA_pred.value == state["binding"] or (pA_pred.value == "power" and state["binding"] == "site power"))
+                else mo.callout(mo.md(f"**Prediction check:** the instrument found `{state['binding']}`, not `{pA_pred.value}`. Peak capacity is not the first question when the physical envelope fails."), kind="warn")
+            )
+        )
 
-`fleet_power_kw = rack_power_kw * rack_count`
+        boundary_callout = (
+            mo.callout(mo.md(f"**Recovered envelope.** The current plan satisfies rack cooling, site power, and sustained capacity with `{state['binding']}` as the binding budget."), kind="success")
+            if state["feasible"]
+            else mo.callout(mo.md(f"**Infrastructure violation:** `{state['binding']}` rejects the plan. Change cooling tier, reduce density, or adjust rack count until the physical budget recovers."), kind="danger")
+        )
 
-`sustained_capacity = accelerators * peak_per_accelerator * MFU`
-
-**Chapter anchor**
-
-`#sec-compute-rack` and `#sec-compute-power-wall` explain why dense AI racks
-cross air-cooling and power-delivery envelopes before advertised peak FLOPs
-settle the plan.
-
-**Source model**
-
-Hardware identity comes from `{v2_02_packet['hardware_ref']}`. Track thresholds
-are teaching envelopes chosen for this lab and are recorded in the lab
-report.
-"""
-                    )
-                }
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part A - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Rack, Power, and Cooling Bind Before Peak FLOPs</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                {v2_02_packet['stakeholder']} needs a feasible {v2_02_packet['report_frame']}.
+                The first question is not how many peak FLOPs the plan advertises; it is whether
+                the {v2_02_packet['asset']} can receive power and reject heat.
+              </p>
+              <div class="mlsysbook-compact-fields">
+                {v2_02_fields_html({
+                    "Chapter claim": "Selecting the fastest accelerator is counterproductive if cooling cannot remove the heat.",
+                    "Your decision": "Choose the binding infrastructure budget to carry forward.",
+                    "Track consequence": v2_02_packet["failure_noun"] + " failure changes what enough compute means.",
+                })}
+              </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                pA_pred,
+                title="1. Formulate Physical Envelope Hypothesis",
+                subtitle=f"Predict which infrastructure budget rejects the first {v2_02_packet['report_frame']}:",
+                gate_label="Hypothesis Gate A",
             ),
-            mo.md("### 7. Checkpoint"),
-            pA_checkpoint,
-        ]
-        return mo.vstack(items)
+            instrumentation_console(
+                mo.hstack([pA_accels, pA_racks, pA_cooling], gap="1rem"),
+                title="Physical Rack & Power Envelope Controls",
+                subtitle=f"Adjust accelerator density per {v2_02_packet['asset']}, rack count, and cooling tier:",
+            ),
+            mo.md("### Empirical Evidence"),
+            mo.as_html(fig),
+            mo.Html(
+                v2_02_metric_cards_html([
+                    ("Accelerators", f"{state['total_accelerators']}", f"{pA_racks.value} x {pA_accels.value}", COLORS["BlueLine"]),
+                    ("Rack power", f"{state['rack_power_kw']:.2f} kW", f"limit {state['cooling_limit_kw']:.2f} kW", COLORS["OrangeLine"]),
+                    ("Sustained capacity", f"{state['sustained_tflops']:.0f}", "TFLOP/s-equivalent", COLORS["GreenLine"]),
+                    ("Binding budget", state["binding"], "after power/cooling/capacity checks", COLORS["RedLine"] if not state["feasible"] else COLORS["GreenLine"]),
+                ])
+            ),
+            mo.md(v2_02_markdown_table(("Budget", "Current", "Limit / Need", "Status"), rows)),
+            boundary_callout,
+            pred_check,
+            MathPeek(
+                formula="P_{\\text{rack}} = P_{\\text{overhead}} + N_{\\text{accel}} \\cdot P_{\\text{accel}}; \\quad P_{\\text{fleet}} = P_{\\text{rack}} \\cdot N_{\\text{rack}}",
+                variables={
+                    "AcceleratorsPerRack": f"{pA_accels.value}",
+                    "RackPower": f"{state['rack_power_kw']:.2f} kW",
+                    "CoolingLimit": f"{state['cooling_limit_kw']:.2f} kW",
+                    "FleetPower": f"{state['fleet_power_kw']:.2f} kW",
+                    "SiteLimit": f"{v2_02_packet['site_power_kw']:.2f} kW",
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT A: BINDING INFRASTRUCTURE BUDGET</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Physical Budget Carry-Forward</h4>
+                {pA_checkpoint}
+            </div>
+            """),
+        ])
 
     def build_part_b():
         part_a = v2_02_part_a_state(v2_02_packet, pA_accels.value, pA_racks.value, pA_cooling.value)
         state = v2_02_part_b_state(v2_02_packet, part_a, pB_util.value, pB_demand.value)
-        items = [
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel">
-  <div class="mlsysbook-section-label">Part B - Concept Module</div>
-  <h2>Utilization Converts Capacity Into Economics And Waste</h2>
-  <p>The same physical capacity from Part A can be wasteful, healthy, or saturated.
-  Utilization is the conversion factor between bought infrastructure and useful work.</p>
-</div>
-"""
-            ),
-            mo.md("### 1. Structured Prediction"),
-            pB_pred,
-        ]
-        if pB_pred.value is None:
-            items.append(mo.callout(mo.md("Commit to a utilization prediction to unlock the economics instrument."), kind="warn"))
-            return mo.vstack(items)
 
-        items += [mo.md("### 2. Manipulate Utilization And Demand"), mo.hstack([pB_util, pB_demand], gap="1rem")]
         xs = list(range(15, 99, 5))
         useful = []
         idle_cost = []
-        carbon_waste = []
         for pct in xs:
             row = v2_02_part_b_state(v2_02_packet, part_a, pct, pB_demand.value)
             useful.append(row["useful_tflops"])
             idle_cost.append(row["idle_cost"])
-            carbon_waste.append(row["idle_carbon_kg_hr"])
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=xs, y=useful, mode="lines+markers", name="Useful throughput", line=dict(color=COLORS["BlueLine"])))
         fig.add_trace(go.Scatter(x=xs, y=idle_cost, mode="lines+markers", name="Idle cost ($/hr)", yaxis="y2", line=dict(color=COLORS["OrangeLine"])))
@@ -1010,62 +1058,87 @@ report.
             margin=dict(l=55, r=55, t=30, b=55),
         )
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
-        items.append(
-            mo.Html(
-                v2_02_metric_cards_html(
-                    [
-                        ("Useful throughput", f"{state['useful_tflops']:.0f}", f"demand {state['adjusted_demand_tflops']:.0f}", COLORS["BlueLine"]),
-                        ("Idle cost", f"${state['idle_cost']:.2f}/hr", "capacity paid for but unused", COLORS["OrangeLine"]),
-                        ("Carbon waste", f"{state['idle_carbon_kg_hr']:.2f} kg/hr", "idle share of facility emissions", COLORS["RedLine"]),
-                        ("Verdict", state["verdict"], f"healthy band {v2_02_packet['min_util_pct']}-{v2_02_packet['max_util_pct']}%", COLORS["GreenLine"] if state["verdict"] == "balanced" else COLORS["RedLine"]),
-                    ]
-                )
-            )
-        )
+
         rows = [
             ("Utilization target", f"{state['utilization_pct']:.0f}%", f"{v2_02_packet['min_util_pct']}-{v2_02_packet['max_util_pct']}%", state["verdict"]),
             ("Useful capacity", f"{state['useful_tflops']:.1f}", f"{state['adjusted_demand_tflops']:.1f}", "pass" if state["demand_ok"] else "shortfall"),
             ("Hourly cost", f"${state['hourly_cost']:.2f}", f"${v2_02_packet['hourly_cost_guardrail']:.2f}", "context"),
             ("Idle carbon", f"{state['idle_carbon_kg_hr']:.2f} kg/hr", "lower is better", "waste" if state["waste"] else "bounded"),
         ]
-        items.append(mo.md(v2_02_markdown_table(("Amount", "Current", "Reference", "Status"), rows)))
-        if state["verdict"] == "balanced":
-            items.append(mo.callout(mo.md("**Utilization target is defensible.** The plan turns capacity into useful work without erasing operating headroom."), kind="success"))
-        elif state["verdict"] == "waste":
-            items.append(mo.callout(mo.md("**Waste boundary reached.** Bought accelerators are powered and cooled while too little useful work is extracted."), kind="danger"))
-        else:
-            items.append(mo.callout(mo.md("**Saturation boundary reached.** The plan may look efficient, but queue/capacity headroom is gone."), kind="danger"))
-        if pB_pred.value == "band" and state["verdict"] == "balanced":
-            items.append(mo.callout(mo.md("**Prediction check:** correct. Utilization is a guarded band, not a one-way maximize knob."), kind="success"))
-        elif pB_pred.value in {"max", "low", "irrelevant"}:
-            items.append(mo.callout(mo.md("**Prediction check:** the evidence rejects one-sided utilization rules. Economics, carbon, and queue headroom move together."), kind="warn"))
-        items += [
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - useful capacity and waste": mo.md(
-                        """
-**Formula**
 
-`useful_capacity = sustained_capacity * utilization`
+        verdict_callout = (
+            mo.callout(mo.md("**Utilization target is defensible.** The plan turns capacity into useful work without erasing operating headroom."), kind="success")
+            if state["verdict"] == "balanced"
+            else (
+                mo.callout(mo.md("**Waste boundary reached.** Bought accelerators are powered and cooled while too little useful work is extracted."), kind="danger")
+                if state["verdict"] == "waste"
+                else mo.callout(mo.md("**Saturation boundary reached.** The plan may look efficient, but queue/capacity headroom is gone."), kind="danger")
+            )
+        )
 
-`idle_cost = hourly_cost * (1 - utilization)`
+        pred_check = (
+            mo.callout(mo.md("Commit to a utilization prediction to unlock the economics instrument."), kind="warn")
+            if pB_pred.value is None
+            else (
+                mo.callout(mo.md("**Prediction check:** correct. Utilization is a guarded band, not a one-way maximize knob."), kind="success")
+                if (pB_pred.value == "band" and state["verdict"] == "balanced")
+                else mo.callout(mo.md("**Prediction check:** the evidence rejects one-sided utilization rules. Economics, carbon, and queue headroom move together."), kind="warn")
+            )
+        )
 
-`idle_carbon = facility_power_kw * PUE * carbon_intensity * (1 - utilization)`
-
-**Chapter anchor**
-
-`#sec-compute-infrastructure-peak-vs-sustained-throughput-625a` and
-`#sec-compute-summary` frame sustained throughput and utilization as first-order
-capacity-planning quantities.
-"""
-                    )
-                }
+        return mo.vstack([
+            mo.Html("""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part B - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Utilization Converts Capacity Into Economics And Waste</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                The same physical capacity from Part A can be wasteful, healthy, or saturated.
+                Utilization is the conversion factor between bought infrastructure and useful work.
+              </p>
+            </div>
+            """),
+            gated_hypothesis_card(
+                pB_pred,
+                title="2. Formulate Utilization & MFU Hypothesis",
+                subtitle="Predict how accelerator utilization should be governed in operational capacity planning:",
+                gate_label="Hypothesis Gate B",
             ),
-            mo.md("### 7. Checkpoint"),
-            pB_checkpoint,
-        ]
-        return mo.vstack(items)
+            instrumentation_console(
+                mo.hstack([pB_util, pB_demand], gap="1rem"),
+                title="Utilization & Workload Demand Controls",
+                subtitle="Sweep target utilization percentage and demand multiplier:",
+            ),
+            mo.md("### Empirical Evidence"),
+            mo.as_html(fig),
+            mo.Html(
+                v2_02_metric_cards_html([
+                    ("Useful throughput", f"{state['useful_tflops']:.0f}", f"demand {state['adjusted_demand_tflops']:.0f}", COLORS["BlueLine"]),
+                    ("Idle cost", f"${state['idle_cost']:.2f}/hr", "capacity paid for but unused", COLORS["OrangeLine"]),
+                    ("Carbon waste", f"{state['idle_carbon_kg_hr']:.2f} kg/hr", "idle share of facility emissions", COLORS["RedLine"]),
+                    ("Verdict", state["verdict"], f"healthy band {v2_02_packet['min_util_pct']}-{v2_02_packet['max_util_pct']}%", COLORS["GreenLine"] if state["verdict"] == "balanced" else COLORS["RedLine"]),
+                ])
+            ),
+            mo.md(v2_02_markdown_table(("Amount", "Current", "Reference", "Status"), rows)),
+            verdict_callout,
+            pred_check,
+            MathPeek(
+                formula="\\text{UsefulTFLOPS} = \\text{SustainedTFLOPS} \\cdot U; \\quad \\text{IdleCost} = \\text{Cost}_{\\text{hr}} \\cdot (1 - U)",
+                variables={
+                    "TargetUtilization": f"{pB_util.value}%",
+                    "UsefulTFLOPS": f"{state['useful_tflops']:.1f}",
+                    "IdleCost": f"${state['idle_cost']:.2f}/hr",
+                    "IdleCarbon": f"{state['idle_carbon_kg_hr']:.2f} kg/hr",
+                    "Verdict": state["verdict"],
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT B: UTILIZATION DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Operational Target Confirmation</h4>
+                {pB_checkpoint}
+            </div>
+            """),
+        ])
 
     def build_part_c():
         part_a = v2_02_part_a_state(v2_02_packet, pA_accels.value, pA_racks.value, pA_cooling.value)
@@ -1073,25 +1146,7 @@ capacity-planning quantities.
         rows, recommended, rejected_default = v2_02_candidate_rows(v2_02_packet, part_a, part_b, pC_placement.value, pC_role.value)
         selected = v2_02_select_row(rows, pC_choice.value)
         rejected = v2_02_rejected_row(rows, pC_reject.value, selected["id"])
-        items = [
-            mo.Html(
-                """
-<div class="mlsysbook-panel">
-  <div class="mlsysbook-section-label">Part C - Concept Module</div>
-  <h2>Accelerator Mix And Placement Change The Plan</h2>
-  <p>A fleet is not just a larger accelerator. Training, inference, memory bandwidth,
-  placement, cost, and carbon can prefer different capacity mixes.</p>
-</div>
-"""
-            ),
-            mo.md("### 1. Structured Prediction"),
-            pC_pred,
-        ]
-        if pC_pred.value is None:
-            items.append(mo.callout(mo.md("Choose a mix prediction to unlock the placement comparison."), kind="warn"))
-            return mo.vstack(items)
 
-        items += [mo.md("### 2. Manipulate Mix Context"), mo.hstack([pC_placement, pC_role], gap="1rem")]
         fig = go.Figure()
         for row in rows:
             color = COLORS["GreenLine"] if row["feasible"] else COLORS["RedLine"]
@@ -1116,67 +1171,87 @@ capacity-planning quantities.
             margin=dict(l=55, r=20, t=30, b=45),
         )
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
-        table_rows = []
-        for row in rows:
-            table_rows.append(
-                (
-                    row["label"],
-                    f"{row['throughput_tflops']:.0f}",
-                    f"{row['memory_margin_pct']:.1f}%",
-                    f"${row['cost_usd_hr']:.2f}",
-                    f"{row['carbon_kg_hr']:.2f}",
-                    "pass" if row["feasible"] else ", ".join(row["violations"]),
-                )
+
+        table_rows = [
+            (
+                row["label"],
+                f"{row['throughput_tflops']:.0f}",
+                f"{row['memory_margin_pct']:.1f}%",
+                f"${row['cost_usd_hr']:.2f}",
+                f"{row['carbon_kg_hr']:.2f}",
+                "pass" if row["feasible"] else ", ".join(row["violations"]),
             )
-        items.append(mo.md(v2_02_markdown_table(("Candidate", "Throughput", "Memory", "Cost/hr", "Carbon/hr", "Status"), table_rows)))
-        items.append(
-            mo.Html(
-                v2_02_metric_cards_html(
-                    [
-                        ("Recommended", recommended["label"], recommended["note"], COLORS["GreenLine"] if recommended["feasible"] else COLORS["OrangeLine"]),
-                        ("Selected", selected["label"], "student checkpoint or recommended default", COLORS["BlueLine"]),
-                        ("Rejected", rejected["label"], ", ".join(rejected["violations"]) or rejected["note"], COLORS["RedLine"]),
-                    ]
-                )
+            for row in rows
+        ]
+
+        pred_check = (
+            mo.callout(mo.md("Choose a mix prediction to unlock the placement comparison."), kind="warn")
+            if pC_pred.value is None
+            else (
+                mo.callout(mo.md("**Prediction check:** your predicted mix matches the current recommended candidate."), kind="success")
+                if pC_pred.value == recommended["id"]
+                else mo.callout(mo.md(f"**Prediction check:** current evidence favors `{recommended['label']}` under this placement and workload role."), kind="warn")
             )
         )
-        if pC_pred.value == recommended["id"]:
-            items.append(mo.callout(mo.md("**Prediction check:** your predicted mix matches the current recommended candidate."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"**Prediction check:** current evidence favors `{recommended['label']}` under this placement and workload role."), kind="warn"))
-        if not selected["feasible"]:
-            items.append(mo.callout(mo.md(f"**Selected mix fails:** {', '.join(selected['violations'])}. A plan can be locally appealing and still fail the amount-system guardrails."), kind="danger"))
-        else:
-            items.append(mo.callout(mo.md(f"**Selected mix passes Part C.** It still needs Part D's simultaneous power, utilization, cost, and carbon guardrails."), kind="success"))
-        items += [
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - mix and placement score": mo.md(
-                        """
-**Formula**
 
-Each candidate transforms the Part B capacity:
+        selected_callout = (
+            mo.callout(mo.md(f"**Selected mix passes Part C.** It still needs Part D's simultaneous power, utilization, cost, and carbon guardrails."), kind="success")
+            if selected["feasible"]
+            else mo.callout(mo.md(f"**Selected mix fails:** {', '.join(selected['violations'])}. A plan can be locally appealing and still fail the amount-system guardrails."), kind="danger")
+        )
 
-`candidate_throughput = useful_capacity * mix_factor * role_factor * placement_factor`
-
-`candidate_cost = hourly_cost * mix_cost_factor * placement_cost_factor`
-
-`candidate_carbon = carbon_kg_hr * mix_carbon_factor * placement_carbon_factor`
-
-**Chapter anchor**
-
-`#sec-compute-accelerator-selection`, `#sec-compute-bandwidth-hierarchy`, and
-`#sec-compute-fallacies-pitfalls` warn against treating one accelerator-hour as
-interchangeable with another.
-"""
-                    )
-                }
+        return mo.vstack([
+            mo.Html("""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part C - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Accelerator Mix And Placement Change The Plan</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                A fleet is not just a larger accelerator. Training, inference, memory bandwidth,
+                placement, cost, and carbon can prefer different capacity mixes.
+              </p>
+            </div>
+            """),
+            gated_hypothesis_card(
+                pC_pred,
+                title="3. Formulate Fleet Heterogeneity Hypothesis",
+                subtitle="Predict which accelerator mix and placement topology survives operational guardrails:",
+                gate_label="Hypothesis Gate C",
             ),
-            mo.md("### 7. Checkpoint"),
-            mo.hstack([pC_choice, pC_reject], gap="1rem"),
-        ]
-        return mo.vstack(items)
+            instrumentation_console(
+                mo.hstack([pC_placement, pC_role], gap="1rem"),
+                title="Heterogeneous Mix & Placement Controls",
+                subtitle="Configure placement topology and workload role emphasis:",
+            ),
+            mo.md("### Empirical Evidence"),
+            mo.as_html(fig),
+            mo.md(v2_02_markdown_table(("Candidate", "Throughput", "Memory", "Cost/hr", "Carbon/hr", "Status"), table_rows)),
+            mo.Html(
+                v2_02_metric_cards_html([
+                    ("Recommended", recommended["label"], recommended["note"], COLORS["GreenLine"] if recommended["feasible"] else COLORS["OrangeLine"]),
+                    ("Selected", selected["label"], "student checkpoint or recommended default", COLORS["BlueLine"]),
+                    ("Rejected", rejected["label"], ", ".join(rejected["violations"]) or rejected["note"], COLORS["RedLine"]),
+                ])
+            ),
+            selected_callout,
+            pred_check,
+            MathPeek(
+                formula="\\text{Score} = 40 \\cdot \\frac{\\text{TFLOPS}}{\\text{Demand}} + 0.9 \\cdot \\text{MemMargin} - 18 \\cdot \\frac{\\text{Cost}}{\\text{Limit}} - 10 \\cdot \\frac{\\text{Carbon}}{\\text{Limit}} - \\text{Penalty}",
+                variables={
+                    "Placement": pC_placement.value,
+                    "RoleEmphasis": pC_role.value,
+                    "SelectedMix": selected["label"],
+                    "SelectedFeasible": str(selected["feasible"]),
+                    "Recommended": recommended["label"],
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT C: SELECTION &amp; REJECTION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Document Capacity Mix Decision and Justify Rejection</h4>
+                {mo.hstack([pC_choice, pC_reject], gap="1rem")}
+            </div>
+            """),
+        ])
 
     def build_part_d():
         part_a = v2_02_part_a_state(v2_02_packet, pA_accels.value, pA_racks.value, pA_cooling.value)
@@ -1184,25 +1259,7 @@ interchangeable with another.
         rows, recommended, _ = v2_02_candidate_rows(v2_02_packet, part_a, part_b, pC_placement.value, pC_role.value)
         selected = v2_02_select_row(rows, pC_choice.value or recommended["id"])
         state = v2_02_part_d_state(v2_02_packet, part_a, part_b, selected, pD_margin.value, pD_region.value, pD_procurement.value)
-        items = [
-            mo.Html(
-                """
-<div class="mlsysbook-panel">
-  <div class="mlsysbook-section-label">Part D - Concept Module</div>
-  <h2>Recommendation Under Simultaneous Guardrails</h2>
-  <p>The winning mix from Part C is not launch-ready until power, cooling,
-  utilization, cost, and carbon all pass together.</p>
-</div>
-"""
-            ),
-            mo.md("### 1. Structured Prediction"),
-            pD_pred,
-        ]
-        if pD_pred.value is None:
-            items.append(mo.callout(mo.md("Predict the rejecting guardrail to unlock the recommendation scorecard."), kind="warn"))
-            return mo.vstack(items)
 
-        items += [mo.md("### 2. Manipulate Final Guardrails"), mo.hstack([pD_margin, pD_region, pD_procurement], gap="1rem")]
         guardrail_rows = [
             ("Power", state["effective_power_kw"], v2_02_packet["site_power_kw"], state["power_ok"]),
             ("Rack cooling", state["effective_rack_kw"] / max(part_a["rack_count"], 1), part_a["cooling_limit_kw"], state["cooling_ok"]),
@@ -1223,9 +1280,9 @@ interchangeable with another.
         fig.add_hline(y=1, line_dash="dash", line_color=COLORS["OrangeLine"])
         fig.update_layout(height=360, yaxis_title="Current / limit ratio", margin=dict(l=55, r=20, t=30, b=45))
         apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
+
         status_html = " ".join(v2_02_status_badge(ok, label) for label, _, _, ok in guardrail_rows)
-        items.append(mo.Html(f"<div style='display:flex; flex-wrap:wrap; gap:8px; margin:12px 0;'>{status_html}</div>"))
+
         table_rows = [
             ("Power", f"{state['effective_power_kw']:.2f} kW", f"{v2_02_packet['site_power_kw']:.2f} kW", "pass" if state["power_ok"] else "fail"),
             ("Cooling", f"{state['effective_rack_kw'] / max(part_a['rack_count'], 1):.2f} kW/enclosure", f"{part_a['cooling_limit_kw']:.2f}", "pass" if state["cooling_ok"] else "fail"),
@@ -1233,43 +1290,74 @@ interchangeable with another.
             ("Cost", f"${state['cost_usd_hr']:.2f}/hr", f"${v2_02_packet['hourly_cost_guardrail']:.2f}/hr", "pass" if state["cost_ok"] else "fail"),
             ("Carbon", f"{state['carbon_kg_hr']:.2f} kg/hr", f"{v2_02_packet['carbon_guardrail_kg_hr']:.2f} kg/hr", "pass" if state["carbon_ok"] else "fail"),
         ]
-        items.append(mo.md(v2_02_markdown_table(("Guardrail", "Current", "Limit", "Status"), table_rows)))
-        if state["feasible"]:
-            items.append(mo.callout(mo.md("**Recommendation passes.** The selected capacity plan satisfies all simultaneous guardrails."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"**Recommendation not ready:** `{state['binding']}` is the first failed guardrail. The memo should revise or reject the plan."), kind="danger"))
-        if pD_pred.value == state["binding"] or (pD_pred.value == "power" and state["binding"] in {"power", "cooling"}):
-            items.append(mo.callout(mo.md("**Prediction check:** your final guardrail prediction matches the scorecard."), kind="success"))
-        elif state["binding"] == "none":
-            items.append(mo.callout(mo.md("**Prediction check:** no guardrail failed under the current controls. The memo can approve if the residual risk is named."), kind="info"))
-        else:
-            items.append(mo.callout(mo.md(f"**Prediction check:** `{state['binding']}` rejected the plan first, not `{pD_pred.value}`."), kind="warn"))
-        items += [
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - simultaneous guardrail model": mo.md(
-                        """
-**Formula**
 
-`feasible = power_ok and cooling_ok and utilization_ok and cost_ok and carbon_ok`
+        pred_check = (
+            mo.callout(mo.md("Predict the rejecting guardrail to unlock the recommendation scorecard."), kind="warn")
+            if pD_pred.value is None
+            else (
+                mo.callout(mo.md("**Prediction check:** your final guardrail prediction matches the scorecard."), kind="success")
+                if (pD_pred.value == state["binding"] or (pD_pred.value == "power" and state["binding"] in {"power", "cooling"}))
+                else (
+                    mo.callout(mo.md("**Prediction check:** no guardrail failed under the current controls. The memo can approve if the residual risk is named."), kind="info")
+                    if state["binding"] == "none"
+                    else mo.callout(mo.md(f"**Prediction check:** `{state['binding']}` rejected the plan first, not `{pD_pred.value}`."), kind="warn")
+                )
+            )
+        )
 
-`carbon_kg_hr = power_kw * PUE * region_carbon_intensity * mix_carbon_factor`
+        guardrail_callout = (
+            mo.callout(mo.md("**Recommendation passes.** The selected capacity plan satisfies all simultaneous guardrails."), kind="success")
+            if state["feasible"]
+            else mo.callout(mo.md(f"**Recommendation not ready:** `{state['binding']}` is the first failed guardrail. The memo should revise or reject the plan."), kind="danger")
+        )
 
-`cost_usd_hr = selected_cost * capacity_margin * procurement_factor`
-
-**Chapter anchor**
-
-`#sec-compute-summary` states the constraint cascade: accelerator power
-determines rack cooling, rack density determines pod layout, and scaling
-efficiency determines whether economics close.
-"""
-                    )
-                }
+        return mo.vstack([
+            mo.Html("""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part D - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Recommendation Under Simultaneous Guardrails</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                The winning mix from Part C is not launch-ready until power, cooling,
+                utilization, cost, and carbon all pass together.
+              </p>
+            </div>
+            """),
+            gated_hypothesis_card(
+                pD_pred,
+                title="4. Formulate Multi-Constraint Guardrail Hypothesis",
+                subtitle="Predict which physical, economic, or environmental guardrail rejects the final sizing recommendation:",
+                gate_label="Hypothesis Gate D",
             ),
-            mo.md("### 7. Checkpoint"),
-            pD_decision,
-        ]
-        return mo.vstack(items)
+            instrumentation_console(
+                mo.hstack([pD_margin, pD_region, pD_procurement], gap="1rem"),
+                title="Operational Guardrail & Procurement Controls",
+                subtitle="Set capacity reserve margin, carbon intensity grid region, and procurement posture:",
+            ),
+            mo.md("### Empirical Evidence"),
+            mo.as_html(fig),
+            mo.Html(f"<div style='display:flex; flex-wrap:wrap; gap:8px; margin:12px 0;'>{status_html}</div>"),
+            mo.md(v2_02_markdown_table(("Guardrail", "Current", "Limit", "Status"), table_rows)),
+            guardrail_callout,
+            pred_check,
+            MathPeek(
+                formula="\\text{Feasible} = \\text{PowerOK} \\land \\text{CoolingOK} \\land \\text{UtilOK} \\land \\text{CostOK} \\land \\text{CarbonOK}",
+                variables={
+                    "ReserveMargin": f"{pD_margin.value}%",
+                    "Region": pD_region.value,
+                    "Procurement": pD_procurement.value,
+                    "EffectivePower": f"{state['effective_power_kw']:.2f} kW",
+                    "HourlyCost": f"${state['cost_usd_hr']:.2f}/hr",
+                    "BindingGuardrail": state["binding"],
+                },
+            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT D: FINAL ARCHITECTURAL RECOMMENDATION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Authorize, Revise, or Reject the Compute Sizing Memo</h4>
+                {pD_decision}
+            </div>
+            """),
+        ])
 
     def build_synthesis():
         part_a = v2_02_part_a_state(v2_02_packet, pA_accels.value, pA_racks.value, pA_cooling.value)
@@ -1296,60 +1384,99 @@ efficiency determines whether economics close.
             "revise": "Revise before approval",
             "reject": "Reject and restart sizing",
         }.get(pD_decision.value or part_d["verdict"], "Decision not recorded")
-        return mo.vstack(
-            [
-                mo.Html(
-                    f"""
-<div class="mlsysbook-panel">
-  <div class="mlsysbook-section-label">Synthesis - Compute Infrastructure Memo</div>
-  <h2>{verdict_text}</h2>
-  <p>The memo must state the selected capacity plan, the binding infrastructure
-  budget, a rejected alternative, and the network/storage implication that
-  carries into the next labs.</p>
-  <div class="mlsysbook-compact-fields">{v2_02_fields_html(dict(memo_rows))}</div>
-</div>
-"""
-                ),
-                mo.callout(
-                    mo.md(
-                        f"**Durable invariant:** {v2_02_packet['track_label']} infrastructure is an amount system: "
-                        "chips become power, heat, useful throughput, cost, carbon, and network/storage obligations."
-                    ),
-                    kind="info",
-                ),
-                mo.accordion(
-                    {
-                        "Math Peek / Source Model - memo evidence packet": mo.md(
-                            """
-The final report is defensible only if it carries forward all four evidence types:
+        passed = part_d["feasible"]
 
-1. Physical envelope: rack/enclosure power and cooling.
-2. Operating envelope: utilization target and demand headroom.
-3. Procurement envelope: accelerator mix and rejected alternative.
-4. Governance envelope: cost, carbon, and the next network/storage implication.
-"""
-                        )
-                    }
-                ),
-            ]
-        )
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Synthesis - Compute Infrastructure Memo</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">{verdict_text}</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                The memo must state the selected capacity plan, the binding infrastructure
+                budget, a rejected alternative, and the network/storage implication that
+                carries into the next labs.
+              </p>
+              <div class="mlsysbook-compact-fields">{v2_02_fields_html(dict(memo_rows))}</div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin: 18px 0; background: #FFFDFD;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; margin-bottom: 6px;">LEAD ARCHITECT AUTHORIZATION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Compute Infrastructure Sign-Off: {v2_02_packet['stakeholder']}</h4>
+                <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                    <span style="display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 0.8rem; background: {'#ECFDF5' if passed else '#FEF2F2'}; color: {'#065F46' if passed else '#991B1B'}; border: 1px solid {'#A7F3D0' if passed else '#FECACA'};">
+                        {'APPROVED FOR PROCUREMENT' if passed else 'REVISION REQUIRED &mdash; GUARDRAIL BREACH'}
+                    </span>
+                    <span style="font-size: 0.85rem; color: #475569;">
+                        Verdict: <code>{verdict_text}</code> &middot; Binding: <code>{part_d['binding']}</code> &middot; Fleet Power: <code>{part_d['effective_power_kw']:.2f} kW</code>
+                    </span>
+                </div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div style="background:#0f172a; color:#e2e8f0; border-radius:10px; padding:20px 24px; margin:16px 0;">
+                <div style="font-size:0.72rem; font-weight:800; color:#93c5fd;
+                            text-transform:uppercase; letter-spacing:0.12em;">Compute Infrastructure Sizing Memo</div>
+                <h3 style="margin:8px 0 10px 0; color:white;">Track: {v2_02_profile.label}</h3>
+                <p style="line-height:1.6; margin:0 0 12px 0;">
+                    Selected <strong>{selected['label']}</strong> deployed across <strong>{part_a['rack_count']} {v2_02_packet['asset']}(s)</strong>
+                    ({part_a['total_accelerators']} {v2_02_packet['accelerator_unit']}(s)).
+                    Binding budget: <strong>{part_d['binding'] if part_d['binding'] != 'none' else part_a['binding']}</strong>.
+                    Operating at <strong>{pB_util.value}%</strong> utilization with <strong>{pD_margin.value}%</strong> reserve margin.
+                    Fleet power is <strong>{part_d['effective_power_kw']:.2f} kW</strong> and hourly TCO is <strong>${part_d['cost_usd_hr']:.2f}/hr</strong>.
+                </p>
+                <div style="border-top:1px solid #334155; padding-top:12px; color:#bfdbfe;">
+                    <strong>Downstream Carry-Forward:</strong> {v2_02_packet['carry_forward']}
+                </div>
+            </div>
+            """),
+            big_takeaways([
+                "Compute infrastructure is a coupled amount-system, not a peak-FLOPs purchase.",
+                "Selecting the fastest accelerator is counterproductive if rack cooling cannot remove the heat.",
+                "Model FLOPs Utilization (MFU) is a guarded operating band: over-allocation wastes capital, while saturation destroys latency.",
+                "Heterogeneous placement must balance arithmetic intensity against interconnect bandwidth and offload latency.",
+                "Cost, power delivery, and carbon intensity form simultaneous non-negotiable operational guardrails.",
+            ]),
+            source_trace(
+                {
+                    "Report builder": "mlsysbook_labs.build_lab_report",
+                    "Report export": "mlsysbook_labs.report_export_panel",
+                    "Ledger": "DesignLedger.save(chapter=2)",
+                    "Hardware ref": v2_02_packet["hardware_ref"],
+                    "Model ref": v2_02_packet["model_ref"],
+                },
+                collapsed=True,
+                summary="The sizing memo and ledger snapshot are generated from local controls and source-traced helpers.",
+            ),
+            mo.Html("""
+            <div style="border: 1px solid #CBD5E1; border-radius: 8px; padding: 16px 20px; margin-top: 20px; background: #F8FAFC;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                    What's Next &middot; Volume II Curriculum Continuum
+                </div>
+                <h4 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.05rem;">
+                    Next Lab: Volume II, Chapter 3 &mdash; Interconnect &amp; Communication Topologies
+                </h4>
+                <p style="margin: 0; font-size: 0.88rem; color: #334155; line-height: 1.5;">
+                    Carry your compute infrastructure sizing into Chapter 3, where you will wire these compute nodes into high-bandwidth
+                    Clos, torus, and dragonfly fabrics to sustain all-reduce collective communication.
+                </p>
+            </div>
+            """),
+        ])
 
-    v2_02_tabs = mo.ui.tabs(
-        {
-            "Part A - Rack/Power/Cooling": build_part_a(),
-            "Part B - Utilization": build_part_b(),
-            "Part C - Mix/Placement": build_part_c(),
-            "Part D - Guardrails": build_part_d(),
-            "Synthesis": build_synthesis(),
-        }
-    )
+    v2_02_tabs = mo.ui.tabs({
+        "Part A -- Rack, Power & Cooling": build_part_a(),
+        "Part B -- Compute Utilization & MFU": build_part_b(),
+        "Part C -- Heterogeneous Placement": build_part_c(),
+        "Part D -- Cost & Operational Guardrails": build_part_d(),
+        "Synthesis": build_synthesis(),
+    })
     v2_02_tabs
-    return (v2_02_tabs,)
+    return
 
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
     ledger,
     mo,
     pA_accels,
@@ -1396,63 +1523,62 @@ def _(
             pD_decision.value,
         )
     )
-    ledger.save(
-        chapter=2,
-        design={
-            "chapter": "v2_02",
-            "track_id": v2_02_profile.track_id,
-            "scenario_id": v2_02_packet["scenario_id"],
-            "hardware_ref": v2_02_packet["hardware_ref"],
-            "model_ref": v2_02_packet["model_ref"],
-            "completed": _complete,
-            "partA_prediction": pA_pred.value,
-            "accelerators_per_enclosure": pA_accels.value,
-            "enclosure_count": pA_racks.value,
-            "cooling_tier": pA_cooling.value,
-            "rack_power_kw": round(_part_a["rack_power_kw"], 4),
-            "fleet_power_kw": round(_part_a["fleet_power_kw"], 4),
-            "binding_infrastructure_budget": _part_a["binding"],
-            "partA_checkpoint": pA_checkpoint.value,
-            "partB_prediction": pB_pred.value,
-            "utilization_target_pct": pB_util.value,
-            "demand_multiplier": pB_demand.value,
-            "useful_tflops": round(_part_b["useful_tflops"], 4),
-            "idle_cost_usd_hr": round(_part_b["idle_cost"], 4),
-            "idle_carbon_kg_hr": round(_part_b["idle_carbon_kg_hr"], 4),
-            "utilization_verdict": _part_b["verdict"],
-            "partB_checkpoint": pB_checkpoint.value,
-            "partC_prediction": pC_pred.value,
-            "placement": pC_placement.value,
-            "role_emphasis": pC_role.value,
-            "selected_mix": _selected["label"],
-            "selected_mix_feasible": _selected["feasible"],
-            "rejected_alternative": _rejected["label"],
-            "rejected_alternative_reason": ", ".join(_rejected["violations"]) or _rejected["note"],
-            "partD_prediction": pD_pred.value,
-            "capacity_margin_pct": pD_margin.value,
-            "carbon_region": pD_region.value,
-            "procurement_stance": pD_procurement.value,
-            "final_binding_guardrail": _part_d["binding"],
-            "final_verdict": _part_d["verdict"],
-            "final_decision": pD_decision.value,
-            "carry_forward_network_storage": v2_02_packet["carry_forward"],
-        },
-    )
-    _status = "COMPLETE" if _complete else "IN PROGRESS"
+    ledger.save(chapter=2, design={
+        "chapter": "v2_02",
+        "track_id": v2_02_profile.track_id,
+        "scenario_id": v2_02_packet["scenario_id"],
+        "hardware_ref": v2_02_packet["hardware_ref"],
+        "model_ref": v2_02_packet["model_ref"],
+        "completed": _complete,
+        "partA_prediction": pA_pred.value,
+        "accelerators_per_enclosure": pA_accels.value,
+        "enclosure_count": pA_racks.value,
+        "cooling_tier": pA_cooling.value,
+        "rack_power_kw": round(_part_a["rack_power_kw"], 4),
+        "fleet_power_kw": round(_part_a["fleet_power_kw"], 4),
+        "binding_infrastructure_budget": _part_a["binding"],
+        "partA_checkpoint": pA_checkpoint.value,
+        "partB_prediction": pB_pred.value,
+        "utilization_target_pct": pB_util.value,
+        "demand_multiplier": pB_demand.value,
+        "useful_tflops": round(_part_b["useful_tflops"], 4),
+        "idle_cost_usd_hr": round(_part_b["idle_cost"], 4),
+        "idle_carbon_kg_hr": round(_part_b["idle_carbon_kg_hr"], 4),
+        "utilization_verdict": _part_b["verdict"],
+        "partB_checkpoint": pB_checkpoint.value,
+        "partC_prediction": pC_pred.value,
+        "placement": pC_placement.value,
+        "role_emphasis": pC_role.value,
+        "selected_mix": _selected["label"],
+        "selected_mix_feasible": _selected["feasible"],
+        "rejected_alternative": _rejected["label"],
+        "rejected_alternative_reason": ", ".join(_rejected["violations"]) or _rejected["note"],
+        "partD_prediction": pD_pred.value,
+        "capacity_margin_pct": pD_margin.value,
+        "carbon_region": pD_region.value,
+        "procurement_stance": pD_procurement.value,
+        "final_binding_guardrail": _part_d["binding"],
+        "final_verdict": _part_d["verdict"],
+        "final_decision": pD_decision.value,
+        "carry_forward_network_storage": v2_02_packet["carry_forward"],
+    })
+
+    _passed = _part_d["feasible"]
     mo.Html(
         f"""
-<div class="lab-hud" style="background:#0f172a; border-radius:10px; padding:16px 22px; margin-top:24px;
-            font-family:SFMono-Regular, Consolas, monospace;">
-  <div style="color:#94a3b8; font-size:0.72rem; font-weight:700; letter-spacing:0.12em;
-              text-transform:uppercase;">Design Ledger - Lab V2-02 Saved</div>
-  <div style="color:#cbd5e1; font-size:0.84rem; line-height:1.75; margin-top:8px;">
-    <span style="color:#64748b;">track:</span> <span style="color:{COLORS['BlueLine']};">{v2_02_profile.label}</span><br/>
-    <span style="color:#64748b;">binding_budget:</span> <span style="color:{COLORS['OrangeLine']};">{_part_d['binding']}</span><br/>
-    <span style="color:#64748b;">selected_mix:</span> <span style="color:{COLORS['GreenLine']};">{_selected['label']}</span><br/>
-    <span style="color:#64748b;">status:</span> <span style="color:{COLORS['RedLine'] if not _complete else COLORS['GreenLine']};">{_status}</span>
-  </div>
-</div>
-"""
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">Vol2 &middot; Lab 02</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v2_02_profile.label}</span>
+      <span class="hud-label">STATUS</span>
+      <span class="hud-value" style="color: {'#10B981' if _passed else '#F59E0B'};">{'PASS' if _passed else 'REVIEW'}</span>
+      <span class="hud-label">BINDING</span>
+      <span class="hud-value">{_part_d['binding']}</span>
+      <span class="hud-label">FLEET POWER</span>
+      <span class="hud-value">{_part_d['effective_power_kw']:.2f} kW</span>
+    </div>
+    """
     )
     return
 
