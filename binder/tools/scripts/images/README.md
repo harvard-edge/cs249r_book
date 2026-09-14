@@ -6,6 +6,9 @@ Scripts for managing, processing, and validating images in the book.
 - `compress_images.py` - Compress images to reduce file size
 - `remove_bg.py` - Remove backgrounds from images
 
+## Figure Generation
+- `build_locator_stack.py` - Regenerate the Volume IV chapter locator stack figures (`fig_locator.svg`); needs `lualatex` and `pdftocairo`
+
 ## Image Management
 - `manage_images.py` - Main image management utility
 - `download_external_images.py` - Download external images
