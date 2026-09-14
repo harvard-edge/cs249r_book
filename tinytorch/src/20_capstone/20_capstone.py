@@ -602,7 +602,11 @@ class BenchmarkReport:
         if num_runs <= 0:
             raise ValueError("num_runs must be positive")
         # Count parameters and stored size (see measure_memory)
-        param_count = model.count_parameters()
+        param_count = (
+            model.count_parameters()
+            if hasattr(model, "count_parameters")
+            else sum(p.data.size for p in model.parameters())
+        )
         model_size_mb = self.measure_memory(model)
 
         # Measure accuracy

@@ -1054,7 +1054,7 @@ For each parameter:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-step", "solution": true}
-#| export
+#| exporti
 @method_of(Adam)
 def step(self):
     """
@@ -1439,7 +1439,7 @@ For each parameter:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adamw-step", "solution": true}
-#| export
+#| exporti
 @method_of(AdamW)
 def step(self):
     """
