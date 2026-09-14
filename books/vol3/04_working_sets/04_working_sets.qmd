@@ -223,6 +223,8 @@ Empirical measurements of transformer attention distributions during complex rea
 1. **Top 5 to 8 percent of tokens capture over 85 percent of total attention mass:** These tokens constitute the active working set $W_\epsilon(t)$. They include system prompt invariants, tool parameter signatures, active error tracebacks, and target symbol declarations.
 2. **Over 70 percent of historical tokens receive less than 0.001 percent of attention mass:** These tokens are functionally inert. They consist of intermediate build outputs, repetitive status polls, uncalled helper function bodies, and discarded trial code.
 
+This extreme concentration of attention mass reveals a crucial systems opportunity: by identifying and preserving only the active working set while discarding or offloading inert tokens, the runtime can stabilize context memory indefinitely, as contrasted in @fig-vol3-context-working-set-dynamics.
+
 ::: {#fig-vol3-context-working-set-dynamics fig-env="figure" fig-pos="htb" fig-cap="**Dynamics of Context Working Sets and Locality**: Panel A shows an unmanaged append-only context window where cumulative tokens grow monotonically toward hardware capacity limits, triggering linear KV cache memory expansion and quadratic prefill latency. Panel B illustrates active working set management, where context memory is partitioned into permanent system invariants, an active sliding window, and dynamically retained heavy-hitter tokens, maintaining bounded memory consumption." fig-alt="Dynamics of context working sets and locality comparing unmanaged append-only context with active working set management."}
 ![](images/svg/context_working_set_dynamics.svg){width="100%"}
 :::
@@ -373,44 +375,51 @@ With this partition, language models can stream over millions of tokens with sta
 
 **StreamingLLM memory bounds napkin math:** On Llama-3-70B ($320\text{ KB/token}$ in BF16), pinning $S=4$ sink tokens alongside a sliding window of $W=1{,}024$ tokens bounds the active KV cache to $(4 + 1{,}024) \times 320\text{ KB} \approx 329\text{ MB}$ per stream. Even if an agent generates $1{,}000{,}000$ tokens, memory consumption remains strictly locked at $329\text{ MB}$ instead of exploding to $320\text{ GB}$—a $970\times$ reduction in physical HBM footprint.
 
-To make these mechanics concrete, @lst-vol3-workingsets-streaming-buffer provides an operational implementation of the StreamingLLM KV cache manager, maintaining permanent initial sink tokens while rolling a contiguous local window buffer and evaluating attention without softmax denominator collapse.
+The tension between unbounded agent autonomy and finite accelerator HBM forces a fundamental redesign of the KV-cache lifecycle. If a serving runtime naively evicts tokens according to a conventional sliding window, the loss of initial sequence tokens causes attention logits to drift, triggering catastrophic perplexity explosion ($>10^3$). @Algo-streaming-attention-sink formalizes the dual-zone buffer management policy of StreamingLLM. By partitioning a fixed physical buffer in accelerator HBM into permanently pinned initial attention sinks ($S$) and a circular rolling window ($W$), the runtime achieves bounded $\mathcal{O}(S + W)$ memory residency and $\mathcal{O}(1)$ in-place slot writes while mathematically stabilizing the softmax denominator across millions of tokens.
 
-::: {#lst-vol3-workingsets-streaming-buffer lst-cap="**Streaming Attention Sink and Rolling Local Window KV Cache Manager**: Python implementation of a fixed-capacity streaming KV cache buffer maintaining pinned attention sinks at offsets 0..3 alongside a circular rolling local window."}
-```python
-import numpy as np
-
-
-class StreamingKVBuffer:
-    """Fixed-capacity KV cache maintaining pinned attention sinks and a rolling window."""
-
-    def __init__(self, num_sinks: int = 4, window_size: int = 1024, head_dim: int = 128):
-        self.s, self.w, self.d = num_sinks, window_size, head_dim
-        self.capacity = self.s + self.w
-        self.k_buf = np.zeros((self.capacity, self.d), dtype=np.float32)
-        self.v_buf = np.zeros((self.capacity, self.d), dtype=np.float32)
-        self.total_tokens = 0
-
-    def append(self, k: np.ndarray, v: np.ndarray) -> None:
-        """Inserts token key/value vectors, pinning initial sinks and cycling rolling window."""
-        if self.total_tokens < self.capacity:
-            idx = self.total_tokens
-        else:
-            # Pinned sinks [0..s-1] remain untouched; overwrite circular window [s..s+w-1]
-            idx = self.s + ((self.total_tokens - self.capacity) % self.w)
-        self.k_buf[idx], self.v_buf[idx] = k, v
-        self.total_tokens += 1
-
-    def forward(self, q: np.ndarray) -> np.ndarray:
-        """Computes scaled dot-product attention across resident sinks and local window."""
-        length = min(self.total_tokens, self.capacity)
-        scores = np.dot(q, self.k_buf[:length].T) / np.sqrt(self.d)
-        weights = np.exp(scores - np.max(scores))
-        weights /= np.sum(weights)
-        return np.dot(weights, self.v_buf[:length])
+```{pseudocode}
+#| label: algo-streaming-attention-sink
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Streaming attention sink and rolling cache}
+\begin{algorithmic}
+\Require stream token index $t$; query vector $\mathbf{q}_t$; key-value pair $(\mathbf{k}_t, \mathbf{v}_t)$; sink count $S$; rolling window size $W$; physical cache buffers $\mathbf{K}, \mathbf{V}$ in HBM
+\Ensure attention output $\mathbf{y}_t$ with bounded memory footprint $\mathcal{O}(S + W)$
+\If{$t \le S$} \Comment{populate pinned initial sink tokens}
+    \State $\text{slot} \gets t$
+\Else \Comment{circular overwrite in rolling window region}
+    \State $\text{slot} \gets S + ((t - S - 1) \bmod W) + 1$
+\EndIf
+\State $\mathbf{K}[\text{slot}] \gets \mathbf{k}_t$, $\mathbf{V}[\text{slot}] \gets \mathbf{v}_t$ \Comment{write to accelerator HBM}
+\State $L_{\text{active}} \gets \min(t, S + W)$ \Comment{active memory footprint}
+\State compute attention scores $\mathbf{s} \gets \frac{\mathbf{q}_t \mathbf{K}[1:L_{\text{active}}]^\top}{\sqrt{d_k}}$
+\State $\mathbf{a} \gets \textsc{Softmax}(\mathbf{s})$ \Comment{sinks absorb excess attention mass}
+\State $\mathbf{y}_t \gets \mathbf{a} \mathbf{V}[1:L_{\text{active}}]$
+\State \Return $\mathbf{y}_t$
+\end{algorithmic}
+\end{algorithm}
 ```
-:::
 
-However, while StreamingLLM prevents numerical collapse, it is insufficient for autonomous software agents. In an agent workflow, an observation received 20 turns ago (e.g., the root directory structure or a database configuration schema) cannot simply be evicted in favor of recent compiler noise. To preserve task completion capabilities over extended horizons, systems runtimes must move beyond static sliding windows to dynamic, content-aware context budgeting.
+### Systems mechanics: Dual-zone buffers and softmax stabilization
+
+To understand how @algo-streaming-attention-sink bounds accelerator memory while maintaining generation coherence, an ML systems engineer must examine its memory addressing and mathematical stabilization:
+
+1. **Dual-Zone Physical Buffer Layout (Lines 1–5):** The algorithm partitions a contiguous pre-allocated buffer of size $S + W$ in accelerator HBM into two functional regions:
+   - **Pinned Attention Sink ($1 \le \text{slot} \le S$):** The first $S$ token positions (empirically $S = 4$) are written during prompt ingestion and permanently locked against eviction.
+   - **Circular Rolling Window ($S < \text{slot} \le S + W$):** For all subsequent tokens ($t > S$), slot addressing wraps cyclically using modular arithmetic: $\text{slot} \gets S + ((t - S - 1) \bmod W) + 1$.
+2. **In-Place Mutation with Zero Copy Overhead (Line 6):** When token $t$ arrives, its key and value vectors $(\mathbf{k}_t, \mathbf{v}_t)$ overwrite the oldest physical slot directly in HBM. Naive sliding-window implementations shift the entire $W$-token tensor buffer to the left on every step, consuming massive memory bandwidth ($\mathcal{O}(W)$ bytes copied per token). In contrast, circular ring addressing executes in $\mathcal{O}(1)$ time with zero memory movement, achieving maximum hardware efficiency.
+3. **Softmax Denominator Stabilization (Lines 7–10):** Retaining the $S$ initial tokens is not an empirical heuristic; it is a mathematical requirement of autoregressive attention. During pretraining, early layer representations establish an inductive bias where attention heads deposit excess probability mass onto the initial sequence tokens whenever the current query finds no relevant semantic match. If an eviction policy removes these initial tokens, the denominator $\sum_{j} \exp(s_{t, j})$ loses its primary absorbing term. The excess probability mass is violently redistributed across the remaining rolling tokens, artificially inflating irrelevant historical noise and causing model perplexity to explode toward infinity. By pinning $S=4$ sink tokens, the denominator remains stable across millions of generated tokens.
+
+#### The architectural boundary: Why FIFO windowing fails for agents
+
+While StreamingLLM guarantees numerical stability and constant memory consumption $\mathcal{O}(S + W)$, it exposes a fundamental limitation when applied to autonomous software agents:
+
+- **Strict FIFO Amnesia:** A circular rolling window treats all tokens as temporally uniform, assuming that recent tokens are always more valuable than distant tokens.
+- **The Ground-Truth Eviction Hazard:** In an agentic trajectory, an observation emitted 30 turns ago—such as the target database schema, an API access contract, or a critical user constraint—is infinitely more valuable than 1,000 tokens of intermediate compiler error logs generated two steps ago. Under pure StreamingLLM, the compiler logs will overwrite the database schema, leaving the agent blind to its core operating constraints.
+
+To preserve task completion capabilities over extended horizons, systems runtimes must move beyond static FIFO sliding windows toward **dynamic, content-aware context budgeting** that treats working-set memory as a structured, managed hierarchy.
 
 <!-- ======================================================================= -->
 <!-- SECTION 4.3: DYNAMIC CONTEXT BUDGETING AND EVICTION POLICIES            -->
@@ -457,7 +466,7 @@ where $\bar{\alpha}_{\tau, i} = \sum_{\ell=1}^L \sum_{h=1}^H \alpha_{\ell, h, \t
 
 All intermediate tokens not belonging to $\mathcal{S} \cup \mathcal{W} \cup \mathcal{H}$ are evicted from HBM, and their cache blocks are reclaimed by the memory allocator. As shown in @fig-vol3-attention-sinks-eviction, retaining just 20 percent of intermediate tokens via heavy-hitter scoring preserves over 98 percent of multi-turn reasoning accuracy on agentic benchmarks while slashing decode memory bandwidth demand by $4\times$ (@zhang2023h2o).
 
-::: {#fig-vol3-attention-sinks-eviction fig-env="figure" fig-pos="htb" fig-cap="**Dynamic KV Cache Sparsification and Eviction Topologies**: Dense unbounded attention retains all historical tokens in accelerator HBM, leading to memory exhaustion. StreamingLLM pins four initial sink tokens to prevent softmax denominator collapse while discarding intermediate tokens via a local rolling window. The Heavy-Hitter Oracle (H2O) retains initial sinks, the local window, and the top-k intermediate tokens ranked by cumulative attention mass, preserving critical reasoning state within bounded memory." fig-alt="Diagram of KV cache sparsification topologies comparing dense attention, StreamingLLM, and Heavy-Hitter Oracle."}
+::: {#fig-vol3-attention-sinks-eviction fig-env="figure" fig-pos="htb" fig-cap="**Dynamic KV Cache Sparsification and Eviction Topologies**: Dense unbounded attention retains all historical tokens in accelerator HBM, leading to memory exhaustion. StreamingLLM pins four initial sink tokens to prevent softmax denominator collapse while discarding intermediate tokens via a local rolling window. The Heavy-Hitter Oracle (H2O) retains initial sinks, the local window, and the top-k intermediate tokens ranked by cumulative attention mass, preserving critical reasoning state within bounded memory." fig-alt="Diagram of three KV cache sparsification topologies: dense unbounded attention retaining all historical tokens, StreamingLLM pinning initial attention sink tokens with a sliding local window, and Heavy-Hitter Oracle (H2O) retaining sinks, a sliding window, and top-k attention heavy hitters."}
 ![](images/svg/attention_sinks_and_eviction.svg){width="100%"}
 :::
 
@@ -528,44 +537,51 @@ In real-world inference systems such as SGLang (@zheng2023sglang) and vLLM (@kwo
    - The abandoned child branch containing the `<thought>` tokens has its reference count decremented ($C_{\text{ref}} \leftarrow C_{\text{ref}} - 1 = 0$).
    - The engine simply allocates fresh physical pages for the small $(a_t, o_t)$ suffix. When GPU memory pressure occurs, the unreferenced scratchpad pages are automatically evicted by the server's background LRU page allocator.
 
-To demonstrate this end-to-end mechanism, @lst-vol3-workingsets-cot-cleaner implements an operational `TwoPhaseCommitCoTManager` paired with a simulated `RadixPrefixNode` allocator, verifying that scratchpad excision maintains full prefix cache hits while eliminating memory bloat.
+With the rise of reasoning models that emit extensive chain-of-thought scratchpads before taking action, an agent runtime faces a critical memory systems dilemma: retaining thousands of intermediate deliberative tokens per turn exhausts GPU HBM within dozens of turns, yet naively discarding context destroys prefix cache reuse. @Algo-twophase-context-cleaner formalizes the Two-Phase Commit context compaction protocol that bridges agent orchestration frameworks with low-level GPU virtual memory allocators. In Phase 1 (Proposal), the model generates an ephemeral scratchpad $\mathbf{z}_t$ and tool action $a_t$ into a temporary Radix branch. In Phase 2 (Commit), once the sandbox executes $a_t$ and yields observation $o_t$, the runtime excises $\mathbf{z}_t$, commits only the canonical $(a_t, o_t)$ transition tuple, and decrements reference counts to trigger automatic page reclamation without forfeiting 100 percent prefix cache hits.
 
-::: {#lst-vol3-workingsets-cot-cleaner lst-cap="**Two-Phase Commit CoT Context Cleaner and Radix Prefix Reuser**: Python implementation of a transactional CoT manager excising ephemeral thought tokens post-sandbox execution and verifying Radix prefix cache hit preservation."}
-```python
-import re
-from typing import Dict, Tuple
-
-
-class TwoPhaseCommitCoTManager:
-    """Manages transactional CoT execution: excises ephemeral thoughts and commits prefix."""
-
-    def __init__(self, system_prompt: str):
-        self.history = [("system", system_prompt)]
-        self.ref_counts: Dict[str, int] = {"root": 1}
-
-    def commit_turn(self, raw_response: str, execute_fn) -> Tuple[str, str, int]:
-        """Phase 1: executes tool; Phase 2: excises thoughts and preserves radix prefix."""
-        # 1. Parse ephemeral thought tokens and isolate canonical action
-        match = re.search(r"<(?:thought|think)>(.*?)</(?:thought|think)>", raw_response, re.DOTALL)
-        thought = match.group(1).strip() if match else ""
-        action = re.sub(
-            r"<(?:thought|think)>.*?</(?:thought|think)>", "", raw_response, flags=re.DOTALL
-        ).strip()
-
-        # 2. Phase 1 execution: run tool in isolated sandbox
-        observation = execute_fn(action)
-
-        # 3. Phase 2 commit: release scratchpad cache branch (ref_count -> 0)
-        # Scratchpad KV pages are reclaimed by LRU; only canonical action/obs commit to prefix
-        self.ref_counts["scratchpad"] = 0  # Marked unreferenced for GPU allocator reclaim
-        self.history.append(("assistant", action))
-        self.history.append(("tool", observation))
-        self.ref_counts[f"turn_{len(self.history)}"] = 1
-
-        pruned_tokens = len(thought) // 4
-        return action, observation, pruned_tokens
+```pseudocode
+#| label: algo-twophase-context-cleaner
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Two-phase commit context compaction}
+\begin{algorithmic}
+\Require persistent trajectory $\tau_{t-1}$; model response containing scratchpad $\mathbf{z}_t$ and action $a_t$; sandbox oracle $\mathcal{E}$; Radix tree $\mathcal{R}$
+\Ensure updated canonical trajectory $\tau_t$ and reclaimed scratchpad cache pages
+\State parse tool action $a_t$ and ephemeral reasoning tokens $\mathbf{z}_t$ from raw response \Comment{Phase 1: proposal}
+\State locate scratchpad branch node $v_{\text{scratch}} \in \mathcal{R}$ corresponding to $\mathbf{z}_t$
+\State execute action $o_t \gets \mathcal{E}(a_t)$ in isolated execution sandbox
+\State $\tau_t \gets \tau_{t-1} \circ (a_t, o_t)$ \Comment{Phase 2: commit canonical transition to persistent trajectory}
+\State decrement reference count $C_{\text{ref}}(v_{\text{scratch}}) \gets C_{\text{ref}}(v_{\text{scratch}}) - 1$ \Comment{dereference scratchpad branch}
+\If{$C_{\text{ref}}(v_{\text{scratch}}) = 0$}
+    \State add physical KV pages of $v_{\text{scratch}}$ to allocator free list $\mathcal{F}_{\text{HBM}}$ \Comment{reclaim GPU memory}
+    \State prune unreferenced leaf $v_{\text{scratch}}$ from $\mathcal{R}$
+\EndIf
+\State allocate fresh physical pages for canonical continuation $(a_t, o_t)$ under prefix $\tau_{t-1}$
+\State \Return $\tau_t$
+\end{algorithmic}
+\end{algorithm}
 ```
-:::
+
+### The systems lifecycle of two-phase reasoning compaction
+
+To see how @algo-twophase-context-cleaner bridges agent orchestration frameworks with low-level GPU memory allocators, an ML systems engineer must trace the lifecycle of reasoning tokens through the server's Radix tree:
+
+1. **Phase 1: Ephemeral Proposal (Lines 1–2):** During model generation, the language model outputs a high-volume chain-of-thought scratchpad $\mathbf{z}_t$ (often 1,000 to 4,000 tokens) before terminating with a structured tool call $a_t$. In the serving engine's virtual memory tree, this creates an active branch node $v_{\text{scratch}}$ descending from the parent trajectory prefix $\tau_{t-1}$.
+2. **Sandbox Actuation (Line 3):** The client harness parses $a_t$, intercepts execution, and dispatches the action to an isolated container or microVM sandbox $\mathcal{E}$, yielding environment observation $o_t$ (e.g., test results or command stdout).
+3. **Phase 2: Canonical Commit (Lines 4–5):** The client updates the persistent trajectory ledger to record strictly the transition: $\tau_t \gets \tau_{t-1} \circ (a_t, o_t)$. The thousands of reasoning tokens comprising $\mathbf{z}_t$ are intentionally omitted from the canonical history.
+4. **Zero-Overhead Memory Dereferencing (Lines 5–9):** When turn $t+1$ is dispatched, the serving engine decrements the reference count of the scratchpad branch node: $C_{\text{ref}}(v_{\text{scratch}}) \leftarrow C_{\text{ref}}(v_{\text{scratch}}) - 1$. Because no peer trajectory branches from this scratchpad, $C_{\text{ref}}$ drops to zero:
+   - The allocator immediately unmaps the physical KV blocks backing $\mathbf{z}_t$ and returns their frame descriptors to the global free list $\mathcal{F}_{\text{HBM}}$.
+   - The leaf node $v_{\text{scratch}}$ is pruned from the Radix tree, preventing memory fragmentation.
+5. **Prefill Elimination via 100 Percent Prefix Reuse (Line 10):** When turn $t+1$ begins inference, the prompt begins with the shared prefix $\tau_{t-1}$. The serving engine traverses the Radix tree and achieves a **100 percent prefix cache hit**: zero prefill matrix multiplications are executed for $\tau_{t-1}$. The engine allocates fresh physical blocks strictly for the compact $(a_t, o_t)$ continuation.
+
+#### Memory economics of reasoning token excision
+
+The quantitative impact of @algo-twophase-context-cleaner on cluster serving economics is dramatic:
+
+- **Uncompacted Deliberation:** An agent generating 2,000 reasoning tokens per turn across 50 execution turns produces $100{,}000$ cumulative scratchpad tokens. On a 70B model in FP16 ($320\text{ KB/token}$), retaining this unpruned scratchpad consumes $32\text{ GB}$ of resident accelerator memory per agent instance, exhausting the KV-cache capacity of an 80 GB GPU.
+- **Two-Phase Commit Compaction:** Because the scratchpad is dereferenced and reclaimed after each turn, resident memory is bounded strictly by $\tau_{t-1} \circ (a_t, o_t)$. If actions and observations average 150 tokens per turn, the resident context after 50 turns is only $7{,}500$ tokens ($2.4\text{ GB}$)—a **$13.3\times$ reduction in resident memory** and up to a **$60\times$ reduction in cumulative KV cache bloat**, without sacrificing prefix cache reuse.
 
 ### Dual-pathway semantic compaction
 

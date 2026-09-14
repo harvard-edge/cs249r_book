@@ -23,7 +23,9 @@ rng = np.random.default_rng(7)
 from pathlib import Path
 
 # Add project root
-sys.path.insert(0, os.getcwd())
+repo_root = str(Path(__file__).resolve().parents[2])
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 from rich.console import Console
 from rich.panel import Panel

@@ -993,7 +993,13 @@ ZeRO-1 shards optimizer states across GPUs. Each GPU stores only $1/N$ of the Ad
 
 ZeRO-2 additionally shards gradients. Instead of AllReduce, which leaves full gradients on each GPU, ZeRO-2 uses ReduceScatter so each GPU receives $1/N$ of the reduced gradients. Under the FP16-gradient convention used here, memory savings reduce gradients from $2N$ bytes/param replicated across $N$ workers to $2$ bytes/param total, or $2/N$ bytes/param per GPU.
 
-ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded. This achieves maximum memory efficiency at the cost of additional communication that FSDP introduces relative to standard DDP.
+ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the model. Before each layer's forward pass, parameters are gathered via AllGather; after backward pass, gradients are reduced via ReduceScatter, then parameters are discarded (@fig-zero-partitioning). This achieves maximum memory efficiency at the cost of additional communication that FSDP introduces relative to standard DDP.
+
+::: {#fig-zero-partitioning fig-env="figure" fig-pos="htb" fig-cap="**ZeRO state partitioning across GPU ranks**: Memory layout per GPU for 4 workers under standard DDP versus ZeRO stages 1, 2, and 3. ZeRO-1 shards optimizer states ($O/4$), ZeRO-2 adds gradient sharding ($G/4$), and ZeRO-3 partitions all model state ($P/4$, $G/4$, $O/4$)." fig-alt="Matrix diagram comparing state layout across 4 GPUs for Baseline DDP, ZeRO Stage 1, ZeRO Stage 2, and ZeRO Stage 3."}
+
+![](images/svg/zero-partitioning.svg){width="100%"}
+
+:::
 
 This sharding places communication on the critical path that DDP avoids. The forward pass needs an AllGather to reconstruct each layer's parameters ($M_{\text{layer}}$ bytes); the backward pass needs a second AllGather to reconstruct them when parameters are resharded after the forward pass ($M_{\text{layer}}$ bytes), followed by a ReduceScatter for gradients ($M_{\text{layer}}$ bytes). For a model with $N_L$ layers, full-shard FSDP with resharding therefore performs about $3N_L$ collective operations per training step against the single AllReduce that DDP needs, raising total communication volume to roughly $3M_{\text{state}}$ bytes versus $2M_{\text{state}}$ for DDP. The collectives are spread across more operations with overlap opportunities, however: while layer $i$ computes, layer $i+1$ can prefetch its parameters.
 

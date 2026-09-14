@@ -30,7 +30,7 @@
     </tr>
     <tr>
       <td><b><code>vol2/</code></b></td>
-      <td>Volume II: Machine Learning Systems at Scale.</td>
+      <td>Volume II: Scaling Machine Learning Systems.</td>
     </tr>
   </tbody>
 </table>

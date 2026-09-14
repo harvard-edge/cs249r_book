@@ -1091,18 +1091,20 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def _run_inline_unit_tests(self, module_name: str, verbose: bool) -> Dict[str, int]:
-        """Run inline unit tests and parse output for detailed display."""
+        """Run inline unit tests and parse output for detailed display.
+
+        Prefers the student's working notebook in modules/ so that tests
+        actually certify the student's implementation (#2117). Falls back
+        to the instructor reference in src/ if no notebook exists.
+        """
         project_root = Path.cwd()
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_path = project_root / "modules" / module_name / f"{short_name}.ipynb"
         src_dir = project_root / "src" / module_name
         dev_file = src_dir / f"{module_name}.py"
 
-        if not dev_file.exists():
-            if verbose:
-                self.console.print(f"   [dim yellow]No source file found: {dev_file}[/dim yellow]")
-            return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
-
         # Set up environment with project root in PYTHONPATH
-        # This allows src files to import from tinytorch.core.*
+        # This allows module code to import from tinytorch.core.*
         env = os.environ.copy()
         pythonpath = env.get('PYTHONPATH', '')
         if pythonpath:
@@ -1110,9 +1112,24 @@ class ModuleWorkflowCommand(BaseCommand):
         else:
             env['PYTHONPATH'] = str(project_root)
 
+        if notebook_path.exists():
+            runner = (
+                "import json, sys; from pathlib import Path; "
+                "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
+                "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
+                "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
+            )
+            cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
+        elif dev_file.exists():
+            cmd = [sys.executable, str(dev_file.absolute())]
+        else:
+            if verbose:
+                self.console.print(f"   [dim yellow]No module file found: {notebook_path} or {dev_file}[/dim yellow]")
+            return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
+
         # Run the module file (which triggers if __name__ == "__main__" tests)
         result = subprocess.run(
-            [sys.executable, str(dev_file.absolute())],
+            cmd,
             capture_output=True,
             text=True,
             encoding="utf-8",

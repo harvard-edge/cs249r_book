@@ -1446,7 +1446,7 @@ EmbeddingLayer.forward pipeline:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "emblayer-forward", "solution": true}
-#| export
+#| exporti
 
 # Continue the EmbeddingLayer class with forward and utility methods
 def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:

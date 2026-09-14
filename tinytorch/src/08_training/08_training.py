@@ -630,7 +630,7 @@ Trainer State After __init__:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-init", "solution": true}
-#| export
+#| exporti
 def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
     """
     Initialize trainer with model and training components.
@@ -873,7 +873,7 @@ training epoch with accumulation, scheduling, and history tracking.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-train-epoch", "solution": true}
-#| export
+#| exporti
 def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     """
     Train for one epoch through the dataset.
@@ -1154,7 +1154,7 @@ no gradient clipping.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-evaluate", "solution": true}
-#| export
+#| exporti
 def trainer_evaluate(self, dataloader):
     """
     Evaluate model on dataset without updating parameters.
@@ -1326,7 +1326,7 @@ Checkpoint Contents:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-save-checkpoint", "solution": true}
-#| export
+#| exporti
 def trainer_save_checkpoint(self, path: str):
     """
     Save parameters, optimizer, scheduler, and epoch history for resumption.
@@ -1473,7 +1473,7 @@ checkpoint.pkl ──→ pickle.load() ──→ restore epoch, step
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-load-checkpoint", "solution": true}
-#| export
+#| exporti
 def trainer_load_checkpoint(self, path: str):
     """
     Load training state from checkpoint.

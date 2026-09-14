@@ -138,7 +138,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
   </tbody>
 </table>
 
-### Volume II: At Scale (16 labs · Distributed ML systems)
+### Volume II: Scaling (16 labs · Distributed ML systems)
 
 <table width="100%" style="width:100%">
   <thead>

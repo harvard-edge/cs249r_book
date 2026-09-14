@@ -685,7 +685,11 @@ class InferenceTopologyRecap:
 
 Multi-GPU tensor parallelism shards each layer's weight matrices across multiple GPUs connected by high-bandwidth interconnect (NVLink at `{python} InferenceTopologyRecap.nvlink_h100_gb_per_s_str` bidirectional [450 GB/s per direction] on H100). Each GPU computes a partial result for every layer, and an all-reduce operation synchronizes the partial results before the next layer. This topology is necessary when model weights exceed single-device memory and provides latency reduction proportional to the parallelism degree, at the cost of communication overhead per layer. The model sharding section (@sec-inference-scale-model-sharding-inference-82b3) analyzes the communication overhead quantitatively.
 
-Disaggregated serving separates the prefill phase (processing the input prompt, which is compute-bound) from the decode phase (generating tokens one at a time, which is memory-bandwidth-bound) onto different hardware pools optimized for each workload profile. Prefill nodes use high-FLOP/s accelerators; decode nodes use high-bandwidth-memory configurations. Separation removes prefill/decode interference and permits independent parallelism and capacity plans, but it also places a state transfer on the critical path [@zhong2024distserve]. Chunked prefill provides the contrasting colocated approach: it bounds interference without paying a network transfer [@agrawal2024sarathi].
+Disaggregated serving separates the prefill phase (processing the input prompt, which is compute-bound) from the decode phase (generating tokens one at a time, which is memory-bandwidth-bound) onto different hardware pools optimized for each workload profile (@fig-disaggregated-serving). Prefill nodes use high-FLOP/s accelerators; decode nodes use high-bandwidth-memory configurations. Separation removes prefill/decode interference and permits independent parallelism and capacity plans, but it also places a state transfer on the critical path [@zhong2024distserve]. Chunked prefill provides the contrasting colocated approach: it bounds interference without paying a network transfer [@agrawal2024sarathi].
+
+::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**: Separation of compute-bound prefill instances from memory-bandwidth-bound decode instances, mediated by low-latency RDMA KV-cache migration." fig-alt="Disaggregated LLM serving architecture illustrating compute-bound prefill nodes transferring key-value cache over high-speed RDMA network to memory-bandwidth-bound decode nodes."}
+![](images/svg/disaggregated-serving.svg)
+:::
 
 The disaggregation decision therefore depends on a quantitative contract, not on the phase labels alone. If prefill produces $S_{\mathrm{KV}}$ bytes of attention state and the usable inter-pool bandwidth is $B_{\mathrm{net}}$, then the handoff consumes at least
 
@@ -2089,6 +2093,12 @@ Available Memory for KV = `{python} KVCacheCapacityEstimator.total_hbm_decimal_g
 
 :::
 
+::: {.column-margin}
+![](images/svg/inference_kv_cache_ladder.svg){width="100%" fig-alt="KV cache capacity ladder showing memory consumption scaling from a single token (0.33 MB) to a 128K request (43 GB) against total KV budget (480 GB)."}
+
+*KV cache capacity ladder across sequence lengths against available memory budget.*
+:::
+
 ### The fragmentation problem {#sec-inference-scale-fragmentation-problem-28be}
 
 Traditional memory allocation for KV cache preallocates contiguous memory for each sequence based on maximum expected length. This creates two forms of waste.
@@ -2591,6 +2601,12 @@ class SpeculativeSpeedup:
 - **High acceptance** $(\alpha_{\text{acc}} = 0.9)$: Expected `{python} SpeculativeSpeedup.et_high_str` per round, speedup of `{python} SpeculativeSpeedup.sp_high_mult_str`.
 - **Medium acceptance** $(\alpha_{\text{acc}} = 0.7)$: Expected `{python} SpeculativeSpeedup.et_med_str` per round, speedup of `{python} SpeculativeSpeedup.sp_med_mult_str`.
 - **Low acceptance** $(\alpha_{\text{acc}} = 0.5)$: Expected `{python} SpeculativeSpeedup.et_low_str` per round, speedup of `{python} SpeculativeSpeedup.sp_low_mult_str`.
+
+::: {.column-margin}
+![](images/svg/vol2_inference_margin_001.svg){width="100%" fig-alt="Speculative decoding speedup curve highlighting the 70 percent acceptance threshold."}
+
+*Speculative decoding speedup at 70 percent acceptance rate.*
+:::
 
 Predictable text achieves $\alpha_{\text{acc}} > 0.9$, while creative reasoning or code generation may fall below 0.5; well-aligned model pairs that share training data and architecture commonly land at 0.6--0.8. Because acceptance is a property of the workload, not of the hardware, a single global setting is wrong for a mixed fleet: the same speculation that halves time per token on a chat endpoint can slow a code-generation endpoint that sits below the break-even acceptance rate. The serving system must therefore decide per endpoint, and three serving concerns govern that decision.
 
