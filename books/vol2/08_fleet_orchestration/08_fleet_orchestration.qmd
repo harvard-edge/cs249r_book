@@ -229,7 +229,13 @@ The objectives conflict because each one rewards a different scheduling behavior
 
 Fairness requires an outcome metric, not only a quota rule. For job $j$, **slowdown** $S_j=(W_j+T_j)/T_j$ compares its queueing-plus-running time with its isolated runtime $T_j$; a one-hour job that waits nine hours has $S_j=10$, even if its team eventually receives its nominal GPU share. A scheduler should report the distribution of slowdown by user and job class, together with the age of the oldest pending feasible job. Dominant-share parity detects unequal resource allocation, slowdown exposes unequal delay, and a bounded maximum feasible wait detects starvation. These metrics separate a policy that is fair in allocated GPU-hours from one that is fair in the time users wait to obtain useful results.
 
-Optimizing all four simultaneously is impossible; every scheduling policy represents a specific point in this four-dimensional trade-off space. The most direct conflict exists between throughput and latency, a tension analogous to the throughput-latency trade-off in computer architecture. A throughput-optimal scheduler prioritizes the largest, most parallelizable jobs because they use the hardware most efficiently. However, this policy is latency-catastrophic for small jobs: a researcher submitting a 10-minute debugging task might wait days for the large job to finish. Conversely, a latency-optimal scheduler minimizes average wait time but potentially starves large jobs indefinitely, reducing aggregate cluster throughput by leaving large blocks of resources idle while waiting for "just one more" small job to finish.
+As @fig-fleet-orchestration-scheduling-tradeoffs illustrates, optimizing all four simultaneously is impossible; every scheduling policy represents a specific point in this four-dimensional trade-off space. The most direct conflict exists between throughput and latency, a tension analogous to the throughput-latency trade-off in computer architecture. A throughput-optimal scheduler prioritizes the largest, most parallelizable jobs because they use the hardware most efficiently. However, this policy is latency-catastrophic for small jobs: a researcher submitting a 10-minute debugging task might wait days for the large job to finish. Conversely, a latency-optimal scheduler minimizes average wait time but potentially starves large jobs indefinitely, reducing aggregate cluster throughput by leaving large blocks of resources idle while waiting for "just one more" small job to finish.
+
+::: {#fig-fleet-orchestration-scheduling-tradeoffs fig-env="figure" fig-pos="htb" fig-cap="**Scheduling trade-offs across competing fleet objectives**: A four-way trade-off diamond (Throughput, Latency, Fairness, Cost Efficiency) illustrates the tensions governing cluster scheduling. Throughput favors long, unbroken runs; Latency favors aggressive preemption for interactive jobs; Fairness fragments resources to equalize shares; and Cost Efficiency leverages discounted, interruptible capacity." fig-alt="Trade-off diamond connecting four scheduling objectives: Throughput, Latency, Fairness, and Cost Efficiency, with pairwise tension arrows and policy trade-off descriptions."}
+
+![](images/svg/scheduling-objectives-conflict.svg)
+
+:::
 
 ::: {.column-margin}
 ![](images/svg/fleet_orchestration_util_knee.svg){width="100%" fig-alt="A wait-time curve that stays flat at low utilization then turns sharply upward toward the right, with a marked knee and a shaded danger zone past it."}
@@ -651,7 +657,13 @@ Heterogeneous RLHF gangs are the exception; for common homogeneous training jobs
 
 The gang-scheduling/backfill tension does not have a tool-neutral answer: the orchestration paradigm determines which guarantee the platform protects first. Slurm, shaped by HPC batch systems, favors explicit resource requests and predictable allocation. Kubernetes, shaped by cloud-native service management, favors declared desired state and continuous reconciliation. The choice is therefore not Slurm vs. Kubernetes as products; it is which control model best matches the workload mix, failure behavior, and operational culture of the fleet.
 
-The fundamental distinction is between imperative and declarative resource management. In an imperative system, users specify exactly what resources they need and the system allocates them directly. In a declarative system, users specify what they want running and the system converges toward that state. This distinction, familiar from programming language design, determines how ML workloads are scheduled, monitored, and recovered from failure.
+As contrasted in @fig-fleet-orchestration-slurm-vs-k8s, the fundamental distinction is between imperative and declarative resource management. In an imperative system, users specify exactly what resources they need and the system allocates them directly. In a declarative system, users specify what they want running and the system converges toward that state. This distinction, familiar from programming language design, determines how ML workloads are scheduled, monitored, and recovered from failure.
+
+::: {#fig-fleet-orchestration-slurm-vs-k8s fig-env="figure" fig-pos="htb" fig-cap="**Architectural paradigms: Slurm vs. Kubernetes**: Slurm (left) uses an imperative batch model where users submit explicit resource requests to a centralized controller (`slurmctld`) providing deterministic atomic allocation. Kubernetes (right) uses a declarative service model where controllers continuously reconcile observed cluster state in `etcd` against desired state specifications." fig-alt="Two-column comparison. Left: Slurm's imperative batch scheduling model with centralized controller and predictable allocation. Right: Kubernetes' declarative control-loop model with continuous etcd reconciliation and dynamic operators."}
+
+![](images/svg/slurm-vs-kubernetes.svg)
+
+:::
 
 ### Slurm: The HPC heritage {#sec-fleet-orchestration-slurm}
 
@@ -946,7 +958,13 @@ Between racks connected through **Spine Switches**\index{Spine Switch!definition
 
 This hierarchy means that a 64-GPU job allocated entirely within a single rack (8 nodes, all under one leaf switch) will outperform the same job spread across 8 racks (1 node per rack, crossing spine switches for every AllReduce). The performance difference stems directly from the communication analysis in @sec-collective-communication: ring AllReduce latency scales with the slowest link in the ring, and cross-rack hops introduce both higher latency and increased contention risk. For synchronous training, every iteration waits for the slowest worker to complete its AllReduce, so even occasional cross-rack congestion events create persistent throughput degradation.
 
-The scheduler must therefore model the cluster not as a flat list of compute slots, but as a hierarchical graph with distinct bandwidth cliffs at each level (GPU, Node, Rack, and Pod) corresponding to NVLink, InfiniBand, and spine-switch boundaries. Each boundary crossing introduces an order-of-magnitude bandwidth reduction, and at the rack and pod levels, network oversubscription (often 2:1 or 4:1 at the spine switches) further restricts bisection bandwidth beyond what the raw link speed suggests. A topology-aware scheduler explicitly optimizes for these constraints, treating "locality" as a first-class resource. For a distributed training job requiring 1,024 GPUs, a fragmented placement that scatters workers across random racks can degrade end-to-end training throughput by 15 to 30 percent compared to a compact placement within a single pod.
+The scheduler must therefore model the cluster not as a flat list of compute slots, but as a hierarchical graph with distinct bandwidth cliffs at each level (GPU, Node, Rack, and Pod) corresponding to NVLink, InfiniBand, and spine-switch boundaries (@fig-fleet-orchestration-topology-hierarchy). Each boundary crossing introduces an order-of-magnitude bandwidth reduction, and at the rack and pod levels, network oversubscription (often 2:1 or 4:1 at the spine switches) further restricts bisection bandwidth beyond what the raw link speed suggests. A topology-aware scheduler explicitly optimizes for these constraints, treating "locality" as a first-class resource. For a distributed training job requiring 1,024 GPUs, a fragmented placement that scatters workers across random racks can degrade end-to-end training throughput by 15 to 30 percent compared to a compact placement within a single pod.
+
+::: {#fig-fleet-orchestration-topology-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Physical topology hierarchy and bandwidth cliffs**: Hardware boundaries dictate communication performance across three distinct domains. Within a node, NVLink provides 900 GB/s bidirectional bandwidth for tensor-parallel communication. Within a rack, InfiniBand/RoCE links deliver 50 GB/s for pipeline and data parallelism. Across racks and pods, spine switch fabrics drop effective bandwidth to 12–25 GB/s with 2:1 to 4:1 oversubscription." fig-alt="Three-tier physical hierarchy showing Node domain (NVLink at 900 GB/s), Rack domain (InfiniBand/RoCE at 50 GB/s), and Pod domain (Spine switch fabric at 12 to 25 GB/s) with order-of-magnitude bandwidth cliffs."}
+
+![](images/svg/topology-hierarchy.svg)
+
+:::
 
 @Fig-topology-placement-paths contrasts optimal and scattered placement for a 4-GPU tensor parallel group, showing how the communication path determines whether GPUs use a single leaf switch or must traverse slower leaf-spine-leaf hops.
 
@@ -1147,7 +1165,13 @@ Rail-aware scheduling assigns data parallel replicas such that corresponding GPU
 
 The interaction between rail-aware scheduling and topology-aware placement creates a multi-dimensional optimization problem. The scheduler must simultaneously optimize for intra-node NVLink locality (tensor parallelism requires GPUs on the same node), intra-rack switch locality (pipeline parallelism benefits from minimal switch hops between stages), and rail alignment (data parallelism benefits from same-rail communication). These three objectives are partially conflicting: constraining data parallel replicas to specific GPU positions within each node (for rail alignment) reduces the scheduler's flexibility to choose nodes based on rack locality, and requiring full-node allocations for NVLink locality prevents sharing nodes between jobs that could improve packing efficiency.
 
-Production schedulers resolve these conflicts using weighted scoring functions that prioritize constraints based on workload characteristics. For large training jobs using 3D parallelism, tensor parallel locality receives the highest weight (because NVLink-to-InfiniBand performance degradation is the largest), followed by rail alignment (because it eliminates congestion for the most frequent communication pattern), followed by rack locality (because the performance benefit is smaller and can be partially compensated by compute-communication overlap). For pure data parallel jobs, rail alignment receives the highest weight. For single-node jobs, topology constraints are irrelevant and the scheduler optimizes purely for packing efficiency.
+Production schedulers resolve these conflicts using weighted scoring functions that prioritize constraints based on workload characteristics (@fig-fleet-orchestration-hierarchical-placement). For large training jobs using 3D parallelism, tensor parallel locality receives the highest weight (because NVLink-to-InfiniBand performance degradation is the largest), followed by rail alignment (because it eliminates congestion for the most frequent communication pattern), followed by rack locality (because the performance benefit is smaller and can be partially compensated by compute-communication overlap). For pure data parallel jobs, rail alignment receives the highest weight. For single-node jobs, topology constraints are irrelevant and the scheduler optimizes purely for packing efficiency.
+
+::: {#fig-fleet-orchestration-hierarchical-placement fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical placement for 3D parallelism**: Optimal placement maps distributed training dimensions to matching physical interconnect layers. Tensor parallelism (TP) maps strictly inside nodes across NVLink (900 GB/s); pipeline parallelism (PP) maps across adjacent nodes within a rack (50 GB/s); and data parallelism (DP) spans across racks via rail-aligned spine fabrics." fig-alt="Architectural diagram mapping 3D parallelism dimensions to hardware domains: TP mapped to intra-node NVLink, PP mapped to intra-rack InfiniBand, and DP mapped across racks with rail-aligned network switches."}
+
+![](images/svg/hierarchical-placement.svg)
+
+:::
 
 ### Topology discovery and dynamic adaptation {#sec-fleet-orchestration-topology-discovery}
 
@@ -1179,7 +1203,13 @@ Elastic scheduling eliminates this binary choice. The recovery mechanics of elas
 
 ### The scheduler-framework contract {#sec-fleet-orchestration-elastic-contract}
 
-Elastic scheduling requires a well-defined contract between the scheduler and the training framework. The scheduler guarantees that resource changes are communicated through defined signals, with sufficient advance notice for graceful adaptation. The framework guarantees that it can handle resource changes without corrupting model state, using the batch size adjustment, learning rate recalibration, and communication group reconstruction mechanisms developed in @sec-fault-tolerance-reliability-reliability-elastic-training-mechanisms-49b1.
+Elastic scheduling requires a well-defined contract between the scheduler and the training framework. The scheduler guarantees that resource changes are communicated through defined signals, with sufficient advance notice for graceful adaptation. The framework guarantees that it can handle resource changes without corrupting model state, using the batch size adjustment, learning rate recalibration, and communication group reconstruction mechanisms developed in @sec-fault-tolerance-reliability-reliability-elastic-training-mechanisms-49b1. The worker-membership lifecycle follows the state machine shown in @fig-fleet-orchestration-elastic-state-machine, transitioning workers through provisioning, active training, dynamic rebalancing, and self-healing fault recovery.
+
+::: {#fig-fleet-orchestration-elastic-state-machine fig-env="figure" fig-pos="htb" fig-cap="**Elastic training worker lifecycle and state machine**: The state machine governing dynamic worker membership. Training begins in Pending/Provisioning, transitions through Rendezvous into Active Training, and adapts dynamically via Scale-Up/Rebalance or Draining/Scale-Down without full job restarts. Hardware faults trigger self-healing recovery." fig-alt="State machine diagram illustrating elastic worker states: Pending, Active Training, Scale-Up Rebalance, Draining Scale-Down, and Fault Recovery, connected by rendezvous, resize, and self-heal transitions."}
+
+![](images/svg/elastic-training-state-machine.svg)
+
+:::
 
 From the scheduler's side, the contract has three parameters:
 
@@ -1260,7 +1290,13 @@ Adding resources to a running job does not always accelerate time-to-convergence
 *Elastic scaling's benefit flattens into saturation.*
 :::
 
-The decision to scale is therefore a function of marginal utility, not vacancy alone. For our 175B parameter model, the efficiency curve is derived from profiling: it scales linearly from 64 to 512 GPUs, becomes sublinear between 512 and 1,024, and hits diminishing returns beyond 1,024. Consequently, the scheduler enforces an elastic range of $[256, 1024]$. If the cluster has free resources but the job is already at 1,024 GPUs, the scheduler withholds the extra nodes, predicting that the 5 percent marginal throughput gain does not justify the re-sharding overhead or the opportunity cost of starving a pending job. Similarly, if only 128 GPUs are available, the scheduler may choose to queue the job rather than run it, as the training intensity per GPU would be too low to hide the communication latency.
+As illustrated in @fig-fleet-orchestration-scaling-efficiency-curve, the decision to scale is therefore a function of marginal utility, not vacancy alone. For our 175B parameter model, the efficiency curve is derived from profiling: it scales linearly from 64 to 512 GPUs, becomes sublinear between 512 and 1,024, and hits diminishing returns beyond 1,024. Consequently, the scheduler enforces an elastic range of $[256, 1024]$. If the cluster has free resources but the job is already at 1,024 GPUs, the scheduler withholds the extra nodes, predicting that the 5 percent marginal throughput gain does not justify the re-sharding overhead or the opportunity cost of starving a pending job. Similarly, if only 128 GPUs are available, the scheduler may choose to queue the job rather than run it, as the training intensity per GPU would be too low to hide the communication latency.
+
+::: {#fig-fleet-orchestration-scaling-efficiency-curve fig-env="figure" fig-pos="htb" fig-cap="**Empirical scaling efficiency curve and elastic operating range**: Observed scaling efficiency ($\eta_{\text{scaling}}$) across cluster sizes from 64 to 4,096 GPUs. Efficiency exhibits three distinct regimes: linear scaling ($\eta \ge 90\%$), sublinear scaling ($70\% \le \eta < 90\%$), and communication saturation ($\eta < 70\%$). Schedulers restrict elastic scaling to the viable window $[N_{\text{min}}, N_{\text{max}}]$ to prevent negative marginal utility." fig-alt="Empirical scaling efficiency curve plotting scaling efficiency percentage against GPU count from 64 to 4,096 GPUs, highlighting linear, sublinear, and saturation zones with minimum and maximum viable scale boundaries."}
+
+![](images/svg/scaling-efficiency-curve.svg)
+
+:::
 
 This logic extends to the temporal dimension, where the scheduler must weigh the immediate progress of a smaller allocation against the deferred gratification of waiting for a larger one. If a 512-GPU job can start immediately with 128 GPUs, or wait two hours for the full request, the optimal choice depends on the integration of throughput over time. The preemption overhead (the cost of stopping, checkpointing, and restarting to resize) must be amortized over the subsequent run duration. A policy of "opportunistic scaling" that resizes a job every time a single node becomes free often yields net negative progress due to the constant thrashing of the distributed process group.
 
@@ -1541,7 +1577,13 @@ Organizations that rely on cloud infrastructure (or that think about on-premise 
 
 : **Cloud Capacity Reservation Tiers**: Capacity tiers trade cost and commitment against availability guarantees and interruption risk, giving the scheduler a price ladder for routing workloads by urgency and restart tolerance. {#tbl-cloud-capacity-reservation-tiers tbl-colwidths="[18,25,27,30]"}
 
-The optimal mix depends on workload characteristics and organizational priorities. An organization with 60 percent steady-state utilization and 40 percent burst demand might reserve capacity for 60 percent of peak need, use on-demand for latency-sensitive bursts that require immediate provisioning, and use spot for the remainder. The scheduling system must understand these capacity tiers and route workloads accordingly: inference workloads to reserved capacity for guaranteed availability, large training jobs to a mix of reserved (for the base allocation) and spot (for additional workers via elastic scaling), and exploratory work to spot exclusively where the cost savings are maximized and the interruption tolerance is highest.
+As @fig-fleet-orchestration-capacity-reservation illustrates, the optimal mix depends on workload characteristics and organizational priorities. An organization with 60 percent steady-state utilization and 40 percent burst demand might reserve capacity for 60 percent of peak need, use on-demand for latency-sensitive bursts that require immediate provisioning, and use spot for the remainder. The scheduling system must understand these capacity tiers and route workloads accordingly: inference workloads to reserved capacity for guaranteed availability, large training jobs to a mix of reserved (for the base allocation) and spot (for additional workers via elastic scaling), and exploratory work to spot exclusively where the cost savings are maximized and the interruption tolerance is highest.
+
+::: {#fig-fleet-orchestration-capacity-reservation fig-env="figure" fig-pos="htb" fig-cap="**Capacity reservation tiers and portfolio optimization**: The three cloud capacity tiers (Reserved, On-Demand, and Spot/Preemptible) trade unit cost against commitment and availability guarantees. Schedulers map steady-state baseline demand to reserved capacity, diurnal spikes to on-demand instances, and restart-tolerant training to discounted spot pools." fig-alt="Comparison of three cloud capacity tiers: 1-to-3 year reserved capacity, on-demand instances, and spot/preemptible pools, showing pricing tiers, SLA availability, and workload routing across a diurnal demand curve."}
+
+![](images/svg/capacity-reservation.svg)
+
+:::
 
 ```{python}
 #| echo: false
@@ -1798,7 +1840,13 @@ Large language model (LLM) inference requires specialized scaling considerations
 
 [^fn-kv-cache-orchestration]: **Paged KV cache**\index{KV Cache!serving}: Paging changes how the cache is allocated and reduces fragmentation, but it does not change the cache's growth with sequence length and concurrent requests. Autoscalers must therefore monitor memory pressure even when compute utilization remains low.
 
-This dual resource dimension (compute and memory) suggests that effective LLM autoscaling should monitor both GPU compute utilization and GPU memory pressure, scaling out when either approaches critical thresholds. Some production systems define a composite scaling metric that combines these dimensions, triggering scale-out when the maximum of normalized compute utilization and normalized memory pressure exceeds a threshold. This composite approach prevents the system from being surprised by either type of resource exhaustion.
+This dual resource dimension (compute and memory) suggests that effective LLM autoscaling should monitor both GPU compute utilization and GPU memory pressure, scaling out when either approaches critical thresholds. Some production systems define a composite scaling metric that combines these dimensions, triggering scale-out when the maximum of normalized compute utilization and normalized memory pressure exceeds a threshold. This composite approach prevents the system from being surprised by either type of resource exhaustion. @Fig-fleet-orchestration-inference-autoscaling illustrates this closed-loop control architecture, where dual-signal telemetry feeds predictive and reactive controllers to coordinate pod provisioning and replica prewarming.
+
+::: {#fig-fleet-orchestration-inference-autoscaling fig-env="figure" fig-pos="htb" fig-cap="**Inference autoscaling closed-loop control**: A dual-signal control architecture monitors both GPU memory pressure (KV cache occupancy) and compute load (SM utilization, queue depth). Telemetry feeds both a reactive HPA loop and a predictive prewarming controller that provisions replicas ahead of cold-start deadlines." fig-alt="Control loop architecture showing dual-signal telemetry (KV cache pressure and compute utilization) driving reactive and predictive autoscalers to actuate replica scaling and model prewarming."}
+
+![](images/svg/inference-autoscaling-loop.svg)
+
+:::
 
 Autoscaling for inference must also handle **Cold Start Latency**\index{Cold Start Latency!definition}, which creates a tension between cost efficiency and responsiveness that has no simple resolution. The cold-start problem in serving is quantitatively more severe than in standard web services due to the sheer mass of model weights. A 70B-parameter model in FP16 occupies approximately 140 GB, and all of it must reach GPU memory before the first request can be served, a transfer bound by PCIe or NVLink bandwidth. Even at the per-direction PCIe Gen4 x16 speed of 32 GB/s, the raw transfer takes over 4 seconds, and in practice model initialization, graph compilation, and safety checks extend this to 60–120 seconds. Loading from Non-Volatile Memory Express (NVMe) SSDs at 7 GB/s read bandwidth takes roughly 20 seconds; from network storage, it can exceed 2 minutes.
 
@@ -2036,7 +2084,13 @@ The deepest utilization divide in the ML fleet is the wall between training and 
 
 Repurposing a GPU from training to serving is not instantaneous. The orchestrator must checkpoint the training job (1 to 5 minutes), kill the container, launch the inference server, load the model weights from storage (2 to 10 minutes), and run warmup queries (1 to 5 minutes) to populate compilation caches. This 5-to-20-minute switching latency means GPUs cannot react to second-by-second traffic bursts. Instead, they must follow diurnal patterns.
 
-Inference traffic typically follows a "human curve": low at 3 AM, ramping up at 8 AM, peaking at 2 PM, and tapering off at 10 PM. A smart orchestrator forecasts this curve 30 minutes in advance. At 7:30 AM, it preempts low-priority training jobs (like hyperparameter sweeps) to warm up inference replicas. At 10:30 PM, as traffic drops, it drains inference replicas and releases GPUs back to the training scheduler.
+Inference traffic typically follows a "human curve": low at 3 AM, ramping up at 8 AM, peaking at 2 PM, and tapering off at 10 PM. A smart orchestrator forecasts this curve 30 minutes in advance. At 7:30 AM, it preempts low-priority training jobs (like hyperparameter sweeps) to warm up inference replicas. At 10:30 PM, as traffic drops, it drains inference replicas and releases GPUs back to the training scheduler. @Fig-fleet-orchestration-training-serving-diurnal illustrates this 24-hour diurnal cycle, showing how an orchestrator shifts GPUs between serving and training to recover idle overnight capacity.
+
+::: {#fig-fleet-orchestration-training-serving-diurnal fig-env="figure" fig-pos="htb" fig-cap="**Training vs. serving diurnal GPU capacity shift**: Diurnal serving demand peaks during working hours and troughs overnight. Rather than statically partitioning dedicated clusters, dynamic sharing preempts low-priority training to meet morning serving surges, and returns drained serving GPUs to training overnight, reclaiming millions of dollars in annual cluster capacity." fig-alt="24-hour diurnal timeline showing serving demand rising during daytime and dropping at night, with opportunistic training capacity dynamically expanding into the reclaimed serving envelope."}
+
+![](images/svg/training-serving-diurnal.svg)
+
+:::
 
 ```{python}
 #| echo: false
