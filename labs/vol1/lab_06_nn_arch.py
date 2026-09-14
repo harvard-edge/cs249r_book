@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: SETUP
-# ===========================================================================
 
 
 @app.cell
@@ -38,9 +34,11 @@ async def _():
         architecture_signature,
         architecture_track_profile,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -55,7 +53,6 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        LAB_CSS,
         MathPeek,
         apply_plotly_theme,
         architecture_decision,
@@ -63,19 +60,18 @@ async def _():
         architecture_signature,
         architecture_track_profile,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html,
+        instrumentation_console,
         ledger,
         mo,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
-        track_context,
-        track_arc_context,
-        track_selector,
     )
 
 
@@ -85,12 +81,19 @@ def _(get_lab_metadata):
     return (v1_06_metadata,)
 
 
-@app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_06_track_picker = track_selector(default=_default_track)
-    v1_06_track_picker
+@app.cell
+def _(mo):
+    # Top-Level Universal Track Selector
+    v1_06_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 & BERT vs MoE)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Jetson Orin & YOLO vs ViT)": "robotaxi",
+            "📱 Mobile Track (Apple Silicon & MobileNetV2 vs MobileViT)": "iphone",
+            "⚡ TinyML Track (ESP32-S3 & Temporal CNN vs Tiny DS-CNN)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 & BERT vs MoE)",
+        label="Select Course / Industry Track",
+    )
     return (v1_06_track_picker,)
 
 
@@ -118,7 +121,6 @@ def _(
         v1_06_hardware,
         v1_06_model,
         v1_06_profile,
-        v1_06_track_id,
         v1_06_variant,
     )
 
@@ -129,25 +131,32 @@ def _(COLORS, html):
         return html.escape(str(value))
 
     def v1_06_fields_html(items):
-        return "".join(
-            f'<div class="mlsysbook-field"><strong>{v1_06_e(label)}</strong>{v1_06_e(value)}</div>'
-            for label, value in items.items()
-        )
+        cards = []
+        for label, value in items.items():
+            cards.append(
+                f'<div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 14px;">'
+                f'<div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">{v1_06_e(label)}</div>'
+                f'<div style="font-size: 0.98rem; font-weight: 700; color: #0F172A;">{v1_06_e(value)}</div>'
+                f'</div>'
+            )
+        return f'<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 12px 0;">{"".join(cards)}</div>'
 
     def v1_06_table_html(headers, rows, *, numeric=()):
-        _head = "".join(f"<th>{v1_06_e(header)}</th>" for header in headers)
+        _head = "".join(f'<th style="padding: 10px 14px; border-bottom: 2px solid #CBD5E1; text-align: left; font-weight: 700; color: #334155; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em;">{v1_06_e(header)}</th>' for header in headers)
         _body = []
         for row in rows:
             _cells = []
             for idx, value in enumerate(row):
-                _style = " style='text-align:right; font-variant-numeric: tabular-nums;'" if idx in numeric else ""
-                _cells.append(f"<td{_style}>{v1_06_e(value)}</td>")
+                _align = "right" if idx in numeric else "left"
+                _cells.append(f'<td style="padding: 10px 14px; border-bottom: 1px solid #E2E8F0; text-align: {_align}; color: #1E293B; font-variant-numeric: tabular-nums;">{v1_06_e(value)}</td>')
             _body.append(f"<tr>{''.join(_cells)}</tr>")
         return f"""
-        <table class="mlsysbook-table">
-          <thead><tr>{_head}</tr></thead>
-          <tbody>{''.join(_body)}</tbody>
-        </table>
+        <div style="overflow-x: auto; margin-top: 14px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+            <thead><tr style="background: #F8FAFC;">{_head}</tr></thead>
+            <tbody>{''.join(_body)}</tbody>
+          </table>
+        </div>
         """
 
     def v1_06_callout_html(title, message, *, kind="info"):
@@ -459,134 +468,60 @@ def _(COLORS, html):
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
-    LAB_CSS,
     mo,
-    source_trace,
-    track_context,
-    track_arc_context,
     v1_06_architecture,
-    v1_06_metadata,
+    v1_06_hardware,
+    v1_06_model,
     v1_06_profile,
     v1_06_variant,
 ):
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 06
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                Architecture Tax
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Inductive Bias &middot; Scaling Shape &middot; Kernel Support &middot; Guardrails
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 860px; line-height: 1.65;">
-                {v1_06_variant.workload_summary} The goal is not to crown one universal
-                architecture; it is to choose the family whose resource signature matches
-                the selected track. Architecture choices create different resource
-                shapes; inductive bias and scaling laws determine which amount grows first.
-                Every track follows the same four concepts; the track changes the persona,
-                thresholds, evidence emphasis, failure mode, and report framing.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Concept Modules + Synthesis &middot; ~50 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_06_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_06_architecture.scaling_variable}
-                </span>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Topology Locality</span>
-                <span class="badge badge-warn">Attention Memory Wall</span>
-                <span class="badge badge-info">Inductive Bias</span>
-                <span class="badge badge-fail">Deployment Memo</span>
-            </div>
+    hw_name = getattr(v1_06_hardware, "name", "Selected Accelerator")
+    model_name = getattr(v1_06_model, "name", "Reference Baseline")
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header">
+        <div class="mlsysbook-meta">ML SYSTEMS TEXTBOOK &middot; VOLUME I &middot; CHAPTER 06 &middot; LAB 06</div>
+        <h1 style="color: #0F172A; font-size: 1.85rem; font-weight: 800; margin: 8px 0;">
+          Neural Network Architectures &amp; The Architecture Tax
+        </h1>
+        <p style="color: #475569; font-size: 0.95rem; line-height: 1.55; margin-bottom: 14px;">
+          Evaluate how inductive bias, tensor topology, and scaling laws impose physical hardware costs across deployment tiers.
+        </p>
+        <div class="mlsysbook-chip-row">
+          <span class="mlsysbook-chip"><strong>Hardware:</strong> {hw_name}</span>
+          <span class="mlsysbook-chip"><strong>Baseline:</strong> {model_name}</span>
+          <span class="mlsysbook-chip"><strong>Scaling Axis:</strong> {v1_06_architecture.scaling_variable}</span>
+          <span class="mlsysbook-chip"><strong>Memory Budget:</strong> {v1_06_architecture.memory_budget_mb:.1f} MB</span>
+          <span class="mlsysbook-chip"><strong>Latency SLA:</strong> &le; {v1_06_architecture.latency_budget_ms:.1f} ms</span>
         </div>
-        """),
-        track_context(v1_06_profile),
-        track_arc_context(v1_06_profile, v1_06_metadata.lab_id),
-        source_trace({
-            "chapter": "vol1/nn_architectures/nn_architectures.qmd",
-            "anchors": (
-                "Architectural Principles",
-                "CNNs: Spatial Pattern Processing",
-                "RNNs: Sequential Pattern Processing",
-                "Attention: Dynamic Processing",
-                "Transformers: Parallel Sequence Processing",
-                "Architecture Selection Framework",
-                "Fallacies and Pitfalls",
-            ),
-            "shared_helper": "mlsysbook_labs.architecture",
-            "scenario_id": v1_06_variant.scenario_id,
-        }, summary="Opening source map"),
-    ])
-    return
+      </div>
 
-
-@app.cell(hide_code=True)
-def _(COLORS, mo, v1_06_architecture):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Learning Objectives
+      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+          System Scenario: {v1_06_profile.label} Architecture Selection
+        </h3>
+        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
+          {v1_06_variant.workload_summary}
+          The architectural goal in systems engineering is not to chase a single universal leaderboard winner, but to select the model family whose operational resource footprint respects hardware bounds.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Neural Architectures:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>Topology Dictates Locality:</strong> Convolutions and recurrent units enforce strict spatial and temporal locality, while attention computes all-to-all quadratic token interactions across memory.</li>
+            <li><strong>The Scaling Tax:</strong> As context length, sensor resolution, or window length expands, architectures with superlinear activation memory hit the memory wall first.</li>
+            <li><strong>Inductive Bias vs. Data Appetite:</strong> Hard-coded structural priors drastically reduce training sample requirements and parameter footprints on resource-bounded hardware.</li>
+            <li><strong>Hardware-Software Kernel Co-design:</strong> Even mathematically elegant architectures fail in production if target accelerator NPUs lack fused, optimized hardware kernel support.</li>
+          </ul>
         </div>
-        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Compare architecture signatures:</strong>
-                parameters, operations, activation memory, latency, power, quality, and kernel support.</div>
-            <div style="margin-bottom: 3px;">2. <strong>Predict scaling failure:</strong>
-                sweep {v1_06_architecture.scaling_variable} and identify the first architecture family that breaks.</div>
-            <div style="margin-bottom: 3px;">3. <strong>Reason about inductive bias:</strong>
-                explain how locality, recurrence, attention, or routing changes data need and deployability.</div>
-            <div style="margin-bottom: 3px;">4. <strong>Defend an architecture:</strong>
-                recommend one family, reject alternatives, and state the validation requirement.</div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                Which architecture family fits {v1_06_architecture.label}, and what failure
-                appears next as {v1_06_architecture.scaling_variable} grows?
-            </div>
-        </div>
+      </div>
     </div>
     """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
-# ===========================================================================
-# ZONE B: CONTROLS AND COMPUTATION
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
-def _(mo, v1_06_architecture):
+def _(mo):
     v1_06_failure_prediction = mo.ui.radio(
         options={
             "Local convolution or streaming state will best match the amount system": "local",
@@ -594,7 +529,7 @@ def _(mo, v1_06_architecture):
             "Kernel support or dispatch will decide before the topology": "kernel",
             "Quality guardrail will decide before resource budgets": "quality",
         },
-        label=f"Part A prediction: which topology best matches {v1_06_architecture.label}?",
+        value="Local convolution or streaming state will best match the amount system",
     )
     v1_06_topology_checkpoint = mo.ui.radio(
         options={
@@ -603,9 +538,9 @@ def _(mo, v1_06_architecture):
             "Defer until kernel and memory profiling is complete": "profile_first",
             "Reject the current candidate set": "reject_set",
         },
-        label="Part A checkpoint: what topology decision follows from the signature?",
+        value="Choose the topology with the best locality/headroom",
     )
-    return (v1_06_failure_prediction, v1_06_topology_checkpoint)
+    return v1_06_failure_prediction, v1_06_topology_checkpoint
 
 
 @app.cell(hide_code=True)
@@ -617,7 +552,6 @@ def _(mo, v1_06_architecture):
         step=v1_06_architecture.scale_step,
         label=f"{v1_06_architecture.scaling_variable} ({v1_06_architecture.scaling_unit})",
     )
-    v1_06_scale
     return (v1_06_scale,)
 
 
@@ -630,7 +564,7 @@ def _(mo):
             "Power or duty cycle crosses first": "power",
             "Quality or kernel support fails before scale does": "quality_kernel",
         },
-        label="Part B prediction: as the workload scale grows, which amount fails first?",
+        value="Activation/KV/state memory becomes the hidden wall",
     )
     v1_06_scaling_checkpoint = mo.ui.radio(
         options={
@@ -639,9 +573,9 @@ def _(mo):
             "Require memory-aware attention kernels": "memory_kernel",
             "Escalate to a larger deployment envelope": "larger_envelope",
         },
-        label="Part B checkpoint: what mitigation would you defend after seeing the wall?",
+        value="Keep the local or streaming topology",
     )
-    return (v1_06_memory_prediction, v1_06_scaling_checkpoint)
+    return v1_06_memory_prediction, v1_06_scaling_checkpoint
 
 
 @app.cell(hide_code=True)
@@ -653,7 +587,7 @@ def _(mo):
             "The leaderboard-quality model wins": "leaderboard",
             "The answer changes with the track constraint": "track_constraint",
         },
-        label="Part C prediction: which inductive-bias trade-off survives deployment?",
+        value="Structured local bias wins by reducing data and state",
     )
     v1_06_data_pressure = mo.ui.slider(
         start=0.5,
@@ -669,9 +603,9 @@ def _(mo):
             "Collect more data before changing architecture": "more_data",
             "Reject the bias because deployment evidence fails": "reject_bias",
         },
-        label="Part C checkpoint: which bias decision would you record?",
+        value="Defend the structured-bias architecture",
     )
-    return (v1_06_bias_checkpoint, v1_06_bias_prediction, v1_06_data_pressure)
+    return v1_06_bias_checkpoint, v1_06_bias_prediction, v1_06_data_pressure
 
 
 @app.cell(hide_code=True)
@@ -687,7 +621,7 @@ def _(mo, v1_06_architecture):
             "Approve the smallest architecture": "smallest",
             "Let the track guardrail decide": "guardrail",
         },
-        label="Part D prediction: which review rule should approve the architecture?",
+        value="Approve the feasible architecture with the most headroom",
     )
     v1_06_arch_choice = mo.ui.dropdown(
         options=_architecture_options,
@@ -700,10 +634,11 @@ def _(mo, v1_06_architecture):
             "Approve only with mitigation": "mitigate",
             "Reject and redesign": "reject",
         },
-        label="Part D checkpoint: what should the review record?",
+        value="Approve",
     )
     v1_06_reflection = mo.ui.text_area(
         label="Synthesis memo",
+        value="Selected architecture matches hardware memory and latency envelopes. Rejected alternatives either breach activation memory under scaling or lack optimized NPU kernel support.",
         placeholder="Recommendation, rejected alternatives, measured evidence, residual risk, and validation requirement.",
         full_width=True,
     )
@@ -720,9 +655,9 @@ def _(
     architecture_decision,
     architecture_scaling_curve,
     architecture_signature,
-    v1_06_attention_wall,
     v1_06_arch_choice,
     v1_06_architecture,
+    v1_06_attention_wall,
     v1_06_bias_frontier,
     v1_06_data_pressure,
     v1_06_review_summary,
@@ -772,17 +707,14 @@ def _(
     )
 
 
-# ===========================================================================
-# ZONE C: PARTS
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     MathPeek,
     apply_plotly_theme,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     mo,
     source_trace,
     v1_06_arch_choice,
@@ -791,13 +723,17 @@ def _(
     v1_06_bias,
     v1_06_bias_checkpoint,
     v1_06_bias_prediction,
+    v1_06_callout_html,
     v1_06_curve,
     v1_06_data_pressure,
     v1_06_decision,
     v1_06_deployment_checkpoint,
     v1_06_failure_prediction,
+    v1_06_fields_html,
     v1_06_memory_prediction,
     v1_06_prediction_html,
+    v1_06_profile,
+    v1_06_reflection,
     v1_06_review,
     v1_06_review_prediction,
     v1_06_scale,
@@ -805,8 +741,6 @@ def _(
     v1_06_selected_eval,
     v1_06_signature,
     v1_06_table_html,
-    v1_06_fields_html,
-    v1_06_callout_html,
     v1_06_topology,
     v1_06_topology_checkpoint,
     v1_06_track_amount_system,
@@ -1077,6 +1011,20 @@ def _(
         "guardrail": "track guardrail",
     }
 
+    _part_a_hyp = gated_hypothesis_card(
+        v1_06_failure_prediction,
+        title="1. Formulate Your Topology Hypothesis",
+        subtitle=f"Which model family and tensor topology best matches {v1_06_architecture.label}?",
+        gate_label="Required Engineering Gate",
+        accent="#A51C30",
+    )
+    _part_a_checkpoint = gated_hypothesis_card(
+        v1_06_topology_checkpoint,
+        title="2. Topology Decision Checkpoint",
+        subtitle="What topology decision follows from the measured signature?",
+        gate_label="Architectural Decision",
+        accent="#1F407A",
+    )
     _part_a = mo.vstack([
         mo.Html(f"""
         <div class="mlsysbook-panel mlsysbook-nugget">
@@ -1086,27 +1034,13 @@ def _(
             {v1_06_architecture.workload_label}. The amount system is {_amount_system["amounts"]}.</div>
         </div>
         """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Concept</h2>
-          <ul class="mlsysbook-list">
-            <li>Topology is not decoration: local filters, recurrent state, attention gather/reduce, and sparse routing move different amounts.</li>
-            <li>The chart is normalized to the selected track budgets so the binding amount is visible.</li>
-            <li>Quality is only one column; locality, memory, latency, power, and kernel support decide deployability.</li>
-          </ul>
-          <div class="mlsysbook-callout"><strong>Track architecture story:</strong> {v1_06_architecture.architecture_story}</div>
-        </div>
-        """),
-        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
-        mo.hstack([v1_06_failure_prediction], justify="start"),
+        _part_a_hyp,
         mo.Html(v1_06_prediction_html(
             "Prediction Check",
             v1_06_failure_prediction.value,
             v1_06_topology["actual"],
             _part_a_labels,
         )),
-        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
-        mo.hstack([v1_06_scale], justify="start"),
         mo.as_html(_signature_fig),
         mo.Html(f"""
         <div class="mlsysbook-panel">
@@ -1163,10 +1097,28 @@ def _(
             },
             summary="Part A source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_06_topology_checkpoint,
+        _part_a_checkpoint,
     ])
 
+    _part_b_hyp = gated_hypothesis_card(
+        v1_06_memory_prediction,
+        title="1. Predict The Hidden Scaling Wall",
+        subtitle=f"As {v1_06_architecture.scaling_variable} expands, which bounded amount will fail first?",
+        gate_label="Required Engineering Gate",
+        accent="#A51C30",
+    )
+    _part_b_controls = instrumentation_console(
+        v1_06_scale,
+        title="2. Workload Scaling Control",
+        subtitle=f"Sweep {v1_06_architecture.scaling_variable} to observe the activation and latency trajectories:",
+    )
+    _part_b_checkpoint = gated_hypothesis_card(
+        v1_06_scaling_checkpoint,
+        title="3. Scaling Policy Checkpoint",
+        subtitle="What mitigation would you defend after observing the physical wall?",
+        gate_label="Mitigation Gate",
+        accent="#1F407A",
+    )
     _part_b = mo.vstack([
         mo.Html(f"""
         <div class="mlsysbook-panel mlsysbook-nugget">
@@ -1176,26 +1128,14 @@ def _(
             but activation, attention, or state memory can become the hidden wall.</div>
         </div>
         """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Concept</h2>
-          <ul class="mlsysbook-list">
-            <li>Attention scores scale with sequence length squared during full attention.</li>
-            <li>Serving state and KV-like caches scale with resident sequence length and concurrency.</li>
-            <li>A candidate that fits at the default scale can still be fragile at the next product requirement.</li>
-          </ul>
-        </div>
-        """),
-        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
-        v1_06_memory_prediction,
+        _part_b_hyp,
+        _part_b_controls,
         mo.Html(v1_06_prediction_html(
             "Prediction Check",
             v1_06_memory_prediction.value,
             v1_06_attention["actual"],
             _part_b_labels,
         )),
-        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
-        mo.hstack([v1_06_scale], justify="start"),
         mo.hstack([mo.as_html(_latency_fig), mo.as_html(_activation_fig)], widths="equal"),
         mo.Html(f"""
         <div class="mlsysbook-panel">
@@ -1234,10 +1174,28 @@ def _(
             },
             summary="Part B source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_06_scaling_checkpoint,
+        _part_b_checkpoint,
     ])
 
+    _part_c_hyp = gated_hypothesis_card(
+        v1_06_bias_prediction,
+        title="1. Formulate Inductive Bias Hypothesis",
+        subtitle="Which inductive-bias trade-off survives sustained deployment?",
+        gate_label="Required Engineering Gate",
+        accent="#A51C30",
+    )
+    _part_c_controls = instrumentation_console(
+        v1_06_data_pressure,
+        title="2. Data / Coverage Pressure Control",
+        subtitle="Adjust the training sample coverage pressure multiplier:",
+    )
+    _part_c_checkpoint = gated_hypothesis_card(
+        v1_06_bias_checkpoint,
+        title="3. Inductive Bias Checkpoint",
+        subtitle="Which structural prior policy would you defend in review?",
+        gate_label="Prior Gate",
+        accent="#1F407A",
+    )
     _part_c = mo.vstack([
         mo.Html(f"""
         <div class="mlsysbook-panel mlsysbook-nugget">
@@ -1247,27 +1205,14 @@ def _(
             Your answer must fit {_amount_system["stake"]}.</div>
         </div>
         """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Concept</h2>
-          <ul class="mlsysbook-list">
-            <li>Inductive bias narrows the hypothesis space, often reducing data need and resource demand.</li>
-            <li>No Free Lunch means the same bias can hurt when the data violates the assumed structure.</li>
-            <li>Deployability is part of the bias trade-off, not a post-processing step.</li>
-          </ul>
-          <div class="mlsysbook-callout"><strong>Track bias statement:</strong> {_amount_system["bias"]}.</div>
-        </div>
-        """),
-        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
-        v1_06_bias_prediction,
+        _part_c_hyp,
+        _part_c_controls,
         mo.Html(v1_06_prediction_html(
             "Prediction Check",
             v1_06_bias_prediction.value,
             v1_06_bias["actual"],
             _part_c_labels,
         )),
-        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
-        mo.hstack([v1_06_data_pressure], justify="start"),
         mo.as_html(_bias_fig),
         mo.Html(f"""
         <div class="mlsysbook-panel">
@@ -1315,10 +1260,28 @@ def _(
             },
             summary="Part C source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_06_bias_checkpoint,
+        _part_c_checkpoint,
     ])
 
+    _part_d_hyp = gated_hypothesis_card(
+        v1_06_review_prediction,
+        title="1. Predict Architecture Selection Rule",
+        subtitle="Which review criteria should approve the production candidate?",
+        gate_label="Required Engineering Gate",
+        accent="#A51C30",
+    )
+    _part_d_controls = instrumentation_console(
+        v1_06_arch_choice,
+        title="2. Architecture Recommendation Candidate",
+        subtitle="Select candidate model family to submit to review:",
+    )
+    _part_d_checkpoint = gated_hypothesis_card(
+        v1_06_deployment_checkpoint,
+        title="3. Deployment Review Gate",
+        subtitle="What is the final review decision for this candidate?",
+        gate_label="Production Gate",
+        accent="#1F407A",
+    )
     _part_d = mo.vstack([
         mo.Html(f"""
         <div class="mlsysbook-panel mlsysbook-nugget">
@@ -1328,26 +1291,14 @@ def _(
             rejected alternatives, guardrails, and the validation test that could overturn the choice.</div>
         </div>
         """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Concept</h2>
-          <ul class="mlsysbook-list">
-            <li>The highest-quality candidate is only valid inside the deployment envelope.</li>
-            <li>Review should compare the selected design against the leaderboard and headroom alternatives.</li>
-            <li>The memo is incomplete without residual risk and validation evidence.</li>
-          </ul>
-        </div>
-        """),
-        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
-        v1_06_review_prediction,
+        _part_d_hyp,
+        _part_d_controls,
         mo.Html(v1_06_prediction_html(
             "Prediction Check",
             v1_06_review_prediction.value,
             v1_06_review["actual"],
             _part_d_labels,
         )),
-        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
-        v1_06_arch_choice,
         mo.Html(f"""
         <div class="mlsysbook-panel">
           <h2>Review Evidence</h2>
@@ -1396,8 +1347,99 @@ def _(
             },
             summary="Part D source model",
         ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_06_deployment_checkpoint,
+        _part_d_checkpoint,
+    ])
+
+    _memo_text = str(v1_06_reflection.value or "").strip()
+    _ready_for_ledger = all(
+        value is not None
+        for value in (
+            v1_06_failure_prediction.value,
+            v1_06_memory_prediction.value,
+            v1_06_bias_prediction.value,
+            v1_06_review_prediction.value,
+            v1_06_topology_checkpoint.value,
+            v1_06_scaling_checkpoint.value,
+            v1_06_bias_checkpoint.value,
+            v1_06_deployment_checkpoint.value,
+        )
+    ) and bool(_memo_text)
+
+    _synthesis = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Synthesis: Record The Architecture Recommendation Memo</h2></div>
+          <div class="mlsysbook-callout"><strong>Invariant:</strong>
+            Architecture choices create different resource shapes. The memo is valid only when
+            the selected family, rejected alternatives, measured constraint, and residual risk
+            are all explicit.</div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Decision Record</h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px;">
+            {v1_06_fields_html({
+                "Track": v1_06_architecture.label,
+                "Selected architecture": v1_06_decision.selected_label,
+                "Topology match": v1_06_topology["best_label"],
+                "Attention wall": f"{v1_06_attention['attention_label']} -> {v1_06_attention['dominant_amount']}",
+                "Bias recommendation": v1_06_bias["best"]["label"],
+                "Review status": v1_06_review["status"],
+                "Dominant constraint": v1_06_decision.dominant_constraint,
+                "Next failure": v1_06_decision.next_failure,
+                "Residual risk": v1_06_decision.residual_risk,
+                "Validation requirement": v1_06_decision.validation_requirement,
+            })}
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Memo Fields</h2>
+          {v1_06_table_html(
+              ("Required field", "Current value"),
+              (
+                  ("Recommendation", v1_06_decision.memo_summary),
+                  ("Rejected alternatives", "; ".join(v1_06_decision.rejected_alternatives)),
+                  ("Measured evidence", f"{v1_06_selected_eval.latency_ms:.2f} ms, {v1_06_selected_eval.activation_mb:.2f} MB, {v1_06_selected_eval.power_w:.3f} W"),
+                  ("Residual risk", v1_06_decision.residual_risk),
+                  ("Validation requirement", v1_06_decision.validation_requirement),
+              ),
+          )}
+        </div>
+        """),
+        mo.Html('<div class="mlsysbook-panel"><h2>Student Memo</h2></div>'),
+        v1_06_reflection,
+        mo.Html(v1_06_callout_html(
+            "Ledger Status",
+            "Ready to save as completed." if _ready_for_ledger else "Complete the predictions, checkpoints, and memo text before treating the ledger entry as complete.",
+            kind="ok" if _ready_for_ledger else "warn",
+        )),
+        mo.Html("""
+        <div class="mlsysbook-panel">
+          <h2>Big Takeaways</h2>
+          <ul class="mlsysbook-list">
+            <li><strong>Topology controls locality.</strong> The same quality proxy can hide different operation and memory shapes.</li>
+            <li><strong>Scaling shape exposes the next wall.</strong> Attention and sequence state can make memory the binding resource.</li>
+            <li><strong>Bias is a deployment trade-off.</strong> Stronger structure can reduce data need and resource cost, but only when the workload matches it.</li>
+            <li><strong>Selection is a recommendation.</strong> A defensible architecture memo names rejected alternatives and residual risk.</li>
+          </ul>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="lab-hud">
+            <span class="hud-label">LAB</span>
+            <span class="hud-value">06 &middot; Architecture Tax</span>
+            <span class="hud-label">TRACK</span>
+            <span class="hud-value">{v1_06_profile.label}</span>
+            <span style="flex:1;"></span>
+            <span class="hud-label">ARTIFACT</span>
+            <span class="hud-value">{v1_06_architecture.report_artifact}</span>
+            <span class="hud-label">STATUS</span>
+            <span class="hud-active">ACTIVE</span>
+        </div>
+        """),
     ])
 
     mo.ui.tabs({
@@ -1405,39 +1447,26 @@ def _(
         "Part B - Memory Wall": _part_b,
         "Part C - Inductive Bias": _part_c,
         "Part D - Recommendation": _part_d,
-        "Synthesis": mo.md("Use the synthesis memo below after completing Parts A-D."),
+        "Synthesis": _synthesis,
     })
     return
 
 
-# ===========================================================================
-# ZONE D: SYNTHESIS AND REPORT
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
-    v1_06_attention,
-    v1_06_bias,
+    ledger,
+    v1_06_architecture,
     v1_06_bias_checkpoint,
     v1_06_bias_prediction,
-    v1_06_callout_html,
-    v1_06_deployment_checkpoint,
-    ledger,
-    mo,
-    v1_06_architecture,
     v1_06_decision,
+    v1_06_deployment_checkpoint,
     v1_06_failure_prediction,
-    v1_06_fields_html,
     v1_06_memory_prediction,
     v1_06_profile,
     v1_06_reflection,
-    v1_06_review,
     v1_06_review_prediction,
     v1_06_scaling_checkpoint,
     v1_06_selected_eval,
-    v1_06_table_html,
-    v1_06_topology,
     v1_06_topology_checkpoint,
     v1_06_variant,
 ):
@@ -1488,86 +1517,6 @@ def _(
             "residual_risk": v1_06_decision.residual_risk,
             "validation_requirement": v1_06_decision.validation_requirement,
         })
-
-    def build_synthesis():
-        return mo.vstack([
-            mo.Html(f"""
-            <div class="mlsysbook-panel mlsysbook-nugget">
-              <div class="mlsysbook-part-title"><h2>Synthesis: Record The Architecture Recommendation Memo</h2></div>
-              <div class="mlsysbook-callout"><strong>Invariant:</strong>
-                Architecture choices create different resource shapes. The memo is valid only when
-                the selected family, rejected alternatives, measured constraint, and residual risk
-                are all explicit.</div>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Decision Record</h2>
-              <div class="mlsysbook-grid">
-                {v1_06_fields_html({
-                    "Track": v1_06_architecture.label,
-                    "Selected architecture": v1_06_decision.selected_label,
-                    "Topology match": v1_06_topology["best_label"],
-                    "Attention wall": f"{v1_06_attention['attention_label']} -> {v1_06_attention['dominant_amount']}",
-                    "Bias recommendation": v1_06_bias["best"]["label"],
-                    "Review status": v1_06_review["status"],
-                    "Dominant constraint": v1_06_decision.dominant_constraint,
-                    "Next failure": v1_06_decision.next_failure,
-                    "Residual risk": v1_06_decision.residual_risk,
-                    "Validation requirement": v1_06_decision.validation_requirement,
-                })}
-              </div>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Memo Fields</h2>
-              {v1_06_table_html(
-                  ("Required field", "Current value"),
-                  (
-                      ("Recommendation", v1_06_decision.memo_summary),
-                      ("Rejected alternatives", "; ".join(v1_06_decision.rejected_alternatives)),
-                      ("Measured evidence", f"{v1_06_selected_eval.latency_ms:.2f} ms, {v1_06_selected_eval.activation_mb:.2f} MB, {v1_06_selected_eval.power_w:.3f} W"),
-                      ("Residual risk", v1_06_decision.residual_risk),
-                      ("Validation requirement", v1_06_decision.validation_requirement),
-                  ),
-              )}
-            </div>
-            """),
-            mo.Html('<div class="mlsysbook-panel"><h2>Student Memo</h2></div>'),
-            v1_06_reflection,
-            mo.Html(v1_06_callout_html(
-                "Ledger Status",
-                "Ready to save as completed." if _ready_for_ledger else "Complete the predictions, checkpoints, and memo text before treating the ledger entry as complete.",
-                kind="ok" if _ready_for_ledger else "warn",
-            )),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Big Takeaways</h2>
-              <ul class="mlsysbook-list">
-                <li><strong>Topology controls locality.</strong> The same quality proxy can hide different operation and memory shapes.</li>
-                <li><strong>Scaling shape exposes the next wall.</strong> Attention and sequence state can make memory the binding resource.</li>
-                <li><strong>Bias is a deployment trade-off.</strong> Stronger structure can reduce data need and resource cost, but only when the workload matches it.</li>
-                <li><strong>Selection is a recommendation.</strong> A defensible architecture memo names rejected alternatives and residual risk.</li>
-              </ul>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="lab-hud">
-                <span class="hud-label">LAB</span>
-                <span class="hud-value">06 &middot; Architecture Tax</span>
-                <span class="hud-label">TRACK</span>
-                <span class="hud-value">{v1_06_profile.label}</span>
-                <span style="flex:1;"></span>
-                <span class="hud-label">ARTIFACT</span>
-                <span class="hud-value">{v1_06_architecture.report_artifact}</span>
-                <span class="hud-label">STATUS</span>
-                <span class="hud-active">ACTIVE</span>
-            </div>
-            """),
-        ])
-
-    build_synthesis()
     return
 
 
@@ -1576,8 +1525,8 @@ def _(
     build_lab_report,
     mo,
     report_export_panel,
-    v1_06_attention,
     v1_06_architecture,
+    v1_06_attention,
     v1_06_bias,
     v1_06_bias_checkpoint,
     v1_06_bias_prediction,
