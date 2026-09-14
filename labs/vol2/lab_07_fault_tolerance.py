@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
@@ -29,10 +29,14 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         track_arc_context,
         track_context,
@@ -45,21 +49,21 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
+        instrumentation_console,
         ledger,
         math,
         mo,
         report_export_panel,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -70,21 +74,33 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_07_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_07_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 Clusters & Fleet MTBF vs Young-Daly Checkpointing)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Robotaxi Active Missions & Fail-Operational Degradation)": "robotaxi",
+            "📱 Mobile Track (On-Device Model Rollouts & Fleet Crash-Rate Guardrails)": "iphone",
+            "⚡ TinyML Track (Wearable Sensor Fleets & Battery-Aware State Snapshots)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 Clusters & Fleet MTBF vs Young-Daly Checkpointing)",
+        label="Select Course / Industry Track",
+    )
     v2_07_track_picker
     return (v2_07_track_picker,)
 
 
 @app.cell
-def _(get_lab_track_variant, get_track_profile, v2_07_metadata, v2_07_track_picker):
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    v2_07_metadata,
+    v2_07_track_picker,
+):
     v2_07_track_id = v2_07_track_picker.value
     v2_07_profile = get_track_profile(v2_07_track_id)
     v2_07_variant = get_lab_track_variant(v2_07_metadata.lab_id, v2_07_profile.track_id)
     v2_07_defaults = v2_07_variant.defaults
-    return v2_07_defaults, v2_07_profile, v2_07_track_id, v2_07_variant
+    return v2_07_defaults, v2_07_profile, v2_07_variant
 
 
 @app.cell
@@ -322,7 +338,7 @@ def _():
     def v2_07_lens_for(track_id):
         return v2_07_TRACK_LENSES.get(track_id, v2_07_TRACK_LENSES["cloud_fleet"])
 
-    return v2_07_PLAN_PROFILES, v2_07_POLICY_PROFILES, v2_07_TRACK_LENSES, v2_07_lens_for
+    return v2_07_PLAN_PROFILES, v2_07_POLICY_PROFILES, v2_07_lens_for
 
 
 @app.cell
@@ -332,95 +348,59 @@ def _(v2_07_lens_for, v2_07_profile):
 
 
 @app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    LAB_CSS,
-    mo,
-    track_arc_context,
-    track_context,
-    v2_07_lens,
-    v2_07_metadata,
-    v2_07_profile,
-    v2_07_variant,
-):
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #111827 0%, #1f2937 55%, #0f172a 100%);
-                    padding: 32px 40px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.32);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #9ca3af; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume II &middot; Lab 07
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.35rem; font-weight: 900;
-                       color: #f9fafb; line-height: 1.1;">
-                When Failure Is Routine
-            </h1>
-            <p style="margin: 0 0 8px 0; font-size: 1.08rem; font-weight: 600;
-                      color: #cbd5e1; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                MTBF &middot; Young-Daly &middot; Lost Work &middot; Recovery Guardrails
-            </p>
-            <p style="margin: 0 0 20px 0; font-size: 1.0rem; color: #d1d5db;
-                      max-width: 820px; line-height: 1.65;">
-                {v2_07_lens["scenario"]} The selected track changes the persona,
-                thresholds, and memo framing, but every track reasons over the same
-                failure amounts.
-            </p>
-            <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <span class="badge badge-info">{v2_07_profile.label}</span>
-                <span class="badge badge-warn">{v2_07_variant.guardrail_metric}</span>
-                <span class="badge badge-fail">{v2_07_lens["failure_mode"]}</span>
-            </div>
+def _(ACADEMIC_LAB_CSS, mo, v2_07_lens, v2_07_profile, v2_07_variant):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 07 &middot; LAB 07
         </div>
-        """),
-        track_context(v2_07_profile),
-        track_arc_context(v2_07_profile, v2_07_metadata.lab_id),
-    ])
-    return
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          Fault Tolerance, MTBF & Checkpoint Governance
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Model aggregate fleet MTBF, derive the optimal Young-Daly checkpoint interval,
+          quantify lost recomputation overhead, and enforce multi-tier recovery guardrails.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_07_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_07_profile.stakeholder}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Fleet Unit:</strong> {v2_07_lens["unit_label"]}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Routine Failure:</strong> {v2_07_lens["failure_mode"]}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> {v2_07_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
 
-
-@app.cell(hide_code=True)
-def _(COLORS, mo, v2_07_lens, v2_07_profile):
-    mo.Html(f"""
-    <div style="border-left:4px solid {COLORS['BlueLine']}; background:white;
-                border-radius:0 12px 12px 0; padding:20px 28px; margin:8px 0 16px 0;
-                box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                    text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-            Chapter invariant
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_07_profile.label} Reliability Architecture
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_07_lens["scenario"]} At scale, failures cease to be rare exceptions and become routine operating conditions. Fault tolerance requires precise mathematical co-design of checkpoint tax, rework cost, and recovery latency.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Fault-Tolerant Systems:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Fleet MTBF Inverse Law (MTBF<sub>fleet</sub> = MTBF<sub>component</sub> / N):</strong> As node count N scales into thousands of accelerators or millions of edge clients, mean time between failures drops linearly from years to hours or minutes.</li>
+            <li><strong>The Young-Daly Optimum (&tau;<sub>opt</sub> &asymp; &radic;(2 &middot; &delta; &middot; MTBF)):</strong> Checkpointing too frequently burns throughput on write overhead (&delta;); checkpointing too rarely burns runtime on recomputation rework. The optimum precisely balances both costs.</li>
+            <li><strong>Multi-tier Recovery Tax:</strong> Actual incident downtime includes failure detection latency, node draining, interconnect renegotiation, state loading, and warmup/JIT compilation.</li>
+            <li><strong>Latent Corruption & Error Masking:</strong> High-frequency checkpointing protects against catastrophic halts, but fails against silent data corruption (SDC) without active checksumming and rollback history.</li>
+          </ul>
         </div>
-        <div style="font-size:1.0rem; color:{COLORS['Text']}; line-height:1.65;">
-            At fleet scale, failures become routine. MTBF, checkpoint interval, lost work,
-            recovery time, and redundancy are design amounts.
-        </div>
-        <div style="border-top:1px solid {COLORS['Border']}; margin:14px -28px 0 -28px;
-                    padding:14px 28px 0 28px;">
-            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                Track realization
-            </div>
-            <div style="font-size:0.95rem; color:{COLORS['TextSec']}; line-height:1.65;">
-                <strong>{v2_07_profile.stakeholder}</strong> must plan for
-                <strong>{v2_07_lens["unit_label"]}</strong> whose routine failure mode is
-                <strong>{v2_07_lens["failure_mode"]}</strong>.
-            </div>
-        </div>
+      </div>
     </div>
     """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** - Complete before this lab:
-
-    - **Volume II, Chapter 7: Fault Tolerance and Reliability** - failure analysis
-      at scale, MTBF composition, Young-Daly checkpointing, recovery procedures,
-      serving redundancy, and graceful degradation.
-    """), kind="info")
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
@@ -433,6 +413,7 @@ def _(mo):
             "C) It improves because more devices create redundancy": "improves",
             "D) It cannot be estimated from MTBF": "unknowable",
         },
+        value="B) It falls by about 10x when fleet size grows 10x",
         label="Part A prediction: if the fleet grows 10x, what happens to aggregate MTBF?",
     )
     v2_07_part_b_prediction = mo.ui.radio(
@@ -442,6 +423,7 @@ def _(mo):
             "C) Choose the interval where save overhead and expected rework balance": "optimum",
             "D) Use the same interval for every fleet": "fixed",
         },
+        value="C) Choose the interval where save overhead and expected rework balance",
         label="Part B prediction: what checkpoint interval policy is safest?",
     )
     v2_07_part_c_prediction = mo.ui.radio(
@@ -451,6 +433,7 @@ def _(mo):
             "C) Detection, restart, load, and warmup time": "recovery_terms",
             "D) All of these become design amounts": "all_amounts",
         },
+        value="D) All of these become design amounts",
         label="Part C prediction: which amount can dominate failure cost?",
     )
     v2_07_part_d_prediction = mo.ui.radio(
@@ -460,6 +443,7 @@ def _(mo):
             "C) Latency, quality, or safety guardrails": "performance",
             "D) Any one of these can reject the plan": "any_guardrail",
         },
+        value="D) Any one of these can reject the plan",
         label="Part D prediction: which guardrail can reject a fault-tolerance plan?",
     )
     return (
@@ -471,7 +455,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, v2_07_defaults, v2_07_lens):
+def _(mo, v2_07_POLICY_PROFILES, v2_07_defaults, v2_07_lens):
     v2_07_fleet_size = mo.ui.slider(
         start=int(v2_07_lens["fleet_min"]),
         stop=int(v2_07_lens["fleet_max"]),
@@ -566,6 +550,7 @@ def _(mo, v2_07_defaults, v2_07_lens):
             "Correlated failure domain": "correlated",
             "Shared software/configuration bug": "software",
         },
+        value="Correlated failure domain",
         label="Part C checkpoint: which failure remains uncovered or needs a drill?",
     )
     v2_07_rejected_alternative = mo.ui.radio(
@@ -601,10 +586,14 @@ def _(mo, v2_07_defaults, v2_07_lens):
 @app.cell(hide_code=True)
 def _(
     COLORS,
+    MathPeek,
     apply_plotly_theme,
+    big_takeaways,
     build_lab_report,
+    gated_hypothesis_card,
     go,
     html_lib,
+    instrumentation_console,
     ledger,
     math,
     mo,
@@ -1026,8 +1015,6 @@ def _(
         )
         return apply_plotly_theme(_fig)
 
-    def v2_07_math_peek(title, body):
-        return mo.accordion({title: mo.md(body)})
 
     def v2_07_prediction_feedback(selected, correct, explanation):
         if selected is None:
@@ -1046,24 +1033,30 @@ def _(
         _clean_ok = _exposure["clean_probability"] >= _exposure["target_clean_probability"]
         _failure_expected = _exposure["expected_failures"] >= 1.0
         _items = [
-            mo.md("## Part A - Aggregate MTBF Falls as Fleet Size Grows"),
-            mo.callout(mo.md(
-                f"{v2_07_profile.stakeholder}: decide whether {v2_07_lens['fleet_default']:,} "
-                f"{v2_07_lens['unit_label']} can finish the window without treating "
-                f"{v2_07_lens['failure_mode']} as routine."
-            ), kind="info"),
-            v2_07_part_a_prediction,
-        ]
-        if v2_07_part_a_prediction.value is None:
-            _items.append(v2_07_prediction_feedback(None, "inverse", ""))
-            return mo.vstack(_items)
-        _items.extend([
+            mo.md("## Part A - Concept Module: Aggregate MTBF Falls as Fleet Size Grows"),
+            gated_hypothesis_card(
+                v2_07_part_a_prediction,
+                title="1. Formulate Aggregate MTBF Scaling Hypothesis",
+                subtitle=(
+                    f"Scenario: {v2_07_profile.stakeholder} must decide whether {v2_07_lens['fleet_default']:,} "
+                    f"{v2_07_lens['unit_label']} can finish the window without treating "
+                    f"{v2_07_lens['failure_mode']} as routine."
+                ),
+            ),
             v2_07_prediction_feedback(
                 v2_07_part_a_prediction.value,
                 "inverse",
                 "Aggregate failure rate grows with component count, so aggregate MTBF falls by the same factor.",
             ),
-            mo.hstack([v2_07_fleet_size, v2_07_duration_h], justify="start"),
+        ]
+        if v2_07_part_a_prediction.value is None:
+            return mo.vstack(_items)
+        _items.extend([
+            instrumentation_console(
+                mo.hstack([v2_07_fleet_size, v2_07_duration_h], justify="start", gap=1.0),
+                title="Fleet & Mission Instrumentation",
+                subtitle="Sweep unit count and mission window to track aggregate MTBF collapse",
+            ),
             mo.as_html(v2_07_mtbf_chart(_exposure)),
             v2_07_table(
                 ["Amount", "Value", "Decision meaning"],
@@ -1085,45 +1078,56 @@ def _(
                 ),
                 kind="warn" if (_failure_expected or not _clean_ok) else "success",
             ),
-            v2_07_math_peek(
-                "Math Peek: Fleet MTBF",
-                """
-The chapter uses the exponential reliability model:
-
-`R_system(t) = exp(-N * lambda * t)`
-
-For identical independent components:
-
-`MTBF_system = MTBF_component / N`
-
-The track changes what a component is, but the amount-system reasoning is the
-same: more exposed units create a shorter time between fleet-visible failures.
-                """,
+            MathPeek(
+                "MTBF_system = MTBF_component / N; R_system(t) = exp(-N * lambda * t)",
+                {
+                    "fleet size N": f"{_exposure['fleet_size']:,} {v2_07_lens['unit_label']}",
+                    "component MTBF": f"{v2_07_fmt(_exposure['component_mtbf_h'])} h",
+                    "aggregate MTBF": f"{v2_07_fmt(_exposure['system_mtbf_h'])} h",
+                    "expected failures": v2_07_fmt(_exposure['expected_failures']),
+                    "clean probability": v2_07_pct(_exposure['clean_probability']),
+                    "chapter source": "Exponential reliability model and fleet scale laws",
+                },
             ),
-            v2_07_part_a_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Planning Metric</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Which failure amount must drive your recovery system architecture?
+                </p>
+                {v2_07_part_a_checkpoint}
+            </div>
+            """),
         ])
         return mo.vstack(_items)
 
     def build_part_b():
         _checkpoint = v2_07_checkpoint_result()
         _items = [
-            mo.md("## Part B - Checkpoint Interval Has an Optimum"),
-            mo.callout(mo.md(
-                f"The {v2_07_profile.label} plan must choose how often to save recoverable state. "
-                "The goal is not maximum checkpointing or minimum checkpointing; it is minimum wasted capacity."
-            ), kind="info"),
-            v2_07_part_b_prediction,
-        ]
-        if v2_07_part_b_prediction.value is None:
-            _items.append(v2_07_prediction_feedback(None, "optimum", ""))
-            return mo.vstack(_items)
-        _items.extend([
+            mo.md("## Part B - Concept Module: Checkpoint Interval Has an Optimum"),
+            gated_hypothesis_card(
+                v2_07_part_b_prediction,
+                title="2. Formulate Checkpoint Interval Hypothesis",
+                subtitle=(
+                    f"Scenario: The {v2_07_profile.label} plan must choose how often to save recoverable state. "
+                    "The goal is not maximum checkpointing or minimum checkpointing; it is minimum wasted capacity."
+                ),
+            ),
             v2_07_prediction_feedback(
                 v2_07_part_b_prediction.value,
                 "optimum",
                 "Young-Daly gives the minimum of a U-shaped tax: save overhead falls with interval while expected rework rises.",
             ),
-            mo.hstack([v2_07_write_min, v2_07_checkpoint_interval_min], justify="start"),
+        ]
+        if v2_07_part_b_prediction.value is None:
+            return mo.vstack(_items)
+        _items.extend([
+            instrumentation_console(
+                mo.hstack([v2_07_write_min, v2_07_checkpoint_interval_min], justify="start", gap=1.0),
+                title="Checkpoint Write & Interval Console",
+                subtitle="Adjust checkpoint duration and interval to explore the Young-Daly U-curve",
+            ),
             mo.as_html(v2_07_young_daly_chart(_checkpoint)),
             v2_07_table(
                 ["Amount", "Value", "Limit or comparison"],
@@ -1146,22 +1150,27 @@ same: more exposed units create a shorter time between fleet-visible failures.
                 ),
                 kind="success" if _checkpoint["near_optimum"] and _checkpoint["tax_ok"] else "warn",
             ),
-            v2_07_math_peek(
-                "Math Peek: Young-Daly Checkpoint Tax",
-                """
-The chapter's first-order checkpoint model is:
-
-`tau_opt = sqrt(2 * T_write * MTBF_system)`
-
-For a chosen interval `tau`, the visible tax is:
-
-`waste = T_write / tau + tau / (2 * MTBF_system)`
-
-Restart time is a per-failure recovery term. It should be budgeted, but not
-folded into `T_write` unless a recovery-aware checkpoint model is derived.
-                """,
+            MathPeek(
+                "tau_opt = sqrt(2 * T_write * MTBF_system); Waste = T_write/tau + tau/(2*MTBF_system)",
+                {
+                    "system MTBF": f"{v2_07_fmt(_checkpoint['mtbf_min'])} min",
+                    "write time T_write": f"{v2_07_fmt(_checkpoint['write_min'])} min",
+                    "chosen interval tau": f"{v2_07_fmt(_checkpoint['interval_min'])} min",
+                    "optimal interval tau_opt": f"{v2_07_fmt(_checkpoint['tau_opt_min'])} min",
+                    "total tax": f"{v2_07_fmt(_checkpoint['total_tax_pct'])}% (limit {v2_07_lens['tax_limit_pct']}%)",
+                    "chapter source": "Young-Daly optimal checkpoint formula",
+                },
             ),
-            v2_07_part_b_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Operating Move</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    What operational change follows directly from the checkpoint cost curve?
+                </p>
+                {v2_07_part_b_checkpoint}
+            </div>
+            """),
         ])
         return mo.vstack(_items)
 
@@ -1169,24 +1178,30 @@ folded into `T_write` unless a recovery-aware checkpoint model is derived.
         _rows = v2_07_all_policy_results()
         _selected = v2_07_policy_result()
         _items = [
-            mo.md("## Part C - Lost Work and Recovery Policy Trade Amounts"),
-            mo.callout(mo.md(
-                f"A {v2_07_lens['failure_mode']} incident has arrived. Choose the recovery policy that "
-                f"meets a {v2_07_lens['recovery_objective_min']}-minute objective without exceeding "
-                "storage or write-bandwidth budgets."
-            ), kind="info"),
-            v2_07_part_c_prediction,
-        ]
-        if v2_07_part_c_prediction.value is None:
-            _items.append(v2_07_prediction_feedback(None, "all_amounts", ""))
-            return mo.vstack(_items)
-        _items.extend([
+            mo.md("## Part C - Concept Module: Lost Work and Recovery Policy Trade Amounts"),
+            gated_hypothesis_card(
+                v2_07_part_c_prediction,
+                title="3. Formulate Recovery Policy Trade-off Hypothesis",
+                subtitle=(
+                    f"Scenario: A {v2_07_lens['failure_mode']} incident has arrived. Choose the recovery policy that "
+                    f"meets a {v2_07_lens['recovery_objective_min']}-minute objective without exceeding "
+                    "storage or write-bandwidth budgets."
+                ),
+            ),
             v2_07_prediction_feedback(
                 v2_07_part_c_prediction.value,
                 "all_amounts",
                 "Lost work, storage, bandwidth, and restart terms all become design amounts; the binding one changes by policy.",
             ),
-            mo.hstack([v2_07_recovery_policy, v2_07_checkpoint_history, v2_07_write_bandwidth_gbs], justify="start"),
+        ]
+        if v2_07_part_c_prediction.value is None:
+            return mo.vstack(_items)
+        _items.extend([
+            instrumentation_console(
+                mo.hstack([v2_07_recovery_policy, v2_07_checkpoint_history, v2_07_write_bandwidth_gbs], justify="start", gap=1.0),
+                title="Recovery Architecture & Storage Controls",
+                subtitle="Configure restart policy, retained snapshot count, and storage bus bandwidth",
+            ),
             v2_07_table(
                 ["Policy", "Lost work", "Recovery", "Storage", "Write GB/s", "Coverage", "Status"],
                 [
@@ -1214,20 +1229,27 @@ folded into `T_write` unless a recovery-aware checkpoint model is derived.
                 ),
                 kind="success" if _selected["feasible"] else "warn",
             ),
-            v2_07_math_peek(
-                "Math Peek: Failure Cost Budget",
-                """
-The recovery budget decomposes a failure event:
-
-`T_failure = lost_work + T_detect + T_restart + T_load + T_warmup`
-
-Checkpoint history increases storage but protects against a bad latest
-checkpoint. Replicated state increases normal-operation cost but reduces lost
-work and failover latency. A policy is feasible only when recovery time, storage,
-and write bandwidth all fit the selected track.
-                """,
+            MathPeek(
+                "T_failure = lost_work + T_detect + T_restart + T_load + T_warmup",
+                {
+                    "selected policy": _selected["label"],
+                    "lost work": f"{v2_07_fmt(_selected['lost_work_min'])} min",
+                    "total recovery time": f"{v2_07_fmt(_selected['recovery_min'])} min (limit {v2_07_lens['recovery_objective_min']} min)",
+                    "storage footprint": f"{v2_07_fmt(_selected['storage_gb'])} GB (budget {v2_07_lens['storage_budget_gb']} GB)",
+                    "required write BW": f"{v2_07_fmt(_selected['required_write_gbs'], 3)} GB/s",
+                    "chapter source": "End-to-end failure cost decomposition",
+                },
             ),
-            v2_07_uncovered_failure,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Residual Vulnerability</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Which failure mode remains uncovered or requires a dedicated validation drill?
+                </p>
+                {v2_07_uncovered_failure}
+            </div>
+            """),
             mo.callout(mo.md(f"Validation drill: **{_selected['validation']}**."), kind="info"),
         ])
         return mo.vstack(_items)
@@ -1237,23 +1259,29 @@ and write bandwidth all fit the selected track.
         _selected = v2_07_plan_result(recovery=_recovery)
         _rows = v2_07_default_plan_results(_recovery)
         _items = [
-            mo.md("## Part D - Recovery Plan Must Pass Guardrails"),
-            mo.callout(mo.md(
-                f"The {v2_07_profile.label} design review asks for one plan that meets recovery, "
-                f"cost, latency, quality, and {v2_07_variant.guardrail_metric} guardrails."
-            ), kind="info"),
-            v2_07_part_d_prediction,
-        ]
-        if v2_07_part_d_prediction.value is None:
-            _items.append(v2_07_prediction_feedback(None, "any_guardrail", ""))
-            return mo.vstack(_items)
-        _items.extend([
+            mo.md("## Part D - Concept Module: Recovery Plan Must Pass Guardrails"),
+            gated_hypothesis_card(
+                v2_07_part_d_prediction,
+                title="4. Formulate Multi-Guardrail Hypothesis",
+                subtitle=(
+                    f"Scenario: The {v2_07_profile.label} design review asks for one plan that meets recovery, "
+                    f"cost, latency, quality, and {v2_07_variant.guardrail_metric} guardrails."
+                ),
+            ),
             v2_07_prediction_feedback(
                 v2_07_part_d_prediction.value,
                 "any_guardrail",
                 "A reliability plan is valid only inside all guardrails at once; a single miss rejects it.",
             ),
-            mo.hstack([v2_07_plan_choice, v2_07_replica_count], justify="start"),
+        ]
+        if v2_07_part_d_prediction.value is None:
+            return mo.vstack(_items)
+        _items.extend([
+            instrumentation_console(
+                mo.hstack([v2_07_plan_choice, v2_07_replica_count], justify="start", gap=1.0),
+                title="Replication Plan & Standby Units",
+                subtitle="Select failure tolerance plan and redundancy factor",
+            ),
             mo.as_html(v2_07_availability_chart(_rows)),
             v2_07_table(
                 ["Plan", "Replicas", "Avail.", "Recovery", "Cost", "Latency", "Quality", v2_07_variant.guardrail_metric, "Misses"],
@@ -1292,22 +1320,27 @@ and write bandwidth all fit the selected track.
                 ),
                 kind="success" if _selected["feasible"] else "warn",
             ),
-            v2_07_math_peek(
-                "Math Peek: Redundancy Guardrail Gate",
-                """
-For independent replicas, the chapter availability model is:
-
-`A_system = 1 - (1 - A_single)^k`
-
-The design gate is a conjunction:
-
-`feasible = recovery_ok and cost_ok and performance_ok and guardrail_ok`
-
-Replication can improve availability while still failing cost, latency, or
-quality. That is why the plan must pass all guardrails, not just one metric.
-                """,
+            MathPeek(
+                "A_system = 1 - (1 - A_single)^k; Feasible = AND(all_guardrails)",
+                {
+                    "plan": _selected["label"],
+                    "replicas k": str(_selected["replicas"]),
+                    "availability": f"{v2_07_fmt(_selected['availability_pct'], 4)}% (target {v2_07_lens['availability_target_pct']}%)",
+                    "recovery time": f"{v2_07_fmt(_selected['recovery_min'])} min",
+                    "cost": f"{v2_07_fmt(_selected['cost'])}",
+                    "chapter source": "System availability with k redundant replicas",
+                },
             ),
-            v2_07_rejected_alternative,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Rejected Alternative</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Identify which alternative plan must be formally rejected and documented in the synthesis memo.
+                </p>
+                {v2_07_rejected_alternative}
+            </div>
+            """),
         ])
         return mo.vstack(_items)
 
@@ -1455,8 +1488,14 @@ quality. That is why the plan must pass all guardrails, not just one metric.
         )
         return mo.vstack([
             mo.md("## Synthesis - Reliability Memo"),
-            v2_07_student_id,
-            v2_07_memo_decision,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO & REFLECTIONS</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Reliability Engineering Memo</h4>
+                {v2_07_student_id}
+                <div style="margin-top: 12px;">{v2_07_memo_decision}</div>
+            </div>
+            """),
             v2_07_table(
                 ["Memo field", "Selected evidence"],
                 [
@@ -1468,6 +1507,21 @@ quality. That is why the plan must pass all guardrails, not just one metric.
                 ],
             ),
             mo.callout(mo.md(_decision_text), kind="success" if _plan["feasible"] else "warn"),
+            big_takeaways([
+                "Fleet size turns failures into a routine rate, not a rare anecdote.",
+                "Checkpoint interval has an optimum because save overhead and lost work pull in opposite directions.",
+                "Recovery policy and redundancy are valid only when recovery objective, cost, and performance guardrails pass together.",
+                "V2-08 orchestration must schedule the spare capacity and failure-domain placement implied by the reliability memo.",
+            ]),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION & SIGN-OFF</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Confirm your fault tolerance deployment strategy and export your telemetry audit record.
+                </p>
+            </div>
+            """),
             report_export_panel(_report),
         ])
 
