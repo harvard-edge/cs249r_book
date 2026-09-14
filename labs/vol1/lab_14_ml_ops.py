@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -34,6 +30,7 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        big_takeaways,
         build_lab_report,
         drift_visibility,
         get_lab_metadata,
@@ -58,6 +55,7 @@ async def _():
         COLORS,
         LAB_CSS,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         drift_visibility,
         get_lab_metadata,
@@ -65,8 +63,6 @@ async def _():
         get_track_profile,
         go,
         ledger,
-        math,
-        mlsysim,
         mo,
         np,
         ops_policy,
@@ -74,10 +70,8 @@ async def _():
         report_export_panel,
         resolve_mlsysim_ref,
         retraining_cadence,
-        source_trace,
-        track_context,
         track_arc_context,
-        track_selector,
+        track_context,
     )
 
 
@@ -88,11 +82,20 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
+    _options = {
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
+        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
+        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+    }
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v1_14_track_picker = track_selector(default=_default_track)
-    v1_14_track_picker
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    v1_14_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_14_track_picker,)
 
 
@@ -104,6 +107,7 @@ def _(
     resolve_mlsysim_ref,
     v1_14_track_picker,
 ):
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
     v1_14_track_id = v1_14_track_picker.value
     v1_14_profile = get_track_profile(v1_14_track_id)
     v1_14_variant = get_lab_track_variant("v1_14_silent_degradation", v1_14_profile.track_id)
@@ -115,74 +119,120 @@ def _(
         v1_14_hardware,
         v1_14_model,
     )
-    return (
-        v1_14_hardware,
-        v1_14_model,
-        v1_14_ops,
-        v1_14_profile,
-        v1_14_track_id,
-        v1_14_variant,
-    )
+    return v1_14_ops, v1_14_profile, v1_14_variant
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
-    source_trace,
-    track_context,
     track_arc_context,
+    track_context,
     v1_14_metadata,
     v1_14_ops,
     v1_14_profile,
+    v1_14_track_picker,
     v1_14_variant,
 ):
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 14
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_14_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 14 &middot; Foundational Lab 14
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                The Silent Degradation Problem
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              The Silent Degradation Problem: Drift, Retraining &amp; Operations
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Deployed Behavior &middot; Thresholds &middot; Rollback &middot; Error Budget
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_14_variant.workload_summary} Infrastructure health metrics can stay green while accuracy and downstream quality silently collapse. Build continuous monitoring, calibrate alert thresholds, determine optimal retraining cadences, and design rollback error budgets.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 760px; line-height: 1.65;">
-                {v1_14_variant.workload_summary} Infrastructure can stay green while
-                quality silently crosses the guardrail.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~54 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_14_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_14_ops.hardware_ref}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_14_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Workload:</strong> {v1_14_ops.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_14_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_14_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> MLOps &amp; Silent Degradation Defense
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> operations runbook memo
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Drift Monitor</span>
-                <span class="badge badge-warn">Retrain T*</span>
-                <span class="badge badge-fail">Rollback Policy</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_14_profile.label} ML Operations
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_14_variant.stakeholder}</strong> responsible for monitoring <strong>{v1_14_variant.model_ref}</strong> on <strong>{v1_14_variant.hardware_ref}</strong>. The deployed model faces <strong>{v1_14_ops.drift_source}</strong> and must protect <strong>{v1_14_variant.guardrail_metric}</strong> against unmonitored silent quality collapse.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of ML Operations:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Silent Degradation Asymmetry Law:</strong> System infrastructure (CPU, memory, networking, uptime) remains 100% green while model prediction accuracy silently decays: Health<sub>infra</sub> &ne; Health<sub>model</sub>. Monitoring telemetry must track data distribution drift (<em>D</em><sub>drift</sub>) and prediction quality independently of system liveliness.</li>
+                <li><strong>The Economic Retraining Horizon (<em>T</em>* Invariant):</strong> Retraining cadence is governed by the square-root optimal trade-off between fixed retraining compute cost (<em>C</em><sub>retrain</sub>) and cumulative stale-model degradation loss (<em>C</em><sub>drift</sub>): <em>T</em>* = &radic;(2 &middot; <em>C</em><sub>retrain</sub> / <em>C</em><sub>drift</sub>). Arbitrary scheduled retraining inflates energy costs while delayed retraining risks catastrophic customer harm.</li>
+                <li><strong>The Delayed Ground Truth Blind Spot:</strong> Ground-truth labels arrive with non-zero lag (&tau;<sub>label</sub>), blinding direct performance evaluation in the short term. Proxy metrics (input feature drift, output distribution divergence, prediction entropy) must act as early-warning tripwires before label arrival.</li>
+                <li><strong>The Automated Safe Rollback &amp; Canary Invariant:</strong> Every continuous deployment requires canary traffic slicing, statistical blast-radius limitation, and sub-second automated rollback triggers: &Delta;Quality &lt; &minus;&epsilon; &rArr; Rollback &rarr; Baseline. No model promotion may proceed without automated verification against golden evaluation suites.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Separate infrastructure from model health:</strong>
+                    detect when {v1_14_ops.drift_source} degrades quality before dashboards fail.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Optimize retraining cadence:</strong>
+                    use <em>T</em>* = &radic;(2<em>C</em>/<em>C</em><sub>drift</sub>) to balance retraining cost against stale-model risk.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Enforce canary &amp; rollback bounds:</strong>
+                    limit blast radius with statistical gates and automated rollback triggers.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Govern error budgets:</strong>
+                    budget acceptable quality degradation and defend the residual operational blind spot.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    What operations policy prevents silent degradation while protecting
+                    {v1_14_variant.guardrail_metric}?
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
+                            line-height: 1.6; margin-top: 10px;">
+                    Every track follows the same four concepts. The selected track changes
+                    persona, constraints, thresholds, evidence emphasis, failure mode, and
+                    report framing.
+                </div>
             </div>
         </div>
         """),
@@ -193,78 +243,13 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_14_ops, v1_14_variant):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Separate infrastructure health from model health:</strong>
-                    detect when {v1_14_ops.drift_source} degrades quality before dashboards fail.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Choose retraining cadence:</strong>
-                    use T* = sqrt(2C/C_drift) to balance retraining cost against stale-model risk.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Write an operations policy:</strong>
-                    combine monitoring, canary rollout, rollback, escalation, and residual blind spot.</div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Monitoring Signal
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    {v1_14_ops.monitoring_signal}
-                </div>
-            </div>
-            <div style="flex: 0 0 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Label Delay
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    {v1_14_ops.label_delay_days} days before the signal is fully visible
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                "What operations policy prevents silent degradation while protecting
-                {v1_14_variant.guardrail_metric}?"
-            </div>
-        </div>
-    </div>
-    """)
+def _():
     return
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** - Complete before this lab:
-
-    - **The ML Operations chapter** - drift, delayed labels, retraining cadence,
-      rollback, escalation, and ML technical debt.
-    """), kind="info")
+def _():
     return
-
-
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -316,7 +301,7 @@ def _(mo, v1_14_ops):
             f"{v1_14_ops.label}: how should ops choose the PSI alert threshold?"
         ),
     )
-    return (partA_days, partA_rate, partA_threshold, partB_pred)
+    return partA_days, partA_rate, partA_threshold, partB_pred
 
 
 @app.cell(hide_code=True)
@@ -352,7 +337,12 @@ def _(mo, v1_14_ops):
         },
         label=f"What release policy protects {v1_14_ops.guardrail_metric}?",
     )
-    return (partB_false_alarm_rate, partB_review_cost, partB_threshold, partC_pred)
+    return (
+        partB_false_alarm_rate,
+        partB_review_cost,
+        partB_threshold,
+        partC_pred,
+    )
 
 
 @app.cell(hide_code=True)
@@ -370,7 +360,7 @@ def _(mo, v1_14_ops):
         },
         label=f"What makes a defensible {v1_14_ops.label} operations policy?",
     )
-    return (partC_canary, partC_fallback, partC_rollback, partD_pred)
+    return partC_canary, partC_fallback, partC_rollback, partD_pred
 
 
 @app.cell(hide_code=True)
@@ -391,7 +381,7 @@ def _(mo, v1_14_ops):
     )
     partD_canary = mo.ui.slider(start=0, stop=50, value=10, step=5, label="Runbook canary (%)")
     partD_rollback = mo.ui.slider(start=0.25, stop=72, value=8, step=0.25, label="Runbook rollback (hours)")
-    return (partD_cadence, partD_canary, partD_rollback, partD_threshold)
+    return partD_cadence, partD_canary, partD_rollback, partD_threshold
 
 
 @app.cell
@@ -581,15 +571,11 @@ def _():
     )
 
 
-# ===========================================================================
-# ZONE C: MAIN LAB
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
+    big_takeaways,
     drift_visibility,
     go,
     mo,
@@ -651,11 +637,11 @@ def _(
             </div>
             """),
             mo.md("""
-## Concept Module A - Deployed Behavior Is The Monitor
+    ## Concept Module A - Deployed Behavior Is The Monitor
 
-Uptime, latency, and offline validation can stay green while deployed behavior
-drifts. The monitor has to include production telemetry, delayed labels, and the
-track guardrail that users actually experience.
+    Uptime, latency, and offline validation can stay green while deployed behavior
+    drifts. The monitor has to include production telemetry, delayed labels, and the
+    track guardrail that users actually experience.
             """),
             partA_pred,
         ]
@@ -758,26 +744,26 @@ track guardrail that users actually experience.
             ), kind="danger"))
 
         items.append(mo.md(f"""
-**Drift Visibility - Live Calculation**
+    **Drift Visibility - Live Calculation**
 
-```
-drift source      = {v1_14_ops.drift_source}
-monitoring signal = {v1_14_ops.monitoring_signal}
-true PSI          = {_result.true_psi:.3f}
-observed PSI      = {_result.observed_psi:.3f}
-true quality      = {_result.true_quality_pct:.1f}%
-observed quality  = {_result.observed_quality_pct:.1f}%
-damage cost       = ${_result.accumulated_damage_cost:,.0f}
-```
-**Math Peek / Source Model**
+    ```
+    drift source      = {v1_14_ops.drift_source}
+    monitoring signal = {v1_14_ops.monitoring_signal}
+    true PSI          = {_result.true_psi:.3f}
+    observed PSI      = {_result.observed_psi:.3f}
+    true quality      = {_result.true_quality_pct:.1f}%
+    observed quality  = {_result.observed_quality_pct:.1f}%
+    damage cost       = ${_result.accumulated_damage_cost:,.0f}
+    ```
+    **Math Peek / Source Model**
 
-```
-quality(t) ~= A0 - lambda * PSI(t)
-detection delay = alert_day - quality_breach_day
-```
+    ```
+    quality(t) ~= A0 - lambda * PSI(t)
+    detection delay = alert_day - quality_breach_day
+    ```
 
-*Source: `mlsysbook_labs.drift_visibility`; chapter sections on observable
-degradation and model/infrastructure monitoring.*
+    *Source: `mlsysbook_labs.drift_visibility`; chapter sections on observable
+    degradation and model/infrastructure monitoring.*
         """))
 
         items.append(mo.callout(mo.md(
@@ -809,14 +795,14 @@ degradation and model/infrastructure monitoring.*
             </div>
             """),
             mo.md(f"""
-## Concept Module B - Thresholds Spend Attention
+    ## Concept Module B - Thresholds Spend Attention
 
-The chapter gives PSI > 0.2 as a useful starting point for feature-distribution
-drift, but a threshold is an operating policy. Tight thresholds spend on-call
-attention; loose thresholds spend quality, safety, battery, or SLO budget.
+    The chapter gives PSI > 0.2 as a useful starting point for feature-distribution
+    drift, but a threshold is an operating policy. Tight thresholds spend on-call
+    attention; loose thresholds spend quality, safety, battery, or SLO budget.
 
-Track amount system: **{_amounts['unit_label']}**, attention budget
-**{_amounts['attention_budget_hours']:.0f} review hours/year**.
+    Track amount system: **{_amounts['unit_label']}**, attention budget
+    **{_amounts['attention_budget_hours']:.0f} review hours/year**.
             """),
             partB_pred,
         ]
@@ -926,16 +912,16 @@ Track amount system: **{_amounts['unit_label']}**, attention budget
             ), kind="danger"))
 
         items.append(mo.md(f"""
-**Math Peek / Source Model**
+    **Math Peek / Source Model**
 
-```
-detection_day = threshold / drift_rate + label_delay
-false alarms  ~= base false alarms * (default_threshold / threshold)^1.35
-total cost    = false alarm cost + missed damage cost + monitoring cost
-```
+    ```
+    detection_day = threshold / drift_rate + label_delay
+    false alarms  ~= base false alarms * (default_threshold / threshold)^1.35
+    total cost    = false alarm cost + missed damage cost + monitoring cost
+    ```
 
-*Source: chapter feature-distribution thresholds and monitoring cost model;
-notebook-local `v1_14_threshold_economics`.*
+    *Source: chapter feature-distribution thresholds and monitoring cost model;
+    notebook-local `v1_14_threshold_economics`.*
         """))
 
         items.append(mo.callout(mo.md(
@@ -966,18 +952,18 @@ notebook-local `v1_14_threshold_economics`.*
             </div>
             """),
             mo.md(f"""
-## Concept Module C - Rollback Limits Blast Radius
+    ## Concept Module C - Rollback Limits Blast Radius
 
-For **{v1_14_ops.label}**, rollback is:
+    For **{v1_14_ops.label}**, rollback is:
 
-```
-{v1_14_ops.rollback_policy}
-```
+    ```
+    {v1_14_ops.rollback_policy}
+    ```
 
-Canary traffic, rollback time, and fallback coverage define the amount of
-production behavior at risk before recovery. The same concept appears as a
-kill switch on iPhone, OTA rollback for Oura, geofenced fallback for RoboTaxi,
-and registry-pinned traffic rollback for Cloud Fleet.
+    Canary traffic, rollback time, and fallback coverage define the amount of
+    production behavior at risk before recovery. The same concept appears as a
+    kill switch on iPhone, OTA rollback for Oura, geofenced fallback for RoboTaxi,
+    and registry-pinned traffic rollback for Cloud Fleet.
             """),
             partC_pred,
         ]
@@ -1069,16 +1055,16 @@ and registry-pinned traffic rollback for Cloud Fleet.
             ), kind="danger"))
 
         items.append(mo.md(f"""
-**Math Peek / Source Model**
+    **Math Peek / Source Model**
 
-```
-blast radius = daily units * canary share * rollback hours / 24 * unprotected share
+    ```
+    blast radius = daily units * canary share * rollback hours / 24 * unprotected share
              = {_amounts['daily_units']:.1f} * {partC_canary.value / 100:.2f} * {partC_rollback.value / 24:.3f} * {(1 - partC_fallback.value / 100):.2f}
              = {_rollout['exposed_units']:.2f} {_amounts['unit_label']}
-```
+    ```
 
-*Source: chapter rollback strategy table and staged deployment discussion;
-notebook-local `v1_14_rollout_risk`.*
+    *Source: chapter rollback strategy table and staged deployment discussion;
+    notebook-local `v1_14_rollout_risk`.*
         """))
 
         items.append(mo.callout(mo.md(
@@ -1111,14 +1097,14 @@ notebook-local `v1_14_rollout_risk`.*
             </div>
             """),
             mo.md(f"""
-## Concept Module D - Error Budget Is A Policy Choice
+    ## Concept Module D - Error Budget Is A Policy Choice
 
-The final policy spends an explicit error budget. Detection delay spends days
-before the alert fires. Slow retraining spends stale-model exposure. Rollback
-spends blast-radius exposure. Residual blind spots spend owner attention.
+    The final policy spends an explicit error budget. Detection delay spends days
+    before the alert fires. Slow retraining spends stale-model exposure. Rollback
+    spends blast-radius exposure. Residual blind spots spend owner attention.
 
-Track budget: **{_amounts['error_budget_days']:.1f} equivalent days** for
-{v1_14_ops.guardrail_metric}.
+    Track budget: **{_amounts['error_budget_days']:.1f} equivalent days** for
+    {v1_14_ops.guardrail_metric}.
             """),
             partD_pred,
         ]
@@ -1224,20 +1210,20 @@ Track budget: **{_amounts['error_budget_days']:.1f} equivalent days** for
             ), kind="danger"))
 
         items.append(mo.md(f"""
-**Math Peek / Source Model**
+    **Math Peek / Source Model**
 
-```
-T* = sqrt(2 * retrain_cost / drift_cost_per_day)
-   = sqrt(2 * {v1_14_ops.retrain_cost:,.0f} / {v1_14_ops.drift_cost_per_day:,.0f})
-   = {_cadence.optimal_days:.1f} days
+    ```
+    T* = sqrt(2 * retrain_cost / drift_cost_per_day)
+       = sqrt(2 * {v1_14_ops.retrain_cost:,.0f} / {v1_14_ops.drift_cost_per_day:,.0f})
+       = {_cadence.optimal_days:.1f} days
 
-monitoring cost = C_ingest + C_storage + C_compute + C_alert
-policy cost     = ${_policy.total_annual_cost:,.0f}/year
-```
+    monitoring cost = C_ingest + C_storage + C_compute + C_alert
+    policy cost     = ${_policy.total_annual_cost:,.0f}/year
+    ```
 
-*Source: chapter cost-aware automation, monitoring cost model, and on-call
-practice sections; shared `mlsysbook_labs.ops_policy` and notebook-local
-`v1_14_error_budget`.*
+    *Source: chapter cost-aware automation, monitoring cost model, and on-call
+    practice sections; shared `mlsysbook_labs.ops_policy` and notebook-local
+    `v1_14_error_budget`.*
         """))
 
         items.append(mo.callout(mo.md(
@@ -1322,37 +1308,49 @@ practice sections; shared `mlsysbook_labs.ops_policy` and notebook-local
                 </div>
             </div>
             """),
+            mo.Html(f"""
+            <div style="border-left: 4px solid #10B981; background: #F0FDF4; border-radius: 0 10px 10px 0; padding: 18px 24px; margin: 16px 0;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #059669; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                    Lead Architect Authorization &middot; ML Operations Runbook Sign-Off
+                </div>
+                <div style="font-size: 0.95rem; color: #065F46; line-height: 1.6;">
+                    <strong>Operations Verdict:</strong> {"RELEASE SIGN-OFF GRANTED" if _status == "approved" else "HOLD OPERATIONS SIGN-OFF"}.
+                    {"Operations runbook satisfies drift monitoring, retraining cost-loss balance, and canary rollback boundaries for " + v1_14_profile.label + "." if _status == "approved" else "Threshold or error budget policy requires tuning before operational handoff."}
+                </div>
+            </div>
+            """),
+            big_takeaways([
+                "Silent degradation occurs when infra metrics stay green while model accuracy collapses.",
+                "Optimal retraining cadence T* balances fixed compute cost against cumulative drift loss.",
+                "Delayed ground truth requires distribution drift proxies as real-time tripwires.",
+                "Safe deployment requires canary traffic gating, automated rollback, and error budget governance.",
+            ]),
         ])
 
-    _tabs = mo.ui.tabs({
+    v1_14_tabs = mo.ui.tabs({
         "Part A: Deployed Behavior": build_part_a(),
         "Part B: Threshold Trade-off": build_part_b(),
         "Part C: Rollout & Rollback": build_part_c(),
         "Part D: Error Budget Policy": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    _tabs
+    v1_14_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: LEDGER HUD
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
 def _(
     ledger,
     mo,
+    partA_pred,
+    partB_pred,
     partB_threshold,
     partC_canary,
     partC_fallback,
+    partC_pred,
     partC_rollback,
     partD_cadence,
     partD_canary,
-    partA_pred,
-    partB_pred,
-    partC_pred,
     partD_pred,
     partD_rollback,
     partD_threshold,
@@ -1362,30 +1360,30 @@ def _(
     v1_14_variant,
 ):
     _amounts = v1_14_track_amounts(v1_14_profile, v1_14_ops)
-    if partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None:
-        ledger.save(chapter=14, design={
-            "chapter": "v1_14",
-            "track_id": v1_14_profile.track_id,
-            "scenario_id": v1_14_variant.scenario_id,
-            "hardware_ref": v1_14_ops.hardware_ref,
-            "model_ref": v1_14_ops.model_ref,
-            "completed": True,
-            "deployed_behavior_prediction": partA_pred.value,
-            "threshold_tradeoff_prediction": partB_pred.value,
-            "rollout_rollback_prediction": partC_pred.value,
-            "error_budget_prediction": partD_pred.value,
-            "part_b_threshold_psi": partB_threshold.value,
-            "part_c_canary_pct": partC_canary.value,
-            "part_c_rollback_hours": partC_rollback.value,
-            "part_c_fallback_pct": partC_fallback.value,
-            "runbook_threshold_psi": partD_threshold.value,
-            "runbook_retraining_cadence_days": partD_cadence.value,
-            "runbook_canary_pct": partD_canary.value,
-            "runbook_rollback_hours": partD_rollback.value,
-            "rollback_rule": v1_14_ops.rollback_policy,
-            "residual_blind_spot": _amounts["blind_spot"],
-            "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
-        })
+    _ready = partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None
+    ledger.save(chapter=14, design={
+        "chapter": "v1_14",
+        "track_id": v1_14_profile.track_id,
+        "scenario_id": v1_14_variant.scenario_id,
+        "hardware_ref": v1_14_ops.hardware_ref,
+        "model_ref": v1_14_ops.model_ref,
+        "completed": _ready,
+        "deployed_behavior_prediction": partA_pred.value,
+        "threshold_tradeoff_prediction": partB_pred.value,
+        "rollout_rollback_prediction": partC_pred.value,
+        "error_budget_prediction": partD_pred.value,
+        "part_b_threshold_psi": partB_threshold.value,
+        "part_c_canary_pct": partC_canary.value,
+        "part_c_rollback_hours": partC_rollback.value,
+        "part_c_fallback_pct": partC_fallback.value,
+        "runbook_threshold_psi": partD_threshold.value,
+        "runbook_retraining_cadence_days": partD_cadence.value,
+        "runbook_canary_pct": partD_canary.value,
+        "runbook_rollback_hours": partD_rollback.value,
+        "rollback_rule": v1_14_ops.rollback_policy,
+        "residual_blind_spot": _amounts["blind_spot"],
+        "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
+    })
 
     mo.Html(f"""
     <div class="lab-hud">
@@ -1394,10 +1392,24 @@ def _(
         <span class="hud-label">TRACK</span>
         <span class="hud-value">{v1_14_profile.label}</span>
         <span style="flex:1;"></span>
-        <span class="hud-label">MONITOR</span>
-        <span class="hud-value">{partD_threshold.value:.2f} PSI</span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">operations_runbook_memo</span>
         <span class="hud-label">STATUS</span>
-        <span class="hud-active">ACTIVE</span>
+        <span class="hud-active">{"SAVED" if _ready else "ACTIVE"}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Monitor threshold</strong>{partD_threshold.value:.2f} PSI</div>
+        <div class="mlsysbook-field"><strong>Retrain cadence</strong>{partD_cadence.value} days</div>
+        <div class="mlsysbook-field"><strong>Canary / rollback</strong>{partD_canary.value}% / {partD_rollback.value:g}h</div>
+        <div class="mlsysbook-field"><strong>Rollback rule</strong>{v1_14_ops.rollback_policy}</div>
+        <div class="mlsysbook-field"><strong>Residual blind spot</strong>{_amounts['blind_spot']}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
     </div>
     """)
     return
