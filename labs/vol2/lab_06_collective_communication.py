@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
@@ -40,10 +40,13 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
@@ -59,29 +62,26 @@ async def _():
         ACADEMIC_LAB_CSS,
         COLORS,
         Hardware,
-        LAB_CSS,
         MathPeek,
         Systems,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         calc_hierarchical_allreduce_time,
         calc_ring_allreduce_time,
         calc_tree_allreduce_time,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
+        instrumentation_console,
         ledger,
-        mlsysim,
         mo,
         np,
         report_export_panel,
         resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
         ureg,
     )
 
@@ -91,14 +91,21 @@ def _(get_lab_metadata):
     v2_06_lab_path = "vol2/lab_06_collective_communication.py"
     v2_06_chapter = 6
     v2_06_metadata = get_lab_metadata(v2_06_lab_path)
-    return v2_06_chapter, v2_06_lab_path, v2_06_metadata
+    return v2_06_chapter, v2_06_metadata
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_06_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_06_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 Clusters & Ring/Tree/Hierarchical AllReduce)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Robotaxi Fleet Depot Aggregation & Rare Events)": "robotaxi",
+            "📱 Mobile Track (On-Device Federated Learning & Battery/Privacy Constraints)": "iphone",
+            "⚡ TinyML Track (Wearable Sensor Cohorts & Intermittent Sync Windows)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 Clusters & Ring/Tree/Hierarchical AllReduce)",
+        label="Select Course / Industry Track",
+    )
     v2_06_track_picker
     return (v2_06_track_picker,)
 
@@ -117,14 +124,7 @@ def _(
     v2_06_hardware = resolve_mlsysim_ref(v2_06_variant.hardware_ref)
     v2_06_model = resolve_mlsysim_ref(v2_06_variant.model_ref)
     v2_06_defaults = v2_06_variant.defaults
-    return (
-        v2_06_defaults,
-        v2_06_hardware,
-        v2_06_model,
-        v2_06_profile,
-        v2_06_track_id,
-        v2_06_variant,
-    )
+    return v2_06_defaults, v2_06_profile, v2_06_variant
 
 
 @app.cell
@@ -675,7 +675,6 @@ def _(
         v2_06_candidate_chart,
         v2_06_collective_terms,
         v2_06_default_fabric_label,
-        v2_06_fabric_label,
         v2_06_fabric_options,
         v2_06_failure_callout,
         v2_06_fmt,
@@ -703,132 +702,64 @@ def _(v2_06_profile, v2_06_track_lens, v2_06_variant):
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
-    LAB_CSS,
     mo,
-    track_arc_context,
-    track_context,
     v2_06_defaults,
     v2_06_lens,
-    v2_06_metadata,
     v2_06_profile,
     v2_06_variant,
 ):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.Html(
-                f"""
-                <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                            padding: 32px 40px; border-radius: 16px; color: white;
-                            box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-                    <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                                color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                        Machine Learning Systems &middot; Volume II &middot; Lab 06
-                    </div>
-                    <h1 style="margin: 0 0 10px 0; font-size: 2.35rem; font-weight: 900;
-                               color: #f8fafc; line-height: 1.1;">
-                        Collective Communication
-                    </h1>
-                    <p style="margin: 0 0 6px 0; font-size: 1.1rem; font-weight: 600;
-                              color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                        Alpha-Beta &middot; Ring/Tree/Hierarchy &middot; Overlap &middot; Compression
-                    </p>
-                    <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                              max-width: 820px; line-height: 1.65;">
-                        {v2_06_lens["scenario"]} Communication algorithm choice is a
-                        systems decision, not a library detail.
-                    </p>
-                    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px;">
-                        <span style="background: rgba(99,102,241,0.18); color:#a5b4fc;
-                                     padding:5px 14px; border-radius:20px; font-size:0.8rem;
-                                     font-weight:600; border:1px solid rgba(99,102,241,0.3);">
-                            4 Concept Modules + Synthesis &middot; ~45 min
-                        </span>
-                        <span style="background: rgba(203,32,45,0.15); color:#fca5a5;
-                                     padding:5px 14px; border-radius:20px; font-size:0.8rem;
-                                     font-weight:600; border:1px solid rgba(203,32,45,0.25);">
-                            {v2_06_profile.label}
-                        </span>
-                        <span style="background: rgba(34,197,94,0.12); color:#86efac;
-                                     padding:5px 14px; border-radius:20px; font-size:0.8rem;
-                                     font-weight:600; border:1px solid rgba(34,197,94,0.20);">
-                            {v2_06_variant.hardware_ref}
-                        </span>
-                    </div>
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <span class="badge badge-info">{v2_06_defaults["operation"]}</span>
-                        <span class="badge badge-warn">{v2_06_defaults["topology"]}</span>
-                        <span class="badge badge-fail">{v2_06_variant.guardrail_metric}</span>
-                    </div>
-                </div>
-                """
-            ),
-            track_context(v2_06_profile),
-            track_arc_context(v2_06_profile, v2_06_metadata.lab_id),
-        ]
-    )
-    return
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 06 &middot; LAB 06
+        </div>
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          Collective Communication & AllReduce Topologies
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Evaluate Ring, Tree, and Hierarchical AllReduce algorithms across multi-node topologies,
+          profile gradient compression with error feedback, and quantify communication-computation overlap.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_06_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_06_variant.stakeholder}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Hardware:</strong> {v2_06_variant.hardware_ref}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Topology:</strong> {v2_06_defaults["topology"]}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> {v2_06_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
 
-
-@app.cell(hide_code=True)
-def _(COLORS, mo, source_trace, v2_06_defaults, v2_06_lens, v2_06_variant):
-    mo.vstack(
-        [
-            mo.Html(
-                f"""
-                <div style="border-left:4px solid {COLORS['BlueLine']}; background:white;
-                            border-radius:0 12px 12px 0; padding:20px 28px; margin:8px 0 16px 0;
-                            box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-                    <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                                text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                        Chapter Invariant
-                    </div>
-                    <div style="font-size:0.95rem; color:{COLORS['TextSec']}; line-height:1.7;">
-                        Collectives are algorithms whose latency and bandwidth terms depend on topology,
-                        payload, overlap, and compression. Your track keeps the same concept sequence
-                        while changing the stakeholder, guardrails, evidence emphasis, and report frame.
-                    </div>
-                    <div style="border-top:1px solid {COLORS['Border']}; margin:14px -28px 0 -28px;
-                                padding:14px 28px 0 28px;">
-                        <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
-                                    text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                            Starting Scenario
-                        </div>
-                        <div style="font-size:1.0rem; color:{COLORS['Text']}; font-weight:600; line-height:1.5;">
-                            {v2_06_defaults["participants"]} {v2_06_lens["participant_name"]},
-                            {v2_06_defaults["message_gb"]} GB per participant,
-                            topology: {v2_06_defaults["topology"]}.
-                        </div>
-                    </div>
-                </div>
-                """
-            ),
-            mo.callout(
-                mo.md(
-                    """
-                    **Recommended Reading** - Volume II, Chapter 6: Collective Communication.
-
-                    Focus on alpha-beta cost models, Ring and Tree AllReduce, topology-aware
-                    hierarchical communication, gradient compression, error feedback, and
-                    communication-computation overlap.
-                    """
-                ),
-                kind="info",
-            ),
-            source_trace(
-                {
-                    "chapter anchors": "collective_communication.qmd sections on alpha-beta, AllReduce algorithms, topology, compression, and overlap",
-                    "shared solvers": "mlsysim.physics calc_ring_allreduce_time, calc_tree_allreduce_time, calc_hierarchical_allreduce_time",
-                    "track defaults": v2_06_variant.scenario_id,
-                    "local assumptions": "step-time budgets, quality/fidelity proxies, and overlap guardrails are notebook-local pedagogical assumptions",
-                    "validation tests": ", ".join(v2_06_lens["validation_tests"]),
-                },
-                collapsed=True,
-                summary="Source models and local assumptions",
-            ),
-        ]
-    )
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_06_profile.label} Collective Scaling
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_06_lens["scenario"]} Communication algorithm choice is a fundamental systems decision governed by physical fabric topology and message scaling, not an opaque library detail.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Collective Communication:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Ring AllReduce Scaling Limit (2(N-1)&alpha; + 2((N-1)/N)M/&beta;):</strong> Bandwidth overhead per device is nearly constant (2M/&beta; as N &rarr; &infin;), but latency scales linearly with N (2(N-1)&alpha;).</li>
+            <li><strong>The Tree AllReduce Trade-off (2&lceil;log&sub2; N&rceil;&alpha; + 2&lceil;log&sub2; N&rceil;M/&beta;):</strong> Latency scales logarithmically (O(log N)), making tree optimal for small latency-bound payloads, but bandwidth term carries a 2log&sub2; N multiplier, degrading scaling for large gradient buckets.</li>
+            <li><strong>Hierarchical Topology Decoupling:</strong> Mixing high-speed local fabrics (e.g. NVLink 900 GB/s) with cross-node networks (InfiniBand 50 GB/s) via Reduce-Scatter, Inter-node AllReduce, and All-Gather prevents slow cross-node links from serializing local communication.</li>
+            <li><strong>Gradient Compression & Error Feedback Law:</strong> Quantization and sparsification shrink payload M, but require residual error compensation e<sub>t+1</sub> = (g<sub>t</sub> + e<sub>t</sub>) - v<sub>t</sub> to prevent optimizer divergence or safety fidelity loss.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
@@ -841,6 +772,7 @@ def _(mo, v2_06_defaults):
             "C) The winner depends on alpha, beta, N, and payload size": "depends",
             "D) FLOPs dominate once the collective is chosen": "flops",
         },
+        value="C) The winner depends on alpha, beta, N, and payload size",
         label="Part A prediction - which rule chooses between ring and tree costs?",
     )
     partB_prediction = mo.ui.radio(
@@ -850,6 +782,7 @@ def _(mo, v2_06_defaults):
             "C) Topology changes diagrams but not collective time": "label_only",
             "D) Participant count matters but local grouping does not": "participants_only",
         },
+        value="A) Topology can make a collective infeasible or no longer dominant",
         label=f"Part B prediction - what changes the dominant collective for {v2_06_defaults['topology']}?",
     )
     partC_prediction = mo.ui.radio(
@@ -859,6 +792,7 @@ def _(mo, v2_06_defaults):
             "C) Async overlap makes bandwidth irrelevant": "free_overlap",
             "D) Compression only changes optimizer math, not systems behavior": "optimizer_only",
         },
+        value="A) Compression and overlap reduce exposed time but carry validation risk",
         label="Part C prediction - what risk remains after hiding or shrinking communication?",
     )
     partD_prediction = mo.ui.radio(
@@ -868,6 +802,7 @@ def _(mo, v2_06_defaults):
             "C) Optimization risk rejects the naive plan": "optimization",
             "D) The fastest modeled plan should always be approved": "fastest",
         },
+        value="C) Optimization risk rejects the naive plan",
         label="Part D prediction - which guardrail will reject the naive alternative?",
     )
 
@@ -877,6 +812,7 @@ def _(mo, v2_06_defaults):
             "Carry tree forward for alpha-bound payloads": "tree_family",
             "Do not lock yet; let topology decide": "defer_to_topology",
         },
+        value="Carry ring forward for bandwidth-bound payloads",
         label="Part A checkpoint - which algorithm family should the next module test?",
     )
     partB_checkpoint = mo.ui.radio(
@@ -885,6 +821,7 @@ def _(mo, v2_06_defaults):
             "Use tree/coordinator scheduling": "tree_schedule",
             "Use hierarchical local-global scheduling": "hierarchical_schedule",
         },
+        value="Use hierarchical local-global scheduling",
         label="Part B checkpoint - which topology assumption should the plan carry forward?",
     )
     partC_checkpoint = mo.ui.radio(
@@ -893,6 +830,7 @@ def _(mo, v2_06_defaults):
             "Moderate compression with validation": "moderate_compression",
             "Aggressive compression/overlap only after convergence or fidelity evidence": "aggressive_with_evidence",
         },
+        value="Moderate compression with validation",
         label="Part C checkpoint - which optimization policy should the design review use?",
     )
     partD_final_decision = mo.ui.radio(
@@ -901,6 +839,7 @@ def _(mo, v2_06_defaults):
             "Revise algorithm, topology, or optimization before approval": "revise",
             "Reject the plan and rerun topology/validation evidence": "reject",
         },
+        value="Approve the selected communication plan",
         label="Final decision - how should the stakeholder sign the communication design review?",
     )
     student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
@@ -965,16 +904,26 @@ def _(mo, v2_06_default_fabric_label, v2_06_defaults, v2_06_fabric_options):
         step=1,
         label="Compression ratio",
     )
-    return compression_ratio, fabric, gpus_per_node, message_gb, n_gpus, overlap_pct
+    return (
+        compression_ratio,
+        fabric,
+        gpus_per_node,
+        message_gb,
+        n_gpus,
+        overlap_pct,
+    )
 
 
 @app.cell(hide_code=True)
 def _(
     MathPeek,
+    big_takeaways,
     build_lab_report,
     compression_ratio,
     fabric,
+    gated_hypothesis_card,
     gpus_per_node,
+    instrumentation_console,
     ledger,
     memo_note,
     message_gb,
@@ -1174,15 +1123,15 @@ def _(
         _best_ms = min(_ring_ms, _tree_ms)
         items = [
             mo.md("## Part A - Concept Module: Ring And Tree Costs Bind Different Alpha/Beta Terms"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** {v2_06_variant.stakeholder} must choose a first-pass collective for "
-                    f"**{_n} {v2_06_lens['participant_name']}** moving a **{_payload:.4g} GB "
-                    f"{v2_06_lens['payload_name']}** over **{_terms['fabric_label']}**."
+            gated_hypothesis_card(
+                partA_prediction,
+                title="1. Formulate Your AllReduce Scaling Hypothesis",
+                subtitle=(
+                    f"Scenario: {v2_06_variant.stakeholder} must choose a first-pass collective for "
+                    f"{_n} {v2_06_lens['participant_name']} moving a {_payload:.4g} GB "
+                    f"{v2_06_lens['payload_name']} over {_terms['fabric_label']}."
                 ),
-                kind="info",
             ),
-            partA_prediction,
             v2_06_prediction_feedback(
                 partA_prediction.value,
                 _actual,
@@ -1194,7 +1143,11 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack([n_gpus, message_gb, fabric], justify="start"),
+                instrumentation_console(
+                    mo.hstack([n_gpus, message_gb, fabric], justify="start", gap=1.0),
+                    title="Participant Scale & Fabric Instrumentation",
+                    subtitle="Sweep participant count, payload size, and underlying link bandwidth",
+                ),
                 mo.as_html(v2_06_alpha_beta_chart(_terms, v2_06_lens["budget_ms"])),
                 _part_a_table(),
                 v2_06_failure_callout(
@@ -1212,7 +1165,16 @@ def _(
                         "chapter source": "Alpha-beta model and AllReduce algorithm crossover sections",
                     },
                 ),
-                partA_checkpoint,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Algorithm Selection</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        Which collective algorithm family should the next module carry forward?
+                    </p>
+                    {partA_checkpoint}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1223,15 +1185,14 @@ def _(
         _best_row = v2_06_row_by_key(_topology_rows, _best_key)
         items = [
             mo.md("## Part B - Concept Module: Topology Changes Which Collective Is Feasible Or Dominant"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** The Part A amount now has to run through the selected track topology: "
-                    f"**{v2_06_lens['topology_label']}**. Test whether local grouping, fabric, and "
-                    "topology assumptions change the winning collective."
+            gated_hypothesis_card(
+                partB_prediction,
+                title="2. Formulate Your Topology Feasibility Hypothesis",
+                subtitle=(
+                    f"Scenario: The Part A amount now runs through {v2_06_lens['topology_label']}. "
+                    "Test whether local grouping, fabric, and hierarchy assumptions change the winning collective."
                 ),
-                kind="info",
             ),
-            partB_prediction,
             v2_06_prediction_feedback(
                 partB_prediction.value,
                 _actual,
@@ -1243,7 +1204,11 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack([n_gpus, gpus_per_node, fabric], justify="start"),
+                instrumentation_console(
+                    mo.hstack([n_gpus, gpus_per_node, fabric], justify="start", gap=1.0),
+                    title="Grouping & Topology Controls",
+                    subtitle="Configure intra-node local grouping and cross-node interconnect",
+                ),
                 mo.as_html(v2_06_frontier_chart(v2_06_lens, _n, _fabric, _local, _payload)),
                 _part_b_table(),
                 v2_06_failure_callout(
@@ -1261,7 +1226,16 @@ def _(
                         "chapter source": "Hierarchical AllReduce and topology-aware routing sections",
                     },
                 ),
-                partB_checkpoint,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Topology Governance</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        Which topology assumption should the plan carry forward?
+                    </p>
+                    {partB_checkpoint}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1270,14 +1244,14 @@ def _(
         _actual = "risk"
         items = [
             mo.md("## Part C - Concept Module: Overlap And Compression Hide Communication With Risk"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** The design now tries to reduce exposed time for **{_part_c['selected_label']}**. "
-                    "Compression shrinks the payload; overlap hides only communication that has useful work beside it."
+            gated_hypothesis_card(
+                partC_prediction,
+                title="3. Formulate Your Optimization & Risk Hypothesis",
+                subtitle=(
+                    f"Scenario: The design tries to reduce exposed time for {_part_c['selected_label']}. "
+                    "Compression shrinks payload; overlap hides only communication with concurrent compute."
                 ),
-                kind="info",
             ),
-            partC_prediction,
             v2_06_prediction_feedback(
                 partC_prediction.value,
                 _actual,
@@ -1289,7 +1263,11 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack([compression_ratio, overlap_pct], justify="start"),
+                instrumentation_console(
+                    mo.hstack([compression_ratio, overlap_pct], justify="start", gap=1.0),
+                    title="Optimization & Overlap Controls",
+                    subtitle="Tune gradient compression ratio and computation overlap percentage",
+                ),
                 mo.as_html(v2_06_optimization_chart({**_part_c, "budget_ms": v2_06_lens["budget_ms"]})),
                 _part_c_table(),
                 v2_06_failure_callout(
@@ -1307,7 +1285,16 @@ def _(
                         "chapter source": "Gradient compression, error feedback, and overlap limits sections",
                     },
                 ),
-                partC_checkpoint,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Optimization Policy</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        Which optimization policy should the design review authorize?
+                    </p>
+                    {partC_checkpoint}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1321,15 +1308,14 @@ def _(
         _actual = _actual_map.get(_rejected["binding_guardrail"], "optimization")
         items = [
             mo.md("## Part D - Concept Module: Communication Plan Guardrails"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** The final design review must satisfy exposed step-time, topology, "
-                    f"and {v2_06_lens['optimization_guardrail_label']} guardrails for {v2_06_profile.label}. "
-                    f"{v2_06_lens['decision_frame']}"
+            gated_hypothesis_card(
+                partD_prediction,
+                title="4. Formulate Your Plan Guardrail Hypothesis",
+                subtitle=(
+                    f"Scenario: The final design review must satisfy exposed step-time, topology, "
+                    f"and {v2_06_lens['optimization_guardrail_label']} guardrails for {v2_06_profile.label}."
                 ),
-                kind="info",
             ),
-            partD_prediction,
             v2_06_prediction_feedback(
                 partD_prediction.value,
                 _actual,
@@ -1341,7 +1327,11 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack([gpus_per_node, compression_ratio, overlap_pct], justify="start"),
+                instrumentation_console(
+                    mo.hstack([gpus_per_node, compression_ratio, overlap_pct], justify="start", gap=1.0),
+                    title="Integrated Guardrail Review Knobs",
+                    subtitle="Simultaneous verification of grouping, compression, and overlap limits",
+                ),
                 mo.as_html(v2_06_candidate_chart(_selected, _rejected)),
                 _part_d_table(_selected, _rejected),
                 v2_06_failure_callout(
@@ -1359,7 +1349,16 @@ def _(
                         "chapter source": "Fallacies, pitfalls, and chapter summary",
                     },
                 ),
-                partD_final_decision,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Engineering Sign-off</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        How should the stakeholder sign off on this collective communication plan?
+                    </p>
+                    {partD_final_decision}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1511,8 +1510,14 @@ def _(
         return mo.vstack(
             [
                 mo.md("## Synthesis - Collective Communication Design Review"),
-                student_id,
-                memo_note,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO & REFLECTIONS</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Design Review Findings</h4>
+                    {student_id}
+                    <div style="margin-top: 12px;">{memo_note}</div>
+                </div>
+                """),
                 mo.callout(
                     mo.md(
                         f"**Selected algorithm/topology/optimization:** {_selected['selected_label']} "
@@ -1524,7 +1529,24 @@ def _(
                     ),
                     kind="success" if _selected["valid_plan"] else "warn",
                 ),
-                partD_final_decision,
+                big_takeaways(
+                    [
+                        "Ring and tree costs differ because their alpha and beta terms scale differently.",
+                        "Topology changes whether a collective is feasible and whether its modeled advantage is real.",
+                        "Overlap and compression reduce exposed communication only inside validation guardrails.",
+                        "The V2-06 decision becomes a V2-07 reliability obligation.",
+                    ]
+                ),
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION & SIGN-OFF</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        Confirm your collective deployment authorization and export your telemetry audit record.
+                    </p>
+                    {partD_final_decision}
+                </div>
+                """),
                 report_export_panel(_report),
             ]
         )
