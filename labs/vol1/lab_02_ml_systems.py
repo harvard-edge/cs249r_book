@@ -628,6 +628,9 @@ def _(
                 {status_tag}
               </div>
               <div style="color: #1E293B; font-size: 0.92rem; line-height: 1.6;">
+                <p style="margin: 0 0 6px 0;">
+                  You predicted: <code>{pred_wall_radio.value}</code> &mdash; Actual bottleneck: <strong>{active_profile.bottleneck} Wall</strong>.
+                </p>
                 <strong>Simulation Reality:</strong> Execution step latency is <strong>{lat_ms:.2f} ms</strong>, of which 
                 <strong>{lat_mem_ms:.2f} ms</strong> ({lat_mem_ms / max(lat_ms, 1e-6) * 100:.1f}%) is memory transfer overhead, 
                 while arithmetic compute takes <strong>{lat_compute_ms:.2f} ms</strong>.<br/>
