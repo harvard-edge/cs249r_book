@@ -162,6 +162,9 @@ def _fragment_owner(source_path: Path, volume_root: Path) -> Path | None:
         "_conventions.qmd": volume_root / "frontmatter" / "about.qmd",
         "_notation_body.qmd": volume_root / "frontmatter" / "notation.qmd",
         "_notation_distributed.qmd": volume_root / "frontmatter" / "notation.qmd",
+        "_notation_scaling.qmd": volume_root / "frontmatter" / "notation.qmd",
+        "_notation_agentic.qmd": volume_root / "frontmatter" / "notation.qmd",
+        "_notation_physical.qmd": volume_root / "frontmatter" / "notation.qmd",
     }
     return owners.get(source_path.name)
 

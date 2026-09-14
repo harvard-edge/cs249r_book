@@ -5,8 +5,8 @@ This is a conservative, high-signal scanner intended for CI:
 - Emits DEFERRED issues for context-dependent collisions (review-only).
 
 Ground truth definitions live in:
-  - books/vol1/frontmatter/_notation_body.qmd (shared)
-  - books/vol2/frontmatter/_notation_distributed.qmd (vol2-only)
+  - books/shared/_partials/_notation_body.qmd (shared)
+  - books/vol2/frontmatter/_notation_scaling.qmd (vol2-only)
 
 Rule: "Notation conventions" (see the Notations chapter in each volume).
 """
@@ -31,8 +31,12 @@ RULE_TEXT = (
 # ── Definition parsing (from the Notations chapter tables) ────────────────────
 
 _NOTATION_PATHS = (
+    Path("books/shared/_partials/_notation_body.qmd"),
     Path("books/vol1/frontmatter/_notation_body.qmd"),
+    Path("books/vol2/frontmatter/_notation_scaling.qmd"),
     Path("books/vol2/frontmatter/_notation_distributed.qmd"),
+    Path("books/vol3/frontmatter/_notation_agentic.qmd"),
+    Path("books/vol4/frontmatter/_notation_physical.qmd"),
 )
 
 
@@ -376,7 +380,10 @@ def check(
 
     # Skip the notation definition sources themselves to avoid self-referential noise.
     posix = file_path.as_posix()
-    if posix.endswith("/frontmatter/notation.qmd") or posix.endswith("/frontmatter/_notation_body.qmd") or posix.endswith("/frontmatter/_notation_distributed.qmd"):
+    if (
+        posix.endswith("/frontmatter/notation.qmd")
+        or "/_notation_" in posix
+    ):
         return issues, counter
 
     # Resolve repo root from file path (scan.py passes absolute file paths).
