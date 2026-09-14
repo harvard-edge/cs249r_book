@@ -193,66 +193,9 @@ At each execution step $t$, an **agentic execution cycle** executes a closed loo
 5. **Runtime Verification:** An external verification oracle audits the outcome against task invariants, gating whether the state transition is committed, rolled back, or flagged for error remediation.
 :::
 
-To understand how these five phases translate into software, @lst-vol3-intro-minimal-runtime formalizes the minimal execution harness required to operate an agent safely. Notice the architectural parallel to classical operating systems: the runtime maintains an **Agent Control Block (ACB)** (analogous to the OS `task_struct`), enforces step and token watchdog budgets, discriminates zero-cost internal compute from state-mutating I/O calls, and routes observations through a verification oracle before updating the context history.
+To govern this execution cycle reliably, an autonomous runtime maintains an **Agent Control Block (ACB)**—an in-memory state descriptor directly analogous to the `task_struct` (Process Control Block) in a classical operating system kernel. The ACB encapsulates the running trajectory's active identity: unique task identifiers, allocated working context buffers, cumulative token and financial expenditures, active tool capability leases, and verification milestones. At each turn, the runtime references the ACB to enforce step-count and financial watchdog budgets, dispatches neural token generation, discriminates reversible internal deliberation from state-mutating external actuation, and gates state transitions through verification oracles before updating the trajectory history.
 
-::: {#lst-vol3-intro-minimal-runtime lst-cap="**The Minimal Closed-Loop Agent Runtime**: Python implementation of the foundational agent control loop, featuring the Agent Control Block (ACB) state structure, strict budget enforcement, Compute vs. I/O action classification, and runtime invariant verification."}
-```python
-from dataclasses import dataclass, field
-from typing import Any, Callable
-
-
-@dataclass
-class AgentControlBlock:
-  task_id: str
-  objective: str
-  turn: int = 0
-  max_turns: int = 50
-  tokens_consumed: int = 0
-  token_budget: int = 100_000
-  history: list[dict[str, Any]] = field(default_factory=list)
-  is_terminal: bool = False
-  status: str = "INITIALIZED"
-
-
-class MinimalAgentRuntime:
-
-  def __init__(self, policy_fn, tool_dispatcher, verifier_fn):
-    self.policy = policy_fn
-    self.tools = tool_dispatcher
-    self.verifier = verifier_fn
-
-  def step(self, acb: AgentControlBlock) -> AgentControlBlock:
-    # Watchdog budget enforcement
-    if acb.turn >= acb.max_turns or acb.tokens_consumed >= acb.token_budget:
-      acb.is_terminal = True
-      acb.status = "BUDGET_EXHAUSTED"
-      return acb
-
-    # Phase 1 & 2: Context Assembly & Neural Dispatch
-    prompt = f"Task: {acb.objective}\nHistory: {acb.history}"
-    output, tokens = self.policy(prompt)
-    acb.tokens_consumed += tokens
-
-    # Phase 3: Action Classification (Compute vs. I/O Boundary)
-    is_tool, payload = self._classify_action(output)
-    if not is_tool:
-      # Reversible internal deliberation: mutate working context only
-      acb.history.append({"role": "thought", "content": payload})
-    else:
-      # Irreversible external actuation: execute in sandbox with verification
-      obs = self.tools(payload["name"], payload["arguments"])
-      if not self.verifier(obs):
-        obs["verification_status"] = "INVARIANT_VIOLATION_FLAGGED"
-      acb.history.append(
-          {"role": "action", "tool": payload["name"], "obs": obs}
-      )
-
-    acb.turn += 1
-    return acb
-```
-:::
-
-This minimal harness represents the bare minimum kernel of autonomous agency. As we progress through this book, we will replace each simplistic component with production systems architecture: replacing prompt string concatenation with paged virtual memory (@sec-vol3-virtual-memory), unconstrained token generation with grammar-constrained decoding (@sec-vol3-processor), naive shell execution with microVM sandboxes (@sec-vol3-virtualization), and synchronous waiting with asynchronous trajectory schedulers (@sec-vol3-scheduling).
+This control loop represents the foundational kernel of autonomous agency. As we progress through this book, we examine how each stage of this cycle scales from conceptual prototypes into hardened production systems: replacing raw prompt string concatenation with paged virtual memory (@sec-vol3-virtual-memory), unconstrained token generation with grammar-constrained decoding (@sec-vol3-processor), naive shell execution with isolated microVM sandboxes (@sec-vol3-virtualization), and synchronous blocking with asynchronous trajectory schedulers (@sec-vol3-scheduling).
 
 ### The causal feedback inversion: Endogenous distribution shift
 
@@ -460,62 +403,32 @@ Autoregressive transformer inference operates under two fundamentally distinct c
 ![](images/svg/prefill_vs_decode.svg){width="100%"}
 :::
 
-The architectural contrast between these phases is captured by the **Roofline model**, which relates attainable computational performance ($P$, in FLOPS) to operational intensity ($I$, in FLOPs per byte of memory traffic) and peak hardware capabilities:
-$$P = \min\left(P_{\text{peak}}, \; I \times \text{BW}_{\text{mem}}\right)$$
-where $P_{\text{peak}}$ is the peak arithmetic throughput of the accelerator's matrix cores and $\text{BW}_{\text{mem}}$ is the memory bandwidth of HBM.
+The architectural contrast between these two phases is governed by the **Roofline model**, which relates attainable computational performance to operational intensity (arithmetic operations executed per byte of memory transferred from off-chip storage):
 
-To make this constraint concrete, consider an NVIDIA H100 SXM5 accelerator. The chip delivers a peak 16-bit Tensor Core throughput of $P_{\text{peak}} \approx 989\text{ TFLOPS}$ ($989 \times 10^{12}\text{ FLOP/s}$) and an HBM3 memory bandwidth of $\text{BW}_{\text{mem}} \approx 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ bytes/s}$). The *arithmetic intensity knee* that separates memory-bound execution from compute-bound execution is:
-$$I_{\text{knee}} = \frac{P_{\text{peak}}}{\text{BW}_{\text{mem}}} = \frac{989 \times 10^{12}\text{ FLOP/s}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 295\text{ FLOP/byte}$$
-Any operation with an arithmetic intensity below $295\text{ FLOP/byte}$ cannot saturate the accelerator's matrix compute units; its execution speed is strictly throttled by the rate at which bytes stream across the memory bus.
+1. **Context Prefill Phase (Compute-Bound):** When an agent initiates a turn, it submits a prompt consisting of system instructions, trajectory history, and new tool observations. The accelerator processes all prompt tokens concurrently. The dominant operations are dense General Matrix-Matrix Multiplications (GEMM). Because model weights are reused across hundreds or thousands of prompt tokens in parallel, operational intensity is high. The workload operates near the flat ceiling of the Roofline model: execution speed is bounded by peak accelerator Tensor Core arithmetic throughput.
+2. **Autoregressive Decode Phase (Memory-Bandwidth Bound):** Once prefill completes, the model generates output action tokens sequentially, one token at a time. To emit each new token, the accelerator must stream its entire multi-gigabyte weight tensor from off-chip High-Bandwidth Memory (HBM) into on-chip registers to perform a Matrix-Vector Multiplication (GEMV). Because weights are read once to compute a single token update, operational intensity collapses to approximately $1\text{ FLOP/Byte}$. At this low intensity, execution speed is strictly throttled by HBM memory bandwidth. Over 99 percent of the accelerator's matrix compute units sit idle, stalled waiting for weight bytes to stream across the memory bus.
 
-1. **Context Prefill Phase (Compute-Bound):** When an agent initiates a turn, it submits a prompt consisting of system instructions, trajectory history, and new tool observations ($T_{\text{prompt}}$ tokens). The accelerator processes all $T_{\text{prompt}}$ tokens concurrently. The dominant operations are dense General Matrix-Matrix Multiplications (GEMM). Because model weights are reused across all $T_{\text{prompt}}$ tokens in parallel, arithmetic intensity is high (frequently $100\text{--}300+\text{ FLOP/byte}$ for large prompts). The workload operates near or on the flat ceiling of the Roofline model: throughput is bounded by peak accelerator Tensor Core FLOPS.
-2. **Autoregressive Decode Phase (Memory-Bandwidth Bound):** Once prefill completes, the model generates output action tokens sequentially, one token at a time. To produce each new token, the accelerator must fetch all model parameter weights $\theta$ from off-chip HBM into on-chip SRAM registers, perform a General Matrix-Vector Multiplication (GEMV), and write the resulting hidden state back. For a 70-billion parameter model in 16-bit precision ($140\text{ GB}$ of weights), generating a single token vector requires streaming $140\text{ GB}$ over the bus to perform $2 \times 70\times 10^9 = 140\text{ GFLOP}$ of arithmetic. Arithmetic intensity collapses to:
-$$I_{\text{decode}} = \frac{140\text{ GFLOP}}{140\text{ GB}} = 1.0\text{ FLOP/byte}$$
-At $1.0\text{ FLOP/byte}$, the accelerator's attainable performance is:
-$$P_{\text{attainable}} = 1.0\text{ FLOP/byte} \times 3.35\text{ TB/s} = 3.35\text{ TFLOPS}$$
-This represents less than $0.4\%$ of the H100's peak 989 TFLOPS Tensor Core capacity. Over $99.6\%$ of the silicon's compute units sit completely stalled, waiting for weight bytes to arrive from HBM.
+In an agentic workflow, execution oscillates continuously between these two regimes: brief compute-bound prefill spikes when ingesting observations, followed by memory-bandwidth-bound decode stalls while generating action plans.
 
-### The key-value cache arithmetic
+### The key-value cache capacity wall
 
-To prevent the decode phase from recomputing self-attention across the entire history for every emitted token, inference engines store the intermediate Key and Value activation vectors of all past tokens in accelerator memory. This memory structure is the **Key-Value (KV) cache**.
+To prevent the autoregressive decode phase from recomputing self-attention over the entire historical sequence for every newly emitted token, inference engines store intermediate Key and Value activation vectors in accelerator memory. This memory structure is the **Key-Value (KV) cache**.
 
-The physical memory footprint of the KV cache for a single active trajectory is governed by model architecture dimensions:
-$$M_{\text{KV}} = 2 \times N_{\text{layers}} \times n_{\text{kv}} \times d_{\text{head}} \times T \times b_{\text{bytes}}$$
-where:
+While the KV cache eliminates redundant attention recomputation, it introduces a severe physical memory footprint. Key-Value activations must be retained across all layers and attention heads for every token in the active trajectory. Consequently, the KV cache footprint grows linearly with sequence length:
 
-- $N_{\text{layers}}$ is the number of transformer layers.
-- $n_{\text{kv}}$ is the number of Key-Value attention heads. Modern architectures use Grouped-Query Attention (GQA), setting $n_{\text{kv}} \ll n_{\text{query}}$ to reduce memory pressure.
-- $d_{\text{head}}$ is the hidden dimension per attention head ($d_{\text{model}} / n_{\text{query}}$).
-- $T$ is the total accumulated sequence length (tokens).
-- $b_{\text{bytes}}$ is the precision byte width (e.g., $2\text{ bytes}$ for 16-bit floating point FP16/BF16; $1\text{ byte}$ for 8-bit FP8).
-- The leading factor of $2$ accounts for storing both Key and Value tensors.
+- For a modern 70-billion-parameter model, retaining the KV cache across an extended agent horizon of $32\text{k}$ to $128\text{k}$ tokens requires between $10\text{ GB}$ and $40+\text{ GB}$ of high-bandwidth memory for a single trajectory.
+- Once static model weights are loaded onto an accelerator (consuming tens of gigabytes even in quantized 8-bit precision), only a fraction of HBM remains available for dynamic activations and KV states.
 
-Consider a contemporary 70-billion parameter dense model utilizing Grouped-Query Attention ($N_{\text{layers}} = 80$, $n_{\text{kv}} = 8$, $d_{\text{head}} = 128$, and $b_{\text{bytes}} = 2$). Storing one token of KV state across all 80 layers requires:
-$$2 \times 80 \times 8 \times 128 \times 2\text{ bytes} = 327{,}680\text{ bytes/token} \approx 327.7\text{ KB/token}$$
-At an execution horizon of $T = 32{,}768$ tokens ($32\text{k}$ context), the memory required to retain the KV cache for a single agent trajectory is:
-$$M_{\text{KV}} = 327{,}680 \times 32{,}768 = 10{,}737{,}418{,}240\text{ bytes} \approx 10.74\text{ GB}$$
+This footprint creates the **KV cache capacity wall**. In production deployments, accelerator memory is rapidly saturated not by static weights, but by the accumulating KV caches of active agent sessions. A cluster of high-end accelerators can host only a handful of concurrent long-horizon trajectories before exhausting HBM, capping serving concurrency and forcing runtimes into aggressive memory throttling.
 
-When the agent's horizon expands to $T = 131{,}072$ tokens ($128\text{k}$ context), the KV cache footprint scales linearly to $42.95\text{ GB}$.
+### The context accumulation wall
 
-This arithmetic reveals the physical memory bottleneck of autonomous agency. If an engineer serves this 70B model with FP8 weights ($70\text{ GB}$) on a single 80 GB NVIDIA H100 accelerator to avoid multi-GPU interconnect overhead, the static weights leave only $10\text{ GB}$ of remaining HBM for runtime activations and the KV cache. A single trajectory at $32\text{k}$ context immediately triggers an Out-Of-Memory (OOM) fault. Even in an 8-GPU tensor-parallel cluster (where weights consume $\approx 8.75\text{ GB}$ per GPU and the KV heads are sharded across devices), serving just a handful of concurrent agent sessions operating at $128\text{k}$ context windows rapidly exhausts available HBM, forcing serving systems to throttle concurrency.
+The linear growth of the KV cache is further compounded by the accumulation of context across multi-turn trajectories.
 
-### The context accumulation wall and quadratic prefill tax
+In an autonomous agent loop spanning dozens of sequential turns, each step appends tool invocation arguments, compiler outputs, environment diagnostics, and scratchpad reflections to the prompt. This monotonic accumulation imposes two distinct systems penalties:
 
-The linear growth of the KV cache is compounded by the quadratic cost of context prefill across multi-turn trajectories.
-
-In an agentic loop spanning $K$ sequential turns, each turn appends a new tool observation $O_k$ to the context. At turn $k$, the total prompt length evaluated during prefill is the sum of all preceding instructions, actions, and observations:
-$$C_k = C_0 + \sum_{i=1}^{k-1} \left( |A_i| + |O_i| \right)$$
-
-Because standard self-attention exhibits quadratic computational complexity with respect to sequence length [@vaswani2017; @dao2023flashattention2], the FLOPs required to execute the prefill phase at step $k$ scale as $\mathcal{O}(C_k^2)$. If each turn adds an average of $\Delta$ tokens of tool commands and observations ($C_k \approx k \Delta$), the cumulative prefill compute across an entire trajectory of $K$ turns scales cubically with the operational horizon:
-$$\text{Cumulative Prefill Compute} \propto \sum_{k=1}^K C_k^2 \approx \Delta^2 \sum_{k=1}^K k^2 = \Delta^2 \frac{K(K+1)(2K+1)}{6} \approx \frac{1}{3} K^3 \Delta^2$$
-
-To appreciate the severity of this cubic tax, consider an agent executing a 50-turn trajectory ($K = 50$) with an average increment of $\Delta = 1{,}000$ tokens per turn. At turn 50 alone, the engine prefills $50{,}000$ tokens. Notice the dual scaling behavior: cumulative token volume processed across all turns scales quadratically ($\mathcal{O}(K^2 \Delta)$):
-$$\sum_{k=1}^{50} (1{,}000 \cdot k) = 1{,}000 \times \frac{50 \times 51}{2} = 1{,}275{,}000\text{ tokens evaluated}$$
-while the cumulative pairwise self-attention compute scales cubically ($\mathcal{O}(K^3 \Delta^2)$):
-$$\frac{1}{3} (50)^3 (1{,}000)^2 \approx 4.17 \times 10^{10}\text{ token-pair operations}$$
-This is over $40{,}000$ times the attention work performed in the initial turn! Without prefix caching, the agent repeatedly re-evaluates its own static history, burning massive compute budgets on redundant attention operations.
-
-Beyond computational cost, expanding context windows degrade model reasoning. As established by @liu2024lost, transformer attention distributions exhibit pronounced U-shaped retrieval curves: models retrieve information located at the extreme beginning or extreme end of the prompt with high fidelity, but accuracy degrades significantly for tokens positioned in the middle of long contexts. In long-horizon agent trajectories, critical early environmental invariants and initial user constraints migrate into this attention dead zone, triggering subtle goal drift and hallucinated preconditions.
+1. **The Quadratic Prefill Tax:** Standard self-attention scales quadratically with sequence length ($\mathcal{O}(T^2)$). As the working context expands from thousands to tens of thousands of tokens over a long trajectory, each successive turn requires evaluating an increasingly large prompt. Without prefix caching, the runtime repeatedly recomputes self-attention over the entire static history, burning massive compute budgets on redundant attention operations.
+2. **Attention Dispersion ("Lost in the Middle"):** Beyond computational cost, expanding context windows degrade model reasoning. Empirical studies consistently reveal that transformer attention follows a U-shaped distribution [@liu2024lost]: models retrieve information located at the extreme beginning or extreme end of a sequence with high fidelity, but accuracy degrades significantly for tokens positioned in the middle. In long trajectories, critical early environmental constraints, system instructions, and initial objectives migrate into this attention dead zone, triggering goal drift and hallucinated preconditions.
 
 ### The tool-wait memory tax
 
@@ -525,36 +438,32 @@ The intersection of stateful trajectories and physical hardware culminates in th
 ![](images/svg/tool_wait_memory_tax.svg){width="100%"}
 :::
 
-In traditional ML serving, requests execute to completion in hundreds of milliseconds, immediately freeing accelerator memory for the next incoming query. In agentic systems, execution alternates between brief bursts of neural generation and lengthy periods of external tool execution.
+In traditional machine learning serving, stateless inference queries complete in hundreds of milliseconds, immediately releasing accelerator resources for the next request. In agentic systems, execution alternates between brief millisecond bursts of neural token generation and lengthy periods of external tool execution.
 
-Consider a representative agent step:
+When an agent issues an external tool call—such as compiling an application, executing an integration test suite, querying a remote database, or awaiting human approval—the tool execution operates on human and network timescales spanning seconds, minutes, or hours. In a naive synchronous architecture, the agent's multi-gigabyte KV cache remains pinned in accelerator HBM while the runtime blocks on external I/O.
 
-1. **Neural Generation:** The model generates a 50-token shell command invoking a comprehensive integration test suite. At a decoding speed of $40\text{ tokens/s}$, this generation takes $1.25\text{ s}$.
-2. **Tool Execution:** The shell command executes within an isolated microVM. Compiling the application, starting container dependencies, and executing test suites requires $30\text{ s}$.
-3. **Observation Ingestion:** The test runner emits compiler diagnostics, and the agent initiates the next turn.
+Across production workflows, agents spend between 70 percent and 90 percent of their total wall-clock lifetime waiting on external systems. Holding premium GPU accelerators in an idle, memory-pinned state destroys cluster economics: expensive hardware sits at near-zero compute utilization, prevented from serving other workloads because memory is stranded by dormant trajectories waiting on I/O.
 
-During the $30\text{ s}$ of tool execution, the accelerator experiences severe resource stranding. In a naive serving architecture, the agent's $20\text{ GB}$ KV cache remains pinned in GPU HBM. The GPU Tensor Cores sit completely idle, waiting for the operating system's `waitpid()` call to return.
+Overcoming the Tool-Wait Memory Tax requires decoupling compute allocation from the trajectory lifecycle:
 
-Across production agent workflows, agents spend between 70 percent and 90 percent of their total wall-clock lifetime waiting on external systems: compiler builds, remote API endpoints, database queries, and browser page rendering. Holding forty-thousand-dollar GPU accelerators in an idle memory-pinned state destroys data center operational economics. Memory capacity is exhausted not by active computation, but by dormant state waiting on I/O.
-
-Overcoming the Tool-Wait Memory Tax requires re-architecting the serving infrastructure:
-
-- **Radix Prefix Caching:** As explored in @sec-vol3-vm-radix-tree, shared prompt prefixes and static tool definitions must be indexed in global radix trees, eliminating redundant prefill FLOPs when trajectories resume.
-- **Hierarchical Memory Swapping:** The runtime must treat GPU HBM as an ephemeral L1 cache, asynchronously paging idle KV blocks across high-speed interconnects (PCIe Gen5 or Compute Express Link (CXL)) into inexpensive host DDR5 RAM during blocking tool calls, and restoring them before the next token decode begins.
+- **Radix Prefix Caching:** Indexing shared prompt prefixes and static tool definitions in global radix trees, eliminating redundant prefill compute when trajectories resume (@sec-vol3-virtual-memory).
+- **Hierarchical Memory Swapping:** Treating GPU HBM as an ephemeral working cache, asynchronously paging idle KV blocks across high-speed interconnects (PCIe Gen5 or CXL) into host DRAM or NVMe storage during blocking tool calls, and restoring them before the next token decode begins (@sec-vol3-scheduling).
 
 ### The mandate for systems co-design
 
-The physical walls of agency—compounding probability failure, Roofline divergence, KV cache explosion, and tool-wait memory stranding—demonstrate that autonomous AI is fundamentally a systems problem. Algorithmic advances in model pretraining are powerless against the mathematics of $p^N$ or the physical bandwidth limits of accelerator memory buses.
+The physical walls of agency—compounding reliability decay ($p^N$), Roofline decode bottlenecks, KV cache memory saturation, and the tool-wait memory tax—demonstrate that autonomous AI is fundamentally a systems problem. Algorithmic advances in model pretraining cannot overcome the exponential decay of sequential probability or the physical bandwidth limits of accelerator memory buses.
 
 Building viable agentic systems requires co-designing the neural policy with the operating system runtime. Having examined the physical constraints that govern agent execution in silicon, we can now look forward to the architectural frontiers where these challenges are being addressed across enterprise software, multi-agent fleets, and physical robotics.
 
 ::: {#chk-vol3-01-silicon-physics .callout-checkpoint title="Silicon physics and memory limits"}
+
 Before exploring the architectural frontiers of autonomous delegation, verify your grasp of the physical and mathematical constraints governing agent execution:
 
-- [ ] **Compounding failure calculus:** Calculate the end-to-end completion rate $R = p^N$ for an agent executing $N = 40$ steps with single-step success $p = 0.96$. If an upgraded frontier model improves single-step accuracy to $p = 0.985$, what is the new completion rate, and what fraction of tasks still fail?
-- [ ] **Roofline knee disparity:** An NVIDIA H200 accelerator achieves $1{,}979\text{ TFLOP/s}$ dense FP16 compute and $4.8\text{ TB/s}$ HBM3e bandwidth. Compute its operational intensity knee $\mathcal{I}_{\text{knee}}$. Why does single-batch autoregressive decode ($\mathcal{I} \approx 1\text{ FLOP/Byte}$) strand over $99\%$ of the GPU's peak compute capacity?
-- [ ] **KV cache capacity limit:** Calculate the uncompressed FP16 KV cache memory footprint for a 405B-parameter model ($L = 126, d_{\text{model}} = 16{,}384$) operating over a $128\text{k}$-token context under standard MHA. How many 80 GB GPUs are required solely to retain this single session's KV cache?
-- [ ] **Tool-Wait memory tax:** An agent executes 25 external tool invocations averaging 3 seconds each. If model token generation takes a total of 5 seconds across the turn, calculate the accelerator idle ratio. Explain why naive synchronous serving destroys cluster operational economics.
+- [ ] **Compounding failure dynamics**: explain why a model with 95 percent single-step accuracy collapses to under 10 percent end-to-end success across a 50-step trajectory, and how closed-loop verification oracles reset error accumulation.
+- [ ] **Roofline divergence**: contrast context prefill and autoregressive decode under the Roofline model. Why does single-token decode leave over 99 percent of accelerator matrix compute units stalled?
+- [ ] **KV cache capacity limits**: explain why Key-Value caching is necessary during autoregressive decoding, and how context expansion across long trajectories caps serving concurrency in GPU HBM.
+- [ ] **Tool-Wait memory tax**: describe how the latency mismatch between millisecond token generation and multi-second tool execution leads to resource stranding, and explain the role of hierarchical memory swapping in mitigating this tax.
+
 :::
 
 <!-- ======================================================================= -->
