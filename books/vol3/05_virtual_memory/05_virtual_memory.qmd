@@ -488,6 +488,18 @@ as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in 
 \end{algorithm}
 ```
 
+### Systems mechanics: Block table indirection and copy-on-write isolation
+
+To understand how @algo-pagedattention-allocation transforms memory efficiency in agent serving runtimes, an ML systems engineer must examine how block tables decouple logical sequence indexing from physical accelerator storage:
+
+1. **Logical-to-Physical Address Translation:** In classical inference engines, KV caches are allocated as contiguous tensor allocations $\mathbf{K}, \mathbf{V} \in \mathbb{R}^{B \times L_{\max} \times H \times D}$. Because request lengths are unpredictable, engines must allocate for maximum possible context $L_{\max}$, wasting $60\text{--}80\%$ of accelerator memory to internal and external fragmentation. PagedAttention mirrors the paging subsystem of an operating system kernel: a logical trajectory $S$ is represented by a dynamically expanding block table $\mathcal{T}[S]$ where each entry points to a fixed-size physical block (typically $B_{\text{block}} = 16$ tokens, corresponding to $5.12\text{ MB}$ per block on a 70B model in FP16).
+2. **Tail Block Allocation (Lines 1–4):** When an agent begins inference or saturates its current tail block, the allocator pops an unmapped block index $b_{\text{new}}$ from the global free list $\mathcal{F}_{\text{HBM}}$, initializes its reference count to unity ($C_{\text{ref}}[b_{\text{new}}] \gets 1$), and registers it in block table $\mathcal{T}[S]$.
+3. **Copy-on-Write Trajectory Branching (Lines 6–13):** When an agent spawns $K$ parallel speculative rollouts (e.g., Monte Carlo Tree Search or Best-of-$N$ deliberation), the runtime duplicates only the lightweight block table arrays $\mathcal{T}[S_1], \ldots, \mathcal{T}[S_K]$ while incrementing reference counters $C_{\text{ref}}[b] \leftarrow C_{\text{ref}}[b] + 1$ on all shared prefix blocks. Zero activation bytes are duplicated.
+   - When branch $S_k$ generates its first divergent token, it inspects its tail block $b_{\text{tail}}$. Because the block is shared ($C_{\text{ref}}[b_{\text{tail}}] > 1$), writing directly to it would corrupt the KV activations of sibling branches.
+   - The memory manager intercepts the write: it pops a private block $b_{\text{new}}$ from $\mathcal{F}_{\text{HBM}}$, copies the $B_{\text{block}}$ tokens from $b_{\text{tail}}$ to $b_{\text{new}}$ via an internal high-speed HBM-to-HBM copy ($> 3\text{ TB/s}$ bandwidth), decrements $C_{\text{ref}}[b_{\text{tail}}]$, and updates $\mathcal{T}[S_k]$ to point to $b_{\text{new}}$.
+   - All preceding prefix blocks ($1, \ldots, \text{tail}-1$) remain shared and read-only.
+4. **Token Insertion and Memory Fragmentation (Line 15):** The new key-value activation $\mathbf{x}$ writes into the next free slot of the private tail block. Because blocks are fixed at $B_{\text{block}} = 16$, memory waste is strictly confined to the unused slots of the single active tail block—bounding internal memory fragmentation to $< 4\%$ across the entire serving cluster.
+
 By confining Copy-on-Write duplication strictly to the single active tail block, PagedAttention decouples physical memory consumption from the branching factor $K$, allowing hundreds of concurrent speculative rollouts to share common prefixes with near-zero memory duplication.
 
 ```{python}
@@ -673,7 +685,27 @@ If an agent returns for its next execution turn before memory pressure forces ev
 \end{algorithm}
 ```
 
-Restricting eviction strictly to unreferenced leaf nodes guarantees that internal tree prefixes remain intact for active sequences, maximizing cache hits across multi-turn deliberation workflows.
+### Systems mechanics: Compressed tries, edge splitting, and the leaf eviction invariant
+
+To see how @algo-radix-prefix-cache coordinates real-time inference across multi-turn agent workflows, an ML systems engineer must examine its three core structural operations:
+
+1. **Prefix Traversal and Block Accumulation (Lines 1–6):** When an agent dispatches a new turn with prompt tokens $\mathbf{t}$, the serving engine descends from the tree root $r$. For each candidate child node $v$, it evaluates the Longest Common Prefix (LCP) length $m$. If the entire edge matches ($m = |v.\text{tokens}|$), all physical blocks backing node $v$ are immediately appended to the request's block table $\mathcal{B}_{\text{cached}}$. The engine advances token position $\text{pos} \gets \text{pos} + m$ without dispatching a single GPU tensor core operation.
+2. **Dynamic Edge Splitting (Lines 7–12):** When an incoming prompt diverges midway through an existing multi-token edge (for instance, sharing the first 120 tokens of a 256-token tool schema before varying an argument), `SplitEdge(u, v, m)` dynamically partitions the edge into:
+   - An ancestral parent segment containing the shared $m$ tokens, whose physical memory blocks remain cached and referenced.
+   - Two child branches: one representing the existing continuation, and a newly allocated branch holding the divergent tokens of the incoming request.
+   This dynamic structural adaptation ensures that prompt prefixes remain shared at the finest possible granularity without requiring manual prefix registration.
+3. **The Leaf-Only LRU Eviction Invariant (Lines 13–18):** Accelerator memory is finite; when the physical free pool $\mathcal{F}_{\text{HBM}}$ approaches exhaustion, blocks must be reclaimed. However, a naive LRU policy that evicts arbitrary blocks would create catastrophic dangling pointers in the trie. RadixAttention enforces the **Leaf-Only Eviction Invariant**:
+   - Only nodes that are unreferenced ($C_{\text{ref}} = 0$) and possess zero active children (i.e., true leaves) are eligible for eviction from $\mathcal{Q}_{\text{LRU}}$.
+   - When an unreferenced leaf $w$ is popped, its physical blocks return to free pool $\mathcal{F}_{\text{HBM}}$, and $w$ is safely detached from its parent.
+   - If detachment leaves the parent node with only a single surviving child, the parent and child edges automatically merge, preserving the trie's compressed invariants.
+   By pruning strictly from the outside in, ancestral prefixes (such as high-traffic system prompts and repomaps) remain pinned and intact for all active concurrent agents.
+
+#### Latency impact: Collapsing time-to-first-token (TTFT)
+
+In multi-turn autonomous agents, context histories routinely expand to $30{,}000\text{--}60{,}000$ tokens. On an NVIDIA H100 SXM5 GPU executing a 70B parameter model:
+
+- **Uncached Prefill Latency:** Computing prefill attention across $40{,}000$ tokens from scratch requires over $1.8 \times 10^{14}$ FLOPs, consuming approximately $420\text{--}500\text{ ms}$ of pure accelerator compute time before the first reasoning token can be emitted.
+- **RadixAttention Cache Hit:** The trie traversal in @algo-radix-prefix-cache executes entirely on the host CPU in less than $0.08\text{ ms}$. Because the $40{,}000$ prefix tokens hit resident HBM blocks, prefill computation is eliminated entirely. Time-To-First-Token (TTFT) collapses from $500\text{ ms}$ to under $14\text{ ms}$ (the latency of a single decode step)—a **$35\times$ reduction in responsiveness** that transforms interactive agent autonomy.
 
 ### Content-addressed hash chains
 
