@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
@@ -28,11 +28,16 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
+        resolve_mlsysim_ref,
         source_trace,
         track_arc_context,
         track_context,
@@ -47,21 +52,25 @@ async def _():
         COLORS,
         Hardware,
         LAB_CSS,
+        MathPeek,
         Models,
         ReferenceStats,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
+        instrumentation_console,
         ledger,
         mo,
         report_export_panel,
+        resolve_mlsysim_ref,
         source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -73,20 +82,36 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v2_04_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_04_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (Microcontrollers & Wearables / Oura Ring & Cortex-M55)": "oura_ring",
+            "📱 Mobile Track (On-Device Personal AI / iPhone & Apple Silicon M4)": "iphone",
+            "🤖 Edge & Embodied Track (Robotics & Drones / Robotaxi & Jetson Orin)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (NVIDIA H100 / B200 Clusters & 3D Parallelism / Scale)",
+        label="Select Course / Industry Track",
+    )
     v2_04_track_picker
     return (v2_04_track_picker,)
 
 
 @app.cell
-def _(get_lab_track_variant, get_track_profile, v2_04_lab_id, v2_04_track_picker):
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v2_04_lab_id,
+    v2_04_track_picker,
+):
     v2_04_track_id = v2_04_track_picker.value
     v2_04_profile = get_track_profile(v2_04_track_id)
     v2_04_variant = get_lab_track_variant(v2_04_lab_id, v2_04_profile.track_id)
-    return v2_04_profile, v2_04_track_id, v2_04_variant
+    v2_04_hardware = resolve_mlsysim_ref(v2_04_variant.hardware_ref)
+    v2_04_model = resolve_mlsysim_ref(v2_04_variant.model_ref)
+    # Cross-tier hardware targets: Hardware.Tiny.CortexM55, Hardware.Mobile.AppleM4, Hardware.Edge.JetsonOrin, Hardware.Cloud.H100
+    return v2_04_profile, v2_04_variant
 
 
 @app.cell
@@ -200,9 +225,7 @@ def _():
 
     return (
         v2_04_callout_html,
-        v2_04_escape,
         v2_04_fields_html,
-        v2_04_first_feasible,
         v2_04_format,
         v2_04_option_labels,
         v2_04_prediction_html,
@@ -563,50 +586,108 @@ def _(Hardware, Models, ReferenceStats, v2_04_profile, v2_04_qty_to_float):
     v2_04_checkpoint_policy_specs = v2_04_checkpoint_policies()
     v2_04_lifecycle_policy_specs = v2_04_lifecycle_policies(v2_04_storage)
     return (
-        v2_04_checkpoint_policies,
         v2_04_checkpoint_policy_specs,
-        v2_04_lifecycle_policies,
         v2_04_lifecycle_policy_specs,
         v2_04_storage,
-        v2_04_storage_profile,
     )
 
 
 @app.cell(hide_code=True)
-def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, track_arc_context, track_context, v2_04_profile, v2_04_storage, v2_04_variant):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel mlsysbook-launch-panel">
-  <div class="mlsysbook-section-label">Volume II - Chapter 4</div>
-  <h1>The Data Storage Fuel Line</h1>
-  <p>
-    Storage feeds training and serving. Throughput, locality, consistency,
-    checkpoint load, and lifecycle policy shape system capacity because the
-    consumer only benefits from data that arrives in the right place, at the
-    right time, with enough recovery evidence.
-  </p>
-  <div class="mlsysbook-grid">
-    <div class="mlsysbook-field"><strong>Scenario</strong>{v2_04_storage["scenario"]}</div>
-    <div class="mlsysbook-field"><strong>Training link</strong>{v2_04_storage["training_link"]}</div>
-    <div class="mlsysbook-field"><strong>Serving link</strong>{v2_04_storage["serving_link"]}</div>
-    <div class="mlsysbook-field"><strong>Report artifact</strong>{v2_04_variant.assumptions["report_artifact"]}</div>
-  </div>
-</div>
-"""
-            ),
-            track_context(v2_04_profile),
-            track_arc_context(v2_04_profile, v2_04_variant.lab_id),
-        ]
-    )
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    track_arc_context,
+    track_context,
+    v2_04_profile,
+    v2_04_storage,
+    v2_04_variant,
+):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell" style="margin-bottom: 20px;">
+        <div style="border-left: 4px solid #A51C30; padding: 12px 18px; background: white; border-radius: 0 8px 8px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <div style="font-size: 0.72rem; font-weight: 800; color: #A51C30; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                ML Systems Textbook &middot; Volume II &middot; Chapter 4 &middot; Foundational Lab 04
+            </div>
+            <h1 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.85rem; font-weight: 800;">
+                The Data Storage Fuel Line: Ingestion, Locality, and Checkpointing
+            </h1>
+            <p style="margin: 0 0 12px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+                Storage feeds training and serving. Throughput, locality, consistency, checkpoint storms, and lifecycle policy shape
+                system capacity because the consumer only benefits from data that arrives in the right place, at the right time,
+                with enough recovery evidence.
+            </p>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <span class="mlsysbook-chip" style="background: #FEE2E2; color: #991B1B; font-weight: 700;">Track: {v2_04_profile.label}</span>
+                <span class="mlsysbook-chip" style="background: #E0F2FE; color: #0369A1;">Stakeholder: {v2_04_storage['stakeholder']}</span>
+                <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">Hardware: {v2_04_storage['hardware_ref']}</span>
+                <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">System: {v2_04_storage['system_ref']}</span>
+                <span class="mlsysbook-chip" style="background: #FEF3C7; color: #92400E;">Focus: Storage Fuel Line &amp; I/O Walls</span>
+                <span class="mlsysbook-chip" style="background: #EDE9FE; color: #5B21B6;">Deliverable: Storage Architecture Memo</span>
+            </div>
+        </div>
+    </div>
+    """)
+
+    scenario_panel = mo.Html(f"""
+    <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.1rem;">System Scenario: {v2_04_profile.label} Data Engine</h3>
+        <p style="color: #334155; font-size: 0.9rem; line-height: 1.6;">
+            {v2_04_storage['scenario']} You are operating as the <strong>{v2_04_storage['stakeholder']}</strong>
+            managing data flows for <strong>{v2_04_storage['consumer_label']}</strong>. Your pipeline must feed
+            distributed training (<i>{v2_04_storage['training_link']}</i>) while sustaining low-latency serving
+            (<i>{v2_04_storage['serving_link']}</i>).
+        </p>
+        <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px 18px; margin-top: 12px;">
+            <div style="font-size: 0.8rem; font-weight: 700; color: #1E293B; margin-bottom: 8px;">The Architectural Invariants of Data Storage:</div>
+            <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #334155; line-height: 1.6;">
+                <li><strong>The Fuel Line Invariant:</strong> Compute throughput is strictly bounded by data arrival rate: <i>B</i><sub>req</sub> = <i>N</i> &middot; &eta; &middot; <i>D</i><sub>step</sub> / <i>T</i><sub>iter</sub>. Accelerators starved of data waste expensive CapEx.</li>
+                <li><strong>The Locality &amp; Bandwidth Hierarchy:</strong> Bandwidth drops by orders of magnitude across storage tiers (HBM &gg; Local NVMe &gg; Remote Object Store). Working sets must be aggressively staged or compressed to avoid pipeline stalls.</li>
+                <li><strong>The Checkpoint Trade-Off:</strong> Checkpointing trades synchronous pause time and write amplification against lost work during failure recovery: <i>T</i><sub>pause</sub> = State / BW<sub>write</sub>. Fast unverified snapshots save runtime but compromise restore guarantees.</li>
+                <li><strong>The Lifecycle Guardrail:</strong> Retention economics compound over fleet operational lifetime: Cost<sub>monthly</sub> = &sum; Footprint<sub>i</sub> &times; <i>P</i><sub>i</sub>. Data tiering must satisfy freshness, cost, and durability simultaneously.</li>
+            </ul>
+        </div>
+    </div>
+    """)
+
+    objectives_panel = mo.Html(f"""
+    <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">LEARNING OBJECTIVES</div>
+        <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.88rem; color: #334155; line-height: 1.6;">
+            <li><strong>Size the data fuel line:</strong> Use the pipeline equation to identify ingestion bottlenecks, queue backlogs, and consumer starvation.</li>
+            <li><strong>Analyze locality and placement hierarchies:</strong> Quantify trade-offs across latency, data movement cost, egress bandwidth, and staleness.</li>
+            <li><strong>Evaluate checkpointing protocols:</strong> Balance synchronous pause latency and write storms against verifiable recovery evidence.</li>
+            <li><strong>Defend a durable lifecycle policy:</strong> Optimize multi-tier retention economics while strictly adhering to durability and freshness SLAs.</li>
+        </ul>
+        <div style="margin-top: 10px; font-size: 0.84rem; color: #0284C7; font-style: italic;">
+            CORE QUESTION: "How does storage hierarchy and placement constrain end-to-end ML throughput, and how do we co-design checkpointing and data lifecycle policies?"
+        </div>
+    </div>
+    """)
+
+    track_mission_card = track_context(v2_04_profile)
+    arc_card = track_arc_context(v2_04_profile, v2_04_variant.lab_id)
+
+    mo.vstack([
+        LAB_CSS,
+        ACADEMIC_LAB_CSS,
+        header_html,
+        scenario_panel,
+        objectives_panel,
+        track_mission_card,
+        arc_card,
+    ])
     return
 
 
 @app.cell(hide_code=True)
-def _(mo, v2_04_checkpoint_policy_specs, v2_04_lifecycle_policy_specs, v2_04_option_labels, v2_04_storage):
+def _(
+    mo,
+    v2_04_checkpoint_policy_specs,
+    v2_04_lifecycle_policy_specs,
+    v2_04_option_labels,
+    v2_04_storage,
+):
     v2_04_a_prediction = mo.ui.radio(
         options={
             "Storage/read throughput will bind": "storage_throughput",
@@ -754,7 +835,6 @@ def _(mo, v2_04_checkpoint_policy_specs, v2_04_lifecycle_policy_specs, v2_04_opt
         ),
         full_width=True,
     )
-
     return (
         v2_04_a_checkpoint,
         v2_04_a_prediction,
@@ -1053,7 +1133,15 @@ def _(
 
 
 @app.cell
-def _(COLORS, apply_plotly_theme, go, v2_04_a_result, v2_04_b_result, v2_04_c_result, v2_04_d_result):
+def _(
+    COLORS,
+    apply_plotly_theme,
+    go,
+    v2_04_a_result,
+    v2_04_b_result,
+    v2_04_c_result,
+    v2_04_d_result,
+):
     v2_04_a_fig = go.Figure()
     _a_rows = v2_04_a_result["rows"]
     v2_04_a_fig.add_trace(
@@ -1139,12 +1227,16 @@ def _(COLORS, apply_plotly_theme, go, v2_04_a_result, v2_04_b_result, v2_04_c_re
         barmode="stack",
     )
     apply_plotly_theme(v2_04_d_fig)
-
     return v2_04_a_fig, v2_04_b_fig, v2_04_c_fig, v2_04_d_fig
 
 
 @app.cell(hide_code=True)
 def _(
+    COLORS,
+    MathPeek,
+    big_takeaways,
+    gated_hypothesis_card,
+    instrumentation_console,
     mo,
     source_trace,
     v2_04_a_checkpoint,
@@ -1291,22 +1383,38 @@ def _(
         else f"{v2_04_d_selected['label']} satisfies freshness, retention, cost, and reliability guardrails."
     )
 
-    _part_a = mo.vstack(
-        [
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel mlsysbook-nugget">
-  <div class="mlsysbook-part-title"><h2>Part A: Throughput Must Match Consumer Demand</h2></div>
-  <div class="mlsysbook-callout"><strong>Scenario:</strong>
-    You are the {v2_04_storage["stakeholder"]}. Your consumer is
-    {v2_04_storage["consumer_label"]}, and the storage path must feed both:
-    {v2_04_storage["training_link"]}; {v2_04_storage["serving_link"]}.
-  </div>
-</div>
-"""
+    def build_part_a():
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part A - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Throughput Must Match Consumer Demand</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                You are operating as the <strong>{v2_04_storage["stakeholder"]}</strong>. Your consumer is
+                <strong>{v2_04_storage["consumer_label"]}</strong>, and the storage path must feed both:
+                {v2_04_storage["training_link"]}; {v2_04_storage["serving_link"]}.
+              </p>
+              <div class="mlsysbook-compact-fields">
+                {v2_04_fields_html({
+                    "Chapter claim": "Storage capacity is not storage throughput; starving accelerators destroys system MFU.",
+                    "Your decision": "Identify the primary fuel line bottleneck and size prefetch/bandwidth accordingly.",
+                    "Track consequence": f"Consumer starvation is {v2_04_a_result['starvation_pct']:.1f}% under current demand.",
+                })}
+              </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_04_a_prediction,
+                title="1. Formulate Fuel Line Bottleneck Hypothesis",
+                subtitle="Predict which stage in the storage pipeline blocks consumer demand first:",
+                gate_label="Hypothesis Gate A",
             ),
-            v2_04_a_prediction,
-            v2_04_demand_multiplier,
+            instrumentation_console(
+                v2_04_demand_multiplier,
+                title="Data Demand & Ingestion Controls",
+                subtitle="Sweep consumer demand pressure to observe pipeline stage saturation:",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.Html(
                 v2_04_prediction_html(
                     "Prediction Check",
@@ -1316,39 +1424,31 @@ def _(
                 )
             ),
             mo.as_html(v2_04_a_fig),
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel">
-  <h2>Throughput Evidence</h2>
-  <div class="mlsysbook-grid">
-    {v2_04_fields_html({
-        "Base demand": f"{v2_04_a_result['base_demand_mb_s']:.2f} MB/s",
-        "Bottleneck stage": v2_04_a_result["bottleneck"]["stage"],
-        "Binding ratio": v2_04_ratio_label(v2_04_a_result["binding_ratio"]),
-        "Backlog": f"{v2_04_a_result['bottleneck']['backlog_gb_h']:.2f} GB/hour",
-        "Starvation": f"{v2_04_a_result['starvation_pct']:.1f}%",
-        "Consumer count": v2_04_storage["consumer_count"],
-    })}
-  </div>
-  {v2_04_table_html(("Stage", "Demand MB/s", "Capacity MB/s", "Utilization", "Backlog GB/h", "Status"), _a_rows, numeric=(1, 2, 3, 4))}
-</div>
-"""
-            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Throughput Evidence</h2>
+              <div class="mlsysbook-grid">
+                {v2_04_fields_html({
+                    "Base demand": f"{v2_04_a_result['base_demand_mb_s']:.2f} MB/s",
+                    "Bottleneck stage": v2_04_a_result["bottleneck"]["stage"],
+                    "Binding ratio": v2_04_ratio_label(v2_04_a_result["binding_ratio"]),
+                    "Backlog": f"{v2_04_a_result['bottleneck']['backlog_gb_h']:.2f} GB/hour",
+                    "Starvation": f"{v2_04_a_result['starvation_pct']:.1f}%",
+                    "Consumer count": v2_04_storage["consumer_count"],
+                })}
+              </div>
+              {v2_04_table_html(("Stage", "Demand MB/s", "Capacity MB/s", "Utilization", "Backlog GB/h", "Status"), _a_rows, numeric=(1, 2, 3, 4))}
+            </div>
+            """),
             mo.Html(v2_04_callout_html("Consequence", _a_consequence, "fail" if _a_failure else "ok")),
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - pipeline bandwidth": mo.md(
-                        """
-The chapter pipeline equation sizes the fuel line:
-
-`BW_required = N_consumer x target_utilization x data_per_step / iteration_time`
-
-The backlog model is:
-
-`backlog_growth = max(0, stage_demand - stage_capacity) x time`
-"""
-                    )
-                }
+            MathPeek(
+                formula="\\text{BW}_{\\text{req}} = N \\cdot \\eta \\cdot \\frac{D_{\\text{step}}}{T_{\\text{iter}}}; \\quad \\text{Backlog} = \\max(0, D_{\\text{stage}} - C_{\\text{stage}}) \\cdot \\Delta t",
+                variables={
+                    "BaseDemand": f"{v2_04_a_result['base_demand_mb_s']:.2f} MB/s",
+                    "Bottleneck": v2_04_a_result["bottleneck"]["stage"],
+                    "BacklogRate": f"{v2_04_a_result['bottleneck']['backlog_gb_h']:.2f} GB/h",
+                    "ConsumerStarvation": f"{v2_04_a_result['starvation_pct']:.1f}%",
+                },
             ),
             source_trace(
                 {
@@ -1360,27 +1460,47 @@ The backlog model is:
                 },
                 summary="Part A source model",
             ),
-            mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-            v2_04_a_checkpoint,
-        ]
-    )
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT A: PIPELINE BACKLOG RESOLUTION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Throughput Remediation Selection</h4>
+                {v2_04_a_checkpoint}
+            </div>
+            """),
+        ])
 
-    _part_b = mo.vstack(
-        [
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel mlsysbook-nugget">
-  <div class="mlsysbook-part-title"><h2>Part B: Locality And Placement Change Cost</h2></div>
-  <div class="mlsysbook-callout"><strong>Scenario:</strong>
-    Move the same data through remote, tiered, or local placement. The concept is
-    unchanged; the {v2_04_profile.label} track changes latency, movement cost,
-    freshness, and residual risk.
-  </div>
-</div>
-"""
+    def build_part_b():
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part B - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Locality And Placement Change Cost And Latency</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                Move the same data through remote, tiered, or local placement. The concept is
+                unchanged; the <strong>{v2_04_profile.label}</strong> track changes latency, movement cost,
+                freshness, and residual risk.
+              </p>
+              <div class="mlsysbook-compact-fields">
+                {v2_04_fields_html({
+                    "Chapter claim": "Placement changes the amount system: cache hits lower bandwidth but increase staleness risk.",
+                    "Your decision": "Select a placement tier that satisfies latency, movement, cost, and freshness budgets.",
+                    "Selected status": "PASS" if v2_04_b_selected["feasible"] else "FAIL",
+                })}
+              </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_04_b_prediction,
+                title="2. Formulate Data Placement Hypothesis",
+                subtitle="Predict which data placement class satisfies all operational guardrails:",
+                gate_label="Hypothesis Gate B",
             ),
-            v2_04_b_prediction,
-            mo.hstack([v2_04_placement_policy, v2_04_working_set_pressure], widths="equal"),
+            instrumentation_console(
+                mo.hstack([v2_04_placement_policy, v2_04_working_set_pressure], gap="1rem"),
+                title="Locality & Working-Set Controls",
+                subtitle="Select placement architecture and scale working-set pressure:",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.Html(
                 v2_04_prediction_html(
                     "Prediction Check",
@@ -1390,39 +1510,32 @@ The backlog model is:
                 )
             ),
             mo.as_html(v2_04_b_fig),
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel">
-  <h2>Placement Evidence</h2>
-  <div class="mlsysbook-grid">
-    {v2_04_fields_html({
-        "Selected placement": v2_04_b_selected["label"],
-        "Latency": f"{v2_04_b_selected['latency_ms']:.1f} ms / {v2_04_storage['latency_budget_ms']:.0f} ms",
-        "Data moved": f"{v2_04_b_selected['moved_gb_day']:.1f} GB/day",
-        "Movement cost": f"${v2_04_b_selected['cost_day']:.2f}/day",
-        "Freshness lag": f"{v2_04_b_selected['freshness_min']:.0f} min",
-        "Residual risk": v2_04_b_selected["risk"],
-    })}
-  </div>
-  {v2_04_table_html(("Placement", "Class", "Latency ms", "GB/day", "Cost/day", "Freshness min", "Status"), _b_rows, numeric=(2, 3, 5))}
-</div>
-"""
-            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Placement Evidence</h2>
+              <div class="mlsysbook-grid">
+                {v2_04_fields_html({
+                    "Selected placement": v2_04_b_selected["label"],
+                    "Latency": f"{v2_04_b_selected['latency_ms']:.1f} ms / {v2_04_storage['latency_budget_ms']:.0f} ms",
+                    "Data moved": f"{v2_04_b_selected['moved_gb_day']:.1f} GB/day",
+                    "Movement cost": f"${v2_04_b_selected['cost_day']:.2f}/day",
+                    "Freshness lag": f"{v2_04_b_selected['freshness_min']:.0f} min",
+                    "Residual risk": v2_04_b_selected["risk"],
+                })}
+              </div>
+              {v2_04_table_html(("Placement", "Class", "Latency ms", "GB/day", "Cost/day", "Freshness min", "Status"), _b_rows, numeric=(2, 3, 5))}
+            </div>
+            """),
             mo.Html(v2_04_callout_html("Consequence", _b_consequence, "fail" if _b_failure else "ok")),
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - placement path": mo.md(
-                        """
-Placement changes the amount system without changing the model:
-
-`latency = base_latency + tail_latency + request_MB x 8 / bandwidth_Gbps`
-
-`movement_cost = GB_moved x price_per_GB`
-
-Cache hit rate reduces bytes moved, but it can create staleness or governance risk.
-"""
-                    )
-                }
+            MathPeek(
+                formula="T_{\\text{latency}} = T_{\\text{base}} + T_{\\text{tail}} + \\frac{\\text{Req}_{\\text{MB}} \\cdot 8}{\\text{BW}_{\\text{Gbps}}}; \\quad \\text{Cost} = \\text{Moved}_{\\text{GB}} \\cdot P_{\\text{egress}}",
+                variables={
+                    "SelectedPlacement": v2_04_b_selected["label"],
+                    "Latency": f"{v2_04_b_selected['latency_ms']:.1f} ms",
+                    "DataMoved": f"{v2_04_b_selected['moved_gb_day']:.1f} GB/day",
+                    "EgressCost": f"${v2_04_b_selected['cost_day']:.2f}/day",
+                    "FreshnessLag": f"{v2_04_b_selected['freshness_min']:.0f} min",
+                },
             ),
             source_trace(
                 {
@@ -1434,27 +1547,47 @@ Cache hit rate reduces bytes moved, but it can create staleness or governance ri
                 },
                 summary="Part B source model",
             ),
-            mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-            v2_04_b_checkpoint,
-        ]
-    )
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT B: DATA PLACEMENT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Placement Tier Confirmation</h4>
+                {v2_04_b_checkpoint}
+            </div>
+            """),
+        ])
 
-    _part_c = mo.vstack(
-        [
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel mlsysbook-nugget">
-  <div class="mlsysbook-part-title"><h2>Part C: Checkpointing Trades Evidence Against Write Storms</h2></div>
-  <div class="mlsysbook-callout"><strong>Scenario:</strong>
-    Pick a consistency and checkpoint policy. The decision is valid only if it
-    controls pause time and write storms while proving that the state can be
-    restored.
-  </div>
-</div>
-"""
+    def build_part_c():
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part C - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Checkpointing Trades Evidence Against Write Storms</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                Pick a consistency and checkpoint policy. The decision is valid only if it
+                controls pause time and write storms while proving that the state can be
+                restored.
+              </p>
+              <div class="mlsysbook-compact-fields">
+                {v2_04_fields_html({
+                    "Chapter claim": "A checkpoint is only valid if restorable; unverified snapshots create silent recovery failure.",
+                    "Your decision": "Balance checkpoint pause, write amplification, and recovery verification.",
+                    "Selected status": "PASS" if v2_04_c_selected["feasible"] else "FAIL",
+                })}
+              </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_04_c_prediction,
+                title="3. Formulate Checkpoint Protocol Hypothesis",
+                subtitle="Predict which checkpointing strategy survives operational write storms and recovery SLAs:",
+                gate_label="Hypothesis Gate C",
             ),
-            v2_04_c_prediction,
-            mo.hstack([v2_04_checkpoint_policy, v2_04_checkpoint_interval], widths="equal"),
+            instrumentation_console(
+                mo.hstack([v2_04_checkpoint_policy, v2_04_checkpoint_interval], gap="1rem"),
+                title="Checkpointing & Recovery Controls",
+                subtitle="Select checkpoint protocol and configure snapshot interval:",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.Html(
                 v2_04_prediction_html(
                     "Prediction Check",
@@ -1464,72 +1597,84 @@ Cache hit rate reduces bytes moved, but it can create staleness or governance ri
                 )
             ),
             mo.as_html(v2_04_c_fig),
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel">
-  <h2>Checkpoint Evidence</h2>
-  <div class="mlsysbook-grid">
-    {v2_04_fields_html({
-        "Selected policy": v2_04_c_selected["label"],
-        "State amount": f"{v2_04_storage['state_gb']:.2f} GB",
-        "Pause": f"{v2_04_c_selected['pause_s']:.2f}s / {v2_04_storage['pause_budget_s']:.1f}s",
-        "Write storm": f"{v2_04_c_selected['write_storm_gb_h']:.1f} GB/hour",
-        "Restore evidence": f"{v2_04_c_selected['restore_evidence_pct']:.0f}%",
-        "Lost-work exposure": f"{v2_04_c_selected['lost_work_min']:.1f} min",
-    })}
-  </div>
-  {v2_04_table_html(("Policy", "Pause s", "Durable delay min", "Write GB/h", "Evidence", "Lost work min", "Status"), _c_rows, numeric=(1, 2, 3, 4, 5))}
-</div>
-"""
-            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Checkpoint Evidence</h2>
+              <div class="mlsysbook-grid">
+                {v2_04_fields_html({
+                    "Selected policy": v2_04_c_selected["label"],
+                    "State amount": f"{v2_04_storage['state_gb']:.2f} GB",
+                    "Pause": f"{v2_04_c_selected['pause_s']:.2f}s / {v2_04_storage['pause_budget_s']:.1f}s",
+                    "Write storm": f"{v2_04_c_selected['write_storm_gb_h']:.1f} GB/hour",
+                    "Restore evidence": f"{v2_04_c_selected['restore_evidence_pct']:.0f}%",
+                    "Lost-work exposure": f"{v2_04_c_selected['lost_work_min']:.1f} min",
+                })}
+              </div>
+              {v2_04_table_html(("Policy", "Pause s", "Durable delay min", "Write GB/h", "Evidence", "Lost work min", "Status"), _c_rows, numeric=(1, 2, 3, 4, 5))}
+            </div>
+            """),
             mo.Html(v2_04_callout_html("Consequence", _c_consequence, "fail" if _c_failure else "ok")),
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - checkpoint load": mo.md(
-                        """
-The chapter checkpoint model treats recovery as a storage amount system:
-
-`T_write = checkpoint_size / write_bandwidth`
-
-`write_storm = checkpoint_size x writes_per_hour`
-
-Async staging lowers exposed pause, but a checkpoint only counts if restore evidence
-proves a consistent point in time.
-"""
-                    )
-                }
+            MathPeek(
+                formula="T_{\\text{pause}} = \\frac{\\text{State}}{\\text{BW}_{\\text{local}}}; \\quad \\text{Storm} = \\text{State} \\cdot \\alpha_{\\text{amp}} \\cdot \\frac{60}{T_{\\text{interval}}}",
+                variables={
+                    "SelectedPolicy": v2_04_c_selected["label"],
+                    "StateSize": f"{v2_04_storage['state_gb']:.2f} GB",
+                    "PauseTime": f"{v2_04_c_selected['pause_s']:.2f}s",
+                    "WriteStorm": f"{v2_04_c_selected['write_storm_gb_h']:.1f} GB/h",
+                    "RestoreEvidence": f"{v2_04_c_selected['restore_evidence_pct']:.0f}%",
+                },
             ),
             source_trace(
                 {
                     "chapter_anchor": "Checkpoint Storage; Distributed checkpoint coordination",
-                    "model_ref": "Models.Language.GPT3 for the cloud-fleet chapter checkpoint anchor; track-specific evidence snapshots elsewhere",
+                    "model_ref": "Models.Language.GPT3 for cloud-fleet; track-specific evidence snapshots elsewhere",
                     "checkpoint_state_gb": f"{v2_04_storage['state_gb']:.2f}",
                     "node_count": v2_04_storage["node_count"],
                     "selected_policy": v2_04_c_selected["label"],
                 },
                 summary="Part C source model",
             ),
-            mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-            v2_04_c_checkpoint,
-        ]
-    )
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT C: RECOVERY GUARANTEE DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Checkpoint Protocol Confirmation</h4>
+                {v2_04_c_checkpoint}
+            </div>
+            """),
+        ])
 
-    _part_d = mo.vstack(
-        [
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel mlsysbook-nugget">
-  <div class="mlsysbook-part-title"><h2>Part D: Lifecycle Policy Must Satisfy Guardrails</h2></div>
-  <div class="mlsysbook-callout"><strong>Scenario:</strong>
-    Decide what remains hot, what is tiered, what is summarized, and what is
-    discarded. A cheap policy that fails freshness, retention, or reliability is
-    not a valid storage design.
-  </div>
-</div>
-"""
+    def build_part_d():
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Part D - Concept Module</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Lifecycle Policy Must Satisfy Simultaneous Guardrails</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                Decide what remains hot, what is tiered, what is summarized, and what is
+                discarded. A cheap policy that fails freshness, retention, or reliability is
+                not a valid storage design.
+              </p>
+              <div class="mlsysbook-compact-fields">
+                {v2_04_fields_html({
+                    "Chapter claim": "Storage lifecycle is a multi-constraint problem: price, retention, durability, and freshness must close together.",
+                    "Your decision": "Balance hot/warm/cold footprint against operational budget and durability floor.",
+                    "Selected status": "PASS" if v2_04_d_selected["feasible"] else "FAIL",
+                })}
+              </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_04_d_prediction,
+                title="4. Formulate Storage Lifecycle Hypothesis",
+                subtitle="Predict which tiering and retention policy satisfies simultaneous SLA and cost guardrails:",
+                gate_label="Hypothesis Gate D",
             ),
-            v2_04_d_prediction,
-            mo.hstack([v2_04_lifecycle_policy, v2_04_freshness_target], widths="equal"),
+            instrumentation_console(
+                mo.hstack([v2_04_lifecycle_policy, v2_04_freshness_target], gap="1rem"),
+                title="Lifecycle & Tiering Controls",
+                subtitle="Configure retention tiering policy and maximum tolerable freshness lag:",
+            ),
+            mo.md("### Empirical Evidence"),
             mo.Html(
                 v2_04_prediction_html(
                     "Prediction Check",
@@ -1539,39 +1684,32 @@ proves a consistent point in time.
                 )
             ),
             mo.as_html(v2_04_d_fig),
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel">
-  <h2>Lifecycle Evidence</h2>
-  <div class="mlsysbook-grid">
-    {v2_04_fields_html({
-        "Selected policy": v2_04_d_selected["label"],
-        "Retained footprint": f"{v2_04_d_selected['retained_gb']:.1f} GB",
-        "Monthly cost": f"${v2_04_d_selected['monthly_cost']:.0f} / ${v2_04_storage['monthly_budget']:.0f}",
-        "Freshness": f"{v2_04_d_selected['freshness_lag_min']:.0f} min / {v2_04_freshness_target.value:.0f} min",
-        "Retention": f"{v2_04_d_selected['retention_days']:.1f} days / {v2_04_storage['min_retention_days']:.1f} days",
-        "Reliability": f"{v2_04_d_selected['durability_pct']:.2f}% / {v2_04_storage['durability_floor_pct']:.2f}%",
-    })}
-  </div>
-  {v2_04_table_html(("Policy", "Retained GB", "Monthly cost", "Freshness min", "Retention days", "Durability", "Status"), _d_rows, numeric=(1, 3, 4))}
-</div>
-"""
-            ),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Lifecycle Evidence</h2>
+              <div class="mlsysbook-grid">
+                {v2_04_fields_html({
+                    "Selected policy": v2_04_d_selected["label"],
+                    "Retained footprint": f"{v2_04_d_selected['retained_gb']:.1f} GB",
+                    "Monthly cost": f"${v2_04_d_selected['monthly_cost']:.0f} / ${v2_04_storage['monthly_budget']:.0f}",
+                    "Freshness": f"{v2_04_d_selected['freshness_lag_min']:.0f} min / {v2_04_freshness_target.value:.0f} min",
+                    "Retention": f"{v2_04_d_selected['retention_days']:.1f} days / {v2_04_storage['min_retention_days']:.1f} days",
+                    "Reliability": f"{v2_04_d_selected['durability_pct']:.2f}% / {v2_04_storage['durability_floor_pct']:.2f}%",
+                })}
+              </div>
+              {v2_04_table_html(("Policy", "Retained GB", "Monthly cost", "Freshness min", "Retention days", "Durability", "Status"), _d_rows, numeric=(1, 3, 4))}
+            </div>
+            """),
             mo.Html(v2_04_callout_html("Consequence", _d_consequence, "fail" if _d_failure else "ok")),
-            mo.accordion(
-                {
-                    "Math Peek / Source Model - lifecycle accounting": mo.md(
-                        """
-Lifecycle policy is a simultaneous guardrail problem:
-
-`retained_GB = ingest_GB_per_day x retention_days x reduction_factor`
-
-`monthly_cost = hot_GB x hot_price + warm_GB x warm_price + cold_GB x cold_price`
-
-The policy must also satisfy freshness and reliability thresholds.
-"""
-                    )
-                }
+            MathPeek(
+                formula="\\text{Cost}_{\\text{month}} = \\sum_{i \\in \\{h,w,c\\}} \\text{Footprint}_i \\cdot P_i; \\quad \\text{Retained}_{\\text{GB}} = D_{\\text{daily}} \\cdot \\text{Days} \\cdot \\beta_{\\text{red}}",
+                variables={
+                    "SelectedPolicy": v2_04_d_selected["label"],
+                    "RetainedGB": f"{v2_04_d_selected['retained_gb']:.1f} GB",
+                    "MonthlyCost": f"${v2_04_d_selected['monthly_cost']:.0f}",
+                    "Durability": f"{v2_04_d_selected['durability_pct']:.2f}%",
+                    "FreshnessLag": f"{v2_04_d_selected['freshness_lag_min']:.0f} min",
+                },
             ),
             source_trace(
                 {
@@ -1583,69 +1721,123 @@ The policy must also satisfy freshness and reliability thresholds.
                 },
                 summary="Part D source model",
             ),
-            mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-            v2_04_d_checkpoint,
-        ]
-    )
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT D: LIFECYCLE POLICY AUTHORIZATION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Retention Policy Sign-Off</h4>
+                {v2_04_d_checkpoint}
+            </div>
+            """),
+        ])
 
     def build_synthesis():
-        return mo.vstack(
-            [
-                mo.Html(
-                    f"""
-<div class="mlsysbook-panel mlsysbook-nugget">
-  <div class="mlsysbook-part-title"><h2>Synthesis: Storage Architecture Memo</h2></div>
-  <div class="mlsysbook-callout"><strong>Memo frame:</strong>
-    Select placement and lifecycle policy for {v2_04_profile.label}, name the
-    binding storage amount, reject one alternative, and carry the implication
-    into V2-05 distributed training.
-  </div>
-</div>
-"""
-                ),
-                mo.Html(
-                    f"""
-<div class="mlsysbook-panel">
-  <h2>Architecture Evidence Summary</h2>
-  <div class="mlsysbook-grid">
-    {v2_04_fields_html({
-        "Selected placement": v2_04_b_selected["label"],
-        "Selected lifecycle": v2_04_d_selected["label"],
-        "Checkpoint evidence": v2_04_c_selected["label"],
-        "Binding storage amount": f"{v2_04_binding['module']} - {v2_04_binding['amount']} ({v2_04_binding['ratio']:.2f}x)",
-        "Rejected alternative": v2_04_rejected_alternative,
-        "Carry forward": v2_04_storage["next_lab"],
-    })}
-  </div>
-</div>
-"""
-                ),
-                v2_04_final_decision,
-                v2_04_architecture_memo,
-                source_trace(
-                    {
-                        "chapter_anchor": "Data Storage summary",
-                        "report_artifact": v2_04_variant.assumptions["report_artifact"],
-                        "selected_track": v2_04_profile.track_id,
-                        "binding_amount": v2_04_binding["amount"],
-                        "distributed_training_implication": v2_04_storage["next_lab"],
-                    },
-                    summary="Synthesis source model",
-                ),
-            ]
+        passed = (
+            v2_04_a_result["feasible"]
+            and v2_04_b_selected["feasible"]
+            and v2_04_c_selected["feasible"]
+            and v2_04_d_selected["feasible"]
         )
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <div class="mlsysbook-section-label">Synthesis - Storage Architecture Memo</div>
+              <h2 style="margin:8px 0 6px 0; color:#0F172A;">Storage Fuel Line Sign-Off: {v2_04_profile.label}</h2>
+              <p style="color:#475569; font-size:0.92rem; line-height:1.55;">
+                Select placement and lifecycle policy for <strong>{v2_04_profile.label}</strong>, name the
+                binding storage amount, reject one alternative, and carry the implication
+                into Volume II Chapter 5 distributed training.
+              </p>
+              <div class="mlsysbook-compact-fields">
+                {v2_04_fields_html({
+                    "Selected placement": v2_04_b_selected["label"],
+                    "Selected lifecycle": v2_04_d_selected["label"],
+                    "Checkpoint evidence": v2_04_c_selected["label"],
+                    "Binding storage amount": f"{v2_04_binding['module']} - {v2_04_binding['amount']} ({v2_04_binding['ratio']:.2f}x)",
+                    "Rejected alternative": v2_04_rejected_alternative,
+                    "Carry forward": v2_04_storage["next_lab"],
+                })}
+              </div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin: 18px 0; background: #FFFDFD;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; margin-bottom: 6px;">LEAD ARCHITECT AUTHORIZATION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Data Storage Architecture Sign-Off: {v2_04_storage['stakeholder']}</h4>
+                <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                    <span style="display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 0.8rem; background: {'#ECFDF5' if passed else '#FEF2F2'}; color: {'#065F46' if passed else '#991B1B'}; border: 1px solid {'#A7F3D0' if passed else '#FECACA'};">
+                        {'APPROVED FOR FLEET DEPLOYMENT' if passed else 'PROVISIONAL &mdash; STORAGE BOUNDARY BREACH'}
+                    </span>
+                    <span style="font-size: 0.85rem; color: #475569;">
+                        Binding: <code>{v2_04_binding['amount']}</code> &middot; Placement: <code>{v2_04_b_selected['label']}</code> &middot; Cost: <code>${v2_04_d_selected['monthly_cost']:.0f}/mo</code>
+                    </span>
+                </div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div style="background:#0f172a; color:#e2e8f0; border-radius:10px; padding:20px 24px; margin:16px 0;">
+                <div style="font-size:0.72rem; font-weight:800; color:#93c5fd;
+                            text-transform:uppercase; letter-spacing:0.12em;">Storage Architecture Memo Summary</div>
+                <h3 style="margin:8px 0 10px 0; color:white;">Track: {v2_04_profile.label}</h3>
+                <p style="line-height:1.6; margin:0 0 12px 0;">
+                    Operating as <strong>{v2_04_storage['stakeholder']}</strong>.
+                    Placement <strong>{v2_04_b_selected['label']}</strong> provides <strong>{v2_04_b_selected['latency_ms']:.1f} ms</strong> latency
+                    at <strong>${v2_04_b_selected['cost_day']:.2f}/day</strong> movement cost.
+                    Recovery uses <strong>{v2_04_c_selected['label']}</strong> with <strong>{v2_04_c_selected['pause_s']:.2f}s</strong> pause.
+                    Lifecycle policy <strong>{v2_04_d_selected['label']}</strong> retains <strong>{v2_04_d_selected['retained_gb']:.1f} GB</strong>
+                    at <strong>${v2_04_d_selected['monthly_cost']:.0f}/month</strong>.
+                </p>
+                <div style="border-top:1px solid #334155; padding-top:12px; color:#bfdbfe;">
+                    <strong>Downstream Carry-Forward:</strong> {v2_04_storage['next_lab']}
+                </div>
+            </div>
+            """),
+            instrumentation_console(
+                mo.vstack([v2_04_final_decision, v2_04_architecture_memo]),
+                title="Synthesis Governance & Downstream Hand-Off",
+                subtitle="Designate final storage architecture decision and document carry-forward rationale:",
+            ),
+            big_takeaways([
+                "Storage capacity is not storage throughput: fuel line starvation destroys accelerator MFU.",
+                "Data placement hierarchy determines latency, movement energy, and egress cost across physical tiers.",
+                "A checkpoint only counts if verified restorable: fast unverified snapshots risk unrecoverable state loss.",
+                "Storage lifecycle policy must balance hot, warm, and cold tiers against freshness, durability, and cost guardrails.",
+                "Downstream Chapter 5 Distributed Training must co-design batch staging and checkpoint write storms with storage infrastructure.",
+            ]),
+            source_trace(
+                {
+                    "chapter_anchor": "Data Storage summary",
+                    "report_artifact": v2_04_variant.assumptions["report_artifact"],
+                    "selected_track": v2_04_profile.track_id,
+                    "binding_amount": v2_04_binding["amount"],
+                    "distributed_training_implication": v2_04_storage["next_lab"],
+                },
+                collapsed=True,
+                summary="Synthesis source model",
+            ),
+            mo.Html("""
+            <div style="border: 1px solid #CBD5E1; border-radius: 8px; padding: 16px 20px; margin-top: 20px; background: #F8FAFC;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
+                    What's Next &middot; Volume II Curriculum Continuum
+                </div>
+                <h4 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.05rem;">
+                    Next Lab: Volume II, Chapter 5 &mdash; Distributed Training: 3D Parallelism &amp; Sharding
+                </h4>
+                <p style="margin: 0; font-size: 0.88rem; color: #334155; line-height: 1.5;">
+                    Carry your storage pipeline and checkpoint write storm budgets into Chapter 5, where you will size data, tensor, and pipeline parallelism across distributed nodes.
+                </p>
+            </div>
+            """),
+        ])
 
-    v2_04_tabs = mo.ui.tabs(
-        {
-            "Part A: Throughput": _part_a,
-            "Part B: Locality": _part_b,
-            "Part C: Checkpointing": _part_c,
-            "Part D: Lifecycle": _part_d,
-            "Synthesis": build_synthesis(),
-        }
-    )
+    v2_04_tabs = mo.ui.tabs({
+        "Part A -- Ingestion & Storage Bandwidth": build_part_a(),
+        "Part B -- Locality & Working Set Placement": build_part_b(),
+        "Part C -- Checkpointing & Recovery Protocols": build_part_c(),
+        "Part D -- Lifecycle & Retention Economics": build_part_d(),
+        "Synthesis": build_synthesis(),
+    })
     v2_04_tabs
-    return (v2_04_tabs,)
+    return
 
 
 @app.cell(hide_code=True)
@@ -1679,67 +1871,77 @@ def _(
     v2_04_variant,
     v2_04_working_set_pressure,
 ):
-    if v2_04_a_prediction.value is not None:
-        ledger.save(
-            track=v2_04_profile.track_id,
-            chapter=4,
-            design={
-                "chapter": "v2_04",
-                "track_id": v2_04_profile.track_id,
-                "scenario_id": v2_04_variant.scenario_id,
-                "hardware_ref": v2_04_storage["hardware_ref"],
-                "system_ref": v2_04_storage["system_ref"],
-                "completed": v2_04_final_decision.value is not None
-                and bool(str(v2_04_architecture_memo.value or "").strip()),
-                "part_a_prediction": v2_04_a_prediction.value,
-                "demand_multiplier": v2_04_demand_multiplier.value,
-                "throughput_bottleneck": v2_04_a_result["bottleneck"]["stage"],
-                "backlog_gb_per_hour": v2_04_a_result["bottleneck"]["backlog_gb_h"],
-                "starvation_pct": v2_04_a_result["starvation_pct"],
-                "part_a_checkpoint": v2_04_a_checkpoint.value,
-                "part_b_prediction": v2_04_b_prediction.value,
-                "placement_policy": v2_04_placement_policy.value,
-                "working_set_pressure": v2_04_working_set_pressure.value,
-                "placement_latency_ms": v2_04_b_selected["latency_ms"],
-                "placement_cost_per_day": v2_04_b_selected["cost_day"],
-                "part_b_checkpoint": v2_04_b_checkpoint.value,
-                "part_c_prediction": v2_04_c_prediction.value,
-                "checkpoint_policy": v2_04_checkpoint_policy.value,
-                "checkpoint_interval_min": v2_04_checkpoint_interval.value,
-                "checkpoint_pause_s": v2_04_c_selected["pause_s"],
-                "write_storm_gb_per_hour": v2_04_c_selected["write_storm_gb_h"],
-                "restore_evidence_pct": v2_04_c_selected["restore_evidence_pct"],
-                "part_c_checkpoint": v2_04_c_checkpoint.value,
-                "part_d_prediction": v2_04_d_prediction.value,
-                "lifecycle_policy": v2_04_lifecycle_policy.value,
-                "freshness_target_min": v2_04_freshness_target.value,
-                "monthly_cost": v2_04_d_selected["monthly_cost"],
-                "retention_days": v2_04_d_selected["retention_days"],
-                "durability_pct": v2_04_d_selected["durability_pct"],
-                "part_d_checkpoint": v2_04_d_checkpoint.value,
-                "selected_placement_policy": v2_04_b_selected["label"],
-                "selected_lifecycle_policy": v2_04_d_selected["label"],
-                "binding_storage_amount": v2_04_binding["amount"],
-                "binding_storage_ratio": v2_04_binding["ratio"],
-                "rejected_alternative": v2_04_rejected_alternative,
-                "distributed_training_implication": v2_04_storage["next_lab"],
-                "final_decision": v2_04_final_decision.value,
-                "architecture_memo": v2_04_architecture_memo.value,
-            },
-        )
+    _complete = (
+        v2_04_a_prediction.value is not None
+        and v2_04_b_prediction.value is not None
+        and v2_04_c_prediction.value is not None
+        and v2_04_d_prediction.value is not None
+        and v2_04_final_decision.value is not None
+    )
+    ledger.save(chapter=4, design={
+        "chapter": "v2_04",
+        "track_id": v2_04_profile.track_id,
+        "scenario_id": v2_04_variant.scenario_id,
+        "hardware_ref": v2_04_storage["hardware_ref"],
+        "system_ref": v2_04_storage["system_ref"],
+        "completed": _complete,
+        "part_a_prediction": v2_04_a_prediction.value,
+        "demand_multiplier": v2_04_demand_multiplier.value,
+        "throughput_bottleneck": v2_04_a_result["bottleneck"]["stage"],
+        "backlog_gb_per_hour": v2_04_a_result["bottleneck"]["backlog_gb_h"],
+        "starvation_pct": v2_04_a_result["starvation_pct"],
+        "part_a_checkpoint": v2_04_a_checkpoint.value,
+        "part_b_prediction": v2_04_b_prediction.value,
+        "placement_policy": v2_04_placement_policy.value,
+        "working_set_pressure": v2_04_working_set_pressure.value,
+        "placement_latency_ms": v2_04_b_selected["latency_ms"],
+        "placement_cost_per_day": v2_04_b_selected["cost_day"],
+        "part_b_checkpoint": v2_04_b_checkpoint.value,
+        "part_c_prediction": v2_04_c_prediction.value,
+        "checkpoint_policy": v2_04_checkpoint_policy.value,
+        "checkpoint_interval_min": v2_04_checkpoint_interval.value,
+        "checkpoint_pause_s": v2_04_c_selected["pause_s"],
+        "write_storm_gb_per_hour": v2_04_c_selected["write_storm_gb_h"],
+        "restore_evidence_pct": v2_04_c_selected["restore_evidence_pct"],
+        "part_c_checkpoint": v2_04_c_checkpoint.value,
+        "part_d_prediction": v2_04_d_prediction.value,
+        "lifecycle_policy": v2_04_lifecycle_policy.value,
+        "freshness_target_min": v2_04_freshness_target.value,
+        "monthly_cost": v2_04_d_selected["monthly_cost"],
+        "retention_days": v2_04_d_selected["retention_days"],
+        "durability_pct": v2_04_d_selected["durability_pct"],
+        "part_d_checkpoint": v2_04_d_checkpoint.value,
+        "selected_placement_policy": v2_04_b_selected["label"],
+        "selected_lifecycle_policy": v2_04_d_selected["label"],
+        "binding_storage_amount": v2_04_binding["amount"],
+        "binding_storage_ratio": v2_04_binding["ratio"],
+        "rejected_alternative": v2_04_rejected_alternative,
+        "distributed_training_implication": v2_04_storage["next_lab"],
+        "final_decision": v2_04_final_decision.value,
+        "architecture_memo": v2_04_architecture_memo.value,
+    })
 
+    _passed = (
+        v2_04_a_result["feasible"]
+        and v2_04_b_selected["feasible"]
+        and v2_04_c_selected["feasible"]
+        and v2_04_d_selected["feasible"]
+    )
     mo.Html(
         f"""
-<div class="mlsysbook-panel lab-hud">
-  <h2>Design Ledger</h2>
-  <div class="mlsysbook-grid">
-    <div class="mlsysbook-field"><strong>Saved track</strong>{v2_04_profile.label}</div>
-    <div class="mlsysbook-field"><strong>Binding amount</strong>{v2_04_binding["amount"]}</div>
-    <div class="mlsysbook-field"><strong>Selected placement</strong>{v2_04_b_selected["label"]}</div>
-    <div class="mlsysbook-field"><strong>Next lab</strong>{v2_04_storage["next_lab"]}</div>
-  </div>
-</div>
-"""
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">Vol2 &middot; Lab 04</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v2_04_profile.label}</span>
+      <span class="hud-label">STATUS</span>
+      <span class="hud-value" style="color: {'#10B981' if _passed else '#F59E0B'};">{'PASS' if _passed else 'REVIEW'}</span>
+      <span class="hud-label">BINDING</span>
+      <span class="hud-value">{v2_04_binding['amount']}</span>
+      <span class="hud-label">PLACEMENT</span>
+      <span class="hud-value">{v2_04_b_selected['label']}</span>
+    </div>
+    """
     )
     return
 
@@ -1747,7 +1949,6 @@ def _(
 @app.cell(hide_code=True)
 def _(
     build_lab_report,
-    mo,
     report_export_panel,
     v2_04_a_checkpoint,
     v2_04_a_prediction,
@@ -1887,7 +2088,7 @@ def _(
     )
 
     report_export_panel(v2_04_report)
-    return (v2_04_report,)
+    return
 
 
 if __name__ == "__main__":
