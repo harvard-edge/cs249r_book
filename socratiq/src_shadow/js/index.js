@@ -814,7 +814,7 @@ async function loadContentAndRetrieveDetails(shadowEle) {
 //  TODO: add user input
 async function handleGeneralAction(
   text,
-  links = ["https://harvard-edge.github.io/cs249r_book/"],
+  links = ["https://mlsysbook.ai/"],
   ele = "",
   tempDifficultyLevel,
   isDiagram = false,
@@ -1030,7 +1030,7 @@ function paperSearchAddition(input) {
   input.value = "";
   handleResearchAction(
     text,
-    ["https://harvard-edge.github.io/cs249r_book/"],
+    ["https://mlsysbook.ai/"],
     3,
     3,
     true
@@ -1040,7 +1040,7 @@ function paperSearchAddition(input) {
 
 async function handleResearchAction(
   sumOfPage,
-  links = ["https://harvard-edge.github.io/cs249r_book/"],
+  links = ["https://mlsysbook.ai/"],
 
   understanding = 3,
   power_up = 3,
