@@ -21,7 +21,7 @@ If you are unsure about whether a contribution is appropriate, feel free to open
 This is a **two-volume textbook** built with [Quarto](https://quarto.org/docs/get-started/):
 
 - **Volume I: Introduction to Machine Learning Systems** — Foundations for single-machine ML systems
-- **Volume II: Machine Learning Systems at Scale** — Distributed systems at production scale
+- **Volume II: Scaling Machine Learning Systems** — Distributed systems at production scale
 
 The key directories are:
 

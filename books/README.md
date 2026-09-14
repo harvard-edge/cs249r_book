@@ -5,7 +5,7 @@ The sources for the *Machine Learning Systems* textbook series. This folder is t
 | Volume | Title | Status |
 |---|---|---|
 | [`vol1/`](vol1/) | Introduction to Machine Learning Systems | Released ([read online](https://mlsysbook.ai/vol1/)) |
-| [`vol2/`](vol2/) | Machine Learning Systems at Scale | Preview ([read online](https://mlsysbook.ai/vol2/)) |
+| [`vol2/`](vol2/) | Scaling Machine Learning Systems | Preview ([read online](https://mlsysbook.ai/vol2/)) |
 | [`vol3/`](vol3/) | Agentic Machine Learning Systems | In development, changing quickly |
 | [`vol4/`](vol4/) | Physical AI Systems | In development, changing quickly |
 
