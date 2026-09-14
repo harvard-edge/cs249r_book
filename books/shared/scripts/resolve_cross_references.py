@@ -658,7 +658,7 @@ def resolve_cross_references(
     #      ships as this when the project is `type: website`).
     #   3. EPUB-specific `<a href="@xxx-yyy">…</a>`.
     pattern1 = rf'<a href="#({CROSSREF_PREFIXES}-[a-zA-Z0-9-]+)" class="quarto-xref"><span class="quarto-unresolved-ref">[^<]*</span></a>'
-    pattern2 = rf'<strong>\?\@({CROSSREF_PREFIXES}-[a-zA-Z0-9-]+)</strong>'
+    pattern2 = rf'(<strong>)?\?\@({CROSSREF_PREFIXES}-[a-zA-Z0-9-]+)(</strong>)?'
     pattern3 = rf'<a href="@({CROSSREF_PREFIXES}-[a-zA-Z0-9-]+)"([^>]*)>([^<]*)</a>'
     # Pattern 4 — `Principle \ref{pri-X}` leaks as an inline-math span.
     # Source prose says: `Principle \ref{pri-data-as-code}`. Pandoc parses the
@@ -685,12 +685,14 @@ def resolve_cross_references(
     unmapped_refs = []
 
     def fix_simple_reference(match):
-        sec_ref = match.group(1)
+        has_strong = bool(match.group(1) and match.group(3))
+        sec_ref = match.group(2)
         abs_path = chapter_mapping.get(sec_ref)
         title = chapter_titles.get(sec_ref)
         if abs_path and title:
             rel_path = calculate_relative_path(from_file, abs_path, build_dir, epub_mapping)
-            return f'<strong><a href="{rel_path}">{title}</a></strong>'
+            link = f'<a href="{rel_path}">{title}</a>'
+            return f'<strong>{link}</strong>' if has_strong else link
         else:
             unmapped_refs.append(sec_ref)
             return match.group(0)
