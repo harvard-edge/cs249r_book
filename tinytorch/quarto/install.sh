@@ -66,9 +66,9 @@ set -e  # Exit on any error
 #   TINYTORCH_BRANCH=dev curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 #   TINYTORCH_VERSION=0.1.5 TINYTORCH_BRANCH=feature/foo ./install.sh
 #   TINYTORCH_NON_INTERACTIVE=1 ./install.sh  # Skip all prompts (for CI)
-REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
 REPO_SHORT="harvard-edge/cs249r_book"
-TAGS_API="https://api.github.com/repos/harvard-edge/cs249r_book/tags"
+REPO_URL="https://github.com/${REPO_SHORT}.git"
+TAGS_API="https://api.github.com/repos/${REPO_SHORT}/tags"
 TAG_PREFIX="tinytorch-v"
 BRANCH="${TINYTORCH_BRANCH:-main}"
 INSTALL_DIR="${TINYTORCH_INSTALL_DIR:-tinytorch}"

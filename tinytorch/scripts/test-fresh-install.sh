@@ -22,7 +22,7 @@ set -e
 # Defaults
 BRANCH="main"
 CI_MODE=false
-INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/harvard-edge/cs249r_book/main/tinytorch/quarto/install.sh"
+REPO="${GITHUB_REPOSITORY:-harvard-edge/cs249r_book}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -71,9 +71,9 @@ echo ""
 echo "▶ Step 1: Running install script (branch: $BRANCH)..."
 export TINYTORCH_BRANCH="$BRANCH"
 export TINYTORCH_NON_INTERACTIVE=1
-curl -fsSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/quarto/install.sh" -o /tmp/install.sh || {
+curl -fsSL "https://raw.githubusercontent.com/__REPO__/${BRANCH}/tinytorch/quarto/install.sh" -o /tmp/install.sh || {
     echo "✗ Failed to download install script for branch: $BRANCH"
-    echo "  URL: https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/quarto/install.sh"
+    echo "  URL: https://raw.githubusercontent.com/__REPO__/${BRANCH}/tinytorch/quarto/install.sh"
     echo "  Hint: Does the branch '${BRANCH}' exist and contain tinytorch/quarto/install.sh?"
     exit 1
 }
@@ -144,7 +144,7 @@ OUTER_EOF
 echo "Testing TinyTorch installation from branch: $BRANCH"
 
 # Build test script with branch substituted
-TEST_SCRIPT=$(build_test_script | sed "s|__BRANCH__|$BRANCH|g")
+TEST_SCRIPT=$(build_test_script | sed -e "s|__BRANCH__|$BRANCH|g" -e "s|__REPO__|$REPO|g")
 
 if [ "$CI_MODE" = true ]; then
     print_step "Running in CI mode (no Docker)"
