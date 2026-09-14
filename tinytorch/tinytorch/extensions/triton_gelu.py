@@ -57,24 +57,27 @@ def has_triton_support() -> bool:
     return _HAS_TRITON
 
 
-def triton_fused_gelu(x: np.ndarray, bias: np.ndarray) -> np.ndarray:
+def triton_fused_gelu(x: np.ndarray, bias: np.ndarray | None = None) -> np.ndarray:
     """Computes Fused Bias + GELU on GPU via Triton JIT.
     
     Args:
         x: Input numpy array of shape [..., D]
-        bias: Bias vector of shape [D]
+        bias: Optional bias vector of shape [D]
         
     Returns:
         Numpy array of identical shape with fused GELU applied.
     """
     if not _HAS_TRITON:
         # Fallback to pure numpy CPU implementation
-        val = x + bias
+        val = x + bias if bias is not None else x
         inner = np.sqrt(2.0 / np.pi) * (val + 0.044715 * np.power(val, 3))
         return 0.5 * val * (1.0 + np.tanh(inner))
 
     x_torch = torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)).cuda()
-    bias_torch = torch.from_numpy(np.ascontiguousarray(bias, dtype=np.float32)).cuda()
+    if bias is not None:
+        bias_torch = torch.from_numpy(np.ascontiguousarray(bias, dtype=np.float32)).cuda()
+    else:
+        bias_torch = torch.zeros(x_torch.shape[-1], device=x_torch.device, dtype=torch.float32)
     out_torch = torch.empty_like(x_torch)
 
     total_elements = x_torch.numel()

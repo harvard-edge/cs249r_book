@@ -96,7 +96,8 @@ def simd_matmul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
     M, K = a_c.shape
     K_b, N = b_c.shape
-    assert K == K_b, f"Matrix dimension mismatch: ({M}, {K}) x ({K_b}, {N})"
+    if K != K_b:
+        raise ValueError(f"Incompatible matrix dimensions: ({M}, {K}) x ({K_b}, {N})")
 
     c = np.empty((M, N), dtype=np.float32)
 
