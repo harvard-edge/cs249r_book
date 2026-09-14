@@ -121,7 +121,7 @@ def verify_lab(lab_path: Path, output_dir: Path) -> SwarmAuditResult:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1200, "height": 1800})
+            page = browser.new_page(viewport={"width": 1200, "height": 3400})
             url = f"http://127.0.0.1:{port}/{output_html.name}"
             page.goto(url, wait_until="networkidle", timeout=25000)
             page.wait_for_timeout(3000)

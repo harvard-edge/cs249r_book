@@ -292,3 +292,157 @@ def render_latency_breakdown(
     )
 
     return apply_plotly_theme(fig)
+
+
+def render_distributed_memory_breakdown(
+    weights_gb: float,
+    grads_gb: float,
+    opt_gb: float,
+    act_gb: float,
+    vram_capacity_gb: float = 80.0,
+    title: str = "Per-GPU VRAM Allocation vs Capacity Wall",
+) -> go.Figure:
+    """Render a stacked bar chart of per-GPU memory components against VRAM capacity."""
+    total_gb = weights_gb + grads_gb + opt_gb + act_gb
+    is_oom = total_gb > vram_capacity_gb
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            name="Model Weights",
+            y=["VRAM"],
+            x=[weights_gb],
+            orientation="h",
+            marker=dict(color="#006395"),
+            text=[f"{weights_gb:.1f} GB"] if weights_gb > 2 else [],
+            textposition="inside",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            name="Gradients",
+            y=["VRAM"],
+            x=[grads_gb],
+            orientation="h",
+            marker=dict(color="#4A777A"),
+            text=[f"{grads_gb:.1f} GB"] if grads_gb > 2 else [],
+            textposition="inside",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            name="Adam Optimizer States",
+            y=["VRAM"],
+            x=[opt_gb],
+            orientation="h",
+            marker=dict(color="#A51C30" if is_oom else "#E06D53"),
+            text=[f"{opt_gb:.1f} GB"] if opt_gb > 2 else [],
+            textposition="inside",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            name="Activations",
+            y=["VRAM"],
+            x=[act_gb],
+            orientation="h",
+            marker=dict(color="#D97706"),
+            text=[f"{act_gb:.1f} GB"] if act_gb > 2 else [],
+            textposition="inside",
+        )
+    )
+
+    fig.add_vline(
+        x=vram_capacity_gb,
+        line_dash="dash",
+        line_color="#A51C30",
+        line_width=2.5,
+        annotation_text=f"VRAM Capacity: {vram_capacity_gb:.0f} GB ({'OOM 💥' if is_oom else 'SAFE ✅'})",
+        annotation_position="top right",
+    )
+
+    max_x = max(vram_capacity_gb * 1.2, total_gb * 1.05)
+
+    fig.update_layout(
+        title=dict(text=f"{title} (Total: {total_gb:.1f} GB / {vram_capacity_gb:.0f} GB)", font=dict(size=14, color=COLORS["Text"])),
+        barmode="stack",
+        xaxis=dict(title="Allocated Memory (GB)", range=[0, max_x], gridcolor="#F1F5F9"),
+        yaxis=dict(showticklabels=False),
+        height=190,
+        margin=dict(l=30, r=40, t=50, b=40),
+        legend=dict(orientation="h", y=1.28, x=0),
+    )
+    return apply_plotly_theme(fig)
+
+
+def render_distributed_step_breakdown(
+    compute_ms: float,
+    tp_comm_ms: float,
+    dp_comm_ms: float,
+    bubble_ms: float,
+    tp_spans_nodes: bool = False,
+    title: str = "Training Step Latency Decomposition",
+) -> go.Figure:
+    """Render a stacked bar breakdown of compute vs TP comm vs DP comm vs PP bubble."""
+    total_ms = compute_ms + tp_comm_ms + dp_comm_ms + bubble_ms
+    fig = go.Figure()
+
+    tp_color = "#A51C30" if tp_spans_nodes else "#006395"
+    tp_name = "TP Comm (Cross-Node InfiniBand ⚠️)" if tp_spans_nodes else "TP Comm (Intra-Node NVLink ✅)"
+
+    fig.add_trace(
+        go.Bar(
+            name="Forward + Backward Compute",
+            y=["Step Latency"],
+            x=[compute_ms],
+            orientation="h",
+            marker=dict(color="#4A777A"),
+            text=[f"{compute_ms:.0f} ms ({compute_ms/total_ms*100:.1f}%)"] if total_ms > 0 and compute_ms / total_ms > 0.08 else [],
+            textposition="inside",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            name=tp_name,
+            y=["Step Latency"],
+            x=[tp_comm_ms],
+            orientation="h",
+            marker=dict(color=tp_color),
+            text=[f"{tp_comm_ms:.0f} ms ({tp_comm_ms/total_ms*100:.1f}%)"] if total_ms > 0 and tp_comm_ms / total_ms > 0.08 else [],
+            textposition="inside",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            name="DP AllReduce Sync",
+            y=["Step Latency"],
+            x=[dp_comm_ms],
+            orientation="h",
+            marker=dict(color="#D97706"),
+            text=[f"{dp_comm_ms:.0f} ms ({dp_comm_ms/total_ms*100:.1f}%)"] if total_ms > 0 and dp_comm_ms / total_ms > 0.08 else [],
+            textposition="inside",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            name="1F1B Pipeline Bubble Idle",
+            y=["Step Latency"],
+            x=[bubble_ms],
+            orientation="h",
+            marker=dict(color="#94A3B8"),
+            text=[f"{bubble_ms:.0f} ms ({bubble_ms/total_ms*100:.1f}%)"] if total_ms > 0 and bubble_ms / total_ms > 0.08 else [],
+            textposition="inside",
+        )
+    )
+
+    fig.update_layout(
+        title=dict(text=f"{title} (Total: {total_ms:,.0f} ms)", font=dict(size=14, color=COLORS["Text"])),
+        barmode="stack",
+        xaxis=dict(title="Execution Time (ms)", gridcolor="#F1F5F9"),
+        yaxis=dict(showticklabels=False),
+        height=190,
+        margin=dict(l=30, r=40, t=50, b=40),
+        legend=dict(orientation="h", y=1.28, x=0),
+    )
+    return apply_plotly_theme(fig)

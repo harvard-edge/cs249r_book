@@ -17,6 +17,8 @@ from .rationale import (
     RationaleChallenge,
     RationaleEvaluation,
     evaluate_rationale,
+    render_distributed_memory_breakdown,
+    render_distributed_step_breakdown,
     render_interactive_roofline,
     render_latency_breakdown,
 )
@@ -607,6 +609,8 @@ __all__ = [
     "RationaleChallenge",
     "RationaleEvaluation",
     "evaluate_rationale",
+    "render_distributed_memory_breakdown",
+    "render_distributed_step_breakdown",
     "render_interactive_roofline",
     "render_latency_breakdown",
 ]
