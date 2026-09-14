@@ -456,7 +456,7 @@ $$M_{\text{physical}} = M_{\text{KV}}(L_{\text{prefix}}) + K \cdot M_{\text{KV}}
 as opposed to $K \cdot M_{\text{KV}}(L_{\text{prefix}} + L_{\text{branch}})$ in contiguous, unpaged architectures.
 :::
 
-@Algo-pagedattention-allocation formalizes the core virtual memory operations of PagedAttention: zero-copy sequence branching and token-append Copy-on-Write (CoW) page allocation. When an agent forks a candidate trajectory, the memory manager duplicates the logical block table while merely incrementing physical block reference counts. During subsequent token generation, if the tail block is shared ($C_{\text{ref}} > 1$), the allocator clones only that single tail block to private physical storage before mutating it, preserving zero-copy sharing for all preceding prefix blocks.
+Decoupling the logical sequence abstraction from physical silicon memory is the foundation of scalable agent inference. When an agent forks into multiple speculative reasoning branches, naive tensor replication rapidly exhausts accelerator memory. @Algo-pagedattention-allocation formalizes the virtual memory management protocol of PagedAttention. By maintaining a logical-to-physical block table $\mathcal{T}[S]$ and reference-counting physical pages in HBM, the allocator achieves zero-copy trajectory branching and enforces Copy-on-Write (CoW) isolation: shared parent blocks remain immutable and aliased across rollouts, while private physical blocks are allocated strictly when a divergent token mutates the active tail.
 
 ```pseudocode
 #| label: algo-pagedattention-allocation
@@ -649,7 +649,7 @@ Because accelerator High-Bandwidth Memory is strictly bounded, the Radix tree ca
 
 If an agent returns for its next execution turn before memory pressure forces eviction, the system achieves a **$100\%$ cache hit** on its historical prefix, resuming execution with zero prefill latency.
 
-@Algo-radix-prefix-cache outlines the prefix lookup, node traversal, and leaf-only LRU eviction mechanisms of RadixAttention. When a new agent turn arrives with token sequence $\mathbf{t}$, the cache traverses the compressed trie to discover the longest matching prefix of physical blocks. When memory pressure demands block reclamation, the eviction policy targets only unpinned leaf nodes ($C_{\text{ref}} = 0$) from the LRU queue, preventing broken tree branches.
+While PagedAttention manages individual physical blocks, multi-turn agent workflows require dynamic, cross-request prefix reuse across complex conversational and branching histories. Static prefix caching fails when prompts vary slightly or fork unpredictably. @Algo-radix-prefix-cache formalizes the core traversal, structural splitting, and eviction mechanisms of RadixAttention. By structuring physical KV cache blocks into a compressed Radix trie, the runtime dynamically matches incoming token sequences against cached GPU memory, splits edges on-the-fly at divergence boundaries, and reclaims memory strictly through leaf-only LRU eviction to guarantee tree structural integrity.
 
 ```pseudocode
 #| label: algo-radix-prefix-cache
@@ -694,7 +694,7 @@ To see how @algo-radix-prefix-cache coordinates real-time inference across multi
    - An ancestral parent segment containing the shared $m$ tokens, whose physical memory blocks remain cached and referenced.
    - Two child branches: one representing the existing continuation, and a newly allocated branch holding the divergent tokens of the incoming request.
    This dynamic structural adaptation ensures that prompt prefixes remain shared at the finest possible granularity without requiring manual prefix registration.
-3. **The Leaf-Only LRU Eviction Invariant (Lines 13–18):** Accelerator memory is finite; when the physical free pool $\mathcal{F}_{\text{HBM}}$ approaches exhaustion, blocks must be reclaimed. However, a naive LRU policy that evicts arbitrary blocks would create catastrophic dangling pointers in the trie. RadixAttention enforces the **Leaf-Only Eviction Invariant**:
+3. **The Leaf-Only LRU Eviction Invariant (Lines 13–19):** Accelerator memory is finite; when the physical free pool $\mathcal{F}_{\text{HBM}}$ approaches exhaustion, blocks must be reclaimed. However, a naive LRU policy that evicts arbitrary blocks would create catastrophic dangling pointers in the trie. RadixAttention enforces the **Leaf-Only Eviction Invariant**:
    - Only nodes that are unreferenced ($C_{\text{ref}} = 0$) and possess zero active children (i.e., true leaves) are eligible for eviction from $\mathcal{Q}_{\text{LRU}}$.
    - When an unreferenced leaf $w$ is popped, its physical blocks return to free pool $\mathcal{F}_{\text{HBM}}$, and $w$ is safely detached from its parent.
    - If detachment leaves the parent node with only a single surviving child, the parent and child edges automatically merge, preserving the trie's compressed invariants.
