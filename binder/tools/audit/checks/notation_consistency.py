@@ -33,6 +33,7 @@ RULE_TEXT = (
 _NOTATION_PATHS = (
     Path("books/vol1/frontmatter/_notation_body.qmd"),
     Path("books/vol2/frontmatter/_notation_distributed.qmd"),
+    Path("books/vol4/frontmatter/_notation_physical.qmd"),
 )
 
 
@@ -376,7 +377,12 @@ def check(
 
     # Skip the notation definition sources themselves to avoid self-referential noise.
     posix = file_path.as_posix()
-    if posix.endswith("/frontmatter/notation.qmd") or posix.endswith("/frontmatter/_notation_body.qmd") or posix.endswith("/frontmatter/_notation_distributed.qmd"):
+    if (
+        posix.endswith("/frontmatter/notation.qmd")
+        or posix.endswith("/frontmatter/_notation_body.qmd")
+        or posix.endswith("/frontmatter/_notation_distributed.qmd")
+        or posix.endswith("/frontmatter/_notation_physical.qmd")
+    ):
         return issues, counter
 
     # Resolve repo root from file path (scan.py passes absolute file paths).
