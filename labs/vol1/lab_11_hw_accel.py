@@ -1,12 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-
-# ===========================================================================
-# CELL 0: SETUP
-# ===========================================================================
 
 
 @app.cell
@@ -36,13 +31,16 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        big_takeaways,
         build_lab_report,
         fusion_traffic,
+        gated_hypothesis_card,
         gemm_workload,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         hardware_roofline_profile,
+        instrumentation_console,
         part_workflow,
         report_export_panel,
         resolve_mlsysim_ref,
@@ -58,16 +56,18 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        LAB_CSS,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         fusion_traffic,
+        gated_hypothesis_card,
         gemm_workload,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         hardware_roofline_profile,
+        instrumentation_console,
         ledger,
         math,
         mo,
@@ -76,9 +76,6 @@ async def _():
         report_export_panel,
         resolve_mlsysim_ref,
         roofline_point,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -88,12 +85,19 @@ def _(get_lab_metadata):
     return (v1_11_metadata,)
 
 
-@app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_11_track_picker = track_selector(default=_default_track)
-    v1_11_track_picker
+@app.cell
+def _(mo):
+    # Top-Level Universal Track Selector
+    v1_11_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 & Tensor Cores vs Bandwidth Wall)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Jetson Orin & DLA / Tensor Cores vs Tail Latency)": "robotaxi",
+            "📱 Mobile Track (Apple Silicon & Neural Engine AMX vs Thermal Envelope)": "iphone",
+            "⚡ TinyML Track (ESP32-S3 & SIMD Vector Extensions vs SRAM Boundaries)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 & Tensor Cores vs Bandwidth Wall)",
+        label="Select Course / Industry Track",
+    )
     return (v1_11_track_picker,)
 
 
@@ -110,18 +114,7 @@ def _(
     v1_11_variant = get_lab_track_variant("v1_11_hardware_roofline", v1_11_track_id)
     v1_11_hardware = resolve_mlsysim_ref(v1_11_variant.hardware_ref)
     v1_11_roofline = hardware_roofline_profile(v1_11_profile, v1_11_variant, v1_11_hardware)
-    return (
-        v1_11_hardware,
-        v1_11_profile,
-        v1_11_roofline,
-        v1_11_track_id,
-        v1_11_variant,
-    )
-
-
-# ===========================================================================
-# CELL 1: NOTEBOOK-LOCAL V1-11 HELPERS
-# ===========================================================================
+    return v1_11_hardware, v1_11_profile, v1_11_roofline, v1_11_variant
 
 
 @app.cell
@@ -129,6 +122,7 @@ def _(
     fusion_traffic,
     gemm_workload,
     math,
+    roofline_point,
     v1_11_hardware,
     v1_11_profile,
     v1_11_roofline,
@@ -452,7 +446,6 @@ def _(
         }
 
     return (
-        v1_11_boundary_dimension,
         v1_11_deployment_result,
         v1_11_lens,
         v1_11_memory_result,
@@ -461,68 +454,71 @@ def _(
     )
 
 
-# ===========================================================================
-# CELL 2: HEADER AND BRIEFING
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
-    LAB_CSS,
     mo,
-    track_arc_context,
-    track_context,
     v1_11_lens,
-    v1_11_metadata,
     v1_11_profile,
     v1_11_roofline,
+    v1_11_track_picker,
     v1_11_variant,
 ):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.Html(
-                f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 11
-            </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.35rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                Hardware Acceleration Fit
-            </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.05rem; font-weight: 650;
-                      color: #cbd5e1; letter-spacing: 0.02em;">
-                Roofline diagnosis &middot; Memory movement &middot; Precision contracts &middot; Deployment recommendation
-            </p>
-            <p style="margin: 0 0 22px 0; font-size: 0.98rem; color: #cbd5e1;
-                      max-width: 820px; line-height: 1.65;">
-                {v1_11_variant.workload_summary} The chapter invariant is that accelerators
-                expose bottlenecks: speedup appears only when arithmetic intensity, precision,
-                memory hierarchy, and hardware capability match the deployment envelope.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px;">
-                <span class="badge badge-info">4 concept modules &middot; ~50 min</span>
-                <span class="badge badge-warn">{v1_11_profile.label}</span>
-                <span class="badge badge-fail">{v1_11_roofline.hardware_ref}</span>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Ridge {v1_11_roofline.ridge_flop_per_byte:.1f} FLOP/B</span>
-                <span class="badge badge-warn">{v1_11_lens['amount_focus']}</span>
-                <span class="badge badge-fail">{v1_11_variant.guardrail_metric}</span>
-            </div>
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div style="margin-bottom: 16px;">
+        {v1_11_track_picker}
+      </div>
+      <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+          ML Systems Textbook &middot; Volume I &middot; Chapter 11 &middot; Lab 11
         </div>
-        """
-            ),
-            track_context(v1_11_profile),
-            track_arc_context(v1_11_profile, v1_11_metadata.lab_id),
-        ]
-    )
+        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+          Hardware Acceleration Fit &amp; The Accelerator Contract
+        </h1>
+        <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+          Diagnose arithmetic intensity vs. memory bandwidth limits using Roofline models, evaluate kernel fusion and on-chip SRAM tiling, verify tensor-core alignment contracts, and select deployment paths under real latency, power, and cost budgets.
+        </p>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Hardware:</strong> {v1_11_roofline.hardware_ref}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Workload:</strong> {v1_11_variant.model_ref}
+          </span>
+          <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+            <strong>Ridge Point:</strong> {v1_11_roofline.ridge_flop_per_byte:.1f} FLOP/B
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Primary Focus:</strong> {v1_11_lens['amount_focus']}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Guardrail:</strong> {v1_11_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+          System Scenario: {v1_11_profile.label} Accelerator Co-Design
+        </h3>
+        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
+          {v1_11_variant.workload_summary}
+          The chapter invariant is that accelerators expose bottlenecks: speedup appears only when arithmetic intensity, precision, memory hierarchy, and hardware capability match the deployment envelope.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Hardware Acceleration:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Roofline Ceiling:</strong> Theoretical TFLOP/s peaks are only attainable if operational arithmetic intensity (FLOP/Byte) exceeds the hardware ridge point. Sub-ridge workloads are strictly memory-bandwidth bound.</li>
+            <li><strong>Memory Movement Dominates Compute:</strong> Moving data through external DRAM consumes orders of magnitude more time and energy than arithmetic execution; operator fusion and local SRAM tiling are mandatory.</li>
+            <li><strong>The Tensor Core Contract:</strong> Specialized matrix engines (Tensor Cores, Apple AMX, Jetson DLA, DSP SIMD) impose strict alignment rules on dimension multiples, supported data types (FP8/BF16/INT8), and numerical stability ranges.</li>
+            <li><strong>Holistic Deployment Feasibility:</strong> True accelerator fit requires simultaneous convergence of latency SLAs, power/thermal dissipation budgets, local memory capacity, and domain validation confidence.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
@@ -559,22 +555,17 @@ def _(mo):
     mo.callout(
         mo.md(
             """
-**Recommended reading**
+    **Recommended reading**
 
-- Chapter 11, **Roofline Model** and **Hardware ridge points**.
-- Chapter 11, **AI Memory Systems**, **Memory hierarchy**, and **Host-accelerator communication**.
-- Chapter 11, **Tensor Cores**, **Numerics in AI acceleration**, and the **Tensor Core contract**.
-- Chapter 11, **Heterogeneous SoC Design**, **Hardware Sustainability**, and **Feasibility assessment**.
-"""
+    - Chapter 11, **Roofline Model** and **Hardware ridge points**.
+    - Chapter 11, **AI Memory Systems**, **Memory hierarchy**, and **Host-accelerator communication**.
+    - Chapter 11, **Tensor Cores**, **Numerics in AI acceleration**, and the **Tensor Core contract**.
+    - Chapter 11, **Heterogeneous SoC Design**, **Hardware Sustainability**, and **Feasibility assessment**.
+    """
         ),
         kind="info",
     )
     return
-
-
-# ===========================================================================
-# CELL 3: WIDGETS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -589,6 +580,7 @@ def _(mo, v1_11_variant):
             "The accelerator path is unsupported": "unsupported",
             "Thermal or power is the first ceiling": "power",
         },
+        value="Memory bandwidth is the first ceiling",
         label="Part A prediction: why might peak throughput not appear?",
     )
     pA_dim = mo.ui.slider(start=128, stop=8192, value=_default_dim, step=128, label="Matrix dimension N")
@@ -605,9 +597,10 @@ def _(mo, v1_11_variant):
             "Switch precision and retest": "switch_precision",
             "Reject this accelerator path": "reject_path",
         },
+        value="Reduce memory traffic first",
         label="Part A checkpoint: first action after the roofline diagnosis",
     )
-    return (pA_action, pA_dim, pA_prec, pA_pred)
+    return pA_action, pA_dim, pA_prec, pA_pred
 
 
 @app.cell(hide_code=True)
@@ -619,6 +612,7 @@ def _(mo, v1_11_lens):
             "About 3-5x, because round-trips disappear": "3_5x",
             "About 10x, because compute becomes free": "10x",
         },
+        value="About 3-5x, because round-trips disappear",
         label="Part B prediction: how much can fusion or tiling help movement-heavy kernels?",
     )
     pB_mode = mo.ui.radio(
@@ -650,9 +644,10 @@ def _(mo, v1_11_lens):
             "Shrink the batch/window": "shrink_window",
             "Reject the accelerator path": "reject_path",
         },
+        value="Fuse adjacent kernels",
         label="Part B checkpoint: memory tactic",
     )
-    return (pB_action, pB_batch, pB_mode, pB_pred, pB_workspace)
+    return pB_action, pB_batch, pB_mode, pB_pred, pB_workspace
 
 
 @app.cell(hide_code=True)
@@ -667,6 +662,7 @@ def _(mo, v1_11_variant):
             "It can fail if the shape is misaligned": "misaligned",
             "It can fail if validation rejects the numeric change": "quality",
         },
+        value="It can fail if the format is unsupported",
         label="Part C prediction: what can prevent tensor-core or low-precision speedup?",
     )
     pC_dim = mo.ui.slider(start=128, stop=4096, value=_default_dim, step=64, label="Tensor dimension")
@@ -683,9 +679,10 @@ def _(mo, v1_11_variant):
             "Keep higher precision": "higher_precision",
             "Add numeric validation before sign-off": "validate",
         },
+        value="Ship this precision path",
         label="Part C checkpoint: precision decision",
     )
-    return (pC_action, pC_dim, pC_prec, pC_pred)
+    return pC_action, pC_dim, pC_prec, pC_pred
 
 
 @app.cell(hide_code=True)
@@ -697,6 +694,7 @@ def _(mo, v1_11_lens):
             "Power, energy, cost, or carbon will reject it": "amount_budget",
             "Validation evidence will reject it": "validation",
         },
+        value="Latency or p99 will reject it",
         label="Part D prediction: what is most likely to reject the naive accelerator choice?",
     )
     _path_options = {path["label"]: path["id"] for path in v1_11_lens["accelerator_paths"]}
@@ -721,21 +719,19 @@ def _(mo, v1_11_lens):
             "Defer until validation completes": "defer_validation",
             "Reject acceleration for this release": "reject_release",
         },
+        value="Recommend selected path",
         label="Part D checkpoint: deployment recommendation",
     )
-    return (pD_action, pD_path, pD_pred, pD_validation)
-
-
-# ===========================================================================
-# CELL 4: CONCEPT MODULES
-# ===========================================================================
+    return pD_action, pD_path, pD_pred, pD_validation
 
 
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
     mo,
     np,
     pA_action,
@@ -885,23 +881,11 @@ def _(
                 ),
                 COLORS["BlueLine"],
             ),
-            v1_11_workflow(
-                "Part A",
-                "Roofline separates compute-bound from memory-bound regimes.",
-                "Commit to the most likely bottleneck before seeing the chart.",
-                "Move matrix size and precision to change arithmetic intensity.",
-                "Compare AI, ridge, attainable throughput, and MFU.",
-                "Choose the first engineering action after the boundary is visible.",
+            gated_hypothesis_card(
+                pA_pred,
+                title="1. Formulate Your Roofline Hypothesis",
+                subtitle="Predict whether the active bottleneck is memory bandwidth, compute throughput, or an unsupported execution path before consulting empirical roofline data.",
             ),
-            mo.md(
-                f"""
-### Concept
-
-Peak throughput is only the flat roof. A workload below the ridge point is limited by
-{v1_11_lens['memory_name']} bandwidth; above it, the compute ceiling is active.
-"""
-            ),
-            pA_pred,
         ]
         if pA_pred.value is None:
             items.append(mo.callout(mo.md("Select a prediction to unlock the roofline evidence."), kind="warn"))
@@ -911,7 +895,14 @@ Peak throughput is only the flat roof. A workload below the ridge point is limit
         point = result["point"]
         workload = result["workload"]
         boundary = result["boundary_dimension"]
-        items.extend([mo.hstack([pA_dim, pA_prec], justify="start"), v1_11_draw_roofline(result)])
+        items.append(
+            instrumentation_console(
+                mo.hstack([pA_dim, pA_prec], justify="start", gap=1.0),
+                title="Roofline Simulation Knobs",
+                subtitle="Adjust matrix dimensions and arithmetic precision to observe operational arithmetic intensity against the hardware ridge point.",
+            )
+        )
+        items.append(v1_11_draw_roofline(result))
         items.append(
             v1_11_cards(
                 (
@@ -955,23 +946,31 @@ Peak throughput is only the flat roof. A workload below the ridge point is limit
                 {
                     "Math Peek and source model": mo.md(
                         f"""
-Formula:
+    Formula:
 
-```text
-AI = FLOPs / bytes
-ridge = peak FLOP/s / memory bandwidth
-R_attainable = min(peak FLOP/s, memory bandwidth * AI)
-```
+    ```text
+    AI = FLOPs / bytes
+    ridge = peak FLOP/s / memory bandwidth
+    R_attainable = min(peak FLOP/s, memory bandwidth * AI)
+    ```
 
-Source model: `mlsysbook_labs.gemm_workload` and `mlsysbook_labs.roofline_point`
-with `{v1_11_roofline.hardware_ref}` from MLSysIM. The chapter claim is the
-Roofline Model: the plot reveals whether the active ceiling is compute or bandwidth.
-"""
+    Source model: `mlsysbook_labs.gemm_workload` and `mlsysbook_labs.roofline_point`
+    with `{v1_11_roofline.hardware_ref}` from MLSysIM. The chapter claim is the
+    Roofline Model: the plot reveals whether the active ceiling is compute or bandwidth.
+    """
                     )
                 }
             )
         )
-        items.append(pA_action)
+        items.append(
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
+                <h4 style="margin:0 0 10px 0; color:#0F172A;">First Action After Roofline Diagnosis</h4>
+                {pA_action}
+            </div>
+            """)
+        )
         return mo.vstack(items)
 
     def v1_11_build_part_b():
@@ -984,23 +983,11 @@ Roofline Model: the plot reveals whether the active ceiling is compute or bandwi
                 ),
                 COLORS["OrangeLine"],
             ),
-            v1_11_workflow(
-                "Part B",
-                "Memory hierarchy and data movement can dominate accelerator performance.",
-                "Predict the speedup from eliminating memory round-trips.",
-                "Change execution mode, batch/window count, and local workspace.",
-                "Inspect traffic, movement time, energy, and spill status.",
-                "Choose the memory tactic to carry into deployment.",
+            gated_hypothesis_card(
+                pB_pred,
+                title="2. Formulate Your Memory Movement Hypothesis",
+                subtitle="Predict the speedup achievable by eliminating external memory round-trips via operator fusion or local SRAM tiling.",
             ),
-            mo.md(
-                f"""
-### Concept
-
-Fusion and tiling do not reduce the mathematical operation count. They reduce traffic through
-{v1_11_lens['memory_name']} and keep reused values in {v1_11_lens['local_memory_name']}.
-"""
-            ),
-            pB_pred,
         ]
         if pB_pred.value is None:
             items.append(mo.callout(mo.md("Select a prediction to unlock the memory movement evidence."), kind="warn"))
@@ -1008,7 +995,13 @@ Fusion and tiling do not reduce the mathematical operation count. They reduce tr
 
         result = v1_11_memory_result(pB_mode.value, pB_batch.value, pB_workspace.value)
         fusion = result["fusion"]
-        items.append(mo.hstack([pB_mode, pB_batch, pB_workspace], justify="start"))
+        items.append(
+            instrumentation_console(
+                mo.hstack([pB_mode, pB_batch, pB_workspace], justify="start", gap=1.0),
+                title="Memory Hierarchy & Operator Fusion Knobs",
+                subtitle="Toggle execution mode and adjust batch/workspace bounds to measure off-chip memory traffic reduction.",
+            )
+        )
         _fig = go.Figure()
         _fig.add_trace(
             go.Bar(
@@ -1054,23 +1047,31 @@ Fusion and tiling do not reduce the mathematical operation count. They reduce tr
                 {
                     "Math Peek and source model": mo.md(
                         f"""
-Fusion traffic model:
+    Fusion traffic model:
 
-```text
-eager bytes = (reads + writes) * tensor bytes
-fused bytes = (one read + one write) * tensor bytes
-movement time = selected bytes / bandwidth
-```
+    ```text
+    eager bytes = (reads + writes) * tensor bytes
+    fused bytes = (one read + one write) * tensor bytes
+    movement time = selected bytes / bandwidth
+    ```
 
-Source model: `mlsysbook_labs.fusion_traffic`, using `{v1_11_roofline.bandwidth_gbs:g} GB/s`
-from `{v1_11_roofline.hardware_ref}`. Chapter connection: Memory hierarchy and host-accelerator
-communication explain why eliminated round-trips can dominate speed and energy.
-"""
+    Source model: `mlsysbook_labs.fusion_traffic`, using `{v1_11_roofline.bandwidth_gbs:g} GB/s`
+    from `{v1_11_roofline.hardware_ref}`. Chapter connection: Memory hierarchy and host-accelerator
+    communication explain why eliminated round-trips can dominate speed and energy.
+    """
                     )
                 }
             )
         )
-        items.append(pB_action)
+        items.append(
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
+                <h4 style="margin:0 0 10px 0; color:#0F172A;">Memory Tactic Decision</h4>
+                {pB_action}
+            </div>
+            """)
+        )
         return mo.vstack(items)
 
     def v1_11_build_part_c():
@@ -1083,25 +1084,11 @@ communication explain why eliminated round-trips can dominate speed and energy.
                 ),
                 COLORS["GreenLine"],
             ),
-            v1_11_workflow(
-                "Part C",
-                "Tensor cores and precision accelerate only supported shapes and tolerable numeric formats.",
-                "Predict which contract term breaks first.",
-                "Change precision and tensor dimension.",
-                "Inspect fast-path support, alignment, quality delta, and latency.",
-                "Choose the precision path and validation note.",
+            gated_hypothesis_card(
+                pC_pred,
+                title="3. Formulate Your Tensor Core Alignment Hypothesis",
+                subtitle=f"Predict which contract term breaks first when enabling specialized matrix accelerators ({v1_11_lens['accelerator_path']}).",
             ),
-            mo.md(
-                f"""
-### Concept
-
-Reduced precision changes both sides of the roofline: fewer bytes move and specialized datapaths
-can raise peak throughput. That only helps when `{v1_11_lens['accelerator_path']}` supports the
-format, dimension multiples of {v1_11_lens['shape_multiple']} are respected, and quality loss stays
-within {v1_11_lens['quality_tolerance_pct']:.1f}%.
-"""
-            ),
-            pC_pred,
         ]
         if pC_pred.value is None:
             items.append(mo.callout(mo.md("Select a prediction to unlock the tensor/precision evidence."), kind="warn"))
@@ -1109,7 +1096,13 @@ within {v1_11_lens['quality_tolerance_pct']:.1f}%.
 
         result = v1_11_precision_result(pC_dim.value, pC_prec.value)
         selected = result["selected"]
-        items.append(mo.hstack([pC_dim, pC_prec], justify="start"))
+        items.append(
+            instrumentation_console(
+                mo.hstack([pC_dim, pC_prec], justify="start", gap=1.0),
+                title="Tensor Dimensions & Format Knobs",
+                subtitle=f"Select numeric precision and matrix dimension to verify shape alignment (multiples of {v1_11_lens['shape_multiple']}) and fast-path kernel dispatch.",
+            )
+        )
         _fig = go.Figure()
         _fig.add_trace(
             go.Bar(
@@ -1159,22 +1152,30 @@ within {v1_11_lens['quality_tolerance_pct']:.1f}%.
                 {
                     "Math Peek and source model": mo.md(
                         f"""
-Precision affects both bytes and peak throughput:
+    Precision affects both bytes and peak throughput:
 
-```text
-AI_GEMM = 2N^3 / (3N^2 * bytes_per_element)
-fast path = supported_format and aligned_shape and quality_delta <= tolerance
-```
+    ```text
+    AI_GEMM = 2N^3 / (3N^2 * bytes_per_element)
+    fast path = supported_format and aligned_shape and quality_delta <= tolerance
+    ```
 
-Source model: `mlsysbook_labs.gemm_workload` plus notebook-local `v1_11_precision_result`.
-Chapter connection: Tensor cores require supported precision and shape contracts; mixed precision
-must still pass validation.
-"""
+    Source model: `mlsysbook_labs.gemm_workload` plus notebook-local `v1_11_precision_result`.
+    Chapter connection: Tensor cores require supported precision and shape contracts; mixed precision
+    must still pass validation.
+    """
                     )
                 }
             )
         )
-        items.append(pC_action)
+        items.append(
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
+                <h4 style="margin:0 0 10px 0; color:#0F172A;">Precision Path Decision</h4>
+                {pC_action}
+            </div>
+            """)
+        )
         return mo.vstack(items)
 
     def v1_11_build_part_d():
@@ -1193,30 +1194,23 @@ must still pass validation.
                 ),
                 COLORS["RedLine"],
             ),
-            v1_11_workflow(
-                "Part D",
-                "Accelerator fit is a deployment recommendation with cost, power, and validation constraints.",
-                "Predict what rejects the naive highest-peak path.",
-                "Choose a candidate path and validation evidence level.",
-                "Compare latency, power/energy/cost/carbon, validation, and failure reasons.",
-                "Commit the recommendation and rejected alternatives.",
+            gated_hypothesis_card(
+                pD_pred,
+                title="4. Formulate Your Deployment Selection Hypothesis",
+                subtitle=f"Predict what constraint is most likely to reject the naive accelerator choice under {v1_11_lens['amount_focus']}.",
             ),
-            mo.md(
-                f"""
-### Concept
-
-The deployable accelerator is the one that passes the amount system for this track:
-{v1_11_lens['amount_focus']}. The chapter feasibility check is practical: compute time,
-memory fit, power or cost, and validation must all pass at the same time.
-"""
-            ),
-            pD_pred,
         ]
         if pD_pred.value is None:
             items.append(mo.callout(mo.md("Select a prediction to unlock the deployment comparison."), kind="warn"))
             return mo.vstack(items)
 
-        items.append(mo.hstack([pD_path, pD_validation], justify="start"))
+        items.append(
+            instrumentation_console(
+                mo.hstack([pD_path, pD_validation], justify="start", gap=1.0),
+                title="Deployment Path & Validation Knobs",
+                subtitle="Select candidate accelerator configuration and evidence level to verify real feasibility against system guardrails.",
+            )
+        )
         items.append(
             v1_11_table(
                 ("Path", "Latency", "Power", v1_11_lens["secondary_budget_label"], "Pass?", "Reason"),
@@ -1252,25 +1246,33 @@ memory fit, power or cost, and validation must all pass at the same time.
                 {
                     "Math Peek and source model": mo.md(
                         """
-Feasibility model:
+    Feasibility model:
 
-```text
-T_process = operations / attainable_throughput
-movement_time = bytes_moved / bandwidth
-path_latency = (T_process + movement_time) / path_speed + transfer_or_runtime_overhead
-deployment_pass = latency_ok and power_or_cost_ok and memory_ok and precision_ok and validation_ok
-```
+    ```text
+    T_process = operations / attainable_throughput
+    movement_time = bytes_moved / bandwidth
+    path_latency = (T_process + movement_time) / path_speed + transfer_or_runtime_overhead
+    deployment_pass = latency_ok and power_or_cost_ok and memory_ok and precision_ok and validation_ok
+    ```
 
-Source model: Part A uses the shared roofline helpers, Part B uses shared fusion traffic,
-and Part C/D use notebook-local `v1_11_` scenario assumptions for deployment budgets.
-Chapter connection: the feasibility assessment asks whether the workload can run inside
-memory, bandwidth, compute, power, cost, and validation limits.
-"""
+    Source model: Part A uses the shared roofline helpers, Part B uses shared fusion traffic,
+    and Part C/D use notebook-local `v1_11_` scenario assumptions for deployment budgets.
+    Chapter connection: the feasibility assessment asks whether the workload can run inside
+    memory, bandwidth, compute, power, cost, and validation limits.
+    """
                     )
                 }
             )
         )
-        items.append(pD_action)
+        items.append(
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
+                <h4 style="margin:0 0 10px 0; color:#0F172A;">Final Deployment Sign-Off</h4>
+                {pD_action}
+            </div>
+            """)
+        )
         return mo.vstack(items)
 
     def v1_11_build_synthesis():
@@ -1301,25 +1303,25 @@ memory, bandwidth, compute, power, cost, and validation limits.
             mo.callout(
                 mo.md(
                     f"""
-**Decision:** {v1_11_lens['report_frame']}
+    **Decision:** {v1_11_lens['report_frame']}
 
-**Bottleneck diagnosis:** Part A measured AI = {a_result['workload'].arithmetic_intensity:.1f}
-FLOP/B against ridge = {v1_11_roofline.ridge_flop_per_byte:.1f}, so the active regime is
-{a_result['point'].regime.lower()}.
+    **Bottleneck diagnosis:** Part A measured AI = {a_result['workload'].arithmetic_intensity:.1f}
+    FLOP/B against ridge = {v1_11_roofline.ridge_flop_per_byte:.1f}, so the active regime is
+    {a_result['point'].regime.lower()}.
 
-**Memory movement evidence:** Part B selected `{b_result['mode']}` execution with
-{b_result['selected_bytes']/1024:.1f} KB of slower-memory traffic, {b_result['selected_time_us']:.2f} us
-movement time, and {"a local-memory spill" if b_result['spills'] else "no local-memory spill"}.
+    **Memory movement evidence:** Part B selected `{b_result['mode']}` execution with
+    {b_result['selected_bytes']/1024:.1f} KB of slower-memory traffic, {b_result['selected_time_us']:.2f} us
+    movement time, and {"a local-memory spill" if b_result['spills'] else "no local-memory spill"}.
 
-**Selected accelerator/precision:** Part C selected {c_result['selected']['precision'].upper()}
-with status `{c_result['selected']['status']}`. Part D selected `{selected['label']}` and recommends
-`{recommendation['label']}`.
+    **Selected accelerator/precision:** Part C selected {c_result['selected']['precision'].upper()}
+    with status `{c_result['selected']['status']}`. Part D selected `{selected['label']}` and recommends
+    `{recommendation['label']}`.
 
-**Rejected alternatives:** {rejected if rejected else "No alternative was rejected by the current constraints."}
+    **Rejected alternatives:** {rejected if rejected else "No alternative was rejected by the current constraints."}
 
-**Residual risk:** validate profiler counters, supported-operator coverage, thermal or duty-cycle behavior,
-and production p99 before treating the recommendation as release evidence.
-"""
+    **Residual risk:** validate profiler counters, supported-operator coverage, thermal or duty-cycle behavior,
+    and production p99 before treating the recommendation as release evidence.
+    """
                 ),
                 kind="info",
             ),
@@ -1356,14 +1358,8 @@ and production p99 before treating the recommendation as release evidence.
     return
 
 
-# ===========================================================================
-# CELL 5: LEDGER HUD
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
-    COLORS,
     ledger,
     mo,
     pA_action,
@@ -1462,13 +1458,9 @@ def _(
     return
 
 
-# ===========================================================================
-# CELL 6: DOWNLOADABLE REPORT
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
+    big_takeaways,
     build_lab_report,
     mo,
     pA_action,
@@ -1622,13 +1614,24 @@ def _(
 
     mo.vstack(
         [
-            mo.md("## Download Report"),
-            mo.callout(
-                mo.md(
-                    "This V1-11 report is generated locally from the selected track, MLSysIM hardware refs, "
-                    "shared roofline calculations, and notebook-local deployment scenario budgets."
-                ),
-                kind="info",
+            big_takeaways(
+                (
+                    "Peak TOPS is not performance; arithmetic intensity decides which ceiling is active.",
+                    "Memory hierarchy matters because eliminated movement can dominate speed and energy.",
+                    "Precision speedups are contracts: supported format, aligned shape, and tolerated quality loss.",
+                    "Deployment recommendations must reject alternatives and name residual validation risk.",
+                )
+            ),
+            mo.Html(
+                """
+    <div class="mlsysbook-panel mlsysbook-report-panel">
+      <h2>Download Report</h2>
+      <p class="mlsysbook-source-summary">
+        This report records the solver-backed candidate frontier, structured predictions,
+        selected accelerator path, validation test, and residual risk.
+      </p>
+    </div>
+    """
             ),
             report_export_panel(_report),
         ]
