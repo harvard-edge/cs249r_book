@@ -1,6 +1,6 @@
 ---
 title: "Starving the GPU"
-subtitle: "Your GPU can process 5,300 images per second. Your CPU decodes 850."
+subtitle: "Your GPU is ready for the next batch. Your CPU is still decoding JPEGs."
 description: "Discover that the data pipeline — not the GPU — is often the binding constraint in training. Use DataModel and TransformationModel to find the crossover where CPU preprocessing stalls the accelerator."
 categories: ["data", "intermediate"]
 ---
@@ -96,7 +96,7 @@ info("GPU Compute Baseline",
      Bottleneck=profile.bottleneck)
 ```
 
-The GPU can process this batch in tens of milliseconds. That is the ceiling. Now let's
+The GPU finishes this batch in well under a tenth of a second. That is the ceiling. Now let's
 check whether the data pipeline can keep up.
 
 ---
@@ -164,8 +164,8 @@ info("CPU vs GPU Pipeline",
 
 **The binding constraint is not silicon — it is JPEG decoding on the CPU.** The data
 pipeline (Wall 9: Transformation) becomes the bottleneck before the GPU (Wall 1: Compute).
-Your GPU can process 5,300+ images per second, but your 8 CPU workers can only prepare
-~850. The GPU sits idle waiting for data. This is why production training pipelines use
+Compare the two step times above: the GPU could get through each batch several times
+faster than your 8 CPU workers can prepare it. The GPU sits idle waiting for data. This is why production training pipelines use
 GPU-accelerated preprocessing (NVIDIA DALI), pre-decoded datasets, or aggressive
 prefetching.
 :::
@@ -180,7 +180,7 @@ becomes more efficient but the CPU falls behind:
 
 ```{python}
 rows = []
-for bs in [32, 64, 128, 256, 512, 1024]:
+for bs in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]:
     p = solver.solve(model=model, hardware=hardware, batch_size=bs, precision="fp16")
 
     t = transform_solver.solve(
@@ -200,11 +200,18 @@ for bs in [32, 64, 128, 256, 512, 1024]:
     ])
 
 table(["Batch", "GPU Step", "CPU Xform", "Binding", "GPU Util"], rows)
+
+crossover = next(r[0] for r in rows if r[3] == "Transformation")
+info("Crossover", First_CPU_bound_batch=crossover)
 ```
 
-Watch the crossover: at small batch sizes the GPU is the bottleneck (100% utilization).
-As batch size grows, CPU preprocessing time grows linearly while GPU step time grows
-sub-linearly. Eventually Wall 9 becomes the binding constraint and GPU utilization drops.
+The crossover sits at the very bottom of the sweep. At the smallest batches the CPU keeps
+up and the GPU runs at full utilization, but only a few samples later Wall 9 binds and
+never lets go. CPU transform time is strictly proportional to batch size. The GPU step is
+a fixed dispatch overhead plus a per-sample compute cost, and that fixed overhead only
+shields the GPU while batches are tiny. Once it is amortized, both costs grow linearly, so
+GPU utilization levels off at the ratio of per-sample GPU compute to per-sample CPU
+transform time instead of falling to zero.
 
 ---
 

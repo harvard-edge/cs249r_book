@@ -706,53 +706,44 @@ MCTS [@kocsis2006bandit; @silver2016mastering] provides an asymptotically optima
    N(s, a) \leftarrow N(s, a) + 1, \quad Q(s, a) \leftarrow Q(s, a) + \frac{V(s') - Q(s, a)}{N(s, a)}
    $$
 
-To translate this theoretical formulation into a production runtime, @lst-vol3-deliberation-mcts-prefix implements an executable PUCT search engine that couples tree expansion to copy-on-write key-value cache page tables. Rather than duplicating prompt tokens across candidate branches, each `MCTSNode` maintains a reference-counted `RadixCacheHandle`, ensuring that memory consumption scales with the active search frontier rather than the combinatorial token tree.
+@Algo-mcts-radix-cache integrates the four PUCT search phases with copy-on-write key-value cache page tables. Rather than recomputing prompt prefixes across candidate branches or duplicating context in device memory, the expansion phase forks the parent node's physical cache handle, pinning shared prompt pages in high-bandwidth memory (HBM) and allocating new pages only for divergent continuation tokens.
 
-::: {#lst-vol3-deliberation-mcts-prefix lst-cap="**Monte Carlo Tree Search with Radix Prefix Cache Management**: Production implementation of PUCT tree search coupling node exploration to copy-on-write KV-cache prefix allocation."}
-```python
-import math
-from typing import Dict, Optional
-
-
-class MCTSNode:
-    """Deliberation tree node backed by a copy-on-write KV-cache page handle."""
-
-    def __init__(self, parent: Optional["MCTSNode"] = None, prior: float = 1.0, cache_handle=None):
-        self.parent, self.prior = parent, prior
-        self.cache_handle = cache_handle  # Reference-counted physical page in Radix cache
-        self.children: Dict[str, "MCTSNode"] = {}
-        self.visits, self.value = 0, 0.0
-
-    @property
-    def q_value(self) -> float:
-        return self.value / self.visits if self.visits > 0 else 0.0
-
-    def puct(self, c: float = 1.414) -> float:
-        u = c * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
-        return self.q_value + u
-
-
-def search_step(root: MCTSNode, expand_fn, eval_fn) -> None:
-    """Executes a 4-phase MCTS iteration with CoW prefix cache fork & backpropagation."""
-    # 1. Select: traverse path maximizing PUCT
-    curr, path = root, [root]
-    while curr.children:
-        curr = max(curr.children.values(), key=lambda n: n.puct())
-        path.append(curr)
-
-    # 2. Expand: fork candidate children sharing parent's KV prefix handle
-    if not curr.children:
-        for action, prior in expand_fn(curr).items():
-            child_handle = curr.cache_handle.fork() if curr.cache_handle else None
-            curr.children[action] = MCTSNode(parent=curr, prior=prior, cache_handle=child_handle)
-
-    # 3. Evaluate & 4. Backpropagate: update visit counts and Q-values along search path
-    val = eval_fn(curr)
-    for node in reversed(path):
-        node.visits += 1
-        node.value += val
+```pseudocode
+#| label: algo-mcts-radix-cache
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Monte Carlo Tree Search with Radix prefix caching}
+\begin{algorithmic}
+\Require root state $s_0$; Radix cache handle $H_0$ in accelerator HBM; exploration coefficient $c_{\text{puct}}$; rollout budget $B$; branching factor $K$
+\Ensure updated deliberation search tree and selected action $a^*$
+\For{$\text{step} = 1$ to $B$}
+    \State $u \gets \text{root}$, $\Pi \gets [u]$ \Comment{selection: traverse path maximizing PUCT score}
+    \While{$u$ is not a leaf}
+        \State $a^* \gets \arg\max_a \left( Q(u, a) + c_{\text{puct}} \cdot P(u, a) \frac{\sqrt{N(u)}}{1 + N(u, a)} \right)$
+        \State $u \gets \text{child}(u, a^*)$, append $u$ to $\Pi$
+    \EndWhile
+    \If{$N(u) > 0$ \textbf{and} $u$ is non-terminal} \Comment{expansion: fork CoW cache pages at branch point}
+        \State sample candidate actions $\{a_1, \dots, a_K\} \sim \pi_\theta(\cdot \mid u)$
+        \For{each action $a_k$}
+            \State $H_k \gets \textsc{ForkPrefixHandle}(H(u))$ \Comment{increments physical page reference counts}
+            \State instantiate child $v_k$ with state $s_k$, prior $P(u, a_k)$, and cache handle $H_k$
+        \EndFor
+        \State $u \gets v_1$, append $u$ to $\Pi$
+    \EndIf
+    \State $V \gets \textsc{EvaluateState}(u)$ \Comment{evaluation: scalar value head or shallow rollout}
+    \For{each node $w \in \text{reversed}(\Pi)$} \Comment{backpropagation: update ancestral statistics}
+        \State $N(w) \gets N(w) + 1$
+        \State $Q(w) \gets Q(w) + \frac{V - Q(w)}{N(w)}$
+    \EndFor
+\EndFor
+\State \Return $\arg\max_a N(\text{root}, a)$
+\end{algorithmic}
+\end{algorithm}
 ```
-:::
+
+By coupling tree expansion directly to reference-counted page tables, the memory footprint of deliberation scales linearly with the active search frontier rather than combinatorially with the total number of sampled reasoning tokens.
 
 ### The verification tax formulation
 
@@ -975,59 +966,48 @@ The circuit breaker operates as an out-of-band Finite State Machine (FSM):
 2. **`HALF-OPEN` (Degraded Remediation):** Tripped by soft invariant breaches (e.g., 2 consecutive tool errors or semantic stagnation). The runtime suspends unconstrained autonomy, injects an out-of-band system warning into context, prunes failing tools from the schema, and grants a strict 2-step remediation budget. If the model demonstrates physical progress ($\Delta \mathcal{S}_{\text{env}} > \delta$), the breaker resets to `CLOSED`.
 3. **`OPEN` (Tripped & Safe Abort):** Tripped by hard invariant violations or failed remediation. The runtime forcibly terminates model inference, initiates compensating rollbacks for uncommitted environment mutations, emits structured telemetry, and escalates to human-in-the-loop queues.
 
-To formalize both the mathematical verification scheduler and the out-of-band watchdog engine, @lst-vol3-deliberation-circuit-breaker implements an operational `VerificationScheduler` computing $m^*$ under the Young-Daly Square-Root Law, directly determining how many tree expansion steps the `PUCTSearchPlanner` from @lst-vol3-deliberation-mcts-prefix executes before invoking intermediate verifiers. This is paired with a three-state `WatchdogCircuitBreaker` FSM that tracks token burn, error burst ceilings, and cosine semantic distances to arrest runaway agent loops.
+@Algo-watchdog-circuit-breaker formalizes this out-of-band monitoring loop across step, token, error, and physical progress dimensions. On each agent control step, the watchdog evaluates four orthogonal health invariants: total step count against task ceiling $K_{\max}$, cumulative token consumption against budget $T_{\max}$, consecutive execution errors against burst limit $E_{\max}$, and the physical environment progress delta $\Delta \mathcal{S}_{\text{env}}$ established in @tbl-vol3-deliberation-cycle-detection.
 
-::: {#lst-vol3-deliberation-circuit-breaker lst-cap="**Dynamic Verification Scheduler and Watchdog Circuit Breaker**: Python implementation of optimal Young-Daly verification cadence scheduling alongside an out-of-band circuit breaker FSM monitoring semantic progress deltas and error burst rates."}
-```python
-import math
-from enum import Enum, auto
-
-
-class CircuitState(Enum):
-    CLOSED = auto()
-    HALF_OPEN = auto()
-    OPEN = auto()
-
-
-def compute_optimal_cadence(t_step: float, t_ver: float, reliability_p: float) -> int:
-    """Evaluates Young-Daly verification cadence: m* = sqrt(2 * T_ver / ((1 - p) * T_step))."""
-    ratio = (2.0 * t_ver) / (max(1.0 - reliability_p, 1e-4) * t_step)
-    return max(1, round(math.sqrt(ratio)))
-
-
-class WatchdogCircuitBreaker:
-    """Out-of-band kernel watchdog monitoring agent trajectory health invariants."""
-
-    def __init__(self, max_steps: int = 30, max_tokens: int = 50_000, error_thresh: int = 3):
-        self.max_steps = max_steps
-        self.max_tokens = max_tokens
-        self.error_thresh = error_thresh
-        self.state = CircuitState.CLOSED
-        self.steps = 0
-        self.tokens = 0
-        self.consecutive_errors = 0
-
-    def step(self, tokens_used: int, error: bool = False, delta_env: float = 1.0) -> CircuitState:
-        """Evaluates trajectory health invariants on each agent control step."""
-        self.steps += 1
-        self.tokens += tokens_used
-        self.consecutive_errors = (self.consecutive_errors + 1) if error else 0
-
-        # Hard invariant violations trip immediately to OPEN
-        if (
-            self.steps > self.max_steps
-            or self.tokens > self.max_tokens
-            or self.consecutive_errors >= self.error_thresh
-        ):
-            self.state = CircuitState.OPEN
-        elif delta_env <= 0.0:  # Stagnation trips to HALF_OPEN degraded remediation
-            self.state = CircuitState.HALF_OPEN if self.state == CircuitState.CLOSED else CircuitState.OPEN
-        elif self.state == CircuitState.HALF_OPEN and not error:
-            self.state = CircuitState.CLOSED  # Remediated progress restores normal operation
-
-        return self.state
+```pseudocode
+#| label: algo-watchdog-circuit-breaker
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Watchdog circuit breaker and invariant monitor}
+\begin{algorithmic}
+\Require step ceiling $K_{\max}$; token budget $T_{\max}$; error burst threshold $E_{\max}$; minimum progress delta $\delta_{\min}$
+\Ensure safe termination or updated breaker state $\sigma \in \{\textsc{Closed}, \textsc{Half-Open}, \textsc{Open}\}$
+\State $\sigma \gets \textsc{Closed}$, $k \gets 0$, $T \gets 0$, $e \gets 0$ \Comment{initialize watchdog invariants}
+\While{agent execution is active}
+    \State receive step telemetry $(\Delta T, \text{err}, \Delta \mathcal{S}_{\text{env}})$ from sandbox monitor
+    \State $k \gets k + 1$
+    \State $T \gets T + \Delta T$
+    \State $e \gets (e + 1)$ \textbf{if} err \textbf{else} $0$
+    \If{$k > K_{\max}$ \textbf{or} $T > T_{\max}$ \textbf{or} $e \ge E_{\max}$} \Comment{hard safety invariant violation}
+        \State $\sigma \gets \textsc{Open}$
+        \State abort model inference, trigger compensating rollback, and escalate to human queue
+        \State \Return $\sigma$
+    \ElsIf{$\Delta \mathcal{S}_{\text{env}} < \delta_{\min}$} \Comment{semantic stagnation or livelock detected}
+        \If{$\sigma = \textsc{Closed}$}
+            \State $\sigma \gets \textsc{Half-Open}$
+            \State inject out-of-band warning, restrict tool schema, and grant 2-step canary budget
+        \Else
+            \State $\sigma \gets \textsc{Open}$ \Comment{stagnation persists across canary window}
+            \State abort inference and escalate to supervisor
+            \State \Return $\sigma$
+        \EndIf
+    \ElsIf{$\sigma = \textsc{Half-Open}$ \textbf{and not} err}
+        \State $\sigma \gets \textsc{Closed}$ \Comment{verified physical progress restores normal operation}
+        \State restore full tool schema and reset error counter
+    \EndIf
+\EndWhile
+\State \Return $\sigma$
+\end{algorithmic}
+\end{algorithm}
 ```
-:::
+
+Operating the watchdog out-of-band ensures that even when an agent policy enters an unconstrained livelock or hallucinatory loop, the supervisor arrests execution before runaway token expenditure exhausts cluster quotas or corrupts downstream state.
 
 ::: {#ws-deliberation-endogenous-livelock .callout-war-story title="The endogenous feedback loop and livelock meltdown"}
 
