@@ -113,12 +113,13 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">📖</td>
       <td><b>Textbook Series</b></td>
       <td>Four-volume MIT Press textbook series on Machine Learning Systems Architecture:
-        <br>• <a href="https://mlsysbook.ai/vol1/"><b>Vol I: Introduction to Machine Learning Systems</b></a> <i>(Foundations & Release Edition)</i>
-        <br>• <a href="https://mlsysbook.ai/vol2/"><b>Vol II: Scaling Machine Learning Systems</b></a> <i>(Preview / Work in Progress)</i>
-        <br>• <a href="https://mlsysbook.ai/vol3/"><b>Vol III: Agentic Machine Learning Systems</b></a> <i>(In Development / Early Draft)</i>
-        <br>• <a href="https://mlsysbook.ai/vol4/"><b>Vol IV: Physical AI: Machine Learning Systems</b></a> <i>(In Development / Early Draft)</i>
+        <br>• <a href="https://mlsysbook.ai/vol1/"><b>Vol I: Introduction to Machine Learning Systems</b></a> <i>(Released)</i><br>&nbsp;&nbsp;&nbsp;The foundations, abstractions, lifecycle, data, training, inference, evaluation, deployment, and responsible systems.
+        <br>• <a href="https://mlsysbook.ai/vol2/"><b>Vol II: Scaling Machine Learning Systems</b></a> <i>(Preview)</i><br>&nbsp;&nbsp;&nbsp;Distributed computation, accelerators, memory, communication, parallelism, serving, reliability, and efficiency.
+        <br>• <a href="books/vol3/"><b>Vol III: Agentic Machine Learning Systems</b></a> <i>(In Development)</i><br>&nbsp;&nbsp;&nbsp;Reasoning and acting loops, memory, tools, planning, search, orchestration, evaluation, security, and multi-agent systems.
+        <br>• <a href="books/vol4/"><b>Vol IV: Physical AI Systems</b></a> <i>(In Development)</i><br>&nbsp;&nbsp;&nbsp;Sensing, perception, world models, control, robotics, embodiment, real-time constraints, safety, and hardware.
+        <br><br>⚠️ <i>Volumes III and IV are in development and change quickly as I iterate. Please do not cite or teach from them yet. Feedback is welcome through the <a href="https://github.com/harvard-edge/cs249r_book/issues/new/choose">Book feedback</a> issue forms.</i>
       </td>
-      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II (Preview)</a> · <a href="https://mlsysbook.ai/vol3/">Vol III (Draft)</a> · <a href="https://mlsysbook.ai/vol4/">Vol IV (Draft)</a></td>
+      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II (Preview)</a> · <a href="books/vol3/">Vol III (In Dev)</a> · <a href="books/vol4/">Vol IV (In Dev)</a></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
@@ -148,7 +149,7 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">💼</td>
       <td><b>StaffML</b></td>
       <td>Physics-grounded interview questions for ML systems roles. Vault, practice drills, mock interviews, and progress tracking.</td>
-      <td><a href="https://mlsysbook.ai/staffml/">Practice</a> · <a href="interviews/README.md">Repo guide</a></td>
+      <td><a href="https://mlsysbook.ai/staffml/">Practice</a> · <a href="staffml/README.md">Repo guide</a></td>
     </tr>
   </tbody>
 </table>
@@ -206,7 +207,6 @@ Some projects are intentionally earlier-stage than the main curriculum:
 
 - [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
 - [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
-- [ML Systems Design Grammar](design-grammar/README.md) is an experimental framework for reasoning from stable primitives, constraints, and rewrite rules.
 
 ---
 
@@ -282,14 +282,14 @@ The textbook series follows a comprehensive systems progression across four core
     </tr>
     <tr>
       <td align="center">🟣</td>
-      <td><b>Volume III</b><br><i>Agentic (Notebook)</i></td>
+      <td><b>Volume III</b><br><i>Agentic (In Dev)</i></td>
       <td><b>The Trajectory</b></td>
       <td>How do we govern intelligence acting autonomously over long horizons?</td>
       <td>Compounding trajectory drift and unauthorized side-effects.</td>
     </tr>
     <tr>
       <td align="center">🌲</td>
-      <td><b>Volume IV</b><br><i>Physical AI (Notebook)</i></td>
+      <td><b>Volume IV</b><br><i>Physical AI (In Dev)</i></td>
       <td><b>The Physical Plant</b></td>
       <td>How do we let intelligence act safely on matter and physical systems?</td>
       <td>Irreversible physical damage in the real world.</td>
@@ -297,7 +297,7 @@ The textbook series follows a comprehensive systems progression across four core
   </tbody>
 </table>
 
-> *Note: Volumes III and IV are currently active research notebooks as these disciplines rapidly evolve. Over time, they may mature into formal textbooks—for now, they are where I explore first principles and separate durable systems foundations from noise. You are welcome to follow along as they take shape.*
+> *Note: Volumes III and IV are in development. They change quickly as I iterate, so expect chapters to be added, reorganized, and rewritten. You are welcome to follow along as they take shape.*
 
 #### How the Volumes Connect
 
@@ -528,7 +528,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">📖</td>
       <td><b>Fix a typo or improve a chapter</b></td>
-      <td><a href="book/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
+      <td><a href="binder/docs/CONTRIBUTING.md">Textbook contributing guide</a></td>
     </tr>
     <tr>
       <td align="center">🔥</td>
@@ -548,7 +548,7 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
     <tr>
       <td align="center">💼</td>
       <td><b>Improve assessment or career-readiness content</b></td>
-      <td><a href="interviews/README.md">StaffML guide</a> · <a href="book/tools/scripts/genai/quiz_refresh/README.md">quiz refresh guide</a></td>
+      <td><a href="staffml/README.md">StaffML guide</a></td>
     </tr>
     <tr>
       <td align="center">🧠</td>
@@ -572,17 +572,17 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
 
 ## License
 
-This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `tinytorch/LICENSE`, `interviews/staffml/LICENSE`) is authoritative.
+This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `tinytorch/LICENSE`, `staffml/app/LICENSE`) is authoritative.
 
 | Component | License | What it means |
 |---|---|---|
-| Textbook (`book/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
-| [TinyTorch](packages/tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
-| [MLSys·im](packages/mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
-| [StaffML](interviews/staffml/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
-| [StaffML question corpus](interviews/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use; commercial use requires permission. |
-| [TinyDigits dataset](packages/tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
-| [TinyTalks dataset](packages/tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
+| Textbook (`books/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
+| [TinyTorch](tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
+| [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
+| [StaffML](staffml/app/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
+| [StaffML question corpus](staffml/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use; commercial use requires permission. |
+| [TinyDigits dataset](tinytorch/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
+| [TinyTalks dataset](tinytorch/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
 
 A user-facing summary lives at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
 
@@ -970,25 +970,6 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- INSTRUCTORS-CONTRIBUTORS-END -->
-
----
-
-### ⚗️ ML Systems Design Grammar Contributors
-
-<!-- DESIGNGRAMMAR-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-<table width="100%" style="width:100%">
-  <tbody>
-    <tr>
-      <td align="center" valign="top" width="14.29%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=50" width="50px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- DESIGNGRAMMAR-CONTRIBUTORS-END -->
 ---
 
 <div align="center">

@@ -1,0 +1,392 @@
+id: https://staffml.mlsysbook.ai/schema/question
+name: staffml_question
+title: StaffML Question Schema (v1.0)
+description: |
+  LinkML schema for the StaffML per-question YAML format. This is the sole
+  source of truth for the vault's data model. Pydantic models, SQL DDL, and
+  TypeScript types are derived from this file.
+
+  v1.0 (2026-04-21): rebased on the paper's 4-axis taxonomy. Track, level,
+  zone, topic, competency_area, bloom_level, and phase are now self-contained
+  YAML fields. The filesystem encodes only `track` for navigability.
+
+  See ARCHITECTURE.md §3.3 and CHANGELOG.md.
+license: CC-BY-NC-4.0
+version: 1.0.0
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+  staffml: https://staffml.mlsysbook.ai/schema/
+default_prefix: staffml
+default_range: string
+
+imports:
+  - linkml:types
+
+enums:
+
+  Track:
+    description: Deployment regime the question targets (paper §4 "Tracks").
+    permissible_values:
+      tinyml: {}
+      edge: {}
+      mobile: {}
+      cloud: {}
+      global: {}
+
+  CompetencyArea:
+    description: |
+      The 13 canonical competency areas from the paper (§4 Table 3).
+      Closed enum — values outside this set are rejected at validation
+      time. Added 2026-04-25 after a survey found ~40 published items
+      with topic names or zone names mistakenly populating this field.
+    permissible_values:
+      deployment: {}
+      parallelism: {}
+      networking: {}
+      latency: {}
+      memory: {}
+      compute: {}
+      data: {}
+      power: {}
+      precision: {}
+      reliability: {}
+      optimization: {}
+      architecture: {}
+      cross-cutting: {}
+
+  Level:
+    description: |
+      Cognitive depth mapped to Bloom's taxonomy (paper §3.2). L1 = Remember
+      through L6+ = Create. L6+ denotes Staff+ mastery-level synthesis.
+    permissible_values:
+      L1: {}
+      L2: {}
+      L3: {}
+      L4: {}
+      L5: {}
+      L6+: {}
+
+  Zone:
+    description: |
+      Ikigai-style cognitive zone. 4 pure + 6 compound + 1 mastery = 11 zones
+      (paper §3 "The StaffML Competency Model"). Zone-level affinity table in
+      paper Table 2.
+    permissible_values:
+      recall: {description: "Single skill: Bloom Remember"}
+      analyze: {description: "Single skill: Bloom Analyze"}
+      design: {description: "Single skill: Bloom Create"}
+      implement: {description: "Single skill: execute/apply"}
+      fluency: {description: "Compound: recall + quantify"}
+      diagnosis: {description: "Compound: recall + analyze"}
+      specification: {description: "Compound: recall + design"}
+      optimization: {description: "Compound: analyze + quantify"}
+      evaluation: {description: "Compound: analyze + design"}
+      realization: {description: "Compound: design + quantify"}
+      mastery: {description: "All four skills: Staff+ synthesis"}
+
+  BloomLevel:
+    description: |
+      Bloom's taxonomy (2001 revision). Note: 'synthesize' from the original
+      1956 taxonomy is subsumed by 'create' in the revision.
+    permissible_values:
+      remember: {}
+      understand: {}
+      apply: {}
+      analyze: {}
+      evaluate: {}
+      create: {}
+
+  Phase:
+    description: ML lifecycle phase the question addresses.
+    permissible_values:
+      training: {}
+      inference: {}
+      both: {}
+
+  Status:
+    description: Publication state.
+    permissible_values:
+      draft:     {description: "Authored but not yet ready for users"}
+      published: {description: "Live in the corpus"}
+      flagged:   {description: "Under review; surface to authors not users"}
+      archived:  {description: "Retired but content preserved for history"}
+      deleted:   {description: "Soft-deleted; paired with deletion_reason"}
+
+  Provenance:
+    description: Authorship provenance (closed enum — see REVIEWS.md H-5).
+    permissible_values:
+      human: {}
+      llm-draft: {}
+      llm-then-human-edited: {}
+      imported: {}
+
+  HumanReviewStatus:
+    description: |
+      Human verification state, independent of LLM validation stamps.
+      A question can be LLM-validated but not human-reviewed, or vice versa.
+    permissible_values:
+      not-reviewed: {description: "No human has reviewed this question"}
+      verified: {description: "Human reviewer confirmed content, math, and classification"}
+      flagged: {description: "Human reviewer identified issues needing attention"}
+      needs-rework: {description: "Human reviewer recommends regeneration"}
+
+  VisualKind:
+    description: |
+      Renderer kind for an attached question visual. Closed enum: only
+      values shipped by the practice page are accepted. `mermaid` was
+      removed in v0.1.2 — it was reserved for future inline-text diagrams
+      but never implemented; re-add when shipping that feature.
+    permissible_values:
+      svg: {description: "Static SVG asset under staffml/vault/visuals/<track>/"}
+
+classes:
+
+  ChainRef:
+    description: Structured chain reference with position.
+    attributes:
+      id:
+        range: string
+        required: true
+        description: Chain identifier; must exist in chains.yaml.
+      position:
+        range: integer
+        required: true
+        minimum_value: 0
+        description: Position within the chain (0-indexed per current corpus data).
+
+  Resource:
+    description: |
+      Author-curated external reference attached to a question.
+    attributes:
+      name:
+        range: string
+        required: true
+        description: Human-readable label. Plaintext, ≤120 chars recommended.
+      url:
+        range: uri
+        required: true
+        pattern: "^https://.*"
+        description: Scheme must be https. Rejects javascript:, data:, http:.
+
+  HumanReview:
+    description: |
+      Human verification lineage. Populated when a human reviewer examines
+      the question. Distinct from validation_* (LLM) and math_* (LLM-math)
+      stamps.
+    attributes:
+      status:
+        range: HumanReviewStatus
+        required: true
+      by:
+        range: string
+        description: Reviewer identifier (email or git handle).
+      date:
+        range: date
+      notes:
+        range: string
+        description: Free-form reviewer notes.
+
+  Visual:
+    description: |
+      Diagram attached to a question. Stored as a separate asset file
+      under staffml/vault/visuals/<track>/; the YAML only carries
+      metadata (kind, filename, alt text, caption). This keeps SVG markup
+      out of YAML diffs and lets authors use real SVG editors instead of
+      YAML multiline scalars. v0.1.2 hardened the schema: kind is a closed
+      enum (VisualKind), path matches a tighter regex, alt and caption
+      have minimum lengths, caption is required.
+    attributes:
+      kind:
+        range: VisualKind
+        required: true
+        description: Renderer kind. Only `svg` ships today.
+      path:
+        range: string
+        required: true
+        pattern: "^[a-z0-9-]+\\.svg$"
+        description: Bare filename under visuals/<track>/, lowercase + dash + dot only, must end in `.svg`. No path traversal. ≤120 chars.
+      alt:
+        range: string
+        required: true
+        minimum_length: 10
+        description: Accessibility description for screen readers and SVG-load failure. ≥10 chars (a one-word alt is not informative); ≤400 chars. Required — a visual with no alt is an a11y regression.
+      caption:
+        range: string
+        required: true
+        minimum_length: 5
+        description: Short author-facing caption rendered below the figure. ≥5 chars; ≤120 chars. Required as of v0.1.2 — every shipped visual already had one, and the absence was implicit a11y debt.
+
+  Details:
+    description: Rich-text body of the question.
+    attributes:
+      realistic_solution:
+        range: string
+        required: true
+        description: Restricted-Markdown + KaTeX. Canonical answer.
+      common_mistake:
+        range: string
+        description: |
+          Restricted-Markdown + KaTeX. When present, must follow the
+          AUTHORING.md Pitfall/Rationale/Consequence convention: contain
+          (in this order) the literal markers `**The Pitfall:**`,
+          `**The Rationale:**`, `**The Consequence:**`. Enforced as a
+          structural-tier invariant on published YAMLs.
+        pattern: '(?s).*\*\*The Pitfall:\*\*.*\*\*The Rationale:\*\*.*\*\*The Consequence:\*\*.*'
+      napkin_math:
+        range: string
+        description: |
+          Restricted-Markdown + KaTeX. When present, must follow the
+          AUTHORING.md Assumptions/Calculations/Conclusion convention:
+          contain (in this order) `**Assumptions` (variants:
+          `**Assumptions:**` / `**Assumptions & Constraints:**`),
+          `**Calculations:**` exactly, and `**Conclusion` (variants:
+          `**Conclusion:**` / `**Conclusion & Interpretation:**`).
+          Enforced as a structural-tier invariant on published YAMLs.
+        pattern: '(?s).*\*\*Assumptions.*\*\*Calculations:\*\*.*\*\*Conclusion.*'
+      options:
+        range: string
+        multivalued: true
+        description: MCQ options (exactly 4 when present).
+      correct_index:
+        range: integer
+        minimum_value: 0
+        maximum_value: 3
+        description: Required iff options is present.
+      resources:
+        range: Resource
+        multivalued: true
+
+  Question:
+    description: A single StaffML interview question (schema v1.0).
+    attributes:
+      # --- identity ---
+      schema_version:
+        range: string
+        required: true
+        equals_string: "1.0"
+      id:
+        range: string
+        identifier: true
+        required: true
+        description: "Immutable, URL-safe. Format: <track>-<N> or <track>-<suffix>-<N>."
+      # --- 4-axis classification (paper §3) ---
+      track:
+        range: Track
+        required: true
+      level:
+        range: Level
+        required: true
+      zone:
+        range: Zone
+        required: true
+      topic:
+        range: string
+        required: true
+        description: Must exist in taxonomy.yaml (87 curated topics).
+      competency_area:
+        range: CompetencyArea
+        required: true
+        description: One of 13 canonical areas (closed enum). See CompetencyArea above.
+      bloom_level:
+        range: BloomLevel
+      phase:
+        range: Phase
+      # --- content ---
+      title:
+        range: string
+        required: true
+        description: Plaintext, ≤120 chars.
+      scenario:
+        range: string
+        required: true
+        description: Plaintext only. No HTML. ≥30 chars.
+      question:
+        range: string
+        required: false
+        description: >-
+          Explicit one-sentence interrogative derived from the full item
+          context: scenario, realistic_solution, common_mistake, napkin_math,
+          and options when present. Rendered as the "Your task" prompt in the
+          practice UI when it is not already duplicated by the scenario. Max
+          200 chars. Example — scenario sets context about a drone with a
+          50 GB/s chip interconnect and a 33 ms frame deadline; the question
+          field reads "Which parallelism strategy (tensor vs. pipeline) would
+          you choose and why?"
+      visual:
+        range: Visual
+        required: false
+        description: >-
+          Optional diagram attached to the question. Stored as a
+          separate file under staffml/vault/visuals/<track>/<path>
+          so the SVG text does not contaminate YAML diffs and existing
+          SVG tooling works unchanged. Rendered between the scenario
+          and the question callout on the practice page — context →
+          diagram → ask.
+      details:
+        range: Details
+        required: true
+      # --- workflow ---
+      status:
+        range: Status
+        required: true
+      provenance:
+        range: Provenance
+        required: true
+      requires_explanation:
+        range: boolean
+      expected_time_minutes:
+        range: integer
+        minimum_value: 0
+      deletion_reason:
+        range: string
+      # --- chain membership (plural — fixes v0.1 singular-chain data loss) ---
+      chains:
+        range: ChainRef
+        multivalued: true
+      # --- LLM validation lineage ---
+      validated:
+        range: boolean
+      validation_status:
+        range: string
+      validation_date:
+        range: date
+      validation_model:
+        range: string
+      validation_issues:
+        range: string
+        multivalued: true
+      validation_status_pro:
+        range: string
+      validation_issues_pro:
+        range: string
+        multivalued: true
+      # --- math validation (separate LLM pass) ---
+      math_verified:
+        range: boolean
+      math_status:
+        range: string
+      math_date:
+        range: date
+      math_model:
+        range: string
+      math_issues:
+        range: string
+        multivalued: true
+      # --- human review (new in v1.0) ---
+      human_reviewed:
+        range: HumanReview
+      # --- Pro-model review notes (31 questions with substantive feedback) ---
+      classification_review:
+        range: string
+      # --- tags + temporal ---
+      tags:
+        range: string
+        multivalued: true
+      created_at:
+        range: datetime
+      updated_at:
+        range: datetime
+      last_modified:
+        range: date
+

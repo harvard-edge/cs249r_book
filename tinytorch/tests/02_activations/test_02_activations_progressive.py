@@ -1,0 +1,270 @@
+"""
+Module 02: Progressive Integration Tests
+Tests that Module 02 (Activations) works correctly AND that all previous modules still work.
+
+DEPENDENCY CHAIN: 01_tensor → 02_activations
+Students can trace back exactly where issues originate.
+"""
+
+import numpy as np
+rng = np.random.default_rng(7)
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+
+class TestModule01StillWorking:
+    """Verify Module 01 (Tensor) functionality is still intact."""
+
+    def test_tensor_environment_stable(self):
+        """Ensure tensor environment wasn't broken by activations development."""
+        # Core environment should be stable
+        assert sys.version_info >= (3, 8), "Module 01: Python version check broken"
+
+        # Project structure should remain intact
+        project_root = Path(__file__).parent.parent.parent
+        assert (project_root / "modules").exists(), "Module 01: Module structure broken"
+        assert (project_root / "tinytorch").exists(), "Module 01: Package structure broken"
+
+    def test_tensor_functionality_stable(self):
+        """Ensure tensor functionality wasn't broken by activations development."""
+        try:
+            from tinytorch.core.tensor import Tensor
+
+            # Basic tensor operations should still work
+            t = Tensor([1, 2, 3])
+            assert t.shape == (3,), "Module 01: Tensor creation broken"
+
+            # Numpy integration should still work
+            arr = np.array([[1, 2], [3, 4]])
+            t2 = Tensor(arr)
+            assert t2.shape == (2, 2), "Module 01: Numpy integration broken"
+
+        except ImportError:
+            raise
+
+
+class TestModule02ActivationsCore:
+    """Test Module 02 (Activations) core functionality."""
+
+    def test_relu_activation(self):
+        """Test ReLU activation function."""
+        try:
+            from tinytorch.core.activations import ReLU
+            from tinytorch.core.tensor import Tensor
+
+            relu = ReLU()
+            x = Tensor(np.array([-2, -1, 0, 1, 2]))
+            output = relu(x)
+
+            expected = np.array([0, 0, 0, 1, 2])
+            assert np.array_equal(output.data, expected), "ReLU activation failed"
+
+        except ImportError:
+            raise
+
+    def test_sigmoid_activation(self):
+        """Test Sigmoid activation function."""
+        try:
+            from tinytorch.core.activations import Sigmoid
+            from tinytorch.core.tensor import Tensor
+
+            sigmoid = Sigmoid()
+            x = Tensor(np.array([0, 1, -1]))
+            output = sigmoid(x)
+
+            # Sigmoid(0) should be 0.5
+            assert np.isclose(output.data[0], 0.5, atol=1e-6), "Sigmoid activation failed"
+
+            # All outputs should be in (0, 1)
+            assert np.all(output.data > 0) and np.all(output.data < 1), "Sigmoid range failed"
+
+        except ImportError:
+            raise
+
+
+class TestProgressiveStackIntegration:
+    """Test that the full stack (01→02) works together."""
+
+    def test_tensor_activation_pipeline(self):
+        """Test tensors work correctly with activations."""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.activations import ReLU, Sigmoid
+
+            # Create tensor using Module 02
+            x = Tensor(np.array([-1, 0, 1, 2]))
+
+            # Apply activations from Module 03
+            relu = ReLU()
+            sigmoid = Sigmoid()
+
+            # Pipeline: input -> ReLU -> Sigmoid
+            h = relu(x)
+            output = sigmoid(h)
+
+            # Should work end-to-end
+            assert output.shape == x.shape, "Tensor-activation pipeline broken"
+            assert np.all(output.data >= 0) and np.all(output.data <= 1), "Pipeline output invalid"
+
+        except ImportError:
+            raise
+
+    def test_activation_chaining(self):
+        """Test multiple activations can be chained."""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.activations import ReLU, Sigmoid, Tanh
+
+            x = Tensor(rng.standard_normal((5, 10)))
+
+            # Chain multiple activations
+            relu = ReLU()
+            tanh = Tanh()
+            sigmoid = Sigmoid()
+
+            h1 = relu(x)      # Apply ReLU
+            h2 = tanh(h1)     # Apply Tanh
+            output = sigmoid(h2)  # Apply Sigmoid
+
+            assert output.shape == x.shape, "Activation chaining broken"
+
+        except ImportError:
+            raise
+
+
+class TestNonLinearityCapability:
+    """Test that activations enable non-linear computation."""
+
+    def test_nonlinearity_proof(self):
+        """Test that activations actually provide non-linearity."""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.activations import ReLU
+
+            relu = ReLU()
+
+            # Linear input
+            x = Tensor(np.array([-2, -1, 0, 1, 2]))
+
+            # Non-linear output from ReLU
+            y = relu(x)
+
+            # Should be different from linear function
+            linear_output = x.data  # Identity function
+            nonlinear_output = y.data
+
+            # ReLU introduces non-linearity
+            assert not np.array_equal(linear_output, nonlinear_output), "No nonlinearity detected"
+
+            # Specifically, negative values should become zero
+            assert np.all(nonlinear_output >= 0), "ReLU non-linearity not working"
+
+        except ImportError:
+            raise
+
+
+class TestXORProblemReadiness:
+    """Test that the stack is ready for XOR problem (non-linear learning)."""
+
+    def test_xor_components_available(self):
+        """Test components needed for XOR are available."""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.activations import ReLU, Sigmoid
+
+            # XOR inputs
+            X = Tensor(np.array([[0, 0], [0, 1], [1, 0], [1, 1]]))
+
+            # Should be able to apply activations
+            relu = ReLU()
+            sigmoid = Sigmoid()
+
+            # Simulated hidden layer output
+            hidden = relu(X)  # Non-linear transformation
+
+            # Simulated output layer
+            output = sigmoid(hidden)
+
+            assert output.shape == X.shape, "XOR components not ready"
+
+        except ImportError:
+            raise
+
+    def test_activation_expressiveness(self):
+        """Test activations provide sufficient expressiveness."""
+        try:
+            from tinytorch.core.tensor import Tensor
+            from tinytorch.core.activations import ReLU, Sigmoid
+
+            # Test that we can represent different patterns
+            patterns = [
+                np.array([1, 0, 0, 1]),  # XOR pattern
+                np.array([0, 1, 1, 0]),  # Inverse XOR
+                np.array([1, 1, 0, 0]),  # AND-like pattern
+            ]
+
+            relu = ReLU()
+            sigmoid = Sigmoid()
+
+            for pattern in patterns:
+                x = Tensor(pattern)
+
+                # Should be able to transform any pattern
+                h = relu(x)
+                y = sigmoid(h)
+
+                assert y.shape == x.shape, "Pattern transformation failed"
+
+        except ImportError:
+            raise
+
+
+class TestRegressionPrevention:
+    """Ensure previous modules still work after Module 02 development."""
+
+    def test_no_module_01_regression(self):
+        """Verify Module 01 (Tensor) functionality unchanged."""
+        # These should ALWAYS work
+        assert sys.version_info.major >= 3, "Module 01: Python detection broken"
+
+        project_root = Path(__file__).parent.parent.parent
+        assert project_root.exists(), "Module 01: Project structure broken"
+
+    def test_no_module_01_tensor_regression(self):
+        """Verify Module 01 Tensor functionality unchanged."""
+        try:
+            from tinytorch.core.tensor import Tensor
+
+            # Basic tensor creation should still work
+            t = Tensor([1, 2, 3])
+            assert t.shape == (3,), "Module 01: Basic tensor broken"
+
+        except ImportError:
+            raise
+
+    def test_progressive_stability(self):
+        """Test the progressive stack is stable."""
+        # Stack should be stable through: Tensor -> Activations
+
+        # NumPy level
+        import numpy as np
+        assert np is not None, "NumPy broken"
+
+        # Tensor level (if available)
+        try:
+            from tinytorch.core.tensor import Tensor
+            t = Tensor([1])
+            assert t.shape == (1,), "Tensor level broken"
+        except ImportError:
+            raise
+
+        # Activation level (if available)
+        try:
+            from tinytorch.core.activations import ReLU
+            relu = ReLU()
+            assert callable(relu), "Activation level broken"
+        except ImportError:
+            raise

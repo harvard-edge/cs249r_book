@@ -1,0 +1,261 @@
+# Attention Mechanisms: Scaled Dot-Product and Causal Masking {#sec-attention}
+
+Chapter 11 left every token as a vector that carries its own meaning and its own position, and nothing else. The vector for *it* in "the machine crashed because it overheated" knows that it is a pronoun sitting at position five; it has no idea that *machine* exists. The question this chapter answers is the one a practitioner asks the first time they open a transformer's source: how does one token read from the others, and why does that operation turn out to be three matrix multiplies and a softmax?
+
+The mechanism is **scaled dot-product attention**, and the layer that packages it is `MultiHeadAttention`. We build both in a few dozen lines of plain Python, trace a two-token example by hand until every decimal is accounted for, and then look at why production systems rewrite the same arithmetic so that its largest intermediate never touches main memory.
+
+![Attention as routing. Each query scores every key with a dot product, the scores are scaled by $1/\sqrt{d_k}$, future positions are masked out, and the resulting weights mix the values.](assets/images/diagrams/12_attention-diag-1.svg){#fig-attention-engine}
+
+---
+
+## The Problem
+
+After Chapter 11 a sequence is a matrix $X$ with one row per token and $D$ columns. Every layer we have built so far treats those rows independently. A `Linear` layer multiplies each row by the same weight matrix; an activation squashes each element on its own. Nothing we have mixes one row into another, so the row for *it* comes out of the network knowing exactly as much about *machine* as it did going in, which is nothing.
+
+The obvious fix is to let every token see a summary of the whole sequence. The simplest summary is the average of all rows, and it fails immediately.
+
+```python
+X = [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]      # three tokens, two features each
+avg = [sum(col) / len(X) for col in zip(*X)]  # one summary for the whole sequence
+print([avg for _ in X])
+# three identical rows of [0.666..., 0.666...]; every token receives the same vector
+```
+
+Averaging gives every token the identical vector, so a pronoun receives as much of *because* as of *machine*, and the positional signal we added last chapter is averaged away with everything else. A learned weight for each pair of positions is no better. The token that *it* should read from is whichever noun came before it, and that changes from sentence to sentence; the right weights depend on what the tokens say, not on where they sit. A fixed table of positions also only works for one sequence length.
+
+So the operation we need has three properties. The mixing weights must be computed from the token contents themselves. They must form a proper set of proportions, non-negative and summing to one, so a token can commit most of its attention to one source. And the whole thing must be expressible as matrix arithmetic so that all tokens compute their weights at once instead of one after another. Generation adds a fourth requirement, which we meet in Milestone 2: a token that will be predicted from its predecessors must not be allowed to read from its successors while training.
+
+---
+
+## The Idea
+
+### Queries, keys, and values
+
+Attention is a lookup in which every token both asks a question and offers an answer. From each token's row $x_t$ we compute three vectors with three learned weight matrices:
+
+- a **query** $q_t = x_t W_q$, what this token is looking for ("I am a pronoun; where is my noun?");
+- a **key** $k_t = x_t W_k$, what this token advertises about itself ("I am a singular noun");
+- a **value** $v_t = x_t W_v$, the content this token hands over if someone selects it.
+
+The score between query $i$ and key $j$ is their dot product $q_i \cdot k_j$, which is large when the two vectors point the same way, near zero when they are unrelated, and negative when they point apart. Stacking the queries into a matrix $Q$ and the keys into $K$ (each of shape $S \times d_k$, where $S$ is the sequence length and $d_k$ the width of a query) gives all $S^2$ scores in one product, $Q K^T$. A softmax across each row turns the scores for query $i$ into proportions that sum to one, exactly the softmax of Chapter 4 applied row by row. The output for token $i$ is the weighted sum of the values, so the whole mechanism is
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\!\left( \frac{Q K^T}{\sqrt{d_k}} + M \right) V$$
+
+where $V$ is the $S \times d_v$ matrix of values, $M$ is the mask we come to shortly, and the division by $\sqrt{d_k}$ is the scaling that gives the mechanism its name. Every quantity here is a matrix of shape $S \times S$ or $S \times d$, and every operation is a matrix multiply, an elementwise scale, an elementwise add, or a row-wise softmax. That is why attention runs in parallel across all tokens where earlier sequence models had to walk the sequence one step at a time. The three weight matrices are what make it learnable; the network is free to decide what each token should ask and advertise.
+
+### Why divide by $\sqrt{d_k}$
+
+Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument Chapter 3 made for a layer's fan-in, the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a one-hot vector that nothing can learn through. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
+
+### Causal masking
+
+During generation the model predicts token $t+1$ from tokens $1$ through $t$. If it were allowed to read token $t+1$ while training, it would learn to copy rather than predict, and at generation time there would be nothing to copy. The rule is that query $i$ may attend to key $j$ only when $j \le i$, and we enforce it by adding a mask $M$ to the scores before the softmax:
+
+$$M_{i,j} = \begin{cases} 0 & j \le i \quad \text{(past and present, allowed)} \\ -\infty & j > i \quad \text{(future, forbidden)} \end{cases}$$
+
+For four tokens the mask is zero on and below the diagonal and $-\infty$ above it:
+
+$$M = \begin{pmatrix} 0 & -\infty & -\infty & -\infty \\ 0 & 0 & -\infty & -\infty \\ 0 & 0 & 0 & -\infty \\ 0 & 0 & 0 & 0 \end{pmatrix}$$
+
+Because $e^{-\infty} = 0$, a masked position contributes nothing to the softmax denominator and receives exactly zero weight.
+
+### Several heads at once
+
+One attention pattern is one answer to "who looks at whom." A pronoun wants to find its noun; a verb wants its subject; a closing bracket wants its opening one. Multi-head attention runs $H$ of these patterns side by side. It splits the $D$ model dimensions into $H$ slices of width $d_k = D / H$, lets each head attend using only its slice of $Q$, $K$, and $V$, concatenates the $H$ outputs back into a $D$-wide row, and mixes them with one more learned matrix $W_o$. The model gets $H$ independent routing decisions per token instead of one, and the code section shows why the slicing, rather than $H$ full-width copies, is what makes that affordable.
+
+---
+
+## The Code
+
+::: {.callout-note title="Source Code Mapping"}
+The listings in this section are extracted from Module 12 (`src/12_attention/12_attention.py`) by name when the book is built, so a renamed function in the module fails the build instead of drifting from the chapter. Module 12 exposes three helpers, `scaled_dot_product_attention(Q, K, V, mask)`, and a `MultiHeadAttention(embed_dim, num_heads)` class whose methods are shown one at a time below.
+:::
+
+Module 12 works on tensors and on whole batches at once. Every step, the two matrix products, the scaling, the mask, and the softmax, is a tensor operation from an earlier chapter, so Chapter 6's tape differentiates attention without a line of backward code in this module. We build the pieces in the order the formula applies them. First the score matrix, then the softmax, then the mask, then the function that strings the three together with the scaling, and finally the layer that supplies the projections and the heads.
+
+### The score matrix
+
+Every token has to compare its query against every key. For GPT-2's context of 1,024 tokens that is $1024^2$, a little over a million scores, in each head of each layer, and every one of them is a 64-long dot product. The design attention replaced, the recurrent network,[^fn-recurrent-network-serial] avoided that all-pairs comparison by carrying one hidden state forward a token at a time, and paid for it with a chain of $S$ dependent steps. Token 1,024 cannot be processed until the 1,023 before it are finished, and no number of multiply units on a GPU can shorten a chain.
+
+Attention drops the chain, but the naive way to write it, a nested loop over $(i, j)$ pairs, does the arithmetic while telling the hardware nothing about which scores are independent of which, and a GPU cannot parallelize what it cannot see. The answer is to stack the queries into $Q$ and the keys into $K$, because then $Q K^T$ is one matrix product that produces every score at once, and every entry can be computed at the same time as every other. That is the shape a GPU is built to run, and it is the whole reason a transformer trains in one pass over a sequence.
+
+[^fn-recurrent-network-serial]: **Recurrent network** (RNN): a sequence model that keeps a single hidden state vector and updates it once per token, $h_t = \tanh(W_h h_{t-1} + W_x x_t)$, so the state at position $t$ depends on the state at $t-1$. Poor memory over long distances was one weakness; the one that decided the hardware question is the serial dependency, which forbids processing a whole sequence in one parallel pass.
+
+{{< include _listings/12_attention/compute_scores.qmd >}}
+
+Two lines, and both are Chapter 1. `transpose(-2, -1)` swaps the last two axes whatever comes in front of them, so the same helper serves a single $(S, d_k)$ matrix and a whole batch of heads shaped $(B, H, S, d_k)$; `matmul` on anything with more than two dimensions hands the work to `np.matmul`, which runs every $(S, S)$ product in the batch in one call. PyTorch calls a cuBLAS GEMM, which runs the same products on thousands of multiply units at once.
+
+### Softmax by rows
+
+The Problem asked for weights that are proportions, non-negative and summing to one, so a token can commit most of its attention to one source. Each row of the score matrix is one query's scores, so each row needs its own softmax. The naive way is to exponentiate the raw scores. On my machine `math.exp(710)` raises `OverflowError`, because a Python float gives up at $e^{709.78}$; the float32 the module uses gives up at $e^{88.72}$, which Chapter 4 showed is where the textbook softmax turns a row into `nan`, and Chapter 6's backward then turns every gradient into `nan` with it. Module 12 writes no softmax of its own. It reuses Chapter 2's `Softmax` with `dim=-1`, which subtracts the row maximum before exponentiating, so the largest exponential is exactly $e^0 = 1$, nothing overflows, and the denominator is never zero.
+
+That operation makes several passes over each row, one to find the maximum, one to shift, one to exponentiate, one to sum, one to divide. Keep that count in mind for the production bridge, where the row maximum becomes a running statistic so that softmax can finish without ever holding a whole row; PyTorch's name for this step is `softmax(dim=-1)`.
+
+### The causal mask
+
+Milestone 2 trains a next-token predictor, and the loss at position $t$ scores a prediction of token $t+1$. That only works if position $t$'s output was computed without reading token $t+1$. Chapter 18 leans on the same guarantee from the other side. It generates one token at a time and reuses the keys and values of earlier positions, which is valid only because an earlier position's output never depended on anything after it. The naive way to keep the future out is to run the model once per prefix, $S$ forward passes for a sequence of $S$ tokens, a thousand passes for 1,024 tokens to get what one masked pass gives.
+
+The tempting shortcut, zeroing the forbidden scores after the fact, produces a wrong number instead. A score of zero is an ordinary score. On my machine a softmax over `[0.7071, 0.0]` returns `[0.67, 0.33]`, so a third of that token's attention would go to a token it is not allowed to see. So the mask is added, not multiplied, and the value it adds is so negative that the softmax turns it into exactly zero weight and drops it from the denominator.
+
+{{< include _listings/12_attention/apply_mask.qmd >}}
+
+The mask arrives as ones and zeros, one where a query may look at a key and zero where it may not, which is the shape `np.tril(np.ones((S, S)))` produces and the shape Chapter 13's `_create_causal_mask` builds once per sequence. The helper turns it into the additive form, zero where allowed and `MASK_VALUE`, which is $-10^{9}$, where forbidden. Why not $-\infty$? Because after the row maximum is subtracted, $e^{-10^9}$ underflows to exactly `0.0` in float32 just as $e^{-\infty}$ would, and a finite number keeps every intermediate array free of the `inf` and `nan` that the tape would otherwise have to reason about on the way back. For ordinary finite scores, the allowed entries dominate the entries shifted by this large negative constant. This is an approximation to the mathematical mask, not a guarantee for arbitrarily large scores. Every query must also have at least one allowed key: an all-zero mask row would still produce a softmax distribution over forbidden entries. A causal mask satisfies that precondition because its diagonal is one. The mask depends only on `seq_len`, so one mask serves every head and every layer. PyTorch skips the matrix altogether when you pass `is_causal=True`.
+
+### Scores, scale, mask, softmax, mix
+
+This is the function everything else in the chapter exists to feed. Chapter 13 calls it in every layer of the transformer, Chapter 18 caches keys and values so that it can be called on one new token at a time, and it is the exact signature PyTorch hands to a fused kernel. Three of its four steps are already written. The one that remains is the division by $\sqrt{d_k}$, a single line that a first implementation tends to leave out.
+
+The Idea showed that the raw scores have standard deviation $\sqrt{d_k}$. For the $d_k = 64$ that GPT-2 uses, that is 8, and it is worth seeing what 8 does to a softmax. I drew 2,000 random query and key pairs at $d_k = 64$; the measured standard deviation was 7.9 and the largest dot product was 27. Feed scores like that straight in and the softmax is finished before training starts. On my machine a softmax over `[24.0, -8.0, 0.0]` puts $1 - 4 \times 10^{-11}$ on the first entry and $3.8 \times 10^{-11}$ on the last, a one-hot vector to ten decimal places. The derivative of a softmax output with respect to its input is proportional to $p(1 - p)$, which is zero at both ends, so a saturated row passes back no gradient and the $W_q$ and $W_k$ that produced it stop learning. Dividing by $\sqrt{d_k}$ is the fix. The score of 24 becomes 3, $e^{3} \approx 20$ rather than $e^{24} \approx 2.6 \times 10^{10}$, and the softmax over `[3.0, -1.0, 0.0]` gives `[0.936, 0.017, 0.047]`, still decisive but with mass left to move. With that line in place, attention is the formula written out in order.
+
+{{< include _listings/12_attention/scale_scores.qmd >}}
+
+{{< include _listings/12_attention/sdpa.qmd >}}
+
+`d_k` is read from the last axis of `Q` rather than passed in, so the same function serves a full-width head and a sliced one. The function returns the weights alongside the output because the weights are the thing you inspect when attention misbehaves. Every line is a tensor operation: two `matmul` calls, a scalar multiply, an add, and Chapter 2's softmax. The returned output keeps the graph through both routes: the value route through the final multiply and the score route through softmax back to $Q$ and $K$. Rewrapping `output.data` in a fresh tensor would preserve its numbers while destroying those routes. The module instead composes the earlier operations, so Chapter 6 supplies the backward traversal. PyTorch's `F.scaled_dot_product_attention` takes the same `(Q, K, V, mask)` arguments.
+
+### The projections
+
+The formula takes $Q$, $K$, and $V$ as given, but the sequence only provides $X$. The naive move is to use $X$ for all three. Then the score between tokens $i$ and $j$ is $x_i \cdot x_j$, which equals $x_j \cdot x_i$, so the raw score in each direction is identical, although row-wise softmax can still assign different weights because its denominators differ, and one vector has to serve as the question, the advertisement, and the content at once. There is also nothing to train except the embeddings, which every other layer needs for its own purposes. Three learned matrices give the network three different linear views of the same token, and a fourth, $W_o$, mixes the heads back together. That is four $D \times D$ matrices, 2.36 million weights per layer at $D = 768$, the $4D^2$ term in Chapter 13's parameter count, plus four bias vectors that Module 12 gets for free by building each projection as a Chapter 3 `Linear`.
+
+Their initial scale matters as much as their existence. With unit-variance entries in $W_q$, each entry of $q = x W_q$ would sum $D$ unit-variance products and have variance $D$, and the scores would inherit that twice over. I measured it at $D = 768$ on sixty-four tokens of unit-variance features. Weights drawn straight from a standard normal gave head scores with a standard deviation of about 8,800, and dividing by $\sqrt{64}$ still left about 1,100, which saturates the softmax as surely as no scaling at all. Module 12's projections, which inherit `Linear`'s $1/\sqrt{D_{\text{in}}}$ scale from Chapter 3, gave 8.0, and 1.0 after the division, which is the unit variance The Idea asked for.
+
+{{< include _listings/12_attention/MHA_init.qmd >}}
+
+{{< include _listings/12_attention/MHA_parameters.qmd >}}
+
+The constructor refuses an `embed_dim` that does not divide into `num_heads`, because the head split below cuts `embed_dim` into `num_heads` equal strips. `parameters` concatenates the four layers' lists in the order Chapter 13 expects, weight then bias for each, which is Chapter 3's explicit-list design one level up. PyTorch's `nn.MultiheadAttention` holds the same four, with $W_q$, $W_k$, and $W_v$ stacked into one `in_proj_weight` and $W_o$ as `out_proj`.
+
+### The heads
+
+The Idea said a pronoun, a verb, and a closing bracket each want a different routing pattern, and GPT-2 small gives them twelve. The naive way to get twelve patterns is twelve full-width attention layers side by side, each with its own four $768 \times 768$ matrices. That is 28.3 million weights per layer instead of 2.36 million, and twelve times the score arithmetic, $12 \times S^2 \times D$ multiply-adds. The mechanism that makes twelve heads cost what one head costs is the slice. Project once at full width, cut each of $Q$, $K$, and $V$ into twelve strips of 64 columns, run attention on each strip, and concatenate. The score work is $H \times S^2 \times d_k = S^2 \times D$, the same as a single head, and the four matrices are shared by all of them.
+
+{{< include _listings/12_attention/MHA_split_heads.qmd >}}
+
+{{< include _listings/12_attention/MHA_merge_heads.qmd >}}
+
+{{< include _listings/12_attention/MHA_forward.qmd >}}
+
+Three things are worth noticing. The projections are computed once at full width and then split, so a head never sees more than its own `head_dim` columns of $Q$, $K$, and $V$. There is no loop over heads. `_split_heads` reshapes $(B, S, D)$ to $(B, S, H, d_k)$ and swaps the middle axes, so `scaled_dot_product_attention` receives $(B, H, S, d_k)$ and its single `matmul` produces all $B \times H$ score matrices at once; the mask is reshaped to $(B, 1, S, S)$ so that it broadcasts across the head axis, one more zero stride from Chapter 1. And the split and merge are bookkeeping. In PyTorch they are changes of strides that cost nothing; in TinyTorch each `reshape` and `transpose` produces a tensor that owns its buffer, so they copy, and Chapter 1 explained that trade. The same mask reaches every head, because causality is a property of the sequence, not of a head.
+
+---
+
+## A Worked Trace
+
+Two tokens with $d_k = 2$ are enough to see every step. Take
+
+$$\mathbf{Q} = \begin{bmatrix} 1 & 0 \\ 0 & 2 \end{bmatrix}, \quad \mathbf{K} = \begin{bmatrix} 1 & 1 \\ 1 & 0 \end{bmatrix}, \quad \mathbf{V} = \begin{bmatrix} 2 & 1 \\ 0 & 3 \end{bmatrix}, \quad \mathbf{M} = \begin{bmatrix} 1 & 0 \\ 1 & 1 \end{bmatrix}$$
+
+so that $\sqrt{d_k} = \sqrt{2} \approx 1.4142$. Row 0 belongs to token 0 and may only see itself; row 1 belongs to token 1 and may see both. The mask is written the way Module 12 takes it, ones where looking is allowed, and `_apply_mask` turns each zero into an added $-10^9$.
+
+| Step | Operation | Token 0 (row 0) | Token 1 (row 1) |
+| :--- | :--- | :--- | :--- |
+| 1 | Scores $Q K^T$ | $[1\cdot1 + 0\cdot1,\ 1\cdot1 + 0\cdot0] = [1.0, 1.0]$ | $[0\cdot1 + 2\cdot1,\ 0\cdot1 + 2\cdot0] = [2.0, 0.0]$ |
+| 2 | Divide by $\sqrt{2}$ | $[0.7071, 0.7071]$ | $[1.4142, 0.0]$ |
+| 3 | Add the mask | $[0.7071, -10^9]$ | $[1.4142, 0.0]$ |
+| 4 | Softmax per row | $[1.0, 0.0]$ | $[\tfrac{4.11325}{5.11325}, \tfrac{1.0}{5.11325}] = [0.80443, 0.19557]$ |
+| 5 | Weights $\cdot V$ | $1.0\,[2, 1] + 0.0\,[0, 3] = [2.0, 1.0]$ | $0.80443\,[2, 1] + 0.19557\,[0, 3] = [1.6089, 1.3911]$ |
+
+: Scaled dot-product attention with a causal mask on a two-token sequence, one row per token. {#tbl-attention-trace tbl-colwidths="[8,22,35,35]"}
+
+Token 0's second score was $0.7071$ before masking, a perfectly respectable value, and the mask removed it entirely; that is the $-10^9$ doing its job. Token 1 puts $80\%$ of its weight on token 0 because its query $[0, 2]$ aligns with key $[1, 1]$ and is orthogonal to key $[1, 0]$. Running the module on the same inputs reproduces the table.
+
+```python
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.attention import (scaled_dot_product_attention,
+                                      _compute_attention_scores, _scale_scores, _apply_mask)
+
+Q = Tensor([[1.0, 0.0], [0.0, 2.0]])
+K = Tensor([[1.0, 1.0], [1.0, 0.0]])
+V = Tensor([[2.0, 1.0], [0.0, 3.0]])
+M = Tensor(np.tril(np.ones((2, 2))))            # ones where a query may look
+
+raw = _compute_attention_scores(Q, K)
+print("scores:  ", raw.data.tolist())                       # [[1.0, 1.0], [2.0, 0.0]]
+print("scaled:  ", np.round(_scale_scores(raw, 2).data, 4).tolist())
+print("masked:  ", _apply_mask(_scale_scores(raw, 2), M).data.tolist())   # [[0.7071, -1e9], [1.4142, 0.0]]
+out, w = scaled_dot_product_attention(Q, K, V, mask=M)
+print("weights: ", np.round(w.data, 4).tolist())            # [[1.0, 0.0], [0.8044, 0.1956]]
+print("output:  ", np.round(out.data, 4).tolist())          # [[2.0, 1.0], [1.6089, 1.3911]]
+```
+
+The layer adds only shapes to this picture. Feeding three tokens of width four through two heads gives per-head strips of width two, a $3 \times 3$ weight matrix per head whose upper triangle is zero and whose rows sum to one, and an output the same shape as the input. The batch axis comes first everywhere, so a single sequence is a batch of one.
+
+```python
+from tinytorch.core.attention import MultiHeadAttention
+
+mha = MultiHeadAttention(embed_dim=4, num_heads=2)
+X = Tensor(np.eye(3, 4)[None])                  # (1, 3, 4): three one-hot tokens
+mask = Tensor(np.tril(np.ones((1, 3, 3))))      # (1, 3, 3)
+Y = mha(X, mask)
+print(Y.shape)                                  # (1, 3, 4): same shape as X
+
+Qh = mha._split_heads(mha.q_proj(X), 1, 3)      # (1, 2, 3, 2): batch, head, token, strip
+Kh = mha._split_heads(mha.k_proj(X), 1, 3)
+Vh = mha._split_heads(mha.v_proj(X), 1, 3)
+_, w = scaled_dot_product_attention(Qh, Kh, Vh, mask=mask.reshape(1, 1, 3, 3))
+w0 = w.data[0, 0]                               # head 0's (3, 3) weights
+print(w0.sum(axis=1))                           # [1. 1. 1.]
+print(np.allclose(np.triu(w0, 1), 0.0))         # True: nothing above the diagonal
+```
+
+For this causal mask and ordinary finite scores, the weights sum to one and the upper triangle is zero. These checks establish that the routing weights are valid. A stronger behavioral check asks whether changing a future token can alter an earlier output. The earlier query, its allowed keys, and its allowed values are unchanged, so the earlier output must remain unchanged too.
+
+```python
+X_changed = Tensor(X.data.copy())
+X_changed.data[0, 2] = [3.0, -2.0, 1.0, 4.0]  # change only the final token
+Y_changed = mha(X_changed, mask)
+assert np.allclose(Y.data[:, :2], Y_changed.data[:, :2], atol=1e-6)
+assert np.allclose(w.data.sum(axis=-1), 1.0)
+assert np.allclose(np.triu(w.data, 1), 0.0)
+```
+
+The same argument will apply block by block in Chapter 13 because its remaining operations act on each token separately. Causality therefore becomes a property of the complete model rather than only of one weight matrix.
+
+---
+
+## From TinyTorch to Production
+
+The listings above materialize the $S \times S$ score matrix, run softmax over it, and multiply it by $V$. Production systems compute the identical function but refuse to build that matrix, because for realistic sequence lengths it is the largest object in the whole model.
+
+::: {#nbk-attention-quadratic-vram-wall .callout-notebook title="Napkin math: the quadratic attention memory wall"}
+Take GPT-2 sized attention, $H = 12$ heads of $d_k = 64$ ($D = 768$), a batch of $B = 8$ sequences, and 4-byte floats.
+
+- **Projections**: $Q$, $K$, and $V$ are each $B \times H \times S \times d_k$. At $S = 2{,}048$ that is $3 \times 8 \times 12 \times 2048 \times 64 \times 4 \approx 151\text{ MB}$, and it grows linearly with $S$.
+- **Score matrix**: $B \times H \times S \times S$. At $S = 2{,}048$ that is $8 \times 12 \times 2048 \times 2048 \times 4 \approx 1.61\text{ GB}$, ten times the projections.
+- **Double the context**: at $S = 8{,}192$ the projections reach $604\text{ MB}$ but the score matrix reaches $16\times$ its former size, about $25.8\text{ GB}$, which no longer fits on a 24 GB GPU alongside the weights.
+- **Traffic**: the naive pipeline writes the score matrix to GPU memory after the first matrix multiply, reads it back for softmax, writes the weights, and reads them again for the multiply by $V$. That is four passes over the largest tensor in the model for an operation whose arithmetic is modest.
+:::
+
+The forcing function is the last bullet. GPU main memory (HBM, the high-bandwidth memory stacked next to the chip) is far slower than the small on-chip SRAM each compute unit owns, and the naive pipeline spends its time moving the score matrix between the two rather than doing arithmetic. FlashAttention (Dao and colleagues, 2022) restructures the computation so the score matrix never exists in full. It cuts $Q$, $K$, and $V$ into blocks small enough to sit in SRAM, computes one block of scores at a time, and keeps a running maximum and running sum for each row so that the softmax can be finished incrementally as later blocks arrive. That running-statistics trick is called **online softmax**, and it is the only new mathematics involved; the shifted softmax you built in Chapter 4 is exactly what it computes, accumulated block by block instead of over a whole row at once. The result is the same output with memory that grows linearly in $S$ rather than quadratically, and the paper reports attention running two to four times faster on the GPUs it measured. PyTorch exposes this through `torch.nn.functional.scaled_dot_product_attention`, which dispatches among a FlashAttention kernel (the GPU term for one compiled function that runs on the device), a memory-efficient fallback, and a plain "math" backend equivalent to our listing, depending on the data type, the head width, and the kind of mask you supply. Passing `is_causal=True` instead of an explicit mask lets the kernel skip the upper-triangle blocks entirely rather than computing them and adding $-\infty$.
+
+Module 12 and PyTorch both hold $Q$, $K$, and $V$ as four-dimensional arrays of shape $(B, H, S, d_k)$ and issue one batched matrix multiply for all $B \times H$ score matrices at once, which is what keeps the GPU's multiply units busy; `_split_heads` and `_merge_heads` are a reshape and a transpose, which in PyTorch are the stride views from Chapter 1, with a single `contiguous()` copy before the output projection, and in TinyTorch are copies. Position enters at this point too. The rotary encoding described at the end of Chapter 11 is applied to $q$ and $k$ immediately before the score is taken, inside the same kernel. At inference time one more optimization matters more than any of these. Keys and values for past tokens do not change when a new token arrives, so they are cached rather than recomputed, and Chapter 18 builds that cache. Variants such as multi-query and grouped-query attention, in which several heads share one set of keys and values, exist mainly to shrink it.
+
+| | Module 12 | PyTorch with FlashAttention |
+| :--- | :--- | :--- |
+| Heads | One batched multiply over $(B, H, S, d_k)$ | Same |
+| Score matrix | Built in full as a $(B, H, S, S)$ array | Never materialized; computed in SRAM-sized blocks |
+| Softmax | Chapter 2's `Softmax`, several NumPy passes over a finished row | Online: running max and sum across blocks |
+| Causal mask | Ones and zeros, turned into an additive $0/-10^9$ array | `is_causal=True`; masked blocks are skipped |
+| Precision | 32-bit floats | 16-bit inputs, 32-bit accumulation |
+| Memory in $S$ | Quadratic | Linear |
+
+: What changes between Module 12 and a production attention kernel. The function computed is the same. {#tbl-attention-bridge tbl-colwidths="[18,38,44]"}
+
+What carries over is everything you have just built. Every backend, fused or not, computes $\text{softmax}(Q K^T / \sqrt{d_k} + M)\,V$ with the same $\sqrt{d_k}$, the same additive convention for forbidden positions, the same head split, and the same $W_o$ mix. The two invariants from the trace apply to causal attention probabilities before any dropout. When comparing a production model, first identify whether the returned array contains those probabilities, post-dropout weights, or unmasked attention. The meaning of the array determines which assertion is valid.
+
+In your own work, watch for three things. Attention cost is quadratic in context length, so doubling the context quadruples both the score arithmetic and, on a non-fused path, the memory; if a model that fits at one context length dies at twice that length, this is the first suspect. Check which backend `scaled_dot_product_attention` actually chose, since an unusual mask shape or a head width that is not a multiple of eight silently falls back to the math path and reintroduces the full score matrix. And when attention shows up in a profile as slow despite low arithmetic, it is the memory traffic in the napkin math above that you are seeing; Chapter 14 gives you the tool for telling the two apart.
+
+---
+
+## Summary
+
+Module 12 builds scaled dot-product attention as four steps, dot-product scores, division by $\sqrt{d_k}$, an additive causal mask, and a row-wise softmax that weights the values, and wrapped it in a `MultiHeadAttention` layer that projects the input into queries, keys, and values, runs $H$ heads on $D/H$-wide slices, and mixes the concatenated result with one more matrix. The principle to keep is that attention is content-addressed mixing. The weights are computed from the tokens themselves, they are proportions, and the whole thing is matrix arithmetic that runs for all tokens at once. Two invariants follow from the construction and are worth asserting everywhere: every row of weights sums to one, and with a causal mask nothing above the diagonal is nonzero. Production kernels change how the arithmetic is scheduled, never what it computes. Chapter 13 takes `MultiHeadAttention(embed_dim, num_heads)` with its `forward(x, mask)` and its binary causal-mask interface for granted and asks how to stack many such layers without the activations blowing up or the gradients vanishing.
+
+---
+
+## Exercises
+
+1. **Bidirectional attention.** Call `scaled_dot_product_attention` on the worked-trace inputs with `mask=None`. Token 0's output changes; explain from the scores why it moves toward $V$'s second row, and state which tasks (such as classification of a whole sentence) can use this unmasked form and which cannot.
+2. **Saturation without scaling.** Draw $Q$ and $K$ with $S = 8$ rows of $d_k = 64$ standard-normal entries, compute the softmax weights with and without the $\sqrt{d_k}$ division, and count how many of the eight rows put more than $0.99$ of their weight on a single key in each case. Repeat for $d_k = 4$ and explain the difference.
+3. **Padding mask.** Sequences in a batch are padded to a common length. Write `padding_mask(length, seq_len)` that returns, for one nonempty sequence of true length $\ell$, a ones-and-zeros mask in Module 12's convention forbidding every key $j \ge \ell$, combine it with the causal mask by elementwise multiplication, and check that the weight rows still sum to one and that padded keys receive exactly zero.

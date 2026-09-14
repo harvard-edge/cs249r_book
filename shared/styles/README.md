@@ -70,7 +70,7 @@ Concretely:
 3. `partials/_tokens.scss` and the rest of the partials assume those
    semantic variables already exist.
 4. A site entrypoint (e.g. `style-site.scss` or
-   [`book/quarto/assets/styles/style-vol1.scss`](../../book/quarto/assets/styles/style-vol1.scss))
+   [`books/shared/assets/styles/style-vol1.scss`](../../books/shared/assets/styles/style-vol1.scss))
    imports the theme first, then `_tokens`, then any partials it needs.
 5. Dark-mode entrypoints (`dark-mode-*.scss`) re-import the theme so
    `$accent-dark` is in scope, then layer dark-only rules.
@@ -84,16 +84,16 @@ with this layering.
 | Subsite          | Light entry | Dark entry |
 |------------------|-------------|------------|
 | Site (landing/about/community/newsletter) | [`shared/styles/style-site.scss`](style-site.scss) | [`shared/styles/dark-mode-site.scss`](dark-mode-site.scss) |
-| Book Vol I       | [`book/quarto/assets/styles/style-vol1.scss`](../../book/quarto/assets/styles/style-vol1.scss) | [`book/quarto/assets/styles/dark-mode-vol1.scss`](../../book/quarto/assets/styles/dark-mode-vol1.scss) |
-| Book Vol II      | [`book/quarto/assets/styles/style-vol2.scss`](../../book/quarto/assets/styles/style-vol2.scss) | [`book/quarto/assets/styles/dark-mode-vol2.scss`](../../book/quarto/assets/styles/dark-mode-vol2.scss) |
+| Book Vol I       | [`books/shared/assets/styles/style-vol1.scss`](../../books/shared/assets/styles/style-vol1.scss) | [`books/shared/assets/styles/dark-mode-vol1.scss`](../../books/shared/assets/styles/dark-mode-vol1.scss) |
+| Book Vol II      | [`books/shared/assets/styles/style-vol2.scss`](../../books/shared/assets/styles/style-vol2.scss) | [`books/shared/assets/styles/dark-mode-vol2.scss`](../../books/shared/assets/styles/dark-mode-vol2.scss) |
 | Labs             | [`labs/assets/styles/style.scss`](../../labs/assets/styles/style.scss) | [`labs/assets/styles/dark-mode.scss`](../../labs/assets/styles/dark-mode.scss) |
 | Kits             | [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss) | [`kits/assets/styles/dark-mode.scss`](../../kits/assets/styles/dark-mode.scss) |
-| Slides           | [`slides/assets/styles/style.scss`](../../materials/slides/assets/styles/style.scss) | [`slides/assets/styles/dark-mode.scss`](../../materials/slides/assets/styles/dark-mode.scss) |
-| Instructors      | [`instructors/assets/styles/style.scss`](../../materials/instructors/assets/styles/style.scss) | [`instructors/assets/styles/dark-mode.scss`](../../materials/instructors/assets/styles/dark-mode.scss) |
-| MLSys·im docs    | [`mlsysim/docs/styles/style.scss`](../../packages/mlsysim/docs/styles/style.scss) | [`mlsysim/docs/styles/dark-mode.scss`](../../packages/mlsysim/docs/styles/dark-mode.scss) |
-| TinyTorch (Quarto)| [`tinytorch/quarto/assets/styles/style.scss`](../../packages/tinytorch/quarto/assets/styles/style.scss) | [`tinytorch/quarto/assets/styles/dark-mode.scss`](../../packages/tinytorch/quarto/assets/styles/dark-mode.scss) |
+| Slides           | [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss) | [`slides/assets/styles/dark-mode.scss`](../../slides/assets/styles/dark-mode.scss) |
+| Instructors      | [`instructors/assets/styles/style.scss`](../../instructors/assets/styles/style.scss) | [`instructors/assets/styles/dark-mode.scss`](../../instructors/assets/styles/dark-mode.scss) |
+| MLSys·im docs    | [`mlsysim/docs/styles/style.scss`](../../mlsysim/docs/styles/style.scss) | [`mlsysim/docs/styles/dark-mode.scss`](../../mlsysim/docs/styles/dark-mode.scss) |
+| TinyTorch (Quarto)| [`tinytorch/quarto/assets/styles/style.scss`](../../tinytorch/quarto/assets/styles/style.scss) | [`tinytorch/quarto/assets/styles/dark-mode.scss`](../../tinytorch/quarto/assets/styles/dark-mode.scss) |
 
-The book Vol I / Vol II theme files in [`book/quarto/assets/styles/themes/`](../../book/quarto/assets/styles/themes/)
+The book Vol I / Vol II theme files in [`books/shared/assets/styles/themes/`](../../books/shared/assets/styles/themes/)
 are **symlinks** to the canonical files in [`shared/styles/themes/`](themes/).
 
 ## Brand palette

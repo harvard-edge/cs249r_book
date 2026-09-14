@@ -27,11 +27,11 @@ from pathlib import Path
 
 # Project folders to scan
 PROJECTS = {
-    "book": "book/",
+    "book": "binder/",
     "kits": "kits/",
     "labs": "labs/",
     "tinytorch": "tinytorch/",
-    "interviews": "interviews/",
+    "staffml": "staffml/",
 }
 
 # Patterns to exclude (bots, AI tools, etc.)

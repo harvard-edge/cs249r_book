@@ -1,0 +1,566 @@
+"""
+Module 01: Tensor - Core Functionality Tests
+=============================================
+
+These tests verify that Tensor, the fundamental data structure of TinyTorch, works correctly.
+
+WHY TENSORS MATTER:
+------------------
+Tensors are the foundation of ALL deep learning:
+- Every input (images, text, audio) becomes a tensor
+- Every weight and bias in a neural network is a tensor
+- Every gradient computed during training is a tensor
+
+If Tensor doesn't work, nothing else will. This is Module 01 for a reason.
+
+WHAT STUDENTS LEARN:
+-------------------
+1. How data is represented in deep learning frameworks
+2. Why NumPy is the backbone of Python ML
+3. How operations like broadcasting save memory and compute
+"""
+
+import numpy as np
+rng = np.random.default_rng(7)
+import pytest
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Import at module level - if this fails, the module isn't complete
+from tinytorch.core.tensor import Tensor
+
+
+class TestTensorCreation:
+    """
+    Test tensor creation and initialization.
+
+    CONCEPT: A Tensor wraps a NumPy array and adds deep learning capabilities
+    (like gradient tracking). Creating tensors is the first step in any ML pipeline.
+    """
+
+    def test_tensor_from_list(self):
+        """
+        WHAT: Create tensors from Python lists.
+
+        WHY: Students often start with raw Python data (lists of numbers,
+        nested lists for matrices). TinyTorch must accept this natural input
+        and convert it to the internal NumPy representation.
+
+        STUDENT LEARNING: Data can enter the framework in different forms,
+        but internally it's always a NumPy array.
+        """
+        # 1D tensor (vector) - like a single data sample's features
+        t1 = Tensor([1, 2, 3])
+        assert t1.shape == (3,), (
+            f"1D tensor has wrong shape.\n"
+            f"  Input: [1, 2, 3] (3 elements)\n"
+            f"  Expected shape: (3,)\n"
+            f"  Got: {t1.shape}"
+        )
+        assert np.array_equal(t1.data, [1, 2, 3])
+
+        # 2D tensor (matrix) - like a batch of samples or weight matrix
+        t2 = Tensor([[1, 2], [3, 4]])
+        assert t2.shape == (2, 2), (
+            f"2D tensor has wrong shape.\n"
+            f"  Input: [[1,2], [3,4]] (2 rows, 2 cols)\n"
+            f"  Expected shape: (2, 2)\n"
+            f"  Got: {t2.shape}"
+        )
+
+    def test_tensor_from_numpy(self):
+        """
+        WHAT: Create tensors from NumPy arrays.
+
+        WHY: Real ML data comes from NumPy (pandas, scikit-learn, image loaders).
+        TinyTorch must seamlessly accept NumPy arrays.
+
+        STUDENT LEARNING: TinyTorch uses float32 by default (like PyTorch)
+        because it's faster and uses half the memory of float64.
+        """
+        arr = np.array([[1.0, 2.0], [3.0, 4.0]])
+        t = Tensor(arr)
+
+        assert t.shape == (2, 2)
+        assert t.dtype == np.float32, (
+            f"Tensor should use float32 for efficiency.\n"
+            f"  Expected dtype: np.float32\n"
+            f"  Got: {t.dtype}\n"
+            "float32 is half the memory of float64 and faster on GPUs."
+        )
+        assert np.allclose(t.data, arr)
+
+    def test_tensor_shapes(self):
+        """
+        WHAT: Handle tensors of various dimensions.
+
+        WHY: Deep learning uses many tensor shapes:
+        - 1D: feature vectors, biases
+        - 2D: weight matrices, batch of 1D samples
+        - 3D: sequences (batch, seq_len, features)
+        - 4D: images (batch, height, width, channels)
+
+        STUDENT LEARNING: Shape is critical. Most bugs are shape mismatches.
+        """
+        test_cases = [
+            ((5,), "1D: feature vector"),
+            ((3, 4), "2D: weight matrix"),
+            ((2, 3, 4), "3D: sequence data"),
+            ((1, 28, 28, 3), "4D: single RGB image"),
+        ]
+
+        for shape, description in test_cases:
+            data = rng.standard_normal(shape)
+            t = Tensor(data)
+            assert t.shape == shape, (
+                f"Shape mismatch for {description}.\n"
+                f"  Expected: {shape}\n"
+                f"  Got: {t.shape}"
+            )
+
+
+class TestTensorOperations:
+    """
+    Test tensor arithmetic and operations.
+
+    CONCEPT: Neural networks are just sequences of mathematical operations
+    on tensors. If these operations don't work, training is impossible.
+    """
+
+    def test_tensor_addition(self):
+        """
+        WHAT: Element-wise tensor addition.
+
+        WHY: Addition is used everywhere in neural networks:
+        - Adding bias to layer output: y = Wx + b
+        - Residual connections: output = layer(x) + x
+        - Gradient accumulation
+
+        STUDENT LEARNING: Operations return new Tensors (functional style).
+        """
+        t1 = Tensor([1, 2, 3])
+        t2 = Tensor([4, 5, 6])
+
+        result = t1 + t2
+        expected = np.array([5, 7, 9])
+
+        assert isinstance(result, Tensor), (
+            "Addition should return a Tensor, not numpy array.\n"
+            "This maintains the computation graph for backpropagation."
+        )
+        assert np.array_equal(result.data, expected), (
+            f"Element-wise addition failed.\n"
+            f"  {t1.data} + {t2.data}\n"
+            f"  Expected: {expected}\n"
+            f"  Got: {result.data}"
+        )
+
+    def test_tensor_multiplication(self):
+        """
+        WHAT: Element-wise tensor multiplication.
+
+        WHY: Element-wise multiplication (Hadamard product) is used for:
+        - Applying masks (setting values to zero)
+        - Gating mechanisms (LSTM, attention)
+        - Dropout during training
+
+        STUDENT LEARNING: This is NOT matrix multiplication. It's element-by-element.
+        """
+        t1 = Tensor([1, 2, 3])
+        t2 = Tensor([2, 3, 4])
+
+        result = t1 * t2
+        expected = np.array([2, 6, 12])
+
+        assert isinstance(result, Tensor)
+        assert np.array_equal(result.data, expected), (
+            f"Element-wise multiplication failed.\n"
+            f"  {t1.data} * {t2.data} (element-wise)\n"
+            f"  Expected: {expected}\n"
+            f"  Got: {result.data}\n"
+            "Remember: * is element-wise, @ is matrix multiplication."
+        )
+
+    def test_matrix_multiplication(self):
+        """
+        WHAT: Matrix multiplication (the @ operator).
+
+        WHY: Matrix multiplication is THE core operation of neural networks:
+        - Linear layers: y = x @ W
+        - Attention: scores = Q @ K^T
+        - Every fully-connected layer uses it
+
+        STUDENT LEARNING: Matrix dimensions must be compatible.
+        (m×n) @ (n×p) = (m×p) - inner dimensions must match.
+        """
+        t1 = Tensor([[1, 2], [3, 4]])  # 2×2
+        t2 = Tensor([[5, 6], [7, 8]])  # 2×2
+
+        # Matrix multiplication using @ operator
+        result = t1 @ t2
+
+        # Manual calculation:
+        # [1*5+2*7, 1*6+2*8]   = [19, 22]
+        # [3*5+4*7, 3*6+4*8]   = [43, 50]
+        expected = np.array([[19, 22], [43, 50]])
+
+        assert np.array_equal(result.data, expected), (
+            f"Matrix multiplication failed.\n"
+            f"  {t1.data}\n  @\n  {t2.data}\n"
+            f"  Expected:\n  {expected}\n"
+            f"  Got:\n  {result.data}"
+        )
+
+    def test_matrix_multiplication_rejects_scalars(self):
+        """
+        WHAT: Matrix multiplication rejects 0D tensors (scalars).
+
+        WHY: Matrix multiplication requires at least 1D inputs:
+        - Scalars have no dimensions to contract
+        - Use * for scalar multiplication, @ for matrix multiplication
+        - This matches PyTorch/NumPy behavior
+
+        STUDENT LEARNING: @ and * are different operations.
+        Use * for element-wise/scalar multiplication, @ for matrix multiplication.
+        """
+        scalar = Tensor(5.0)
+        vector = Tensor([1, 2, 3])
+
+        # Scalar @ vector should raise ValueError
+        with pytest.raises(ValueError):
+            _ = scalar @ vector
+
+        # Vector @ scalar should also raise ValueError
+        with pytest.raises(ValueError):
+            _ = vector @ scalar
+
+
+class TestTensorMemory:
+    """
+    Test tensor memory management.
+
+    CONCEPT: Efficient memory use is critical for deep learning.
+    Large models can use 10s of GB. Understanding memory helps debug OOM errors.
+    """
+
+    def test_tensor_data_access(self):
+        """
+        WHAT: Access the underlying NumPy array.
+
+        WHY: Sometimes you need the raw data for:
+        - Visualization (matplotlib expects NumPy)
+        - Debugging (print values)
+        - Integration with other libraries
+
+        STUDENT LEARNING: .data gives you the NumPy array inside the Tensor.
+        """
+        data = np.array([1, 2, 3, 4])
+        t = Tensor(data)
+
+        assert hasattr(t, 'data'), (
+            "Tensor must have a .data attribute.\n"
+            "This gives access to the underlying NumPy array."
+        )
+        assert np.array_equal(t.data, data)
+
+    def test_tensor_copy_semantics(self):
+        """
+        WHAT: Verify tensors don't share memory unexpectedly.
+
+        WHY: Shared memory can cause subtle bugs:
+        - Modifying one tensor accidentally changes another
+        - Gradient corruption during backprop
+        - Non-reproducible results
+
+        STUDENT LEARNING: TinyTorch should copy data by default for safety.
+        """
+        original_data = np.array([1, 2, 3])
+        t1 = Tensor(original_data)
+        t2 = Tensor(original_data.copy())
+
+        # Should have same values but independent data
+        assert np.array_equal(t1.data, t2.data)
+
+        # Modifying original shouldn't affect t2
+        original_data[0] = 999
+        assert not np.shares_memory(t1.data, original_data)
+        assert t1.data[0] == 1, "Constructor must copy the input array"
+        assert t2.data[0] == 1
+
+    def test_tensor_memory_efficiency(self):
+        """
+        WHAT: Handle large tensors efficiently.
+
+        WHY: Real models have millions of parameters:
+        - ResNet-50: 25 million parameters
+        - GPT-2: 1.5 billion parameters
+        - LLaMA: 7-65 billion parameters
+
+        STUDENT LEARNING: Memory efficiency matters at scale.
+        """
+        # Create a 1000×1000 tensor (1 million elements)
+        data = rng.standard_normal((1000, 1000))
+        t = Tensor(data)
+
+        assert t.shape == (1000, 1000)
+        assert t.data.size == 1000000, (
+            f"Tensor should have 1M elements.\n"
+            f"  Got: {t.data.size} elements"
+        )
+
+
+class TestTensorReshaping:
+    """
+    Test tensor reshaping and view operations.
+
+    CONCEPT: Reshaping changes how we interpret the same data.
+    The underlying values don't change, just their arrangement.
+    """
+
+    def test_tensor_reshape(self):
+        """
+        WHAT: Reshape tensor to different dimensions.
+
+        WHY: Reshaping is constantly needed:
+        - Flattening images for dense layers
+        - Rearranging for batch processing
+        - Preparing data for specific layer types
+
+        STUDENT LEARNING: Total elements must stay the same.
+        [12 elements] can become (3,4) or (2,6) or (2,2,3), but not (5,3).
+        """
+        t = Tensor(np.arange(12))  # [0, 1, 2, ..., 11]
+
+        reshaped = t.reshape(3, 4)
+        assert reshaped.shape == (3, 4)
+        np.testing.assert_array_equal(reshaped.data, np.arange(12).reshape(3, 4))
+
+    def test_tensor_flatten(self):
+        """
+        WHAT: Flatten tensor to 1D.
+
+        WHY: Flattening is required to connect:
+        - Conv layers (4D) to Dense layers (2D)
+        - Image data to classification heads
+
+        STUDENT LEARNING: reshape(-1) flattens every axis into one vector
+        """
+        t = Tensor(rng.standard_normal((2, 3, 4)))  # 2×3×4 = 24 elements
+
+        flat = t.reshape(-1)
+        assert flat.shape == (24,)
+        np.testing.assert_array_equal(flat.data, t.data.ravel())
+
+    def test_tensor_transpose(self):
+        """
+        WHAT: Transpose tensor (swap dimensions).
+
+        WHY: Transpose is used for:
+        - Matrix multiplication compatibility
+        - Attention: K^T in Q @ K^T
+        - Rearranging data layouts
+
+        STUDENT LEARNING: Transpose swaps rows and columns.
+        (m×n) becomes (n×m).
+        """
+        t = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3
+
+        transposed = t.transpose()
+        assert transposed.shape == (3, 2)
+        np.testing.assert_array_equal(transposed.data, [[1, 4], [2, 5], [3, 6]])
+
+
+class TestTensorBroadcasting:
+    """
+    Test tensor broadcasting operations.
+
+    CONCEPT: Broadcasting lets you operate on tensors of different shapes
+    by automatically expanding the smaller one. This saves memory and code.
+    """
+
+    def test_scalar_broadcasting(self):
+        """
+        WHAT: Apply a scalar to every element.
+
+        WHY: Scalar operations are common:
+        - Adding bias: output + bias
+        - Normalization: (x - mean) / std
+        - Scaling: x * 0.1
+
+        STUDENT LEARNING: Scalars broadcast to match any shape, regardless
+        of whether the scalar appears before or after the Tensor.
+        """
+        t = Tensor([1, 2, 3])
+
+        result = t + 5
+        expected = np.array([6, 7, 8])
+        assert np.array_equal(result.data, expected), (
+            f"Scalar broadcasting failed.\n"
+            f"  {t.data} + 5\n"
+            f"  Expected: {expected}\n"
+            f"  Got: {result.data}\n"
+            "The scalar 5 should be added to every element."
+        )
+
+        result = 5 + t
+        assert np.array_equal(result.data, expected), (
+            "Scalar arithmetic should work naturally with the scalar first too."
+        )
+
+        result = 2 * t
+        assert np.array_equal(result.data, np.array([2, 4, 6]))
+
+        result = 10 - t
+        assert np.array_equal(result.data, np.array([9, 8, 7]))
+
+        result = 12 / t
+        assert np.allclose(result.data, np.array([12.0, 6.0, 4.0]))
+
+    def test_vector_broadcasting(self):
+        """
+        WHAT: Broadcast a vector across a matrix.
+
+        WHY: Vector broadcasting is used for:
+        - Adding bias to batch output: (batch, features) + (features,)
+        - Normalizing channels: (batch, H, W, C) / (C,)
+
+        STUDENT LEARNING: Broadcasting aligns from the RIGHT.
+        (2,3) + (3,) works because 3 aligns with 3.
+        (2,3) + (2,) fails because 2 doesn't align with 3.
+        """
+        t1 = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3
+        t2 = Tensor([10, 20, 30])            # 3,
+
+        result = t1 + t2
+        assert result.shape == (2, 3), (
+            f"Broadcasting produced wrong shape.\n"
+            f"  (2,3) + (3,) should give (2,3)\n"
+            f"  Got: {result.shape}"
+        )
+        expected = np.array([[11, 22, 33], [14, 25, 36]])
+        assert np.array_equal(result.data, expected), (
+            f"Vector broadcasting failed.\n"
+            f"  [[1,2,3], [4,5,6]] + [10,20,30]\n"
+            f"  Expected: {expected}\n"
+            f"  Got: {result.data}\n"
+            "Each row should have [10,20,30] added to it."
+        )
+
+
+class TestTensorPyTorchCompat:
+    """
+    Tests for PyTorch-compatible API additions (issue #1298).
+
+    WHY THESE MATTER: Students transitioning from PyTorch hit AttributeError
+    when calling .ndim, .numel(), .view(), .contiguous(), or .masked_fill()
+    on TinyTorch tensors. These additions make the two APIs interchangeable
+    for the patterns that appear in transformer training pipelines.
+    """
+
+    def test_ndim(self):
+        """ndim matches len(shape) for tensors of every rank."""
+        assert Tensor(5.0).ndim == 0
+        assert Tensor([1, 2, 3]).ndim == 1
+        assert Tensor([[1, 2], [3, 4]]).ndim == 2
+        assert Tensor([[[1]]]).ndim == 3
+
+    def test_numel(self):
+        """numel() returns total element count, same as .size."""
+        t = Tensor([[1, 2, 3], [4, 5, 6]])
+        assert t.numel() == 6
+        assert t.numel() == t.size
+
+    def test_view_same_as_reshape(self):
+        """view() is a reshape alias and produces the correct shape and data."""
+        t = Tensor([1, 2, 3, 4, 5, 6])
+        v = t.view(2, 3)
+        assert v.shape == (2, 3)
+        assert np.array_equal(v.data, t.reshape(2, 3).data)
+
+    def test_view_with_minus_one(self):
+        """view() passes -1 inference through to reshape."""
+        t = Tensor([1, 2, 3, 4, 5, 6])
+        v = t.view(3, -1)
+        assert v.shape == (3, 2)
+
+    def test_contiguous_returns_correct_data(self):
+        """contiguous() returns a new Tensor with identical values."""
+        t = Tensor([[1, 2, 3], [4, 5, 6]])
+        c = t.contiguous()
+        assert c.shape == t.shape
+        assert np.array_equal(c.data, t.data)
+
+    def test_contiguous_is_c_contiguous(self):
+        """contiguous() guarantees C-order memory layout."""
+        t = Tensor([[1, 2, 3], [4, 5, 6]])
+        transposed = t.transpose()
+        c = transposed.contiguous()
+        assert c.data.flags["C_CONTIGUOUS"]
+
+    def test_masked_fill_basic(self):
+        """masked_fill replaces True positions with the fill value."""
+        t = Tensor([[1.0, 2.0, 3.0]])
+        mask = Tensor([[0.0, 1.0, 0.0]])
+        result = t.masked_fill(mask, -1.0)
+        expected = np.array([[1.0, -1.0, 3.0]], dtype=np.float32)
+        assert np.array_equal(result.data, expected)
+
+    def test_masked_fill_attention_pattern(self):
+        """masked_fill with -inf matches the attention mask pattern in transformers."""
+        scores = Tensor([[1.0, 2.0, 3.0, 4.0]])
+        pad_mask = Tensor([[0.0, 0.0, 1.0, 1.0]])
+        masked = scores.masked_fill(pad_mask, float("-inf"))
+        assert np.isfinite(masked.data[0, 0])
+        assert np.isfinite(masked.data[0, 1])
+        assert masked.data[0, 2] == float("-inf")
+        assert masked.data[0, 3] == float("-inf")
+
+    def test_masked_fill_does_not_mutate_original(self):
+        """masked_fill returns a new tensor without modifying the original."""
+        t = Tensor([[1.0, 2.0, 3.0]])
+        mask = Tensor([[1.0, 0.0, 1.0]])
+        _ = t.masked_fill(mask, 0.0)
+        assert np.array_equal(t.data, np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
+
+    def test_tensor_from_tensor_list(self):
+        """Tensor([t1, t2]) stacks tensors along a new leading dimension."""
+        t1 = Tensor([1.0, 2.0, 3.0])
+        t2 = Tensor([4.0, 5.0, 6.0])
+        stacked = Tensor([t1, t2])
+        assert stacked.shape == (2, 3)
+        assert np.array_equal(stacked.data[0], t1.data)
+        assert np.array_equal(stacked.data[1], t2.data)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+
+
+@pytest.mark.parametrize("mask", [np.array([False, True, False]), np.array([[False, True, False]])])
+def test_masked_fill_broadcasts_shared_mask(mask):
+    """One feature mask applies to every batch row without changing the input."""
+    tensor = Tensor([[1, 2, 3], [4, 5, 6]])
+    masked = tensor.masked_fill(mask, -1)
+    np.testing.assert_array_equal(masked.data, [[1, -1, 3], [4, -1, 6]])
+    np.testing.assert_array_equal(tensor.data, [[1, 2, 3], [4, 5, 6]])
+    assert not np.shares_memory(masked.data, tensor.data)
+
+
+def test_transpose_has_independent_storage():
+    tensor = Tensor([[1, 2, 3], [4, 5, 6]])
+    transposed = tensor.transpose()
+    assert not np.shares_memory(tensor.data, transposed.data)
+    transposed.data[0, 0] = 99
+    assert tensor.data[0, 0] == 1
+
+
+@pytest.mark.parametrize("operation", ["contiguous", "transpose"])
+def test_scalar_copy_operations_preserve_rank(operation):
+    tensor = Tensor(3.0)
+    result = getattr(tensor, operation)()
+    assert result.shape == ()
+    assert result.data == 3.0
+    assert not np.shares_memory(result.data, tensor.data)

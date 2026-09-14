@@ -4,14 +4,10 @@
 
 [![Read Online](https://img.shields.io/badge/Read_Online-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/vol2/)
 
-<div align="center" style="background: #eff6ff; border: 1px solid #60a5fa; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
-  <span style="font-size: 1.1em; font-weight: bold; color: #1e40af;">📘 Preview Edition &bull; Active Final Polish</span><br>
-  <span style="color: #1e3a8a; font-size: 0.95em;">
-    This volume is an open preview draft undergoing final image rendering and editorial polishing. Core technical chapters are stable, with complete cross-references and figure enhancements being added ahead of the official release.
-  </span>
-</div>
-
 ---
+
+> [!CAUTION]
+> **This volume is under active development.** I am writing and revising chapters continuously. Diagrams, figures, and cross-references are being created and updated throughout. What you see here is a work in progress, not a finished product. I share it openly because I believe in transparent development. Expect the content to evolve significantly before the Summer 2027 release.
 
 ## About This Volume
 
@@ -190,7 +186,7 @@ If you notice an error, have a suggestion, or want to propose a topic, please [o
     </tr>
     <tr>
       <td><b>Volume I</b></td>
-      <td><a href="../vol1/">book/quarto/contents/vol1/</a></td>
+      <td><a href="../vol1/">books/vol1/</a></td>
     </tr>
     <tr>
       <td><b>Main README</b></td>
