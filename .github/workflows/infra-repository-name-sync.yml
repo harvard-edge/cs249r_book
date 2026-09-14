@@ -1,0 +1,135 @@
+name: '🔧 Infra · 🏷️ Repository Name Sync'
+
+# =============================================================================
+# 🏷️ Repository Name Sync — follow a repository rename automatically
+# =============================================================================
+#
+# GitHub's own name for this repository (github.repository) is the single
+# source of truth. Workflows and CI scripts read it directly. Files that
+# cannot (READMEs, badges, pyproject metadata, citation files, page links)
+# spell the name out, and .github/repository records which name they use.
+#
+# Flow:
+#   1. SKIP FORKS — a fork carries its own name, so its copy does nothing
+#   2. SYNC       — compare github.repository with the record; after a rename,
+#                   rewrite every reference (.github/scripts/sync-repository-name.py)
+#   3. COMMIT     — commit to dev and push; a rejected push redoes the rewrite
+#                   on the new dev tip, so a concurrent push cannot conflict
+#   4. REBUILD    — dispatch the container builds, whose image path is
+#                   ghcr.io/<owner>/<name>
+#
+# Every run also fails if a workflow file spells the name out: a push made
+# with GITHUB_TOKEN may not modify .github/workflows/, so a rewrite could
+# never reach it.
+#
+# A push made with GITHUB_TOKEN starts no workflows, so the next push to dev
+# validates the rewrite.
+#
+# Not automated: PyPI trusted publishing for mlsysim matches the repository
+# name, so the publisher must be re-registered on pypi.org after a rename.
+#
+# Triggers:
+#   - push (dev): a no-op unless the name changed
+#   - schedule: daily, so a rename is followed even without a push
+#   - workflow_dispatch: manual trigger from Actions UI
+#
+# Secrets:    GITHUB_TOKEN (automatic)
+#
+# Related:
+#   - .github/repository — the name the files currently use
+#   - infra-container-linux.yml, infra-container-windows.yml — rebuilt after a rename
+#
+# =============================================================================
+
+on:
+  push:
+    branches: [dev]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: repository-name-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Repository Name
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🔎 Skip forks
+        id: fork
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FORK=$(gh api "repos/$GITHUB_REPOSITORY" --jq .fork)
+          echo "fork=$FORK" >> "$GITHUB_OUTPUT"
+          if [ "$FORK" = "true" ]; then
+            echo "ℹ️ $GITHUB_REPOSITORY is a fork; nothing to sync"
+          fi
+
+      - name: 📥 Checkout dev
+        if: steps.fork.outputs.fork != 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: 🏷️ Sync repository name
+        id: sync
+        if: steps.fork.outputs.fork != 'true'
+        run: python3 .github/scripts/sync-repository-name.py
+
+      - name: 💾 Commit and push to dev
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          MESSAGE="chore(repo): follow the repository rename to $GITHUB_REPOSITORY"
+          git commit -q -a -m "$MESSAGE"
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:dev; then
+              echo "✅ Pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "⚠️ Push rejected (attempt $attempt/3); redoing the rewrite on the new dev tip"
+            git fetch origin dev
+            git reset --hard origin/dev
+            python3 .github/scripts/sync-repository-name.py
+            if git diff --quiet; then
+              echo "ℹ️ dev already follows the new name"
+              exit 0
+            fi
+            git commit -q -a -m "$MESSAGE"
+          done
+
+          echo "::error::Could not push the rename to dev after 3 attempts"
+          exit 1
+
+      - name: 🐳 Rebuild containers under the new name
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for workflow in infra-container-linux.yml infra-container-windows.yml; do
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref dev
+            echo "🐳 Dispatched $workflow"
+          done
+
+      - name: 📋 Report
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          OLD: ${{ steps.sync.outputs.old }}
+        run: |
+          {
+            echo "## 🏷️ Repository renamed: \`$OLD\` → \`$GITHUB_REPOSITORY\`"
+            echo ""
+            echo "- Every reference was rewritten and committed to dev."
+            echo "- Linux and Windows container builds were dispatched."
+            echo "- **Still manual:** re-register the mlsysim trusted publisher on pypi.org under the new name."
+          } >> "$GITHUB_STEP_SUMMARY"
