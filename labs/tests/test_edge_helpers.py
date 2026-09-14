@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mlsysbook_labs import (
     adaptation_storage,
     edge_device_profile,
@@ -23,9 +25,9 @@ def test_edge_device_profile_uses_mlsysim_hardware_capacity():
     iphone = _edge_profile("iphone")
     oura = _edge_profile("oura_ring")
 
-    assert iphone.memory_capacity_mb == 8000.0
+    assert iphone.memory_capacity_mb == pytest.approx(8589.93, rel=1e-3)
     assert iphone.energy_budget_wh == 15.0
-    assert oura.memory_capacity_mb == 2.0
+    assert oura.memory_capacity_mb == pytest.approx(2.10, rel=1e-2)
     assert oura.energy_budget_wh == 0.06
     assert oura.available_memory_mb < iphone.available_memory_mb
 

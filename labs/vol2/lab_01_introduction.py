@@ -1365,7 +1365,32 @@ def _(
                 "At scale, component failures compound into steady-state routine operational events.",
                 "Downstream Chapter 2 Compute Infrastructure must directly co-design interconnect fabrics and recovery domains.",
             ),
-            residual_risk=v2_01_synthesis_notes.value,
+            reflections={
+                "envelope_choice": f"Selected {envelope} envelope balancing scale efficiency against operational overhead.",
+                "binding_constraint": f"Distributed capacity is bound by {v2_01_b['binding']}.",
+                "carry_forward": question_labels[question],
+            },
+            residual_risk=v2_01_synthesis_notes.value or "Scenario thresholds are teaching models; production requires measured telemetry.",
+            source_trace={
+                "track_id": v2_01_profile.track_id,
+                "scenario_id": v2_01_variant.scenario_id,
+                "hardware_ref": v2_01_variant.hardware_ref,
+                "model_ref": v2_01_variant.model_ref,
+                "track_source_policy": v2_01_profile.source_policy,
+                "chapter_anchors": (
+                    "#sec-intro-fleet-scale",
+                    "#sec-intro-distributed-capacity",
+                    "#sec-intro-c3-trilemma",
+                    "#sec-intro-routine-failure",
+                ),
+            },
+            result_snapshot={
+                "part_a": v2_01_a,
+                "part_b": v2_01_b,
+                "part_c": v2_01_c,
+                "part_d": v2_01_d,
+                "passed": passed,
+            },
         )
 
         return mo.vstack([

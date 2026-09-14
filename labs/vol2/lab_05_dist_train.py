@@ -732,6 +732,7 @@ def _(
     cluster_name,
     curr_zero,
     dashboard_view,
+    fabric_name,
     get_lab_metadata,
     infeasible_topology,
     is_oom,
@@ -746,17 +747,27 @@ def _(
     pred_scaling_radio,
     recompute_radio,
     report_export_panel,
+    scenario_text,
     step_ms,
     tokens_per_sec,
     tp_radio,
     tp_spans_nodes,
+    track_dropdown,
     vram_allocated_gb,
     vram_per_gpu_gb,
+    workload_name,
 ):
     metadata = get_lab_metadata("vol2/lab_05_dist_train.py")
     report = build_lab_report(
         metadata,
-        track="cloud_fleet",
+        track=str(track_dropdown.value),
+        scenario=scenario_text,
+        learning_objectives=(
+            "Analyze 3D parallelism trade-offs across tensor, pipeline, and data parallel dimensions.",
+            "Characterize memory footprint reductions from ZeRO stage 1, 2, and 3 partitioning.",
+            "Evaluate network fabric bottlenecks and the cross-node tensor parallelism latency cliff.",
+            "Synthesize a balanced distributed scaling topology satisfying VRAM and throughput constraints.",
+        ),
         predictions={"hypothesis": str(pred_scaling_radio.value)},
         knob_settings={
             "tp_size": int(tp_radio.value),
@@ -765,10 +776,63 @@ def _(
             "zero_stage": curr_zero,
             "recomputation": str(recompute_radio.value),
         },
-        decisions={
+        evidence_summary={
+            "vram_allocated_gb": round(vram_allocated_gb, 2),
+            "vram_per_gpu_gb": vram_per_gpu_gb,
+            "is_oom": is_oom,
+            "step_latency_ms": round(step_ms, 1),
+            "cluster_throughput_tok_s": round(tokens_per_sec, 1),
+            "tp_spans_nodes": tp_spans_nodes,
+            "infeasible_topology": infeasible_topology,
+        },
+        final_decision={
+            "tp_size": int(tp_radio.value),
+            "pp_size": int(pp_radio.value),
+            "microbatches": int(microbatch_slider.value),
+            "zero_stage": curr_zero,
+            "recomputation": str(recompute_radio.value),
             "vram_gb": vram_allocated_gb,
             "step_latency_ms": step_ms,
             "throughput_tokens_sec": tokens_per_sec,
+            "topology_status": "APPROVED" if (not is_oom and not infeasible_topology) else "INVIOLATE_LIMIT_BREACH",
+        },
+        big_takeaways=(
+            "Tensor Parallelism requires high-bandwidth intra-node interconnects (NVLink); spanning nodes across lower-bandwidth fabrics triggers severe latency penalties.",
+            "Pipeline Parallelism mitigates communication overhead across nodes but introduces a bubble tax inversely proportional to microbatch depth.",
+            "ZeRO memory partitioning dramatically reduces per-device optimizer and parameter footprints without changing computational graph semantics.",
+            "Balanced 3D parallelism co-designs TP, PP, DP, and ZeRO against memory limits and physical network topology.",
+        ),
+        reflections={
+            "diagnosis": "Verified 3D parallelism trade-offs against physical hardware limits.",
+            "tradeoff": f"Configured TP={int(tp_radio.value)}, PP={int(pp_radio.value)}, ZeRO-{curr_zero} for {workload_name}.",
+            "residual_risk": "Real-world scaling may experience stragglers, NCCL communication jitter, or thermal throttling.",
+        },
+        residual_risk=(
+            "Simulated step latencies assume ideal network fabric utilization without congestion or stragglers. "
+            "Validate cluster execution traces with production profiling tools (e.g. PyTorch Profiler, Nsight Systems)."
+        ),
+        source_trace={
+            "workload": workload_name,
+            "cluster": cluster_name,
+            "fabric": fabric_name,
+            "chapter_anchors": (
+                "#sec-dist-train-3d-parallelism",
+                "#sec-dist-train-zero-memory",
+                "#sec-dist-train-interconnect-cliffs",
+            ),
+        },
+        result_snapshot={
+            "tp_size": int(tp_radio.value),
+            "pp_size": int(pp_radio.value),
+            "microbatches": int(microbatch_slider.value),
+            "zero_stage": curr_zero,
+            "recomputation": str(recompute_radio.value),
+            "vram_allocated_gb": vram_allocated_gb,
+            "step_ms": step_ms,
+            "tokens_per_sec": tokens_per_sec,
+            "is_oom": is_oom,
+            "infeasible_topology": infeasible_topology,
+            "pred_is_correct": pred_is_correct,
         },
     )
 
