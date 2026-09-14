@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: SETUP
-# ===========================================================================
 
 
 @app.cell
@@ -31,13 +27,17 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
         compile_break_even,
         dispatch_stack,
         framework_track_profile,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         resolve_mlsysim_ref,
         runtime_decision,
@@ -55,6 +55,7 @@ async def _():
         COLORS,
         LAB_CSS,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         compile_break_even,
         dispatch_stack,
@@ -71,7 +72,6 @@ async def _():
         source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -82,11 +82,20 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
+    _options = {
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
+        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
+        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+    }
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_07_track_picker = track_selector(default=_default_track)
-    v1_07_track_picker
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    v1_07_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_07_track_picker,)
 
 
@@ -98,6 +107,7 @@ def _(
     resolve_mlsysim_ref,
     v1_07_track_picker,
 ):
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
     v1_07_track_id = v1_07_track_picker.value
     v1_07_profile = get_track_profile(v1_07_track_id)
     v1_07_variant = get_lab_track_variant("v1_07_framework_tax", v1_07_profile.track_id)
@@ -109,14 +119,7 @@ def _(
         v1_07_hardware,
         v1_07_model,
     )
-    return (
-        v1_07_framework,
-        v1_07_hardware,
-        v1_07_model,
-        v1_07_profile,
-        v1_07_track_id,
-        v1_07_variant,
-    )
+    return v1_07_framework, v1_07_profile, v1_07_variant
 
 
 @app.cell
@@ -357,7 +360,6 @@ def _(COLORS, mo):
     return (
         v1_07_break_even_category,
         v1_07_constraint_callout,
-        v1_07_fmt_float,
         v1_07_fmt_int,
         v1_07_math_peek,
         v1_07_metric_card,
@@ -375,6 +377,7 @@ def _(COLORS, mo):
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
     source_trace,
@@ -384,6 +387,7 @@ def _(
     v1_07_metadata,
     v1_07_profile,
     v1_07_track_amount_story,
+    v1_07_track_picker,
     v1_07_variant,
 ):
     _amount_story = v1_07_track_amount_story(v1_07_profile)
@@ -391,51 +395,92 @@ def _(
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 07
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_07_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 7 &middot; Foundational Lab 07
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                ML Frameworks: Runtime Consequences
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              ML Frameworks: Runtime Consequences &amp; Execution Stacks
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Dispatch &middot; Graph Shape &middot; Fusion &middot; Portability &middot; Validation
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              Trace how high-level framework abstractions carry physical execution costs. Evaluate eager vs graph dispatch overheads, measure kernel fusion boundaries, quantify cross-platform portability taxes, and validate execution stacks under strict deployment latency and memory limits.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 900px; line-height: 1.65;">
-                Chapter invariant: framework abstractions carry runtime consequences.
-                Graph shape, dispatch, portability, and kernel support change the deployed
-                system even when the model math is unchanged. Every track follows the same
-                Part A-D concept sequence; the selected track changes persona, thresholds,
-                evidence emphasis, failure mode, and report framing.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Concept Modules + Synthesis &middot; ~55 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_07_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_07_framework.workload_label}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_07_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Workload:</strong> {v1_07_framework.workload_label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_07_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_07_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> Dispatch &amp; Graph Optimization
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> {v1_07_framework.report_artifact}
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Part A: Eager vs Graph Overhead</span>
-                <span class="badge badge-warn">Part B: Fusion Boundary</span>
-                <span class="badge badge-info">Part C: Portability Amounts</span>
-                <span class="badge badge-fail">Part D: Release Evidence</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_07_profile.label} Framework &amp; Runtime Engineering
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_07_variant.stakeholder}</strong> responsible for deploying <strong>{v1_07_variant.model_ref}</strong> onto <strong>{v1_07_variant.hardware_ref}</strong>. The target deployment requires predictable latency without unexpected host-device synchronization stalls or unlowered operator fallbacks under <strong>{v1_07_framework.workload_label}</strong>.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of ML Frameworks:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Runtime Abstraction Invariant:</strong> Framework abstractions carry physical execution consequences. Graph construction, kernel launch dispatch, and operator lowering dictate system latency and memory consumption even when model math is identical.</li>
+                <li><strong>The Fusion Boundary Law:</strong> Kernel fusion eliminates intermediate tensor round-trips to DRAM only within topologically static, supported subgraphs: <em>T</em><sub>fused</sub> &lt; &sum; <em>T</em><sub>eager</sub>. Unlowered ops break fusion boundaries and trigger costly fallback copies.</li>
+                <li><strong>The Portability-Efficiency Trade-Off:</strong> Standardized IR formats (ONNX, TFLite, CoreML) grant portability across target silicon, but risk forfeiting hardware-specific microarchitectural optimizations without explicit custom runtime delegates.</li>
+                <li><strong>The Compilation Amortization Invariant:</strong> Upfront JIT/AOT graph compilation incurs significant build latency (<em>T</em><sub>compile</sub>). Compilation pays back only when inference query reuse exceeds the break-even threshold: <em>N</em><sub>reuse</sub> &gt; <em>T</em><sub>compile</sub> / &Delta;<em>t</em><sub>speedup</sub>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Diagnose execution overhead:</strong>
+                    separate useful compute from dispatch, transfer, sync, memory traffic, and unsupported-op fallback.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Find a fusion boundary:</strong>
+                    compare compile/delegate setup cost with reuse, shape stability, and supported kernels.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Reason in track amounts:</strong>
+                    explain how compatibility costs latency, footprint, support, battery, safety, or cost.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Release with evidence:</strong>
+                    recommend a runtime only when deployment constraints and validation evidence line up.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    "Which framework/runtime execution path fits {v1_07_framework.label}, and what empirical evidence proves that its graph shape, dispatch latency, and operator support are safe for release?"
+                </div>
             </div>
         </div>
         """),
@@ -465,46 +510,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_07_framework):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Learning Objectives
-        </div>
-        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Diagnose execution overhead:</strong>
-                separate useful compute from dispatch, transfer, sync, memory traffic, and unsupported-op fallback.</div>
-            <div style="margin-bottom: 3px;">2. <strong>Find a fusion boundary:</strong>
-                compare compile/delegate setup cost with reuse, shape stability, and supported kernels.</div>
-            <div style="margin-bottom: 3px;">3. <strong>Reason in track amounts:</strong>
-                explain how compatibility can cost latency, footprint, support, battery, safety, or cost.</div>
-            <div style="margin-bottom: 3px;">4. <strong>Release with evidence:</strong>
-                recommend a runtime only when deployment constraints and validation evidence line up.</div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Runtime Decision
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                Which framework/runtime path fits {v1_07_framework.label}, and what evidence
-                proves that its graph shape, dispatch cost, and operator support are safe to deploy?
-            </div>
-        </div>
-    </div>
-    """)
+def _():
     return
-
-
-# ===========================================================================
-# ZONE B: CONTROLS AND COMPUTATION
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -525,7 +532,7 @@ def _(mo, v1_07_framework):
         step=max(1, int(v1_07_framework.op_count / 20)),
         label="Operation count in the hot path",
     )
-    return (v1_07_op_count, v1_07_overhead_prediction)
+    return v1_07_op_count, v1_07_overhead_prediction
 
 
 @app.cell(hide_code=True)
@@ -648,6 +655,7 @@ def _(
     v1_07_op_count,
     v1_07_overhead_category,
     v1_07_portability_cost_category,
+    v1_07_profile,
     v1_07_release_gate,
     v1_07_release_posture,
     v1_07_reuse_count,
@@ -655,7 +663,6 @@ def _(
     v1_07_shape_dynamism,
     v1_07_support_rows,
     v1_07_validation_focus_actual,
-    v1_07_profile,
 ):
     v1_07_dispatch_rows = tuple(
         dispatch_stack(
@@ -730,15 +737,11 @@ def _(
     )
 
 
-# ===========================================================================
-# ZONE C: CONCEPT MODULES
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
+    big_takeaways,
     go,
     mo,
     source_trace,
@@ -751,7 +754,6 @@ def _(
     v1_07_constraint_callout,
     v1_07_decision,
     v1_07_dispatch_rows,
-    v1_07_fmt_float,
     v1_07_fmt_int,
     v1_07_framework,
     v1_07_math_peek,
@@ -995,18 +997,18 @@ def _(
         v1_07_math_peek(
             "Math Peek / Source Model - dispatch tax",
             f"""
-The chapter defines dispatch tax as host/runtime orchestration relative to useful work:
+    The chapter defines dispatch tax as host/runtime orchestration relative to useful work:
 
-$$
-\\text{{Overhead Ratio}} =
-\\frac{{N_{{ops}} \\cdot t_{{dispatch}}}}{{T_{{compute}} + T_{{memory}}}}
-$$
+    $$
+    \\text{{Overhead Ratio}} =
+    \\frac{{N_{{ops}} \\cdot t_{{dispatch}}}}{{T_{{compute}} + T_{{memory}}}}
+    $$
 
-For **{v1_07_decision.selected_label}**, the notebook-local scenario uses
-`dispatch_stack()` with `op_count = {v1_07_op_count.value}` and the selected track profile.
-Useful compute is {v1_07_selected_stack.useful_compute_ms:.2f} ms; non-compute overhead is
-{v1_07_selected_stack.total_latency_ms - v1_07_selected_stack.useful_compute_ms:.2f} ms.
-""",
+    For **{v1_07_decision.selected_label}**, the notebook-local scenario uses
+    `dispatch_stack()` with `op_count = {v1_07_op_count.value}` and the selected track profile.
+    Useful compute is {v1_07_selected_stack.useful_compute_ms:.2f} ms; non-compute overhead is
+    {v1_07_selected_stack.total_latency_ms - v1_07_selected_stack.useful_compute_ms:.2f} ms.
+    """,
         ),
         source_trace({
             "chapter_anchor": "Execution Problem / The dispatch tax",
@@ -1053,18 +1055,18 @@ Useful compute is {v1_07_selected_stack.useful_compute_ms:.2f} ms; non-compute o
         v1_07_math_peek(
             "Math Peek / Source Model - compile break-even",
             f"""
-The chapter's compile decision rule is:
+    The chapter's compile decision rule is:
 
-$$
-N_{{breakeven}} =
-\\frac{{T_{{compile}}}}{{T_{{eager}} - T_{{compiled}}}}
-$$
+    $$
+    N_{{breakeven}} =
+    \\frac{{T_{{compile}}}}{{T_{{eager}} - T_{{compiled}}}}
+    $$
 
-The selected runtime has compile/delegate cost {v1_07_selected_break_even.compile_cost_s:.1f} s and
-per-inference savings {v1_07_selected_break_even.per_inference_savings_ms:.2f} ms against the baseline.
-The selected shape-dynamism pressure is {v1_07_shape_dynamism.value}% and the adjusted support floor is
-{v1_07_framework.kernel_support_floor_pct:.1f}%.
-""",
+    The selected runtime has compile/delegate cost {v1_07_selected_break_even.compile_cost_s:.1f} s and
+    per-inference savings {v1_07_selected_break_even.per_inference_savings_ms:.2f} ms against the baseline.
+    The selected shape-dynamism pressure is {v1_07_shape_dynamism.value}% and the adjusted support floor is
+    {v1_07_framework.kernel_support_floor_pct:.1f}%.
+    """,
         ),
         source_trace({
             "chapter_anchor": "Kernel fusion / Hybrid JIT and compilation",
@@ -1116,18 +1118,18 @@ The selected shape-dynamism pressure is {v1_07_shape_dynamism.value}% and the ad
         v1_07_math_peek(
             "Math Peek / Source Model - compatibility score",
             f"""
-The notebook converts portability into normalized headroom amounts:
+    The notebook converts portability into normalized headroom amounts:
 
-```
-compatibility_score =
-  mean(latency_headroom / latency_budget,
+    ```
+    compatibility_score =
+      mean(latency_headroom / latency_budget,
        support_headroom / available_support_headroom,
        footprint_headroom / memory_budget) * 100
-```
+    ```
 
-This is not a framework leaderboard. It is a scenario model that forces the same runtime choice to pass
-{v1_07_framework.primary_metric} while respecting {v1_07_framework.guardrail_metric}.
-""",
+    This is not a framework leaderboard. It is a scenario model that forces the same runtime choice to pass
+    {v1_07_framework.primary_metric} while respecting {v1_07_framework.guardrail_metric}.
+    """,
         ),
         source_trace({
             "chapter_anchor": "Deployment Targets / Framework Selection / ONNX portability",
@@ -1199,18 +1201,18 @@ This is not a framework leaderboard. It is a scenario model that forces the same
         v1_07_math_peek(
             "Math Peek / Source Model - deployment feasibility rule",
             f"""
-The release decision is an amount-system predicate:
+    The release decision is an amount-system predicate:
 
-```
-latency_ms <= {v1_07_framework.latency_budget_ms:.1f}
-footprint_mb <= {v1_07_framework.memory_budget_mb:.3f}
-support_pct >= {v1_07_framework.kernel_support_floor_pct:.1f}
-reuse_count >= break_even_inferences  # when compile/delegate cost is nonzero
-validation_evidence matches selected track
-```
+    ```
+    latency_ms <= {v1_07_framework.latency_budget_ms:.1f}
+    footprint_mb <= {v1_07_framework.memory_budget_mb:.3f}
+    support_pct >= {v1_07_framework.kernel_support_floor_pct:.1f}
+    reuse_count >= break_even_inferences  # when compile/delegate cost is nonzero
+    validation_evidence matches selected track
+    ```
 
-Framework selection is therefore constrained optimization, not a framework popularity contest.
-""",
+    Framework selection is therefore constrained optimization, not a framework popularity contest.
+    """,
         ),
         source_trace({
             "chapter_anchor": "Framework Selection / Fallacies and Pitfalls",
@@ -1223,26 +1225,84 @@ Framework selection is therefore constrained optimization, not a framework popul
         v1_07_recommendation,
     ])
 
-    mo.ui.tabs({
-        "Part A - Execution Overhead": _part_a,
-        "Part B - Fusion Boundary": _part_b,
-        "Part C - Portability Trade": _part_c,
-        "Part D - Release Evidence": _part_d,
-        "Synthesis": mo.md("Use the synthesis recommendation below after completing Parts A-D."),
+    _synthesis = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Synthesis: Runtime Deployment Recommendation</h2>
+          <p>The chapter invariant is now a deployment recommendation: a framework abstraction is
+          acceptable only when its graph shape, dispatch cost, operator support, portability risk,
+          and validation evidence survive the selected track.</p>
+          <div class="mlsysbook-grid">
+            <div class="mlsysbook-field"><strong>Track</strong>{v1_07_framework.label}</div>
+            <div class="mlsysbook-field"><strong>Selected runtime</strong>{v1_07_decision.selected_label}</div>
+            <div class="mlsysbook-field"><strong>Release status</strong>{v1_07_release_result['status']}</div>
+            <div class="mlsysbook-field"><strong>Dominant overhead</strong>{v1_07_decision.dominant_overhead}</div>
+            <div class="mlsysbook-field"><strong>Break-even</strong>{v1_07_selected_break_even.break_even_inferences or 'no payback'}</div>
+            <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_07_decision.residual_risk}</div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
+          <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+            Lead Systems Architect Authorization
+          </div>
+          <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
+            The framework and runtime architecture for <strong>{v1_07_profile.label}</strong> is authorized for execution. Operator coverage, dispatch overhead, and fusion boundaries satisfy production latency SLOs under <strong>{v1_07_framework.workload_label}</strong>.
+          </div>
+        </div>
+        """),
+        big_takeaways([
+            ("Execution mode is physical", "Eager and graph execution pay different dispatch and memory costs depending on reuse and dynamism."),
+            ("Fusion is conditional", "It removes dispatch and memory traffic only inside supported, stable graph regions."),
+            ("Portability has a price", "Compatibility can consume latency, memory, supported operators, validation evidence, or rollback simplicity."),
+            ("Selection needs evidence", "The runtime decision is valid only inside a source-traced operating envelope."),
+        ]),
+        mo.Html(f"""
+        <div class="lab-hud">
+            <span class="hud-label">LAB</span>
+            <span class="hud-value">07 &middot; ML Frameworks</span>
+            <span class="hud-label">TRACK</span>
+            <span class="hud-value">{v1_07_profile.label}</span>
+            <span style="flex:1;"></span>
+            <span class="hud-label">ARTIFACT</span>
+            <span class="hud-value">{v1_07_framework.report_artifact}</span>
+            <span class="hud-label">STATUS</span>
+            <span class="hud-active">{v1_07_release_result['status']}</span>
+        </div>
+        """),
+    ])
+
+    def build_part_a():
+        return _part_a
+
+    def build_part_b():
+        return _part_b
+
+    def build_part_c():
+        return _part_c
+
+    def build_part_d():
+        return _part_d
+
+    def build_synthesis():
+        return _synthesis
+
+    v1_07_tabs = mo.ui.tabs({
+        "Part A - Execution Overhead": build_part_a(),
+        "Part B - Fusion Boundary": build_part_b(),
+        "Part C - Portability Trade": build_part_c(),
+        "Part D - Release Evidence": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
+    v1_07_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: SYNTHESIS AND REPORT
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
 def _(
     ledger,
     mo,
-    source_trace,
     v1_07_actual_break_even_category,
     v1_07_actual_overhead_category,
     v1_07_actual_portability_cost,
@@ -1269,94 +1329,74 @@ def _(
     v1_07_variant,
 ):
     _recommendation_text = str(v1_07_recommendation.value or "").strip()
-    if v1_07_overhead_prediction.value is not None:
-        ledger.save(chapter=7, design={
-            "chapter": "v1_07",
-            "track_id": v1_07_profile.track_id,
-            "scenario_id": v1_07_variant.scenario_id,
-            "hardware_ref": v1_07_framework.hardware_ref,
-            "model_ref": v1_07_framework.model_ref,
-            "completed": bool(_recommendation_text),
-            "part_a_prediction": v1_07_overhead_prediction.value,
-            "part_a_actual_dominant_overhead": v1_07_actual_overhead_category,
-            "part_b_prediction": v1_07_break_even_prediction.value,
-            "part_b_actual_boundary": v1_07_actual_break_even_category,
-            "part_b_checkpoint": v1_07_part_b_checkpoint.value,
-            "part_c_prediction": v1_07_portability_prediction.value,
-            "part_c_actual_portability_cost": v1_07_actual_portability_cost,
-            "part_c_checkpoint": v1_07_part_c_checkpoint.value,
-            "part_d_validation_prediction": v1_07_validation_prediction.value,
-            "part_d_actual_validation_focus": v1_07_actual_validation_focus,
-            "release_posture": v1_07_release_posture.value,
-            "release_status": v1_07_release_result["status"],
-            "operation_count": v1_07_op_count.value,
-            "reuse_count": v1_07_reuse_count.value,
-            "shape_dynamism_pct": v1_07_shape_dynamism.value,
-            "selected_runtime": v1_07_runtime_choice.value,
-            "dominant_overhead": v1_07_decision.dominant_overhead,
-            "break_even_inferences": v1_07_selected_break_even.break_even_inferences,
-            "total_latency_ms": v1_07_selected_stack.total_latency_ms,
-            "kernel_support_pct": v1_07_selected_support["adjusted_support_pct"],
-            "runtime_feasible": v1_07_selected_support["feasible_with_shape"],
-            "validation_requirement": v1_07_decision.validation_requirement,
-            "residual_risk": v1_07_decision.residual_risk,
-            "final_recommendation": _recommendation_text,
-        })
+    _ready = bool(
+        v1_07_overhead_prediction.value is not None
+        and v1_07_break_even_prediction.value is not None
+        and v1_07_portability_prediction.value is not None
+        and v1_07_validation_prediction.value is not None
+        and _recommendation_text
+    )
+    ledger.save(chapter=7, design={
+        "chapter": "v1_07",
+        "track_id": v1_07_profile.track_id,
+        "scenario_id": v1_07_variant.scenario_id,
+        "hardware_ref": v1_07_framework.hardware_ref,
+        "model_ref": v1_07_framework.model_ref,
+        "completed": _ready,
+        "part_a_prediction": v1_07_overhead_prediction.value,
+        "part_a_actual_dominant_overhead": v1_07_actual_overhead_category,
+        "part_b_prediction": v1_07_break_even_prediction.value,
+        "part_b_actual_boundary": v1_07_actual_break_even_category,
+        "part_b_checkpoint": v1_07_part_b_checkpoint.value,
+        "part_c_prediction": v1_07_portability_prediction.value,
+        "part_c_actual_portability_cost": v1_07_actual_portability_cost,
+        "part_c_checkpoint": v1_07_part_c_checkpoint.value,
+        "part_d_validation_prediction": v1_07_validation_prediction.value,
+        "part_d_actual_validation_focus": v1_07_actual_validation_focus,
+        "release_posture": v1_07_release_posture.value,
+        "release_status": v1_07_release_result["status"],
+        "operation_count": v1_07_op_count.value,
+        "reuse_count": v1_07_reuse_count.value,
+        "shape_dynamism_pct": v1_07_shape_dynamism.value,
+        "selected_runtime": v1_07_runtime_choice.value,
+        "dominant_overhead": v1_07_decision.dominant_overhead,
+        "break_even_inferences": v1_07_selected_break_even.break_even_inferences,
+        "total_latency_ms": v1_07_selected_stack.total_latency_ms,
+        "kernel_support_pct": v1_07_selected_support["adjusted_support_pct"],
+        "runtime_feasible": v1_07_selected_support["feasible_with_shape"],
+        "validation_requirement": v1_07_decision.validation_requirement,
+        "residual_risk": v1_07_decision.residual_risk,
+        "final_recommendation": _recommendation_text,
+    })
 
-    def build_synthesis():
-        return mo.vstack([
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Synthesis: Runtime Deployment Recommendation</h2>
-              <p>The chapter invariant is now a deployment recommendation: a framework abstraction is
-              acceptable only when its graph shape, dispatch cost, operator support, portability risk,
-              and validation evidence survive the selected track.</p>
-              <div class="mlsysbook-grid">
-                <div class="mlsysbook-field"><strong>Track</strong>{v1_07_framework.label}</div>
-                <div class="mlsysbook-field"><strong>Selected runtime</strong>{v1_07_decision.selected_label}</div>
-                <div class="mlsysbook-field"><strong>Release status</strong>{v1_07_release_result['status']}</div>
-                <div class="mlsysbook-field"><strong>Dominant overhead</strong>{v1_07_decision.dominant_overhead}</div>
-                <div class="mlsysbook-field"><strong>Break-even</strong>{v1_07_selected_break_even.break_even_inferences or 'no payback'}</div>
-                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_07_decision.residual_risk}</div>
-              </div>
-            </div>
-            """),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Big Takeaways</h2>
-              <ul class="mlsysbook-list">
-                <li><strong>Execution mode is physical.</strong> Eager and graph execution pay different dispatch and memory costs depending on reuse and dynamism.</li>
-                <li><strong>Fusion is conditional.</strong> It removes dispatch and memory traffic only inside supported, stable graph regions.</li>
-                <li><strong>Portability has a price.</strong> Compatibility can consume latency, memory, supported operators, validation evidence, or rollback simplicity.</li>
-                <li><strong>Selection needs evidence.</strong> The runtime decision is valid only inside a source-traced operating envelope.</li>
-              </ul>
-            </div>
-            """),
-            source_trace({
-                "track_id": v1_07_profile.track_id,
-                "scenario_id": v1_07_variant.scenario_id,
-                "hardware_ref": v1_07_variant.hardware_ref,
-                "model_ref": v1_07_variant.model_ref,
-                "shared_helper": "mlsysbook_labs.frameworks",
-                "chapter_anchor": "ML Frameworks / Framework Selection",
-                "source_policy": v1_07_profile.source_policy,
-            }, summary="The synthesis recommendation is source-traced to chapter anchors, track metadata, and helper calculations."),
-            mo.Html(f"""
-            <div class="lab-hud">
-                <span class="hud-label">LAB</span>
-                <span class="hud-value">07 &middot; ML Frameworks</span>
-                <span class="hud-label">TRACK</span>
-                <span class="hud-value">{v1_07_profile.label}</span>
-                <span style="flex:1;"></span>
-                <span class="hud-label">ARTIFACT</span>
-                <span class="hud-value">{v1_07_framework.report_artifact}</span>
-                <span class="hud-label">STATUS</span>
-                <span class="hud-active">{v1_07_release_result['status']}</span>
-            </div>
-            """),
-        ])
-
-    build_synthesis()
+    _hud = mo.Html(f"""
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">07 &middot; ML Frameworks</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_07_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">{v1_07_framework.report_artifact}</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">{'SAVED' if _ready else 'ACTIVE'}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Selected runtime</strong>{v1_07_decision.selected_label}</div>
+        <div class="mlsysbook-field"><strong>Release status</strong>{v1_07_release_result['status']}</div>
+        <div class="mlsysbook-field"><strong>Dominant overhead</strong>{v1_07_decision.dominant_overhead}</div>
+        <div class="mlsysbook-field"><strong>Break-even</strong>{v1_07_selected_break_even.break_even_inferences or 'no payback'}</div>
+        <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_07_decision.residual_risk}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
+    </div>
+    """)
+    _hud
     return
 
 
