@@ -53,8 +53,9 @@ from mlperf.registry import (  # noqa: E402
     quality_target_satisfied,
 )
 
-GITHUB_BLOB = "https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu"
-GITHUB_TREE = "https://github.com/harvard-edge/cs249r_book/tree/main/mlperf-edu"
+GITHUB_REPO = "https://github.com/harvard-edge/cs249r_book"
+GITHUB_BLOB = f"{GITHUB_REPO}/blob/main/mlperf-edu"
+GITHUB_TREE = f"{GITHUB_REPO}/tree/main/mlperf-edu"
 CHECKOUT_COMMAND = "uv run mlperf"
 
 GENERATED_NOTE = (
