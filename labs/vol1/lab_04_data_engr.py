@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -27,17 +23,20 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.labs.components import MathPeek
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
         data_pipeline_profile,
         evaluate_pipeline,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         movement_frontier,
         part_workflow,
         pipeline_architecture,
@@ -58,6 +57,7 @@ async def _():
         LAB_CSS,
         MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         data_pipeline_profile,
         evaluate_pipeline,
@@ -75,7 +75,6 @@ async def _():
         source_trace,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -86,11 +85,20 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
+    _options = {
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
+        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
+        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+    }
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_04_track_picker = track_selector(default=_default_track)
-    v1_04_track_picker
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    v1_04_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_04_track_picker,)
 
 
@@ -102,6 +110,7 @@ def _(
     resolve_mlsysim_ref,
     v1_04_track_picker,
 ):
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
     v1_04_track_id = v1_04_track_picker.value
     v1_04_profile = get_track_profile(v1_04_track_id)
     v1_04_variant = get_lab_track_variant("v1_04_data_gravity", v1_04_profile.track_id)
@@ -113,14 +122,7 @@ def _(
         v1_04_hardware,
         v1_04_model,
     )
-    return (
-        v1_04_hardware,
-        v1_04_model,
-        v1_04_pipeline_profile,
-        v1_04_profile,
-        v1_04_track_id,
-        v1_04_variant,
-    )
+    return v1_04_pipeline_profile, v1_04_profile, v1_04_variant
 
 
 @app.cell
@@ -541,7 +543,6 @@ def _():
         v1_04_callout_html,
         v1_04_contract_governance,
         v1_04_fields_html,
-        v1_04_fmt,
         v1_04_prediction_html,
         v1_04_quality_budget,
         v1_04_snapshot,
@@ -564,6 +565,7 @@ def _(
     v1_04_metadata,
     v1_04_pipeline_profile,
     v1_04_profile,
+    v1_04_track_picker,
     v1_04_track_spec,
     v1_04_variant,
 ):
@@ -572,46 +574,97 @@ def _(
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 62%, #10233f 100%);
-                    padding: 34px 42px; border-radius: 14px; color: white;
-                    box-shadow: 0 8px 28px rgba(0,0,0,0.30);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 04
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_04_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 4 &middot; Foundational Lab 04
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.35rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                Data Engineering
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              Data Engineering: Quality Budgets &amp; Ingestion Architectures
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.08rem; font-weight: 650;
-                      color: #bfdbfe; letter-spacing: 0.02em;">
-                Quality budgets &middot; Split integrity &middot; Flow capacity &middot; Data contracts
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_04_variant.workload_summary} Co-design quality budgets, audit temporal and entity leakage across evaluation splits, dimension ingestion pipeline throughput, and enforce schema contracts against silent data debt.
             </p>
-            <p style="margin: 0 0 20px 0; font-size: 1.0rem; color: #dbeafe;
-                      max-width: 900px; line-height: 1.6;">
-                {v1_04_variant.workload_summary} The invariant for this lab is that data is infrastructure:
-                quality, lineage, throughput, and contracts are amount systems that shape model behavior.
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_04_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Data Source:</strong> {v1_04_pipeline_profile.data_source}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_04_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_04_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> Ingestion &amp; Split Integrity
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> {_spec["report_artifact"]}
+              </span>
+            </div>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_04_profile.label} Pipeline Engineering
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_04_variant.stakeholder}</strong> responsible for the ingestion path feeding <strong>{v1_04_variant.model_ref}</strong> on <strong>{v1_04_variant.hardware_ref}</strong>. The pipeline processes high-rate telemetry from <strong>{v1_04_pipeline_profile.data_source}</strong>. Unmitigated defects escape into feature tables, data leakage across train/validation boundaries creates false offline confidence, and arrival bursts threaten to breach freshness SLAs.
             </p>
-            <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <span class="badge badge-info">4 Concept Modules + Synthesis</span>
-                <span class="badge badge-warn">{v1_04_profile.label}</span>
-                <span class="badge badge-fail">{_spec["report_artifact"]}</span>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of Data Engineering:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Data-as-Infrastructure Invariant:</strong> Machine learning models inherit their behaviors, blind spots, and failure modes directly from upstream data transformations. A pipeline bug is mathematically equivalent to an erroneous model parameter.</li>
+                <li><strong>The Leakage Conservation Law:</strong> Information leaked across evaluation boundaries (temporal, session, or entity) directly inflates observed validation accuracy (<em>M</em><sub>obs</sub> &gt; <em>M</em><sub>prod</sub>) while guaranteeing silent catastrophic production failure.</li>
+                <li><strong>The Ingestion Capacity Constraint:</strong> Pipeline arrival rates (&lambda;) must strictly remain within sustainable worker service capacity (&mu;) under peak burst factors: &lambda;<sub>peak</sub> &le; <em>N</em><sub>workers</sub> &middot; &mu;. Backpressure and queuing policies prevent unrecoverable freshness lag.</li>
+                <li><strong>The Contract Governance Invariant:</strong> Unenforced schema evolution and silent distribution drift produce compound data debt. Automated data contracts with explicit breaking change gates protect downstream inference surfaces.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Budget quality:</strong>
+                    trade defect detection against coverage loss and review bottleneck.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Audit split integrity:</strong>
+                    quantify and eliminate temporal and entity leakage before training.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Dimension ingestion:</strong>
+                    balance arrival rates, worker counts, queue backlogs, and freshness SLAs.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Govern contracts:</strong>
+                    enforce schemas, retention limits, and data lineage against compound data debt.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    "How do we architect an ingestion and validation pipeline for {v1_04_profile.label} that minimizes defect escape and prevents silent data debt while respecting physical compute and memory limits?"
+                </div>
             </div>
         </div>
         """),
         track_context(v1_04_profile),
         track_arc_context(v1_04_profile, v1_04_metadata.lab_id),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <div class="mlsysbook-section-label">Chapter Invariant</div>
-          <h2>Data Is Infrastructure</h2>
-          <p style="line-height:1.65; color:{COLORS['TextSec']};">
-            The model inherits the data path. A pipeline decision is not complete until
-            the quality budget, split boundary, flow capacity, and governance contract
-            are measured for {v1_04_pipeline_profile.label}.
-          </p>
-        </div>
-        """),
         part_workflow(
             "V1-04 Data Engineering Workflow",
             (
@@ -671,11 +724,6 @@ def _(
         ),
     ])
     return
-
-
-# ===========================================================================
-# ZONE B: CONTROLS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -903,7 +951,7 @@ def _(mo):
         placeholder="Name the evidence you still might miss, the downstream model behavior it could affect, and the trigger for revisiting this decision.",
         full_width=True,
     )
-    return (v1_04_final_stance, v1_04_residual_risk_note)
+    return v1_04_final_stance, v1_04_residual_risk_note
 
 
 @app.cell
@@ -987,16 +1035,12 @@ def _(
     )
 
 
-# ===========================================================================
-# ZONE C: CONCEPT MODULES
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     MathPeek,
     apply_plotly_theme,
+    big_takeaways,
     go,
     mo,
     source_trace,
@@ -1522,6 +1566,22 @@ def _(
             },
         ),
         mo.Html(f"""
+        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
+          <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+            Lead Systems Architect Authorization
+          </div>
+          <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
+            The data engineering architecture for <strong>{v1_04_profile.label}</strong> is authorized for pipeline deployment. Quality budgets maintain defect escape under target thresholds while ingestion queues sustain peak arrival bursts from <strong>{v1_04_pipeline_profile.data_source}</strong>.
+          </div>
+        </div>
+        """),
+        big_takeaways([
+            ("Data is physical infrastructure", "Every byte incurs collection, transformation, movement, and storage costs."),
+            ("Quality is a finite budget", "Filtering out bad data reduces defect escape but risks coverage loss and cohort starvation."),
+            ("Split boundaries must isolate information", "Temporal and entity leakage produce illusory offline performance that collapses in production."),
+            ("Governance prevents downstream debt", "Schema, freshness, and lineage contracts prevent silent data drift from corrupting model behavior."),
+        ]),
+        mo.Html(f"""
         <div class="lab-hud">
             <span class="hud-label">LAB</span>
             <span class="hud-value">04 &middot; Data Engineering</span>
@@ -1536,23 +1596,30 @@ def _(
         """),
     ])
 
+    def build_part_a():
+        return _part_a
+
+    def build_part_b():
+        return _part_b
+
+    def build_part_c():
+        return _part_c
+
+    def build_part_d():
+        return _part_d
+
     def build_synthesis():
         return _synthesis
 
-    _tabs = mo.ui.tabs({
-        "Part A: Quality Budget": _part_a,
-        "Part B: Split Integrity": _part_b,
-        "Part C: Throughput": _part_c,
-        "Part D: Contracts": _part_d,
+    v1_04_tabs = mo.ui.tabs({
+        "Part A: Quality Budget": build_part_a(),
+        "Part B: Split Integrity": build_part_b(),
+        "Part C: Throughput": build_part_c(),
+        "Part D: Contracts": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    _tabs
+    v1_04_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: LEDGER AND REPORT
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -1597,41 +1664,51 @@ def _(
         )
     ) and bool(_risk_note)
 
-    if _ready_for_ledger:
-        ledger.save(chapter=4, design={
-            "chapter": "v1_04",
-            "track_id": v1_04_profile.track_id,
-            "scenario_id": v1_04_variant.scenario_id,
-            "hardware_ref": v1_04_pipeline_profile.hardware_ref,
-            "model_ref": v1_04_pipeline_profile.model_ref,
-            "completed": True,
-            "quality_prediction": v1_04_quality_prediction.value,
-            "quality_budget_pass": v1_04_quality_result["pass"],
-            "residual_defects_per_10k": v1_04_quality_result["residual_defects_per_10k"],
-            "quality_checkpoint": v1_04_quality_checkpoint.value,
-            "split_prediction": v1_04_split_prediction.value,
-            "effective_leakage_pct": v1_04_split_result["effective_leakage_pct"],
-            "adjusted_metric_pct": v1_04_split_result["adjusted_metric_pct"],
-            "split_valid": v1_04_split_result["valid"],
-            "split_checkpoint": v1_04_split_checkpoint.value,
-            "throughput_prediction": v1_04_throughput_prediction.value,
-            "actual_bottleneck": v1_04_throughput_result["bottleneck_stage"],
-            "utilization_pct": v1_04_throughput_result["utilization_pct"],
-            "backlog_gb": v1_04_throughput_result["backlog_gb"],
-            "freshness_lag_s": v1_04_throughput_result["freshness_lag_s"],
-            "throughput_checkpoint": v1_04_throughput_checkpoint.value,
-            "movement_strategy": v1_04_movement_result.strategy_id,
-            "retention_policy": v1_04_architecture.retention_policy,
-            "contract_prediction": v1_04_contract_prediction.value,
-            "contract_policy": v1_04_contract_result["policy_label"],
-            "silent_debt_index": v1_04_contract_result["silent_debt_index"],
-            "contract_checkpoint": v1_04_contract_checkpoint.value,
-            "binding_data_constraint": v1_04_binding_result["label"],
-            "final_pipeline_stance": v1_04_final_stance.value,
-            "residual_risk": _risk_note,
-        })
+    ledger.save(chapter=4, design={
+        "chapter": "v1_04",
+        "track_id": v1_04_profile.track_id,
+        "scenario_id": v1_04_variant.scenario_id,
+        "hardware_ref": v1_04_pipeline_profile.hardware_ref,
+        "model_ref": v1_04_pipeline_profile.model_ref,
+        "completed": _ready_for_ledger,
+        "quality_prediction": v1_04_quality_prediction.value,
+        "quality_budget_pass": v1_04_quality_result["pass"],
+        "residual_defects_per_10k": v1_04_quality_result["residual_defects_per_10k"],
+        "quality_checkpoint": v1_04_quality_checkpoint.value,
+        "split_prediction": v1_04_split_prediction.value,
+        "effective_leakage_pct": v1_04_split_result["effective_leakage_pct"],
+        "adjusted_metric_pct": v1_04_split_result["adjusted_metric_pct"],
+        "split_valid": v1_04_split_result["valid"],
+        "split_checkpoint": v1_04_split_checkpoint.value,
+        "throughput_prediction": v1_04_throughput_prediction.value,
+        "actual_bottleneck": v1_04_throughput_result["bottleneck_stage"],
+        "utilization_pct": v1_04_throughput_result["utilization_pct"],
+        "backlog_gb": v1_04_throughput_result["backlog_gb"],
+        "freshness_lag_s": v1_04_throughput_result["freshness_lag_s"],
+        "throughput_checkpoint": v1_04_throughput_checkpoint.value,
+        "movement_strategy": v1_04_movement_result.strategy_id,
+        "retention_policy": v1_04_architecture.retention_policy,
+        "contract_prediction": v1_04_contract_prediction.value,
+        "contract_policy": v1_04_contract_result["policy_label"],
+        "silent_debt_index": v1_04_contract_result["silent_debt_index"],
+        "contract_checkpoint": v1_04_contract_checkpoint.value,
+        "binding_data_constraint": v1_04_binding_result["label"],
+        "final_pipeline_stance": v1_04_final_stance.value,
+        "residual_risk": _risk_note,
+    })
 
-    mo.Html(f"""
+    _hud = mo.Html(f"""
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">04 &middot; Data Engineering</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_04_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">BINDING</span>
+        <span class="hud-value">{v1_04_binding_result["label"]}</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">{'SAVED' if _ready_for_ledger else 'ACTIVE'}</span>
+    </div>
     <div class="mlsysbook-panel">
       <h2>Design Ledger</h2>
       <div class="mlsysbook-grid">
@@ -1641,11 +1718,12 @@ def _(
         <div class="mlsysbook-field"><strong>Residual risk</strong>{_risk_note or 'not recorded'}</div>
       </div>
       <div style="margin-top:10px; color:{COLORS['TextSec']}; line-height:1.55;">
-        The ledger saves only after all four predictions, all four checkpoints, a final stance,
-        and a residual risk are recorded.
+        The ledger saves each updated decision. All four predictions, all four checkpoints,
+        a final stance, and a residual risk mark the design complete.
       </div>
     </div>
     """)
+    _hud
     return
 
 
