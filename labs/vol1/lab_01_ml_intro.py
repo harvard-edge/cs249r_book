@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -32,12 +28,16 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
         action_box,
+        big_takeaways,
         build_lab_report,
         diagnose_triad,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         intervention_frontier,
         report_export_panel,
         resolve_mlsysim_ref,
@@ -53,10 +53,11 @@ async def _():
         _ = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS,
-        action_box,
         COLORS,
         LAB_CSS,
+        action_box,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         diagnose_triad,
         get_lab_metadata,
@@ -65,14 +66,12 @@ async def _():
         go,
         intervention_frontier,
         ledger,
-        mlsysim,
         mo,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
-        track_context,
         track_arc_context,
-        track_selector,
+        track_context,
         triad_track_profile,
     )
 
@@ -83,12 +82,19 @@ def _(get_lab_metadata):
     return (v1_01_metadata,)
 
 
-@app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_01_track_picker = track_selector(default=_default_track)
-    v1_01_track_picker
+@app.cell
+def _(mo):
+    # Top-Level Universal Track Selector
+    v1_01_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 & Cluster Ingestion vs SLA Walls)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Jetson Orin & Rare-Hazard Perception vs Safety Margins)": "robotaxi",
+            "📱 Mobile Track (Apple Silicon & Neural Engine vs Thermal Envelope)": "iphone",
+            "⚡ TinyML Track (ESP32-S3 & Bio-Sensing Duty Cycle vs SRAM Walls)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 & Cluster Ingestion vs SLA Walls)",
+        label="Select Course / Industry Track",
+    )
     return (v1_01_track_picker,)
 
 
@@ -100,6 +106,8 @@ def _(
     triad_track_profile,
     v1_01_track_picker,
 ):
+    # Cross-tier hardware targets
+    # Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Max, Hardware.Tiny.Cortex_M55
     v1_01_track_id = v1_01_track_picker.value
     v1_01_profile = get_track_profile(v1_01_track_id)
     v1_01_variant = get_lab_track_variant("v1_01_ai_triad", v1_01_profile.track_id)
@@ -111,14 +119,7 @@ def _(
         v1_01_hardware,
         v1_01_model,
     )
-    return (
-        v1_01_hardware,
-        v1_01_model,
-        v1_01_profile,
-        v1_01_track_id,
-        v1_01_triad,
-        v1_01_variant,
-    )
+    return v1_01_profile, v1_01_track_id, v1_01_triad, v1_01_variant
 
 
 @app.cell
@@ -390,67 +391,112 @@ def _(
         v1_01_comparison_hardware,
         v1_01_comparison_model,
     )
-    return (
-        v1_01_comparison_id,
-        v1_01_comparison_profile,
-        v1_01_comparison_triad,
-        v1_01_comparison_variant,
-    )
+    return v1_01_comparison_profile, v1_01_comparison_triad
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
-    source_trace,
-    track_context,
     track_arc_context,
+    track_context,
     v1_01_metadata,
     v1_01_profile,
-    v1_01_triad,
+    v1_01_track_picker,
     v1_01_variant,
 ):
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 01
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_01_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 1 &middot; Foundational Lab 01
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                The AI Triad
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              The AI Triad: Data, Algorithm, and Machine
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Data &middot; Algorithm &middot; Machine
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_01_variant.workload_summary} The first engineering decision is not which knob to improve; it is which axis is actually binding.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 780px; line-height: 1.65;">
-                {v1_01_variant.workload_summary} The first engineering decision
-                is not which knob to improve; it is which axis is actually binding.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Memo &middot; ~55 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_01_profile.label}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_01_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Stakeholder:</strong> {v1_01_variant.stakeholder}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_01_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_01_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> AI Triad Diagnosis
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> Triad Diagnosis Memo
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Silent Degradation</span>
-                <span class="badge badge-warn">Binding Axis</span>
-                <span class="badge badge-fail">First Fix</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_01_profile.label} Production Diagnosis
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are operating as the <strong>{v1_01_variant.stakeholder}</strong>. Your deployment target is <strong>{v1_01_variant.hardware_ref}</strong> running <strong>{v1_01_variant.model_ref}</strong>. Model quality is silently drifting under production workload pressure, while crash logs and infrastructure health checks remain completely green. You must identify which axis of the Data-Algorithm-Machine triad binds before committing engineering resources.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of the AI Triad:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Silent Degradation Invariant:</strong> In ML systems, failure does not manifest as stack traces. Distribution drift $P_{{\\text{{prod}}}}(X) \\neq P_{{\\text{{train}}}}(X)$ degrades output quality while execution uptime remains 100%.</li>
+                <li><strong>The Triad Bottleneck Invariant:</strong> System throughput and quality are bounded by $\\min(\\text{{Data Readiness}}, \\text{{Algorithmic Efficiency}}, \\text{{Machine Capacity}})$. Optimizing a non-binding axis yields zero end-to-end improvement.</li>
+                <li><strong>The Evidence Asymmetry Invariant:</strong> Offline validation loss curves cannot prove real-time latency bounds, thermal stability, or rare-event safety margins. Production requires operational runtime evidence.</li>
+                <li><strong>The Migration Guardrail:</strong> Resolving the primary bottleneck immediately shifts the system constraint to the next axis. Systems design requires planning for bottleneck migration.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Explain silent degradation:</strong>
+                    show how learned behavior changes without a code diff.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose the binding axis:</strong>
+                    separate data coverage, algorithm design, and machine envelope.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Separate evidence systems:</strong>
+                    distinguish training evidence from inference evidence.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Defend the first fix:</strong>
+                    select an intervention, reject alternatives, and name validation evidence.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    "The behavior changed. Which quantity changed, which axis binds, and what first fix is defensible?"
+                </div>
             </div>
         </div>
         """),
@@ -461,54 +507,12 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_01_triad):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Learning Objectives
-        </div>
-        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Explain silent degradation:</strong>
-                show how learned behavior changes without a code diff.</div>
-            <div style="margin-bottom: 3px;">2. <strong>Diagnose the binding axis:</strong>
-                separate data coverage, algorithm design, and machine envelope.</div>
-            <div style="margin-bottom: 3px;">3. <strong>Separate evidence systems:</strong>
-                distinguish training evidence from inference evidence.</div>
-            <div style="margin-bottom: 3px;">4. <strong>Defend the first fix:</strong>
-                select an intervention, reject alternatives, and name validation evidence.</div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                "The behavior changed. Which quantity changed, which axis binds, and what first fix is defensible?"
-            </div>
-        </div>
-    </div>
-    """)
-    return
-
-
-@app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
     **Recommended Reading** - Complete the Introduction chapter's discussion of
     production ML as a system before starting this lab.
     """), kind="info")
     return
-
-
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -555,7 +559,7 @@ def _(action_box, mo, v1_01_track_id, v1_01_track_lens):
         body="Choose the response you would defend after the degradation evidence.",
         name="silent_response",
     )
-    return (partA_cadence, partA_drift, partA_months, partA_pred, partA_response)
+    return partA_cadence, partA_drift, partA_months, partA_pred, partA_response
 
 
 @app.cell(hide_code=True)
@@ -603,7 +607,13 @@ def _(action_box, mo, v1_01_triad):
         body="Choose the binding axis you would defend after reading the evidence and track comparison.",
         name="diagnosis",
     )
-    return (partB_algorithm, partB_data, partB_decision, partB_machine, partB_pred)
+    return (
+        partB_algorithm,
+        partB_data,
+        partB_decision,
+        partB_machine,
+        partB_pred,
+    )
 
 
 @app.cell(hide_code=True)
@@ -641,7 +651,7 @@ def _(action_box, mo, v1_01_track_id, v1_01_track_lens):
         body="Choose the evidence packet that belongs in the triad diagnosis memo.",
         name="evidence_packet",
     )
-    return (partC_evidence, partC_model_scale, partC_pred, partC_pressure)
+    return partC_evidence, partC_model_scale, partC_pred, partC_pressure
 
 
 @app.cell(hide_code=True)
@@ -688,15 +698,11 @@ def _(mo, v1_01_track_id, v1_01_track_lens):
     return (synthesis_risk,)
 
 
-# ===========================================================================
-# ZONE C: MAIN LAB
-# ===========================================================================
-
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
+    big_takeaways,
     diagnose_triad,
     go,
     intervention_frontier,
@@ -793,14 +799,14 @@ def _(
                 f"{_lens['silent_metric']} is trending down, but code version, model file, and infrastructure health are unchanged.",
             ),
             mo.md(f"""
-## Part A: Model Behavior Is Not Normal Software Behavior
+    ## Part A: Model Behavior Is Not Normal Software Behavior
 
-**Concept.** In traditional software, behavior usually changes when code changes.
-In ML systems, learned behavior can degrade silently because the current input
-distribution drifts away from the training distribution.
+    **Concept.** In traditional software, behavior usually changes when code changes.
+    In ML systems, learned behavior can degrade silently because the current input
+    distribution drifts away from the training distribution.
 
-**Track lens.** For **{v1_01_profile.label}**, watch **{_lens['silent_metric']}**
-under {_lens['drift_driver']}. The guardrail is **{v1_01_triad.guardrail_metric}**.
+    **Track lens.** For **{v1_01_profile.label}**, watch **{_lens['silent_metric']}**
+    under {_lens['drift_driver']}. The guardrail is **{v1_01_triad.guardrail_metric}**.
             """),
             partA_pred,
         ]
@@ -840,15 +846,15 @@ under {_lens['drift_driver']}. The guardrail is **{v1_01_triad.guardrail_metric}
         """))
 
         items.append(mo.md(f"""
-**Evidence Table**
+    **Evidence Table**
 
-| Quantity | Value | Why it matters |
-|---|---:|---|
-| Drift pressure | {silent['drift_pct']:.0f}% | {_lens['drift_driver']} |
-| Months in production | {silent['months']:.0f} | time lets drift accumulate |
-| Monitoring cadence | every {silent['cadence_weeks']:.0f} week(s) | slower cadence delays detection |
-| {_lens['silent_metric']} | {silent['quality_pct']:.1f}% | quality can move while code is fixed |
-| Code/infrastructure health | 100.0% | conventional dashboards can stay green |
+    | Quantity | Value | Why it matters |
+    |---|---:|---|
+    | Drift pressure | {silent['drift_pct']:.0f}% | {_lens['drift_driver']} |
+    | Months in production | {silent['months']:.0f} | time lets drift accumulate |
+    | Monitoring cadence | every {silent['cadence_weeks']:.0f} week(s) | slower cadence delays detection |
+    | {_lens['silent_metric']} | {silent['quality_pct']:.1f}% | quality can move while code is fixed |
+    | Code/infrastructure health | 100.0% | conventional dashboards can stay green |
         """))
 
         if silent["feasible"]:
@@ -888,15 +894,15 @@ under {_lens['drift_driver']}. The guardrail is **{v1_01_triad.guardrail_metric}
                 v1_01_triad.failure_story,
             ),
             mo.md(f"""
-## Part B: Data, Algorithm, and Machine Are Coupled
+    ## Part B: Data, Algorithm, and Machine Are Coupled
 
-**Concept.** The same symptom can come from Data, Algorithm, or Machine. The
-first useful intervention targets the axis with the weakest margin to its
-track-specific threshold.
+    **Concept.** The same symptom can come from Data, Algorithm, or Machine. The
+    first useful intervention targets the axis with the weakest margin to its
+    track-specific threshold.
 
-- **Data:** {v1_01_triad.data_axis}
-- **Algorithm:** {v1_01_triad.algorithm_axis}
-- **Machine:** {v1_01_triad.machine_axis}
+    - **Data:** {v1_01_triad.data_axis}
+    - **Algorithm:** {v1_01_triad.algorithm_axis}
+    - **Machine:** {v1_01_triad.machine_axis}
             """),
             partB_pred,
         ]
@@ -932,20 +938,20 @@ track-specific threshold.
         selected_margins = v1_01_axis_margins(diag)
         compare_margins = v1_01_axis_margins(compare_diag)
         items.append(mo.md(f"""
-**Diagnosis Table**
+    **Diagnosis Table**
 
-| Axis | Score | {v1_01_profile.label} threshold | Margin | Meaning |
-|---|---:|---:|---:|---|
-| Data | {diag.data_score_pct:.0f}% | {diag.data_threshold_pct:.0f}% | {selected_margins['Data']:+.1f} pp | {v1_01_triad.data_axis} |
-| Algorithm | {diag.algorithm_score_pct:.0f}% | {diag.algorithm_threshold_pct:.0f}% | {selected_margins['Algorithm']:+.1f} pp | {v1_01_triad.algorithm_axis} |
-| Machine | {diag.machine_score_pct:.0f}% | {diag.machine_threshold_pct:.0f}% | {selected_margins['Machine']:+.1f} pp | {v1_01_triad.machine_axis} |
+    | Axis | Score | {v1_01_profile.label} threshold | Margin | Meaning |
+    |---|---:|---:|---:|---|
+    | Data | {diag.data_score_pct:.0f}% | {diag.data_threshold_pct:.0f}% | {selected_margins['Data']:+.1f} pp | {v1_01_triad.data_axis} |
+    | Algorithm | {diag.algorithm_score_pct:.0f}% | {diag.algorithm_threshold_pct:.0f}% | {selected_margins['Algorithm']:+.1f} pp | {v1_01_triad.algorithm_axis} |
+    | Machine | {diag.machine_score_pct:.0f}% | {diag.machine_threshold_pct:.0f}% | {selected_margins['Machine']:+.1f} pp | {v1_01_triad.machine_axis} |
 
-**Track Comparison: Same Scores, Different Envelope**
+    **Track Comparison: Same Scores, Different Envelope**
 
-| Track | Binding axis | Primary metric | Guardrail | Data margin | Algorithm margin | Machine margin |
-|---|---|---|---|---:|---:|---:|
-| {v1_01_profile.label} | {diag.binding_axis} | {diag.primary_metric} | {diag.guardrail_metric} | {selected_margins['Data']:+.1f} | {selected_margins['Algorithm']:+.1f} | {selected_margins['Machine']:+.1f} |
-| {v1_01_comparison_profile.label} | {compare_diag.binding_axis} | {compare_diag.primary_metric} | {compare_diag.guardrail_metric} | {compare_margins['Data']:+.1f} | {compare_margins['Algorithm']:+.1f} | {compare_margins['Machine']:+.1f} |
+    | Track | Binding axis | Primary metric | Guardrail | Data margin | Algorithm margin | Machine margin |
+    |---|---|---|---|---:|---:|---:|
+    | {v1_01_profile.label} | {diag.binding_axis} | {diag.primary_metric} | {diag.guardrail_metric} | {selected_margins['Data']:+.1f} | {selected_margins['Algorithm']:+.1f} | {selected_margins['Machine']:+.1f} |
+    | {v1_01_comparison_profile.label} | {compare_diag.binding_axis} | {compare_diag.primary_metric} | {compare_diag.guardrail_metric} | {compare_margins['Data']:+.1f} | {compare_margins['Algorithm']:+.1f} | {compare_margins['Machine']:+.1f} |
         """))
 
         if diag.binding_axis != compare_diag.binding_axis:
@@ -986,14 +992,14 @@ track-specific threshold.
                 "The training run completed, but the deployment owner asks what amount system proves the artifact can run.",
             ),
             mo.md(f"""
-## Part C: Training and Inference Create Different Amount Systems
+    ## Part C: Training and Inference Create Different Amount Systems
 
-**Concept.** Training evidence is not inference evidence. Training asks whether
-the system can learn within a throughput or cost envelope. Inference asks whether
-the learned artifact can serve within a request, sensor-window, or device budget.
+    **Concept.** Training evidence is not inference evidence. Training asks whether
+    the system can learn within a throughput or cost envelope. Inference asks whether
+    the learned artifact can serve within a request, sensor-window, or device budget.
 
-For **{v1_01_profile.label}**, the inference gate is **{_lens['infer_amount_label']}**
-plus **{_lens['guardrail_amount_label']}**.
+    For **{v1_01_profile.label}**, the inference gate is **{_lens['infer_amount_label']}**
+    plus **{_lens['guardrail_amount_label']}**.
             """),
             partC_pred,
         ]
@@ -1041,13 +1047,13 @@ plus **{_lens['guardrail_amount_label']}**.
         """))
 
         items.append(mo.md(f"""
-**Amount-System Evidence**
+    **Amount-System Evidence**
 
-| Stage | Quantity | Value | Limit | Unit | Decision |
-|---|---|---:|---:|---|---|
-| Training | {_lens['train_amount_label']} | {amounts['training_amount']:.1f} | {amounts['training_limit']:.1f} | {_lens['train_unit']} | {"PASS" if amounts['training_pass'] else "FAIL"} |
-| Inference | {_lens['infer_amount_label']} | {amounts['inference_amount']:.1f} | {amounts['inference_limit']:.1f} | {_lens['infer_unit']} | {"PASS" if amounts['inference_pass'] else "FAIL"} |
-| Inference guardrail | {_lens['guardrail_amount_label']} | {amounts['guardrail_amount']:.1f} | {amounts['guardrail_limit']:.1f} | {_lens['guardrail_unit']} | {"PASS" if amounts['guardrail_pass'] else "FAIL"} |
+    | Stage | Quantity | Value | Limit | Unit | Decision |
+    |---|---|---:|---:|---|---|
+    | Training | {_lens['train_amount_label']} | {amounts['training_amount']:.1f} | {amounts['training_limit']:.1f} | {_lens['train_unit']} | {"PASS" if amounts['training_pass'] else "FAIL"} |
+    | Inference | {_lens['infer_amount_label']} | {amounts['inference_amount']:.1f} | {amounts['inference_limit']:.1f} | {_lens['infer_unit']} | {"PASS" if amounts['inference_pass'] else "FAIL"} |
+    | Inference guardrail | {_lens['guardrail_amount_label']} | {amounts['guardrail_amount']:.1f} | {amounts['guardrail_limit']:.1f} | {_lens['guardrail_unit']} | {"PASS" if amounts['guardrail_pass'] else "FAIL"} |
         """))
 
         if partC_pred.value == "inference_evidence":
@@ -1084,11 +1090,11 @@ plus **{_lens['guardrail_amount_label']}**.
                 "The next lifecycle loop has one engineering budget. Choose the first defensible fix and name how it could be invalidated.",
             ),
             mo.md("""
-## Part D: Lifecycle Decisions Need a First Defensible Fix
+    ## Part D: Lifecycle Decisions Need a First Defensible Fix
 
-**Concept.** Lifecycle decisions are not generic improvement lists. The first fix
-must relieve the current binding axis under the selected track's constraints and
-must include validation evidence that could overturn the choice.
+    **Concept.** Lifecycle decisions are not generic improvement lists. The first fix
+    must relieve the current binding axis under the selected track's constraints and
+    must include validation evidence that could overturn the choice.
             """),
             partD_pred,
         ]
@@ -1128,15 +1134,15 @@ must include validation evidence that could overturn the choice.
         """))
 
         items.append(mo.md(f"""
-**Frontier Table**
+    **Frontier Table**
 
-| Axis | Budget | Post-score | Interpretation |
-|---|---:|---:|---|
-| Data | {frontier.data_budget_pct:.0f}% | {frontier.data_score_pct:.1f}% | {v1_01_triad.data_axis} |
-| Algorithm | {frontier.algorithm_budget_pct:.0f}% | {frontier.algorithm_score_pct:.1f}% | {v1_01_triad.algorithm_axis} |
-| Machine | {frontier.machine_budget_pct:.0f}% | {frontier.machine_score_pct:.1f}% | {v1_01_triad.machine_axis} |
+    | Axis | Budget | Post-score | Interpretation |
+    |---|---:|---:|---|
+    | Data | {frontier.data_budget_pct:.0f}% | {frontier.data_score_pct:.1f}% | {v1_01_triad.data_axis} |
+    | Algorithm | {frontier.algorithm_budget_pct:.0f}% | {frontier.algorithm_score_pct:.1f}% | {v1_01_triad.algorithm_axis} |
+    | Machine | {frontier.machine_budget_pct:.0f}% | {frontier.machine_score_pct:.1f}% | {v1_01_triad.machine_axis} |
 
-Rejected alternatives for the selected intervention: {", ".join(frontier.rejected_alternatives)}.
+    Rejected alternatives for the selected intervention: {", ".join(frontier.rejected_alternatives)}.
         """))
 
         if not frontier.feasible:
@@ -1191,10 +1197,10 @@ Rejected alternatives for the selected intervention: {", ".join(frontier.rejecte
         response_value = response_payload.get("silent_response")
         return mo.vstack([
             mo.md("""
-## Synthesis: Triad Diagnosis Memo
+    ## Synthesis: Triad Diagnosis Memo
 
-Record one memo that connects silent model behavior, D-A-M diagnosis,
-training/inference evidence, and the first lifecycle fix.
+    Record one memo that connects silent model behavior, D-A-M diagnosis,
+    training/inference evidence, and the first lifecycle fix.
             """),
             synthesis_risk,
             mo.Html(f"""
@@ -1212,26 +1218,37 @@ training/inference evidence, and the first lifecycle fix.
                 <p><strong>Carry-forward risk:</strong> {synthesis_risk.value or 'not selected'}</p>
             </div>
             """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
+              <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+                Lead Systems Architect Authorization
+              </div>
+              <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
+                The AI Triad diagnosis for <strong>{v1_01_profile.label}</strong> confirms that the binding constraint is <strong>{diag.binding_axis}</strong>. Production authorization approves the first fix: <strong>{frontier.selected_intervention}</strong> while rejecting {', '.join(frontier.rejected_alternatives)}.
+              </div>
+            </div>
+            """),
+            big_takeaways([
+                "Silent degradation is real: ML systems fail silently when input distributions drift, even when system health checks report green.",
+                "Triad bottlenecks govern capacity: System throughput and latency are bound by min(Data, Algorithm, Machine). Optimizing the wrong axis yields zero speedup.",
+                "Evidence asymmetry dictates validation: Validation loss cannot substitute for runtime tail latency, thermal headroom, or SRAM fit.",
+                "Bottlenecks migrate: Fixing the primary constraint immediately promotes the secondary constraint to the binding path.",
+            ]),
             mo.callout(mo.md(
                 "**Chapter invariant.** A machine learning system does what its data, arithmetic, and hardware permit. "
                 "The memo is defensible only if the selected evidence names which quantity changed and which constraint now binds."
             ), kind="info"),
         ])
 
-    _tabs = mo.ui.tabs({
+    v1_01_tabs = mo.ui.tabs({
         "Part A: Silent Behavior": build_part_a(),
         "Part B: D-A-M Diagnosis": build_part_b(),
         "Part C: Training vs Inference": build_part_c(),
         "Part D: First Fix": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    _tabs
+    v1_01_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: LEDGER HUD AND REPORT
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -1239,7 +1256,6 @@ def _(
     diagnose_triad,
     intervention_frontier,
     ledger,
-    mo,
     partA_cadence,
     partA_drift,
     partA_months,
@@ -1290,7 +1306,7 @@ def _(
     _silent_response = _silent_payload.get("silent_response")
     _diagnosis_value = _diagnosis_payload.get("diagnosis")
     _evidence_value = _evidence_payload.get("evidence_packet")
-    if (
+    _ready = bool(
         partA_pred.value is not None
         and _silent_response is not None
         and partB_pred.value is not None
@@ -1299,44 +1315,30 @@ def _(
         and _evidence_value is not None
         and partD_pred.value is not None
         and synthesis_risk.value
-    ):
-        ledger.save(chapter=1, design={
-            "chapter": "v1_01",
-            "track_id": v1_01_profile.track_id,
-            "scenario_id": v1_01_variant.scenario_id,
-            "hardware_ref": v1_01_triad.hardware_ref,
-            "model_ref": v1_01_triad.model_ref,
-            "completed": True,
-            "silent_degradation_prediction": partA_pred.value,
-            "silent_failure_response": _silent_response,
-            "observed_quality_pct": _silent["quality_pct"],
-            "predicted_binding_axis": partB_pred.value,
-            "triad_final_diagnosis": _diagnosis_value,
-            "computed_binding_axis": _diag.binding_axis,
-            "training_inference_prediction": partC_pred.value,
-            "selected_evidence_packet": _evidence_value,
-            "deployment_ready": _amounts["deployment_ready"],
-            "budget_prediction": partD_pred.value,
-            "selected_intervention": _frontier.selected_intervention,
-            "best_intervention": _frontier.best_intervention,
-            "rejected_alternatives": _frontier.rejected_alternatives,
-            "validation_evidence": partD_validation.value,
-            "carry_forward_risk": synthesis_risk.value,
-        })
-
-    mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">01 &middot; AI Triad</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_01_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">ARTIFACT</span>
-        <span class="hud-value">{v1_01_triad.report_artifact}</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">ACTIVE</span>
-    </div>
-    """)
+    )
+    ledger.save(chapter=1, design={
+        "chapter": "v1_01",
+        "track_id": v1_01_profile.track_id,
+        "scenario_id": v1_01_variant.scenario_id,
+        "hardware_ref": v1_01_triad.hardware_ref,
+        "model_ref": v1_01_triad.model_ref,
+        "completed": _ready,
+        "silent_degradation_prediction": partA_pred.value,
+        "silent_failure_response": _silent_response,
+        "observed_quality_pct": _silent["quality_pct"],
+        "predicted_binding_axis": partB_pred.value,
+        "triad_final_diagnosis": _diagnosis_value,
+        "computed_binding_axis": _diag.binding_axis,
+        "training_inference_prediction": partC_pred.value,
+        "selected_evidence_packet": _evidence_value,
+        "deployment_ready": _amounts["deployment_ready"],
+        "budget_prediction": partD_pred.value,
+        "selected_intervention": _frontier.selected_intervention,
+        "best_intervention": _frontier.best_intervention,
+        "rejected_alternatives": _frontier.rejected_alternatives,
+        "validation_evidence": partD_validation.value,
+        "carry_forward_risk": synthesis_risk.value,
+    })
     return
 
 
