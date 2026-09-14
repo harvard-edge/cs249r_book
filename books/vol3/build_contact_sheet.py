@@ -17,7 +17,7 @@ font_card_title = ImageFont.truetype(FONT_PATH, 16)
 font_card_sub = ImageFont.truetype(FONT_PATH, 12)
 
 chapters = [
-    ('01_introduction', 'Chapter 01 — Introduction', 'The Emerging Agentic Systems Stack'),
+    ('01_introduction', 'Chapter 01 — The Agentic Stack', 'The Emerging Agentic Systems Stack'),
     ('02_processor', 'Chapter 02 — Stochastic Processors', 'Part I: The Stochastic Processor'),
     ('03_deliberation', 'Chapter 03 — Test-Time Deliberation', 'Part I: The Stochastic Processor'),
     ('04_working_sets', 'Chapter 04 — Context Working Sets', 'Part II: The Context Memory Hierarchy'),
