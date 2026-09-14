@@ -1,29 +1,9 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
-# -----------------------------------------------------------------------------
-# LAB V2-10: THE INFERENCE ECONOMY
-#
-# Chapter invariant: production inference is a coupled queueing, memory/state,
-# and economics problem. Mean throughput does not imply a usable service; serving
-# policies must satisfy memory, latency tail, quality, thermal/power, and cost
-# guardrails at the same time.
-#
-# Packet modules:
-#   Part A - Cost Inversion Calibration
-#   Part B - State/KV Cache Wall
-#   Part C - Batching Under Variance
-#   Part D - Serving Design Challenge
-#   Synthesis
-# -----------------------------------------------------------------------------
 
-# ============================================================================
-# ZONE A: OPENING
-# ============================================================================
-
-# --- CELL 0: SETUP ------------------------------------------------------------
 @app.cell
 async def _():
     import marimo as mo
@@ -50,13 +30,17 @@ async def _():
     from mlsysim.labs.components import DecisionLog
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
         batching_result,
+        big_takeaways,
         build_lab_report,
         cost_crossover,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         inference_economy_profile,
+        instrumentation_console,
         report_export_panel,
         resolve_mlsysim_ref,
         serving_plan,
@@ -72,17 +56,19 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        DecisionLog,
-        LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
         batching_result,
+        big_takeaways,
         build_lab_report,
         cost_crossover,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         inference_economy_profile,
+        instrumentation_console,
         ledger,
         math,
         mo,
@@ -91,9 +77,6 @@ async def _():
         resolve_mlsysim_ref,
         serving_plan,
         state_capacity,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -104,10 +87,17 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_10_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_10_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (ARM Cortex-M55 / SRAM Limits & Duty-Cycle Budget)": "oura_ring",
+            "📱 Mobile Track (Apple Silicon / Unified Memory & 5W Battery Limits)": "iphone",
+            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Real-Time Loops)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (H100 Clusters & Continuous Batching vs KV Cache)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 Clusters & Continuous Batching vs KV Cache)",
+        label="Select Course / Industry Track",
+    )
     v2_10_track_picker
     return (v2_10_track_picker,)
 
@@ -131,17 +121,9 @@ def _(
         v2_10_hardware,
         v2_10_model,
     )
-    return (
-        v2_10_hardware,
-        v2_10_inference,
-        v2_10_model,
-        v2_10_profile,
-        v2_10_track_id,
-        v2_10_variant,
-    )
+    return v2_10_inference, v2_10_model, v2_10_profile, v2_10_variant
 
 
-# --- CELL 1: NOTEBOOK-LOCAL HELPERS -----------------------------------------
 @app.cell
 def _(COLORS, math, mo):
     def v2_10_fmt_currency(value, unit):
@@ -474,7 +456,6 @@ def _(COLORS, math, mo):
         v2_10_fmt_currency,
         v2_10_fmt_duration_days,
         v2_10_fmt_ms,
-        v2_10_math_peek,
         v2_10_metric_card,
         v2_10_part_banner,
         v2_10_phase_amounts,
@@ -493,57 +474,66 @@ def _(COLORS, math, mo):
     )
 
 
-# --- CELL 2: HEADER -----------------------------------------------------------
 @app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    track_arc_context,
-    track_context,
-    v2_10_inference,
-    v2_10_metadata,
-    v2_10_profile,
-    v2_10_variant,
-):
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div style="background:linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
-                    border-radius:16px; padding:32px 40px; margin-bottom:8px;
-                    border:1px solid #2d3748;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
-                <div>
-                    <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                                text-transform:uppercase; letter-spacing:0.14em; margin-bottom:8px;">
-                        Vol 2 &middot; Lab 10 &middot; Inference at Scale
-                    </div>
-                    <div style="font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.15; margin-bottom:10px;">
-                        The Inference Economy
-                    </div>
-                    <div style="font-size:0.95rem; color:#94a3b8; max-width:680px; line-height:1.6;">
-                        {v2_10_variant.workload_summary} You will test cost, state/cache memory,
-                        batching under variance, and release guardrails for {v2_10_inference.label}.
-                    </div>
-                </div>
-                <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
-                    <span class="badge badge-info">{v2_10_profile.label}</span>
-                    <span class="badge badge-info">{v2_10_inference.hardware_ref}</span>
-                    <span class="badge badge-info">{v2_10_inference.model_name}</span>
-                    <span class="badge badge-warn">45-55 minutes &middot; 4 Parts + Synthesis</span>
-                </div>
-            </div>
+def _(ACADEMIC_LAB_CSS, mo, v2_10_inference, v2_10_profile, v2_10_variant):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 10 &middot; LAB 10
         </div>
-        """),
-        track_context(v2_10_profile),
-        track_arc_context(v2_10_profile, v2_10_metadata.lab_id),
-    ])
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          The Inference Economy: Prefill, Decode, KV-Cache & Continuous Batching
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Model recurring inference economics, navigate the state/KV-cache memory wall,
+          quantify batching under sequence length variance, and balance multi-objective serving guardrails.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_10_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_10_variant.stakeholder}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Hardware:</strong> {v2_10_inference.hardware_name}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Model:</strong> {v2_10_inference.model_name}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Primary Metric:</strong> {v2_10_variant.primary_metric}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> {v2_10_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_10_profile.label} Production Serving Architecture
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_10_variant.workload_summary} Production inference is a coupled queueing, memory/state, and economics optimization problem. High average throughput does not guarantee a viable deployment without strict guarantees on memory footprint, tail latency (TTFT/TPOT), quality degradation, and cost.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Inference Systems:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>Prefill vs Decode Duality:</strong> Prefill is compute-bound matrix multiplication (<i>O</i>(N<sup>2</sup>) attention, high arithmetic intensity); decode is memory-bandwidth-bound autoregressive weight and KV-cache streaming (<i>O</i>(1) step arithmetic intensity).</li>
+            <li><strong>The KV-Cache Memory Wall (M<sub>total</sub> = M<sub>weights</sub> + B &middot; M<sub>KV</sub>):</strong> Serving capacity is bounded by memory footprint, not FLOPs: each active context stores key-value tensors (2 &middot; L &middot; H &middot; S &middot; bytes) that quickly starve available accelerator memory.</li>
+            <li><strong>Continuous vs Static Batching:</strong> Static batching incurs severe padding waste (1 - L&#772; / L<sub>max</sub>); iteration-level (continuous) batching reclaims idle execution slots but introduces scheduler overhead and tail latency variance under tight SLOs.</li>
+            <li><strong>Multi-Objective Guardrail Invariant:</strong> A serving policy ships only if memory (no OOM), tail latency (p99 &le; SLO), fidelity floor, and cost/power budgets are satisfied simultaneously.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
-# --- CELL 3: BRIEFING ---------------------------------------------------------
 @app.cell(hide_code=True)
 def _(COLORS, mo, v2_10_inference, v2_10_variant):
     mo.Html(f"""
@@ -602,7 +592,6 @@ def _(COLORS, mo, v2_10_inference, v2_10_variant):
     return
 
 
-# --- CELL 4: RECOMMENDED READING --------------------------------------------
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -615,11 +604,6 @@ def _(mo):
     return
 
 
-# ============================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ============================================================================
-
-# --- CELL 5: PART A WIDGETS --------------------------------------------------
 @app.cell(hide_code=True)
 def _(mo, v2_10_inference):
     partA_prediction = mo.ui.radio(
@@ -629,6 +613,7 @@ def _(mo, v2_10_inference):
             "C) Months -- setup cost dominates for a quarter or more": "months",
             "D) Never in the first year -- setup remains dominant": "never",
         },
+        value="B) Weeks -- serving overtakes setup during early rollout",
         label=(
             f"{v2_10_inference.label}: when does cumulative {v2_10_inference.cost_label} "
             "exceed the one-time setup/training budget?"
@@ -639,6 +624,7 @@ def _(mo, v2_10_inference):
             "A) Prefill / input pass -- prompt or window processing controls the first response": "prefill",
             "B) Decode / output loop -- repeated output steps control the live service": "decode",
         },
+        value="B) Decode / output loop -- repeated output steps control the live service",
         label=(
             f"{v2_10_inference.label}: which amount system is more likely to bind "
             "after the request is live?"
@@ -699,22 +685,22 @@ def _(mo, v2_10_inference):
             "C) Only reduce launch setup cost": "setup_only",
             "D) Reduce demand even if quality and access suffer": "throttle",
         },
+        value="B) Track cost/event and prioritize recurring efficiency",
         label="Checkpoint: what design lever should the platform owner carry forward?",
     )
     return (
         partA_checkpoint,
         partA_cost_per_event,
         partA_decode_tokens,
-        partA_phase_prediction,
-        partA_prefill_tokens,
         partA_horizon_weeks,
         partA_optimization_pct,
+        partA_phase_prediction,
         partA_prediction,
+        partA_prefill_tokens,
         partA_qps,
     )
 
 
-# --- CELL 6: PART B WIDGETS --------------------------------------------------
 @app.cell(hide_code=True)
 def _(mo, v2_10_inference, v2_10_variant):
     partB_prediction = mo.ui.radio(
@@ -724,6 +710,7 @@ def _(mo, v2_10_inference, v2_10_variant):
             "C) A few sessions -- state/cache is the first wall": "few",
             "D) One or zero sessions -- memory fails immediately": "one",
         },
+        value="C) A few sessions -- state/cache is the first wall",
         label=(
             f"{v2_10_inference.model_name} on {v2_10_inference.hardware_name}: "
             "how many concurrent sessions fit before memory fails?"
@@ -763,6 +750,7 @@ def _(mo, v2_10_inference, v2_10_variant):
             "C) Ignore state because the model weights fit": "ignore_state",
             "D) Spill state/cache to slow off-device memory first": "spill",
         },
+        value="A) Lower weight precision to free live state memory",
         label=f"Checkpoint: what is the first capacity lever for {v2_10_inference.state_kind}?",
     )
     return (
@@ -774,7 +762,6 @@ def _(mo, v2_10_inference, v2_10_variant):
     )
 
 
-# --- CELL 7: PART C WIDGETS --------------------------------------------------
 @app.cell(hide_code=True)
 def _(mo, v2_10_inference):
     partC_prediction = mo.ui.radio(
@@ -784,6 +771,7 @@ def _(mo, v2_10_inference):
             "C) Dynamic batching": "dynamic",
             "D) Continuous batching": "continuous",
         },
+        value="D) Continuous batching",
         label="Which scheduling policy wins for this workload after variance and SLO risk are counted?",
     )
     _context = max(64, v2_10_inference.context_tokens)
@@ -831,6 +819,7 @@ def _(mo, v2_10_inference):
             "C) Always avoid batching because it adds latency": "never_batch",
             "D) Maximize batch size and ignore tail latency": "max_batch",
         },
+        value="B) Pick the simplest policy that meets SLO and uses capacity well",
         label="Checkpoint: what rule should be used in production?",
     )
     return (
@@ -844,7 +833,6 @@ def _(mo, v2_10_inference):
     )
 
 
-# --- CELL 8: PART D WIDGETS --------------------------------------------------
 @app.cell(hide_code=True)
 def _(mo, v2_10_inference, v2_10_variant):
     partD_prediction = mo.ui.radio(
@@ -854,6 +842,7 @@ def _(mo, v2_10_inference, v2_10_variant):
             "C) Minimal static policy -- SLO/deadline fails": "slo_fail",
             "D) Guardrail-balanced policy -- best feasible option": "best_feasible",
         },
+        value="D) Guardrail-balanced policy -- best feasible option",
         label="Release review: which serving policy survives all guardrails?",
     )
     _target = v2_10_inference.demand_qps
@@ -913,7 +902,14 @@ def _(mo, v2_10_inference, v2_10_variant):
             "C) Maximize batch size first": "batch",
             "D) Use the largest serving unit available": "largest",
         },
+        value="B) Minimize recurring cost subject to every guardrail",
         label="Checkpoint: what objective should the release review enforce?",
+    )
+    v2_10_student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
+    v2_10_memo_decision = mo.ui.text_area(
+        label="Inference deployment memo",
+        placeholder="State serving policy, precision, devices per replica, routing strategy, binding constraint, and edge implications.",
+        full_width=True,
     )
     return (
         partD_checkpoint,
@@ -923,57 +919,35 @@ def _(mo, v2_10_inference, v2_10_variant):
         partD_routing,
         partD_schedule,
         partD_target_qps,
+        v2_10_memo_decision,
+        v2_10_student_id,
     )
 
-
-# ============================================================================
-# ZONE C: SINGLE TABS CELL
-# ============================================================================
 
 @app.cell(hide_code=True)
 def _(
     COLORS,
+    MathPeek,
     apply_plotly_theme,
     batching_result,
+    big_takeaways,
+    build_lab_report,
     cost_crossover,
+    gated_hypothesis_card,
     go,
+    instrumentation_console,
+    ledger,
     math,
     mo,
     np,
-    serving_plan,
-    state_capacity,
-    v2_10_binding_constraint,
-    v2_10_capacity_bucket,
-    v2_10_crossover_bucket,
-    v2_10_edge_implication,
-    v2_10_failure_card,
-    v2_10_fmt_currency,
-    v2_10_fmt_duration_days,
-    v2_10_fmt_ms,
-    v2_10_math_peek,
-    v2_10_metric_card,
-    v2_10_part_banner,
-    v2_10_phase_amounts,
-    v2_10_phase_label,
-    v2_10_policy_multiplier,
-    v2_10_precision_label,
-    v2_10_prediction_bucket_days,
-    v2_10_rejected_alternative,
-    v2_10_reveal_card,
-    v2_10_schedule_label,
-    v2_10_scheduling_rows,
-    v2_10_serving_latency_ms,
-    v2_10_stakeholder_card,
-    v2_10_table_html,
-    v2_10_track_schedule_note,
     partA_checkpoint,
     partA_cost_per_event,
     partA_decode_tokens,
-    partA_phase_prediction,
-    partA_prefill_tokens,
     partA_horizon_weeks,
     partA_optimization_pct,
+    partA_phase_prediction,
     partA_prediction,
+    partA_prefill_tokens,
     partA_qps,
     partB_checkpoint,
     partB_context_tokens,
@@ -994,13 +968,42 @@ def _(
     partD_routing,
     partD_schedule,
     partD_target_qps,
+    report_export_panel,
+    serving_plan,
+    state_capacity,
+    v2_10_binding_constraint,
+    v2_10_capacity_bucket,
+    v2_10_crossover_bucket,
+    v2_10_edge_implication,
+    v2_10_failure_card,
+    v2_10_fmt_currency,
+    v2_10_fmt_duration_days,
+    v2_10_fmt_ms,
     v2_10_inference,
+    v2_10_memo_decision,
+    v2_10_metadata,
+    v2_10_metric_card,
     v2_10_model,
+    v2_10_part_banner,
+    v2_10_phase_amounts,
+    v2_10_phase_label,
+    v2_10_policy_multiplier,
+    v2_10_precision_label,
+    v2_10_prediction_bucket_days,
     v2_10_profile,
+    v2_10_rejected_alternative,
+    v2_10_reveal_card,
+    v2_10_schedule_label,
+    v2_10_scheduling_rows,
+    v2_10_serving_latency_ms,
+    v2_10_stakeholder_card,
+    v2_10_student_id,
+    v2_10_table_html,
+    v2_10_track_schedule_note,
     v2_10_variant,
 ):
     def build_part_a():
-        items = [
+        _items = [
             v2_10_part_banner(
                 "A",
                 "Prefill/Decode Amount Split",
@@ -1014,19 +1017,27 @@ def _(
                 COLORS["BlueLine"],
                 COLORS["BlueLL"],
             ),
-            mo.md(f"""
-The selected track runs a continuing inference loop. The setup or training budget is
-**{v2_10_fmt_currency(v2_10_inference.setup_cost, v2_10_inference.cost_unit)}**, while each event costs
-**{v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}** before optimization.
-
-Commit to both predictions before using the calculator.
-"""),
-            partA_prediction,
-            partA_phase_prediction,
+            gated_hypothesis_card(
+                partA_prediction,
+                title="1. Formulate Recurring Cost Crossover Hypothesis",
+                subtitle=(
+                    f"Scenario: The selected track ({v2_10_profile.label}) runs a continuing inference loop. "
+                    f"Setup or training budget is {v2_10_fmt_currency(v2_10_inference.setup_cost, v2_10_inference.cost_unit)}, "
+                    f"while each event costs {v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit} before optimization. "
+                    "Predict when cumulative serving cost overtakes one-time setup cost."
+                ),
+            ),
+            gated_hypothesis_card(
+                partA_phase_prediction,
+                title="2. Formulate Phase Bottleneck Hypothesis",
+                subtitle=(
+                    "Scenario: An inference request separates into prefill/prompt ingestion and decode/token generation. "
+                    "Predict which phase amount binds the live service."
+                ),
+            ),
         ]
         if partA_prediction.value is None or partA_phase_prediction.value is None:
-            items.append(mo.callout(mo.md("Select both Part A predictions to unlock the cost and phase evidence."), kind="warn"))
-            return mo.vstack(items)
+            return mo.vstack(_items)
 
         _default_cost = cost_crossover(
             setup_cost=v2_10_inference.setup_cost,
@@ -1115,12 +1126,15 @@ Commit to both predictions before using the calculator.
             f"and about {_phase['decode_read_gb']:,.1f} GB of model-byte reads in this proxy."
         )
 
-        items.extend([
-            mo.md("### Manipulate the phase amounts and recurring loop"),
-            mo.hstack([
-                mo.vstack([partA_qps, partA_cost_per_event, partA_horizon_weeks, partA_optimization_pct]),
-                mo.vstack([partA_prefill_tokens, partA_decode_tokens]),
-            ], justify="center", gap=2),
+        _items.extend([
+            instrumentation_console(
+                mo.vstack([
+                    mo.hstack([partA_qps, partA_cost_per_event, partA_horizon_weeks, partA_optimization_pct], justify="start", gap=1.0),
+                    mo.hstack([partA_prefill_tokens, partA_decode_tokens], justify="start", gap=1.0),
+                ]),
+                title="Inference Economics & Phase Workload Console",
+                subtitle="Manipulate demand rate, per-event cost, planning horizon, and prefill/decode balance",
+            ),
             mo.hstack([
                 v2_10_metric_card("Crossover", v2_10_fmt_duration_days(_cost.crossover_days), "serving > setup", COLORS["OrangeLine"]),
                 v2_10_metric_card("Daily recurring", v2_10_fmt_currency(_cost.daily_cost, v2_10_inference.cost_unit), "after optimization", COLORS["RedLine"]),
@@ -1147,38 +1161,37 @@ Commit to both predictions before using the calculator.
                 _phase_detail,
                 "success" if partA_phase_prediction.value == _phase["binding_phase"] else "warn",
             ),
-            v2_10_math_peek(
-                "Math Peek / Source Model - phase split and serving cost",
-                f"""
-```
-C_total(t) = C_setup + C_event * QPS * seconds * t
-C_serving_day = QPS * 86400 * C_event * (1 - optimization_pct)
-t_crossover = C_setup / C_serving_day
-
-TTFT proxy ~= f(prompt/input amount)
-TPOT proxy ~= model_bytes / memory_bandwidth
-decode_loop ~= output_steps * TPOT
-```
-
-Source model: `cost_crossover()` from `mlsysbook_labs.inference`, using the selected track profile:
-setup cost = {v2_10_inference.setup_cost:g}, demand = {v2_10_inference.demand_qps:g} events/s,
-cost/event = {v2_10_inference.cost_per_event:g} {v2_10_inference.cost_unit}.
-
-The prefill/decode split is a notebook-local teaching proxy tied to the chapter's
-TTFT/TPOT and prefill/decode source claims. For non-LLM tracks it maps to input
-window processing versus recurring output or decision-loop work.
-""",
+            MathPeek(
+                "C_total(t) = C_setup + C_event * QPS * 86400 * t; t_crossover = C_setup / C_serving_day",
+                {
+                    "setup/training budget": v2_10_fmt_currency(v2_10_inference.setup_cost, v2_10_inference.cost_unit),
+                    "demand rate": f"{partA_qps.value:g} events/s",
+                    "cost per event": f"{partA_cost_per_event.value:g} {v2_10_inference.cost_unit}",
+                    "crossover point": v2_10_fmt_duration_days(_cost.crossover_days),
+                    "annual savings": v2_10_fmt_currency(_cost.annual_savings, v2_10_inference.cost_unit),
+                    "binding phase": v2_10_phase_label(_phase["binding_phase"]),
+                    "chapter source": "Inference Economics & Prefill/Decode Duality",
+                },
             ),
-            partA_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Operating Lever</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    What design lever should the platform owner carry forward?
+                </p>
+                {partA_checkpoint}
+            </div>
+            """),
         ])
         if partA_checkpoint.value == "optimize":
-            items.append(mo.callout(mo.md("Checkpoint saved: recurring cost/event is the lever to carry forward."), kind="success"))
+            _items.append(mo.callout(mo.md("Checkpoint saved: recurring cost/event is the lever to carry forward."), kind="success"))
         elif partA_checkpoint.value is not None:
-            items.append(mo.callout(mo.md("Cost inversion means the recurring term deserves first-class design attention."), kind="warn"))
-        return mo.vstack(items)
+            _items.append(mo.callout(mo.md("Cost inversion means the recurring term deserves first-class design attention."), kind="warn"))
+        return mo.vstack(_items)
 
     def build_part_b():
-        items = [
+        _items = [
             v2_10_part_banner(
                 "B",
                 "State/KV Cache Wall",
@@ -1192,16 +1205,18 @@ window processing versus recurring output or decision-loop work.
                 COLORS["GreenLine"],
                 COLORS["GreenLL"],
             ),
-            mo.md(f"""
-For transformer serving, the state term is KV cache. For device tracks, the same
-slot is runtime state such as activation buffers, sensor windows, or local cache.
-The lesson is identical: **weights are only one memory term**.
-"""),
-            partB_prediction,
+            gated_hypothesis_card(
+                partB_prediction,
+                title="3. Formulate State/KV-Cache Capacity Hypothesis",
+                subtitle=(
+                    f"Scenario: For transformer serving, state is KV cache; for device tracks, it is runtime buffers. "
+                    f"Model weights load on {v2_10_inference.hardware_name}, but live {v2_10_inference.state_kind} expands per session. "
+                    "Predict how many concurrent sessions can fit before reaching the memory wall."
+                ),
+            ),
         ]
         if partB_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your state-capacity prediction to unlock Part B."), kind="warn"))
-            return mo.vstack(items)
+            return mo.vstack(_items)
 
         _state = state_capacity(
             v2_10_inference,
@@ -1254,12 +1269,12 @@ The lesson is identical: **weights are only one memory term**.
         )
         _gap_detail = "The bucket matches the computed capacity." if partB_prediction.value == _actual_bucket else f"Computed max concurrency is {_state.max_concurrent}, so the memory wall is {_actual_bucket}."
 
-        items.extend([
-            mo.md("### Manipulate precision, context, and serving-unit memory"),
-            mo.hstack([
-                mo.vstack([partB_precision]),
-                mo.vstack([partB_context_tokens, partB_devices]),
-            ], justify="center", gap=2),
+        _items.extend([
+            instrumentation_console(
+                mo.hstack([partB_precision, partB_context_tokens, partB_devices], justify="start", gap=1.0),
+                title="State Memory & Accelerator Topology Console",
+                subtitle="Adjust weight precision, context window length, and devices per serving replica",
+            ),
             v2_10_failure_card(
                 _oom,
                 "OOM - state/cache wall reached",
@@ -1280,31 +1295,36 @@ The lesson is identical: **weights are only one memory term**.
                 _gap_detail,
                 "success" if partB_prediction.value == _actual_bucket else "warn",
             ),
-            v2_10_math_peek(
-                "Math Peek / Source Model - state and KV cache",
-                f"""
-```
-M_KV = 2 * layers * hidden_dim * sequence * bytes * batch
-M_total = M_weights + batch * M_state_per_request
-max_concurrent = floor((M_device - M_weights) / M_state_per_request)
-```
-
-For non-transformer tracks, the profile supplies a fixed runtime/state buffer per request
-instead of transformer KV cache. Source model: `state_capacity()` from
-`mlsysbook_labs.inference`, hardware ref `{v2_10_inference.hardware_ref}`,
-model ref `{v2_10_inference.model_ref}`.
-""",
+            MathPeek(
+                "M_KV = 2 * layers * hidden_dim * sequence * bytes * batch; max_concurrent = floor((M_device - M_weights) / M_state)",
+                {
+                    "device memory": f"{_state.total_memory_gb:.2f} GB",
+                    "model weights": f"{_state.weight_gb:.2f} GB ({v2_10_precision_label(partB_precision.value)})",
+                    "state per session": f"{_state.state_per_request_gb:.4f} GB ({_state.state_kind})",
+                    "max concurrent sessions": str(_state.max_concurrent),
+                    "available headroom": f"{_state.available_gb:.2f} GB",
+                    "chapter source": "KV-Cache Scaling & Activation State Walls",
+                },
             ),
-            partB_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Memory Headroom Strategy</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    When live state threatens capacity, what is the primary architecture lever?
+                </p>
+                {partB_checkpoint}
+            </div>
+            """),
         ])
         if partB_checkpoint.value == "precision":
-            items.append(mo.callout(mo.md("Checkpoint saved: reduce memory pressure before adding compute-only capacity."), kind="success"))
+            _items.append(mo.callout(mo.md("Checkpoint saved: reduce memory pressure before adding compute-only capacity."), kind="success"))
         elif partB_checkpoint.value is not None:
-            items.append(mo.callout(mo.md("The first question is whether the live state term fits beside weights; compute is secondary when memory is binding."), kind="warn"))
-        return mo.vstack(items)
+            _items.append(mo.callout(mo.md("The first question is whether the live state term fits beside weights; compute is secondary when memory is binding."), kind="warn"))
+        return mo.vstack(_items)
 
     def build_part_c():
-        items = [
+        _items = [
             v2_10_part_banner(
                 "C",
                 "Batching Under Variance",
@@ -1318,16 +1338,18 @@ model ref `{v2_10_inference.model_ref}`.
                 COLORS["OrangeLine"],
                 COLORS["OrangeLL"],
             ),
-            mo.md(f"""
-{v2_10_track_schedule_note(v2_10_inference.track_id)}
-
-Commit to a scheduling policy before seeing the throughput and SLO-risk table.
-"""),
-            partC_prediction,
+            mo.md(f"{v2_10_track_schedule_note(v2_10_inference.track_id)}"),
+            gated_hypothesis_card(
+                partC_prediction,
+                title="4. Formulate Batching Policy Hypothesis",
+                subtitle=(
+                    f"Scenario: Requests arrive with length variance and deadline pressure. Predict which scheduling policy "
+                    f"maximizes effective throughput while respecting {v2_10_variant.guardrail_metric}."
+                ),
+            ),
         ]
         if partC_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your scheduling prediction to unlock Part C."), kind="warn"))
-            return mo.vstack(items)
+            return mo.vstack(_items)
 
         _avg = partC_avg_len.value
         _max = max(partC_max_len.value, _avg)
@@ -1397,12 +1419,15 @@ Commit to a scheduling policy before seeing the throughput and SLO-risk table.
         )
         _prediction_detail = "That policy wins for the current settings." if partC_prediction.value == _winner else "The score changes because throughput, padding waste, scheduler overhead, and deadline risk interact."
 
-        items.extend([
-            mo.md("### Manipulate request variance, fill factor, and deadline"),
-            mo.hstack([
-                mo.vstack([partC_avg_len, partC_max_len]),
-                mo.vstack([partC_batch_size, partC_fill_factor, partC_slo_ms]),
-            ], justify="center", gap=2),
+        _items.extend([
+            instrumentation_console(
+                mo.hstack([
+                    mo.vstack([partC_avg_len, partC_max_len]),
+                    mo.vstack([partC_batch_size, partC_fill_factor, partC_slo_ms]),
+                ], justify="start", gap=1.0),
+                title="Batch Scheduling & Variance Console",
+                subtitle="Tune request length variance, batch size, fill factor, and latency SLO",
+            ),
             v2_10_failure_card(
                 _continuous_overhead_failure,
                 "SLO/deadline violation - scheduler overhead dominates",
@@ -1433,32 +1458,37 @@ Commit to a scheduling policy before seeing the throughput and SLO-risk table.
                 _prediction_detail,
                 "success" if partC_prediction.value == _winner else "warn",
             ),
-            v2_10_math_peek(
-                "Math Peek / Source Model - batching under variance",
-                f"""
-```
-waste = 1 - avg_len / max_len
-TP_continuous = batch_size * (max_len / avg_len) * fill_factor
-```
-
-The helper `batching_result()` computes padding waste, static throughput,
-continuous throughput, and speedup. The policy table adds a local tail/deadline
-estimate so continuous batching can lose when request variance is low, volume is
-low, or scheduler overhead violates the selected track's guardrail.
-
-Current source values: avg={_avg:,}, max={_max:,}, batch={_batch}, fill_factor={_fill:.2f}.
-""",
+            MathPeek(
+                "padding_waste = 1 - avg_len / max_len; TP_continuous = batch_size * (max_len / avg_len) * fill_factor",
+                {
+                    "average length": f"{_avg:,}",
+                    "maximum length": f"{_max:,}",
+                    "static padding waste": f"{_batching.padding_waste_pct:.1f}%",
+                    "continuous speedup formula": f"{_batching.speedup:.1f}x",
+                    "policy winner": v2_10_schedule_label(_winner),
+                    "target SLO": f"{_slo:g} ms",
+                    "chapter source": "Continuous vs Static Batching Under Skew",
+                },
             ),
-            partC_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Production Scheduling Rule</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    What operational rule governs continuous batching adoption?
+                </p>
+                {partC_checkpoint}
+            </div>
+            """),
         ])
         if partC_checkpoint.value == "conditional":
-            items.append(mo.callout(mo.md("Checkpoint saved: batching policy is workload- and SLO-dependent."), kind="success"))
+            _items.append(mo.callout(mo.md("Checkpoint saved: batching policy is workload- and SLO-dependent."), kind="success"))
         elif partC_checkpoint.value is not None:
-            items.append(mo.callout(mo.md("The production rule is conditional: use the simplest policy that satisfies SLO and recovers enough capacity."), kind="warn"))
-        return mo.vstack(items)
+            _items.append(mo.callout(mo.md("The production rule is conditional: use the simplest policy that satisfies SLO and recovers enough capacity."), kind="warn"))
+        return mo.vstack(_items)
 
     def build_part_d():
-        items = [
+        _items = [
             v2_10_part_banner(
                 "D",
                 "Serving Design Challenge",
@@ -1472,17 +1502,18 @@ Current source values: avg={_avg:,}, max={_max:,}, batch={_batch}, fill_factor={
                 COLORS["RedLine"],
                 COLORS["RedLL"],
             ),
-            mo.md("""
-The design review is not looking for the cheapest single number or the fastest
-single number. It is looking for a feasible policy:
-
-`memory_ok and slo_ok and quality_ok and cost_ok`
-"""),
-            partD_prediction,
+            gated_hypothesis_card(
+                partD_prediction,
+                title="5. Formulate Serving Release Policy Hypothesis",
+                subtitle=(
+                    f"Scenario: Choose a release policy for {v2_10_inference.label}. It must meet target QPS, "
+                    f"{v2_10_variant.guardrail_metric}, memory headroom, fidelity floors, and cost budgets simultaneously. "
+                    "Predict which policy profile satisfies all guardrails."
+                ),
+            ),
         ]
         if partD_prediction.value is None:
-            items.append(mo.callout(mo.md("Select your release-review prediction to unlock Part D."), kind="warn"))
-            return mo.vstack(items)
+            return mo.vstack(_items)
 
         _target = partD_target_qps.value
         _precision = partD_precision.value
@@ -1592,12 +1623,15 @@ single number. It is looking for a feasible policy:
         _prediction_actual = "best feasible" if all((_memory_ok, _slo_ok, _quality_ok, _cost_ok)) else f"blocked by {_binding}"
         _prediction_detail = "The release policy must pass every guardrail, not just cost or throughput."
 
-        items.extend([
-            mo.md("### Tune the release policy"),
-            mo.hstack([
-                mo.vstack([partD_target_qps, partD_precision]),
-                mo.vstack([partD_schedule, partD_devices, partD_routing]),
-            ], justify="center", gap=2),
+        _items.extend([
+            instrumentation_console(
+                mo.hstack([
+                    mo.vstack([partD_target_qps, partD_precision]),
+                    mo.vstack([partD_schedule, partD_devices, partD_routing]),
+                ], justify="start", gap=1.0),
+                title="Multi-Objective Serving Release Console",
+                subtitle="Configure precision, batching engine, replica topology, and routing policy",
+            ),
             v2_10_failure_card(
                 not _memory_ok,
                 "OOM - memory guardrail failed",
@@ -1634,28 +1668,36 @@ single number. It is looking for a feasible policy:
                 _prediction_detail,
                 "success" if partD_prediction.value == "best_feasible" and _binding.startswith("none") else "warn",
             ),
-            v2_10_math_peek(
-                "Math Peek / Source Model - serving policy feasibility",
-                f"""
-```
-feasible = memory_ok and slo_ok and quality_ok and cost_ok
-QPS_per_replica = max_batch * base_qps * batching_multiplier
-replicas_needed = ceil(target_qps / QPS_per_replica)
-daily_cost = replicas * devices_per_replica * cost_per_device_hour * 24
-```
-
-Source model: `serving_plan()` combines `state_capacity()` with track-specific
-QPS slots and recurring cost. The notebook adds local release-review indicators:
-SLO margin, quality guardrail, routing risk, and binding constraint.
-""",
+            MathPeek(
+                "feasible = memory_ok and slo_ok and quality_ok and cost_ok; replicas = ceil(target_qps / (max_batch * base_qps * multiplier))",
+                {
+                    "target QPS": f"{_target:g} req/s",
+                    "selected precision": v2_10_precision_label(_precision),
+                    "scheduling engine": v2_10_schedule_label(_policy),
+                    "replicas needed": str(_plan.replicas_needed),
+                    "total accelerators": str(_plan.total_devices),
+                    "daily cost": v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit),
+                    "estimated p99": f"{_p99_ms:.1f} ms" if math.isfinite(_p99_ms) else "OOM",
+                    "binding constraint": _binding,
+                    "chapter source": "End-to-End Serving Policy Feasibility",
+                },
             ),
-            partD_checkpoint,
+            mo.Html(f"""
+            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Production Release Objective</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    What design objective governs production serving release?
+                </p>
+                {partD_checkpoint}
+            </div>
+            """),
         ])
         if partD_checkpoint.value == "guardrails":
-            items.append(mo.callout(mo.md("Checkpoint saved: the objective is constrained cost minimization under all guardrails."), kind="success"))
+            _items.append(mo.callout(mo.md("Checkpoint saved: the objective is constrained cost minimization under all guardrails."), kind="success"))
         elif partD_checkpoint.value is not None:
-            items.append(mo.callout(mo.md("A release design is feasible only when every guardrail passes simultaneously."), kind="warn"))
-        return mo.vstack(items)
+            _items.append(mo.callout(mo.md("A release design is feasible only when every guardrail passes simultaneously."), kind="warn"))
+        return mo.vstack(_items)
 
     def build_synthesis():
         _cost = cost_crossover(
@@ -1712,92 +1754,198 @@ SLO margin, quality guardrail, routing risk, and binding constraint.
         _slo_margin = v2_10_inference.slo_ms - _p99_ms if math.isfinite(_p99_ms) else -math.inf
         _rejected = v2_10_rejected_alternative(v2_10_inference.track_id, _binding)
         _edge_implication = v2_10_edge_implication(v2_10_inference.track_id, _binding)
+
+        _decision_text = v2_10_memo_decision.value or (
+            f"Deploy {v2_10_precision_label(partD_precision.value)} with {v2_10_schedule_label(partD_schedule.value)} "
+            f"across {_plan.replicas_needed} serving units ({_plan.total_devices} total devices) using {partD_routing.value}. "
+            f"Binding amount: {_binding}; daily cost {v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit)}. "
+            f"Reject: {_rejected}. {v2_10_variant.guardrail_metric} margin: {'OOM' if not math.isfinite(_slo_margin) else f'{_slo_margin:.1f} ms'}."
+        )
+
+        _incomplete = []
+        for label, widget in (
+            ("Part A cost inversion prediction", partA_prediction),
+            ("Part A prefill/decode phase prediction", partA_phase_prediction),
+            ("Part A checkpoint", partA_checkpoint),
+            ("Part B state/KV prediction", partB_prediction),
+            ("Part B checkpoint", partB_checkpoint),
+            ("Part C scheduling prediction", partC_prediction),
+            ("Part C checkpoint", partC_checkpoint),
+            ("Part D policy prediction", partD_prediction),
+            ("Part D checkpoint", partD_checkpoint),
+        ):
+            if widget.value is None:
+                _incomplete.append(label)
+
+        _complete = len(_incomplete) == 0
+        _residual_risk = (
+            "Validate teaching estimates with production traces: real token distributions, "
+            "thermal/power replay, p99 load tests, quality canaries, routing behavior, and current pricing."
+        )
+        _ledger_design = {
+            "track_id": v2_10_profile.track_id,
+            "scenario_id": v2_10_variant.scenario_id,
+            "partA_predicted_crossover": partA_prediction.value or "no_selection",
+            "partA_actual_crossover_days": round(_cost.crossover_days, 3),
+            "partA_phase_prediction": partA_phase_prediction.value or "no_selection",
+            "partA_binding_phase": _phase["binding_phase"],
+            "partA_prefill_tokens": partA_prefill_tokens.value,
+            "partA_decode_tokens": partA_decode_tokens.value,
+            "partB_max_concurrent": _state.max_concurrent,
+            "partB_context_tokens": partB_context_tokens.value,
+            "partB_precision_bytes": float(partB_precision.value),
+            "partB_oom": bool(_state.oom),
+            "partC_scheduling_policy": partC_prediction.value or "no_selection",
+            "partC_speedup": round(_batching.speedup, 3),
+            "partC_padding_waste_pct": round(_batching.padding_waste_pct, 3),
+            "partD_selected_precision": v2_10_precision_label(partD_precision.value),
+            "partD_selected_policy": partD_schedule.value,
+            "partD_selected_routing": partD_routing.value,
+            "partD_replicas_needed": _plan.replicas_needed,
+            "partD_cost_per_day": round(_plan.daily_cost, 6),
+            "partD_binding_constraint": _binding,
+            "partD_rejected_alternative": _rejected,
+            "v2_11_edge_implication": _edge_implication,
+            "decision": _decision_text,
+        }
+        if _complete:
+            ledger.save(chapter=10, design=_ledger_design)
+
+        _report = build_lab_report(
+            v2_10_metadata,
+            student_id=v2_10_student_id.value or "",
+            track=v2_10_profile.label,
+            scenario=v2_10_variant.workload_summary,
+            learning_objectives=(
+                "Separate prefill/input work from decode/output work before sizing the service.",
+                "Quantify when recurring serving cost exceeds setup or training cost.",
+                "Compute the selected track's state/KV or runtime-state memory wall.",
+                "Compare scheduling policies under request variance and SLO pressure.",
+                "Choose a release policy under memory, latency, quality, and cost guardrails.",
+            ),
+            predictions={
+                "partA_predicted_crossover": partA_prediction.value,
+                "partA_predicted_phase": partA_phase_prediction.value,
+                "partB_predicted_capacity": partB_prediction.value,
+                "partC_predicted_policy": partC_prediction.value,
+                "partD_predicted_release_policy": partD_prediction.value,
+            },
+            knob_settings={
+                "demand_qps": partA_qps.value,
+                "cost_per_event": partA_cost_per_event.value,
+                "optimization_pct": partA_optimization_pct.value,
+                "prefill_tokens": partA_prefill_tokens.value,
+                "decode_tokens": partA_decode_tokens.value,
+                "context_tokens": partB_context_tokens.value,
+                "precision_bytes_partB": partB_precision.value,
+                "avg_len": partC_avg_len.value,
+                "max_len": _max_len,
+                "batch_size": partC_batch_size.value,
+                "fill_factor": partC_fill_factor.value,
+                "release_precision": v2_10_precision_label(partD_precision.value),
+                "release_policy": v2_10_schedule_label(partD_schedule.value),
+                "release_devices": partD_devices.value,
+                "release_routing": partD_routing.value,
+            },
+            evidence_summary={
+                "actual_crossover_days": round(_cost.crossover_days, 3),
+                "annual_savings": v2_10_fmt_currency(_cost.annual_savings, v2_10_inference.cost_unit),
+                "binding_phase": v2_10_phase_label(_phase["binding_phase"]),
+                "prefill_ms": round(_phase["prefill_ms"], 3),
+                "decode_ms": round(_phase["decode_ms"], 3),
+                "max_concurrent": _state.max_concurrent,
+                "state_per_request_gb": round(_state.state_per_request_gb, 6),
+                "padding_waste_pct": round(_batching.padding_waste_pct, 3),
+                "continuous_speedup": round(_batching.speedup, 3),
+                "replicas_needed": _plan.replicas_needed,
+                "daily_cost": v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit),
+                "slo_margin_ms": round(_slo_margin, 3) if math.isfinite(_slo_margin) else "not_feasible",
+                "binding_constraint": _binding,
+                "rejected_alternative": _rejected,
+            },
+            final_decision={
+                "selected_precision": v2_10_precision_label(partD_precision.value),
+                "selected_policy": partD_schedule.value,
+                "selected_routing": partD_routing.value,
+                "replicas_needed": _plan.replicas_needed,
+                "cost_per_day": round(_plan.daily_cost, 6),
+                "binding_constraint": _binding,
+                "rejected_alternative": _rejected,
+                "v2_11_edge_implication": _edge_implication,
+            },
+            big_takeaways=(
+                "Prefill/input and decode/output are different amount systems: compute-bound vs memory-bandwidth bound.",
+                "Recurring serving cost compounds quickly: cost-per-event optimization soon overtakes setup/training investments.",
+                "State/KV cache memory caps concurrency: weights are only a static baseline; dynamic context state dominates memory at load.",
+                "Batching policy is workload- and SLO-dependent: continuous batching excels under variance but pays scheduler overhead under strict latency budgets.",
+                "A serving policy ships only if every guardrail passes: memory, latency, quality floor, and cost must all clear simultaneously.",
+            ),
+            reflections={
+                "cost_inversion_checkpoint": partA_checkpoint.value,
+                "phase_amount_prediction": partA_phase_prediction.value,
+                "state_wall_checkpoint": partB_checkpoint.value,
+                "batching_checkpoint": partC_checkpoint.value,
+                "release_checkpoint": partD_checkpoint.value,
+                "student_justification": str(v2_10_memo_decision.value or ""),
+            },
+            residual_risk=_residual_risk,
+            source_trace={
+                "track_id": v2_10_profile.track_id,
+                "scenario_id": v2_10_variant.scenario_id,
+                "hardware_ref": v2_10_variant.hardware_ref,
+                "model_ref": v2_10_variant.model_ref,
+                "shared_helper": "mlsysbook_labs.inference",
+                "helper_apis": ("cost_crossover", "state_capacity", "batching_result", "serving_plan"),
+                "source_policy": v2_10_profile.source_policy,
+            },
+            result_snapshot={
+                "cost_crossover": _cost,
+                "state_capacity": _state,
+                "batching": _batching,
+                "serving_plan": _plan,
+            },
+            incomplete_fields=tuple(_incomplete),
+        )
+
         return mo.vstack([
+            mo.md("## Synthesis - Inference Architecture Memo"),
             mo.Html(f"""
-            <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                        border-radius:8px; padding:24px 28px; margin:16px 0;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:12px;">
-                    Key Takeaways
-                </div>
-                <div style="font-size:0.92rem; color:{COLORS['Text']}; line-height:1.75;">
-                    <div style="margin-bottom:10px;">
-                        <strong>1. Prefill/input and decode/output are different amount systems.</strong>
-                        Current settings bind on {v2_10_phase_label(_phase["binding_phase"])}:
-                        prefill/input is {v2_10_fmt_ms(_phase["prefill_ms"])}, decode/output is {v2_10_fmt_ms(_phase["decode_ms"])}.
-                    </div>
-                    <div style="margin-bottom:10px;">
-                        <strong>2. Recurring serving cost compounds.</strong>
-                        Current settings cross the setup budget after {v2_10_fmt_duration_days(_cost.crossover_days)};
-                        a {partA_optimization_pct.value}% recurring optimization saves {v2_10_fmt_currency(_cost.annual_savings, v2_10_inference.cost_unit)} per year.
-                    </div>
-                    <div style="margin-bottom:10px;">
-                        <strong>3. State/KV memory caps concurrency.</strong>
-                        {_state.state_kind} leaves {_state.max_concurrent} live session(s) at the selected context and precision.
-                    </div>
-                    <div style="margin-bottom:10px;">
-                        <strong>4. Batching policy is workload- and SLO-dependent.</strong>
-                        Static waste is {_batching.padding_waste_pct:.1f}%, continuous formula speedup is {_batching.speedup:.1f}x,
-                        and the current policy winner is {v2_10_schedule_label(_winner)}.
-                    </div>
-                    <div>
-                        <strong>5. A serving policy ships only if every guardrail passes.</strong>
-                        The current release plan needs {_plan.replicas_needed} serving unit(s) and costs
-                        {v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit)} per day.
-                    </div>
-                </div>
+            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO & REFLECTIONS</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Inference Architecture Deployment Memo</h4>
+                {v2_10_student_id}
+                <div style="margin-top: 12px;">{v2_10_memo_decision}</div>
             </div>
             """),
+            v2_10_table_html(
+                ("Memo Field", "Selected Evidence & Architecture Decision"),
+                [
+                    ("Serving Policy", f"{v2_10_precision_label(partD_precision.value)} with {v2_10_schedule_label(partD_schedule.value)}, {partD_devices.value} dev/replica, {partD_routing.value}"),
+                    ("Cluster Footprint", f"{_plan.replicas_needed} serving unit(s) ({_plan.total_devices} devices total), {v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit)}/day"),
+                    ("Latency & Margin", f"p99 estimate: {'OOM' if not math.isfinite(_p99_ms) else f'{_p99_ms:.1f} ms'} (guardrail: {v2_10_inference.slo_ms:g} ms, margin: {'N/A' if not math.isfinite(_slo_margin) else f'{_slo_margin:.1f} ms'})"),
+                    ("Binding Constraint", _binding),
+                    ("Rejected Alternative", _rejected),
+                    ("V2-11 Edge Implication", _edge_implication),
+                ],
+            ),
+            mo.callout(mo.md(_decision_text), kind="success" if all((_memory_ok, _slo_ok, _quality_ok, _cost_ok)) else "warn"),
+            big_takeaways([
+                "Prefill/input and decode/output are different amount systems: compute-bound vs memory-bandwidth bound.",
+                "Recurring serving cost compounds quickly: cost-per-event optimization soon overtakes setup/training investments.",
+                "State/KV cache memory caps concurrency: weights are only a static baseline; dynamic context state dominates memory at load.",
+                "Batching policy is workload- and SLO-dependent: continuous batching excels under variance but pays scheduler overhead under strict latency budgets.",
+                "A serving policy ships only if every guardrail passes: memory, latency, quality floor, and cost must all clear simultaneously.",
+            ]),
             mo.Html(f"""
-            <div style="background:white; border:1px solid {COLORS['Border']};
-                        border-radius:8px; padding:22px 26px; margin:8px 0 16px 0;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['RedLine']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:10px;">
-                    Inference Deployment Memo
-                </div>
-                <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
-                    <div><strong>Selected policy:</strong> {v2_10_precision_label(partD_precision.value)} with {v2_10_schedule_label(partD_schedule.value)},
-                    {partD_devices.value} device(s) per serving unit, {partD_routing.value}, and {_plan.replicas_needed} serving unit(s).</div>
-                    <div><strong>Binding amount:</strong> {_binding}; SLO margin is {"not feasible" if not math.isfinite(_slo_margin) else f"{_slo_margin:.1f} ms"}.</div>
-                    <div><strong>Rejected alternative:</strong> {_rejected}</div>
-                    <div><strong>V2-11 edge implication:</strong> {_edge_implication}</div>
-                </div>
+            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION & SIGN-OFF</div>
+                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization</h4>
+                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                    Confirm your serving architecture policy and export your engineering audit record.
+                </p>
             </div>
             """),
-            mo.Html(f"""
-            <div style="display:flex; gap:16px; margin:8px 0 16px 0; flex-wrap:wrap;">
-                <div style="flex:1; min-width:280px; background:white;
-                            border:1px solid {COLORS['Border']}; border-radius:8px; padding:20px 24px;">
-                    <div style="font-size:0.7rem; font-weight:700; color:{COLORS['BlueLine']};
-                                text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
-                        What's Next
-                    </div>
-                    <div style="font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.6;">
-                        <strong>Lab V2-11: Edge Intelligence</strong> asks what changes when the same inference problem
-                        moves outward to devices, intermittent connectivity, privacy, battery, and local feedback loops.
-                    </div>
-                </div>
-                <div style="flex:1; min-width:280px; background:white;
-                            border:1px solid {COLORS['Border']}; border-radius:8px; padding:20px 24px;">
-                    <div style="font-size:0.7rem; font-weight:700; color:{COLORS['GreenLine']};
-                                text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px;">
-                        Textbook &amp; TinyTorch
-                    </div>
-                    <div style="font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.6;">
-                        <strong>Read:</strong> the Inference at Scale sections on state/KV cache, scheduling, and serving economics.<br/>
-                        <strong>Build:</strong> TinyTorch inference exercises on cache/state management and request scheduling.
-                    </div>
-                </div>
-            </div>
-            """),
-            mo.accordion({
-                "Self-Assessment": mo.md("""
-1. When does recurring serving cost exceed setup cost for your selected track?
-2. Which term caps concurrency: weights, runtime state/KV cache, or devices?
-3. Why can continuous batching lose when variance, volume, or deadline pressure changes?
-4. Which guardrail is binding in your final serving policy?
-""")
-            }),
+            report_export_panel(_report),
         ])
 
     tabs = mo.ui.tabs({
@@ -1811,407 +1959,19 @@ SLO margin, quality guardrail, routing risk, and binding constraint.
     return
 
 
-# ============================================================================
-# ZONE D: LEDGER HUD AND REPORT
-# ============================================================================
-
 @app.cell(hide_code=True)
-def _(DecisionLog):
-    decision_input, decision_ui = DecisionLog()
-    return (decision_input, decision_ui)
-
-
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    v2_10_binding_constraint,
-    v2_10_edge_implication,
-    v2_10_fmt_currency,
-    v2_10_policy_multiplier,
-    v2_10_phase_amounts,
-    v2_10_phase_label,
-    v2_10_precision_label,
-    v2_10_rejected_alternative,
-    v2_10_serving_latency_ms,
-    batching_result,
-    cost_crossover,
-    decision_input,
-    decision_ui,
-    ledger,
-    math,
-    mo,
-    partA_checkpoint,
-    partA_cost_per_event,
-    partA_decode_tokens,
-    partA_optimization_pct,
-    partA_phase_prediction,
-    partA_prefill_tokens,
-    partA_prediction,
-    partA_qps,
-    partB_checkpoint,
-    partB_context_tokens,
-    partB_devices,
-    partB_precision,
-    partB_prediction,
-    partC_avg_len,
-    partC_batch_size,
-    partC_checkpoint,
-    partC_fill_factor,
-    partC_max_len,
-    partC_prediction,
-    partD_checkpoint,
-    partD_devices,
-    partD_precision,
-    partD_prediction,
-    partD_routing,
-    partD_schedule,
-    partD_target_qps,
-    serving_plan,
-    state_capacity,
-    v2_10_inference,
-    v2_10_model,
-    v2_10_profile,
-    v2_10_variant,
-):
-    _cost = cost_crossover(
-        setup_cost=v2_10_inference.setup_cost,
-        demand_qps=partA_qps.value,
-        cost_per_event=partA_cost_per_event.value,
-        optimization_pct=partA_optimization_pct.value,
-    )
-    _phase = v2_10_phase_amounts(
-        v2_10_inference,
-        partA_prefill_tokens.value,
-        partA_decode_tokens.value,
-        float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
-    )
-    _state = state_capacity(
-        v2_10_inference,
-        v2_10_model,
-        context_tokens=partB_context_tokens.value,
-        precision_bytes=partB_precision.value,
-        devices_per_replica=partB_devices.value,
-    )
-    _max_len = max(partC_max_len.value, partC_avg_len.value)
-    _batching = batching_result(
-        avg_len=partC_avg_len.value,
-        max_len=_max_len,
-        batch_size=partC_batch_size.value,
-        fill_factor=partC_fill_factor.value,
-    )
-    _plan = serving_plan(
-        v2_10_inference,
-        v2_10_model,
-        target_qps=partD_target_qps.value,
-        precision_bytes=partD_precision.value,
-        batching_multiplier=v2_10_policy_multiplier(v2_10_inference.track_id, partD_schedule.value),
-        devices_per_replica=partD_devices.value,
-        context_tokens=v2_10_inference.context_tokens,
-    )
-    _capacity = max(1e-9, _plan.replicas_needed * _plan.per_replica_qps)
-    _utilization = min(0.999, partD_target_qps.value / _capacity)
-    _p99_ms = v2_10_serving_latency_ms(v2_10_inference.track_id, v2_10_inference.slo_ms, partD_schedule.value, _utilization, _plan.oom)
-    _memory_ok = not _plan.oom
-    _slo_ok = _p99_ms <= v2_10_inference.slo_ms
-    _quality_ok = not (partD_precision.value == 0.5 and v2_10_inference.track_id == "robotaxi")
-    _cost_ok = _plan.daily_cost <= _plan.baseline_daily_cost * 1.05
-    _binding = v2_10_binding_constraint(_memory_ok, _slo_ok, _cost_ok, _quality_ok)
-    _slo_margin = v2_10_inference.slo_ms - _p99_ms if math.isfinite(_p99_ms) else -math.inf
-    _rejected = v2_10_rejected_alternative(v2_10_inference.track_id, _binding)
-    _edge_implication = v2_10_edge_implication(v2_10_inference.track_id, _binding)
-
-    _complete = all(
-        widget.value is not None
-        for widget in (
-            partA_prediction,
-            partA_phase_prediction,
-            partA_checkpoint,
-            partB_prediction,
-            partB_checkpoint,
-            partC_prediction,
-            partC_checkpoint,
-            partD_prediction,
-            partD_checkpoint,
-        )
-    )
-    _residual_risk = (
-        "Validate teaching estimates with production traces: real token distributions, "
-        "thermal/power replay, p99 load tests, quality canaries, routing behavior, and current pricing."
-    )
-    _ledger_design = {
-        "track_id": v2_10_profile.track_id,
-        "scenario_id": v2_10_variant.scenario_id,
-        "partA_predicted_crossover": partA_prediction.value or "no_selection",
-        "partA_actual_crossover_days": round(_cost.crossover_days, 3),
-        "partA_phase_prediction": partA_phase_prediction.value or "no_selection",
-        "partA_binding_phase": _phase["binding_phase"],
-        "partA_binding_phase_label": v2_10_phase_label(_phase["binding_phase"]),
-        "partA_prefill_tokens": partA_prefill_tokens.value,
-        "partA_decode_tokens": partA_decode_tokens.value,
-        "partA_prefill_ms": round(_phase["prefill_ms"], 3),
-        "partA_decode_ms": round(_phase["decode_ms"], 3),
-        "partB_max_concurrent": _state.max_concurrent,
-        "partB_context_tokens": partB_context_tokens.value,
-        "partB_precision_bytes": float(partB_precision.value),
-        "partB_oom": bool(_state.oom),
-        "partC_scheduling_policy": partC_prediction.value or "no_selection",
-        "partC_speedup": round(_batching.speedup, 3),
-        "partC_padding_waste_pct": round(_batching.padding_waste_pct, 3),
-        "partD_selected_precision": v2_10_precision_label(partD_precision.value),
-        "partD_selected_policy": partD_schedule.value,
-        "partD_selected_routing": partD_routing.value,
-        "partD_replicas_needed": _plan.replicas_needed,
-        "partD_cost_per_day": round(_plan.daily_cost, 6),
-        "partD_slo_margin_ms": round(_slo_margin, 3) if math.isfinite(_slo_margin) else "not_feasible",
-        "partD_binding_constraint": _binding,
-        "partD_rejected_alternative": _rejected,
-        "v2_11_edge_implication": _edge_implication,
-        "residual_risk": _residual_risk,
-        "student_justification": str(decision_input.value),
-    }
-    if _complete:
-        ledger.save(chapter=10, design=_ledger_design)
-
-    _status = "SAVED" if _complete else "INCOMPLETE"
-    _status_color = COLORS["GreenLine"] if _complete else COLORS["OrangeLine"]
-    decision_ui
+def _(mo, v2_10_metadata, v2_10_profile):
     mo.Html(f"""
     <div class="lab-hud">
-        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 10</span></div>
-        <div><span class="hud-label">TRACK</span> <span class="hud-value">{v2_10_profile.label}</span></div>
-        <div><span class="hud-label">CROSSOVER</span> <span class="hud-value">{_cost.crossover_days:.1f} days</span></div>
-        <div><span class="hud-label">MAX CONCURRENCY</span> <span class="hud-value">{_state.max_concurrent}</span></div>
-        <div><span class="hud-label">POLICY</span> <span class="hud-value">{partD_schedule.value}</span></div>
-        <div><span class="hud-label">STATUS</span> <span style="color:{_status_color}; font-family:var(--font-mono);">{_status}</span></div>
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">{v2_10_metadata.lab_id}</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v2_10_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">ACTIVE</span>
     </div>
     """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    v2_10_binding_constraint,
-    v2_10_edge_implication,
-    v2_10_fmt_currency,
-    v2_10_policy_multiplier,
-    v2_10_phase_amounts,
-    v2_10_phase_label,
-    v2_10_precision_label,
-    v2_10_rejected_alternative,
-    v2_10_schedule_label,
-    v2_10_serving_latency_ms,
-    batching_result,
-    build_lab_report,
-    cost_crossover,
-    decision_input,
-    math,
-    mo,
-    partA_checkpoint,
-    partA_cost_per_event,
-    partA_decode_tokens,
-    partA_optimization_pct,
-    partA_phase_prediction,
-    partA_prefill_tokens,
-    partA_prediction,
-    partA_qps,
-    partB_checkpoint,
-    partB_context_tokens,
-    partB_devices,
-    partB_precision,
-    partB_prediction,
-    partC_avg_len,
-    partC_batch_size,
-    partC_checkpoint,
-    partC_fill_factor,
-    partC_max_len,
-    partC_prediction,
-    partD_checkpoint,
-    partD_devices,
-    partD_precision,
-    partD_prediction,
-    partD_routing,
-    partD_schedule,
-    partD_target_qps,
-    report_export_panel,
-    serving_plan,
-    state_capacity,
-    v2_10_inference,
-    v2_10_metadata,
-    v2_10_model,
-    v2_10_profile,
-    v2_10_variant,
-):
-    _cost = cost_crossover(
-        setup_cost=v2_10_inference.setup_cost,
-        demand_qps=partA_qps.value,
-        cost_per_event=partA_cost_per_event.value,
-        optimization_pct=partA_optimization_pct.value,
-    )
-    _phase = v2_10_phase_amounts(
-        v2_10_inference,
-        partA_prefill_tokens.value,
-        partA_decode_tokens.value,
-        float(v2_10_variant.defaults.get("precision_bytes", 2.0)),
-    )
-    _state = state_capacity(
-        v2_10_inference,
-        v2_10_model,
-        context_tokens=partB_context_tokens.value,
-        precision_bytes=partB_precision.value,
-        devices_per_replica=partB_devices.value,
-    )
-    _max_len = max(partC_max_len.value, partC_avg_len.value)
-    _batching = batching_result(
-        avg_len=partC_avg_len.value,
-        max_len=_max_len,
-        batch_size=partC_batch_size.value,
-        fill_factor=partC_fill_factor.value,
-    )
-    _plan = serving_plan(
-        v2_10_inference,
-        v2_10_model,
-        target_qps=partD_target_qps.value,
-        precision_bytes=partD_precision.value,
-        batching_multiplier=v2_10_policy_multiplier(v2_10_inference.track_id, partD_schedule.value),
-        devices_per_replica=partD_devices.value,
-        context_tokens=v2_10_inference.context_tokens,
-    )
-    _capacity = max(1e-9, _plan.replicas_needed * _plan.per_replica_qps)
-    _utilization = min(0.999, partD_target_qps.value / _capacity)
-    _p99_ms = v2_10_serving_latency_ms(v2_10_inference.track_id, v2_10_inference.slo_ms, partD_schedule.value, _utilization, _plan.oom)
-    _memory_ok = not _plan.oom
-    _slo_ok = _p99_ms <= v2_10_inference.slo_ms
-    _quality_ok = not (partD_precision.value == 0.5 and v2_10_inference.track_id == "robotaxi")
-    _cost_ok = _plan.daily_cost <= _plan.baseline_daily_cost * 1.05
-    _binding = v2_10_binding_constraint(_memory_ok, _slo_ok, _cost_ok, _quality_ok)
-    _slo_margin = v2_10_inference.slo_ms - _p99_ms if math.isfinite(_p99_ms) else -math.inf
-    _rejected = v2_10_rejected_alternative(v2_10_inference.track_id, _binding)
-    _edge_implication = v2_10_edge_implication(v2_10_inference.track_id, _binding)
-
-    _incomplete = []
-    for label, widget in (
-        ("Part A cost inversion prediction", partA_prediction),
-        ("Part A prefill/decode phase prediction", partA_phase_prediction),
-        ("Part A checkpoint", partA_checkpoint),
-        ("Part B state/KV prediction", partB_prediction),
-        ("Part B checkpoint", partB_checkpoint),
-        ("Part C scheduling prediction", partC_prediction),
-        ("Part C checkpoint", partC_checkpoint),
-        ("Part D policy prediction", partD_prediction),
-        ("Part D checkpoint", partD_checkpoint),
-    ):
-        if widget.value is None:
-            _incomplete.append(label)
-
-    _report = build_lab_report(
-        v2_10_metadata,
-        track=v2_10_profile.label,
-        scenario=v2_10_variant.workload_summary,
-        learning_objectives=(
-            "Separate prefill/input work from decode/output work before sizing the service.",
-            "Quantify when recurring serving cost exceeds setup or training cost.",
-            "Compute the selected track's state/KV or runtime-state memory wall.",
-            "Compare scheduling policies under request variance and SLO pressure.",
-            "Choose a release policy under memory, latency, quality, and cost guardrails.",
-        ),
-        predictions={
-            "partA_predicted_crossover": partA_prediction.value,
-            "partA_predicted_phase": partA_phase_prediction.value,
-            "partB_predicted_capacity": partB_prediction.value,
-            "partC_predicted_policy": partC_prediction.value,
-            "partD_predicted_release_policy": partD_prediction.value,
-        },
-        knob_settings={
-            "demand_qps": partA_qps.value,
-            "cost_per_event": partA_cost_per_event.value,
-            "optimization_pct": partA_optimization_pct.value,
-            "prefill_tokens": partA_prefill_tokens.value,
-            "decode_tokens": partA_decode_tokens.value,
-            "context_tokens": partB_context_tokens.value,
-            "precision_bytes_partB": partB_precision.value,
-            "avg_len": partC_avg_len.value,
-            "max_len": _max_len,
-            "batch_size": partC_batch_size.value,
-            "fill_factor": partC_fill_factor.value,
-            "release_precision": v2_10_precision_label(partD_precision.value),
-            "release_policy": v2_10_schedule_label(partD_schedule.value),
-            "release_devices": partD_devices.value,
-            "release_routing": partD_routing.value,
-        },
-        evidence_summary={
-            "actual_crossover_days": round(_cost.crossover_days, 3),
-            "annual_savings": v2_10_fmt_currency(_cost.annual_savings, v2_10_inference.cost_unit),
-            "binding_phase": v2_10_phase_label(_phase["binding_phase"]),
-            "prefill_ms": round(_phase["prefill_ms"], 3),
-            "decode_ms": round(_phase["decode_ms"], 3),
-            "max_concurrent": _state.max_concurrent,
-            "state_per_request_gb": round(_state.state_per_request_gb, 6),
-            "padding_waste_pct": round(_batching.padding_waste_pct, 3),
-            "continuous_speedup": round(_batching.speedup, 3),
-            "replicas_needed": _plan.replicas_needed,
-            "daily_cost": v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit),
-            "slo_margin_ms": round(_slo_margin, 3) if math.isfinite(_slo_margin) else "not_feasible",
-            "binding_constraint": _binding,
-            "rejected_alternative": _rejected,
-        },
-        final_decision={
-            "selected_precision": v2_10_precision_label(partD_precision.value),
-            "selected_policy": partD_schedule.value,
-            "selected_routing": partD_routing.value,
-            "replicas_needed": _plan.replicas_needed,
-            "cost_per_day": round(_plan.daily_cost, 6),
-            "binding_constraint": _binding,
-            "rejected_alternative": _rejected,
-            "v2_11_edge_implication": _edge_implication,
-        },
-        big_takeaways=(
-            "Prefill/input and decode/output are different amount systems.",
-            "Recurring serving cost compounds.",
-            "State/KV memory caps concurrency.",
-            "Batching policy is workload- and SLO-dependent.",
-            "A serving policy ships only if all guardrails pass.",
-        ),
-        reflections={
-            "cost_inversion_checkpoint": partA_checkpoint.value,
-            "phase_amount_prediction": partA_phase_prediction.value,
-            "state_wall_checkpoint": partB_checkpoint.value,
-            "batching_checkpoint": partC_checkpoint.value,
-            "release_checkpoint": partD_checkpoint.value,
-            "student_justification": str(decision_input.value),
-        },
-        residual_risk=(
-            "Validate teaching estimates with production traces: real token distributions, thermal/power replay, "
-            "p99 load tests, quality canaries, routing behavior, and current pricing."
-        ),
-        source_trace={
-            "track_id": v2_10_profile.track_id,
-            "scenario_id": v2_10_variant.scenario_id,
-            "hardware_ref": v2_10_variant.hardware_ref,
-            "model_ref": v2_10_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.inference",
-            "helper_apis": ("cost_crossover", "state_capacity", "batching_result", "serving_plan"),
-            "source_policy": v2_10_profile.source_policy,
-        },
-        result_snapshot={
-            "cost_crossover": _cost,
-            "state_capacity": _state,
-            "batching": _batching,
-            "serving_plan": _plan,
-        },
-        incomplete_fields=tuple(_incomplete),
-    )
-
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This report is generated locally from the selected track, MLSysIM hardware/model refs, "
-                "and shared `mlsysbook_labs.inference` calculations."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
     return
 
 
