@@ -104,11 +104,7 @@ To prevent state divergence, production agent runtimes adopt the transactional f
 - **Isolation:** Concurrent agent threads operating on shared repositories must not read uncommitted or partial tool outputs from peer agents.
 - **Durability:** Once an action-observation tuple $(a_t, o_t)$ is logged to episodic memory, it must survive catastrophic crashes of the runtime host.
 
-In classical database engines, the Write-Ahead Log (WAL) protocol enforces the rule that no data page shall be written to non-volatile storage until the log record describing the update has been flushed to disk [@gray1978notes; @mohan1992aries]. For an autonomous agent runtime mutating external systems, this invariant must be inverted and hardened:
-
-$$\text{Log}(s_t, a_t) \prec_{\text{commit}} \text{Execute}(a_t) \prec_{\text{commit}} \text{Log}(o_t, s_{t+1}) $$
-
-where $\prec_{\text{commit}}$ denotes strict serial precedence enforced by a synchronous `fsync` storage barrier.
+In classical database engines, the Write-Ahead Log (WAL) protocol enforces the rule that no data page shall be written to non-volatile storage until the log record describing the update has been flushed to disk [@gray1978notes; @mohan1992aries]. For an autonomous agent runtime mutating external systems, this invariant must be inverted and hardened: $\text{Log}(s_t, a_t) \prec_{\text{commit}} \text{Execute}(a_t) \prec_{\text{commit}} \text{Log}(o_t, s_{t+1})$, where $\prec_{\text{commit}}$ denotes strict serial precedence enforced by a synchronous `fsync` storage barrier.
 
 @Fig-vol3-episodic-wal-flow illustrates the write-ahead logging sequence and transaction boundaries governing actuation and failure recovery.
 
@@ -156,37 +152,17 @@ Unstructured episodic text—including terminal logs, compiler traces, and free-
 
 ### High-dimensional metric topologies
 
-In an episodic store, observation strings $x \in \mathcal{X}$ are mapped into a dense continuous vector space by an embedding encoder $f_\phi: \mathcal{X} \to \mathbb{R}^D$:
+In an episodic store, observation strings $x \in \mathcal{X}$ are mapped into a dense continuous vector space by an embedding encoder $f_\phi: \mathcal{X} \to \mathbb{R}^D$: $\mathbf{v} = f_\phi(x) / \|f_\phi(x)\|_2$. Normalizing vectors to unit length ($\|\mathbf{v}\|_2 = 1$) simplifies cosine similarity to an inner product: $S_C(\mathbf{q}, \mathbf{v}) = (\mathbf{q} \cdot \mathbf{v}) / (\|\mathbf{q}\|_2 \|\mathbf{v}\|_2) = \mathbf{q}^T \mathbf{v}$. Under unit normalization, maximizing cosine similarity is mathematically equivalent to minimizing squared Euclidean distance: $\|\mathbf{q} - \mathbf{v}\|_2^2 = \|\mathbf{q}\|_2^2 + \|\mathbf{v}\|_2^2 - 2 \mathbf{q}^T \mathbf{v} = 2(1 - S_C(\mathbf{q}, \mathbf{v}))$.
 
-$$\mathbf{v} = \frac{f_\phi(x)}{\|f_\phi(x)\|_2} $$
-
-Normalizing vectors to unit length ($\|\mathbf{v}\|_2 = 1$) simplifies cosine similarity to an inner product:
-
-$$S_C(\mathbf{q}, \mathbf{v}) = \frac{\mathbf{q} \cdot \mathbf{v}}{\|\mathbf{q}\|_2 \|\mathbf{v}\|_2} = \mathbf{q}^T \mathbf{v} $$
-
-Under unit normalization, maximizing cosine similarity is mathematically equivalent to minimizing squared Euclidean distance:
-
-$$\|\mathbf{q} - \mathbf{v}\|_2^2 = \|\mathbf{q}\|_2^2 + \|\mathbf{v}\|_2^2 - 2 \mathbf{q}^T \mathbf{v} = 2(1 - S_C(\mathbf{q}, \mathbf{v})) $$
-
-Exact nearest neighbor search across $N$ stored vectors requires computing $N$ inner products of dimension $D$, demanding $2 \cdot N \cdot D$ floating-point operations (FLOPs). For an episodic store with $N = 10^7$ memories and $D = 1536$, a single query requires over $30.7\text{ GFLOPs}$. On a modern multi-core CPU with a memory bandwidth of $B_{\text{mem}} = 100\text{ GB/s}$, streaming the raw vectors ($10^7 \times 1536 \times 4\text{ bytes} \approx 61.4\text{ GB}$) imposes a physical latency floor of:
-
-$$T_{\text{exact\_scan}} = \frac{61.4\text{ GB}}{100\text{ GB/s}} \approx 614\text{ ms} $$
-
-A 614 ms memory scan per tool turn violates interactive execution budgets.
+Exact nearest neighbor search across $N$ stored vectors requires computing $N$ inner products of dimension $D$, demanding $2 \cdot N \cdot D$ floating-point operations (FLOPs). For an episodic store with $N = 10^7$ memories and $D = 1536$, a single query requires over $30.7\text{ GFLOPs}$. On a modern multi-core CPU with a memory bandwidth of $B_{\text{mem}} = 100\text{ GB/s}$, streaming the raw vectors ($10^7 \times 1536 \times 4\text{ bytes} \approx 61.4\text{ GB}$) imposes a physical latency floor of $T_{\text{exact\_scan}} = 61.4\text{ GB} / 100\text{ GB/s} \approx 614\text{ ms}$. A 614 ms memory scan per tool turn violates interactive execution budgets.
 
 ### The curse of dimensionality
 
 Attempting to accelerate spatial search using classical partitioning trees (such as $k$-d trees or $R$-trees) fails catastrophically in high-dimensional embedding spaces due to the **Curse of Dimensionality**\index{Curse of Dimensionality}.
 
-To see why high dimensions break spatial indexing, consider the elementary geometry of a $D$-dimensional hypersphere. In $D$ dimensions, volume scales proportionally to radius to the $D$-th power: $V_D(r) \propto r^D$. Consider a thin outer shell of relative thickness $\epsilon$ (where $0 < \epsilon < 1$) at the boundary of a sphere of radius $r$. The ratio of the volume of the inner core of radius $r(1 - \epsilon)$ to the total sphere volume is $(1 - \epsilon)^D$. Consequently, the fraction of volume packed into the thin outer shell is:
+To see why high dimensions break spatial indexing, consider the elementary geometry of a $D$-dimensional hypersphere. In $D$ dimensions, volume scales proportionally to radius to the $D$-th power: $V_D(r) \propto r^D$. Consider a thin outer shell of relative thickness $\epsilon$ (where $0 < \epsilon < 1$) at the boundary of a sphere of radius $r$. The ratio of the volume of the inner core of radius $r(1 - \epsilon)$ to the total sphere volume is $(1 - \epsilon)^D$. Consequently, the fraction of volume packed into the thin outer shell is $\text{Shell Volume Fraction} = [V_D(r) - V_D(r(1 - \epsilon))] / V_D(r) = 1 - (1 - \epsilon)^D$.
 
-$$\text{Shell Volume Fraction} = \frac{V_D(r) - V_D(r(1 - \epsilon))}{V_D(r)} = 1 - (1 - \epsilon)^D $$
-
-For modern embedding dimensions ($D = 1536$) and a razor-thin shell of just $\epsilon = 0.01$ (the outer $1\%$ of the radius), this fraction evaluates to:
-
-$$1 - (0.99)^{1536} \approx 1 - 1.9 \times 10^{-7} \approx 0.9999998 $$
-
-Over $99.9999\%$ of the hypersphere's entire volume resides in the outermost $1\%$ crust! In high dimensions, the concept of an "interior" disappears: data points do not cluster in the center; they all live on the outer boundary, approximately equidistant and mutually orthogonal to one another.[^fn-beyer-curse-hypersphere]
+For modern embedding dimensions ($D = 1536$) and a razor-thin shell of just $\epsilon = 0.01$ (the outer 1 percent of the radius), this fraction evaluates to $1 - (0.99)^{1536} \approx 1 - 1.9 \times 10^{-7} \approx 0.9999998$. Over 99.9999 percent of the hypersphere's entire volume resides in the outermost 1 percent crust! In high dimensions, the concept of an "interior" disappears: data points do not cluster in the center; they all live on the outer boundary, approximately equidistant and mutually orthogonal to one another.[^fn-beyer-curse-hypersphere]
 
 [^fn-beyer-curse-hypersphere]: Formally, @beyer1999nearest proved that for independent and identically distributed random vectors in high dimensions, the distance contrast between the nearest and farthest neighbors asymptotically vanishes: $\lim_{D \to \infty} (\max_{i} \|\mathbf{x}_i - \mathbf{q}\|_p - \min_{i} \|\mathbf{x}_i - \mathbf{q}\|_p) / \min_{i} \|\mathbf{x}_i - \mathbf{q}\|_p = 0$. The exact continuous hypersphere volume is given by $V_D(r) = \frac{\pi^{D/2}}{\Gamma(D/2 + 1)} r^D$. For the complete measure-concentration derivation and geometric proof, see @sec-vol3-appendix-math-curse-dimensionality.
 
@@ -202,13 +178,8 @@ To achieve sub-millisecond retrieval across millions of memories, agent architec
 For memory-constrained episodic runtimes, **Inverted File Product Quantization (IVF-PQ)**\index{Inverted File Product Quantization (IVF-PQ)} [@jegou2011product] combines spatial clustering with lossy sub-vector compression:
 
 1. **Inverted File (IVF) Coarse Partitioning:** The vector space is partitioned into $K_{\text{ivf}}$ Voronoi cells using $k$-means clustering over centroids $\{\mathbf{c}_1, \dots, \mathbf{c}_{K_{\text{ivf}}}\}$. At query time, the search engine computes distances only to the nearest $n_{\text{probe}} \ll K_{\text{ivf}}$ centroids, pruning $(1 - n_{\text{probe}} / K_{\text{ivf}})$ of the candidate vectors from consideration.
-2. **Product Quantization (PQ):** Instead of storing raw high-dimensional residual vectors $\mathbf{r} = \mathbf{x} - \mathbf{c}_i$, the residual is split into $M$ orthogonal sub-vectors of dimension $d^* = D / M$:
-   $$\mathbf{r} = [\mathbf{r}^{(1)}, \mathbf{r}^{(2)}, \dots, \mathbf{r}^{(M)}], \quad \mathbf{r}^{(m)} \in \mathbb{R}^{d^*} $$
-   Each sub-vector space is quantized using a codebook of $K_{\text{pq}} = 256$ centroids. Because $256 = 2^8$, each sub-vector is represented by an 8-bit byte index. A 1536-dimensional FP32 vector (requiring 6,144 bytes) is compressed into $M$ bytes. For $M = 64$, this achieves a **$96\times$ compression factor**, reducing the memory footprint of $10^7$ vectors from $61.4\text{ GB}$ to $640\text{ MB}$, allowing the entire index to reside permanently in host RAM.
-
-3. **Asymmetric Distance Computation (ADC):** During search, the query vector $\mathbf{q}$ is *not* quantized. The runtime precomputes a distance lookup table $\mathcal{D} \in \mathbb{R}^{M \times 256}$ storing the squared Euclidean distance between each query sub-vector and each codebook centroid:
-   $$\mathcal{D}[m, k] = \|\mathbf{q}^{(m)} - \mathbf{c}_k^{(m)}\|^2, \quad \forall m \in \{1, \dots, M\}, \ k \in \{0, \dots, 255\} $$
-   Computing $\mathcal{D}$ requires only $M \times 256 \times d^* = 256 \cdot D$ multiply-accumulate operations—a negligible constant overhead (e.g., $393\text{ kFLOPs}$ for $D=1536$). The table consumes $64 \times 256 \times 4\text{ bytes} = 64\text{ KB}$, fitting entirely within the CPU's L1/L2 data cache.
+2. **Product Quantization (PQ):** Instead of storing raw high-dimensional residual vectors $\mathbf{r} = \mathbf{x} - \mathbf{c}_i$, the residual is split into $M$ orthogonal sub-vectors of dimension $d^* = D / M$: $\mathbf{r} = [\mathbf{r}^{(1)}, \mathbf{r}^{(2)}, \dots, \mathbf{r}^{(M)}]$, where $\mathbf{r}^{(m)} \in \mathbb{R}^{d^*}$. Each sub-vector space is quantized using a codebook of $K_{\text{pq}} = 256$ centroids. Because $256 = 2^8$, each sub-vector is represented by an 8-bit byte index. A 1536-dimensional FP32 vector (requiring 6,144 bytes) is compressed into $M$ bytes. For $M = 64$, this achieves a **$96\times$ compression factor**, reducing the memory footprint of $10^7$ vectors from $61.4\text{ GB}$ to $640\text{ MB}$, allowing the entire index to reside permanently in host RAM.
+3. **Asymmetric Distance Computation (ADC):** During search, the query vector $\mathbf{q}$ is *not* quantized. The runtime precomputes a distance lookup table $\mathcal{D} \in \mathbb{R}^{M \times 256}$ storing the squared Euclidean distance between each query sub-vector and each codebook centroid: $\mathcal{D}[m, k] = \|\mathbf{q}^{(m)} - \mathbf{c}_k^{(m)}\|^2$ for all $m \in \{1, \dots, M\}$ and $k \in \{0, \dots, 255\}$. Computing $\mathcal{D}$ requires only $M \times 256 \times d^* = 256 \cdot D$ multiply-accumulate operations—a negligible constant overhead (e.g., $393\text{ kFLOPs}$ for $D=1536$). The table consumes $64 \times 256 \times 4\text{ bytes} = 64\text{ KB}$, fitting entirely within the CPU's L1/L2 data cache.
 
 The distance between the query and any stored quantized vector $\mathbf{x}$ is evaluated via:
 
@@ -228,15 +199,9 @@ Evaluating @eq-vol3-episodic-adc requires exactly $M$ array lookups and $M-1$ sc
 
 Where IVF-PQ optimizes memory footprint through lossy compression, **Hierarchical Navigable Small World (HNSW)**\index{Hierarchical Navigable Small World} graphs optimize query latency and recall by constructing multi-layer geometric proximity graphs [@malkov2020hnsw].
 
-Inspired by skip-lists, an HNSW index builds a hierarchy of graph layers $\ell \in \{0, 1, \dots, L_{\max}\}$. Layer 0 contains every stored vector as a vertex, with edges connecting nearest neighbors according to a heuristic that balances proximity with directional diversity. Each superior layer contains an exponentially decaying subset of vertices, selected with probability:
+Inspired by skip-lists, an HNSW index builds a hierarchy of graph layers $\ell \in \{0, 1, \dots, L_{\max}\}$. Layer 0 contains every stored vector as a vertex, with edges connecting nearest neighbors according to a heuristic that balances proximity with directional diversity. Each superior layer contains an exponentially decaying subset of vertices, selected with probability $P(\text{level} \ge \ell) = \exp(-\ell / m_L) = (1 / M_{\text{hnsw}})^\ell$, where $m_L = 1 / \ln(M_{\text{hnsw}})$ and $M_{\text{hnsw}}$ governs the maximum number of bidirectional connections per node. With $M_{\text{hnsw}} = 32$, Layer 1 retains only $1/32$ of the vertices in Layer 0; Layer 2 retains $1/32$ of Layer 1; and so forth. For an index of $N = 10^7$ vectors, the entire hierarchy spans only $\lceil \log_{32}(10^7) \rceil \approx 5$ layers, with the top layer containing only a dozen entry points.
 
-$$P(\text{level} \ge \ell) = \exp(-\ell / m_L), \quad m_L = \frac{1}{\ln(M_{\text{hnsw}})} $$
-
-where $M_{\text{hnsw}}$ governs the maximum number of bidirectional connections per node. This distribution translates to a straightforward geometric progression: each node is promoted to layer $\ell$ with probability $(1 / M_{\text{hnsw}})^\ell$. With $M_{\text{hnsw}} = 32$, Layer 1 retains only $1/32$ of the vertices in Layer 0; Layer 2 retains $1/32$ of Layer 1; and so forth. For an index of $N = 10^7$ vectors, the entire hierarchy spans only $\lceil \log_{32}(10^7) \rceil \approx 5$ layers, with the top layer containing only a dozen entry points.
-
-The uppermost layers contain sparse, long-range "highway" edges that allow greedy routing to traverse vast geometric distances in 2 to 3 hops per layer before descending to denser layers below, achieving logarithmic routing complexity:
-
-$$\mathcal{O}(\log N) $$
+The uppermost layers contain sparse, long-range "highway" edges that allow greedy routing to traverse vast geometric distances in 2 to 3 hops per layer before descending to denser layers below, achieving logarithmic routing complexity $\mathcal{O}(\log N)$.
 
 Query routing proceeds greedily from top to bottom:
 
@@ -245,11 +210,7 @@ Query routing proceeds greedily from top to bottom:
 3. When a local minimum is reached in layer $\ell$, the search drops to the corresponding vertex in layer $\ell - 1$.
 4. Upon reaching Layer 0, the algorithm executes an expanded beam search of size $efSearch$, returning the top-$k$ nearest neighbors.
 
-While HNSW achieves superior recall (>98 percent) and sub-millisecond query latency ($< 2\text{ ms}$), its memory footprint is substantial. Storing $M_{\text{hnsw}} = 32$ to $64$ bidirectional integer pointers per vector alongside uncompressed 1536-dimensional FP32 vectors consumes:
-
-$$S_{\text{HNSW}} = N \times (D \cdot 4 + 2 \cdot M_{\text{hnsw}} \cdot 8) \approx 6,144 + 1,024 = 7,168\text{ bytes/vector} $$
-
-For $10^7$ memories, HNSW demands over $71\text{ GB}$ of resident RAM, requiring dedicated memory-optimized nodes.
+While HNSW achieves superior recall (>98 percent) and sub-millisecond query latency ($< 2\text{ ms}$), its memory footprint is substantial. Storing $M_{\text{hnsw}} = 32$ to $64$ bidirectional integer pointers per vector alongside uncompressed 1536-dimensional FP32 vectors consumes $S_{\text{HNSW}} = N \times (D \cdot 4 + 2 \cdot M_{\text{hnsw}} \cdot 8) \approx 6,144 + 1,024 = 7,168\text{ bytes/vector}$. For $10^7$ memories, HNSW demands over $71\text{ GB}$ of resident RAM, requiring dedicated memory-optimized nodes.
 
 @Tbl-vol3-episodic-ann-comparison synthesizes the architectural trade-offs across standard vector indexing topologies.
 
@@ -267,11 +228,7 @@ For $10^7$ memories, HNSW demands over $71\text{ GB}$ of resident RAM, requiring
 
 Despite their speed, dense vector stores exhibit an architectural failure mode that frequently derails autonomous agent reasoning: **Polarity Blindness**\index{Polarity Blindness}.
 
-Standard embedding models are trained using contrastive objective functions, such as InfoNCE:
-
-$$\mathcal{L}_{\text{InfoNCE}} = -\log \frac{\exp(\mathbf{q} \cdot \mathbf{k}^+ / \tau)}{\exp(\mathbf{q} \cdot \mathbf{k}^+ / \tau) + \sum_{j} \exp(\mathbf{q} \cdot \mathbf{k}_j^- / \tau)} $$
-
-Because the loss penalizes topical dissimilarity, sentences sharing identical technical subjects, entities, and syntactic vocabulary project to adjacent points in latent space—even if their truth values are diametrically opposed.
+Standard embedding models are trained using contrastive objective functions, such as InfoNCE: $\mathcal{L}_{\text{InfoNCE}} = -\log [ \exp(\mathbf{q} \cdot \mathbf{k}^+ / \tau) / ( \exp(\mathbf{q} \cdot \mathbf{k}^+ / \tau) + \sum_{j} \exp(\mathbf{q} \cdot \mathbf{k}_j^- / \tau) ) ]$. Because the loss penalizes topical dissimilarity, sentences sharing identical technical subjects, entities, and syntactic vocabulary project to adjacent points in latent space—even if their truth values are diametrically opposed.
 
 ::: {#exm-vol3-episodic-polarity-blindness .callout-notebook title="Worked example: Polarity blindness in dense vector spaces"}
 Consider three propositions evaluated by a standard contrastive text encoder (such as InfoNCE-trained text-embedding-3 or Contriever):
@@ -280,11 +237,7 @@ Consider three propositions evaluated by a standard contrastive text encoder (su
 - $s_2$: *"Database migration script 042 failed catastrophically with fatal syntax errors."*
 - $s_3$: *"The quick brown fox jumps over the lazy sleeping dog."*
 
-Evaluating pairwise cosine similarity $S_C(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$ reveals the failure mode:
-
-$$S_C(s_1, s_2) \approx 0.942 \quad \gg \quad S_C(s_1, s_3) \approx 0.087$$
-
-Despite asserting diametrically opposed operational truths, $s_1$ and $s_2$ share near-identical technical entities, syntax, and topical vocabulary. The contrastive loss pushes them to virtually adjacent coordinates in latent space.
+Evaluating pairwise cosine similarity $S_C(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$ reveals the failure mode: $S_C(s_1, s_2) \approx 0.942 \gg S_C(s_1, s_3) \approx 0.087$. Despite asserting diametrically opposed operational truths, $s_1$ and $s_2$ share near-identical technical entities, syntax, and topical vocabulary. The contrastive loss pushes them to virtually adjacent coordinates in latent space.
 :::
 
 If an agent queries its episodic memory with: *"Did database migration 042 succeed?"*, an ANN search returns both the success log and the fatal failure log with nearly indistinguishable similarity scores ($S_C \approx 0.94$). If the prompt assembly engine blindly injects the top candidate, the agent risks consuming an obsolete error traceback or a negated premise.
@@ -298,28 +251,18 @@ In long-running agent workflows, the agent frequently issues identical or semant
 An agent semantic cache operates across two distinct tiers:
 
 1. **L1 Exact-Match Cache (Deterministic Key):** The query string is normalized and hashed via SHA-256. If an identical query was previously evaluated in the active session, the result is fetched in $\mathcal{O}(1)$ time from host RAM ($< 0.05\text{ ms}$). While exact caching incurs zero false positives, it is fragile: a minor difference in whitespace, reordered CLI arguments, or synonymous wording results in a cache miss.
-2. **L2 Semantic Cache (Approximate Metric Key):** The incoming query $q$ is mapped to embedding $\mathbf{v}_q$ and compared against an in-memory index of previously answered queries. If the nearest cached query $\mathbf{v}_{c}$ satisfies:
-   $$S_C(\mathbf{v}_q, \mathbf{v}_c) \ge \tau_{\text{cache}} $$
-   the runtime returns the cached retrieval context or model generation directly, bypassing the downstream secondary storage scan and model prefill.
+2. **L2 Semantic Cache (Approximate Metric Key):** The incoming query $q$ is mapped to embedding $\mathbf{v}_q$ and compared against an in-memory index of previously answered queries. If the nearest cached query $\mathbf{v}_{c}$ satisfies $S_C(\mathbf{v}_q, \mathbf{v}_c) \ge \tau_{\text{cache}}$, the runtime returns the cached retrieval context or model generation directly, bypassing the downstream secondary storage scan and model prefill.
 
 #### First-principles latency and cost napkin math
 
 The systems value of semantic caching is quantified by the gap between cache-hit and cache-miss execution latencies:
 
-- **Cache Hit Latency ($T_{\text{hit}}$):** Incurs only the local query embedding and in-memory index lookup:
-  $$T_{\text{hit}} = T_{\text{embed}} + T_{\text{cache\_scan}} \approx 2.8\text{ ms} + 0.2\text{ ms} = 3.0\text{ ms} $$
-- **Cache Miss Latency ($T_{\text{miss}}$):** Incurs the cache lookup plus the full retrieval, prompt assembly, prefill, and generation pipeline ($T_{\text{exec}}$):
-  $$T_{\text{miss}} = T_{\text{hit}} + T_{\text{exec}} \approx 3.0\text{ ms} + 600\text{ ms} = 603\text{ ms} $$
+- **Cache Hit Latency ($T_{\text{hit}}$):** Incurs only the local query embedding and in-memory index lookup: $T_{\text{hit}} = T_{\text{embed}} + T_{\text{cache\_scan}} \approx 2.8\text{ ms} + 0.2\text{ ms} = 3.0\text{ ms}$.
+- **Cache Miss Latency ($T_{\text{miss}}$):** Incurs the cache lookup plus the full retrieval, prompt assembly, prefill, and generation pipeline ($T_{\text{exec}}$): $T_{\text{miss}} = T_{\text{hit}} + T_{\text{exec}} \approx 3.0\text{ ms} + 600\text{ ms} = 603\text{ ms}$.
 
-On a cache hit, the agent achieves a **$200\times$ latency reduction** ($3.0\text{ ms}$ vs. $603\text{ ms}$). Across a multi-turn session with an empirical cache hit rate $h \in [0, 1]$, the expected turn latency evaluates to:
+On a cache hit, the agent achieves a **$200\times$ latency reduction** ($3.0\text{ ms}$ vs. $603\text{ ms}$). Across a multi-turn session with an empirical cache hit rate $h \in [0, 1]$, the expected turn latency evaluates to $T_{\text{avg}} = h \cdot T_{\text{hit}} + (1 - h) \cdot T_{\text{miss}} = T_{\text{hit}} + (1 - h) \cdot T_{\text{exec}}$. For an agent achieving a modest hit rate of $h = 0.35$ (35 percent repeated or near-identical queries) and $T_{\text{exec}} = 600\text{ ms}$, $T_{\text{avg}} = 3.0\text{ ms} + (1 - 0.35) \times 600\text{ ms} = 3.0 + 390 = 393\text{ ms}$.
 
-$$T_{\text{avg}} = h \cdot T_{\text{hit}} + (1 - h) \cdot T_{\text{miss}} = T_{\text{hit}} + (1 - h) \cdot T_{\text{exec}} $$
-
-For an agent achieving a modest hit rate of $h = 0.35$ (35 percent repeated or near-identical queries) and $T_{\text{exec}} = 600\text{ ms}$:
-
-$$T_{\text{avg}} = 3.0\text{ ms} + (1 - 0.35) \times 600\text{ ms} = 3.0 + 390 = 393\text{ ms} $$
-
-Semantic caching slashes average turn latency by $34.5\%$ while eliminating over a third of downstream inference token charges and accelerator prefill FLOPs.
+Semantic caching slashes average turn latency by 34.5 percent while eliminating over a third of downstream inference token charges and accelerator prefill FLOPs.
 
 #### The similarity threshold dilemma and cache poisoning
 
@@ -380,11 +323,7 @@ def skeletonize_python_source(source_code: str) -> str:
 ```
 :::
 
-The token reduction ratio achieved by skeletonization is parameterized as:
-
-$$\rho_{\text{prune}} = 1 - \frac{T_{\text{skeleton}}}{T_{\text{full}}} $$
-
-In production software repositories, $\rho_{\text{prune}}$ typically ranges between $0.90$ and $0.95$. A 500,000-token repository compresses into an interface skeleton of 25,000 to 50,000 tokens, enabling structural symbol maps to fit directly within long-context prompts.
+The token reduction ratio achieved by skeletonization is parameterized as $\rho_{\text{prune}} = 1 - T_{\text{skeleton}} / T_{\text{full}}$. In production software repositories, $\rho_{\text{prune}}$ typically ranges between $0.90$ and $0.95$. A 500,000-token repository compresses into an interface skeleton of 25,000 to 50,000 tokens, enabling structural symbol maps to fit directly within long-context prompts.
 
 ### Symbol dependency graphs and personalized PageRank
 
@@ -409,11 +348,7 @@ where:
 - $\alpha \in [0.15, 0.20]$ is the teleportation (restart) probability, representing the probability of jumping back to the active seed set.
 - $\mathbf{s} \in \mathbb{R}^{|V|}$ is the personalization vector, with $s_i = 1 / |\mathcal{S}|$ if $i \in \mathcal{S}$, and $s_i = 0$ otherwise.
 
-The stationary distribution $\mathbf{p}^* = \lim_{t \to \infty} \mathbf{p}^{(t)}$ satisfies the linear system:
-
-$$\mathbf{p}^* = \alpha [\mathbf{I} - (1 - \alpha) \mathbf{P}^T]^{-1} \mathbf{s} $$
-
-The stationary probability $p_v^*$ quantifies the structural relevance of symbol $v$ relative to the active seed set $\mathcal{S}$.
+The stationary distribution $\mathbf{p}^* = \lim_{t \to \infty} \mathbf{p}^{(t)}$ satisfies the linear system $\mathbf{p}^* = \alpha [\mathbf{I} - (1 - \alpha) \mathbf{P}^T]^{-1} \mathbf{s}$. The stationary probability $p_v^*$ quantifies the structural relevance of symbol $v$ relative to the active seed set $\mathcal{S}$.
 
 #### First-principles systems math: Power iteration vs. matrix inversion
 
@@ -421,14 +356,9 @@ While the analytical stationary distribution contains a matrix inverse, evaluati
 
 Production runtimes evaluate PPR using iterative **Power Iteration**\index{Power Iteration} over sparse adjacency matrices stored in **Compressed Sparse Row (CSR)**\index{Compressed Sparse Row} format:
 
-1. **CSR Memory Footprint:** A symbol dependency graph with $|V| = 50,000$ vertices and $|E| = 250,000$ directed edges stores two flat 32-bit integer arrays (an offset array of size $|V| + 1$ and a column-index array of size $|E|$):
-   $$\text{Memory}_{\text{CSR}} = (|V| + 1 + |E|) \times 4\text{ bytes} = (50,001 + 250,000) \times 4 \approx 1.20\text{ MB} $$
-   At $1.20\text{ MB}$, the entire graph topology fits comfortably inside the CPU's L3 hardware cache (typically 32 to 64 MB), eliminating DRAM bus traffic entirely during traversal.
+1. **CSR Memory Footprint:** A symbol dependency graph with $|V| = 50,000$ vertices and $|E| = 250,000$ directed edges stores two flat 32-bit integer arrays (an offset array of size $|V| + 1$ and a column-index array of size $|E|$): $\text{Memory}_{\text{CSR}} = (|V| + 1 + |E|) \times 4\text{ bytes} = (50,001 + 250,000) \times 4 \approx 1.20\text{ MB}$. At $1.20\text{ MB}$, the entire graph topology fits comfortably inside the CPU's L3 hardware cache (typically 32 to 64 MB), eliminating DRAM bus traffic entirely during traversal.
 2. **Sparse Matrix-Vector (SpMV) Compute:** Each power-iteration step performs a single sparse matrix-vector multiplication requiring $2 \cdot |E| = 500,000$ FLOPs.
-3. **Geometric Convergence:** Because the damping factor $(1 - \alpha) \approx 0.85$ bounds the spectral radius of $(1 - \alpha)\mathbf{P}^T$, the approximation error contracts by at least $0.85$ on every step.[^fn-ppr-convergence-perron] Evaluating just $15$ to $20$ iterations yields a rank-stable relevance distribution:
-   $$\text{Total Compute} = 20 \times 500,000\text{ FLOPs} = 10\text{ MFLOPs} $$
-   On a modern CPU core delivering $50\text{ GFLOPS}$ of vector throughput, power iteration completes in:
-   $$T_{\text{PPR}} = \frac{10^7\text{ FLOPs}}{5 \times 10^{10}\text{ FLOPs/s}} = 0.0002\text{ s} = 0.2\text{ ms} $$
+3. **Geometric Convergence:** Because the damping factor $(1 - \alpha) \approx 0.85$ bounds the spectral radius of $(1 - \alpha)\mathbf{P}^T$, the approximation error contracts by at least $0.85$ on every step.[^fn-ppr-convergence-perron] Evaluating just $15$ to $20$ iterations yields a rank-stable relevance distribution, requiring $\text{Total Compute} = 20 \times 500,000\text{ FLOPs} = 10\text{ MFLOPs}$. On a modern CPU core delivering $50\text{ GFLOPS}$ of vector throughput, power iteration completes in $T_{\text{PPR}} = 10^7\text{ FLOPs} / (5 \times 10^{10}\text{ FLOPs/s}) = 0.2\text{ ms}$.
 
 Iterative graph diffusion turns structural context expansion from an intractable $\mathcal{O}(|V|^3)$ matrix bottleneck into a sub-millisecond, cache-resident CPU operation.
 
@@ -567,22 +497,14 @@ An agent that retains every raw terminal printout, JSON dump, and transient comp
 
 Every memory item $m$ in the episodic ledger is assigned an intrinsic importance score $I(m) \in [1, 10]$ evaluating its long-term operational value. High-importance items ($I(m) \ge 8$) include fatal error post-mortems, architectural interface decisions, and user-specified constraints; low-importance items ($I(m) \le 3$) include transient directory listings and progress bar logs.
 
-When evaluating memory items for retrieval, the runtime computes a composite score balancing recency, importance, and query relevance:
+When evaluating memory items for retrieval, the runtime computes a composite score balancing recency, importance, and query relevance: $\text{Score}(m, q) = w_{\text{rec}} \cdot \text{Recency}(m) + w_{\text{imp}} \cdot \frac{I(m)}{10} + w_{\text{rel}} \cdot S_C(\mathbf{q}, \mathbf{v}_m)$.
 
-$$\text{Score}(m, q) = w_{\text{rec}} \cdot \text{Recency}(m) + w_{\text{imp}} \cdot \frac{I(m)}{10} + w_{\text{rel}} \cdot S_C(\mathbf{q}, \mathbf{v}_m) $$
-
-To prevent memory bloat, recency is modeled using the **Ebbinghaus Forgetting Curve**\index{Ebbinghaus Forgetting Curve}, parameterized by a half-life $t_{1/2}$:
-
-$$\text{Recency}(m) = \exp\left(-\frac{\ln 2}{t_{1/2}} \cdot (t_{\text{now}} - t_{\text{accessed}})\right) = 2^{-\frac{\Delta t}{t_{1/2}}} $$
-
-where $\Delta t = t_{\text{now}} - t_{\text{accessed}}$ is the elapsed time since the memory was last retrieved.
+To prevent memory bloat, recency is modeled using the **Ebbinghaus Forgetting Curve**\index{Ebbinghaus Forgetting Curve}, parameterized by a half-life $t_{1/2}$: $\text{Recency}(m) = \exp\left(-\frac{\ln 2}{t_{1/2}} \cdot (t_{\text{now}} - t_{\text{accessed}})\right) = 2^{-\Delta t / t_{1/2}}$, where $\Delta t = t_{\text{now}} - t_{\text{accessed}}$ is the elapsed time since the memory was last retrieved.
 
 This exponential formulation provides clear systems mechanics:
 
 1. **Predictable Decay:** If a transient debugging log has a baseline half-life of $t_{1/2} = 12\text{ hours}$, its recency multiplier drops to $0.5$ after half a day, $0.25$ after 24 hours, and $0.06$ after two days.
-2. **Spaced Reinforcement:** Whenever an existing memory item $m$ is retrieved and successfully utilized by the agent to accomplish an action, its access timestamp updates ($t_{\text{accessed}} \leftarrow t_{\text{now}}$) and its half-life scales up:
-   $$t_{1/2} \leftarrow \min(t_{1/2} \cdot \gamma, t_{\max}) $$
-   where $\gamma \approx 1.5\text{--}2.0$ is the reinforcement factor. Frequently accessed architectural heuristics become nearly permanent, while one-off debugging traces naturally fade.
+2. **Spaced Reinforcement:** Whenever an existing memory item $m$ is retrieved and successfully utilized by the agent to accomplish an action, its access timestamp updates ($t_{\text{accessed}} \leftarrow t_{\text{now}}$) and its half-life scales up: $t_{1/2} \leftarrow \min(t_{1/2} \cdot \gamma, t_{\max})$, where $\gamma \approx 1.5\text{--}2.0$ is the reinforcement factor. Frequently accessed architectural heuristics become nearly permanent, while one-off debugging traces naturally fade.
 3. **Sleep Compaction Threshold:** During offline sleep cycles, the consolidation engine computes the cumulative retention score $\text{Retention}(m) = \frac{I(m)}{10} \cdot \text{Recency}(m)$. Any memory item where $\text{Retention}(m) < \Theta_{\text{prune}}$ (e.g., $\Theta_{\text{prune}} = 0.05$) is evicted from the active L3 vector index and archived to compressed cold storage. This bounds the active vector index size to a stable steady state ($N_{\text{active}} \propto \text{Turn Rate} \times \bar{t}_{1/2}$) rather than allowing it to grow unbounded.
 
 #### Generative reflection
@@ -596,11 +518,7 @@ The generated reflections represent high-order semantic abstractions. The runtim
 
 #### Trajectory distillation
 
-Detailed trajectory turn sequences are compressed into canonical state-action summaries. The distillation compression ratio is defined as:
-
-$$\mathcal{R}_{\text{distill}} = \frac{|\text{Tokens}_{\text{distilled}}|}{|\text{Tokens}_{\text{raw}}|} $$
-
-In production runtimes, $\mathcal{R}_{\text{distill}}$ typically achieves values between $0.02$ and $0.05$—compressing raw trajectories by a factor of 20 to 50 while preserving causal operational lessons.
+Detailed trajectory turn sequences are compressed into canonical state-action summaries. The distillation compression ratio is defined as $\mathcal{R}_{\text{distill}} = |\text{Tokens}_{\text{distilled}}| / |\text{Tokens}_{\text{raw}}|$. In production runtimes, $\mathcal{R}_{\text{distill}}$ typically achieves values between $0.02$ and $0.05$—compressing raw trajectories by a factor of 20 to 50 while preserving causal operational lessons.
 
 ### Doyle's truth maintenance system (TMS)
 
@@ -694,8 +612,7 @@ Relying on physical POSIX timestamps to order memories across distributed agent 
 - Each agent maintains a monotonic integer clock $L \in \mathbb{N}$, initialized to zero.
 - Before executing an internal reasoning step or tool dispatch, the agent increments its local clock: $L \leftarrow L + 1$.
 - Every message or tool payload carries the current timestamp $L_{\text{msg}}$.
-- Upon receiving an external observation or peer message, the agent synchronizes its clock:
-  $$L \leftarrow \max(L, L_{\text{msg}}) + 1 $$
+- Upon receiving an external observation or peer message, the agent synchronizes its clock: $L \leftarrow \max(L, L_{\text{msg}}) + 1$.
 
 Every memory item is indexed by the causal tuple $\langle \text{agent\_id}, L, \text{epoch} \rangle$, providing an unambiguous partial order over historical events regardless of physical clock drift.
 
@@ -724,11 +641,7 @@ Building persistent external memory requires enforcing strict systems latency bu
 
 ### End-to-end turn latency decomposition
 
-The total wall-clock latency of an agent interaction turn ($T_{\text{turn}}$) decomposes into seven sequential phases:
-
-$$T_{\text{turn}} = T_{\text{embed}} + T_{\text{ann}} + T_{\text{graph}} + T_{\text{rerank}} + T_{\text{pack}} + T_{\text{prefill}} + T_{\text{decode}} $$
-
-To satisfy an end-to-end SLA ($T_{\text{turn}} \le T_{\text{SLA}}$), each subsystem must operate within an allocated latency budget.
+The total wall-clock latency of an agent interaction turn ($T_{\text{turn}}$) decomposes into seven sequential phases: $T_{\text{turn}} = T_{\text{embed}} + T_{\text{ann}} + T_{\text{graph}} + T_{\text{rerank}} + T_{\text{pack}} + T_{\text{prefill}} + T_{\text{decode}}$. To satisfy an end-to-end SLA ($T_{\text{turn}} \le T_{\text{SLA}}$), each subsystem must operate within an allocated latency budget.
 
 @Tbl-vol3-episodic-sla-budget details the breakdown between an unoptimized distributed architecture and a production-hardened local-first memory pipeline.
 
@@ -751,13 +664,9 @@ Analyzing the physical rooflines of each retrieval stage reveals why naive archi
 
 #### Query embedding latency ($T_{\text{embed}}$)
 
-Invoking an external cloud embedding API incurs Round-Trip Time (RTT) over the WAN, HTTP header serialization, and remote queueing delay:
+Invoking an external cloud embedding API incurs Round-Trip Time (RTT) over the WAN, HTTP header serialization, and remote queueing delay: $T_{\text{embed, remote}} = 2 \cdot \text{RTT} + T_{\text{TLS}} + T_{\text{queue}} + T_{\text{compute}} \approx 2(40\text{ ms}) + 20\text{ ms} + 150\text{ ms} + 50\text{ ms} = 300\text{ ms}$.
 
-$$T_{\text{embed, remote}} = 2 \cdot \text{RTT} + T_{\text{TLS}} + T_{\text{queue}} + T_{\text{compute}} \approx 2(40\text{ ms}) + 20\text{ ms} + 150\text{ ms} + 50\text{ ms} = 300\text{ ms} $$
-
-Conversely, deploying a dedicated local small encoder (e.g., a 110M parameter model such as BGE-Small or MiniLM) on a local GPU or CPU host running TensorRT yields:
-
-$$T_{\text{embed, local}} = \frac{2 \cdot N_{\text{tokens}} \cdot P_{\text{embed}}}{P_{\text{peak\_flops}}} \approx \frac{2 \cdot 64 \cdot 1.1 \times 10^8}{5 \times 10^{12}\text{ FLOPS}} \approx 0.0028\text{ s} = 2.8\text{ ms} $$
+Conversely, deploying a dedicated local small encoder (e.g., a 110M parameter model such as BGE-Small or MiniLM) on a local GPU or CPU host running TensorRT yields $T_{\text{embed, local}} = (2 \cdot N_{\text{tokens}} \cdot P_{\text{embed}}) / P_{\text{peak\_flops}} \approx (2 \cdot 64 \cdot 1.1 \times 10^8) / (5 \times 10^{12}\text{ FLOPS}) \approx 0.0028\text{ s} = 2.8\text{ ms}$.
 
 Local embedding generation achieves a **$100\times$ latency reduction**, transforming an SLA-breaking bottleneck into a negligible fraction of the turn budget.
 
@@ -768,35 +677,13 @@ In an IVF-PQ architecture with ADC, index search consists of two phases:
 - Precomputing the distance lookup table $\mathcal{D}$: $256 \cdot D$ arithmetic operations ($\approx 0.05\text{ ms}$).
 - Scanning candidate postings lists: Streaming $N_{\text{cand}} = \frac{n_{\text{probe}} N}{K_{\text{ivf}}}$ quantized records of $M$ bytes each across memory buses.
 
-The scan latency is strictly memory-bandwidth bound:
-
-$$T_{\text{scan}} = \frac{N_{\text{cand}} \cdot M}{B_{\text{mem}}} $$
-
-For an episodic store of $N = 10^7$ memories with $K_{\text{ivf}} = 4096$, $n_{\text{probe}} = 32$, and $M = 64$:
-
-$$N_{\text{cand}} = \frac{32 \times 10^7}{4096} \approx 78,125 \text{ vectors} $$
-
-$$\text{Data Volume} = 78,125 \times 64\text{ bytes} \approx 5.0\text{ MB} $$
-
-On host DRAM with $B_{\text{mem}} = 100\text{ GB/s}$:
-
-$$T_{\text{scan}} = \frac{5.0 \times 10^6\text{ bytes}}{10^{11}\text{ bytes/s}} = 0.05\text{ ms} $$
-
-Total vector index search completes in under $0.2\text{ ms}$. Remote vector databases that require JSON-over-HTTP serialization add $200\text{--}400\text{ ms}$ of needless network overhead.
+The scan latency is strictly memory-bandwidth bound: $T_{\text{scan}} = (N_{\text{cand}} \cdot M) / B_{\text{mem}}$. For an episodic store of $N = 10^7$ memories with $K_{\text{ivf}} = 4096$, $n_{\text{probe}} = 32$, and $M = 64$, scanning $N_{\text{cand}} = (32 \times 10^7) / 4096 \approx 78,125\text{ vectors}$ ($\text{Data Volume} = 78,125 \times 64\text{ bytes} \approx 5.0\text{ MB}$) across host DRAM with $B_{\text{mem}} = 100\text{ GB/s}$ yields $T_{\text{scan}} = 5.0 \times 10^6\text{ bytes} / 10^{11}\text{ bytes/s} = 0.05\text{ ms}$. Total vector index search completes in under $0.2\text{ ms}$. Remote vector databases that require JSON-over-HTTP serialization add $200\text{--}400\text{ ms}$ of needless network overhead.
 
 #### Cross-encoder re-ranking vs. reciprocal rank fusion ($T_{\text{rerank}}$)
 
-A common design pitfall is passing the top-100 retrieved candidates into a heavy cross-encoder model for re-ranking. A cross-encoder concatenates the query with each candidate document, computing full self-attention across all tokens:
+A common design pitfall is passing the top-100 retrieved candidates into a heavy cross-encoder model for re-ranking. A cross-encoder concatenates the query with each candidate document, computing full self-attention across all tokens scaling as $\mathcal{O}(K_{\text{cand}} \cdot (L_q + L_d)^2)$. Evaluating 100 candidates of 256 tokens each through a 7B-parameter cross-encoder requires tens of trillions of FLOPs, imposing a 400 to 600 ms latency penalty.
 
-$$\mathcal{O}(K_{\text{cand}} \cdot (L_q + L_d)^2) $$
-
-Evaluating 100 candidates of 256 tokens each through a 7B-parameter cross-encoder requires tens of trillions of FLOPs, imposing a 400 to 600 ms latency penalty.
-
-Production architectures replace neural cross-encoders with **Reciprocal Rank Fusion (RRF)**\index{Reciprocal Rank Fusion}, an algorithmic scoring function that fuses ranked candidate lists from disparate retrieval modalities (e.g., dense vector search and sparse BM25) without forward-pass computation:
-
-$$\text{RRF\_Score}(d) = \sum_{m \in \mathcal{M}} \frac{1}{k_0 + r_m(d)} $$
-
-where $\mathcal{M} = \{\text{dense}, \text{sparse}, \text{graph}\}$, $r_m(d)$ is the 1-based rank of document $d$ in retrieval modality $m$, and $k_0 \approx 60$ is a smoothing constant that bounds the influence of outlier top ranks.
+Production architectures replace neural cross-encoders with **Reciprocal Rank Fusion (RRF)**\index{Reciprocal Rank Fusion}, an algorithmic scoring function that fuses ranked candidate lists from disparate retrieval modalities (e.g., dense vector search and sparse BM25) without forward-pass computation: $\text{RRF\_Score}(d) = \sum_{m \in \mathcal{M}} \frac{1}{k_0 + r_m(d)}$, where $\mathcal{M} = \{\text{dense}, \text{sparse}, \text{graph}\}$, $r_m(d)$ is the 1-based rank of document $d$ in retrieval modality $m$, and $k_0 \approx 60$ is a smoothing constant that bounds the influence of outlier top ranks.
 
 For example, a candidate retrieved at rank 1 by BM25 ($r=1$) and rank 4 by dense vector search ($r=4$) achieves an aggregated score of $\frac{1}{60 + 1} + \frac{1}{60 + 4} \approx 0.01639 + 0.01562 = 0.03201$, outscoring a candidate ranked 2nd in dense search ($r=2$) but absent from keyword results ($\frac{1}{60 + 2} \approx 0.01613$). Evaluating RRF across 500 candidates executes in less than $0.5\text{ ms}$ on a single CPU core, eliminating neural cross-encoder latency entirely.
 
@@ -815,13 +702,7 @@ To understand why this marginal compute expands as $(2 L_{\text{base}} K + K^2)$
 
 Each token-token pair evaluates $2 \cdot d_{\text{model}}$ FLOPs per layer (one multiply-accumulate for $Q K^T$ attention scores, and one for multiplying scores by $V$). Summing over $n_{\text{layers}}$ layers yields the exact formula.
 
-For a 70B parameter model ($n_{\text{layers}} = 80, d_{\text{model}} = 8192$) with a baseline prompt of $L_{\text{base}} = 16,384$ tokens, injecting $K = 8,192$ retrieved memory tokens increases prefill operations by:
-
-$$\Delta \text{FLOPs} = 2 \times 80 \times 8192 \times (2(16384)(8192) + (8192)^2) \approx 1.31 \times 10^6 \times 3.35 \times 10^8 \approx 4.4 \times 10^{14}\text{ FLOPs} $$
-
-On an accelerator delivering $P_{\text{peak}} = 1000\text{ TFLOPS}$ sustained prefill throughput, this injects an additional:
-
-$$\Delta T_{\text{prefill}} = \frac{4.4 \times 10^{14}}{10^{15}} = 440\text{ ms} $$
+For a 70B parameter model ($n_{\text{layers}} = 80, d_{\text{model}} = 8192$) with a baseline prompt of $L_{\text{base}} = 16,384$ tokens, injecting $K = 8,192$ retrieved memory tokens increases prefill operations by $\Delta \text{FLOPs} = 2 \times 80 \times 8192 \times (2(16384)(8192) + (8192)^2) \approx 4.4 \times 10^{14}\text{ FLOPs}$. On an accelerator delivering $P_{\text{peak}} = 1000\text{ TFLOPS}$ sustained prefill throughput, this injects an additional latency penalty of $\Delta T_{\text{prefill}} = (4.4 \times 10^{14}) / 10^{15} = 440\text{ ms}$.
 
 Injecting 8k tokens of retrieved memory consumes nearly half a second of GPU prefill time, independent of retrieval database speed. Memory systems must practice **Strict Knapsack Packing**: every injected token must justify its prefill latency cost through high relevance density ($p_v^* / \text{cost}(v)$).
 
@@ -848,9 +729,7 @@ With frontier foundation models expanding supported context windows beyond one m
 This intuition collapses when evaluated against the physical mechanics of accelerator hardware:
 
 1. **Quadratic Prefill Compute and TTFT:** Ingesting a prompt requires computing full self-attention across the entire sequence length $L$. Prefill compute scales quadratically: $\mathcal{O}(L^2 \cdot d_{\text{model}})$. Ingesting a 1,000,000-token prompt requires over $10^{14}$ floating-point operations before the stochastic processor emits its initial action token. In interactive systems, this imposes a Time-to-First-Token (TTFT) penalty of 15 to 30 seconds, paralyzing closed-loop tool actuation.
-2. **High-Bandwidth Memory Saturation:** Key-Value (KV) cache storage scales linearly with sequence length $L$. For a representative 70-billion-parameter model ($n_{\text{layers}} = 80, d_{\text{model}} = 8192$) with Grouped-Query Attention (GQA, 8:1 query-to-KV head ratio) in FP16 precision, storing the KV cache for $L = 10^6$ tokens requires:
-   $$M_{\text{KV}} = 2 \times 2 \times 80 \times \left(\frac{8192}{8}\right) \times 10^6 \approx 3.28 \times 10^{11}\text{ bytes} \approx 328\text{ GB} $$
-   A single agent trajectory consumes more than four 80 GB NVIDIA H100 GPUs solely to hold its KV cache. Concurrency collapses to zero; no other agent session can run on the node.
+2. **High-Bandwidth Memory Saturation:** Key-Value (KV) cache storage scales linearly with sequence length $L$. For a representative 70-billion-parameter model ($n_{\text{layers}} = 80, d_{\text{model}} = 8192$) with Grouped-Query Attention (GQA, 8:1 query-to-KV head ratio) in FP16 precision, storing the KV cache for $L = 10^6$ tokens requires $M_{\text{KV}} = 2 \times 2 \times 80 \times (8192 / 8) \times 10^6 \approx 3.28 \times 10^{11}\text{ bytes} \approx 328\text{ GB}$. A single agent trajectory consumes more than four 80 GB NVIDIA H100 GPUs solely to hold its KV cache. Concurrency collapses to zero; no other agent session can run on the node.
 3. **Attention Dispersion and "Lost in the Middle":** Transformer attention weights are not uniformly distributed across a million tokens. Empirical studies consistently demonstrate that retrieval fidelity follows a U-shaped curve [@liu2024lost]: facts located in the middle third of expansive contexts suffer from severe recall degradation compared to tokens located at the extreme prefix or suffix.
 4. **Economic Compounding:** In an iterative 40-turn trajectory, evaluating an uncompacted 1M-token prompt across every step bills 40 million cumulative prompt tokens for a single task—imposing an unsustainable financial cost.
 

@@ -59,13 +59,7 @@ The engineering post-mortem revealed that of the 112,000 compiler log tokens ing
 
 Every token appended to an agent's context trajectory imposes a dual hardware penalty on modern accelerator hardware: quadratic arithmetic scaling during the prompt prefill phase, and linear capacity and bandwidth exhaustion during the autoregressive decode phase (@dao2022; @pope2023efficiently).
 
-Consider a standard multi-head autoregressive transformer with $L$ layers, model dimension $d_{\text{model}}$, query/key head dimension $d_h$, $H_Q$ query heads, and $H_{\text{KV}}$ key-value heads. During prompt prefill, the model ingests a sequence of length $N$ in parallel. Computing the dense self-attention matrix requires projecting inputs into queries $\mathbf{Q} \in \mathbb{R}^{N \times (H_Q d_h)}$, keys $\mathbf{K} \in \mathbb{R}^{N \times (H_{\text{KV}} d_h)}$, and values $\mathbf{V} \in \mathbb{R}^{N \times (H_{\text{KV}} d_h)}$, followed by the batched matrix multiplication:
-
-$$
-\mathbf{A} = \text{Softmax}\left( \frac{\mathbf{Q} \mathbf{K}^\top}{\sqrt{d_h}} + \mathbf{M} \right) \mathbf{V},
-$$
-
-where $\mathbf{M} \in \mathbb{R}^{N \times N}$ is the causal attention mask. For each layer $\ell \in \{1, \ldots, L\}$, evaluating the inner product $\mathbf{Q} \mathbf{K}^\top$ requires $2 N^2 H_Q d_h = 2 N^2 d_{\text{model}}$ floating-point operations (FLOPs), and multiplying the resulting attention weights by $\mathbf{V}$ requires another $2 N^2 d_{\text{model}}$ FLOPs. Because causal masking zeroes out the upper triangle ($j > i$), only half of the pairwise interactions are computed, reducing causal attention operations to approximately $2 N^2 d_{\text{model}}$ FLOPs per layer.
+Consider a standard multi-head autoregressive transformer with $L$ layers, model dimension $d_{\text{model}}$, query/key head dimension $d_h$, $H_Q$ query heads, and $H_{\text{KV}}$ key-value heads. During prompt prefill, the model ingests a sequence of length $N$ in parallel. Computing dense self-attention projects inputs into queries $\mathbf{Q} \in \mathbb{R}^{N \times (H_Q d_h)}$, keys $\mathbf{K} \in \mathbb{R}^{N \times (H_{\text{KV}} d_h)}$, and values $\mathbf{V} \in \mathbb{R}^{N \times (H_{\text{KV}} d_h)}$, computing $\mathbf{A} = \text{Softmax}(\mathbf{Q} \mathbf{K}^\top / \sqrt{d_h} + \mathbf{M}) \mathbf{V}$ where $\mathbf{M} \in \mathbb{R}^{N \times N}$ is the causal attention mask. For each layer $\ell \in \{1, \ldots, L\}$, evaluating the inner product $\mathbf{Q} \mathbf{K}^\top$ requires $2 N^2 H_Q d_h = 2 N^2 d_{\text{model}}$ floating-point operations (FLOPs), and multiplying the resulting attention weights by $\mathbf{V}$ requires another $2 N^2 d_{\text{model}}$ FLOPs. Because causal masking zeroes out the upper triangle ($j > i$), only half of the pairwise interactions are computed, reducing causal attention operations to approximately $2 N^2 d_{\text{model}}$ FLOPs per layer.
 
 Across all $L$ layers, along with the linear feed-forward network (FFN) projections with intermediate hidden dimension $d_{\text{ff}}$, the total computational volume for prefilling a prompt of $N$ tokens is:
 
@@ -75,15 +69,7 @@ $$ {#eq-autoregressive-prefill-flops}
 
 In @eq-autoregressive-prefill-flops, the first term scales linearly with sequence length $N$ and represents the projection matrices ($\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V, \mathbf{W}_O$) and the feed-forward block ($\mathbf{W}_1, \mathbf{W}_2, \mathbf{W}_3$). The second term, $2 L N^2 d_{\text{model}}$, scales quadratically with $N$ and represents the causal attention score computation.[^fn-workingsets-prefill-flops]
 
-**The attention crossover point napkin math:** Comparing the linear and quadratic terms in @eq-autoregressive-prefill-flops reveals the exact sequence length where attention compute overtakes linear projections:
-$$
-2 L N^2 d_{\text{model}} \approx 4 L N d_{\text{model}} (2 d_{\text{model}} + d_{\text{ff}}) \implies N_{\text{crossover}} \approx 2 (2 d_{\text{model}} + d_{\text{ff}}).
-$$
-For a 70B parameter model ($d_{\text{model}} = 8{,}192, d_{\text{ff}} = 28{,}672$):
-$$
-N_{\text{crossover}} \approx 2 \cdot (2 \cdot 8{,}192 + 28{,}672) = 2 \cdot (16{,}384 + 28{,}672) = 90{,}112\text{ tokens}.
-$$
-Below 90k tokens, matrix projections and FFN layers consume the majority of prefill FLOPs. Above 90k tokens, the quadratic pairwise attention matrix sweeps past all linear projections. While memory-efficient attention algorithms such as FlashAttention-2 (@dao2023flashattention2) eliminate the materialization of the $N \times N$ attention matrix in HBM by tiling the computation across on-chip SRAM, they do not reduce the underlying arithmetic operation count. The physical execution time of prefill remains fundamentally quadratic in $N$: $T_{\text{prefill}}(N) \approx F_{\text{prefill}}(N) / (P_{\text{peak}} \cdot \eta_{\text{compute}})$, where $P_{\text{peak}}$ is the peak dense tensor throughput of the accelerator (e.g., $989 \times 10^{12}\text{ FLOPs/s}$ in 16-bit precision for an NVIDIA H100 SXM5) and $\eta_{\text{compute}} \in [0.45, 0.65]$ is the realized hardware compute efficiency. For an agent ingesting a 128k-token trajectory on a dual-H100 node with a 70B model, prefill compute demands over $3.8 \times 10^{16}$ FLOPs, imposing a multi-second pause before the agent can emit its first reasoning token.
+**The attention crossover point napkin math:** Comparing the linear and quadratic terms in @eq-autoregressive-prefill-flops reveals the exact sequence length where attention compute overtakes linear projections: $2 L N^2 d_{\text{model}} \approx 4 L N d_{\text{model}} (2 d_{\text{model}} + d_{\text{ff}}) \implies N_{\text{crossover}} \approx 2 (2 d_{\text{model}} + d_{\text{ff}})$. For a 70B parameter model ($d_{\text{model}} = 8{,}192, d_{\text{ff}} = 28{,}672$), this evaluates to $N_{\text{crossover}} \approx 2 \cdot (2 \cdot 8{,}192 + 28{,}672) = 90{,}112\text{ tokens}$. Below 90k tokens, matrix projections and FFN layers consume the majority of prefill FLOPs. Above 90k tokens, the quadratic pairwise attention matrix sweeps past all linear projections. While memory-efficient attention algorithms such as FlashAttention-2 (@dao2023flashattention2) eliminate the materialization of the $N \times N$ attention matrix in HBM by tiling the computation across on-chip SRAM, they do not reduce the underlying arithmetic operation count. The physical execution time of prefill remains fundamentally quadratic in $N$: $T_{\text{prefill}}(N) \approx F_{\text{prefill}}(N) / (P_{\text{peak}} \cdot \eta_{\text{compute}})$, where $P_{\text{peak}}$ is the peak dense tensor throughput of the accelerator (e.g., $989 \times 10^{12}\text{ FLOPs/s}$ in 16-bit precision for an NVIDIA H100 SXM5) and $\eta_{\text{compute}} \in [0.45, 0.65]$ is the realized hardware compute efficiency. For an agent ingesting a 128k-token trajectory on a dual-H100 node with a 70B model, prefill compute demands over $3.8 \times 10^{16}$ FLOPs, imposing a multi-second pause before the agent can emit its first reasoning token.
 
 @Tbl-vol3-workingsets-regimes contrasts the execution physics between prompt prefill and autoregressive token decode.
 
@@ -116,19 +102,7 @@ where:
 - **$N$** is the active sequence context length in tokens.
 - **$b_{\text{elem}}$** is the byte width per element ($b_{\text{elem}} = 2$ for FP16/BF16, $b_{\text{elem}} = 1$ for FP8).
 
-**First-principles KV cache napkin math:** Consider a representative frontier agent policy: Llama-3-70B, which uses Grouped-Query Attention (GQA, @ainslie2023gqa) with $L = 80$, $H_Q = 64$, $H_{\text{KV}} = 8$, $d_h = 128$, and BF16 precision ($b_{\text{elem}} = 2$). Evaluating @eq-kv-cache-footprint for a single token ($B=1, N=1$) yields:
-$$
-M_{\text{KV, token}} = 2 \times 80\text{ layers} \times 8\text{ KV heads} \times 128\text{ dims} \times 2\text{ bytes} = 327{,}680\text{ bytes} \approx 320\text{ KB/token}.
-$$
-At a context length of $N = 131{,}072$ tokens (128k), a single resident stream consumes:
-$$
-M_{\text{KV}}(1, 128\text{k}) = 131{,}072 \times 320\text{ KB} \approx 42.95\text{ GB}.
-$$
-Because the 70B model weights in 16-bit precision occupy approximately 140 GB, serving this model requires at least two 80 GB GPUs (160 GB total HBM). A single 128k agent stream consumes over 53 percent of the remaining free memory across both GPUs. If four concurrent agent tasks are executed in parallel ($B=4$), aggregate KV cache demand reaches:
-$$
-M_{\text{KV}}(4, 128\text{k}) = 4 \times 42.95\text{ GB} = 171.8\text{ GB},
-$$
-exceeding physical accelerator capacity and triggering catastrophic out-of-memory aborts (@kwon2023vllm).
+**First-principles KV cache napkin math:** Consider a representative frontier agent policy: Llama-3-70B, which uses Grouped-Query Attention (GQA, @ainslie2023gqa) with $L = 80$, $H_Q = 64$, $H_{\text{KV}} = 8$, $d_h = 128$, and BF16 precision ($b_{\text{elem}} = 2$). Evaluating @eq-kv-cache-footprint for a single token ($B=1, N=1$) yields $M_{\text{KV, token}} = 2 \times 80\text{ layers} \times 8\text{ KV heads} \times 128\text{ dims} \times 2\text{ bytes} = 327{,}680\text{ bytes} \approx 320\text{ KB/token}$. At a context length of $N = 131{,}072$ tokens (128k), a single resident stream consumes $M_{\text{KV}}(1, 128\text{k}) = 131{,}072 \times 320\text{ KB} \approx 42.95\text{ GB}$. Because the 70B model weights in 16-bit precision occupy approximately 140 GB, serving this model requires at least two 80 GB GPUs (160 GB total HBM). A single 128k agent stream consumes over 53 percent of the remaining free memory across both GPUs. If four concurrent agent tasks are executed in parallel ($B=4$), aggregate KV cache demand reaches $M_{\text{KV}}(4, 128\text{k}) = 4 \times 42.95\text{ GB} = 171.8\text{ GB}$, exceeding physical accelerator capacity and triggering catastrophic out-of-memory aborts (@kwon2023vllm).
 
 [^fn-workingsets-prefill-flops]: In standard transformer blocks, linear projections require $8 L N d_{\text{model}}^2$ FLOPs for attention ($\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V, \mathbf{W}_O$) and $4 L N d_{\text{model}} d_{\text{ff}}$ FLOPs for SwiGLU FFN layers. Causal self-attention contributes $2 L N^2 d_{\text{model}}$ FLOPs when upper-triangular masking is exploited by tiled kernels. For complete derivation of tensor operation counts, see `vol3/backmatter/appendix_math.qmd`.
 
@@ -141,10 +115,10 @@ Beyond physical capacity exhaustion, linear KV cache expansion degrades decoding
 Generating a single token requires streaming the entire model weight tensor $M_{\text{weights}}$ and the entire resident KV cache $M_{\text{KV}}(N)$ from accelerator HBM into on-chip SRAM registers. The arithmetic intensity $\mathcal{I}_{\text{decode}}$ of this operation—defined as the ratio of floating-point operations executed to bytes transferred across the memory bus—is governed by @eq-decode-arithmetic-intensity:
 
 $$
-\mathcal{I}_{\text{decode}}(N) = \frac{F_{\text{decode}}(N)}{B_{\text{decode}}(N)}
+\mathcal{I}_{\text{decode}}(N) = \frac{2 P}{M_{\text{weights}} + M_{\text{KV}}(N)}
 $$ {#eq-decode-arithmetic-intensity}
 
-where $F_{\text{decode}}(N)$ is the per-step decode FLOPs and $B_{\text{decode}}(N)$ is the total bytes transferred across the memory bus.[^fn-workingsets-decode-intensity] For a batch size of 1 with 16-bit weights ($b_{\text{elem}} = 2$), because parameter weights dominate computation ($P \gg 2 L H_Q d_h N$), @eq-decode-arithmetic-intensity collapses to $\mathcal{I}_{\text{decode}} \approx 2 / b_{\text{elem}} \approx 1\text{ FLOP/Byte}$.
+where $P$ is the model parameter count and $M_{\text{weights}} + M_{\text{KV}}(N)$ is the total byte volume transferred across the memory bus.[^fn-workingsets-decode-intensity] For a batch size of 1 with 16-bit weights ($b_{\text{elem}} = 2$), because parameter weights dominate computation ($P \gg 2 L H_Q d_h N$), @eq-decode-arithmetic-intensity collapses to $\mathcal{I}_{\text{decode}} \approx 2 / b_{\text{elem}} \approx 1\text{ FLOP/Byte}$.
 
 On an NVIDIA H100 SXM5 accelerator with a peak memory bandwidth of $B_{\text{mem}} = 3.35\text{ TB/s}$, the maximum sustainable floating-point throughput at an arithmetic intensity of $1\text{ FLOP/Byte}$ is exactly $3.35\text{ TFLOP/s}$—less than 0.35 percent of the accelerator's $989\text{ TFLOP/s}$ peak compute capability. Autoregressive decoding is unconditionally bound by memory bandwidth.
 
@@ -156,12 +130,9 @@ $$ {#eq-decode-latency-bandwidth}
 
 **First-principles streaming latency napkin math:** For Llama-3-70B in 16-bit precision, model weights occupy $M_{\text{weights}} \approx 140\text{ GB}$. Because 140 GB exceeds the 80 GB physical capacity of a single H100 GPU, production serving deploys Tensor Parallelism across a dual-GPU node ($TP=2$), providing $160\text{ GB}$ of aggregate HBM3 and $B_{\text{node}} = 2 \times 3{,}350\text{ GB/s} = 6{,}700\text{ GB/s}$ of aggregate memory bandwidth:
 
-- **Short context ($N \approx 0, M_{\text{KV}} \approx 0$):**
-  $$T_{\text{decode}} \approx \frac{140\text{ GB}}{6{,}700\text{ GB/s}} \approx 20.9\text{ ms/token} \implies \text{Throughput} \approx 47.8\text{ tokens/s}.$$
-- **128k context ($M_{\text{KV}} \approx 43\text{ GB}$ across node):** Total data streamed per token is $140 + 43 = 183\text{ GB}$.
-  $$T_{\text{decode}} \approx \frac{183\text{ GB}}{6{,}700\text{ GB/s}} \approx 27.3\text{ ms/token} \implies \text{Throughput} \approx 36.6\text{ tokens/s} \quad (\text{23\% slowdown}).$$
-- **500k context ($M_{\text{KV}} \approx 168\text{ GB} > M_{\text{weights}}$):** Total data streamed across node is $140 + 168 = 308\text{ GB}$.
-  $$T_{\text{decode}} \approx \frac{308\text{ GB}}{6{,}700\text{ GB/s}} \approx 46.0\text{ ms/token} \implies \text{Throughput} \approx 21.7\text{ tokens/s} \quad (\text{54\% slowdown}).$$
+- **Short context ($N \approx 0, M_{\text{KV}} \approx 0$):** $T_{\text{decode}} \approx \frac{140\text{ GB}}{6{,}700\text{ GB/s}} \approx 20.9\text{ ms/token}$, yielding an interactive throughput of approximately $47.8\text{ tokens/s}$.
+- **128k context ($M_{\text{KV}} \approx 43\text{ GB}$ across node):** Total data streamed per token is $140 + 43 = 183\text{ GB}$, yielding $T_{\text{decode}} \approx \frac{183\text{ GB}}{6{,}700\text{ GB/s}} \approx 27.3\text{ ms/token}$ ($\approx 36.6\text{ tokens/s}$, a 23 percent slowdown).
+- **500k context ($M_{\text{KV}} \approx 168\text{ GB} > M_{\text{weights}}$):** Total data streamed across the node is $140 + 168 = 308\text{ GB}$, yielding $T_{\text{decode}} \approx \frac{308\text{ GB}}{6{,}700\text{ GB/s}} \approx 46.0\text{ ms/token}$ ($\approx 21.7\text{ tokens/s}$, a 54 percent slowdown).
 
 When context length grows past 400k tokens, the KV cache literally outweighs the model weights on the memory bus! In multi-tenant environments, every unpruned token in an agent's history directly steals memory bus cycles from all co-scheduled inference streams.
 
@@ -276,10 +247,8 @@ The intuition behind @eq-effective-context-utilization is direct:
 
 **First-principles softmax dispersion napkin math:** Why does long context trigger attention collapse? Consider a needle fact whose attention logit is $z_{\text{target}} = 6$ ($e^6 \approx 403.4$), competing against irrelevant background tokens each having a lower logit $z_{\text{bg}} = -2$ ($e^{-2} \approx 0.135$):
 
-- **In a compact 100-token prompt ($N = 100$):** The 100 background tokens contribute $100 \times 0.135 = 13.5$ to the softmax denominator. The target captures:
-  $$\alpha_{\text{target}} = \frac{403.4}{403.4 + 13.5} = \frac{403.4}{416.9} \approx 96.8\%\text{ of total attention mass}.$$
-- **In an unmanaged 100,000-token prompt ($N = 100{,}000$):** Even though every background token is 8 logit units below the target, 100,000 background tokens contribute $100{,}000 \times 0.135 = 13{,}500$ to the denominator! The target's attention share collapses to:
-  $$\alpha_{\text{target}} = \frac{403.4}{403.4 + 13{,}500} = \frac{403.4}{13{,}903.4} \approx 2.9\%\text{ of total attention mass}.$$
+- **In a compact 100-token prompt ($N = 100$):** The 100 background tokens contribute $100 \times 0.135 = 13.5$ to the softmax denominator. The target captures $\alpha_{\text{target}} = \frac{403.4}{403.4 + 13.5} = \frac{403.4}{416.9} \approx 96.8\text{ percent}$ of total attention mass.
+- **In an unmanaged 100,000-token prompt ($N = 100{,}000$):** Even though every background token is 8 logit units below the target, 100,000 background tokens contribute $100{,}000 \times 0.135 = 13{,}500$ to the denominator. The target's attention share collapses to $\alpha_{\text{target}} = \frac{403.4}{403.4 + 13{,}500} = \frac{403.4}{13{,}903.4} \approx 2.9\text{ percent}$ of total attention mass.
 
 By merely accumulating 100,000 background tokens, the target's relative attention probability is slashed by a factor of 33, falling well below the threshold required to activate downstream feed-forward circuits.
 
@@ -293,9 +262,9 @@ This attention dilution is not distributed uniformly across the context sequence
 
 When target facts are placed at varying relative depths within a prompt, retrieval performance follows a pronounced **U-shaped curve**:
 
-1. **Extreme Prefix (0 to 10 percent depth):** Models achieve near-perfect retrieval accuracy ($>95\%$). Tokens at the beginning of the prompt benefit from early positional indices and serve as primary semantic anchors.
-2. **Extreme Suffix (90 to 100 percent depth):** Models achieve high retrieval accuracy ($>90\%$). Recent tokens benefit from immediate proximity to the generating query position.
-3. **The Middle Distance (20 to 80 percent depth):** Retrieval accuracy drops dramatically, frequently falling below $30\%$—even when the total context length is well within the model's nominal architectural limit.
+1. **Extreme Prefix (0 to 10 percent depth):** Models achieve near-perfect retrieval accuracy (over 95 percent). Tokens at the beginning of the prompt benefit from early positional indices and serve as primary semantic anchors.
+2. **Extreme Suffix (90 to 100 percent depth):** Models achieve high retrieval accuracy (over 90 percent). Recent tokens benefit from immediate proximity to the generating query position.
+3. **The Middle Distance (20 to 80 percent depth):** Retrieval accuracy drops dramatically, frequently falling below 30 percent—even when the total context length is well within the model's nominal architectural limit.
 
 @Tbl-vol3-workingsets-lost-in-middle summarizes the empirical retrieval accuracy and attention allocation across context depth intervals.
 
@@ -353,9 +322,9 @@ In many transformer layers, specific attention heads perform operations where no
 
 During pretraining, language models resolve this architectural constraint by designating the initial tokens of the sequence ($t \in \{0, 1, 2, 3\}$) as a dedicated **attention sink**—functioning as an electrical ground that absorbs surplus probability mass (@xiao2024streamingllm). Because the initial tokens (e.g., `<s>`, system prompt delimiters) appear in every training example and are followed by hundreds of context tokens, the optimizer learns to adjust their Key projections to provide stable, non-interfering targets for surplus attention. In a typical generation step with query $\mathbf{q}_t$:
 
-* **Positions $0 \le i \le 3$ (Initial Sinks):** Absorb $50\%$ to $80\%$ of total probability mass, serving as an electrical ground for heads performing no-op or purely local transformations.
-* **Positions $4 \le i \le t - W$ (Middle Context):** Receive dispersed residual attention (typically $<10\%$ aggregate probability mass) unless matched by an exact keyword or key-value retrieval.
-* **Positions $t - W \le i \le t$ (Recent Window):** Absorb the remaining $20\%$ to $40\%$ of probability mass, driving active local syntax and immediate token-to-token transition logic.
+* **Positions $0 \le i \le 3$ (Initial Sinks):** Absorb 50 to 80 percent of total probability mass, serving as an electrical ground for heads performing no-op or purely local transformations.
+* **Positions $4 \le i \le t - W$ (Middle Context):** Receive dispersed residual attention (typically less than 10 percent aggregate probability mass) unless matched by an exact keyword or key-value retrieval.
+* **Positions $t - W \le i \le t$ (Recent Window):** Absorb the remaining 20 to 40 percent of probability mass, driving active local syntax and immediate token-to-token transition logic.
 
 Even when the semantic query has zero informational connection to the beginning of the prompt, downstream heads reliably dump 50 to 80 percent of their attention mass onto positions $0 \le i \le 3$.
 
@@ -365,13 +334,7 @@ If an eviction algorithm naively purges these initial tokens from the KV cache:
 2. The surplus probability mass is violently and arbitrarily redistributed across the remaining tokens in the sliding window.
 3. Attention heads that were effectively "turned off" by dumping mass into the sink suddenly amplify arbitrary historical tokens, injecting massive variance into the residual stream and destroying model perplexity.
 
-@xiao2024streamingllm demonstrated that retaining as few as **four initial sink tokens** ($S = 4$) alongside a rolling window of recent tokens ($W = 1{,}024$) completely stabilizes the softmax denominator:
-
-$$
-\mathcal{K}_{\text{StreamingLLM}} = \{0, 1, 2, 3\} \cup \{t - W + 1, \ldots, t\}.
-$$
-
-With this partition, language models can stream over millions of tokens with stable perplexity and constant $O(S + W)$ memory footprint.
+@xiao2024streamingllm demonstrated that retaining as few as **four initial sink tokens** ($S = 4$) alongside a rolling window of recent tokens ($W = 1{,}024$) completely stabilizes the softmax denominator: $\mathcal{K}_{\text{StreamingLLM}} = \{0, 1, 2, 3\} \cup \{t - W + 1, \ldots, t\}$. With this partition, language models can stream over millions of tokens with stable perplexity and constant $O(S + W)$ memory footprint.
 
 **StreamingLLM memory bounds napkin math:** On Llama-3-70B ($320\text{ KB/token}$ in BF16), pinning $S=4$ sink tokens alongside a sliding window of $W=1{,}024$ tokens bounds the active KV cache to $(4 + 1{,}024) \times 320\text{ KB} \approx 329\text{ MB}$ per stream. Even if an agent generates $1{,}000{,}000$ tokens, memory consumption remains strictly locked at $329\text{ MB}$ instead of exploding to $320\text{ GB}$—a $970\times$ reduction in physical HBM footprint.
 
@@ -489,15 +452,7 @@ With the advent of deliberate reasoning models (such as DeepSeek-R1, OpenAI o1, 
 
 Treating these in-flight deliberative tokens as permanent trajectory state is an architectural defect. Reasoning tokens represent **ephemeral registers**: scratchpad calculations whose operational utility expires the instant a verified tool action is produced.
 
-**Deliberative reasoning bloat napkin math:** An agent powered by a reasoning model often emits an average of $6{,}000$ scratchpad tokens before issuing each tool call. Across a 30-turn debugging trajectory, if intermediate thoughts are naively retained in context:
-$$
-\text{Total scratchpad bloat} = 30\text{ turns} \times 6{,}000\text{ tokens/turn} = 180{,}000\text{ tokens}.
-$$
-On a 70B model with GQA ($320\text{ KB/token}$ in BF16), holding these $180{,}000$ inert scratchpad tokens consumes:
-$$
-M_{\text{KV}} = 180{,}000 \times 320\text{ KB} \approx 57.6\text{ GB of HBM},
-$$
-and adds over $57.6\text{ GB}$ of memory-bus streaming overhead to every subsequent generated token!
+**Deliberative reasoning bloat napkin math:** An agent powered by a reasoning model often emits an average of $6{,}000$ scratchpad tokens before issuing each tool call. Across a 30-turn debugging trajectory, if intermediate thoughts are naively retained in context, total scratchpad bloat reaches $30\text{ turns} \times 6{,}000\text{ tokens/turn} = 180{,}000\text{ tokens}$. On a 70B model with GQA ($320\text{ KB/token}$ in BF16), holding these $180{,}000$ inert scratchpad tokens consumes $M_{\text{KV}} = 180{,}000 \times 320\text{ KB} \approx 57.6\text{ GB of HBM}$, adding over $57.6\text{ GB}$ of memory-bus streaming overhead to every subsequent generated token!
 Under the Two-Phase Commit protocol, the runtime deallocates the scratchpad memory blocks the moment the tool action executes, preserving only the canonical action and its observation ($30 \times 100\text{ tokens} = 3{,}000\text{ tokens} \approx 0.96\text{ GB}$). This delivers a **$60\times$ reduction in trajectory memory demand** without sacrificing a single step of deliberative reasoning depth.
 
 To eliminate this bloat, agent runtimes implement a **Two-Phase Commit for Reasoning Context** (@tbl-vol3-workingsets-2pc).
@@ -513,11 +468,8 @@ To eliminate this bloat, agent runtimes implement a **Two-Phase Commit for Reaso
 
 : **Two-Phase Commit Context Protocol**: Memory lifecycle and buffer layout transitions across deliberation and action commit phases. {#tbl-vol3-workingsets-2pc tbl-colwidths="[20, 28, 26, 26]"}
 
-1. **Phase 1: Deliberation (Transient Allocation):** The model samples candidate reasoning tokens $\mathbf{z}_t$ and a candidate tool action $a_t$ into an ephemeral buffer:
-   $$\mathbf{z}_t, a_t \sim \pi_\theta\left( \cdot \;\middle|\; x_0, \tau_{t-1} \right).$$
-   The Key and Value tensors for $\mathbf{z}_t$ are allocated in an ephemeral scratchpad pool.
-2. **Phase 2: Commit (Pruning and State Mutation):** The runtime intercepts action $a_t$, parses its tool arguments, and executes it within an isolated sandbox. Upon receiving verified environment observation $o_t$, the runtime **forcefully purges the ephemeral tokens $\mathbf{z}_t$ from the KV cache**. Only the canonical transition tuple $(a_t, o_t)$ is appended to the persistent trajectory $\tau_t$:
-   $$\tau_t = \tau_{t-1} \circ (a_t, o_t).$$
+1. **Phase 1: Deliberation (Transient Allocation):** The model samples candidate reasoning tokens $\mathbf{z}_t$ and a candidate tool action $a_t$ into an ephemeral buffer: $\mathbf{z}_t, a_t \sim \pi_\theta( \cdot \mid x_0, \tau_{t-1} )$. The Key and Value tensors for $\mathbf{z}_t$ are allocated in an ephemeral scratchpad pool.
+2. **Phase 2: Commit (Pruning and State Mutation):** The runtime intercepts action $a_t$, parses its tool arguments, and executes it within an isolated sandbox. Upon receiving verified environment observation $o_t$, the runtime **forcefully purges the ephemeral tokens $\mathbf{z}_t$ from the KV cache**. Only the canonical transition tuple $(a_t, o_t)$ is appended to the persistent trajectory $\tau_t$: $\tau_t = \tau_{t-1} \circ (a_t, o_t)$.
 
 This two-phase commit protocol eliminates 75 to 90 percent of trajectory token bloat (@fig-vol3-workingsets-two-phase-cot). The model retains full deliberative power during action formulation, while the persistent working set remains lean and free of transient cognitive noise.
 
@@ -533,7 +485,7 @@ In real-world inference systems such as SGLang (@zheng2023sglang) and vLLM (@kwo
 2. **Phase 2 Sandbox Execution:** The client harness parses the emitted tool call, executes it in the containerized sandbox, and collects environment observation $o_t$.
 3. **Turn $t+1$ Prompt Formulation:** When dispatching turn $t+1$, the client **omits the `<thought>` block entirely**, submitting a prompt composed strictly of $\tau_{t-1} \circ (a_t, o_t)$.
 4. **Radix Prefix Hit and Automatic LRU Eviction:**
-   - The serving engine hashes the prompt prefix. Tokens matching $\tau_{t-1}$ hit the resident Radix tree with **$100\%$ cache reuse**, requiring zero prefill FLOPs.
+   - The serving engine hashes the prompt prefix. Tokens matching $\tau_{t-1}$ hit the resident Radix tree with **100 percent cache reuse**, requiring zero prefill FLOPs.
    - The abandoned child branch containing the `<thought>` tokens has its reference count decremented ($C_{\text{ref}} \leftarrow C_{\text{ref}} - 1 = 0$).
    - The engine simply allocates fresh physical pages for the small $(a_t, o_t)$ suffix. When GPU memory pressure occurs, the unreferenced scratchpad pages are automatically evicted by the server's background LRU page allocator.
 
@@ -695,11 +647,7 @@ In multi-head self-attention architectures, individual attention heads are not h
 4. **Attention Sink Heads:** Dedicate over 80 percent of their probability mass to position 0 (`[BOS]`), absorbing surplus softmax mass to allow intermediate layers to compute identity mappings.
 5. **Diffuse / Broadcast Heads:** Exhibit high attention entropy approaching maximum dispersion ($H(h) \to \ln t$). These heads aggregate broad, unweighted sequence averages to provide background context for downstream feed-forward layers.
 
-We characterize this specialization by measuring the mean attention entropy across an evaluation sequence of length $N$:
-
-$$
-H(h) = -\frac{1}{N} \sum_{i=1}^N \sum_{j=1}^i \alpha_{i, j}^h \ln \alpha_{i, j}^h.
-$$
+We characterize this specialization by measuring the mean attention entropy across an evaluation sequence of length $N$: $H(h) = -\frac{1}{N} \sum_{i=1}^N \sum_{j=1}^i \alpha_{i, j}^h \ln \alpha_{i, j}^h$.
 
 Empirical evaluations show that across an 80-layer model, specialized retrieval and induction heads are concentrated primarily in the **middle and deep layers** (layers 25 to 65). In contrast, early layers (layers 1 to 15) are dominated by local positional and diffuse broadcast heads whose activations can be compressed or pruned with negligible impact on task accuracy.
 
@@ -707,23 +655,9 @@ Empirical evaluations show that across an 80-layer model, specialized retrieval 
 
 In standard Multi-Head Attention, every head $h \in \{1, \ldots, H\}$ across all $L$ layers maintains its own dedicated Key and Value cache tensors in HBM. **Structured Head Pruning** identifies and permanently removes redundant, low-utility attention heads, eliminating both their arithmetic computation during prefill and their KV cache footprint during decode.
 
-To identify candidate heads for pruning without expensive combinatorial search, systems employ first-order Taylor expansion sensitivity estimation (@micikevicius2017mixed). Let $\mathcal{L}$ denote the loss over an agent validation dataset $\mathcal{D}$. The importance score $I_h^{(\ell)}$ of attention head $h$ in layer $\ell$ is defined as the absolute change in loss induced by masking that head's output:
+To identify candidate heads for pruning without expensive combinatorial search, systems employ first-order Taylor expansion sensitivity estimation (@micikevicius2017mixed). Let $\mathcal{L}$ denote the loss over an agent validation dataset $\mathcal{D}$. The importance score $I_h^{(\ell)}$ of attention head $h$ in layer $\ell$ is defined as the absolute change in loss induced by masking that head's output: $I_h^{(\ell)} = \left| \sum_{w \in \mathbf{W}_h^{(\ell)}} \frac{\partial \mathcal{L}}{\partial w} \cdot w \right|$, where $\mathbf{W}_h^{(\ell)}$ represents the set of parameters belonging to head $h$ across query, key, value, and output projections ($\mathbf{W}_Q^{h}, \mathbf{W}_K^{h}, \mathbf{W}_V^{h}, \mathbf{W}_O^{h}$). The systems intuition is simple: *if zeroing out a head's parameters causes near-zero change in loss ($I_h^{(\ell)} \approx 0$), that head is computing redundant representations (such as static broadcast or identity copies).* Heads with scores below an empirical threshold $\tau_{\text{prune}}$ are removed: $\mathcal{H}_{\text{active}}^{(\ell)} = \{ h \in \{1, \ldots, H\} \mid I_h^{(\ell)} \ge \tau_{\text{prune}} \}$.
 
-$$
-I_h^{(\ell)} = \left| \sum_{w \in \mathbf{W}_h^{(\ell)}} \frac{\partial \mathcal{L}}{\partial w} \cdot w \right|,
-$$
-
-where $\mathbf{W}_h^{(\ell)}$ represents the set of parameters belonging to head $h$ across query, key, value, and output projections ($\mathbf{W}_Q^{h}, \mathbf{W}_K^{h}, \mathbf{W}_V^{h}, \mathbf{W}_O^{h}$). The systems intuition is simple: *if zeroing out a head's parameters causes near-zero change in loss ($I_h^{(\ell)} \approx 0$), that head is computing redundant representations (such as static broadcast or identity copies).* Heads with scores below an empirical threshold $\tau_{\text{prune}}$ are removed:
-
-$$
-\text{Retained Heads: } \mathcal{H}_{\text{active}}^{(\ell)} = \left\{ h \in \{1, \ldots, H\} \;\middle|\; I_h^{(\ell)} \ge \tau_{\text{prune}} \right\}.
-$$
-
-Unlike unstructured parameter pruning—which creates sparse weight matrices that execute inefficiently on dense GPU tensor cores—structured head pruning removes entire tensor dimensions. Pruning head $h$ eliminates its corresponding Key-Value channel:
-
-$$
-M_{\text{KV, pruned}}(N) = 2 \cdot \sum_{\ell=1}^L |\mathcal{H}_{\text{active}}^{(\ell)}| \cdot d_h \cdot N \cdot b_{\text{elem}}.
-$$
+Unlike unstructured parameter pruning—which creates sparse weight matrices that execute inefficiently on dense GPU tensor cores—structured head pruning removes entire tensor dimensions. Pruning head $h$ eliminates its corresponding Key-Value channel: $M_{\text{KV, pruned}}(N) = 2 \cdot \sum_{\ell=1}^L |\mathcal{H}_{\text{active}}^{(\ell)}| \cdot d_h \cdot N \cdot b_{\text{elem}}$.
 
 By removing 30 to 50 percent of heads—predominantly diffuse broadcast heads in early and terminal layers—the runtime slashes KV cache memory consumption proportionally, directly reducing the bytes that must be streamed across the memory bus on every decode forward pass.
 
@@ -760,17 +694,7 @@ where $b_{\text{elem}}$ is precision bytes per value.[^fn-workingsets-mla-projec
 
 Compared to standard MHA ($2.56\text{ MB/token}$), MLA slashes resident KV cache memory footprint by **$38\times$**, and compared to an $8\times$ GQA architecture ($320\text{ KB/token}$), MLA slashes memory demand by **$4.74\times$**.
 
-**The matrix associativity trick behind MLA:** A common concern is that MLA might require decompressing the latent vectors back into full Key and Value head dimensions in HBM before computing attention, which would re-introduce the memory bus bottleneck. MLA completely avoids this via matrix associativity.
-
-Recall that attention logits require computing $\mathbf{q}_t \mathbf{k}_i^\top$. In MLA, key vectors are generated from the latent representation via up-projection matrix $\mathbf{W}_{UK}$: $\mathbf{k}_i^C = \mathbf{c}_i^{KV} \mathbf{W}_{UK}$. Because matrix multiplication is associative:
-$$
-\mathbf{q}_t (\mathbf{k}_i^C)^\top = \mathbf{q}_t \left( \mathbf{c}_i^{KV} \mathbf{W}_{UK} \right)^\top = \left( \mathbf{q}_t \mathbf{W}_{UK}^\top \right) (\mathbf{c}_i^{KV})^\top.
-$$
-Instead of decompressing all $N$ historical keys in HBM, the inference kernel pre-multiplies the *single active query vector* by $\mathbf{W}_{UK}^\top$ once in fast on-chip SRAM registers:
-$$
-\mathbf{q}_t^{\text{latent}} = \mathbf{q}_t \mathbf{W}_{UK}^\top \in \mathbb{R}^{d_c}.
-$$
-It then evaluates the inner product directly against the cached latent vectors $\mathbf{c}_i^{KV} \in \mathbb{R}^{d_c}$. An identical associative projection applies to the Value projections. As a result, the inference engine never materializes high-dimensional Key or Value states in HBM—streaming only $512$ latent dimensions across the bus instead of thousands!
+**The matrix associativity trick behind MLA:** A common concern is that MLA might require decompressing the latent vectors back into full Key and Value head dimensions in HBM before computing attention, which would re-introduce the memory bus bottleneck. MLA completely avoids this via matrix associativity. Recall that attention logits require computing $\mathbf{q}_t \mathbf{k}_i^\top$. In MLA, key vectors are generated from the latent representation via up-projection matrix $\mathbf{W}_{UK}$: $\mathbf{k}_i^C = \mathbf{c}_i^{KV} \mathbf{W}_{UK}$. Because matrix multiplication is associative: $\mathbf{q}_t (\mathbf{k}_i^C)^\top = \mathbf{q}_t ( \mathbf{c}_i^{KV} \mathbf{W}_{UK} )^\top = ( \mathbf{q}_t \mathbf{W}_{UK}^\top ) (\mathbf{c}_i^{KV})^\top$. Instead of decompressing all $N$ historical keys in HBM, the inference kernel pre-multiplies the *single active query vector* by $\mathbf{W}_{UK}^\top$ once in fast on-chip SRAM registers: $\mathbf{q}_t^{\text{latent}} = \mathbf{q}_t \mathbf{W}_{UK}^\top \in \mathbb{R}^{d_c}$. It then evaluates the inner product directly against the cached latent vectors $\mathbf{c}_i^{KV} \in \mathbb{R}^{d_c}$. An identical associative projection applies to the Value projections. As a result, the inference engine never materializes high-dimensional Key or Value states in HBM—streaming only $512$ latent dimensions across the bus instead of thousands!
 
 Because on-chip tensor core compute is abundant while HBM bus bandwidth is severely constrained, MLA trades cheap SRAM arithmetic for scarce memory bandwidth, achieving substantial throughput and concurrency improvements for long-horizon agent trajectories (@fig-vol3-workingsets-mla-architecture).
 
@@ -801,19 +725,11 @@ Standard Multi-Head Attention languishes at $\mathcal{I}_{\text{MHA}} \approx 0.
 1. **Inter-Token Latency (ITL) Reduction:** When $B \cdot M_{\text{KV}}(N)$ is comparable to or larger than $M_{\text{weights}}$, cutting $M_{\text{KV}}(N)$ by $4.7\times$ (via MLA) directly reduces memory bus streaming time, decreasing per-token latency by up to 50 percent.
 2. **Concurrency Expansion:** The maximum concurrent agent batch size $B_{\max} = \lfloor (C_{\text{HBM}} - M_{\text{weights}}) / M_{\text{KV}}(N) \rfloor$ supported within physical memory capacity $C_{\text{HBM}}$ scales inversely with per-token footprint.
 
-**Serving concurrency napkin math:** Consider an 80 GB NVIDIA H100 accelerator serving a 70B parameter model at 128k context ($N = 131{,}072$).
-In FP8 precision ($b_{\text{elem}} = 1$), model weights occupy $M_{\text{weights}} \approx 70\text{ GB}$. The remaining free memory for KV cache allocation is:
-$$C_{\text{free}} = 80\text{ GB} - 70\text{ GB} = 10\text{ GB}.$$
-- **Under Grouped-Query Attention (GQA, $H_{\text{KV}} = 8, d_h = 128, L = 80$):** A single 128k stream in FP8 demands:
-  $$M_{\text{KV, GQA}} = 2 \times 80 \times 8 \times 128 \times 131{,}072 \times 1\text{ byte} \approx 21.47\text{ GB}.$$
-  Because $21.47\text{ GB} > 10\text{ GB}$, maximum single-GPU concurrency is $B_{\max} = \lfloor 10 / 21.47 \rfloor = 0$. A single 128k agent stream cannot even be launched on the GPU without triggering an out-of-memory fault!
-- **Under Multi-Head Latent Attention (MLA, $d_c = 512, d_h^R = 64, L = 60$):** A single 128k stream in FP8 demands:
-  $$M_{\text{KV, MLA}} = 60 \times (512 + 64) \times 131{,}072 \times 1\text{ byte} \approx 4.53\text{ GB}.$$
-  The maximum concurrency becomes:
-  $$B_{\max} = \lfloor 10 / 4.53 \rfloor = 2\text{ concurrent streams}.$$
-- **Across a dual-GPU node (160 GB total HBM, $90\text{ GB}$ free memory):**
-  $$\text{GQA: } B_{\max} = \lfloor 90 / 21.47 \rfloor = 4\text{ concurrent streams}.$$
-  $$\text{MLA: } B_{\max} = \lfloor 90 / 4.53 \rfloor = 19\text{ concurrent streams!}$$
+**Serving concurrency napkin math:** Consider an 80 GB NVIDIA H100 accelerator serving a 70B parameter model at 128k context ($N = 131{,}072$). In FP8 precision ($b_{\text{elem}} = 1$), model weights occupy $M_{\text{weights}} \approx 70\text{ GB}$. The remaining free memory for KV cache allocation is $C_{\text{free}} = 80\text{ GB} - 70\text{ GB} = 10\text{ GB}$.
+
+- **Under Grouped-Query Attention (GQA, $H_{\text{KV}} = 8, d_h = 128, L = 80$):** A single 128k stream in FP8 demands $M_{\text{KV, GQA}} = 2 \times 80 \times 8 \times 128 \times 131{,}072 \times 1\text{ byte} \approx 21.47\text{ GB}$. Because $21.47\text{ GB} > 10\text{ GB}$, maximum single-GPU concurrency is $B_{\max} = \lfloor 10 / 21.47 \rfloor = 0$. A single 128k agent stream cannot even be launched on the GPU without triggering an out-of-memory fault!
+- **Under Multi-Head Latent Attention (MLA, $d_c = 512, d_h^R = 64, L = 60$):** A single 128k stream in FP8 demands $M_{\text{KV, MLA}} = 60 \times (512 + 64) \times 131{,}072 \times 1\text{ byte} \approx 4.53\text{ GB}$, yielding $B_{\max} = \lfloor 10 / 4.53 \rfloor = 2\text{ concurrent streams}$.
+- **Across a dual-GPU node (160 GB total HBM, $90\text{ GB}$ free memory):** GQA sustains $B_{\max} = \lfloor 90 / 21.47 \rfloor = 4\text{ concurrent streams}$, whereas MLA sustains $B_{\max} = \lfloor 90 / 4.53 \rfloor = 19\text{ concurrent streams}$.
 
 MLA delivers a **$4.75\times$ concurrency multiplier** on identical physical GPU hardware, directly slashing the infrastructure cost per agent stream (@fig-vol3-workingsets-serving-concurrency).
 
