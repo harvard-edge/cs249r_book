@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: OPENING
-# ===========================================================================
 
 
 @app.cell
@@ -33,6 +29,7 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         architecture_memo,
+        big_takeaways,
         build_lab_report,
         capstone_track_profile,
         get_lab_metadata,
@@ -57,6 +54,7 @@ async def _():
         LAB_CSS,
         apply_plotly_theme,
         architecture_memo,
+        big_takeaways,
         build_lab_report,
         capstone_track_profile,
         get_lab_metadata,
@@ -64,16 +62,14 @@ async def _():
         get_track_profile,
         go,
         ledger,
-        mlsysim,
         mo,
         replay_ledger,
         report_export_panel,
         resolve_mlsysim_ref,
         sensitivity_audit,
         source_trace,
-        track_context,
         track_arc_context,
-        track_selector,
+        track_context,
     )
 
 
@@ -84,11 +80,21 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_16_track_picker = track_selector(default=_default_track)
-    v1_16_track_picker
+    _options = {
+        "⚡ TinyML Track (Microcontrollers & Wearables)": "oura_ring",
+        "📱 Mobile Track (On-Device Personal AI)": "iphone",
+        "🤖 Edge & Embodied Track (Robotics & Autonomous Systems)": "robotaxi",
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+    }
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
+    v1_16_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_16_track_picker,)
 
 
@@ -111,14 +117,7 @@ def _(
         v1_16_hardware,
         v1_16_model,
     )
-    return (
-        v1_16_capstone,
-        v1_16_hardware,
-        v1_16_model,
-        v1_16_profile,
-        v1_16_track_id,
-        v1_16_variant,
-    )
+    return v1_16_capstone, v1_16_profile, v1_16_variant
 
 
 @app.cell
@@ -398,7 +397,6 @@ def _():
         v1_16_binding_amount,
         v1_16_default_lever,
         v1_16_lever_audit,
-        v1_16_lever_catalog,
         v1_16_lever_options,
         v1_16_report_audit,
         v1_16_track_lens,
@@ -409,61 +407,131 @@ def _():
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
-    source_trace,
-    track_context,
     track_arc_context,
+    track_context,
     v1_16_capstone,
     v1_16_metadata,
     v1_16_profile,
+    v1_16_track_picker,
     v1_16_variant,
 ):
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 16 Capstone
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_16_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 16 &middot; Capstone Lab 16
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                The Architect's Audit
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              The Architect's Audit: Binding Diagnosis, Levers &amp; Operating Envelopes
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Binding Diagnosis &middot; Right Lever &middot; Operating Envelope &middot; Final Report
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_16_variant.workload_summary} The final artifact is not a summary; it is an audit of the architecture implied by earlier decisions. Replay design history across Data, Algorithm, Machine, and System, identify the binding bottleneck, apply the optimal architectural lever, stress-test the operating envelope, and defend a complete release memo.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 780px; line-height: 1.65;">
-                {v1_16_variant.workload_summary} The final artifact is not a
-                summary; it is an audit of the architecture implied by earlier decisions.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Memo &middot; ~55 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_16_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_16_capstone.hardware_ref}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_16_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Workload:</strong> {v1_16_capstone.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_16_capstone.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_16_capstone.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> System Synthesis &amp; Architect's Audit
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> {v1_16_capstone.report_artifact}
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Binding Amount</span>
-                <span class="badge badge-warn">Downstream Debt</span>
-                <span class="badge badge-fail">Residual Risk</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_16_profile.label} Volume I Capstone
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_16_variant.stakeholder}</strong> leading the architectural review for <strong>{v1_16_capstone.model_ref}</strong> on <strong>{v1_16_capstone.hardware_ref}</strong>. The architecture goal is: <em>{v1_16_capstone.architecture_goal}</em>, anchored by the durable principle: <strong>{v1_16_capstone.durable_principle}</strong>.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of ML Systems:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The D-A-M-S Conservation Law (Conservation of System Tension):</strong> Every end-to-end ML system distributes operational tension across four pillars: Data, Algorithm, Machine, and System (<em>D</em> &times; <em>A</em> &times; <em>M</em> &times; <em>S</em>). No optimization eliminates tension; pulling a lever on one pillar (e.g., quantization in Algorithm) inevitably shifts downstream debt into another (e.g., cohort verification in Data, or fallback latency in System): &sum; Tension<sub>pillar</sub> = Const.</li>
+                <li><strong>The Pareto Boundary &amp; Binding Constraint Law:</strong> At any system operating point, overall throughput, latency, cost, and quality are constrained by exactly one binding bottleneck: Bottleneck = argmax<sub><em>p</em> &isin; {{D,A,M,S}}</sub>(Stress<sub><em>p</em></sub>). Optimizing non-binding components yields diminishing returns while accumulating downstream debt without expanding the Pareto frontier.</li>
+                <li><strong>The Parametric Operating Envelope Invariant:</strong> A deployed architecture is only viable if its Pareto envelope remains feasible under multi-axis sensitivity perturbations: Envelope = {{ (<em>W</em>, <em>M</em>, <em>G</em>, <em>C</em>) | SLA &le; &tau;<sub>SLA</sub> &and; Cost &le; &tau;<sub>cost</sub> &and; Quality &ge; &tau;<sub>qual</sub> }}. Stressing workload multiplier (<em>W</em>), model growth (<em>M</em>), guardrail tightening (<em>G</em>), and evidence confidence (<em>C</em>) reveals the most fragile failure boundary.</li>
+                <li><strong>The Defensible Audit &amp; Residual Risk Mandate:</strong> A production-ready architectural sign-off cannot merely report winning metrics; it must explicitly document: DefensibleAudit = ApprovedDecisions &cup; RejectedAlternatives &cup; QuantifiedResidualRisks &cup; ValidationHarness. Hiding trade-offs or unverified assumptions renders a release indefensible.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="margin-bottom: 16px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Learning Objectives
+                </div>
+                <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                    <div style="margin-bottom: 3px;">1. <strong>Diagnose the binding amount:</strong>
+                        use ledger evidence to identify the D-A-M/system quantity that constrains the design.</div>
+                    <div style="margin-bottom: 3px;">2. <strong>Optimize the right lever:</strong>
+                        compare binding relief against downstream debt.</div>
+                    <div style="margin-bottom: 3px;">3. <strong>Deploy inside the envelope:</strong>
+                        perturb workload, model, guardrails, and evidence confidence.</div>
+                    <div style="margin-bottom: 3px;">4. <strong>Defend the report:</strong>
+                        revise a decision, reject an alternative, and name residual risk.</div>
+                </div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+            <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 260px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                        Architecture Goal
+                    </div>
+                    <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                        {v1_16_capstone.architecture_goal}
+                    </div>
+                </div>
+                <div style="flex: 0 0 260px;">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                        Durable Principle
+                    </div>
+                    <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                        {v1_16_capstone.durable_principle}
+                    </div>
+                </div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    "What architecture survives when we stress-test the ledger decisions
+                    against real-world variance and downstream debt?"
+                </div>
             </div>
         </div>
         """),
@@ -474,51 +542,7 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(COLORS, mo, v1_16_capstone):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Diagnose the binding amount:</strong>
-                    use ledger evidence to identify the D-A-M/system quantity that constrains the design.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Optimize the right lever:</strong>
-                    compare binding relief against downstream debt.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Deploy inside the envelope:</strong>
-                    perturb workload, model, guardrails, and evidence confidence.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Defend the report:</strong>
-                    revise a decision, reject an alternative, and name residual risk.</div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 260px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Architecture Goal
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    {v1_16_capstone.architecture_goal}
-                </div>
-            </div>
-            <div style="flex: 0 0 260px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Durable Principle
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    {v1_16_capstone.durable_principle}
-                </div>
-            </div>
-        </div>
-    </div>
-    """)
+def _():
     return
 
 
@@ -529,11 +553,6 @@ def _(mo):
     entries from Labs 00-15 and the design memos you downloaded from recent labs.
     """), kind="info")
     return
-
-
-# ===========================================================================
-# ZONE B: WIDGET DEFINITIONS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -563,7 +582,7 @@ def _(mo, v1_16_capstone):
         },
         label="Part A checkpoint: what should the architecture audit do first?",
     )
-    return (partA_checkpoint, partA_evidence_floor, partA_pred)
+    return partA_checkpoint, partA_evidence_floor, partA_pred
 
 
 @app.cell(hide_code=True)
@@ -598,7 +617,7 @@ def _(mo, v1_16_capstone, v1_16_default_lever, v1_16_lever_options):
         },
         label="Part B checkpoint: what lever policy belongs in the memo?",
     )
-    return (partB_checkpoint, partB_intensity, partB_lever, partB_pred)
+    return partB_checkpoint, partB_intensity, partB_lever, partB_pred
 
 
 @app.cell(hide_code=True)
@@ -627,7 +646,7 @@ def _(mo, v1_16_capstone):
         step=5,
         label="Model growth (%)",
     )
-    return (partC_model_growth, partC_pred, partC_workload)
+    return partC_model_growth, partC_pred, partC_workload
 
 
 @app.cell(hide_code=True)
@@ -666,7 +685,7 @@ def _(mo, v1_16_capstone):
         },
         label="What should the final architecture memo do?",
     )
-    return (partC_checkpoint, partC_evidence, partC_guardrail, partD_pred)
+    return partC_checkpoint, partC_evidence, partC_guardrail, partD_pred
 
 
 @app.cell(hide_code=True)
@@ -713,12 +732,13 @@ def _(mo, v1_16_capstone):
         },
         label="Part D checkpoint: what is the report decision?",
     )
-    return (partD_checkpoint, partD_mitigation, partD_rejected, partD_revision, partD_top_risk)
-
-
-# ===========================================================================
-# ZONE C: MAIN LAB
-# ===========================================================================
+    return (
+        partD_checkpoint,
+        partD_mitigation,
+        partD_rejected,
+        partD_revision,
+        partD_top_risk,
+    )
 
 
 @app.cell(hide_code=True)
@@ -726,6 +746,7 @@ def _(
     COLORS,
     apply_plotly_theme,
     architecture_memo,
+    big_takeaways,
     go,
     ledger,
     mo,
@@ -823,11 +844,11 @@ def _(
             </div>
             """),
             mo.md(f"""
-## Part A: Diagnose The Binding Amount
+    ## Part A: Diagnose The Binding Amount
 
-**Scenario.** You are the {_lens["persona"]}. Your decision is to
-{_lens["decision"]}. The first question is not "what model do we like?" It is
-"which amount is binding after Volume I evidence is replayed?"
+    **Scenario.** You are the {_lens["persona"]}. Your decision is to
+    {_lens["decision"]}. The first question is not "what model do we like?" It is
+    "which amount is binding after Volume I evidence is replayed?"
             """),
             partA_pred,
         ]
@@ -880,11 +901,11 @@ def _(
             for row in _amount_rows
         )
         items.append(mo.md(f"""
-**Amount Evidence Table**
+    **Amount Evidence Table**
 
-| Amount | Track realization | Score | Status | Ledger evidence | Preset hits |
-|---|---|---:|---|---|---:|
-{_amount_rows_md}
+    | Amount | Track realization | Score | Status | Ledger evidence | Preset hits |
+    |---|---|---:|---|---|---:|
+    {_amount_rows_md}
         """))
 
         _ledger_rows = "\n".join(
@@ -892,13 +913,13 @@ def _(
             for decision in _ledger_result.decisions
         )
         items.append(mo.md(f"""
-**Ledger Replay Table**
+    **Ledger Replay Table**
 
-| Lab | Evidence | Constraint | Source | Decision |
-|---:|---|---|---|---|
-{_ledger_rows}
+    | Lab | Evidence | Constraint | Source | Decision |
+    |---:|---|---|---|---|
+    {_ledger_rows}
 
-*Source: `mlsysbook_labs.replay_ledger`; missing entries use typed V1-16 variants.*
+    *Source: `mlsysbook_labs.replay_ledger`; missing entries use typed V1-16 variants.*
         """))
 
         if _ledger_result.coverage_pct < partA_evidence_floor.value:
@@ -913,13 +934,13 @@ def _(
 
         items.append(mo.accordion({
             "Math Peek / Source Model - binding amount score": mo.md("""
-The local source model scores each amount as:
+    The local source model scores each amount as:
 
-`score = track pressure + 4 * ledger hits + 2 * preset hits + evidence gap penalty`
+    `score = track pressure + 4 * ledger hits + 2 * preset hits + evidence gap penalty`
 
-The evidence gap penalty is active when ledger coverage falls below the selected
-floor. This ties the conclusion's D-A-M and Lighthouse constraint-propagation
-claims to the track-specific architecture audit.
+    The evidence gap penalty is active when ledger coverage falls below the selected
+    floor. This ties the conclusion's D-A-M and Lighthouse constraint-propagation
+    claims to the track-specific architecture audit.
             """)
         }))
         items.append(source_trace({
@@ -961,11 +982,11 @@ claims to the track-specific architecture audit.
             </div>
             """),
             mo.md(f"""
-## Part B: Optimize The Right Lever
+    ## Part B: Optimize The Right Lever
 
-**Scenario.** The binding amount from Part A is **{_binding["amount"]}**
-({_binding["track_term"]}). Choose a track-specific lever and intensity, then
-inspect whether the local relief is worth the downstream debt.
+    **Scenario.** The binding amount from Part A is **{_binding["amount"]}**
+    ({_binding["track_term"]}). Choose a track-specific lever and intensity, then
+    inspect whether the local relief is worth the downstream debt.
             """),
             partB_pred,
         ]
@@ -1015,11 +1036,11 @@ inspect whether the local relief is worth the downstream debt.
             f"| Debt explanation | {_lever['debt_note']} |",
         ))
         items.append(mo.md(f"""
-**Lever Audit Table**
+    **Lever Audit Table**
 
-| Field | Value |
-|---|---|
-{_lever_rows}
+    | Field | Value |
+    |---|---|
+    {_lever_rows}
         """))
 
         if _lever["status"] == "FAIL":
@@ -1030,13 +1051,13 @@ inspect whether the local relief is worth the downstream debt.
 
         items.append(mo.accordion({
             "Math Peek / Source Model - local gain and downstream debt": mo.md("""
-The local source model uses:
+    The local source model uses:
 
-`net margin = binding relief - downstream debt`
+    `net margin = binding relief - downstream debt`
 
-Relief is discounted when the selected lever does not target the Part A binding
-amount. Debt grows with intervention intensity because complexity is conserved:
-a faster local path can become validation, monitoring, cost, or safety debt.
+    Relief is discounted when the selected lever does not target the Part A binding
+    amount. Debt grows with intervention intensity because complexity is conserved:
+    a faster local path can become validation, monitoring, cost, or safety debt.
             """)
         }))
         items.append(source_trace({
@@ -1078,10 +1099,10 @@ a faster local path can become validation, monitoring, cost, or safety debt.
             </div>
             """),
             mo.md(f"""
-## Part C: Deploy Inside The Operating Envelope
+    ## Part C: Deploy Inside The Operating Envelope
 
-**Scenario.** Stress the proposed design for **{v1_16_capstone.label}**.
-The envelope is track-specific: {v1_16_capstone.guardrail_metric}.
+    **Scenario.** Stress the proposed design for **{v1_16_capstone.label}**.
+    The envelope is track-specific: {v1_16_capstone.guardrail_metric}.
             """),
             partC_pred,
         ]
@@ -1120,13 +1141,13 @@ The envelope is track-specific: {v1_16_capstone.guardrail_metric}.
             for axis in _audit.axes
         )
         items.append(mo.md(f"""
-**Sensitivity Table**
+    **Sensitivity Table**
 
-| Axis | Value | Limit | Risk | Status | Mitigation |
-|---|---:|---:|---:|---|---|
-{_axis_rows}
+    | Axis | Value | Limit | Risk | Status | Mitigation |
+    |---|---:|---:|---:|---|---|
+    {_axis_rows}
 
-*Source: `mlsysbook_labs.sensitivity_audit`.*
+    *Source: `mlsysbook_labs.sensitivity_audit`.*
         """))
 
         if not _audit.feasible:
@@ -1136,12 +1157,12 @@ The envelope is track-specific: {v1_16_capstone.guardrail_metric}.
 
         items.append(mo.accordion({
             "Math Peek / Source Model - operating envelope": mo.md("""
-The deployment rule is:
+    The deployment rule is:
 
-`deployable = all(axis.value <= axis.limit) and evidence_confidence >= floor`
+    `deployable = all(axis.value <= axis.limit) and evidence_confidence >= floor`
 
-The exact axes come from the track-specific capstone profile and are evaluated
-by the existing `mlsysbook_labs.sensitivity_audit` helper.
+    The exact axes come from the track-specific capstone profile and are evaluated
+    by the existing `mlsysbook_labs.sensitivity_audit` helper.
             """)
         }))
         items.append(source_trace({
@@ -1184,11 +1205,11 @@ by the existing `mlsysbook_labs.sensitivity_audit` helper.
             </div>
             """),
             mo.md("""
-## Part D: Defend The Design Report
+    ## Part D: Defend The Design Report
 
-**Scenario.** The architecture review board asks for a final Volume I design
-report. It must defend one decision and explicitly reject at least one plausible
-alternative.
+    **Scenario.** The architecture review board asks for a final Volume I design
+    report. It must defend one decision and explicitly reject at least one plausible
+    alternative.
             """),
             partD_pred,
         ]
@@ -1205,11 +1226,11 @@ alternative.
             for name, ok, detail in _report_audit["rows"]
         )
         items.append(mo.md(f"""
-**Report Completeness Table**
+    **Report Completeness Table**
 
-| Report element | Status | Evidence |
-|---|---|---|
-{_report_rows}
+    | Report element | Status | Evidence |
+    |---|---|---|
+    {_report_rows}
         """))
 
         items.append(mo.Html(f"""
@@ -1226,23 +1247,23 @@ alternative.
             ), kind="danger"))
 
         items.append(mo.md(f"""
-**Validation Tests To Attach**
+    **Validation Tests To Attach**
 
-{chr(10).join(f"- {test}" for test in _memo.validation_tests)}
+    {chr(10).join(f"- {test}" for test in _memo.validation_tests)}
 
-**Durable Principle**
+    **Durable Principle**
 
-{_memo.durable_principle}
+    {_memo.durable_principle}
         """))
 
         items.append(mo.accordion({
             "Math Peek / Source Model - defensible report": mo.md("""
-The report gate is:
+    The report gate is:
 
-`defensible = decision + rejected alternative + source trace + residual risk + validation evidence`
+    `defensible = decision + rejected alternative + source trace + residual risk + validation evidence`
 
-The memo can accept residual risk, but it cannot hide that risk or pretend a
-rejected alternative was never considered.
+    The memo can accept residual risk, but it cannot hide that risk or pretend a
+    rejected alternative was never considered.
             """)
         }))
         items.append(source_trace({
@@ -1278,21 +1299,21 @@ rejected alternative was never considered.
         ))
         return mo.vstack([
             mo.md(f"""
-## Synthesis: Volume I Final Report
+    ## Synthesis: Volume I Final Report
 
-The Volume I capstone now has one evidence chain:
+    The Volume I capstone now has one evidence chain:
 
-| Evidence replay | Result |
-|---|---|
-| Binding amount | {_binding["amount"]} ({_binding["score"]:.1f}%) |
-| Optimization lever | {_lever["lever_label"]} ({_lever["status"]}) |
-| Operating envelope | {'PASS' if _audit.feasible else 'FAIL'}; most fragile axis: {_audit.most_fragile} |
-| Report defense | {_report_audit["status"]}; completeness {_report_audit["completeness_pct"]:.1f}% |
-| Residual risk | {_memo.top_risk} |
+    | Evidence replay | Result |
+    |---|---|
+    | Binding amount | {_binding["amount"]} ({_binding["score"]:.1f}%) |
+    | Optimization lever | {_lever["lever_label"]} ({_lever["status"]}) |
+    | Operating envelope | {'PASS' if _audit.feasible else 'FAIL'}; most fragile axis: {_audit.most_fragile} |
+    | Report defense | {_report_audit["status"]}; completeness {_report_audit["completeness_pct"]:.1f}% |
+    | Residual risk | {_memo.top_risk} |
 
-| Checkpoint | Recorded decision |
-|---|---|
-{_checkpoint_rows}
+    | Checkpoint | Recorded decision |
+    |---|---|
+    {_checkpoint_rows}
             """),
             mo.callout(mo.md(
                 f"**1. The selected track controls the envelope.** {v1_16_capstone.label} uses the same concept sequence as every track, but with different constraints and evidence."
@@ -1303,6 +1324,23 @@ The Volume I capstone now has one evidence chain:
             mo.callout(mo.md(
                 f"**3. Carry-forward question for Volume II:** {v1_16_volume_ii_question(v1_16_capstone.track_id)}"
             ), kind="info"),
+            mo.Html(f"""
+            <div style="border-left: 4px solid #10B981; background: #F0FDF4; border-radius: 0 10px 10px 0; padding: 18px 24px; margin: 16px 0;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #059669; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                    Lead Architect Authorization &middot; Volume I Capstone Sign-Off
+                </div>
+                <div style="font-size: 0.95rem; color: #065F46; line-height: 1.6;">
+                    <strong>Capstone Verdict:</strong> {"VOLUME I CAPSTONE AUDIT PASSED" if _audit.feasible and _report_audit["status"] == "PASS" else "REVISE CAPSTONE ARCHITECTURE MEMO"}.
+                    {"Full D-A-M-S synthesis verified across operating envelope, sensitivity stress test, and defensible audit trail for " + v1_16_profile.label + "." if _audit.feasible and _report_audit["status"] == "PASS" else "Operating envelope boundaries or audit completeness require tuning before Volume II handoff."}
+                </div>
+            </div>
+            """),
+            big_takeaways([
+                "D-A-M-S Conservation: pulling one architectural lever always shifts tension into downstream debt.",
+                "The binding constraint dictates the only lever that yields real system-level relief.",
+                "A robust architecture operates stably within its parametric envelope under realistic workload perturbation.",
+                "A defensible capstone report explicitly documents rejected alternatives, source traces, and residual risks.",
+            ]),
             source_trace({
                 "chapter_anchor": "Conclusion: Horizon note from node to fleet; Summary",
                 "claim": "Volume I names the local binding amount; Volume II asks what changes when the resource boundary moves outward.",
@@ -1312,20 +1350,15 @@ The Volume I capstone now has one evidence chain:
             }, summary="Synthesis source trace: Volume I to Volume II handoff"),
         ])
 
-    _tabs = mo.ui.tabs({
+    v1_16_tabs = mo.ui.tabs({
         "Part A: Binding Amount": build_part_a(),
         "Part B: Right Lever": build_part_b(),
         "Part C: Operating Envelope": build_part_c(),
         "Part D: Design Report": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    _tabs
+    v1_16_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: LEDGER HUD AND REPORT
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -1387,43 +1420,42 @@ def _(
         partD_pred.value,
         partD_checkpoint.value,
     ))
-    if _ready:
-        ledger.save(chapter=16, design={
-            "chapter": "v1_16",
-            "track_id": v1_16_profile.track_id,
-            "scenario_id": v1_16_variant.scenario_id,
-            "hardware_ref": v1_16_capstone.hardware_ref,
-            "model_ref": v1_16_capstone.model_ref,
-            "architecture_goal": v1_16_capstone.architecture_goal,
-            "durable_principle": v1_16_capstone.durable_principle,
-            "completed": True,
-            "binding_amount_prediction": partA_pred.value,
-            "evidence_floor_pct": partA_evidence_floor.value,
-            "binding_amount_actual": _binding["amount"],
-            "binding_amount_score_pct": _binding["score"],
-            "part_a_checkpoint": partA_checkpoint.value,
-            "optimization_prediction": partB_pred.value,
-            "optimization_lever": _lever["lever_label"],
-            "optimization_intensity_pct": partB_intensity.value,
-            "optimization_status": _lever["status"],
-            "downstream_debt_pct": _lever["debt_pct"],
-            "part_b_checkpoint": partB_checkpoint.value,
-            "sensitivity_prediction": partC_pred.value,
-            "workload_multiplier": partC_workload.value,
-            "model_growth_pct": partC_model_growth.value,
-            "guardrail_tightening_pct": partC_guardrail.value,
-            "evidence_confidence_pct": partC_evidence.value,
-            "operating_envelope_status": "PASS" if _audit.feasible else "FAIL",
-            "most_fragile_axis": _audit.most_fragile,
-            "part_c_checkpoint": partC_checkpoint.value,
-            "memo_prediction": partD_pred.value,
-            "revised_decision": partD_revision.value,
-            "rejected_alternative": partD_rejected.value,
-            "top_residual_risk": partD_top_risk.value,
-            "mitigation_evidence": partD_mitigation.value,
-            "part_d_checkpoint": partD_checkpoint.value,
-            "volume_ii_carry_forward_question": v1_16_volume_ii_question(v1_16_capstone.track_id),
-        })
+    ledger.save(chapter=16, design={
+        "chapter": "v1_16",
+        "track_id": v1_16_profile.track_id,
+        "scenario_id": v1_16_variant.scenario_id,
+        "hardware_ref": v1_16_capstone.hardware_ref,
+        "model_ref": v1_16_capstone.model_ref,
+        "architecture_goal": v1_16_capstone.architecture_goal,
+        "durable_principle": v1_16_capstone.durable_principle,
+        "completed": _ready,
+        "binding_amount_prediction": partA_pred.value,
+        "evidence_floor_pct": partA_evidence_floor.value,
+        "binding_amount_actual": _binding["amount"],
+        "binding_amount_score_pct": _binding["score"],
+        "part_a_checkpoint": partA_checkpoint.value,
+        "optimization_prediction": partB_pred.value,
+        "optimization_lever": _lever["lever_label"],
+        "optimization_intensity_pct": partB_intensity.value,
+        "optimization_status": _lever["status"],
+        "downstream_debt_pct": _lever["debt_pct"],
+        "part_b_checkpoint": partB_checkpoint.value,
+        "sensitivity_prediction": partC_pred.value,
+        "workload_multiplier": partC_workload.value,
+        "model_growth_pct": partC_model_growth.value,
+        "guardrail_tightening_pct": partC_guardrail.value,
+        "evidence_confidence_pct": partC_evidence.value,
+        "operating_envelope_status": "PASS" if _audit.feasible else "FAIL",
+        "most_fragile_axis": _audit.most_fragile,
+        "part_c_checkpoint": partC_checkpoint.value,
+        "memo_prediction": partD_pred.value,
+        "revised_decision": partD_revision.value,
+        "rejected_alternative": partD_rejected.value,
+        "top_residual_risk": partD_top_risk.value,
+        "mitigation_evidence": partD_mitigation.value,
+        "part_d_checkpoint": partD_checkpoint.value,
+        "volume_ii_carry_forward_question": v1_16_volume_ii_question(v1_16_capstone.track_id),
+    })
 
     mo.Html(f"""
     <div class="lab-hud">
@@ -1435,7 +1467,21 @@ def _(
         <span class="hud-label">ARTIFACT</span>
         <span class="hud-value">{v1_16_capstone.report_artifact}</span>
         <span class="hud-label">STATUS</span>
-        <span class="hud-active">ACTIVE</span>
+        <span class="hud-active">{"SAVED" if _ready else "ACTIVE"}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Binding amount</strong>{_binding['amount']} ({_binding['score']:.1f}%)</div>
+        <div class="mlsysbook-field"><strong>Optimization lever</strong>{_lever['lever_label']}</div>
+        <div class="mlsysbook-field"><strong>Operating envelope</strong>{'PASS' if _audit.feasible else 'FAIL'}</div>
+        <div class="mlsysbook-field"><strong>Fragile axis</strong>{_audit.most_fragile}</div>
+        <div class="mlsysbook-field"><strong>Top residual risk</strong>{partD_top_risk.value or 'pending'}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
     </div>
     """)
     return
