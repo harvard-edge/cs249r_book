@@ -1,10 +1,8 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
-
-# CELL 0: SETUP
 
 @app.cell
 async def _():
@@ -33,6 +31,7 @@ async def _():
         ACADEMIC_LAB_CSS,
         amdahl_speedup,
         benchmark_track_profile,
+        big_takeaways,
         build_lab_report,
         get_lab_metadata,
         get_lab_track_variant,
@@ -58,6 +57,7 @@ async def _():
         amdahl_speedup,
         apply_plotly_theme,
         benchmark_track_profile,
+        big_takeaways,
         build_lab_report,
         get_lab_metadata,
         get_lab_track_variant,
@@ -65,17 +65,14 @@ async def _():
         go,
         ledger,
         math,
-        metric_gate,
         mo,
         np,
         report_export_panel,
         resolve_mlsysim_ref,
-        source_trace,
         sustained_benchmark,
         tail_latency,
         track_arc_context,
         track_context,
-        track_selector,
     )
 
 
@@ -86,11 +83,20 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
+    _options = {
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
+        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
+        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+    }
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_12_track_picker = track_selector(default=_default_track)
-    v1_12_track_picker
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    v1_12_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_12_track_picker,)
 
 
@@ -102,6 +108,7 @@ def _(
     resolve_mlsysim_ref,
     v1_12_track_picker,
 ):
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
     v1_12_track_id = v1_12_track_picker.value
     v1_12_profile = get_track_profile(v1_12_track_id)
     v1_12_variant = get_lab_track_variant("v1_12_benchmarking_trap", v1_12_profile.track_id)
@@ -113,17 +120,8 @@ def _(
         v1_12_hardware,
         v1_12_model,
     )
-    return (
-        v1_12_benchmark,
-        v1_12_hardware,
-        v1_12_model,
-        v1_12_profile,
-        v1_12_track_id,
-        v1_12_variant,
-    )
+    return v1_12_benchmark, v1_12_profile, v1_12_variant
 
-
-# NOTEBOOK-LOCAL SUPPORT
 
 @app.cell
 def _(math, np, sustained_benchmark, tail_latency):
@@ -536,11 +534,10 @@ def _(v1_12_benchmark, v1_12_track_packet, v1_12_variant):
     return (v1_12_packet,)
 
 
-# CELL 1: HEADER
-
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
     track_arc_context,
@@ -549,37 +546,105 @@ def _(
     v1_12_metadata,
     v1_12_packet,
     v1_12_profile,
+    v1_12_track_picker,
     v1_12_variant,
 ):
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #111827 0%, #1f2937 58%, #0f3b3e 100%);
-                    padding: 34px 42px; border-radius: 14px; color: white;
-                    box-shadow: 0 8px 30px rgba(0,0,0,0.30);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #9ca3af; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 12
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_12_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 12 &middot; Foundational Lab 12
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.35rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                Performance Benchmarking
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              Performance Benchmarking: Workload Validity, Confidence &amp; Run Rules
             </h1>
-            <p style="margin: 0 0 10px 0; font-size: 1.05rem; font-weight: 600;
-                      color: #a7f3d0; letter-spacing: 0.03em; font-family: 'SF Mono', monospace;">
-                Workload validity &middot; Confidence &middot; Tail guardrails &middot; Fair comparison
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_12_variant.workload_summary} Turn the benchmark claim <strong>{v1_12_benchmark.benchmark_claim}</strong> into reproducible, production-grade evidence for: <em>{v1_12_packet["production_question"]}</em>
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #d1d5db;
-                      max-width: 760px; line-height: 1.65;">
-                {v1_12_variant.workload_summary} Your job is to turn the benchmark claim
-                <strong>{v1_12_benchmark.benchmark_claim}</strong> into reportable evidence
-                for: {v1_12_packet["production_question"]}
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_12_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Workload:</strong> {v1_12_benchmark.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_12_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_12_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> Benchmark Validity &amp; Statistical Run Rules
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> benchmark audit memo
+              </span>
+            </div>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_12_profile.label} Performance Benchmarking
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_12_variant.stakeholder}</strong> evaluating <strong>{v1_12_variant.model_ref}</strong> on <strong>{v1_12_variant.hardware_ref}</strong>. The target system must transform the headline benchmark claim <em>{v1_12_benchmark.benchmark_claim}</em> into rigorous operational evidence addressing: <em>{v1_12_packet["production_question"]}</em>
             </p>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Shared A/B/C/D concept sequence</span>
-                <span class="badge badge-warn">{v1_12_profile.label}</span>
-                <span class="badge badge-fail">{v1_12_benchmark.hidden_failure_metric}</span>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of Performance Benchmarking:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Workload &amp; Metric Representativeness Law:</strong> A benchmark is valid only when execution mode, input distribution, batch size, and concurrency mirror production realities: <em>S</em><sub>valid</sub> &prop; Overlap(<em>W</em><sub>bench</sub>, <em>W</em><sub>prod</sub>). Headline throughput on synthetic inputs hides fatal service degradations.</li>
+                <li><strong>Amdahl's End-to-End System Bottleneck:</strong> Accelerated kernel speedup saturates against Amdahl's Law: <em>S</em><sub>sys</sub> = 1 / ((1 &minus; <em>p</em>) + <em>p</em> / <em>s</em>). Optimizing compute while ignoring preprocessing, host-to-device transfers, and serialization yields diminishing returns.</li>
+                <li><strong>The Tail Percentile &amp; Guardrail Invariant:</strong> Average latency is an insufficient metric in interactive systems. Service level agreements and physical constraints are dictated by the tail: <em>L</em><sub>tail</sub> = <em>L</em><sub>base</sub> &middot; <em>e</em><sup><em>z</em><sub><em>q</em></sub> &middot; &sigma;</sup>. High-percentile outliers (<em>p</em>99, <em>p</em>99.9) violate thermal and latency envelopes even when means appear safe.</li>
+                <li><strong>The Controlled Comparison &amp; Run-Rule Protocol:</strong> Comparative benchmarking is scientifically valid only under strict run-rule parity: &Delta;<em>P</em> is reportable if and only if &and; Condition<sub><em>i</em></sub> = True (identical warmup discard, sample counts, ambient temperature, frequency pinning, and guardrail constraints).</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Measure validity:</strong>
+                    explain why benchmark validity depends on matching the production workload, metric, and operational boundary.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Establish confidence:</strong>
+                    apply warmup discard, sample size rules, and variance metrics (CV &amp; 95% CI) to eliminate statistical noise.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Audit tail guardrails:</strong>
+                    identify how simple averages mask high-percentile tail latency spikes and physical constraint violations.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Enforce fair comparison:</strong>
+                    apply MLPerf-style run rules and controlled conditions to prevent deceptive speedup claims.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    {v1_12_packet["production_question"]}
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
+                            line-height: 1.6; margin-top: 10px;">
+                    Every track follows the same four concepts. The selected track changes
+                    persona, constraints, thresholds, evidence emphasis, failure mode, and
+                    report framing.
+                </div>
             </div>
         </div>
         """),
@@ -589,52 +654,15 @@ def _(
     return
 
 
-# CELL 2: BRIEFING
-
 @app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-            Chapter Invariant
-        </div>
-        <div style="font-size: 1.02rem; color: {COLORS['Text']}; line-height: 1.65; font-weight: 600;">
-            Measurement changes decisions. A benchmark is only valid when workload,
-            warmup, variance, tail behavior, and comparison rules match the deployment question.
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 16px -28px 0 -28px;
-                    padding: 16px 28px 0 28px; display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-                    gap:16px; font-size:0.88rem; color:{COLORS['TextSec']}; line-height:1.55;">
-            <div><strong>Part A:</strong> benchmark validity depends on matching the production workload and metric.</div>
-            <div><strong>Part B:</strong> warmup, variance, and sample size determine confidence.</div>
-            <div><strong>Part C:</strong> averages can hide tail and guardrail failures.</div>
-            <div><strong>Part D:</strong> fair comparison requires controlled conditions and reportable evidence.</div>
-        </div>
-    </div>
-    """)
+def _():
     return
 
 
-# CELL 3: READING
-
 @app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete these chapter anchors before the lab:
-
-    - **Benchmarks as proxies** and **Benchmarking Granularity** for workload and metric validity.
-    - **Micro-benchmarking rules** and **Statistical and methodological issues** for warmup, variance, and confidence.
-    - **Latency and tail latency** plus **Fallacies and Pitfalls** for average-vs-tail failures.
-    - **Benchmark Components**, **Run Rules**, and **MLPerf execution scenarios** for fair comparison.
-    """), kind="info")
+def _():
     return
 
-
-# CELL 4: WIDGETS
 
 @app.cell(hide_code=True)
 def _(mo, v1_12_benchmark, v1_12_packet):
@@ -674,7 +702,7 @@ def _(mo, v1_12_benchmark, v1_12_packet):
         },
         label="Checkpoint: which result belongs in the report?",
     )
-    return (pA_decision, pA_metric, pA_pred, pA_workload)
+    return pA_decision, pA_metric, pA_pred, pA_workload
 
 
 @app.cell(hide_code=True)
@@ -717,7 +745,7 @@ def _(mo, v1_12_packet):
         },
         label="Checkpoint: what confidence verdict goes in the report?",
     )
-    return (pB_decision, pB_jitter, pB_pred, pB_samples, pB_warmup)
+    return pB_decision, pB_jitter, pB_pred, pB_samples, pB_warmup
 
 
 @app.cell(hide_code=True)
@@ -756,7 +784,7 @@ def _(mo, v1_12_benchmark, v1_12_packet):
         },
         label="Checkpoint: what blocks or approves the release?",
     )
-    return (pC_decision, pC_pred, pC_sigma, pC_stress)
+    return pC_decision, pC_pred, pC_sigma, pC_stress
 
 
 @app.cell(hide_code=True)
@@ -794,13 +822,12 @@ def _(mo, v1_12_packet):
     )
 
 
-# CELL 5: TABS
-
 @app.cell(hide_code=True)
 def _(
     COLORS,
     amdahl_speedup,
     apply_plotly_theme,
+    big_takeaways,
     go,
     mo,
     np,
@@ -831,6 +858,7 @@ def _(
     v1_12_html_table,
     v1_12_metric_cards,
     v1_12_packet,
+    v1_12_profile,
     v1_12_validity_result,
     v1_12_variant,
 ):
@@ -1306,40 +1334,37 @@ def _(
                 kind="warn" if incomplete else "success",
             ),
             mo.Html(f"""
-            <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                        border-radius:8px; padding:18px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
-                    Track-specific report frame
+            <div style="border-left: 4px solid #10B981; background: #F0FDF4; border-radius: 0 10px 10px 0; padding: 18px 24px; margin: 16px 0;">
+                <div style="font-size: 0.72rem; font-weight: 700; color: #059669; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+                    Lead Architect Authorization &middot; Benchmark Release Sign-Off
                 </div>
-                <div style="font-size:0.92rem; color:{COLORS['Text']}; line-height:1.7;">
-                    For <strong>{v1_12_benchmark.label}</strong>, accept the benchmark claim only
-                    within the scope <strong>{v1_12_packet['production_scope']}</strong>, with
-                    selected metric <strong>{a_result['selected_metric']}</strong>, confidence
-                    verdict <strong>{"confident" if b_result["confidence_ok"] else "not confident"}</strong>,
-                    guardrail verdict <strong>{"blocked" if c_result["blocked"] else "passes"}</strong>,
-                    and rejected comparison <strong>{d_result['rejected']}</strong>.
+                <div style="font-size: 0.95rem; color: #065F46; line-height: 1.6;">
+                    <strong>Benchmark Verdict:</strong> {"RELEASE SIGN-OFF GRANTED" if not incomplete and not c_result["blocked"] and b_result["confidence_ok"] and d_result["reportable"] else "BLOCK BENCHMARK RELEASE"}.
+                    {"All validity, confidence, tail latency, and fairness conditions are satisfied for " + v1_12_profile.label + "." if not incomplete and not c_result["blocked"] and b_result["confidence_ok"] and d_result["reportable"] else "Incomplete checkpoints or failing guardrails prevent certified benchmark publication."}
                 </div>
             </div>
             """),
+            big_takeaways([
+                "Benchmark validity is a workload-and-metric claim, not a universal throughput figure.",
+                "Confidence requires warmup discard, repeated samples, and variance reporting (CV & 95% CI).",
+                "Tail and guardrail failures (p99/p999, thermal throttling, energy ceilings) are hidden by simple averages.",
+                "Fair comparisons need strictly controlled run rules and identical hardware/ambient envelopes.",
+            ]),
         ])
 
-    tabs = mo.ui.tabs({
+    v1_12_tabs = mo.ui.tabs({
         "Part A: Validity": build_part_a(),
         "Part B: Confidence": build_part_b(),
         "Part C: Tail/Guardrail": build_part_c(),
         "Part D: Fairness": build_part_d(),
         "Synthesis": build_synthesis(),
     })
-    tabs
+    v1_12_tabs
     return
 
 
-# CELL 6: LEDGER HUD
-
 @app.cell(hide_code=True)
 def _(
-    COLORS,
     ledger,
     mo,
     pA_decision,
@@ -1384,25 +1409,24 @@ def _(
     completed = all(widget.value is not None for widget in (
         pA_pred, pA_decision, pB_pred, pB_decision, pC_pred, pC_decision, pD_pred, pD_decision
     ))
-    if completed:
-        ledger.save(chapter=12, design={
-            "lab": "perf_bench",
-            "track_id": v1_12_profile.track_id,
-            "scenario_id": v1_12_variant.scenario_id,
-            "hardware_ref": v1_12_benchmark.hardware_ref,
-            "model_ref": v1_12_benchmark.model_ref,
-            "completed": True,
-            "selected_metric": _a_result["selected_metric"],
-            "validity_score": round(_a_result["validity_score"], 2),
-            "confidence_ok": _b_result["confidence_ok"],
-            "cv_pct": round(_b_result["cv_pct"], 2),
-            "ci_half_width": round(_b_result["ci_half"], 2),
-            "tail_guardrail_blocked": _c_result["blocked"],
-            "failure_rate": _c_result["failure_rate"],
-            "fair_comparison_index": round(_d_result["index"], 2),
-            "accepted_comparison": _d_result["accepted"],
-            "rejected_comparison": _d_result["rejected"],
-        })
+    ledger.save(chapter=12, design={
+        "lab": "perf_bench",
+        "track_id": v1_12_profile.track_id,
+        "scenario_id": v1_12_variant.scenario_id,
+        "hardware_ref": v1_12_benchmark.hardware_ref,
+        "model_ref": v1_12_benchmark.model_ref,
+        "completed": completed,
+        "selected_metric": _a_result["selected_metric"],
+        "validity_score": round(_a_result["validity_score"], 2),
+        "confidence_ok": _b_result["confidence_ok"],
+        "cv_pct": round(_b_result["cv_pct"], 2),
+        "ci_half_width": round(_b_result["ci_half"], 2),
+        "tail_guardrail_blocked": _c_result["blocked"],
+        "failure_rate": _c_result["failure_rate"],
+        "fair_comparison_index": round(_d_result["index"], 2),
+        "accepted_comparison": _d_result["accepted"],
+        "rejected_comparison": _d_result["rejected"],
+    })
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>
@@ -1410,14 +1434,28 @@ def _(
         <span class="hud-label">TRACK</span>
         <span class="hud-value">{v1_12_profile.label}</span>
         <span style="flex:1;"></span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">benchmark_audit_memo</span>
         <span class="hud-label">STATUS</span>
-        <span class="hud-active">{"COMPLETE" if completed else "IN PROGRESS"}</span>
+        <span class="hud-active">{"SAVED" if completed else "ACTIVE"}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if completed else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Selected metric</strong>{_a_result["selected_metric"]}</div>
+        <div class="mlsysbook-field"><strong>Confidence</strong>{'Pass' if _b_result["confidence_ok"] else 'Underpowered / Noisy'}</div>
+        <div class="mlsysbook-field"><strong>Tail / guardrail</strong>{'Blocked' if _c_result["blocked"] else 'Pass'}</div>
+        <div class="mlsysbook-field"><strong>Fair comparison</strong>{_d_result["accepted"]}</div>
+        <div class="mlsysbook-field"><strong>Rejected claim</strong>{_d_result["rejected"]}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
     </div>
     """)
     return
 
-
-# DOWNLOADABLE TRACK REPORT
 
 @app.cell(hide_code=True)
 def _(
