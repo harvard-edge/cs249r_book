@@ -1,21 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# -----------------------------------------------------------------------------
-# LAB V2-12: OPERATIONS AT SCALE AS CONTROL LOOPS
-#
-# Chapter invariant: operations at scale are control loops. SLOs, canaries,
-# rollouts, incidents, and blast radius spend error budget over time.
-#
-# Packet modules:
-#   Part A - SLO / error budget as an amount system
-#   Part B - Canary learning speed versus blast radius
-#   Part C - Incident recovery time and lost-work budgeting
-#   Part D - Operations policy guardrail conjunction
-#   Synthesis - Operations-at-scale memo and V2-13 security implication
-# -----------------------------------------------------------------------------
 
 
 @app.cell
@@ -47,10 +33,14 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         source_trace,
         track_arc_context,
@@ -64,23 +54,22 @@ async def _():
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
-        LAB_CSS,
+        MathPeek,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
+        instrumentation_console,
         ledger,
         math,
         mo,
         pd,
         report_export_panel,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
 
 
@@ -89,24 +78,36 @@ def _(get_lab_metadata):
     v2_12_lab_path = "vol2/lab_12_ops_scale.py"
     v2_12_chapter = 12
     v2_12_metadata = get_lab_metadata(v2_12_lab_path)
-    return v2_12_chapter, v2_12_lab_path, v2_12_metadata
+    return v2_12_chapter, v2_12_metadata
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_12_track_picker = track_selector(default=_default_track)
+def _(mo):
+    v2_12_track_picker = mo.ui.dropdown(
+        options={
+            "⚡ TinyML Track (ARM Cortex-M55 / ESP32-S3 & Remote Firmware OTA Blast Radius)": "oura_ring",
+            "📱 Mobile Track (Apple Silicon / Snapdragon & Staged App Store Rollouts vs Instant Drift)": "iphone",
+            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Geofenced Fleet Safety Control Loops)": "robotaxi",
+            "☁️ Cloud Supercomputing Track (H100/B200 Clusters & Canary Traffic vs Error Budget)": "cloud_fleet",
+        },
+        value="☁️ Cloud Supercomputing Track (H100/B200 Clusters & Canary Traffic vs Error Budget)",
+        label="Select Course / Industry Track",
+    )
     v2_12_track_picker
     return (v2_12_track_picker,)
 
 
 @app.cell
-def _(get_lab_track_variant, get_track_profile, v2_12_metadata, v2_12_track_picker):
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    v2_12_metadata,
+    v2_12_track_picker,
+):
     v2_12_track_id = v2_12_track_picker.value
     v2_12_profile = get_track_profile(v2_12_track_id)
     v2_12_variant = get_lab_track_variant(v2_12_metadata.lab_id, v2_12_track_id)
-    return v2_12_profile, v2_12_track_id, v2_12_variant
+    return v2_12_profile, v2_12_variant
 
 
 @app.cell
@@ -322,7 +323,6 @@ def _(html_lib, math):
         return ("warn", f"Prediction check: the instrument found `{labels.get(actual, actual)}`, not `{labels.get(predicted, predicted)}`.")
 
     return (
-        v2_12_escape,
         v2_12_fmt_hours,
         v2_12_fmt_minutes,
         v2_12_fmt_number,
@@ -338,6 +338,143 @@ def _(html_lib, math):
 def _(v2_12_profile, v2_12_track_packet, v2_12_variant):
     v2_12_packet = v2_12_track_packet(v2_12_profile, v2_12_variant)
     return (v2_12_packet,)
+
+
+@app.cell(hide_code=True)
+def _(ACADEMIC_LAB_CSS, mo, v2_12_packet, v2_12_profile, v2_12_variant):
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
+        <div class="mlsysbook-meta">
+          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 12 &middot; LAB 12
+        </div>
+        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
+          Operations at Scale: Error Budgets, Canary Rollouts &amp; Incident Control Loops
+        </h1>
+        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
+          Transform production operations from reactive firefighting into quantifiable control loops: spend error budgets across availability and quality dimensions,
+          balance canary statistical learning against blast-radius exposure, structure incident response to bound lost work, and enforce conjunctive multi-guardrail release gates.
+        </p>
+        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Track:</strong> {v2_12_profile.label}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
+            <strong>Stakeholder:</strong> {v2_12_variant.stakeholder}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Hardware:</strong> {v2_12_packet['hardware_ref']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
+            <strong>Ops Unit:</strong> {v2_12_packet['ops_unit']}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Primary Metric:</strong> {v2_12_variant.primary_metric}
+          </span>
+          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
+            <strong>Guardrail:</strong> {v2_12_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
+
+      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
+          System Scenario: {v2_12_profile.label} Production Operations Envelope
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
+          {v2_12_variant.workload_summary} Operating machine learning systems at scale requires treating reliability not as an aspirational binary, but as an amount system where availability, semantic accuracy, and incident recovery draw from finite budgets. Fast rollouts gather statistical evidence quickly but risk catastrophic blast radius before automated rollbacks engage; slow rollouts protect users but stall deployment velocity and mask latent distribution drift.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Operations at Scale:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The Error-Budget Amount System:</strong> Reliability is a consumable resource spent over time (<i>B</i><sub>error</sub> = <i>T</i><sub>period</sub> &middot; (1 &minus; SLO)). Deployments and semantic drift spend availability minutes and quality points against hard operational ceilings.</li>
+            <li><strong>Canary Learning vs. Blast Radius:</strong> Canary duration trades statistical power against user exposure: <i>T</i><sub>stage</sub> = <i>N</i><sub>samples</sub> / (<i>R</i><sub>traffic</sub> &middot; <i>p</i><sub>canary</sub>). A tiny canary fails to detect regressions before promotion; an oversized canary maximizes incident blast radius.</li>
+            <li><strong>The Lost-Work Incident Flow Invariant:</strong> Total incident damage is governed by detection latency, diagnostic attribution, and mitigation efficacy: <i>W</i><sub>lost</sub> = <i>R</i><sub>affected</sub> &middot; <i>f</i><sub>impact</sub> &middot; (MTTD + <i>T</i><sub>diag</sub>) + <i>R</i><sub>affected</sub> &middot; <i>f</i><sub>residual</sub> &middot; <i>T</i><sub>recovery</sub>.</li>
+            <li><strong>Conjunctive Operations Guardrail Bundle:</strong> Self-service deployment policies cannot trade off safety dimensions via weighted averages: Launchable = SLO<sub>pass</sub> &and; Blast<sub>pass</sub> &and; Cost<sub>pass</sub> &and; Governance<sub>pass</sub>.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
+    return
+
+
+@app.cell(hide_code=True)
+def _(COLORS, mo, v2_12_packet, v2_12_profile):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <ul class="mlsysbook-list" style="margin: 0; font-size: 0.9rem; color: {COLORS['TextSec']};">
+                <li><strong>Manage error budgets as amount systems:</strong> calculate availability minutes, quality drift points, and incident allowances for {v2_12_profile.label}.</li>
+                <li><strong>Balance canary learning against blast radius:</strong> derive the stage duration required for statistical significance without exceeding blast limits.</li>
+                <li><strong>Execute typed incident runbooks:</strong> structure detection, attribution, mitigation, and recovery to minimize lost work during silent failures.</li>
+                <li><strong>Enforce conjunctive release guardrails:</strong> authorize production policies that satisfy SLO, blast radius, cost, and governance boundaries simultaneously.</li>
+            </ul>
+        </div>
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    SLOs &amp; SLAs &middot; Canary analysis &middot; Incident lifecycle &middot; Conjunctive guardrails
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>~50 min</strong><br/>
+                    A: 10 &middot; B: 10 &middot; C: 15 &middot; D: 15 min
+                </div>
+            </div>
+        </div>
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                &ldquo;When operating {v2_12_packet['ops_unit']} at scale, which operational constraint
+                binds first: availability error budget, statistical canary duration, incident lost work,
+                or multi-guardrail release compliance?&rdquo;
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.Html(f"""
+    <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-bottom: 20px;">
+        <h4 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.05rem;">
+            Recommended Reading &mdash; Complete before this lab:
+        </h4>
+        <ul class="mlsysbook-list" style="margin: 0; font-size: 0.9rem; color: #334155;">
+            <li><strong>Reliability Engineering &amp; SLOs:</strong> error-budget amount systems, burn rates, availability vs. semantic quality trade-offs.</li>
+            <li><strong>Continuous Delivery &amp; Progressive Rollouts:</strong> statistical canary sizing, metric evaluation windows, automated rollback triggers.</li>
+            <li><strong>Incident Response &amp; Runbooks:</strong> MTTD, MTTR, telemetry localization, attribution, and blast-radius containment.</li>
+            <li><strong>Self-Service Deployment Policies:</strong> guardrail conjunctions, governance levels, and operational compliance audit trails.</li>
+        </ul>
+    </div>
+    """)
+    return
 
 
 @app.cell
@@ -577,7 +714,6 @@ def _(mo, v2_12_packet):
         label="Optional memo note",
         placeholder="One sentence of local context or residual risk.",
     )
-
     return (
         v2_12_automation_level,
         v2_12_canary_pct,
@@ -614,7 +750,7 @@ def _(mo, v2_12_packet):
 
 
 @app.cell
-def _(math, v2_12_period_minutes):
+def _(v2_12_period_minutes):
     def v2_12_error_budget(
         packet,
         *,
@@ -852,8 +988,6 @@ def _(math, v2_12_period_minutes):
         v2_12_incident_budget,
         v2_12_policy_eval,
         v2_12_policy_key,
-        v2_12_policy_label,
-        v2_12_runbook_factor,
     )
 
 
@@ -954,15 +1088,22 @@ def _(
         v2_12_c,
         v2_12_d_policies,
         v2_12_fast_policy,
-        v2_12_rejected_policy_key,
         v2_12_rejected_policy_result,
         v2_12_selected_policy,
-        v2_12_selected_policy_key,
     )
 
 
 @app.cell
-def _(COLORS, apply_plotly_theme, go, pd, v2_12_fmt_hours, v2_12_fmt_number, v2_12_fmt_pct, v2_12_guardrail_badge):
+def _(
+    COLORS,
+    apply_plotly_theme,
+    go,
+    pd,
+    v2_12_fmt_hours,
+    v2_12_fmt_number,
+    v2_12_fmt_pct,
+    v2_12_guardrail_badge,
+):
     def v2_12_color(key, fallback):
         return COLORS.get(key, fallback)
 
@@ -1124,7 +1265,6 @@ def _(COLORS, apply_plotly_theme, go, pd, v2_12_fmt_hours, v2_12_fmt_number, v2_
         v2_12_budget_table,
         v2_12_canary_fig,
         v2_12_canary_table,
-        v2_12_color,
         v2_12_incident_fig,
         v2_12_incident_table,
         v2_12_policy_fig,
@@ -1134,106 +1274,12 @@ def _(COLORS, apply_plotly_theme, go, pd, v2_12_fmt_hours, v2_12_fmt_number, v2_
 
 @app.cell(hide_code=True)
 def _(
-    ACADEMIC_LAB_CSS,
     COLORS,
-    LAB_CSS,
-    mo,
-    source_trace,
-    track_arc_context,
-    track_context,
-    v2_12_escape,
-    v2_12_metadata,
-    v2_12_packet,
-    v2_12_profile,
-    v2_12_variant,
-):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.Html(
-                f"""
-                <div style="background:linear-gradient(135deg, {COLORS['Surface0']} 0%, {COLORS['Surface1']} 100%);
-                            border-radius:16px; padding:32px 40px; margin-bottom:8px;
-                            border:1px solid #2d3748;">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
-                        <div>
-                            <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                                        text-transform:uppercase; letter-spacing:0.14em; margin-bottom:8px;">
-                                Vol 2 &middot; Lab 12 &middot; ML Operations at Scale
-                            </div>
-                            <div style="font-size:2rem; font-weight:800; color:#f1f5f9; line-height:1.15; margin-bottom:10px;">
-                                Operations at Scale as Control Loops
-                            </div>
-                            <div style="font-size:0.95rem; color:#94a3b8; max-width:760px; line-height:1.6;">
-                                {v2_12_escape(v2_12_variant.workload_summary)} The shared concept sequence treats
-                                SLOs, canaries, incidents, and policy guardrails as amounts that spend budget over time.
-                            </div>
-                        </div>
-                        <div style="display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
-                            <span class="badge badge-info">{v2_12_escape(v2_12_profile.label)}</span>
-                            <span class="badge badge-info">{v2_12_escape(v2_12_packet['ops_unit'])}</span>
-                            <span class="badge badge-info">{v2_12_escape(v2_12_packet['hardware_ref'])}</span>
-                            <span class="badge badge-warn">45-55 minutes &middot; 4 Parts + Synthesis</span>
-                        </div>
-                    </div>
-                </div>
-                """
-            ),
-            track_context(v2_12_profile),
-            track_arc_context(v2_12_profile, v2_12_metadata.lab_id),
-            source_trace(
-                {
-                    "chapter": "Volume II, Chapter 12: ML Operations at Scale",
-                    "anchors": (
-                        "SLOs and freshness SLOs",
-                        "Canary duration equation",
-                        "Runbook diagnostic flow",
-                        "Self-service deployment invariants",
-                    ),
-                    "track_source": v2_12_packet["source_policy"],
-                    "implementation": "Notebook-local v2_12_ amount-system formulas; shared track metadata and report helpers.",
-                }
-            ),
-        ]
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(COLORS, mo, v2_12_escape, v2_12_packet):
-    mo.Html(
-        f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']};
-                    background:white; border-radius:0 8px 8px 0;
-                    padding:20px 28px; margin:8px 0 16px 0;
-                    box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                Shared concept sequence
-            </div>
-            <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
-                <div>1. <strong>SLO/error budget:</strong> reliability becomes an amount system.</div>
-                <div>2. <strong>Canary/rollout:</strong> learning speed trades against blast radius.</div>
-                <div>3. <strong>Incident response:</strong> recovery time becomes lost-work budget.</div>
-                <div>4. <strong>Operations policy:</strong> SLO, blast radius, cost, and governance guardrails must all pass.</div>
-            </div>
-            <div style="border-top:1px solid {COLORS['Border']}; margin:16px -28px 0 -28px; padding:16px 28px 0 28px;
-                        font-size:0.86rem; color:{COLORS['TextSec']}; line-height:1.65;">
-                <strong>Track lens:</strong> {v2_12_escape(v2_12_packet['stakeholder'])} manages
-                <strong>{v2_12_escape(v2_12_packet['ops_unit'])}</strong> using
-                <strong>{v2_12_escape(v2_12_packet['primary_signal'])}</strong>.
-                Natural failure: {v2_12_escape(v2_12_packet['failure_mode'])}.
-            </div>
-        </div>
-        """
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(
+    MathPeek,
+    big_takeaways,
     build_lab_report,
+    gated_hypothesis_card,
+    instrumentation_console,
     ledger,
     mo,
     report_export_panel,
@@ -1247,11 +1293,9 @@ def _(
     v2_12_canary_pct,
     v2_12_canary_table,
     v2_12_chapter,
-    v2_12_color,
     v2_12_d_policies,
     v2_12_detection_min,
     v2_12_diagnosis_min,
-    v2_12_escape,
     v2_12_fast_policy,
     v2_12_fmt_hours,
     v2_12_fmt_minutes,
@@ -1278,7 +1322,6 @@ def _(
     v2_12_partD_policy_choice,
     v2_12_partD_pred,
     v2_12_policy_fig,
-    v2_12_policy_label,
     v2_12_policy_table,
     v2_12_prediction_feedback,
     v2_12_profile,
@@ -1296,18 +1339,8 @@ def _(
     v2_12_student_id,
     v2_12_telemetry_depth,
     v2_12_traffic_multiplier,
+    v2_12_variant,
 ):
-    def v2_12_gate(pred_widget, items):
-        if pred_widget.value is None:
-            items.append(
-                mo.callout(
-                    mo.md("Commit to the structured prediction first; the instrument is hidden until the prior is explicit."),
-                    kind="warn",
-                )
-            )
-            return True
-        return False
-
     def v2_12_feedback(predicted, actual, labels):
         kind, message = v2_12_prediction_feedback(predicted, actual, labels)
         return mo.callout(mo.md(message), kind=kind)
@@ -1315,37 +1348,54 @@ def _(
     def v2_12_status_callout(ok, success, failure):
         return mo.callout(mo.md(success if ok else failure), kind="success" if ok else "danger")
 
-    def v2_12_build_part_a():
+    def build_part_a():
         labels = {
             "availability": "availability error-budget minutes",
             "quality": "quality/drift points",
             "incident_count": "incident count",
         }
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                You are the {v2_12_packet['stakeholder']}. A release is ready for the
-                {v2_12_packet['ops_unit']}, but the chapter's SLO idea requires you to
-                translate reliability into budgets before approving more exposure.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Mission Scenario &middot; {v2_12_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;A release is ready for {v2_12_packet['ops_unit']}, but our reliability contract
+                    requires translating availability targets and semantic quality into consumable error budgets
+                    before exposing production traffic.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_12_variant.stakeholder} &middot; {v2_12_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_12_partA_pred,
+                title="1. Formulate SLO & Error-Budget Hypothesis",
+                subtitle=(
+                    f"Scenario: You are the {v2_12_variant.stakeholder}. Predict which operations amount "
+                    "(availability error-budget minutes, quality/drift points, or incident count) "
+                    "will bind first under production operating conditions."
+                ),
             ),
-            v2_12_partA_pred,
         ]
-        if v2_12_gate(v2_12_partA_pred, items):
+        if v2_12_partA_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_12_feedback(v2_12_partA_pred.value, v2_12_a["binding_key"], labels),
-                mo.hstack(
-                    [
-                        v2_12_slo_pct,
-                        v2_12_quality_floor,
-                        v2_12_incident_count,
-                    ],
-                    widths="equal",
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_12_slo_pct, v2_12_quality_floor, v2_12_incident_count], widths="equal"),
+                        mo.hstack([v2_12_detection_min, v2_12_impact_min], widths="equal"),
+                    ]),
+                    title="SLO & Error-Budget Parameters",
+                    subtitle=f"Tune availability target, quality floor, and incident parameters for {v2_12_profile.label}",
                 ),
-                mo.hstack([v2_12_detection_min, v2_12_impact_min], widths="equal"),
                 v2_12_budget_fig(v2_12_a),
                 v2_12_budget_table(v2_12_a),
                 v2_12_status_callout(
@@ -1353,54 +1403,81 @@ def _(
                     f"Recovered envelope. The current release stays within all three tracked operation amounts; binding amount: `{v2_12_a['binding']}` at {v2_12_a['binding_ratio']:.2f}x budget.",
                     f"Budget violation. `{v2_12_a['binding']}` is overspent at {v2_12_a['binding_ratio']:.2f}x budget. Reduce incidents, shorten detection, widen the SLO budget, or tighten rollout exposure before promotion.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Error-Budget Commitment Decision</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Status: binding amount is <code>{v2_12_a['binding']}</code> consuming <code>{v2_12_a['binding_ratio']:.2f}x</code> of budget.
+                        Commit your checkpoint decision before advancing to live canary exposure:
+                    </p>
+                    {v2_12_partA_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"B_{\text{error}} = T_{\text{period}} \cdot (1 - \text{SLO}), \quad S_{\text{impact}} = N_{\text{inc}} \cdot (T_{\text{detect}} + T_{\text{impact}})",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Error-budget minutes = period minutes x (1 - SLO).
-
-                            For this 30-day window: `{v2_12_fmt_minutes(v2_12_a['error_budget_minutes'])}`
-                            are allowed by the availability SLO. Incident spend is
-                            `{v2_12_incident_count.value}` incidents x
-                            (`{v2_12_detection_min.value}` detection min + `{v2_12_impact_min.value}` impact min)
-                            = `{v2_12_fmt_minutes(v2_12_a['impact_minutes'])}`.
-
-                            Quality error budget = baseline quality - quality floor =
-                            `{v2_12_packet['baseline_quality_pct']:.1f}% - {v2_12_quality_floor.value:.1f}%`
-                            = `{v2_12_a['quality_budget_pp']:.2f}` percentage points.
-                            """
-                        )
-                    }
+                        "period duration": f"{v2_12_packet['period_days']} days ({v2_12_fmt_minutes(v2_12_a['period_minutes'])})",
+                        "availability SLO": f"{v2_12_slo_pct.value:.2f}%",
+                        "allowed error budget": v2_12_fmt_minutes(v2_12_a['error_budget_minutes']),
+                        "incident count": f"{v2_12_incident_count.value} incidents",
+                        "total impact time": v2_12_fmt_minutes(v2_12_a['impact_minutes']),
+                        "quality budget": f"{v2_12_a['quality_budget_pp']:.2f} pp",
+                        "quality spend": f"{v2_12_a['quality_spend_pp']:.2f} pp",
+                        "chapter source": "Volume II, Chapter 12: Reliability Engineering & Error Budgets",
+                    },
                 ),
-                v2_12_partA_checkpoint,
             ]
         )
         return mo.vstack(items)
 
-    def v2_12_build_part_b():
+    def build_part_b():
         labels = {
             "tiny_blind": "too small to learn inside the release window",
             "balanced": "balanced evidence and exposure",
             "aggressive_exposed": "too much blast-radius exposure",
         }
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                The same control loop now moves from target setting to live rollout.
-                The candidate gets production evidence only from the canary slice, but
-                every exposed {v2_12_packet['traffic_unit']} spends blast-radius budget.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Mission Scenario &middot; {v2_12_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Moving from error-budget planning to live canary rollout on {v2_12_packet['release_unit']}.
+                    We need statistically significant evidence that quality hasn't regressed before our release window closes,
+                    without spending excess blast radius.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_12_variant.stakeholder} &middot; {v2_12_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_12_partB_pred,
+                title="2. Formulate Canary Learning vs. Blast-Radius Hypothesis",
+                subtitle=(
+                    f"Scenario: You are configuring canary exposure for {v2_12_packet['release_unit']}. "
+                    "Predict how canary percentage trades statistical learning speed against user blast-radius exposure."
+                ),
             ),
-            v2_12_partB_pred,
         ]
-        if v2_12_gate(v2_12_partB_pred, items):
+        if v2_12_partB_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_12_feedback(v2_12_partB_pred.value, v2_12_b["actual"], labels),
-                mo.hstack([v2_12_canary_pct, v2_12_stage_hours], widths="equal"),
-                mo.hstack([v2_12_sample_needed, v2_12_traffic_multiplier], widths="equal"),
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_12_canary_pct, v2_12_stage_hours], widths="equal"),
+                        mo.hstack([v2_12_sample_needed, v2_12_traffic_multiplier], widths="equal"),
+                    ]),
+                    title="Canary Traffic & Sample Size Controls",
+                    subtitle=f"Tune canary traffic slice, evaluation window duration, and sample requirement for {v2_12_profile.label}",
+                ),
                 v2_12_canary_fig(
                     v2_12_packet,
                     v2_12_canary_pct.value,
@@ -1414,28 +1491,36 @@ def _(
                     f"Rollout boundary is healthy. This stage gathers enough evidence in `{v2_12_fmt_hours(v2_12_stage_hours.value)}` while spending `{v2_12_fmt_number(v2_12_b['blast_units'])}` {v2_12_packet['traffic_unit']} of blast radius.",
                     f"Rollout boundary fails. Evidence ratio is `{v2_12_b['blind_ratio']:.2f}x` and blast ratio is `{v2_12_b['blast_ratio']:.2f}x`; adjust percentage, duration, sample requirement, or release window.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Canary Promotion Gate Decision</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Required duration: <code>{v2_12_fmt_hours(v2_12_b['required_hours'])}</code>;
+                        blast radius: <code>{v2_12_fmt_number(v2_12_b['blast_units'])} {v2_12_packet['traffic_unit']}</code>.
+                        Select your canary promotion policy:
+                    </p>
+                    {v2_12_partB_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"T_{\text{stage}} = \frac{N_{\text{needed}}}{R_{\text{traffic}} \cdot p_{\text{canary}}}, \quad U_{\text{blast}} = R_{\text{traffic}} \cdot p_{\text{canary}} \cdot T_{\text{actual}}",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Chapter formula: `T_stage = n_samples_needed / (request_rate * p_stage)`.
-
-                            Here, `T_stage = {v2_12_sample_needed.value:,} / `
-                            `({v2_12_fmt_number(v2_12_b['traffic_rate'])} * {v2_12_canary_pct.value / 100:.2f})`
-                            = `{v2_12_fmt_hours(v2_12_b['required_hours'])}`.
-
-                            Blast-radius spend = traffic rate x canary fraction x stage hours =
-                            `{v2_12_fmt_number(v2_12_b['blast_units'])}` {v2_12_packet['traffic_unit']}.
-                            """
-                        )
-                    }
+                        "samples needed": f"{v2_12_sample_needed.value:,}",
+                        "effective traffic rate": f"{v2_12_fmt_number(v2_12_b['traffic_rate'])} {v2_12_packet['traffic_unit']}/h",
+                        "canary fraction": f"{v2_12_canary_pct.value / 100:.2f} ({v2_12_canary_pct.value}%)",
+                        "required duration": v2_12_fmt_hours(v2_12_b['required_hours']),
+                        "allocated duration": f"{v2_12_stage_hours.value:.2f} h",
+                        "blast units spent": f"{v2_12_fmt_number(v2_12_b['blast_units'])} {v2_12_packet['traffic_unit']}",
+                        "blast budget limit": f"{v2_12_fmt_number(v2_12_packet['blast_budget_units'])} {v2_12_packet['traffic_unit']}",
+                        "chapter source": "Volume II, Chapter 12: Continuous Delivery & Progressive Rollouts",
+                    },
                 ),
-                v2_12_partB_checkpoint,
             ]
         )
         return mo.vstack(items)
 
-    def v2_12_build_part_c():
+    def build_part_c():
         labels = {
             "restart_first": "restart serving first",
             "inspect_semantic": "inspect data/model-quality signals first",
@@ -1443,24 +1528,46 @@ def _(
             "wait_for_labels": "wait for more labels",
         }
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                A production incident is visible in `{v2_12_packet['quality_signal']}` while
-                basic health checks can still look normal. The runbook must preserve diagnostic
-                order and limit lost work while the control loop detects, attributes, mitigates,
-                and recovers.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Incident Briefing &middot; {v2_12_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;An anomaly is surfacing in {v2_12_packet['quality_signal']} while infrastructure health
+                    checks report green. We must enforce disciplined diagnostic ordering and contain lost-work budgets
+                    before escalating or taking blunt mitigation steps.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_12_variant.stakeholder} &middot; {v2_12_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_12_partC_pred,
+                title="3. Formulate Incident Response & Lost-Work Hypothesis",
+                subtitle=(
+                    f"Scenario: Silent regression in {v2_12_packet['quality_signal']}. "
+                    "Predict the initial response action that adheres to diagnostic order and minimizes lost work."
+                ),
             ),
-            v2_12_partC_pred,
         ]
-        if v2_12_gate(v2_12_partC_pred, items):
+        if v2_12_partC_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_12_feedback(v2_12_partC_pred.value, "inspect_semantic", labels),
-                mo.hstack([v2_12_mttd_min, v2_12_diagnosis_min, v2_12_runbook_level], widths="equal"),
-                mo.hstack([v2_12_mitigation_pct, v2_12_recovery_min], widths="equal"),
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_12_mttd_min, v2_12_diagnosis_min, v2_12_runbook_level], widths="equal"),
+                        mo.hstack([v2_12_mitigation_pct, v2_12_recovery_min], widths="equal"),
+                    ]),
+                    title="Incident Lifecycle & Runbook Maturity Controls",
+                    subtitle=f"Tune mean time to detect (MTTD), diagnostic latency, mitigation effectiveness, and runbook automation for {v2_12_profile.label}",
+                ),
                 v2_12_incident_fig(v2_12_packet, v2_12_mttd_min.value, v2_12_c, v2_12_recovery_min.value),
                 v2_12_incident_table(v2_12_packet, v2_12_c),
                 v2_12_status_callout(
@@ -1468,31 +1575,36 @@ def _(
                     f"Incident response stays inside the lost-work budget and starts with ML semantic evidence. Lost work: `{v2_12_fmt_number(v2_12_c['lost_work'])}` {v2_12_packet['traffic_unit']}.",
                     f"Response boundary is unsafe. Lost work is `{v2_12_fmt_number(v2_12_c['lost_work'])}` {v2_12_packet['traffic_unit']} against a budget of `{v2_12_fmt_number(v2_12_c['budget'])}`, or the first action violates diagnostic order.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Runbook Remediation Decision</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Lost work: <code>{v2_12_fmt_number(v2_12_c['lost_work'])} {v2_12_packet['traffic_unit']}</code>
+                        (budget: <code>{v2_12_fmt_number(v2_12_c['budget'])}</code>).
+                        Select your post-incident runbook refinement action:
+                    </p>
+                    {v2_12_partC_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"W_{\text{lost}} = R \cdot f_{\text{impact}} \cdot (MTTD + T_{\text{diag}}) + R \cdot f_{\text{impact}} \cdot (1 - \eta_{\text{mit}}) \cdot T_{\text{rec}}",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Lost work = affected amount per minute x impact fraction x minutes.
-
-                            Before mitigation: `{v2_12_fmt_number(v2_12_packet['affected_units_per_min'])}`
-                            {v2_12_packet['traffic_unit']}/min x `{v2_12_fmt_pct(v2_12_packet['incident_impact_fraction'] * 100)}`
-                            x `{v2_12_fmt_minutes(v2_12_c['pre_mitigation_minutes'])}`.
-
-                            After mitigation, residual impact is
-                            `{v2_12_fmt_pct(v2_12_c['residual_fraction'] * 100)}` for
-                            `{v2_12_fmt_minutes(v2_12_recovery_min.value)}`.
-                            The chapter runbook flow is detect user impact -> localize dependency ->
-                            bound blast radius -> escalate by evidence -> learn from the gap.
-                            """
-                        )
-                    }
+                        "affected units/min (R)": f"{v2_12_fmt_number(v2_12_packet['affected_units_per_min'])} {v2_12_packet['traffic_unit']}/min",
+                        "pre-mitigation impact": f"{v2_12_fmt_pct(v2_12_packet['incident_impact_fraction'] * 100)}",
+                        "pre-mitigation duration": v2_12_fmt_minutes(v2_12_c['pre_mitigation_minutes']),
+                        "mitigation efficiency": f"{v2_12_mitigation_pct.value}%",
+                        "residual impact fraction": f"{v2_12_fmt_pct(v2_12_c['residual_fraction'] * 100)}",
+                        "recovery duration": v2_12_fmt_minutes(v2_12_recovery_min.value),
+                        "total lost work": f"{v2_12_fmt_number(v2_12_c['lost_work'])} {v2_12_packet['traffic_unit']}",
+                        "chapter source": "Volume II, Chapter 12: Incident Lifecycle & Runbook Workflows",
+                    },
                 ),
-                v2_12_partC_checkpoint,
             ]
         )
         return mo.vstack(items)
 
-    def v2_12_build_part_d():
+    def build_part_d():
         labels = {
             "slo": "SLO / error budget",
             "blast": "Blast radius",
@@ -1500,23 +1612,46 @@ def _(
             "governance": "Governance",
         }
         items = [
-            mo.md(
-                f"""
-                ### Scenario
-                You now choose the operating policy for the next rollout and incident path.
-                The chapter's self-service deployment invariants make this a guardrail
-                conjunction: SLO, blast radius, cost, and governance must all pass.
-                """
+            mo.Html(f"""
+            <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
+                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                    Policy Authorization Briefing &middot; {v2_12_variant.stakeholder}
+                </div>
+                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                    &ldquo;Deployments at scale must pass a conjunction of independent guardrails:
+                    SLO budget, canary blast radius, serving cost, and governance review. If any single
+                    boundary fails, the rollout is rejected.&rdquo;
+                </div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
+                    &mdash; {v2_12_variant.stakeholder} &middot; {v2_12_profile.label}
+                </div>
+            </div>
+            """),
+            gated_hypothesis_card(
+                v2_12_partD_pred,
+                title="4. Formulate Conjunctive Operations Policy Hypothesis",
+                subtitle=(
+                    "Scenario: Compare candidate release policies against the production guardrail bundle. "
+                    "Predict which constraint causes the naive fast-rollout policy to fail."
+                ),
             ),
-            v2_12_partD_pred,
         ]
-        if v2_12_gate(v2_12_partD_pred, items):
+        if v2_12_partD_pred.value is None:
             return mo.vstack(items)
+
         items.extend(
             [
                 v2_12_feedback(v2_12_partD_pred.value, v2_12_fast_policy["binding"], labels),
-                mo.hstack([v2_12_rollout_aggression, v2_12_automation_level], widths="equal"),
-                mo.hstack([v2_12_telemetry_depth, v2_12_governance_level], widths="equal"),
+                instrumentation_console(
+                    mo.vstack([
+                        mo.hstack([v2_12_rollout_aggression, v2_12_automation_level], widths="equal"),
+                        mo.hstack([v2_12_telemetry_depth, v2_12_governance_level], widths="equal"),
+                    ]),
+                    title="Operations Policy & Guardrail Knobs",
+                    subtitle=f"Configure rollout aggressiveness, automated rollback readiness, telemetry depth, and governance tiers for {v2_12_profile.label}",
+                ),
                 v2_12_policy_fig(v2_12_d_policies),
                 v2_12_policy_table(v2_12_d_policies, v2_12_guardrail_label),
                 mo.hstack([v2_12_partD_policy_choice, v2_12_rejected_policy], widths="equal"),
@@ -1525,29 +1660,35 @@ def _(
                     f"Selected policy passes all guardrails. Binding guardrail is `{v2_12_guardrail_label(v2_12_selected_policy['binding'])}`.",
                     f"Selected policy is not launchable. Binding guardrail is `{v2_12_guardrail_label(v2_12_selected_policy['binding'])}`; revise rollout, automation, telemetry, or governance.",
                 ),
-                mo.accordion(
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Guardrail Authorization Decision</h4>
+                    <p style="margin: 0 0 8px 0; font-size: 0.9rem; color: #475569;">
+                        Selected: <code>{v2_12_selected_policy['name']}</code> (Feasible: {v2_12_selected_policy['feasible']};
+                        Binding: <code>{v2_12_guardrail_label(v2_12_selected_policy['binding'])}</code>).
+                        Confirm your deployment authorization policy:
+                    </p>
+                    {v2_12_partD_checkpoint}
+                </div>
+                """),
+                MathPeek(
+                    r"\text{Launchable} = (\text{SLO}_{\text{spend}} \le 100\%) \land (\text{Blast} \le \text{Blast}_{\max}) \land (\text{Cost} \le \text{Cost}_{\max}) \land (\text{Gov} \ge \text{Gov}_{\min})",
                     {
-                        "Math Peek / source model": mo.md(
-                            f"""
-                            Policy feasibility is not a weighted average. The release is valid only when:
-
-                            `slo_ok and blast_ok and cost_ok and governance_ok`.
-
-                            Current selected policy:
-                            SLO spend `{v2_12_fmt_pct(v2_12_selected_policy['slo_spend_pct'])}`,
-                            blast radius `{v2_12_fmt_pct(v2_12_selected_policy['blast_pct'])}`,
-                            cost index `{v2_12_selected_policy['cost_index']:.1f}`,
-                            governance score `{v2_12_selected_policy['governance_score']:.2f}`.
-                            """
-                        )
-                    }
+                        "SLO spend check": f"{v2_12_fmt_pct(v2_12_selected_policy['slo_spend_pct'])} <= {v2_12_fmt_pct(v2_12_packet['slo_guardrail_limit_pct'])}",
+                        "blast radius check": f"{v2_12_fmt_pct(v2_12_selected_policy['blast_pct'])} <= {v2_12_fmt_pct(v2_12_packet['max_blast_pct'])}",
+                        "cost index check": f"{v2_12_selected_policy['cost_index']:.1f} <= {v2_12_packet['cost_limit_index']:.1f}",
+                        "governance check": f"{v2_12_selected_policy['governance_score']:.2f} >= {v2_12_packet['governance_min_score']:.2f}",
+                        "binding guardrail": v2_12_guardrail_label(v2_12_selected_policy['binding']),
+                        "chapter source": "Volume II, Chapter 12: Self-Service Operations & Conjunction Policies",
+                    },
                 ),
-                v2_12_partD_checkpoint,
             ]
         )
         return mo.vstack(items)
 
     def build_synthesis():
+        items = []
         complete_widgets = (
             ("Part A prediction", v2_12_partA_pred),
             ("Part A checkpoint", v2_12_partA_checkpoint),
@@ -1598,17 +1739,15 @@ def _(
                 "ok": v2_12_c["ok"],
             },
             "partD": {
-                "rollout_aggression": v2_12_rollout_aggression.value,
-                "automation_level": v2_12_automation_level.value,
-                "telemetry_depth": v2_12_telemetry_depth.value,
-                "governance_level": v2_12_governance_level.value,
-                "selected_policy_key": v2_12_partD_policy_choice.value,
-                "rejected_policy_key": v2_12_rejected_policy.value,
-                "binding_guardrail": v2_12_selected_policy["binding"],
-                "policy_feasible": v2_12_selected_policy["feasible"],
+                "selected_policy": v2_12_selected_policy["name"],
+                "binding": binding_ops_amount,
+                "feasible": v2_12_selected_policy["feasible"],
+                "slo_spend_pct": round(v2_12_selected_policy["slo_spend_pct"], 4),
+                "blast_pct": round(v2_12_selected_policy["blast_pct"], 4),
+                "cost_index": round(v2_12_selected_policy["cost_index"], 4),
+                "governance_score": round(v2_12_selected_policy["governance_score"], 4),
             },
             "v2_13_security_implication": security_text,
-            "memo_note": v2_12_memo_note.value,
         }
         report = build_lab_report(
             v2_12_metadata,
@@ -1616,26 +1755,30 @@ def _(
             track=v2_12_profile.label,
             scenario=v2_12_variant.workload_summary,
             learning_objectives=(
-                "Explain how SLO and error budget turn reliability into an amount system.",
-                "Quantify the canary trade-off between learning speed and blast radius.",
-                "Budget incident response by recovery time and lost work.",
-                "Choose an operations policy that satisfies SLO, blast radius, cost, and governance guardrails.",
+                "Manage error budgets as amount systems for the selected track.",
+                "Balance canary statistical learning against blast-radius exposure.",
+                "Structure incident response to minimize lost work during silent failures.",
+                "Select and authorize an operations policy that satisfies conjunctive guardrails.",
             ),
             predictions={
-                "part_a_binding_amount": v2_12_partA_pred.value,
+                "part_a_error_budget_binding": v2_12_partA_pred.value,
                 "part_b_canary_tradeoff": v2_12_partB_pred.value,
-                "part_c_first_response": v2_12_partC_pred.value,
-                "part_d_naive_policy_binding": v2_12_partD_pred.value,
+                "part_c_incident_first_action": v2_12_partC_pred.value,
+                "part_d_guardrail_binding": v2_12_partD_pred.value,
             },
             knob_settings={
-                "availability_slo_pct": v2_12_slo_pct.value,
-                "quality_floor_pct": v2_12_quality_floor.value,
+                "slo_pct": v2_12_slo_pct.value,
+                "quality_floor": v2_12_quality_floor.value,
                 "incident_count": v2_12_incident_count.value,
+                "detection_min": v2_12_detection_min.value,
+                "impact_min": v2_12_impact_min.value,
                 "canary_pct": v2_12_canary_pct.value,
                 "stage_hours": v2_12_stage_hours.value,
                 "sample_needed": v2_12_sample_needed.value,
+                "traffic_multiplier": v2_12_traffic_multiplier.value,
                 "mttd_min": v2_12_mttd_min.value,
                 "diagnosis_min": v2_12_diagnosis_min.value,
+                "runbook_level": v2_12_runbook_level.value,
                 "mitigation_pct": v2_12_mitigation_pct.value,
                 "recovery_min": v2_12_recovery_min.value,
                 "rollout_aggression": v2_12_rollout_aggression.value,
@@ -1679,9 +1822,9 @@ def _(
             },
             big_takeaways=(
                 "Operations at scale spends reliability budget over time.",
-                "Canaries buy evidence by spending bounded blast radius.",
-                "Incident response is a lost-work budget, not just a page.",
-                "A launch policy is valid only when every guardrail passes.",
+                "Canaries buy statistical evidence by spending bounded blast radius.",
+                "Incident response is a lost-work budget, not just a reactive alert.",
+                "A launch policy is valid only when every guardrail passes simultaneously.",
             ),
             source_trace={
                 "book_anchor": v2_12_metadata.book_anchor,
@@ -1713,42 +1856,117 @@ def _(
             )
         status = "SAVED" if not incomplete else "INCOMPLETE"
         status_kind = "success" if not incomplete else "warn"
-        return mo.vstack(
-            [
-                mo.md(
-                    f"""
-                    ### Operations-at-Scale Memo
 
-                    **Report frame:** {v2_12_packet['report_frame']}
+        items.append(mo.md("## Synthesis &mdash; ML Operations at Scale Policy Memo"))
+        items.append(mo.Html(f"""
+        <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO &amp; REFLECTIONS</div>
+            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Operations-at-Scale Control Memo</h4>
+            {v2_12_student_id}
+            <div style="margin-top: 12px;">{v2_12_security_implication}</div>
+            <div style="margin-top: 12px;">{v2_12_memo_note}</div>
+        </div>
+        """))
 
-                    **Selected rollout/incident policy:** `{v2_12_selected_policy['name']}`
+        items.append(mo.callout(
+            mo.md(
+                f"**Memo summary:** Selected `{v2_12_selected_policy['name']}` (binding constraint: `{binding_ops_amount}`); "
+                f"rejected `{v2_12_rejected_policy_result['name']}`.  \n\n"
+                f"**V2-13 implication:** {security_text}"
+            ),
+            kind=status_kind,
+        ))
+        items.append(mo.callout(
+            mo.md(
+                f"**Status:** {status}. "
+                + ("Complete all predictions, checkpoints, policy choices, and the V2-13 implication before final save." if incomplete else "Ledger snapshot saved for downstream labs.")
+            ),
+            kind=status_kind,
+        ))
 
-                    **Binding ops amount:** `{binding_ops_amount}`
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                        border-radius:10px; padding:16px; border-top:3px solid {COLORS['GreenLine']};">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                    Selected rollout policy</div>
+                <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                    {v2_12_selected_policy['name']}</div>
+            </div>
+            <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                        border-radius:10px; padding:16px; border-top:3px solid {COLORS['OrangeLine']};">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                    Binding ops amount</div>
+                <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                    {binding_ops_amount}</div>
+            </div>
+            <div style="flex:1; min-width:220px; background:white; border:1px solid {COLORS['Border']};
+                        border-radius:10px; padding:16px; border-top:3px solid {COLORS['RedLine']};">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']}; text-transform:uppercase;">
+                    Rejected alternative</div>
+                <div style="font-size:1.05rem; font-weight:800; color:{COLORS['Text']}; margin-top:5px;">
+                    {v2_12_rejected_policy_result['name']}</div>
+            </div>
+        </div>
+        """))
 
-                    **Rejected alternative:** `{v2_12_rejected_policy_result['name']}`
+        items.append(big_takeaways([
+            "Operations at scale spends reliability budget over time.",
+            "Canaries buy statistical evidence by spending bounded blast radius.",
+            "Incident response is a lost-work budget, not just a reactive alert.",
+            "A launch policy is valid only when every guardrail passes simultaneously.",
+        ]))
 
-                    **V2-13 implication:** {security_text}
-                    """
-                ),
-                mo.hstack([v2_12_student_id, v2_12_security_implication], widths="equal"),
-                v2_12_memo_note,
-                mo.callout(
-                    mo.md(
-                        f"**Status:** {status}. "
-                        + ("Complete all predictions, checkpoints, policy choices, and the V2-13 implication before final save." if incomplete else "Ledger snapshot saved for downstream labs.")
-                    ),
-                    kind=status_kind,
-                ),
-                report_export_panel(report),
-            ]
-        )
+        items.append(mo.Html(f"""
+        <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION &amp; SIGN-OFF</div>
+            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Production MLOps Architect Authorization</h4>
+            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                Confirm your production rollout policy, verify all four conjunctive guardrails (SLO, blast radius, cost, governance), and export the signed operations audit record.
+            </p>
+        </div>
+        """))
+
+        items.append(report_export_panel(report))
+
+        items.append(mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 16px 0; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab V2-13: The Price of Privacy &amp; Security</strong> &mdash; Carry forward the
+                    selected deployment policy, binding ops amount, and security implication. The next challenge is
+                    securing these production pipelines against adversarial poisoning, model theft, and data leakage.
+                </div>
+            </div>
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> Chapter 12 on ML Operations at Scale for control loop formalisms.<br/>
+                    <strong>Build:</strong> TinyTorch canary analyzer &mdash; implement statistical difference-in-differences testing with automated rollback triggers.
+                </div>
+            </div>
+        </div>
+        """))
+
+        return mo.vstack(items)
 
     v2_12_tabs = mo.ui.tabs(
         {
-            "Part A - SLO Budget": v2_12_build_part_a(),
-            "Part B - Canary Radius": v2_12_build_part_b(),
-            "Part C - Incident Budget": v2_12_build_part_c(),
-            "Part D - Ops Policy": v2_12_build_part_d(),
+            "Part A - SLO Budget": build_part_a(),
+            "Part B - Canary Radius": build_part_b(),
+            "Part C - Incident Budget": build_part_c(),
+            "Part D - Ops Policy": build_part_d(),
             "Synthesis": build_synthesis(),
         }
     )
