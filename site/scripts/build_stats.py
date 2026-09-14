@@ -32,7 +32,7 @@ SITE_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = SITE_DIR.parent
 CACHE_PATH = SITE_DIR / "config" / "stats-cache.json"
 
-GITHUB_REPO = "harvard-edge/cs249r_book"
+GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "harvard-edge/cs249r_book")
 BUTTONDOWN_NEWSLETTER = "mlsysbook"
 # The GA4 property behind the Looker Studio readership report. A property ID is
 # not a credential -- it identifies the property, it does not grant access --

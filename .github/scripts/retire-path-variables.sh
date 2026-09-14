@@ -14,7 +14,8 @@
 
 set -euo pipefail
 
-REPO="harvard-edge/cs249r_book"
+# owner/name from the checkout's remote, so a repository rename needs no edit here.
+REPO="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 VARS=(
   BOOK_ROOT BOOK_QUARTO BOOK_TOOLS BOOK_DOCKER BOOK_DEPS
   TINYTORCH_ROOT TINYTORCH_SITE TINYTORCH_SRC TINYTORCH_TESTS

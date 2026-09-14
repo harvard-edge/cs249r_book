@@ -6,8 +6,14 @@
  *
  * Rules must match .github/workflows/auto-label.yml (path prefix order).
  * Usage: GITHUB_TOKEN=$(gh auth token) node .github/scripts/sync-area-labels.mjs [owner/repo]
+ * Without an argument, the repository is resolved from the current checkout.
  */
-const REPO = process.argv[2] || 'harvard-edge/cs249r_book';
+import { execSync } from 'node:child_process';
+
+const REPO =
+  process.argv[2] ||
+  process.env.GITHUB_REPOSITORY ||
+  execSync('gh repo view --json nameWithOwner -q .nameWithOwner', { encoding: 'utf8' }).trim();
 const [OWNER, REPO_NAME] = REPO.split('/');
 
 const RULES = [

@@ -43,8 +43,7 @@ EXCLUDED_USERS = {
     "Matthew Steward",
 }
 
-OWNER = "harvard-edge"
-REPO = "cs249r_book"
+OWNER, REPO = os.environ.get("GITHUB_REPOSITORY", "harvard-edge/cs249r_book").split("/")
 BRANCH = "dev"
 RESULTS_PER_PAGE = 1000
 
@@ -436,7 +435,7 @@ def main(_):
     # Update profile URL
     merged_df["profile"] = merged_df.apply(
         lambda row: (
-            "https://github.com/harvard-edge/cs249r_book/graphs/contributors"
+            f"https://github.com/{OWNER}/{REPO}/graphs/contributors"
             if pd.isna(row["username"])
             else f"https://github.com/{row['username']}"
         ),
