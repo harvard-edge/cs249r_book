@@ -1,11 +1,7 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
-
-# ===========================================================================
-# ZONE A: SETUP
-# ===========================================================================
 
 
 @app.cell
@@ -31,16 +27,19 @@ async def _():
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
+        MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         resolve_mlsysim_ref,
         source_trace,
-        track_context,
         track_arc_context,
-        track_selector,
+        track_context,
         training_frontier,
         training_memory_stack,
         training_plan,
@@ -55,6 +54,7 @@ async def _():
         COLORS,
         LAB_CSS,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         get_lab_metadata,
         get_lab_track_variant,
@@ -64,10 +64,8 @@ async def _():
         mo,
         report_export_panel,
         resolve_mlsysim_ref,
-        source_trace,
-        track_context,
         track_arc_context,
-        track_selector,
+        track_context,
         training_frontier,
         training_memory_stack,
         training_plan,
@@ -82,11 +80,20 @@ def _(get_lab_metadata):
 
 
 @app.cell(hide_code=True)
-def _(ledger, track_selector):
+def _(ledger, mo):
+    _options = {
+        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
+        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
+        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
+        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+    }
     _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
-    v1_08_track_picker = track_selector(default=_default_track)
-    v1_08_track_picker
+    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
+    v1_08_track_picker = mo.ui.dropdown(
+        options=_options,
+        value=_default_key,
+        label="Select Course / Industry Track",
+    )
     return (v1_08_track_picker,)
 
 
@@ -98,6 +105,7 @@ def _(
     training_track_profile,
     v1_08_track_picker,
 ):
+    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
     v1_08_track_id = v1_08_track_picker.value
     v1_08_profile = get_track_profile(v1_08_track_id)
     v1_08_variant = get_lab_track_variant("v1_08_training_gauntlet", v1_08_profile.track_id)
@@ -109,26 +117,20 @@ def _(
         v1_08_hardware,
         v1_08_model,
     )
-    return (
-        v1_08_hardware,
-        v1_08_model,
-        v1_08_profile,
-        v1_08_track_id,
-        v1_08_training,
-        v1_08_variant,
-    )
+    return v1_08_profile, v1_08_training, v1_08_variant
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
+    COLORS,
     LAB_CSS,
     mo,
-    source_trace,
+    track_arc_context,
     track_context,
-        track_arc_context,
     v1_08_metadata,
     v1_08_profile,
+    v1_08_track_picker,
     v1_08_training,
     v1_08_variant,
 ):
@@ -136,49 +138,100 @@ def _(
         LAB_CSS,
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
-        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
-                    padding: 36px 44px; border-radius: 16px; color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
-                Machine Learning Systems &middot; Volume I &middot; Lab 08
+        <div class="mlsysbook-lab-shell">
+          <div style="margin-bottom: 16px;">
+            {v1_08_track_picker}
+          </div>
+          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+              ML Systems Textbook &middot; Volume I &middot; Chapter 8 &middot; Foundational Lab 08
             </div>
-            <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1;">
-                Training Gauntlet
+            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+              Training Gauntlet: Weights, Gradients, Optimizer State &amp; Activations
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
-                      color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Weights &middot; Gradients &middot; Optimizer State &middot; Activations &middot; Validation
+            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+              {v1_08_variant.workload_summary} Trace where training, adaptation, or calibration should physically execute. Analyze the multi-gigabyte training memory stack across batch sizes, evaluate precision policy trade-offs, and construct a robust training plan that survives real-world resource constraints.
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
-                      max-width: 860px; line-height: 1.65;">
-                {v1_08_variant.workload_summary} This lab asks where training,
-                adaptation, or calibration should happen, then checks whether the memory
-                stack and validation plan match the selected track.
-            </p>
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
-                <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Memo &middot; ~45 min
-                </span>
-                <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    {v1_08_profile.label}
-                </span>
-                <span style="background: rgba(34,197,94,0.12); color: #86efac;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
-                    {v1_08_training.workload_label}
-                </span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Track:</strong> {v1_08_profile.label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Workload:</strong> {v1_08_training.workload_label}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Hardware:</strong> {v1_08_variant.hardware_ref}
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Model:</strong> {v1_08_variant.model_ref}
+              </span>
+              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+                <strong>Primary Focus:</strong> Training Memory &amp; Feasibility
+              </span>
+              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+                <strong>Deliverable:</strong> {v1_08_training.report_artifact}
+              </span>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Batch Frontier</span>
-                <span class="badge badge-warn">Memory Budget</span>
-                <span class="badge badge-fail">Precision Evidence</span>
-                <span class="badge badge-info">Training Memo</span>
+          </div>
+
+          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+              System Scenario: {v1_08_profile.label} Training &amp; Adaptation Engineering
+            </h3>
+            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
+              You are the <strong>{v1_08_training.stakeholder}</strong> responsible for establishing the training, fine-tuning, or adaptation strategy for <strong>{v1_08_variant.model_ref}</strong> on <strong>{v1_08_variant.hardware_ref}</strong>. The target system must satisfy strict memory, throughput, and stability constraints under <strong>{v1_08_training.workload_label}</strong>.
+            </p>
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                The Architectural Invariants of ML Model Training:
+              </div>
+              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
+                <li><strong>The Training Memory Invariant:</strong> Training memory fundamentally dwarfs inference memory: <em>M</em><sub>train</sub> = <em>M</em><sub>weights</sub> + <em>M</em><sub>grads</sub> + <em>M</em><sub>opt</sub> + <em>M</em><sub>acts</sub> + <em>M</em><sub>batch</sub>. For AdamW optimizers, first and second moment states alone require 8 bytes per parameter in FP32, making optimizer state a major memory bottleneck.</li>
+                <li><strong>The Batch Utilization vs Memory Trade-Off:</strong> Larger batch sizes amortize kernel launch latency and improve accelerator compute utilization: <em>T</em><sub>train</sub> = <em>O</em> / (<em>R</em><sub>peak</sub> &middot; &eta;<sub>hw</sub>). However, activation memory grows with batch size, requiring activation checkpointing or gradient accumulation when hitting memory ceilings.</li>
+                <li><strong>The Precision-Stability Duality:</strong> Reduced-precision training (FP16, BF16, FP8) cuts memory traffic and accelerates tensor core operations, but demands dynamic loss scaling or numeric range verification to prevent gradient underflow and loss spikes.</li>
+                <li><strong>The Deployment Handoff Invariant:</strong> Pre-training, fine-tuning, and on-device adaptation represent fundamentally different operational profiles. A training plan is sound only when training location, validation checks, and deployment artifacts are fully reconciled against hardware boundaries.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Reason about batch size:</strong>
+                    compare throughput, memory pressure, and convergence evidence.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Build the training memory stack:</strong>
+                    compare weights, gradients, optimizer state, activations, and data batch memory.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Check precision policy:</strong>
+                    weigh memory/throughput gains against stability evidence.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Choose a training plan:</strong>
+                    satisfy cost, time, memory, validation, and deployment handoff constraints.</div>
+            </div>
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Core Question
+                </div>
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    Training is budgeted optimization on {v1_08_training.label}: which
+                    batch, precision, memory budget, and validation evidence make the
+                    training or adaptation plan defensible?
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
+                            line-height: 1.6; margin-top: 10px;">
+                    Every track follows the same four concepts. The selected track changes
+                    persona, constraints, thresholds, evidence emphasis, failure mode, and
+                    report framing.
+                </div>
             </div>
         </div>
         """),
@@ -186,56 +239,6 @@ def _(
         track_arc_context(v1_08_profile, v1_08_metadata.lab_id),
     ])
     return
-
-
-@app.cell(hide_code=True)
-def _(COLORS, mo, v1_08_training):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Learning Objectives
-        </div>
-        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div style="margin-bottom: 3px;">1. <strong>Reason about batch size:</strong>
-                compare throughput, memory pressure, and convergence evidence.</div>
-            <div style="margin-bottom: 3px;">2. <strong>Build the training memory stack:</strong>
-                compare weights, gradients, optimizer state, activations, and data batch memory.</div>
-            <div style="margin-bottom: 3px;">3. <strong>Check precision policy:</strong>
-                weigh memory/throughput gains against stability evidence.</div>
-            <div style="margin-bottom: 3px;">4. <strong>Choose a training plan:</strong>
-                satisfy cost, time, memory, validation, and deployment handoff constraints.</div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                Training is budgeted optimization on {v1_08_training.label}: which
-                batch, precision, memory budget, and validation evidence make the
-                training or adaptation plan defensible?
-            </div>
-            <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
-                        line-height: 1.6; margin-top: 10px;">
-                Every track follows the same four concepts. The selected track changes
-                persona, constraints, thresholds, evidence emphasis, failure mode, and
-                report framing.
-            </div>
-        </div>
-    </div>
-    """)
-    return
-
-
-# ===========================================================================
-# ZONE B: CONTROLS AND COMPUTATION
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -258,7 +261,7 @@ def _(mo, v1_08_training):
         },
         label="Checkpoint: what batch decision belongs in the memo?",
     )
-    return (v1_08_batch_checkpoint, v1_08_batch_prediction)
+    return v1_08_batch_checkpoint, v1_08_batch_prediction
 
 
 @app.cell(hide_code=True)
@@ -618,6 +621,7 @@ def _(
     training_plan,
     v1_08_batch_consequence,
     v1_08_batch_rows,
+    v1_08_batch_size,
     v1_08_binding_resource,
     v1_08_carry_forward_summary,
     v1_08_memo_evidence_number,
@@ -625,9 +629,8 @@ def _(
     v1_08_precision_policy_rows,
     v1_08_precision_selection,
     v1_08_strategy_by_id,
-    v1_08_track_amount_system,
-    v1_08_batch_size,
     v1_08_strategy_choice,
+    v1_08_track_amount_system,
     v1_08_training,
 ):
     v1_08_selected_strategy = v1_08_strategy_by_id(
@@ -699,19 +702,14 @@ def _(
         v1_08_precision_rows,
         v1_08_precision_selected,
         v1_08_selected_stack,
-        v1_08_selected_strategy,
     )
-
-
-# ===========================================================================
-# ZONE C: PARTS
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
 def _(
     COLORS,
     apply_plotly_theme,
+    big_takeaways,
     go,
     mo,
     v1_08_amount_system,
@@ -721,7 +719,9 @@ def _(
     v1_08_batch_rows_current,
     v1_08_batch_size,
     v1_08_binding_resource_current,
+    v1_08_carry_forward,
     v1_08_frontier,
+    v1_08_memo_evidence,
     v1_08_memory_mitigation,
     v1_08_memory_prediction,
     v1_08_memory_rows,
@@ -733,6 +733,7 @@ def _(
     v1_08_precision_prediction,
     v1_08_precision_rows,
     v1_08_precision_selected,
+    v1_08_profile,
     v1_08_reflection,
     v1_08_selected_stack,
     v1_08_strategy_choice,
@@ -1145,19 +1146,78 @@ def _(
         v1_08_reflection,
     ])
 
-    mo.ui.tabs({
-        "Part A · Batch": _part_a,
-        "Part B · Memory": _part_b,
-        "Part C · Precision": _part_c,
-        "Part D · Plan": _part_d,
-        "Synthesis": mo.md("Use the synthesis memo below after completing Parts A-D."),
+    _synthesis = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Synthesis: Training Plan Memo</h2>
+          <div class="mlsysbook-grid">
+            <div class="mlsysbook-field"><strong>Track</strong>{v1_08_training.label}</div>
+            <div class="mlsysbook-field"><strong>Selected plan</strong>{v1_08_plan.selected_label}</div>
+            <div class="mlsysbook-field"><strong>Training location</strong>{v1_08_plan.training_location}</div>
+            <div class="mlsysbook-field"><strong>Validation location</strong>{v1_08_plan.validation_location}</div>
+            <div class="mlsysbook-field"><strong>Binding resource</strong>{v1_08_binding_resource_current}</div>
+            <div class="mlsysbook-field"><strong>Evidence number</strong>{v1_08_memo_evidence}</div>
+            <div class="mlsysbook-field"><strong>Precision policy</strong>{v1_08_precision_selected["label"]}</div>
+            <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_08_plan.residual_risk}</div>
+          </div>
+          <div class="mlsysbook-callout"><strong>Carry-forward deployment implication:</strong> {v1_08_carry_forward}</div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
+          <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+            Lead Systems Architect Authorization
+          </div>
+          <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
+            The training and adaptation architecture for <strong>{v1_08_profile.label}</strong> is authorized for execution. Memory allocation, batch scaling, and precision policies satisfy resource envelopes under <strong>{v1_08_training.workload_label}</strong>.
+          </div>
+        </div>
+        """),
+        big_takeaways([
+            ("Batch is a systems knob", "It changes utilization, memory pressure, convergence risk, and evidence burden."),
+            ("Training memory is a stack", "Optimizer state and activations can dominate even when inference weights fit."),
+            ("Precision buys resources with evidence debt", "Lower precision must be justified by stability and deployment replay."),
+            ("A plan is valid inside constraints", "Cost, time, memory, validation, and deployment handoff all have veto power."),
+        ]),
+        mo.Html(f"""
+        <div class="lab-hud">
+            <span class="hud-label">LAB</span>
+            <span class="hud-value">08 &middot; Training Gauntlet</span>
+            <span class="hud-label">TRACK</span>
+            <span class="hud-value">{v1_08_profile.label}</span>
+            <span style="flex:1;"></span>
+            <span class="hud-label">ARTIFACT</span>
+            <span class="hud-value">{v1_08_training.report_artifact}</span>
+            <span class="hud-label">STATUS</span>
+            <span class="hud-active">ACTIVE</span>
+        </div>
+        """),
+    ])
+
+    def build_part_a():
+        return _part_a
+
+    def build_part_b():
+        return _part_b
+
+    def build_part_c():
+        return _part_c
+
+    def build_part_d():
+        return _part_d
+
+    def build_synthesis():
+        return _synthesis
+
+    v1_08_tabs = mo.ui.tabs({
+        "Part A · Batch": build_part_a(),
+        "Part B · Memory": build_part_b(),
+        "Part C · Precision": build_part_c(),
+        "Part D · Plan": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
+    v1_08_tabs
     return
-
-
-# ===========================================================================
-# ZONE D: SYNTHESIS AND REPORT
-# ===========================================================================
 
 
 @app.cell(hide_code=True)
@@ -1185,98 +1245,78 @@ def _(
     v1_08_training,
     v1_08_variant,
 ):
-    _required_widgets = (
-        v1_08_batch_prediction,
-        v1_08_batch_checkpoint,
-        v1_08_memory_prediction,
-        v1_08_memory_mitigation,
-        v1_08_precision_prediction,
-        v1_08_precision_policy,
-        v1_08_precision_checkpoint,
-        v1_08_plan_prediction,
-        v1_08_plan_checkpoint,
+    _reflection_text = str(v1_08_reflection.value or "").strip()
+    _ready = bool(
+        v1_08_batch_prediction.value is not None
+        and v1_08_batch_checkpoint.value is not None
+        and v1_08_memory_prediction.value is not None
+        and v1_08_memory_mitigation.value is not None
+        and v1_08_precision_prediction.value is not None
+        and v1_08_precision_checkpoint.value is not None
+        and v1_08_plan_prediction.value is not None
+        and v1_08_plan_checkpoint.value is not None
+        and _reflection_text
     )
-    _has_progress = any(widget.value is not None for widget in _required_widgets)
-    _completed = (
-        all(widget.value is not None for widget in _required_widgets)
-        and bool(str(v1_08_reflection.value or "").strip())
-    )
-    if _has_progress:
-        ledger.save(chapter=8, design={
-            "chapter": "v1_08",
-            "track_id": v1_08_profile.track_id,
-            "scenario_id": v1_08_variant.scenario_id,
-            "hardware_ref": v1_08_training.hardware_ref,
-            "model_ref": v1_08_training.model_ref,
-            "completed": _completed,
-            "batch_prediction": v1_08_batch_prediction.value,
-            "batch_decision": v1_08_batch_checkpoint.value,
-            "batch_size": v1_08_selected_stack.batch_size,
-            "batch_consequence": v1_08_batch_consequence_current["consequence"],
-            "memory_prediction": v1_08_memory_prediction.value,
-            "memory_mitigation": v1_08_memory_mitigation.value,
-            "precision_prediction": v1_08_precision_prediction.value,
-            "precision_policy": v1_08_precision_policy.value or v1_08_precision_selected["policy_id"],
-            "precision_status": v1_08_precision_selected["status"],
-            "precision_total_memory_mb": v1_08_precision_selected["total_mb"],
-            "precision_evidence_required": v1_08_precision_selected["evidence"],
-            "plan_constraint_prediction": v1_08_plan_prediction.value,
-            "plan_checkpoint": v1_08_plan_checkpoint.value,
-            "selected_training_plan": v1_08_plan.selected_id,
-            "training_location": v1_08_plan.training_location,
-            "validation_location": v1_08_plan.validation_location,
-            "dominant_component": v1_08_plan.dominant_component,
-            "total_memory_mb": v1_08_selected_stack.total_mb,
-            "binding_resource": v1_08_binding_resource_current,
-            "memo_evidence_number": v1_08_memo_evidence,
-            "carry_forward_deployment_implication": v1_08_carry_forward,
-        })
+    ledger.save(chapter=8, design={
+        "chapter": "v1_08",
+        "track_id": v1_08_profile.track_id,
+        "scenario_id": v1_08_variant.scenario_id,
+        "hardware_ref": v1_08_training.hardware_ref,
+        "model_ref": v1_08_training.model_ref,
+        "completed": _ready,
+        "batch_prediction": v1_08_batch_prediction.value,
+        "batch_decision": v1_08_batch_checkpoint.value,
+        "batch_size": v1_08_selected_stack.batch_size,
+        "batch_consequence": v1_08_batch_consequence_current["consequence"],
+        "memory_prediction": v1_08_memory_prediction.value,
+        "memory_mitigation": v1_08_memory_mitigation.value,
+        "precision_prediction": v1_08_precision_prediction.value,
+        "precision_policy": v1_08_precision_policy.value or v1_08_precision_selected["policy_id"],
+        "precision_status": v1_08_precision_selected["status"],
+        "precision_total_memory_mb": v1_08_precision_selected["total_mb"],
+        "precision_evidence_required": v1_08_precision_selected["evidence"],
+        "plan_constraint_prediction": v1_08_plan_prediction.value,
+        "plan_checkpoint": v1_08_plan_checkpoint.value,
+        "selected_training_plan": v1_08_plan.selected_id,
+        "training_location": v1_08_plan.training_location,
+        "validation_location": v1_08_plan.validation_location,
+        "dominant_component": v1_08_plan.dominant_component,
+        "total_memory_mb": v1_08_selected_stack.total_mb,
+        "binding_resource": v1_08_binding_resource_current,
+        "memo_evidence_number": v1_08_memo_evidence,
+        "carry_forward_deployment_implication": v1_08_carry_forward,
+    })
 
-    def build_synthesis():
-        return mo.vstack([
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Synthesis: Training Plan Memo</h2>
-              <div class="mlsysbook-grid">
-                <div class="mlsysbook-field"><strong>Track</strong>{v1_08_training.label}</div>
-                <div class="mlsysbook-field"><strong>Selected plan</strong>{v1_08_plan.selected_label}</div>
-                <div class="mlsysbook-field"><strong>Training location</strong>{v1_08_plan.training_location}</div>
-                <div class="mlsysbook-field"><strong>Validation location</strong>{v1_08_plan.validation_location}</div>
-                <div class="mlsysbook-field"><strong>Binding resource</strong>{v1_08_binding_resource_current}</div>
-                <div class="mlsysbook-field"><strong>Evidence number</strong>{v1_08_memo_evidence}</div>
-                <div class="mlsysbook-field"><strong>Precision policy</strong>{v1_08_precision_selected["label"]}</div>
-                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_08_plan.residual_risk}</div>
-              </div>
-              <div class="mlsysbook-callout"><strong>Carry-forward deployment implication:</strong> {v1_08_carry_forward}</div>
-            </div>
-            """),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Big Takeaways</h2>
-              <ul class="mlsysbook-list">
-                <li><strong>Batch is a systems knob.</strong> It changes utilization, memory pressure, convergence risk, and evidence burden.</li>
-                <li><strong>Training memory is a stack.</strong> Optimizer state and activations can dominate even when inference weights fit.</li>
-                <li><strong>Precision buys resources with evidence debt.</strong> Lower precision must be justified by stability and deployment replay.</li>
-                <li><strong>A plan is valid inside constraints.</strong> Cost, time, memory, validation, and deployment handoff all have veto power.</li>
-              </ul>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="lab-hud">
-                <span class="hud-label">LAB</span>
-                <span class="hud-value">08 &middot; Training Gauntlet</span>
-                <span class="hud-label">TRACK</span>
-                <span class="hud-value">{v1_08_profile.label}</span>
-                <span style="flex:1;"></span>
-                <span class="hud-label">ARTIFACT</span>
-                <span class="hud-value">{v1_08_training.report_artifact}</span>
-                <span class="hud-label">STATUS</span>
-                <span class="hud-active">ACTIVE</span>
-            </div>
-            """),
-        ])
-
-    build_synthesis()
+    _hud = mo.Html(f"""
+    <div class="lab-hud">
+        <span class="hud-label">LAB</span>
+        <span class="hud-value">08 &middot; Training Gauntlet</span>
+        <span class="hud-label">TRACK</span>
+        <span class="hud-value">{v1_08_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">{v1_08_training.report_artifact}</span>
+        <span class="hud-label">STATUS</span>
+        <span class="hud-active">{'SAVED' if _ready else 'ACTIVE'}</span>
+    </div>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
+        <div class="mlsysbook-field"><strong>Selected plan</strong>{v1_08_plan.selected_label}</div>
+        <div class="mlsysbook-field"><strong>Training location</strong>{v1_08_plan.training_location}</div>
+        <div class="mlsysbook-field"><strong>Validation location</strong>{v1_08_plan.validation_location}</div>
+        <div class="mlsysbook-field"><strong>Binding resource</strong>{v1_08_binding_resource_current}</div>
+        <div class="mlsysbook-field"><strong>Evidence number</strong>{v1_08_memo_evidence}</div>
+        <div class="mlsysbook-field"><strong>Precision policy</strong>{v1_08_precision_selected["label"]}</div>
+        <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_08_plan.residual_risk}</div>
+      </div>
+      <div style="margin-top:10px; color:#475569; line-height:1.55;">
+        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
+      </div>
+    </div>
+    """)
+    _hud
     return
 
 
