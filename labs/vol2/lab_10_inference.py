@@ -1755,7 +1755,8 @@ def _(
         _rejected = v2_10_rejected_alternative(v2_10_inference.track_id, _binding)
         _edge_implication = v2_10_edge_implication(v2_10_inference.track_id, _binding)
 
-        _decision_text = v2_10_memo_decision.value or (
+        _custom_note = v2_10_memo_decision.value if isinstance(v2_10_memo_decision.value, str) and v2_10_memo_decision.value.strip() else None
+        _decision_text = _custom_note or (
             f"Deploy {v2_10_precision_label(partD_precision.value)} with {v2_10_schedule_label(partD_schedule.value)} "
             f"across {_plan.replicas_needed} serving units ({_plan.total_devices} total devices) using {partD_routing.value}. "
             f"Binding amount: {_binding}; daily cost {v2_10_fmt_currency(_plan.daily_cost, v2_10_inference.cost_unit)}. "
