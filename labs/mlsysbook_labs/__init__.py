@@ -314,6 +314,8 @@ from .ui import (
     track_arc_context,
     track_context,
     track_selector,
+    gated_hypothesis_card,
+    instrumentation_console,
     what_you_need_to_know,
 )
 from .variants import (
@@ -575,6 +577,8 @@ __all__ = [
     "decision_flow",
     "lab_map",
     "track_selector",
+    "gated_hypothesis_card",
+    "instrumentation_console",
     "track_context",
     "track_arc_context",
     "part_header",

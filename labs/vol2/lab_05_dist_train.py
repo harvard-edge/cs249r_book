@@ -43,6 +43,8 @@ async def _():
         render_distributed_step_breakdown,
         build_lab_report,
         get_lab_metadata,
+        gated_hypothesis_card,
+        instrumentation_console,
     )
 
     ledger = DesignLedger()
@@ -56,7 +58,9 @@ async def _():
         RationaleChallenge,
         Systems,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
+        instrumentation_console,
         mo,
         render_distributed_memory_breakdown,
         render_distributed_step_breakdown,
@@ -64,102 +68,254 @@ async def _():
 
 
 @app.cell
-def _(Models, Systems):
-    # Volume II: The Scale Level - Distributed Cluster & Frontier Model
-    dgx_node = Systems.Nodes.DGX_H100
-    cluster_fabric = Systems.Fabrics.InfiniBand_NDR
-    llama3_70b = Models.Language.Llama3_70B
+def _(mo):
+    # Top-Level Universal Track Selector
+    track_dropdown = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (64x H100 Cluster & 3D Parallelism)": "cloud",
+            "🤖 Edge & Embodied Track (Multi-Robot Fleet Swarm & Wi-Fi Mesh)": "embodied",
+            "📱 Mobile Track (On-Device Federated Learning Across Apple Silicon)": "mobile",
+            "⚡ TinyML Track (Microcontroller BLE Mesh & Sensor Swarm)": "tinyml",
+        },
+        value="☁️ Cloud Supercomputing Track (64x H100 Cluster & 3D Parallelism)",
+        label="Select Course / Industry Track",
+    )
+    return (track_dropdown,)
 
-    # Cluster Hardware Dimensions
-    num_nodes = 8
-    gpus_per_node = int(getattr(dgx_node, "accelerators_per_node", 8))
-    total_gpus = num_nodes * gpus_per_node  # 64 H100 GPUs
-    vram_per_gpu_gb = 80.0
-    intra_node_bw_gbs = 900.0   # NVLink 4.0 bidirectional
-    inter_node_bw_gbs = 50.0    # InfiniBand NDR (400 Gbps = 50 GB/s)
 
-    # Workload Parameters
-    param_count = float(llama3_70b.parameters.magnitude)
-    hidden_dim = llama3_70b.hidden_dim
-    num_layers = llama3_70b.layers
-    num_heads = llama3_70b.heads
+@app.cell
+def _(Models, Systems, track_dropdown):
+    # Declarative Track Matrix - Maps academic track to authentic hardware & workload
+    track_id = track_dropdown.value or "cloud"
+    if "embodied" in str(track_id).lower() or "robot" in str(track_id).lower():
+        track_key = "embodied"
+        cluster_name = "16x Autonomous Mobile Robots (Jetson AGX Orin)"
+        fabric_name = "5.0 GHz Ad-hoc Wi-Fi Mesh (100 MB/s)"
+        workload_name = "ViT-Base Robot Perception (86M Params, 12 Layers)"
+        num_nodes = 16
+        gpus_per_node = 1
+        total_gpus = 16
+        vram_per_gpu_gb = 32.0
+        intra_node_bw_gbs = 204.8  # Orin memory bus
+        inter_node_bw_gbs = 0.1    # 100 MB/s Wi-Fi
+        param_count = 86_000_000.0
+        hidden_dim = 768
+        num_layers = 12
+        baseline_mem_str = "1.38 GB / Robot"
+        scenario_title = "System Scenario: Synchronizing 16 Autonomous Robots over Wireless Mesh"
+        scenario_text = (
+            "You are the perception and coordination lead for a swarm of 16 autonomous mobile robots inspecting an industrial facility. "
+            "Each robot runs a vision transformer perception model locally, and coordinates state updates over an ad-hoc Wi-Fi mesh. "
+            "The hard safety deadline requires all robots to exchange perception gradients within a 20 ms control loop."
+        )
+        law_1 = "Mesh Ingress Constraint: Total mesh throughput capped at 100 MB/s aggregate bandwidth across 16 robots."
+        law_2 = "Perception Deadline Law: T_comm + T_compute must be <= 20 ms to prevent obstacle detection stale-state collisions."
+        law_3 = "Memory Footprint: On-device model states share 32 GB LPDDR5 with real-time camera DMA ring buffers."
+        law_4 = "Decentralized Ring AllReduce: Minimizes RF contention compared to central coordinator star topology."
+        hyp_prompt = "Hypothesis Lock: If all 16 robots attempt uncompressed AllReduce synchronization over the 100 MB/s mesh, which failure occurs?"
+        hyp_options = {
+            "A) Real-Time Loop Deadline Violation: Gradient exchange takes >80 ms, violating the 20 ms control cycle and triggering safety e-stops.": "tp_cliff",
+            "B) Robotic Motor Brownout: High RF antenna power draw causes 24V battery bus voltage drop.": "wrong_1",
+            "C) Camera DMA Collision: CSI camera frame ingestion stalls due to unified memory lockup.": "wrong_2",
+            "D) Tensor Core Throttling: Orin SoC exceeds thermal threshold within 2 seconds.": "wrong_3",
+        }
+    elif "mobile" in str(track_id).lower() or "phone" in str(track_id).lower():
+        track_key = "mobile"
+        cluster_name = "100x Apple Silicon Devices (iPhone & Mac)"
+        fabric_name = "Wi-Fi 6 Dynamic Uplink (50 MB/s)"
+        workload_name = "Llama-3.2-1B On-Device Assistant (1.23B Params, 16 Layers)"
+        num_nodes = 100
+        gpus_per_node = 1
+        total_gpus = 100
+        vram_per_gpu_gb = 8.0
+        intra_node_bw_gbs = 100.0  # Unified memory
+        inter_node_bw_gbs = 0.05   # 50 MB/s Wi-Fi
+        param_count = 1_230_000_000.0
+        hidden_dim = 2048
+        num_layers = 16
+        baseline_mem_str = "19.6 GB / Device (OOM Crash)"
+        scenario_title = "System Scenario: Federated Adaptation Across 100 Personal Devices"
+        scenario_text = (
+            "You are the on-device AI platform lead deploying privacy-preserving federated fine-tuning across 100 personal devices. "
+            "Full FP16 model updates require transmitting 2.46 GB of weights and gradients over residential Wi-Fi, which triggers operating system kills and battery drain warnings."
+        )
+        law_1 = "Client Battery Guardrail: Model adaptation must consume < 1% battery per training round."
+        law_2 = "Asynchronous Straggler Law: Slowest 5% of devices (thermal throttling on battery) dictate round duration."
+        law_3 = "Parameter-Efficient Fine-Tuning: LoRA rank r=16 reduces trainable weights from 1.23B down to 3.2M params."
+        law_4 = "Differential Privacy Budget: Noise injection bounds privacy leak per federated epoch."
+        hyp_prompt = "Hypothesis Lock: When training 1.23B parameters directly on 8 GB mobile devices without LoRA or sharding, what causes failure?"
+        hyp_options = {
+            "A) Unified Memory OOM Eviction: iOS / Android OS memory manager terminates the background process when allocation exceeds 4 GB.": "tp_cliff",
+            "B) Flash Storage Wear-Out: Flash NAND cells degrade after 100 training iterations.": "wrong_1",
+            "C) Neural Engine Quantization Crash: CoreML rejects dynamic backpropagation graphs.": "wrong_2",
+            "D) Bluetooth RF Collision: Personal peripheral disconnect occurs during weight broadcast.": "wrong_3",
+        }
+    elif "tiny" in str(track_id).lower() or "mcu" in str(track_id).lower():
+        track_key = "tinyml"
+        cluster_name = "64x ESP32-S3 / Cortex-M55 Microcontrollers"
+        fabric_name = "BLE 5.0 Mesh Radio (1 Mbps = 125 KB/s)"
+        workload_name = "TinyConv Anomaly Detector (250K Params, 6 Layers)"
+        num_nodes = 64
+        gpus_per_node = 1
+        total_gpus = 64
+        vram_per_gpu_gb = 0.000512  # 512 KB SRAM
+        intra_node_bw_gbs = 0.0016  # Internal bus
+        inter_node_bw_gbs = 0.000125 # 125 KB/s BLE
+        param_count = 250_000.0
+        hidden_dim = 64
+        num_layers = 6
+        baseline_mem_str = "4.0 MB / MCU (OOM: Exceeds 512 KB SRAM)"
+        scenario_title = "System Scenario: Distributed Wake-Word Detection on a 64-Sensor BLE Mesh"
+        scenario_text = (
+            "You are the firmware lead for a low-power acoustic sensor mesh deployed in an industrial plant. "
+            "64 battery-powered microcontrollers must collaboratively adapt to background acoustic noise using distributed learning over a 1 Mbps Bluetooth Low Energy (BLE) mesh."
+        )
+        law_1 = "Severe Comm-to-Compute Asymmetry: BLE radio bandwidth (125 KB/s) is 1,000x slower than MCU arithmetic throughput."
+        law_2 = "Static Tensor Arena Limit: Dynamic heap allocation is prohibited; all states must fit in 256 KB static SRAM."
+        law_3 = "Energy Harvesting Envelope: Active radio transmission consumes 30 mW vs 2 mW in deep sleep duty cycle."
+        law_4 = "Integer-Only Arithmetic: MCU lacks hardware FP32 FPU; updates require fixed-point INT8 quantization."
+        hyp_prompt = "Hypothesis Lock: In a 64-node microcontroller swarm over 1 Mbps BLE, where is 98% of the wall-clock step time spent?"
+        hyp_options = {
+            "A) Radio Serialization Latency: Transmitting 500 KB weights across the 125 KB/s BLE mesh completely dominates the 15 ms MCU compute time.": "tp_cliff",
+            "B) MCU ALU Saturation: Integer multiplication overflows the 32-bit register accumulator.": "wrong_1",
+            "C) Flash Memory Read Stalls: Execute-in-place (XIP) bus contention blocks CPU instructions.": "wrong_2",
+            "D) Battery Voltage Sag: Coin-cell internal resistance drops below 1.8V reset threshold.": "wrong_3",
+        }
+    else:  # Cloud
+        track_key = "cloud"
+        dgx_node = Systems.Nodes.DGX_H100
+        cluster_fabric = Systems.Fabrics.InfiniBand_NDR
+        llama3_70b = Models.Language.Llama3_70B
+        cluster_name = f"8x {dgx_node.name} Nodes (64x H100 80GB)"
+        fabric_name = f"{cluster_fabric.name} (50 GB/s) + NVLink 4.0 (900 GB/s)"
+        workload_name = f"{llama3_70b.name} (70.6B Params, 80 Layers)"
+        num_nodes = 8
+        gpus_per_node = int(getattr(dgx_node, "accelerators_per_node", 8))
+        total_gpus = 64
+        vram_per_gpu_gb = 80.0
+        intra_node_bw_gbs = 900.0
+        inter_node_bw_gbs = 50.0
+        param_count = float(llama3_70b.parameters.magnitude)
+        hidden_dim = llama3_70b.hidden_dim
+        num_layers = llama3_70b.layers
+        baseline_mem_str = "1,145 GB / GPU (OOM Wall)"
+        scenario_title = "System Scenario: Training a 70B Frontier LLM on 64 GPUs"
+        scenario_text = (
+            "You are the lead distributed training architect responsible for training Llama-3-70B on an 8-node cluster of DGX H100 servers. "
+            "Each node hosts 8 GPUs connected via NVLink (900 GB/s), while nodes communicate across 400 Gbps InfiniBand (50 GB/s). "
+            "Standard Data Parallelism (DP=64) requires 1,145 GB VRAM per GPU, causing an immediate OOM crash against the 80 GB limit. "
+            "You must partition parameters and activations using 3D Parallelism (TP x PP x DP = 64) and ZeRO memory sharding."
+        )
+        law_1 = "Cluster Topology Constraint: TP x PP x DP = 64 GPUs"
+        law_2 = "Megatron TP Communication: 2 AllReduce operations per transformer layer on activations across the TP group."
+        law_3 = "1F1B Pipeline Bubble Tax: F_bubble = (PP - 1) / (PP - 1 + M), where M is the microbatch count."
+        law_4 = "ZeRO Memory Partitioning: ZeRO-1 shards optimizer states across DP; ZeRO-2 shards gradients; ZeRO-3 shards weights."
+        hyp_prompt = "Hypothesis Lock: If you set Tensor Parallelism TP=16 to fit weights across 2 nodes (8 GPUs/node), which failure mode occurs?"
+        hyp_options = {
+            "B) Cross-Node Network Cliff: TP AllReduce crosses the InfiniBand boundary (50 GB/s vs 900 GB/s NVLink), causing ~38x communication latency explosion.": "tp_cliff",
+            "A) Pipeline Bubble Tax: The 1F1B schedule bubble expands beyond 50%, starving pipeline stages.": "bubble",
+            "C) PCIe Queue Saturation: Host-to-device driver queues overflow as CPU prefetching stalls.": "pcie",
+            "D) FP16 Numerical Underflow: High worker count causes gradient accumulation loss precision collapse.": "numerical",
+        }
+
+    # Safe fallbacks for simulation objects if not set above
+    try:
+        dgx_node
+    except NameError:
+        dgx_node = Systems.Nodes.DGX_H100
+    try:
+        cluster_fabric
+    except NameError:
+        cluster_fabric = Systems.Fabrics.InfiniBand_NDR
+    try:
+        llama3_70b
+    except NameError:
+        llama3_70b = Models.Language.Llama3_70B
     return (
+        baseline_mem_str,
         cluster_fabric,
+        cluster_name,
         dgx_node,
+        fabric_name,
         gpus_per_node,
-        inter_node_bw_gbs,
-        intra_node_bw_gbs,
+        hyp_options,
+        hyp_prompt,
+        law_1,
+        law_2,
+        law_3,
+        law_4,
         llama3_70b,
-        num_layers,
         param_count,
+        scenario_text,
+        scenario_title,
         total_gpus,
         vram_per_gpu_gb,
+        workload_name,
     )
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
-    cluster_fabric,
-    dgx_node,
-    inter_node_bw_gbs,
-    intra_node_bw_gbs,
-    llama3_70b,
+    baseline_mem_str,
+    cluster_name,
+    fabric_name,
+    law_1,
+    law_2,
+    law_3,
+    law_4,
     mo,
-    num_layers,
-    param_count,
-    total_gpus,
-    vram_per_gpu_gb,
+    scenario_text,
+    scenario_title,
+    track_dropdown,
+    workload_name,
 ):
     header_html = mo.Html(f"""
     <div class="mlsysbook-lab-shell">
+      <div style="margin-bottom: 16px;">
+        {track_dropdown}
+      </div>
       <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
         <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
           ML Systems Textbook &middot; Volume II &middot; Chapter 05 &middot; Lab 05
         </div>
         <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-          3D Parallelism &amp; Distributed Training Scaling
+          3D Parallelism &amp; Distributed Scaling
         </h1>
         <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-          Decompose frontier LLM training across a 64-GPU supercomputer using Tensor Parallelism (TP), Pipeline Parallelism (PP), and Data Parallelism with ZeRO memory sharding.
+          Decompose frontier deep learning models across distributed nodes using Tensor Parallelism (TP), Pipeline Parallelism (PP), and Data Parallelism with ZeRO memory sharding.
         </p>
         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
           <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            Cluster: 8x {dgx_node.name} Nodes ({total_gpus}x H100 {vram_per_gpu_gb:.0f}GB)
+            Cluster: {cluster_name}
           </span>
           <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            Intra-Node: NVLink 4.0 ({intra_node_bw_gbs:.0f} GB/s)
+            Fabric: {fabric_name}
           </span>
           <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            Inter-Node: {cluster_fabric.name} ({inter_node_bw_gbs:.0f} GB/s)
-          </span>
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            Workload: {llama3_70b.name} ({param_count/1e9:.1f}B Params, {num_layers} Layers)
+            Workload: {workload_name}
           </span>
           <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-            Baseline Memory: 1,145 GB/GPU (OOM Wall)
+            Baseline: {baseline_mem_str}
           </span>
         </div>
       </div>
 
       <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
         <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-          System Scenario: Training a 70B Frontier LLM on 64 GPUs
+          {scenario_title}
         </h3>
         <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
-          You are the lead distributed training architect responsible for training <strong>Llama-3-70B</strong> on an 8-node cluster of DGX H100 servers.
-          Each node hosts 8 GPUs connected via NVLink (900 GB/s), while nodes communicate across 400 Gbps InfiniBand (50 GB/s).
-        </p>
-        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
-          <strong>The Engineering Crisis:</strong> Standard Data Parallelism (DP=64) requires 1,145 GB of VRAM per GPU (141 GB weights + 141 GB gradients + 847 GB Adam FP32 optimizer states + activations), causing an immediate Out-Of-Memory (OOM) crash against the 80 GB physical HBM3 limit.
-          To fit the model, you must partition parameters and activations using 3D Parallelism (TP &times; PP &times; DP = 64) and ZeRO memory sharding.
+          {scenario_text}
         </p>
         <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B; line-height: 1.6;">
-          <strong>The Fundamental Laws of 3D Parallelism:</strong><br/>
-          &bull; <strong>Cluster Topology Constraint:</strong> <code>TP &times; PP &times; DP = 64 GPUs</code><br/>
-          &bull; <strong>Megatron TP Communication:</strong> 2 AllReduce operations per transformer layer on activations across the TP group.<br/>
-          &bull; <strong>1F1B Pipeline Bubble Tax:</strong> <code>F_bubble = (PP - 1) / (PP - 1 + M)</code>, where <code>M</code> is the microbatch count.<br/>
-          &bull; <strong>ZeRO Memory Partitioning:</strong> ZeRO-1 shards optimizer states across DP; ZeRO-2 shards gradients; ZeRO-3 shards weights.
+          <strong>The Fundamental Laws of This Architecture:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 0 0; padding-left: 1.25rem;">
+            <li>{law_1}</li>
+            <li>{law_2}</li>
+            <li>{law_3}</li>
+            <li>{law_4}</li>
+          </ul>
         </div>
       </div>
     </div>
@@ -168,36 +324,21 @@ def _(
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
+@app.cell
+def _(gated_hypothesis_card, hyp_options, hyp_prompt, mo):
     # ZONE B: Prediction Widget (Gated Hypothesis Lock)
     pred_scaling_radio = mo.ui.radio(
-        options={
-            "A) Pipeline Bubble Tax: The 1F1B schedule bubble expands beyond 50%, starving pipeline stages.": "bubble",
-            "B) Cross-Node Network Cliff: TP AllReduce crosses the InfiniBand boundary (50 GB/s vs 900 GB/s NVLink), causing ~38x communication latency explosion.": "tp_cliff",
-            "C) PCIe Queue Saturation: Host-to-device driver queues overflow as CPU prefetching stalls.": "pcie",
-            "D) FP16 Numerical Underflow: High worker count causes gradient accumulation loss precision collapse.": "numerical",
-        },
-        label="Hypothesis Lock: If you set Tensor Parallelism TP=16 to fit weights across 2 nodes (8 GPUs/node), which failure mode occurs?",
+        options=hyp_options,
+        value=list(hyp_options.keys())[0],
     )
-    pred_scaling_card = mo.vstack([
-        mo.Html("""
-        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 4px solid #A51C30; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
-          <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-            Required Engineering Gate
-          </div>
-          <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-            1. Formulate Your Scaling Hypothesis
-          </h3>
-          <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
-            In large-scale distributed ML, topological placement determines efficiency.
-            Before touching the 3D parallelism sliders, predict the primary systems bottleneck if Tensor Parallelism crosses the physical node boundary:
-          </p>
-        </div>
-        """),
+    hypothesis_card = gated_hypothesis_card(
         pred_scaling_radio,
-    ])
-    pred_scaling_card
+        title="1. Formulate Your Scaling Hypothesis",
+        subtitle=hyp_prompt,
+        gate_label="Required Engineering Gate",
+        accent="#A51C30",
+    )
+    hypothesis_card
     return (pred_scaling_radio,)
 
 
@@ -207,7 +348,7 @@ def _(mo):
     tp_radio = mo.ui.radio(
         options={"1": 1, "2": 2, "4": 4, "8": 8, "16": 16},
         value="8",
-        label="Tensor Parallelism (TP) — Model slicing across GPUs",
+        label="Tensor Parallelism (TP) — Model slicing across devices",
     )
     pp_radio = mo.ui.radio(
         options={"1": 1, "2": 2, "4": 4, "8": 8},
@@ -247,6 +388,29 @@ def _(mo):
         tp_radio,
         zero_dropdown,
     )
+
+
+@app.cell(hide_code=True)
+def _(
+    instrumentation_console,
+    microbatch_slider,
+    mo,
+    pp_radio,
+    recompute_radio,
+    tp_radio,
+    zero_dropdown,
+):
+    controls_layout = mo.hstack([
+        mo.vstack([tp_radio, pp_radio]),
+        mo.vstack([zero_dropdown, microbatch_slider, recompute_radio]),
+    ], widths="equal", gap=1.5)
+    console = instrumentation_console(
+        controls_layout,
+        title="2. Interactive 3D Parallelism & Memory Controls",
+        subtitle="Configure Tensor (TP), Pipeline (PP), and ZeRO memory sharding across the cluster.",
+    )
+    console
+    return
 
 
 @app.cell
@@ -581,7 +745,6 @@ def _(
     tp_radio,
     tp_spans_nodes,
     vram_allocated_gb,
-    zero_dropdown,
 ):
     # ZONE F: Design Ledger & Curriculum Tab Layout
     metadata = get_lab_metadata("vol2/lab_05_dist_train.py")
@@ -608,15 +771,10 @@ def _(
         <div style="margin-bottom: 14px;">
           <h3 style="margin: 0 0 4px 0; color: #0F172A; font-size: 1.2rem;">Part A: 3D Cluster Topology &amp; Scaling Explorer</h3>
           <p style="color: #64748B; font-size: 0.92rem; margin: 0;">
-            Adjust Tensor Parallelism, Pipeline Parallelism, and ZeRO stages to observe real-time trade-offs between VRAM footprint, communication overhead, and bubble idle time.
+            Real-time trade-offs between VRAM footprint, communication overhead, and bubble idle time based on your configuration in the Simulation Knobs above.
           </p>
         </div>
         """),
-        tp_radio,
-        pp_radio,
-        microbatch_slider,
-        zero_dropdown,
-        recompute_radio,
         dashboard_view,
     ])
 

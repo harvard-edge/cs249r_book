@@ -28,8 +28,14 @@ ACADEMIC_LAB_CSS = mo.Html(
   --mlsysbook-ok: #247A4D;
   --mlsysbook-warn: #9A5B00;
   --mlsysbook-danger: #B42318;
-  --mlsysbook-readable-width: 720px;
-  --mlsysbook-panel-width: 840px;
+  --mlsysbook-readable-width: 980px;
+  --mlsysbook-panel-width: 980px;
+
+  /* Native Marimo & shadow-DOM variable cascade */
+  --primary: #A51C30;
+  --ring: #A51C30;
+  --border: #E2E8F0;
+  --radius: 8px;
 }
 .mlsysbook-lab-shell {
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -358,20 +364,20 @@ ACADEMIC_LAB_CSS = mo.Html(
   font-weight: 750;
 }
 .mlsysbook-list {
-  margin: 8px 0 0 0;
-  padding-left: 20px;
-  list-style-position: outside;
+  margin: 8px 0 !important;
+  padding-left: 1.25rem !important;
+  list-style-position: outside !important;
 }
 ul.mlsysbook-list {
-  list-style-type: disc;
+  list-style-type: disc !important;
 }
 ol.mlsysbook-list {
-  list-style-type: decimal;
+  list-style-type: decimal !important;
 }
 .mlsysbook-list li {
-  display: list-item;
-  margin: 6px 0;
-  line-height: 1.5;
+  display: list-item !important;
+  margin: 6px 0 !important;
+  line-height: 1.6 !important;
 }
 .mlsysbook-status {
   display: inline-flex;
@@ -439,30 +445,21 @@ div[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"],
 ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
   display: none !important;
 }
-.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {
+.marimo-cell,
+.output.block {
   width: min(var(--mlsysbook-panel-width), 100%) !important;
   max-width: min(var(--mlsysbook-panel-width), 100%) !important;
   margin-left: auto !important;
   margin-right: auto !important;
 }
-.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) p,
-.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) li {
-  max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+.output.block > div {
+  width: 100% !important;
+  max-width: 100% !important;
 }
-.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly, .mlsysbook-panel, .mlsysbook-lab-header, .mlsysbook-action-box)) {
-  width: min(var(--mlsysbook-panel-width), 100%) !important;
-  max-width: min(var(--mlsysbook-panel-width), 100%) !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-  background: linear-gradient(135deg, #F8FFFB 0%, #FFFFFF 82%) !important;
-  border: 1px solid #B8D8C6 !important;
-  border-left: 4px solid var(--mlsysbook-ok) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 4px 12px rgba(31, 64, 122, 0.06) !important;
-  padding: 14px 18px !important;
-}
-.output.block > div:has(marimo-ui-element):not(:has(svg, canvas, iframe, table, marimo-tabs, .js-plotly-plot, .plotly, .mlsysbook-panel, .mlsysbook-lab-header, .mlsysbook-action-box)) > div {
-  max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+marimo-ui-element {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
 }
 marimo-tabs,
 div[style*="border-left:4px solid"][style*="border-radius:0 10px"],
@@ -1202,3 +1199,73 @@ def instructor_adoption_card(metadata: InstructorMetadata) -> mo.Html:
             f'<div class="mlsysbook-field"><strong>{html.escape(key.replace("_", " "))}</strong>{html.escape(str(value))}</div>'
         )
     return mo.Html(f'<div class="mlsysbook-panel"><h2>Instructor Adoption</h2><div class="mlsysbook-grid">{"".join(rows)}</div></div>')
+
+
+def gated_hypothesis_card(
+    radio_element: Any,
+    *,
+    title: str = "1. Formulate Your Physical Prediction",
+    subtitle: str = "Commit to a prediction before touching the simulation knobs. Which physical failure mode bounds performance?",
+    gate_label: str = "Required Engineering Gate",
+    accent: str = "#A51C30",
+) -> Any:
+    """Render a unified, fully enclosed hypothesis card that bounds prompt and radio choices together."""
+    header_html = mo.Html(f"""
+    <div style="margin-bottom: 12px;">
+      <div style="font-size: 0.75rem; font-weight: 700; color: {html.escape(accent)}; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+        {html.escape(gate_label)}
+      </div>
+      <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+        {html.escape(title)}
+      </h3>
+      <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+        {html.escape(subtitle)}
+      </p>
+    </div>
+    """)
+    return mo.vstack([header_html, radio_element]).style({
+        "background": "#FFFFFF",
+        "border": "1px solid #E2E8F0",
+        "border-left": f"4px solid {accent}",
+        "border-radius": "8px",
+        "padding": "20px",
+        "margin": "14px auto",
+        "width": "min(var(--mlsysbook-panel-width, 980px), 100%)",
+        "max-width": "min(var(--mlsysbook-panel-width, 980px), 100%)",
+        "box-shadow": "0 1px 3px rgba(0,0,0,0.05)",
+    })
+
+
+def instrumentation_console(
+    controls: Any,
+    *,
+    title: str = "Instrumentation Console",
+    subtitle: str = "Adjust system parameters and inspect reactive trade-off telemetry:",
+    accent: str = "#006395",
+) -> Any:
+    """Render interactive simulation controls inside a unified academic card."""
+    items = list(controls) if isinstance(controls, (list, tuple)) else [controls]
+    header_html = mo.Html(f"""
+    <div style="margin-bottom: 14px;">
+      <div style="font-size: 0.75rem; font-weight: 700; color: {html.escape(accent)}; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+        Simulation Knobs
+      </div>
+      <h3 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+        {html.escape(title)}
+      </h3>
+      <p style="color: #475569; font-size: 0.92rem; line-height: 1.5; margin: 0;">
+        {html.escape(subtitle)}
+      </p>
+    </div>
+    """)
+    return mo.vstack([header_html, *items]).style({
+        "background": "#FFFFFF",
+        "border": "1px solid #E2E8F0",
+        "border-left": f"4px solid {accent}",
+        "border-radius": "8px",
+        "padding": "20px",
+        "margin": "14px auto",
+        "width": "min(var(--mlsysbook-panel-width, 980px), 100%)",
+        "max-width": "min(var(--mlsysbook-panel-width, 980px), 100%)",
+        "box-shadow": "0 1px 3px rgba(0,0,0,0.05)",
+    })
