@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
@@ -39,10 +39,13 @@ async def _():
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
         MathPeek,
+        big_takeaways,
         build_lab_report,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
+        instrumentation_console,
         report_export_panel,
         source_trace,
         track_arc_context,
@@ -57,27 +60,25 @@ async def _():
         ACADEMIC_LAB_CSS,
         COLORS,
         Hardware,
-        LAB_CSS,
         MathPeek,
         Systems,
         apply_plotly_theme,
+        big_takeaways,
         build_lab_report,
         calc_alpha_beta_crossover,
         calc_bisection_bandwidth,
         calc_oversubscription_effect,
         calc_point_to_point_time,
+        gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
         go,
         html_lib,
+        instrumentation_console,
         ledger,
         mo,
         report_export_panel,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
         ureg,
     )
 
@@ -87,30 +88,40 @@ def _(get_lab_metadata):
     v2_03_lab_path = "vol2/lab_03_communication.py"
     v2_03_chapter = 3
     v2_03_metadata = get_lab_metadata(v2_03_lab_path)
-    return v2_03_chapter, v2_03_lab_path, v2_03_metadata
+    return v2_03_chapter, v2_03_metadata
 
 
-@app.cell(hide_code=True)
-def _(ledger, track_selector):
-    _saved_track = ledger.get_track()
-    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
-    v2_03_track_picker = track_selector(default=_default_track)
-    v2_03_track_picker
+@app.cell
+def _(mo):
+    # Top-Level Universal Track Selector
+    v2_03_track_picker = mo.ui.dropdown(
+        options={
+            "☁️ Cloud Supercomputing Track (H100 Clusters & NVLink vs InfiniBand Cliffs)": "cloud_fleet",
+            "🤖 Edge & Embodied Track (Jetson Orin & Multi-Camera PCIe/Ethernet Buses)": "robotaxi",
+            "📱 Mobile Track (Apple Silicon & Multi-Die UltraFusion Interconnects)": "iphone",
+            "⚡ TinyML Track (ESP32-S3 & Low-Power SPI/I2C/UART Sensor Buses)": "oura_ring",
+        },
+        value="☁️ Cloud Supercomputing Track (H100 Clusters & NVLink vs InfiniBand Cliffs)",
+        label="Select Course / Industry Track",
+    )
     return (v2_03_track_picker,)
 
 
 @app.cell
-def _(get_lab_track_variant, get_track_profile, v2_03_metadata, v2_03_track_picker):
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    v2_03_metadata,
+    v2_03_track_picker,
+):
     v2_03_track_id = v2_03_track_picker.value
     v2_03_profile = get_track_profile(v2_03_track_id)
     v2_03_variant = get_lab_track_variant(v2_03_metadata.lab_id, v2_03_profile.track_id)
-    return v2_03_profile, v2_03_track_id, v2_03_variant
+    return v2_03_profile, v2_03_variant
 
 
 @app.cell
 def _(
-    Hardware,
-    Systems,
     apply_plotly_theme,
     calc_alpha_beta_crossover,
     calc_bisection_bandwidth,
@@ -618,18 +629,18 @@ def _(
         caption_html = f"<div style='font-weight:700; margin-bottom:8px;'>{html_lib.escape(caption)}</div>" if caption else ""
         return mo.Html(
             f"""
-<div style="overflow-x:auto; margin:12px 0;">
-  {caption_html}
-  <table style="border-collapse:collapse; min-width:720px; width:100%; font-size:0.9rem;">
+    <div style="overflow-x:auto; margin:12px 0;">
+      {caption_html}
+      <table style="border-collapse:collapse; min-width:720px; width:100%; font-size:0.9rem;">
     <thead><tr style="background:#f8fafc;">{header}</tr></thead>
     <tbody>{''.join(body_rows)}</tbody>
-  </table>
-</div>
-<style>
-td, th {{ border:1px solid #d9dee8; padding:8px 10px; text-align:left; vertical-align:top; }}
-th {{ color:#344054; font-weight:700; }}
-</style>
-"""
+      </table>
+    </div>
+    <style>
+    td, th {{ border:1px solid #d9dee8; padding:8px 10px; text-align:left; vertical-align:top; }}
+    th {{ color:#344054; font-weight:700; }}
+    </style>
+    """
         )
 
     def v2_03_failure_callout(result, message_ok, message_fail):
@@ -807,11 +818,7 @@ th {{ color:#344054; font-weight:700; }}
         v2_03_option_labels,
         v2_03_placement_options,
         v2_03_prediction_feedback,
-        v2_03_scenario_assumptions,
-        v2_03_selected_topology_result,
         v2_03_status_label,
-        v2_03_to_mb_s,
-        v2_03_to_ms,
         v2_03_topology_chart,
         v2_03_topology_options,
         v2_03_track_lenses,
@@ -822,63 +829,73 @@ th {{ color:#344054; font-weight:700; }}
 def _(Hardware, Systems, ureg, v2_03_profile, v2_03_track_lenses):
     v2_03_lenses = v2_03_track_lenses(Systems, Hardware, ureg)
     v2_03_lens = v2_03_lenses[v2_03_profile.track_id]
-    return v2_03_lens, v2_03_lenses
+    return (v2_03_lens,)
 
 
 @app.cell(hide_code=True)
 def _(
     ACADEMIC_LAB_CSS,
-    LAB_CSS,
     mo,
-    source_trace,
-    track_arc_context,
-    track_context,
     v2_03_lens,
-    v2_03_metadata,
     v2_03_profile,
-    v2_03_scenario_assumptions,
+    v2_03_track_picker,
     v2_03_variant,
 ):
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            mo.Html(
-                f"""
-<div class="mlsysbook-panel mlsysbook-launch-panel">
-  <div class="mlsysbook-section-label">Machine Learning Systems - Volume II - Lab 03</div>
-  <h1 style="margin-bottom:8px;">Network Fabric Design</h1>
-  <p class="mlsysbook-scenario-narrative" style="font-size:1.02rem;">
-    <strong>Chapter invariant:</strong> Network shape governs distributed work.
-    Bandwidth, latency, bisection, topology, placement, and congestion turn
-    communication into a binding amount.
-  </p>
-  <div class="mlsysbook-compact-fields is-brief">
-    <div><strong>Selected track:</strong> {v2_03_profile.label}</div>
-    <div><strong>Stakeholder:</strong> {v2_03_variant.stakeholder}</div>
-    <div><strong>Scenario:</strong> {v2_03_lens["scenario"]}</div>
-    <div><strong>Report frame:</strong> {v2_03_lens["report_prompt"]}</div>
-  </div>
-</div>
-"""
-            ),
-            track_context(v2_03_profile),
-            track_arc_context(v2_03_profile, v2_03_metadata.lab_id),
-            mo.callout(
-                mo.md(
-                    """
-**Recommended reading before this lab**
+    header_html = mo.Html(f"""
+    <div class="mlsysbook-lab-shell">
+      <div style="margin-bottom: 16px;">
+        {v2_03_track_picker}
+      </div>
+      <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
+          ML Systems Textbook &middot; Volume II &middot; Chapter 03 &middot; Lab 03
+        </div>
+        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
+          Interconnects &amp; Network Fabric Design
+        </h1>
+        <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
+          Characterize point-to-point transmission latency (&alpha;) versus bandwidth (&beta;), evaluate bisection cuts across cluster topologies, diagnose incast congestion and queuing tail effects, and verify collective communication placement policies.
+        </p>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Track:</strong> {v2_03_profile.label}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Stakeholder:</strong> {v2_03_variant.stakeholder}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Baseline Link:</strong> {v2_03_lens['links'][v2_03_lens['default_link']]['label']}
+          </span>
+          <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
+            <strong>Utilization Limit:</strong> &le; {v2_03_lens['utilization_limit']:.0%}
+          </span>
+          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
+            <strong>Guardrail:</strong> {v2_03_variant.guardrail_metric}
+          </span>
+        </div>
+      </div>
 
-- Volume II, Chapter 3: Network Fabrics
-- Focus sections: alpha/beta performance model, switch and topology,
-  fabric behavior, congestion control, monitoring, and summary.
-"""
-                ),
-                kind="info",
-            ),
-            source_trace(v2_03_scenario_assumptions(v2_03_lens), collapsed=True),
-        ]
-    )
+      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
+          System Scenario: {v2_03_profile.label} Network Architecture
+        </h3>
+        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
+          {v2_03_lens['scenario']}
+          Network shape governs distributed work. Bandwidth, latency, bisection, topology, placement, and congestion turn communication into a binding physical constraint.
+        </p>
+        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
+          <strong>The Architectural Invariants of Interconnect Fabrics:</strong>
+          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
+            <li><strong>The &alpha;-&beta; Crossover Law:</strong> Small payloads are latency-bound (&alpha;, dominated by software stack and switch hops); large payloads are bandwidth-bound (n/&beta;, dominated by link serialization).</li>
+            <li><strong>The Bisection Bandwidth Wall:</strong> Bisection bandwidth dictates the maximum sustainable cross-sectional throughput across any bisection cut. Oversubscription directly degrades collective scaling.</li>
+            <li><strong>Congestion Tail Amplification:</strong> Near 100% link utilization, queuing delay grows non-linearly; under BSP barriers, a single congested link drags down the entire distributed gang.</li>
+            <li><strong>Topology-Placement Co-design:</strong> Arbitrary or naive job placement across multi-tier networks converts high-speed local links into oversubscribed core-switch choke points.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """)
+    mo.vstack([ACADEMIC_LAB_CSS, header_html])
     return
 
 
@@ -891,6 +908,7 @@ def _(mo, v2_03_lens):
             "C) Link bandwidth alone, regardless of payload": "bandwidth_only",
             "D) Topology only, before payload size is known": "topology_only",
         },
+        value="A) The fixed startup latency alpha",
         label="Part A prediction - which term will bind for the current payload and path?",
     )
     partB_prediction = mo.ui.radio(
@@ -900,6 +918,7 @@ def _(mo, v2_03_lens):
             "C) More participants always improves synchronization": "participants",
             "D) Hop count matters, but oversubscription does not": "hops_only",
         },
+        value="B) The narrowest bisection cut controls feasible parallel work",
         label="Part B prediction - what decides whether parallel communication remains feasible?",
     )
     partC_prediction = mo.ui.radio(
@@ -909,6 +928,7 @@ def _(mo, v2_03_lens):
             "C) Background traffic is unrelated to synchronous work": "background",
             "D) Local placement choices cannot create fleet-wide bottlenecks": "local_only",
         },
+        value="A) Topology-aware placement keeps utilization below the tail-risk limit",
         label="Part C prediction - what prevents a local communication choice from becoming a fleet bottleneck?",
     )
     partD_prediction = mo.ui.radio(
@@ -918,6 +938,7 @@ def _(mo, v2_03_lens):
             "C) Topology/placement guardrails will reject the naive plan": "topology",
             "D) One passing metric is enough to approve the plan": "single_metric",
         },
+        value="C) Topology/placement guardrails will reject the naive plan",
         label="Part D prediction - which guardrail is most likely to reject the naive plan?",
     )
 
@@ -927,6 +948,7 @@ def _(mo, v2_03_lens):
             "Increase beta by choosing a higher-bandwidth link": "increase_beta",
             "Reduce payload before crossing the network": "reduce_payload",
         },
+        value="Reduce payload before crossing the network",
         label="Part A checkpoint - which lever should this track try first?",
     )
     partB_checkpoint = mo.ui.radio(
@@ -935,6 +957,7 @@ def _(mo, v2_03_lens):
             "Accept oversubscription and rely on retries": "accept_oversub",
             "Reduce endpoint count until the topology becomes feasible": "reduce_participants",
         },
+        value="Carry forward a topology with full or aligned bisection",
         label="Part B checkpoint - what topology assumption should the memo carry forward?",
     )
     partC_checkpoint = mo.ui.radio(
@@ -943,6 +966,7 @@ def _(mo, v2_03_lens):
             "Use balanced placement with explicit utilization headroom": "balanced",
             "Use cheapest available placement and monitor later": "cheap",
         },
+        value="Use topology-aware affinity placement",
         label="Part C checkpoint - what placement mitigation should the final plan use?",
     )
     partD_final_decision = mo.ui.radio(
@@ -951,6 +975,7 @@ def _(mo, v2_03_lens):
             "Revise payload or overlap before approval": "revise_payload",
             "Reject topology/placement and choose a safer fabric policy": "reject_policy",
         },
+        value="Approve the selected plan",
         label="Final decision - how should the stakeholder sign the communication plan?",
     )
     student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
@@ -1049,8 +1074,11 @@ def _(
     COLORS,
     MathPeek,
     active_link,
+    big_takeaways,
     build_lab_report,
     burst_multiplier,
+    gated_hypothesis_card,
+    instrumentation_console,
     ledger,
     memo_note,
     mo,
@@ -1265,15 +1293,15 @@ def _(
     def build_part_a():
         items = [
             mo.md("## Part A - Concept Module: Alpha/Beta Terms Predict Communication Cost"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** {v2_03_variant.stakeholder} must move a "
-                    f"**{_part_a['payload_mb']:.0f} MB {v2_03_lens['payload_name']}** "
-                    f"over **{_part_a['link_label']}** before the track budget is exhausted."
+            gated_hypothesis_card(
+                partA_prediction,
+                title="1. Formulate Your Interconnect Hypothesis",
+                subtitle=(
+                    f"Scenario: {v2_03_variant.stakeholder} must move a "
+                    f"{_part_a['payload_mb']:.0f} MB {v2_03_lens['payload_name']} "
+                    f"over {_part_a['link_label']} before the track budget is exhausted."
                 ),
-                kind="info",
             ),
-            partA_prediction,
             v2_03_prediction_feedback(
                 partA_prediction.value,
                 _actual_part_a,
@@ -1285,7 +1313,11 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack([payload_mb, active_link], justify="start"),
+                instrumentation_console(
+                    mo.hstack([payload_mb, active_link], justify="start", gap=1.0),
+                    title="Interconnect & Message Instrumentation",
+                    subtitle="Configure transfer payload size and physical interconnect path",
+                ),
                 mo.as_html(v2_03_alpha_beta_chart(COLORS, _part_a)),
                 _part_a_table(),
                 v2_03_failure_callout(
@@ -1302,7 +1334,16 @@ def _(
                         "chapter source": "Network Fabrics performance model",
                     },
                 ),
-                partA_checkpoint,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Engineering Action</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        Select the primary architectural lever to resolve alpha/beta bottlenecks for this track.
+                    </p>
+                    {partA_checkpoint}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1311,15 +1352,15 @@ def _(
         _actual = "bisection"
         items = [
             mo.md("## Part B - Concept Module: Topology And Bisection Change Feasible Parallel Work"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** The same payload now scales to **{_participants} "
-                    f"{v2_03_lens['participant_name']}**. The question is whether the topology "
-                    "keeps enough cross-sectional bandwidth for parallel work."
+            gated_hypothesis_card(
+                partB_prediction,
+                title="2. Formulate Your Topology & Bisection Hypothesis",
+                subtitle=(
+                    f"Scenario: The same payload now scales to {_participants} "
+                    f"{v2_03_lens['participant_name']}. What decides whether parallel "
+                    "communication remains feasible across the fabric?"
                 ),
-                kind="info",
             ),
-            partB_prediction,
             v2_03_prediction_feedback(
                 partB_prediction.value,
                 _actual,
@@ -1331,7 +1372,11 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack([participants, topology_choice, active_link], justify="start"),
+                instrumentation_console(
+                    mo.hstack([participants, topology_choice, active_link], justify="start", gap=1.0),
+                    title="Scale & Topology Configuration",
+                    subtitle="Tune the number of endpoints, fabric topology, and link speed",
+                ),
                 mo.as_html(v2_03_topology_chart(COLORS, _topology_rows, v2_03_lens["step_budget_ms"])),
                 _part_b_table(),
                 v2_03_failure_callout(
@@ -1348,7 +1393,16 @@ def _(
                         "chapter source": "Network Fabrics topology and bisection sections",
                     },
                 ),
-                partB_checkpoint,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Topology Governance</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        What topology assumption should the final communication memo carry forward?
+                    </p>
+                    {partB_checkpoint}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1357,15 +1411,15 @@ def _(
         _actual = "placement"
         items = [
             mo.md("## Part C - Concept Module: Congestion And Placement Make Local Choices Fleet-Wide Bottlenecks"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** The scheduler chooses **{_part_c['placement_label']}** on "
-                    f"**{_part_c['topology_label']}**. Under BSP-style synchronization, the slowest "
-                    "congested path paces the whole fleet."
+            gated_hypothesis_card(
+                partC_prediction,
+                title="3. Formulate Your Congestion & Placement Hypothesis",
+                subtitle=(
+                    f"Scenario: The scheduler chooses {_part_c['placement_label']} on "
+                    f"{_part_c['topology_label']}. Under BSP-style synchronization, the slowest "
+                    "congested path paces the entire fleet."
                 ),
-                kind="info",
             ),
-            partC_prediction,
             v2_03_prediction_feedback(
                 partC_prediction.value,
                 _actual,
@@ -1377,7 +1431,11 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack([placement_choice, burst_multiplier, topology_choice], justify="start"),
+                instrumentation_console(
+                    mo.hstack([placement_choice, burst_multiplier, topology_choice], justify="start", gap=1.0),
+                    title="Placement & Traffic Pressure Instrumentation",
+                    subtitle="Simulate job placement policies and background burst multipliers",
+                ),
                 mo.as_html(v2_03_congestion_chart(COLORS, _part_c)),
                 _part_c_table(),
                 v2_03_failure_callout(
@@ -1394,7 +1452,16 @@ def _(
                         "chapter source": "Network Fabrics fabric behavior and congestion-control sections",
                     },
                 ),
-                partC_checkpoint,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Tail Mitigation</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        Which placement mitigation policy will prevent this workload from becoming a fleet bottleneck?
+                    </p>
+                    {partC_checkpoint}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1408,15 +1475,15 @@ def _(
         }.get(_naive_binding, "topology")
         items = [
             mo.md("## Part D - Concept Module: Communication Plan Guardrails"),
-            mo.callout(
-                mo.md(
-                    f"**Scenario.** The final communication plan must satisfy step-time/SLO, "
+            gated_hypothesis_card(
+                partD_prediction,
+                title="4. Formulate Your Plan Guardrail Hypothesis",
+                subtitle=(
+                    f"Scenario: The final communication plan must satisfy step-time/SLO, "
                     f"utilization, and topology guardrails for {v2_03_profile.label}. "
                     f"{v2_03_lens['guardrail_text']}"
                 ),
-                kind="info",
             ),
-            partD_prediction,
             v2_03_prediction_feedback(
                 partD_prediction.value,
                 _naive_prediction_key,
@@ -1428,9 +1495,14 @@ def _(
             return mo.vstack(items)
         items.extend(
             [
-                mo.hstack(
-                    [topology_choice, placement_choice, payload_reduction_pct, overlap_pct],
-                    justify="start",
+                instrumentation_console(
+                    mo.hstack(
+                        [topology_choice, placement_choice, payload_reduction_pct, overlap_pct],
+                        justify="start",
+                        gap=1.0,
+                    ),
+                    title="Plan Optimization & Overlap Controls",
+                    subtitle="Apply payload reduction and communication-computation overlap",
                 ),
                 mo.as_html(v2_03_candidate_chart(COLORS, _part_d, _rejected)),
                 _part_d_table(_part_d, _rejected),
@@ -1448,7 +1520,16 @@ def _(
                         "chapter source": "Network Fabrics summary and fallacies",
                     },
                 ),
-                partD_final_decision,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Engineering Sign-off</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        How should the lead systems architect sign off on this distributed communication plan?
+                    </p>
+                    {partD_final_decision}
+                </div>
+                """),
             ]
         )
         return mo.vstack(items)
@@ -1595,8 +1676,14 @@ def _(
         return mo.vstack(
             [
                 mo.md("## Synthesis - Network Communication Memo"),
-                student_id,
-                memo_note,
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO & REFLECTIONS</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Architectural Findings</h4>
+                    {student_id}
+                    <div style="margin-top: 12px;">{memo_note}</div>
+                </div>
+                """),
                 mo.callout(
                     mo.md(
                         f"**Selected policy:** {_part_d['topology_label']} with {_part_d['placement_label']}.\n\n"
@@ -1607,7 +1694,23 @@ def _(
                     ),
                     kind="success" if _part_d["valid_plan"] else "warn",
                 ),
-                partD_final_decision,
+                big_takeaways(
+                    [
+                        "Communication cost is an amount-system budget, not a single link-speed number.",
+                        "Bisection and placement decide how much parallel work remains useful.",
+                        "A network plan must pass SLO, utilization, and topology guardrails simultaneously.",
+                    ]
+                ),
+                mo.Html(f"""
+                <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION & SIGN-OFF</div>
+                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization</h4>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
+                        Confirm your final deployment authorization and export your telemetry audit record.
+                    </p>
+                    {partD_final_decision}
+                </div>
+                """),
                 report_export_panel(_report),
             ]
         )
@@ -1629,16 +1732,16 @@ def _(
 def _(mo, v2_03_metadata, v2_03_profile):
     mo.Html(
         f"""
-<div class="lab-hud">
-  <span class="hud-label">LAB</span>
-  <span class="hud-value">{v2_03_metadata.lab_id}</span>
-  <span class="hud-label">TRACK</span>
-  <span class="hud-value">{v2_03_profile.label}</span>
-  <span style="flex:1;"></span>
-  <span class="hud-label">STATUS</span>
-  <span class="hud-active">ACTIVE</span>
-</div>
-"""
+    <div class="lab-hud">
+      <span class="hud-label">LAB</span>
+      <span class="hud-value">{v2_03_metadata.lab_id}</span>
+      <span class="hud-label">TRACK</span>
+      <span class="hud-value">{v2_03_profile.label}</span>
+      <span style="flex:1;"></span>
+      <span class="hud-label">STATUS</span>
+      <span class="hud-active">ACTIVE</span>
+    </div>
+    """
     )
     return
 
