@@ -1580,7 +1580,7 @@ restart its moments from zero.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-checkpoint-state", "solution": false}
-#| export
+#| exporti
 def _adam_has_momentum(self) -> bool:
     """Adam always keeps moment buffers, so there is always state to checkpoint."""
     return True

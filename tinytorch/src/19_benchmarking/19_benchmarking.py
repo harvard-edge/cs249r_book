@@ -742,7 +742,7 @@ Input Tensor ──> Warmup Runs (discard) ──> Measurement Runs ──> Benc
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-latency", "solution": true}
-#| export
+#| exporti
 def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model inference latency using Profiler.
@@ -982,7 +982,7 @@ Model ──> Dataset 1 ──> accuracy_1 ──┐
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-accuracy", "solution": true}
-#| export
+#| exporti
 def benchmark_run_accuracy_benchmark(self, simulate: bool = False) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model accuracy across datasets.
@@ -1096,7 +1096,7 @@ Model ──> Profiler.measure_memory() ──> peak_memory_mb
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-memory", "solution": true}
-#| export
+#| exporti
 def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model memory usage using Profiler.
@@ -1183,7 +1183,7 @@ This is the primary interface for multi-model evaluation.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-compare", "solution": true}
-#| export
+#| exporti
 def benchmark_compare_models(self, metric: str = "latency"):
     """
     Compare models across a specific metric.
@@ -1454,7 +1454,7 @@ Models ──> Latency Benchmark ──┐
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-run", "solution": true}
-#| export
+#| exporti
 def benchsuite_run_full_benchmark(self, simulate: bool = False) -> Dict[str, Dict[str, BenchmarkResult]]:
     """
     Run all benchmark categories.
@@ -1654,7 +1654,7 @@ across all four metrics. The best performer in each category is highlighted gree
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-plot", "solution": true}
-#| export
+#| exporti
 def benchsuite_plot_results(self, save_plots: bool = True):
     """
     Generate visualization plots for benchmark results.
@@ -2009,7 +2009,7 @@ markdown report and save it to disk.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-report", "solution": true}
-#| export
+#| exporti
 def benchsuite_generate_report(self) -> str:
     """
     Generate comprehensive benchmark report.
@@ -2734,7 +2734,7 @@ Config Lookup ──> Generate Inputs ──> _run_latency_test() ──> _run_a
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-run", "solution": true}
-#| export
+#| exporti
 def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
                               num_runs: int = 100,
                               test_inputs: Optional[List[Any]] = None,
@@ -3106,7 +3106,7 @@ Combine data compilation, JSON serialization, and summary formatting.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-scorecard", "solution": true}
-#| export
+#| exporti
 def mlperf_generate_compliance_report(self, results: Dict[str, Dict[str, Any]],
                                            output_path: str = "mlperf_report.json") -> str:
     """

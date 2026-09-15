@@ -328,10 +328,10 @@ def _count_layer_parameters(layer) -> int:
     """
     ### BEGIN SOLUTION role="scaffold"
     params = 0
-    if hasattr(layer, 'weight'):
+    if hasattr(layer, 'weight') and layer.weight is not None:
         params += layer.weight.data.size
-        if hasattr(layer, 'bias') and layer.bias is not None:
-            params += layer.bias.data.size
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        params += layer.bias.data.size
     return params
     ### END SOLUTION
 
@@ -450,9 +450,13 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
 
     input_h, input_w = input_shape[-2], input_shape[-1]
     stride = model.stride if hasattr(model, 'stride') else 1
+    stride_h = stride if isinstance(stride, int) else stride[0]
+    stride_w = stride if isinstance(stride, int) else stride[1]
     padding = model.padding if hasattr(model, 'padding') else 0
-    output_h = (input_h + 2 * padding - kernel_h) // stride + 1
-    output_w = (input_w + 2 * padding - kernel_w) // stride + 1
+    pad_h = padding if isinstance(padding, int) else padding[0]
+    pad_w = padding if isinstance(padding, int) else padding[1]
+    output_h = (input_h + 2 * pad_h - kernel_h) // stride_h + 1
+    output_w = (input_w + 2 * pad_w - kernel_w) // stride_w + 1
 
     return output_h * output_w * kernel_h * kernel_w * in_channels * out_channels * 2
     ### END SOLUTION
