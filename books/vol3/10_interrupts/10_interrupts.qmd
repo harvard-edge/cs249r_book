@@ -27,7 +27,6 @@ engine: markdown
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{95}{10}{10}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -50,11 +49,19 @@ In classical operating systems, hardware interrupts decouple fast arithmetic pro
 
 :::
 
+## Architectural Overview: Asynchronous Interrupts and Preemption {#sec-vol3-interrupts-intro}
+
+Trajectory checkpointing and write-ahead logging (@sec-vol3-checkpointing) guarantee that an agentic system can survive hardware crashes, node evictions, and execution faults without state loss. However, durability alone cannot preserve cluster stability when an active agent enters an infinite reasoning loop, starves the cluster of accelerator memory, or proposes a high-blast-radius action that violates safety invariants. A robust machine learning system requires an asynchronous control plane capable of preempting, suspending, and redirecting stochastic execution streams in real time.
+
+In classical operating systems, hardware interrupts decouple fast arithmetic processors from sluggish mechanical peripherals by asserting interrupt request lines (IRQs), trapping into privileged kernel space, saving processor registers, and scheduling interrupt service routines. In agentic systems, the execution runtime must bridge an even more extreme temporal disparity: while deep learning token generation operates on millisecond scales ($15\text{--}40\text{ ms}$ per decode step), human supervisors and external approval gates operate across minutes, hours, or days ($10^2\text{--}10^5\text{ s}$). If the runtime treats human oversight or external tools as synchronous blocking calls, volatile Key-Value (KV) cache memory remains pinned in expensive accelerator High-Bandwidth Memory (HBM), precipitating cluster-wide memory exhaustion and multi-agent deadlocks.
+
+This chapter develops the architectural control plane for preemptive agent systems. We formulate the mathematical bounds of interrupt latency across memory-bound decode, compute-bound prefill, and unbounded tool boundaries. We then design an asynchronous event reactor and signal-dispatch framework that maps POSIX signal semantics (`SIGINT`, `SIGPAUSE`, `SIGKILL`, `SIGBUDGET`, `SIGESCALATE`) to the Agent Control Block (ACB) state machine. To handle human deliberation without memory starvation, we establish hierarchical memory swapping protocols that evacuate KV caches across PCIe buses to host DRAM and NVMe storage tiers. Finally, we implement out-of-band Policy Enforcement Points (PEPs), cryptographic capability attenuation, and trajectory watchdog timers that break Coffman deadlock conditions and enforce monotonic budget constraints across concurrent agent swarms.
+
 ## Preemptive Interrupt Latency {#sec-vol3-interrupts-preemption}
 
-In early 2025, an autonomous Site Reliability Engineering (SRE) agent responding to a minor connection pool exhaustion in a distributed database cluster misdiagnosed the anomaly as catastrophic data corruption. Operating within an un-interruptible autoregressive generation loop, the agent formulated a remediation plan that systematically executed `DROP TABLE` and filesystem re-formatting commands across fourteen production database shards. When on-call engineers noticed the sudden drop in database telemetry and executed an emergency abort command from their administrative dashboard, nothing happened. The agent runtime had been implemented as a synchronous, run-to-completion loop. The driver process was blocked inside an un-interruptible forward-pass kernel evaluating an 8,192-token chain-of-thought scratchpad, followed by synchronous blocking RPC calls to cloud infrastructure APIs. Because the system lacked out-of-band preemptive interrupt lines, the operator's abort signal was queued behind in-flight execution steps. By the time the thread drained its queue and processed the cancellation, fourteen shards had been deleted, resulting in millions of dollars in customer downtime.
+A recurring vulnerability in early agent architectures is the **Run-to-Completion Fallacy**: the assumption that an autonomous agent can be dispatched as a monolithic, uninterruptible batch task that executes unimpeded until it emits a terminal token. In production environments, long-horizon workflows operate in an open, mutating operational environment. If an agent misdiagnoses an anomaly, enters a repetitive hallucination cycle, or triggers an unintended cascading mutation across production infrastructure, treating its execution loop as run-to-completion prevents operators and automated guardrails from halting damage in flight.
 
-This failure underscores the **Run-to-Completion Fallacy**: the dangerous assumption that an autonomous agent can be treated as a batch job that runs unimpeded until it reaches a terminal token. Long-horizon agentic workflows interact with an open, non-deterministic physical world where environmental invariants drift, safety boundaries are breached, and human operators must intervene instantly. Autonomous execution must be preemptible at every stage of the control loop.
+The architectural challenge arises from synchronous blocking loops. When an agent driver thread is blocked inside a synchronous forward-pass evaluation or waiting on a blocking RPC to an external service, external abort signals are queued behind in-flight execution steps. If the runtime lacks out-of-band preemptive interrupt paths, the abort cannot take effect until the current step drains, by which time irreversible side effects may have already committed. Achieving resilient systems control requires treating agent preemption as a first-class microarchitectural primitive.
 
 ### The physics of interrupt latency
 
@@ -71,11 +78,10 @@ where:
 
    If the interrupt occurs during a prompt prefill phase over sequence length $S$, the forward pass processes all $S$ tokens in parallel via matrix multiplication, which is compute-bound by peak tensor throughput $P_{\text{peak}}$: $T_{\text{prefill}} \approx 2PS / P_{\text{peak}}$. For $S = 4{,}096$ prompt tokens on an 8-way accelerator node with aggregate throughput $P_{\text{peak}} \approx 8 \times 989\text{ TFLOP/s} \approx 7.9\text{ PFLOP/s}$, prefill compute time is $\approx (2 \times 70 \times 10^9 \times 4{,}096) / (7.9 \times 10^{15}) \approx 72.6\text{ ms}$. Crucially, whether decoding or prefilling, neural inference steps are physically bounded and finish in milliseconds. But if the agent is blocked in a synchronous external tool call (e.g., executing a remote shell script or querying an unindexed database table), $T_{\text{drain}} = T_{\text{tool\_step}}$, which is unbounded unless bounded by hard real-time kernel preemption.
 
-   #### Inter-token interrupt polling overhead
-   To intercept execution between token iterations, the serving engine must check for pending signals without stalling GPU compute pipelines. Naive implementations issue a synchronous barrier (`cudaStreamSynchronize` or blocking host-device RPC), which imposes a $10\text{--}50\,\mu\text{s}$ CPU-GPU synchronization penalty on every generated token, draining Tensor Core execution queues and destroying decode throughput. In production runtimes (e.g., vLLM or TensorRT-LLM), the scheduler polls a lock-free atomic flag resident in host memory prior to batch dispatch. This asynchronous check incurs negligible overhead ($\approx 10\text{--}50\text{ ns}$ per iteration), preserving full hardware utilization while maintaining sub-step interrupt sensitivity.
+   **Inter-token interrupt polling overhead:** To intercept execution between token iterations, the serving engine must check for pending signals without stalling GPU compute pipelines. Naive implementations issue a synchronous barrier (`cudaStreamSynchronize` or blocking host-device RPC), which imposes a $10\text{--}50\,\mu\text{s}$ CPU-GPU synchronization penalty on every generated token, draining Tensor Core execution queues and destroying decode throughput. In production runtimes (e.g., vLLM or TensorRT-LLM), the scheduler polls a lock-free atomic flag resident in host memory prior to batch dispatch. This asynchronous check incurs negligible overhead ($\approx 10\text{--}50\text{ ns}$ per iteration), preserving full hardware utilization while maintaining sub-step interrupt sensitivity.
 
-   #### Interrupt latency jitter
-   While nominal decode steps finish in $15\text{--}40\text{ ms}$, interrupt latency exhibits heavy-tailed jitter: $\sigma^2(T_{\text{int}}) \approx \sigma^2(T_{\text{drain}}) + \sigma^2(T_{\text{save}})$. If an interrupt arrives at the start of a large prompt prefill chunk ($S = 4{,}096$), $T_{\text{drain}}$ balloons to $75\text{--}150\text{ ms}$. If the agent is executing an un-sandboxed shell command or remote REST API, $T_{\text{drain}}$ jitters into seconds or minutes. Consequently, production systems report median interrupt latencies of $p50 \approx 25\text{ ms}$ but extreme tail latencies of $p99 > 5{,}000\text{ ms}$ under unconstrained tool actuation, reinforcing the necessity of strict out-of-band kernel traps for high-severity signals.
+   **Interrupt latency jitter:** While nominal decode steps finish in $15\text{--}40\text{ ms}$, interrupt latency exhibits heavy-tailed jitter: $\sigma^2(T_{\text{int}}) \approx \sigma^2(T_{\text{drain}}) + \sigma^2(T_{\text{save}})$. If an interrupt arrives at the start of a large prompt prefill chunk ($S = 4{,}096$), $T_{\text{drain}}$ balloons to $75\text{--}150\text{ ms}$. If the agent is executing an un-sandboxed shell command or remote REST API, $T_{\text{drain}}$ jitters into seconds or minutes. Consequently, production systems report median interrupt latencies of $p50 \approx 25\text{ ms}$ but extreme tail latencies of $p99 > 5{,}000\text{ ms}$ under unconstrained tool actuation, reinforcing the necessity of strict out-of-band kernel traps for high-severity signals.
+
 3. **State Preservation Latency ($T_{\text{save}}$):** The time required to serialize the Agent Control Block (ACB) to durable storage, including the trajectory event ledger, tool observation history, and token consumption accounting ($T_{\text{save}} \approx 5\text{--}20\text{ ms}$).
 4. **Dispatch Latency ($T_{\text{dispatch}}$):** The latency to look up and execute the registered Agent Interrupt Service Routine (AISR) within the runtime kernel ($T_{\text{dispatch}} < 1\text{ ms}$).
 
@@ -476,13 +482,9 @@ While the asynchronous event reactor and transactional signal dispatch framework
 
 ## Human-in-the-Loop as a High-Latency Peripheral {#sec-vol3-interrupts-hitl}
 
-In late 2024, an enterprise software organization deployed a fleet of 80 autonomous coding agents to refactor legacy service endpoints across a monorepo. The agents ran on a dedicated cluster of 10 nodes, each equipped with 8 NVIDIA H100 SXM5 GPUs ($80\,\text{GB}$ HBM3 per device, totaling 80 GPUs and $6{,}400\,\text{GB}$ of accelerator memory). To prevent unintended git pushes, developers implemented a synchronous approval gate: before committing to remote branches, the agent runtime executed a blocking `await human_approval()` call. The runtime lacked memory swapping mechanisms, maintaining each agent's active 32,000-token trajectory context pinned in GPU HBM.
+A primary architectural anti-pattern in human-in-the-loop (HITL) agent deployments is the **Synchronous Approval Trap**: pausing an agent workflow for human confirmation via a blocking `await human_approval()` call without releasing physical resources. In enterprise settings where dozens of concurrent agents refactor code, execute database migrations, or orchestrate deployments, synchronous approval gates inevitably collide with human availability. When human operators are unavailable (such as outside business hours or during high-incident shifts), agents remain suspended in active memory.
 
-On a Friday at 17:15, dozens of agents simultaneously finished their code refactoring passes and dispatched Slack approval requests to engineering team leads. The engineers had already left the office for the weekend.
-
-For 64 hours, 80 agents sat idle in synchronous blocking waits. Each agent pinned $10.74\,\text{GB}$ of volatile HBM, locking up over $859\,\text{GB}$ of accelerator capacity across the cluster. When scheduled nightly regression test suites and interactive developer queries were submitted to the GPU fleet, the PagedAttention memory manager [@kwon2023vllm] found zero available physical page frames. Memory starvation triggered an avalanche of Out-of-Memory (OOM) fatal driver aborts, freezing the shared cluster until system administrators manually terminated the orphaned processes on Monday morning.
-
-This production incident illustrates the fundamental tension of Human-in-the-Loop (HITL) agent systems: the **Asymmetric Latency Disparity**.
+If the runtime lacks memory swapping mechanisms, each suspended agent pins its active trajectory context (often 32,000 to 128,000 tokens) in volatile accelerator High-Bandwidth Memory (HBM). Across a fleet of tens or hundreds of concurrent agents, idle KV caches monopolize hundreds of gigabytes of device memory. When new interactive queries or background batch workloads are scheduled onto the cluster, the underlying memory manager finds zero free physical page frames. Memory starvation triggers cascading Out-of-Memory (OOM) fatal driver aborts, freezing shared cluster resources. This failure mode highlights the fundamental physics governing human-in-the-loop systems: the **Asymmetric Latency Disparity**.
 
 ### The asymmetric latency disparity
 
@@ -490,7 +492,7 @@ In modern inference architectures, execution is scheduled across microsecond and
 
 A human engineer reviewing a proposed pull request, Slack escalation, or administrative authorization operates across minutes, hours, or entire business days ($300\text{ to } 86{,}400\text{ seconds}$). In computing systems design, treating a component with $10^5\text{ seconds}$ of latency as a synchronous participant in an execution thread that operates at $10^{-2}\text{ seconds}$ is an architectural flaw. Human supervisors must be modeled as **High-Latency, Asynchronous, Lossy Peripherals**.
 
-#### Latency amplification of synchronous gates: Napkin math
+**Latency amplification of synchronous gates (napkin math):**
 
 To understand why synchronous human approval gates destroy systems throughput, consider an agent executing an $N = 50$-step trajectory. Each autonomous step consumes $T_{\text{step}} = 2\text{ s}$ ($1\text{ s}$ of token generation plus $1\text{ s}$ of sandboxed tool execution). Unsupervised, the complete trajectory finishes in $T_{\text{unsupervised}} = N \cdot T_{\text{step}} = 50 \times 2\text{ s} = 100\text{ s} \approx 1.7\text{ minutes}$.
 
@@ -545,7 +547,7 @@ As detailed in @fig-vol3-interrupts-memory-swapping, the runtime coordinates DMA
 ![](images/svg/acb_memory_swapping.svg){width=100%}
 :::
 
-#### Physical memory offloading protocol
+**Physical memory offloading protocol:**
 When an agent transitions into `SUSPENDED_HUMAN_GATE`, the runtime memory manager executes a non-blocking three-stage offloading pipeline:
 
 1. **Physical Frame Unmapping:** The PagedAttention block manager unbinds the physical GPU page table entries assigned to sequence tokens $0 \dots S-1$, marking the corresponding HBM frames as immediately reallocatable for active decode streams.
@@ -558,14 +560,14 @@ This multi-tier offloading eliminates HBM holding costs during prolonged escrow 
 
 When a human supervisor finally resolves an approval ticket, the runtime faces two complex systems challenges: **Attention Cache Invalidation** and **Rehydration State Skew**.
 
-#### 1. Attention cache invalidation on steering divergence
+**1. Attention cache invalidation on steering divergence:**
 If the human supervisor simply approves the proposed action without modifying arguments, the runtime streams the serialized KV cache back into newly allocated HBM page frames via DMA, verifies memory block pointers, and immediately resumes autoregressive generation.
 
 However, if the human supervisor provides steering feedback (e.g., *"Do not drop table customers; instead, archive inactive rows to cold_storage"*), the prompt context changes. In transformer models, attention keys and values are causally dependent on preceding tokens. If the prompt history is modified at sequence index $S_{\text{fork}}$, all cached key-value representations for indices $s \ge S_{\text{fork}}$ are mathematically invalid: $\text{KV}_{\text{valid}} = \text{KV}_{0:S_{\text{fork}}-1}$, and $\text{KV}_{\text{invalidated}} = \text{KV}_{S_{\text{fork}}:S}$.
 
 The runtime must execute **Prefix Cache Realignment**: preserving the valid prefix blocks $0 \dots S_{\text{fork}}-1$ in host memory while purging the invalidated suffix blocks from the PagedAttention allocation table. When the model resumes inference, it computes forward-pass activations only for the newly injected human steering tokens, minimizing redundant prefill computation.
 
-#### 2. Rehydration state skew (environmental drift)
+**2. Rehydration state skew (environmental drift):**
 During the three hours an agent sat suspended awaiting human approval, the external environment did not remain frozen. Another developer pushed a commit to the git repository, a background cron job pruned files in the workspace, or database records were modified. If the agent rehydrates and executes its planned tool action against stale environmental assumptions, it risks corrupting production systems.
 
 To prevent execution against stale state, the runtime enforces **Pre-Execution Invariant Verification**. When the agent triggers `SYS_ESCALATE` at time $t_0$, the kernel captures a cryptographic digest of the target environment $\mathcal{H}(\text{Env}_{t_0})$ (e.g., git commit hash, database schema version, target file SHA-256 hash). Upon rehydration at time $t_1$, the kernel re-evaluates the environment hash before executing the tool: $\mathcal{H}(\text{Env}_{t_1}) \stackrel{?}{=} \mathcal{H}(\text{Env}_{t_0})$.
@@ -588,7 +590,7 @@ If $a_j \notin \text{Tainted}(\mathcal{P})$, the runtime launches $a_j$ inside a
 
 If human oversight is essential for high-blast-radius actions, why not require human approval for *every* tool invocation? In production systems, human inspection is not free; it is the most expensive operational resource in the entire stack.
 
-#### Quantifying inspection vs. recovery costs
+**Quantifying inspection vs. recovery costs:**
 
 Consider the physical economics of a human review gate versus an automated recovery loop:
 
@@ -597,7 +599,7 @@ Consider the physical economics of a human review gate versus an automated recov
 
 Human inspection is **$100\times$ to $1{,}000\times$ more expensive** than automated recovery. If an agent cluster generates 20 human approval requests per day per agent across a fleet of 50 agents, daily supervisory costs balloon to $\$5{,}000\text{--}\$12{,}500$, dwarfing the entire compute budget of the cluster.
 
-#### Deriving the optimal escalation threshold
+**Deriving the optimal escalation threshold:**
 
 To maximize system throughput while preventing catastrophic accidents, the runtime must formalize when to escalate to human review (`SYS_ESCALATE`) versus when to permit autonomous self-healing.
 
@@ -744,14 +746,14 @@ In their seminal 1971 work, Edward G. Coffman Jr., Michael J. Elphick, and Arie 
 
 To maintain system liveness, the agent runtime kernel enforces structural invariants that systematically eliminate each condition:
 
-#### 1. Eliminating hold-and-wait via optimistic staging
+**1. Eliminating hold-and-wait via optimistic staging:**
 An agent must **never** hold exclusive external resources while waiting across a human supervisory boundary. If an agent requires approval to commit changes, it must utilize **Optimistic Concurrency Control (OCC)**:
 
 - The agent computes its diffs, executes unit tests, and stages changes inside an isolated Copy-on-Write microVM or private git branch.
 - Before issuing `SYS_ESCALATE` and entering `SUSPENDED_HUMAN_GATE`, the agent explicitly releases all distributed mutexes and transaction locks ($\mathcal{R}_{\text{held}} = \emptyset$).
 - When the human signs the lease, the agent re-acquires the necessary locks, verifies that the underlying state hash has not drifted via $\mathcal{H}(\text{Env})$, and commits the transaction atomically.
 
-#### 2. Enforcing preemption via watchdog timers
+**2. Enforcing preemption via watchdog timers:**
 Resources must be preemptible. The runtime attaches an authoritative **Watchdog Timer** to every supervisory gate. A watchdog is an asynchronous hardware timer that counts down from a strict Time-To-Live ($\tau_{\text{watchdog}}$). If the countdown expires before the human resolves the promise ($\tau_{\text{elapsed}} \ge \tau_{\text{watchdog}} \implies \text{Preempt}(\mathcal{K}_{\text{agent}}) \land \text{Abort}(\text{Trajectory})$):
 
 1. The pending promise transitions atomically to `TIMED_OUT`.
@@ -767,7 +769,7 @@ As illustrated in @fig-vol3-interrupts-agent-saga-rollback, when a forward step 
 4. **Heartbeat Timeouts and Supervisor Health Monitoring:** In addition to gross wall-clock timers, supervisory channels maintain bidirectional heartbeat polling ($\Delta t_{\text{heartbeat}} \le 5\text{ s}$). If network partitions sever connectivity between the agent runtime and the human approval interface, the watchdog triggers immediate graceful degradation to a safe standby state before lease expiration.
 5. The escalation ticket is forwarded to a secondary escalation tier (e.g., paging the secondary on-call engineer via PagerDuty).
 
-#### 3. Breaking circular wait via global partial ordering
+**3. Breaking circular wait via global partial ordering:**
 To prevent multi-agent deadlocks where multiple agents hold intersecting locks while waiting on each other's outputs, all system resources and approval tiers are assigned a strict, global **Partial Order**: $R_1 \prec R_2 \prec R_3 \prec \dots \prec R_n$. An agent holding resource $R_j$ may request resource $R_k$ if and only if $R_j \prec R_k$. If an agent needs a lower-order resource $R_i$ ($R_i \prec R_j$), it must completely release $R_j$ before issuing the acquisition request, mathematically rendering circular dependency cycles impossible [@coffman1971].
 
 ### Hierarchical timeout and budget trees

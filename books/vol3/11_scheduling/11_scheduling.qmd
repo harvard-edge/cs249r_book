@@ -23,7 +23,6 @@
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{95}{10}{10}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -44,9 +43,17 @@ When an autonomous agent enters a prolonged wait state for an external sandbox c
 - Calculate analytical breakeven thresholds for preemptive KV cache swapping across HBM, host DDR5 DRAM, and NVMe fabrics during blocking tool invocations.
 :::
 
+## Architectural Overview: Trajectory Scheduling and Cluster Resource Management {#sec-vol3-scheduling-intro}
+
+Preemptive interrupts, watchdog timers, and asynchronous signal delivery (@sec-vol3-interrupts) establish execution control and safety boundaries for individual agent trajectories. In enterprise production environments, however, agents do not run in isolation on dedicated hardware. Instead, hundreds or thousands of heterogeneous agent workflows—spanning interactive code assistants, autonomous debugging loops, multi-agent swarms, and batch background processors—compete for shared accelerator compute and memory resources across distributed GPU clusters.
+
+Managing this multi-tenant execution substrate introduces systems challenges that fundamentally diverge from classical stateless inference serving. In traditional web and conversational serving, requests are short, arrive with bounded variance, and complete in a single forward turn. In agentic systems, by contrast, trajectories are stateful, multi-turn loops that interleave GPU-intensive neural policy evaluations with prolonged, heavy-tailed pauses waiting on sandboxed code execution, compiler toolchains, database migrations, or human approvals. If the cluster scheduler relies on conventional First-In-First-Out (FIFO) queues or monolithic iteration batching, long-running reasoning tasks monopolize accelerator streaming multiprocessors, while blocked agents strand gigabytes of High-Bandwidth Memory (HBM), triggering cluster-wide head-of-line blocking and catastrophic out-of-memory faults.
+
+This chapter develops the architectural foundation for multi-tenant trajectory scheduling across accelerator fleets. We first analyze the arithmetic intensity divergence between compute-bound prompt prefill and memory-bandwidth-bound token decode under the Roofline model, demonstrating how continuous chunked batching and piggybacking eliminate phase contention. We then examine physically disaggregated prefill-decode architectures that stream Key-Value (KV) activations across high-speed RDMA fabrics. Next, we address the mathematical collapse of FIFO queues under heavy-tailed Pareto execution horizons, deriving non-clairvoyant Least Attained Service (LAS) and Multi-Level Feedback Queue (MLFQ) schedulers. Finally, we implement cache-aware prefix routing over global Radix tries and Banker's Algorithm memory admission controls to prevent Coffman deadlocks in shared KV memory pools.
+
 ## Continuous Chunked Batching {#sec-vol3-scheduling-continuous-batching}
 
-Consider an interactive software engineering environment where an accelerator cluster serves 32 concurrent developer agents. Each agent maintains an active conversational session, generating code edits and receiving real-time syntax suggestions at an average Inter-Token Latency (ITL) of $25\text{ ms}$. Suddenly, an automated background triage agent arrives with an expansive request: it submits a $64\text{k}$-token repository diff to bisect a compiler regression. In a conventional serving engine running monolithic continuous iteration batching, the scheduler injects this entire $64\text{k}$-token prompt into the immediate next execution batch. The Tensor Cores on an NVIDIA H100 GPU are monopolized for $420\text{ ms}$ executing the prompt prefill General Matrix Multiply (GEMM) kernels. For nearly half a second, the 32 interactive agents cannot execute a single decode iteration; their Inter-Token Latency spikes by $16.8\times$ from $25\text{ ms}$ to $445\text{ ms}$. Interactive code completions stutter, token streaming buffers drain, and human-facing service level agreements (SLAs) are comprehensively breached.
+Consider a production environment where an accelerator cluster serves 32 concurrent interactive developer agents alongside automated background maintenance tasks. Each interactive agent generates code edits and receives real-time syntax suggestions at an average Inter-Token Latency (ITL) of $25\text{ ms}$. When a background triage agent arrives with an expansive $64\text{k}$-token repository diff to bisect a compiler regression, a conventional serving engine running monolithic continuous iteration batching injects this entire $64\text{k}$-token prompt into the immediate next execution batch. The Tensor Cores on an NVIDIA H100 GPU are monopolized for $420\text{ ms}$ executing the prompt prefill General Matrix Multiply (GEMM) kernels. For nearly half a second, the 32 interactive agents cannot execute a single decode iteration; their Inter-Token Latency spikes by $16.8\times$ from $25\text{ ms}$ to $445\text{ ms}$. Interactive code completions stutter, token streaming buffers drain, and human-facing service level agreements (SLAs) are comprehensively breached.
 
 This production failure exposes the foundational tension in autoregressive sequence serving: the structural divergence between prompt prefill and token decode. Resolving this tension requires understanding how iteration-level scheduling operates and why co-locating unconstrained prefill with active decode induces severe phase interference.
 
@@ -75,21 +82,21 @@ The hardware platform's **machine balance** or **ridge point** $\mathcal{I}_{\te
 
 Now examine the two distinct operational phases of a decoder-only transformer model with $N_{\text{params}}$ parameters, $L$ transformer layers, hidden dimension $d_{\text{model}}$, $H$ query attention heads, $H_{\text{KV}}$ key-value heads, and per-head dimension $d_h = d_{\text{model}} / H$.
 
-#### The prefill phase (compute-bound)
+**The prefill phase (compute-bound):**
 In the prefill phase, the model ingests an entire prompt sequence of length $S$ tokens in a single forward pass. Because all $S$ tokens are known simultaneously, the matrix-vector products across linear projections ($W_Q, W_K, W_V, W_O$ and the feed-forward blocks $W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$) are batched across all $S$ positions into General Matrix Multiplies (GEMMs).
 
 We can derive the operational intensity from first-principles napkin math: in 16-bit half-precision (FP16/BF16), every model parameter occupies 2 bytes of memory and participates in 2 floating-point operations per token (one multiply-accumulate operation: $1 \text{ MAC} = 2 \text{ FLOPs}$). Loading the full model weight tensor requires reading $2 N_{\text{params}}$ bytes from HBM across the memory bus. Because those weights are loaded once and reused across all $S$ prompt tokens in parallel, the linear layers execute $2 N_{\text{params}} S$ FLOPs. The operational intensity is simply the ratio of compute to memory traffic, yielding $\mathcal{I}_{\text{prefill}}(S) \approx \frac{2 N_{\text{params}} S}{2 N_{\text{params}}} = S\text{ FLOP/byte}$.
 
 When an agent prompt contains $S \ge 512$ tokens, its operational intensity $\mathcal{I}_{\text{prefill}} \ge 512\text{ FLOP/byte} > \mathcal{I}_{\text{knee}} = 295.2\text{ FLOP/byte}$. The prefill phase operates squarely in the **compute-bound regime**, saturating accelerator Tensor Cores.
 
-#### The decode phase (memory-bandwidth bound)
+**The decode phase (memory-bandwidth bound):**
 In the autoregressive decode phase, the model generates exactly one new token at position $S + t$ for each active sequence in the batch. Let $B_{\text{dec}}$ denote the number of concurrent decoding sequences. For each sequence, the model must evaluate all $N_{\text{params}}$ weights against a single activation vector of length $1$. Operations degenerate from compute-dense GEMM to memory-bound GEMV (matrix-vector multiplication).
 
 Every single decode step requires streaming the entire model's $2 N_{\text{params}}$ bytes of weights from HBM, alongside the historical Key-Value (KV) cache memory $M_{\text{KV}}$ for all $B_{\text{dec}}$ sequences across all $L$ layers, yielding operational intensity $\mathcal{I}_{\text{decode}}(B_{\text{dec}}) = \frac{2 N_{\text{params}} B_{\text{dec}}}{2 N_{\text{params}} + M_{\text{KV}}}\text{ FLOP/byte}$, where $M_{\text{KV}} = 4 L H_{\text{KV}} d_h \sum_{i=1}^{B_{\text{dec}}} S_i\text{ bytes}$.[^fn-scheduling-intensity-divergence] Even if the historical KV cache were zero ($M_{\text{KV}} = 0$), the decode operational intensity is fundamentally capped by the batch size: $\mathcal{I}_{\text{decode}} \le \frac{2 N_{\text{params}} B_{\text{dec}}}{2 N_{\text{params}}} = B_{\text{dec}}\text{ FLOP/byte}$.
 
 For typical serving batch sizes ($B_{\text{dec}} \in [1, 64]$), decode operational intensity satisfies $\mathcal{I}_{\text{decode}} \le 64\text{ FLOP/byte} \ll 295.2\text{ FLOP/byte}$. Autoregressive decoding is severely **memory-bandwidth bound**: accelerator Tensor Cores sit starved of data for over 75 percent to 90 percent of each clock cycle while the memory bus streams weights from HBM.
 
-#### Phase contention
+**Phase contention:**
 When a monolithic continuous batching engine attempts to schedule an incoming prefill request alongside active decode sequences in the same iteration, a destructive phenomenon known as **phase contention**\index{Phase contention} (or phase interference) occurs (@tbl-vol3-scheduling-monolithic-batching):
 
 | Timeline Window             | Decode Stream Status                   | Prefill Engine State                    | Hardware Resource Allocation           | Inter-Token Latency Impact                |
@@ -139,7 +146,7 @@ The total token budget per iteration is constrained by a strict ceiling $T_{\tex
 
 : **Chunked Prefill Piggybacking Timeline**: Iteration-level scheduling demonstrating smooth prefill ingestion interleaved with token generation, maintaining strict ITL upper bounds across consecutive forward passes. {#tbl-vol3-scheduling-chunked-piggybacking tbl-colwidths="[15,15,25,20,15,10]"}
 
-#### Attention computation across chunk boundaries
+**Attention computation across chunk boundaries:**
 Executing prefill in chunks requires careful handling of causal self-attention across chunk boundaries. When evaluating chunk $k$ spanning token indices $[(k-1)C, \, kC - 1]$:
 
 1. **Intra-Chunk Attention:** Tokens within chunk $k$ attend to preceding tokens within chunk $k$ via standard causal masking.
@@ -148,7 +155,7 @@ Executing prefill in chunks requires careful handling of causal self-attention a
 
 Only when the final chunk $K$ finishes does the request transition from the prefill state to the active decode state, ready to generate its very first output token ($a_0$).
 
-#### Mathematical derivation of the optimal chunk budget
+**Mathematical derivation of the optimal chunk budget:**
 
 What is the optimal token budget $T_{\text{budget}}^*$ that maximizes accelerator throughput without violating an operator's SLA? Let $\tau_{\text{target}}$ denote the target inter-token latency bound (e.g., $\tau_{\text{target}} = 25\text{ ms}$). The execution duration of an iteration processing $B_{\text{dec}}$ decode tokens and $C$ prefill tokens is governed by the two-term Roofline formulation in @eq-chunk-iter-time:
 
@@ -409,7 +416,7 @@ Let $X$ denote the service time (measured in total generated tokens or forward-p
 
 For $\alpha > 1$, the first moment (mean service time) converges to $\mathbb{E}[X] = \alpha x_m / (\alpha - 1)$. However, when $\alpha \le 2$, the second raw moment $\mathbb{E}[X^2]$ diverges to infinity.[^fn-scheduling-pareto-variance] Empirical measurements across production agent fleets (such as SWE-bench execution traces and autonomous web-browsing agents) reveal tail indices strictly within the heavy-tailed band $\alpha \in [1.1, 1.4]$. The workload exhibits **infinite theoretical variance**.
 
-#### The mathematical collapse of FIFO queueing
+**The mathematical collapse of FIFO queueing:**
 In an inference serving engine, batch slots and KV cache page frames are finite physical resources. When requests are scheduled in strict First-In-First-Out (FIFO) order, an incoming task cannot begin execution until preceding tasks yield their slots. If service times have low variance (such as standard chatbot queries requiring 200–400 tokens), FIFO performs stably. But when service times follow a heavy-tailed distribution, catastrophic Head-of-Line (HoL) blocking emerges.
 
 Consider an inference serving node modeled as an $M/G/1$ queue with Poisson arrival rate $\lambda$, arbitrary service time distribution $X$, and server utilization $\rho = \lambda \mathbb{E}[X] < 1$. By the classical Pollaczek-Khinchine formula [@kleinrock1975queueing; see @sec-vol3-appendix-math-queueing], the expected waiting time in the queue is $\mathbb{E}[W_{\text{FIFO}}] = \frac{\lambda \mathbb{E}[X^2]}{2(1 - \rho)}$.
@@ -530,12 +537,12 @@ In a cache-aware cluster, the global routing layer maintains a **Global Prefix D
 ![](images/svg/cache_aware_prefix_routing.svg)
 :::
 
-#### Prefix fingerprinting and chunk hashing
+**Prefix fingerprinting and chunk hashing:**
 To avoid transmitting full multi-thousand-token prompts to the router for string comparison, prompts are fingerprinted using rolling chunk hashes. The token sequence $\mathbf{x} = (x_1, \dots, x_S)$ is partitioned into chunks of $B_{\text{chunk}} = 16$ tokens ($c_k = (x_{(k-1)B_{\text{chunk}} + 1}, \dots, x_{k B_{\text{chunk}}})$), with recursive Merkle chunk hashes computed via $h_k = \text{Hash}(h_{k-1} \parallel c_k)$ from initial vector $h_0 = \text{IV}$.
 
 A request's prefix is thus uniquely represented as a sequence of 64-bit integers $[h_1, h_2, \dots, h_m]$. The router maintains a hash-indexed Trie mapping prefix hashes $h_k$ to the set of worker nodes $\mathcal{W}(h_k) \subseteq \{1, \dots, M\}$ that currently hold that prefix in HBM.
 
-#### The joint routing objective function
+**The joint routing objective function:**
 Routing purely on prefix cache hits can create devastating load imbalances: if 90 percent of requests share a popular developer system prompt, routing all requests to the node holding that prompt will overwhelm that node's queue while peer nodes sit idle.
 
 The cache-aware router must optimize a joint objective balancing **cache affinity** against **worker queue load**.
@@ -846,7 +853,7 @@ The scheduler evaluates an operation's external side effects across a strict fou
 ![](images/svg/reversibility_boundary_preemption_matrix.svg)
 :::
 
-#### Coffman deadlock prevention in shared KV pools
+**Coffman deadlock prevention in shared KV pools:**
 When agents dynamically spawn child subagents, allowing child agents to recursively allocate memory from a shared pool without global coordination introduces the threat of **Coffman deadlocks**\index{Coffman deadlocks} [@coffman1971]:
 
 - **Mutual Exclusion:** Physical HBM blocks are held exclusively by individual PagedAttention tables.

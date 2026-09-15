@@ -28,7 +28,6 @@ engine: jupyter
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{10}{10}{95}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -52,9 +51,21 @@ Treating the foundation model as an immutable neural processor forces systems ar
 
 :::
 
+## Architectural Overview: The Trajectory Data Flywheel {#sec-vol3-flywheel-intro}
+
+The preceding parts of this book developed the systems runtime required to host, constrain, and schedule autonomous agents: the neural processor (@sec-vol3-processor), test-time deliberation engines (@sec-vol3-deliberation), paged virtual memory (@sec-vol3-virtual-memory), sandboxed actuation (@sec-vol3-actuation, @sec-vol3-virtualization), durable checkpointing (@sec-vol3-checkpointing), asynchronous interrupts (@sec-vol3-interrupts), and multi-tenant trajectory scheduling (@sec-vol3-scheduling). These mechanisms treat the underlying neural policy as a fixed computational component, constructing defensive runtime scaffolding to contain its hallucinations and coordinate its execution.
+
+However, relying exclusively on runtime scaffolding introduces severe scalability limits. As tasks grow more complex, forcing an off-the-shelf foundation model to navigate multi-step tool environments requires expansive, multi-thousand-token system prompts, elaborate few-shot demonstration headers, and costly dynamic error recovery loops. Every interaction turn re-pays this steep token and latency tax. Moreover, when deployed models encounter unfamiliar tool errors or unexpected environment states, their next-action distributions degenerate, triggering unrecoverable execution loops.
+
+Part V shifts from runtime containment to **policy adaptation and compilation**. Rather than paying continuous inference costs to steer a generic model through in-context scaffolding, the systems architect compiles tool protocols, environmental state representations, and recovery reflexes directly into the model's parameter weights. The foundational engine driving this transition is the **Trajectory Data Flywheel**.
+
+This chapter develops the end-to-end systems architecture of the autonomous trajectory data flywheel. We first analyze the economic, temporal, and mathematical bottlenecks of manual human demonstration logging, demonstrating why human "golden paths" induce quadratic covariate shift $\mathcal{O}(\epsilon H^2)$ during production tool failures. We then design closed-loop synthetic generation pipelines that harness non-differentiable deterministic oracles—compilers, linters, abstract syntax tree (AST) verifiers, and hermetic microVM test harnesses—to filter millions of model rollouts. Next, we formalize negative trajectory mining to build robust bifurcated curricula that teach models autonomous self-correction. Finally, we address the engineering practicalities of petabyte-scale trajectory log storage, columnar Parquet compression, and selective metadata facet indexing.
+
 ## The Autonomous Data Flywheel Architecture {#sec-vol3-flywheel-architecture}
 
-An enterprise engineering organization deploying an autonomous software repair agent across thousands of internal code repositories discovers that human-annotated debugging demonstrations cost between \$75 and \$200 per trajectory. Collecting a modest corpus of 50,000 multi-turn traces requires over \$4.5 million in direct engineering labor and nine months of calendar time. Yet, when the resulting supervised policy is deployed into production CI/CD pipelines, it fails on 68 percent of real-world pull requests. A forensic post-mortem reveals that human software engineers instinctively edit out their intermediate typos, dead ends, and syntax errors before committing their logged traces. The fine-tuning corpus consisted exclusively of pristine "golden paths." Upon encountering its first unexpected transient network timeout or missing compiler header in production, the deployed policy enters an unrecoverable hallucination loop: unable to parse the nonzero exit code, it emits non-existent CLI flags repeatedly until the context window exhausts the accelerator's high-bandwidth memory.
+Scaling agent capabilities through supervised fine-tuning (SFT) exposes a fundamental economic and distributional bottleneck: **Demonstration Scarcity**. In conventional single-turn instruction tuning, human crowdworkers generate prompt-completion pairs in seconds. In agentic software engineering and DevOps workflows, by contrast, resolving an issue requires navigating complex toolchains, inspecting multi-file codebases, and parsing asynchronous compiler and test outputs across tens of interaction turns.
+
+When organizations rely on human software engineers to manually record agent trajectories, the operational costs are severe: professional debugging sessions require 30 to 90 minutes of sustained focus, translating to \$75 to \$200 per verified demonstration. Beyond direct financial expense, human demonstrations suffer from an even more damaging systemic defect: **Survivorship Bias**. Human engineers instinctively debug in their heads, committing only clean, successful tool invocations. The resulting demonstration corpora consist almost exclusively of pristine "golden paths" that contain zero transient network retries, syntax corrections, or recovery from fatal exit codes. When a policy trained on these idealized traces encounters a runtime anomaly in production, it lacks the conditional training data required to recover, precipitating cascading failure loops. Resolving this challenge requires building an automated, closed-loop synthetic trajectory flywheel.
 
 ### The demonstration scarcity bottleneck
 
@@ -360,7 +371,7 @@ An end-to-end yield of $\eta_{\text{net}} = 0.050$ (5.0 percent) dictates that t
 
 To yield a single accepted, deduplicated golden path, the cluster must generate 20 candidate rollouts. The remaining 950,000 rejected rollouts are not discarded; as detailed in @sec-vol3-flywheel-negative-mining, traces passing Stage 1 but failing Stage 2 are mined to produce high-value error-recovery trajectories.
 
-#### Token consumption napkin math for synthetic generation
+**Token consumption napkin math for synthetic generation:**
 
 Generating one million multi-turn rollouts imposes an immense token processing workload on the inference cluster. Systems engineers must budget both generated output tokens and expanding context prefill tokens from first principles.
 
@@ -397,7 +408,7 @@ $$ {#eq-entropy-regularized-distill}
 
 where $\mathcal{H}(\pi) = - \sum_v \pi(v) \log \pi(v)$ and $\beta_{\text{ent}}$ controls the entropy floor.
 
-#### Trajectory curation: Supervised fine-tuning versus preference optimization
+**Trajectory curation: Supervised fine-tuning versus preference optimization:**
 
 The trajectory filtering and distillation pipeline serves two fundamentally distinct downstream post-training objectives:
 
@@ -530,7 +541,7 @@ The synthesis pipeline pre-computes binary token loss masks $M_i \in \{0, 1\}$ a
 
 As an autonomous data flywheel scales from experimental prototype to continuous post-training pipeline, trajectory storage and log indexing transform from routine data-engineering tasks into major infrastructure cost centers. Unlike stateless instruction-tuning datasets (where a single prompt-response pair occupies a few kilobytes), an agent trajectory is a rich multi-turn telemetry session capturing verbose compiler outputs, terminal diffs, file trees, and system state snapshots.
 
-#### Physical trajectory footprint and storage volume scaling
+**Physical trajectory footprint and storage volume scaling:**
 
 To quantify the physical footprint of trajectory logs, we decompose the byte volume of an average interaction turn $t$:
 
@@ -568,7 +579,7 @@ At cluster scale, this footprint compounds rapidly:
 
   Crucially, production telemetry cannot be written directly to disk without **Inline Security and Privacy Scrubbing**\index{Inline Security and Privacy Scrubbing}. Real-world trajectory streams frequently capture sensitive credentials: bearer authorization tokens, database connection passwords, SSH private keys, and customer personally identifiable information (PII) emitted in stdout logs. An in-line streaming worker applies deterministic regex patterns, high-entropy token detectors, and language-specific AST token masks to scrub sensitive credentials before the trajectory is serialized into permanent storage, ensuring enterprise secrets never leak into fine-tuning weights.
 
-#### Columnar serialization and compression economics
+**Columnar serialization and compression economics:**
 
 Retaining petabytes of trajectory logs as uncompressed flat JSONL files creates severe systems liabilities: reading a single attribute (such as filtering for trajectories where `exit_code == 137` to isolate out-of-memory crashes) requires parsing gigabytes of unindexed text from storage, incurring massive disk I/O and CPU deserialization bottlenecks.
 
@@ -578,7 +589,7 @@ Modern data flywheels resolve this by converting raw ingestion streams into **Co
 2. **High-Ratio Text Compression:** Observations consisting of repetitive compiler warnings, formatted stack traces, and unified diff syntax compress exceptionally well under dictionary-based Zstandard algorithms. In production benchmarks, Zstandard achieves an **80 to 88 percent compression ratio** ($5\times$ to $8\times$ storage reduction) over raw JSONL.
 3. **Cloud Storage Cost Arbitrage:** Compressing a 75 TB raw dataset down to $\approx 11 \text{ TB}$ reduces standard cloud object storage (for example, AWS S3 Standard at \$0.023/GB/month) from $\$1{,}725$ to $\$253$ per month, yielding tens of thousands of dollars in annual infrastructure savings across multi-year data retention horizons.
 
-#### Tiered storage architecture
+**Tiered storage architecture:**
 
 To balance low-latency training ingestion against long-term archival economics, trajectory storage is organized into a three-tier storage hierarchy:
 
@@ -600,7 +611,7 @@ s3://flywheel-trajectories/year=2026/month=09/domain=code_repair/model=pi_v3/sta
 
 This layout allows query engines (such as DuckDB, ClickHouse, or Apache Spark) to execute **Partition Pruning** and **Projection Pushdown**: an engineer searching for 20,000 compiler error traces can scan solely the metadata and observation columns of the `status=FAIL` partition, evaluating queries in seconds without touching petabytes of passing traces.
 
-#### Selective metadata indexing versus full-text inverted indexes
+**Selective metadata indexing versus full-text inverted indexes:**
 
 A frequent architectural mistake is building full-text search indexes (e.g., Elasticsearch or Apache Lucene) across all raw observation strings. Full-text indexing of multi-megabyte terminal outputs, stack traces, and compiler warnings inflates storage by $120$ to $150$ percent and consumes continuous CPU compute during ingestion.
 

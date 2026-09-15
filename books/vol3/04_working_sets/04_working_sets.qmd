@@ -23,7 +23,6 @@
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{10}{10}{95}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -45,15 +44,26 @@ Part I established the foundation model as a stochastic processor core and demon
 :::
 
 <!-- ======================================================================= -->
-<!-- SECTION 4.1: THE WORKING SET THEORY OF LLM CONTEXT                      -->
+<!-- SECTION 4.1: ARCHITECTURAL OVERVIEW: CONTEXT AS AN L1 WORKING SET        -->
+<!-- ======================================================================= -->
+## Architectural Overview: Context as an L1 Working Set {#sec-vol3-workingsets-intro}
+
+In Part I, we analyzed the Stochastic Processor: the autoregressive execution engine and its speculative deliberation pipeline. But every token emitted by the processor generates key and value vectors that must be retained in memory to condition future inference steps. When an autonomous agent engages in long-horizon, multi-turn tool interaction, it rapidly collides with the **Context Accumulation Wall**: quadratic prefill latency ($\mathcal{O}(N^2)$) and linear High-Bandwidth Memory (HBM) capacity exhaustion.
+
+In classical computer systems, a processor does not attempt to keep the entirety of a program's virtual address space inside L1 SRAM cache registers. Instead, the memory management subsystem identifies the program's *working set*—the subset of memory pages actively referenced during an execution phase—and evicts dormant data to lower tiers of the hierarchy. In Part II, we adapt this classical computer systems abstraction to the context memory of the Stochastic Computer:
+
+- **L1 Active Context Working Sets (this chapter)**: Dynamic context management within the attention window, managing attention density, attention sinks, and active prompt eviction.
+- **L2 Paged Virtual Memory (@sec-vol3-virtual-memory)**: Decoupling logical tokens from physical GPU HBM pages via PagedAttention, Radix prefix sharing, and remote RDMA offload.
+- **L3 Persistent Episodic Storage (@sec-vol3-episodic-memory)**: Long-term external memory indexing through vector embeddings, symbolic knowledge graphs, and offline sleep-cycle consolidation.
+
+This chapter investigates the L1 tier. We first adapt Peter Denning's working set model to LLM context (@sec-vol3-workingsets-theory). We then analyze effective attention density and the attention sink phenomenon (@sec-vol3-workingsets-density), engineer dynamic context eviction policies under bounded token budgets (@sec-vol3-workingsets-budgeting), and evaluate architectural selective attention mechanisms (GQA, MLA) under accelerator roofline models (@sec-vol3-workingsets-pruning).
+
+<!-- ======================================================================= -->
+<!-- SECTION 4.2: THE WORKING SET THEORY OF LLM CONTEXT                      -->
 <!-- ======================================================================= -->
 ## The Working Set Theory of LLM Context {#sec-vol3-workingsets-theory}
 
-In October 2023, an automated debugging agent deployed on an enterprise Kubernetes cluster was tasked with resolving a build regression in a distributed C++ database engine. On turn 4 of its investigation, the agent executed a verbose build command (`ninja -v -j32`), which encountered a template instantiation cascade that emitted 65,000 lines of compiler diagnostics directly into standard error. The agent's runtime harness naively appended the resulting 112,000 tokens of raw compiler logs directly into the prompt context buffer.
-
-On turn 5, when the runtime invoked the underlying 70-billion parameter LLM policy to propose the next corrective edit, the inference server suffered a catastrophic operational fault. The Time-to-First-Token (TTFT) exploded from a normal baseline of 420 milliseconds to 38.4 seconds, during which all tensor cores on the dual-NVIDIA H100 GPU node ran at 100 percent duty cycle executing the prompt prefill phase. Immediately following the prefill phase, the server attempted to allocate the Key-Value (KV) cache for the expanded sequence, demanding 36.7 gigabytes of High-Bandwidth Memory (HBM3) for that single stream alone. The host runtime suffered an out-of-memory (OOM) panic, terminated the agent process, dropped all co-scheduled user sessions on the cluster, and left the production repository in an uncommitted, corrupted state.
-
-The engineering post-mortem revealed that of the 112,000 compiler log tokens ingested, fewer than 180 tokens—specifically, the terminal file path, line number, and mismatch signature—contained any actionable diagnostic value. The remaining 99.8 percent of the tokens were computationally inert, yet they imposed a devastating hardware tax. To prevent such systems failures, systems architects must formalize the physical limits governing context expansion and decouple nominal context capacity from active memory residency.
+When an autonomous agent executes a multi-step debugging, refactoring, or data-extraction trajectory, naive runtime harnesses append raw tool outputs, compiler diagnostics, and file contents directly into the prompt buffer. A single verbose command (such as a compilation cascade or database dump) can emit tens of thousands of tokens directly into standard error. Ingesting these raw tokens without curation triggers a dual hardware failure: Time-to-First-Token (TTFT) explodes due to quadratic prefill FLOPs, and Key-Value (KV) cache allocation threatens to exhaust accelerator High-Bandwidth Memory (HBM), precipitating out-of-memory crashes. Crucially, empirical profiling reveals that over 99 percent of verbose diagnostic tokens are computationally inert noise that dilutes attention entropy without aiding reasoning. To prevent systemic collapse, the agent runtime must decouple nominal context capacity from active memory residency.
 
 ### The memory footprint of extended horizons
 
@@ -375,7 +385,7 @@ To understand how @algo-streaming-attention-sink bounds accelerator memory while
 2. **In-Place Mutation with Zero Copy Overhead (Line 6):** When token $t$ arrives, its key and value vectors $(\mathbf{k}_t, \mathbf{v}_t)$ overwrite the oldest physical slot directly in HBM. Naive sliding-window implementations shift the entire $W$-token tensor buffer to the left on every step, consuming massive memory bandwidth ($\mathcal{O}(W)$ bytes copied per token). In contrast, circular ring addressing executes in $\mathcal{O}(1)$ time with zero memory movement, achieving maximum hardware efficiency.
 3. **Softmax Denominator Stabilization (Lines 7–10):** Retaining the $S$ initial tokens is not an empirical heuristic; it is a mathematical requirement of autoregressive attention. During pretraining, early layer representations establish an inductive bias where attention heads deposit excess probability mass onto the initial sequence tokens whenever the current query finds no relevant semantic match. If an eviction policy removes these initial tokens, the denominator $\sum_{j} \exp(s_{t, j})$ loses its primary absorbing term. The excess probability mass is violently redistributed across the remaining rolling tokens, artificially inflating irrelevant historical noise and causing model perplexity to explode toward infinity. By pinning $S=4$ sink tokens, the denominator remains stable across millions of generated tokens.
 
-#### The architectural boundary: Why FIFO windowing fails for agents
+**The architectural boundary: Why FIFO windowing fails for agents.**
 
 While StreamingLLM guarantees numerical stability and constant memory consumption $\mathcal{O}(S + W)$, it exposes a fundamental limitation when applied to autonomous software agents:
 
@@ -528,7 +538,7 @@ To see how @algo-twophase-context-cleaner bridges agent orchestration frameworks
    - The leaf node $v_{\text{scratch}}$ is pruned from the Radix tree, preventing memory fragmentation.
 5. **Prefill Elimination via 100 Percent Prefix Reuse (Line 10):** When turn $t+1$ begins inference, the prompt begins with the shared prefix $\tau_{t-1}$. The serving engine traverses the Radix tree and achieves a **100 percent prefix cache hit**: zero prefill matrix multiplications are executed for $\tau_{t-1}$. The engine allocates fresh physical blocks strictly for the compact $(a_t, o_t)$ continuation.
 
-#### Memory economics of reasoning token excision
+**Memory economics of reasoning token excision.**
 
 The quantitative impact of @algo-twophase-context-cleaner on cluster serving economics is dramatic:
 
@@ -545,7 +555,7 @@ While tensor-level eviction and scratchpad pruning bound memory growth within in
 
 Production runtimes route context through two complementary compaction engines:
 
-#### Pathway A: Deterministic structural compaction
+**Pathway A: Deterministic structural compaction.**
 
 Before invoking expensive and potentially non-deterministic neural summarizers, the runtime applies deterministic, syntax-aware structural pruning:
 
@@ -553,7 +563,7 @@ Before invoking expensive and potentially non-deterministic neural summarizers, 
 2. **Unified Git Diff Delta Representation:** When an agent inspects files that it subsequently edits, raw file text is purged from context and replaced by the unified diff (`git diff -U3`). A 2,000-line source file undergoing a 10-line bug fix is compressed from 6,000 tokens to 120 tokens ($98\%$ reduction).
 3. **AST Symbol Skeletonization:** Using Tree-sitter parsers, referenced code files are skeletonized into Abstract Syntax Tree (AST) repo maps: full function implementations are stripped, preserving only module docstrings, class hierarchies, and typed public method signatures.
 
-#### Pathway B: Semantic state synthesis and state ledgers
+**Pathway B: Semantic state synthesis and state ledgers.**
 
 Historical execution turns preceding the current working window are segmented into logical epochs and synthesized into a structured **State Ledger**. Rather than generating unstructured conversational prose, the synthesis engine emits a strictly validated JSON/YAML document tracking active operational state:
 
@@ -675,14 +685,11 @@ While post-hoc head pruning optimizes existing pretrained weights, architectural
 
 : **Attention Architecture Comparison**: Memory footprint, arithmetic intensity, and serving concurrency for a 70B parameter model at 128k context across MHA, MQA, GQA, and MLA on a single 80 GB H100 GPU (70 GB weights in FP8, 10 GB free HBM) and a dual-GPU node (160 GB HBM, 90 GB free HBM). {#tbl-vol3-attention-architectures tbl-colwidths="[20, 10, 12, 16, 14, 14, 14]"}
 
-#### Multi-query attention (MQA)
-Introduced by @shazeer2019fast, MQA collapses all $H_Q$ query heads to share a single key head and a single value head ($H_{\text{KV}} = 1$). This slashes the KV cache memory footprint by a factor of $H_Q$ (typically $32\times$ to $64\times$). However, MQA can degrade task performance on complex, multi-hop reasoning benchmarks, as query heads are forced to attend over an identical geometric projection of context history.
+**Multi-query attention (MQA):** Introduced by @shazeer2019fast, MQA collapses all $H_Q$ query heads to share a single key head and a single value head ($H_{\text{KV}} = 1$). This slashes the KV cache memory footprint by a factor of $H_Q$ (typically $32\times$ to $64\times$). However, MQA can degrade task performance on complex, multi-hop reasoning benchmarks, as query heads are forced to attend over an identical geometric projection of context history.
 
-#### Grouped-query attention (GQA)
-Introduced by @ainslie2023gqa, GQA generalizes MQA by grouping $H_Q$ query heads into $G = H_Q / K$ groups ($G \in \{4, 8\}$), where each group shares a single Key and Value head ($H_{\text{KV}} = G$, with grouping factor $K$). GQA achieves a Pareto-optimal compromise: it delivers an $8\times$ reduction in KV cache size compared to MHA, while matching MHA reasoning accuracy across virtually all agentic benchmarks. GQA has become the de facto standard for frontier open-weights models, including Llama-3 and Mistral.
+**Grouped-query attention (GQA):** Introduced by @ainslie2023gqa, GQA generalizes MQA by grouping $H_Q$ query heads into $G = H_Q / K$ groups ($G \in \{4, 8\}$), where each group shares a single Key and Value head ($H_{\text{KV}} = G$, with grouping factor $K$). GQA achieves a Pareto-optimal compromise: it delivers an $8\times$ reduction in KV cache size compared to MHA, while matching MHA reasoning accuracy across virtually all agentic benchmarks. GQA has become the de facto standard for frontier open-weights models, including Llama-3 and Mistral.
 
-#### Multi-head latent attention (MLA)
-Pioneered in DeepSeek-V2 and DeepSeek-V3 (@deepseek2024v3), **Multi-Head Latent Attention (MLA)** introduces low-rank projection directly into the Key-Value cache.
+**Multi-head latent attention (MLA):** Pioneered in DeepSeek-V2 and DeepSeek-V3 (@deepseek2024v3), Multi-Head Latent Attention introduces low-rank projection directly into the Key-Value cache.
 
 Instead of caching high-dimensional key and value vectors for each attention head, MLA projects the input activation $\mathbf{x}_t \in \mathbb{R}^{d_{\text{model}}}$ into a compact compressed latent vector $\mathbf{c}_t^{KV} = \mathbf{x}_t \mathbf{W}_{DKV} \in \mathbb{R}^{d_c}$, where $d_c \ll H_Q d_h$. During decode, the model caches only the compressed latent vector $\mathbf{c}_t^{KV}$ and a low-dimensional decoupled rotary key vector $\mathbf{k}_t^R \in \mathbb{R}^{d_h^R}$, with total sequence memory footprint governed by @eq-vol3-workingsets-mla-footprint:
 
@@ -706,9 +713,7 @@ Because on-chip tensor core compute is abundant while HBM bus bandwidth is sever
 
 [^fn-workingsets-mla-projection]: MLA avoids materializing high-dimensional heads in HBM by caching low-rank latent $\mathbf{c}_t^{KV} \in \mathbb{R}^{d_c}$ and decoupled rotary key $\mathbf{k}_t^R \in \mathbb{R}^{d_h^R}$. During decode, up-projection into head dimensions occurs in fast SRAM registers, fusing dequantization with Tensor Core GEMV execution.
 
-#### Hardware Roofline analysis of compressed attention
-
-The systems impact of these compressed attention mechanisms is formalized through the **Accelerator Roofline Model** (@williams2009). On an accelerator with peak floating-point throughput $P_{\text{peak}}$ and memory bandwidth $B_{\text{mem}}$, operational throughput is bounded by the minimum of the compute ceiling and the memory streaming ceiling: $P_{\text{achieved}} = \min(P_{\text{peak}}, \mathcal{I} \cdot B_{\text{mem}})$.
+**Hardware Roofline analysis of compressed attention:** The systems impact of these compressed attention mechanisms is formalized through the **Accelerator Roofline Model** (@williams2009). On an accelerator with peak floating-point throughput $P_{\text{peak}}$ and memory bandwidth $B_{\text{mem}}$, operational throughput is bounded by the minimum of the compute ceiling and the memory streaming ceiling: $P_{\text{achieved}} = \min(P_{\text{peak}}, \mathcal{I} \cdot B_{\text{mem}})$.
 
 The step latency for generating a token under batch size $B$ across sequence length $N$ is governed by the two competing hardware regimes in @eq-roofline-serving:
 

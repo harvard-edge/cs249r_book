@@ -23,7 +23,6 @@
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{95}{10}{10}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -44,15 +43,26 @@ Persistent execution state in an autonomous system must provide durability and c
 - **Design** asynchronous state suspension protocols that eliminate High-Bandwidth Memory (HBM) stranding during human oversight and long-latency external I/O blocks.
 :::
 
+## Architectural Overview: Checkpointing and Fault Tolerance {#sec-vol3-checkpoint-intro}
+
+Part III established the physical and operational boundaries of external actuation: standardizing tool interfaces through typed wire protocols (@sec-vol3-actuation) and confining execution within lightweight, hardware-isolated microVMs (@sec-vol3-virtualization). Yet isolating a single tool invocation does not guarantee the stability of an extended, multi-hour operational trajectory.
+
+Part IV introduces **The Agent Operating System**: the supervisor kernel responsible for orchestrating, checkpointing, interrupting, and scheduling complex agent workflows over time. At the core of this operating system lies the requirement for fault tolerance and durability. In classical database engines and operating systems, crash recovery rests upon ACID transactions, Two-Phase Commit (2PC), and write-ahead undo logs [@gray1992; @mohan1992aries]. If a process crashes or an invariant is violated, the system rolls back uncommitted physical state transitions to a pristine prior checkpoint.
+
+In an autonomous agent runtime, however, classical transaction primitives collapse. An agent is an open-loop controller interacting with hundreds of heterogeneous, external software APIs—sending emails, purchasing cloud resources, modifying production databases, and committing source code. Once an external tool call mutates a remote system, the action crosses the **Reversibility Boundary**: internal model context is freely reversible, but physical real-world side effects cannot be rolled back with an undo log. Furthermore, foundation models exhibit **Fail-Plausible Faults**: generating syntactically valid tool invocations and persuasive rationales that conceal catastrophic semantic errors.
+
+This chapter details the fault-tolerance and checkpointing architecture of the Agent Operating System:
+
+1. **The Irreversibility Dilemma:** Formalizing the fail-plausible fault model, the physical boundary between reversible context and irreversible environment state, and the breakdown of classical distributed commit protocols.
+2. **Copy-on-Write State Snapshots:** Designing the Agent Control Block (ACB), event-sourced Write-Ahead Logs (WAL), and deriving optimal checkpoint cadences via Young-Daly analytic models.
+3. **Saga Orchestration for External Tools:** Structuring forward-recovering and backward-compensating sagas, establishing the invariant that compensating actions must be deterministic code rather than LLM prompts.
+4. **Deterministic Execution Replay:** Isolating sources of environment and hardware non-determinism (floating-point reduction order, random seeds) to enable record/replay post-mortems and counterfactual time-travel debugging.
+
 ## The Irreversibility Dilemma: Why Rollbacks Are Hard {#sec-vol3-checkpoint-irreversibility}
-
-Consider an autonomous infrastructure maintenance agent operating with root privileges across a hybrid cloud cluster. At 03:14 UTC, tasked with reclaiming unattached block storage volumes older than ninety days, the agent analyzes disk telemetry, synthesizes a deletion script, and issues a parallel batch of storage detachment commands. At step 42 of its 60-step trajectory, the host executing the agent policy encounters an uncorrectable double-bit DRAM ECC error, triggering an instantaneous kernel panic and process termination. When the cluster orchestrator detects the dropped heartbeat and reboots the agent container, what state does the agent inherit?
-
-If the orchestrator naively re-executes the trajectory from step zero, the agent inspects a partially mutated world where half the target volumes have vanished, attempts to re-detach missing UUIDs, receives unexpected error codes, enters an unhandled recovery branch, and catastrophic failure cascades through the storage fabric. Conversely, if the system attempts to roll back the executed actions, it confronts a physical impossibility: the underlying storage provider has already shredded the physical flash blocks and released the provisioned blocks to the free pool. The action was physically and semantically irreversible.
 
 In classical database engines and operating systems, failure recovery rests upon a foundation of well-defined transactions. Gray [-@gray1992] and Mohan et al. [-@mohan1992aries] formulated the ACID (Atomicity, Consistency, Isolation, Durability) transaction model, wherein execution sequences either commit completely or abort cleanly, restoring the system to its pre-transaction state via undo logs. In distributed computing, atomic state transitions across independent nodes are traditionally guaranteed via the Two-Phase Commit (2PC) protocol.
 
-When applied to autonomous agent architectures, however, the classical transaction model collapses completely. The stochastic policy engine is decoupled from the execution environment; the tools invoked by the agent span hundreds of disparate third-party webhooks, proprietary SaaS platforms, and physical device drivers; and the model generating the execution plan is fundamentally prone to cognitive drift. To engineer dependable agent runtimes, systems architects must first understand why autonomous workflows break classical recovery primitives.
+When applied to autonomous agent architectures, however, the classical transaction model collapses completely. If an infrastructure node crashes or encounters a hardware fault midway through an extended multi-step trajectory, what state does the agent runtime inherit? If the orchestrator naively re-executes the trajectory from step zero, the agent inspects a partially mutated world where earlier operations have already executed, attempts to re-apply modifications, receives unexpected error codes, and enters an unhandled failure cascade. Conversely, if the system attempts to roll back executed actions, it confronts a physical impossibility: external actions—such as dropping database tables, provisioning cloud instances, or dispatching external notifications—are physically and semantically irreversible. To engineer dependable agent runtimes, systems architects must first understand why autonomous workflows break classical recovery primitives.
 
 ### The fail-plausible fault model
 
@@ -350,9 +360,7 @@ The WAL enforces the fundamental durability contract: **No external actuation ma
 
 : **Agent Write-Ahead Log Schema**: Binary wire format and structural fields of append-only trajectory records. {#tbl-vol3-checkpointing-wal-schema tbl-colwidths="[12,20,15,13,40]"}
 
-#### WAL serialization latency and storage overhead
-
-How does the performance of an append-only WAL compare to naive full-state snapshots? We evaluate this from first principles:
+**WAL serialization latency and storage overhead:** How does the performance of an append-only WAL compare to naive full-state snapshots? We evaluate this from first principles:
 
 1. **Record Sizing per Trajectory Turn:**
    A typical trajectory delta record $\Delta s_t$ contains:
@@ -378,15 +386,11 @@ How does the performance of an append-only WAL compare to naive full-state snaps
 
 When an agent modifies files in its local workspace or forks speculative reasoning branches, copying the full underlying environment introduces massive compute and memory penalties. Resilient runtimes leverage **Copy-on-Write (CoW)**\index{Copy-on-Write (CoW)} mechanisms at both the operating system layer and the accelerator memory layer.
 
-#### Host-side filesystem virtualization: OverlayFS
-
-To sandbox filesystem modifications, the agent runtime provisions an ephemeral **OverlayFS**\index{OverlayFS} mount for the workspace: $\text{Workspace} = \text{OverlayFS}(\text{LowerDir}=\text{BaseRepo}, \text{UpperDir}=\Delta \text{Filesystem}, \text{WorkDir}=\text{Staging})$. The `LowerDir` contains the read-only production repository. When the agent reads a file, the request falls through directly to the `LowerDir`. When the agent modifies or creates a file, the Linux kernel intercepts the write operation and copies only the affected file blocks into the mutable `UpperDir`.
+**Host-side filesystem virtualization (OverlayFS):** To sandbox filesystem modifications, the agent runtime provisions an ephemeral **OverlayFS**\index{OverlayFS} mount for the workspace: $\text{Workspace} = \text{OverlayFS}(\text{LowerDir}=\text{BaseRepo}, \text{UpperDir}=\Delta \text{Filesystem}, \text{WorkDir}=\text{Staging})$. The `LowerDir` contains the read-only production repository. When the agent reads a file, the request falls through directly to the `LowerDir`. When the agent modifies or creates a file, the Linux kernel intercepts the write operation and copies only the affected file blocks into the mutable `UpperDir`.
 
 Creating a checkpoint at step $t$ requires zero data copying of the base repository: the runtime simply archives or snapshots the lightweight `UpperDir` (typically spanning tens of kilobytes rather than gigabytes). Rolling back to a prior checkpoint requires unmounting the workspace, discarding the corrupted `UpperDir`, and attaching a clean or previous `UpperDir` layer—an operation that completes in under $10\text{ milliseconds}$.
 
-#### Accelerator-side context virtualization: Paged attention forking
-
-At the accelerator memory layer, speculative tree search (e.g., Tree-of-Thoughts or Monte Carlo Tree Search, detailed in @sec-vol3-deliberation) requires branching multiple candidate trajectories from an identical parent prompt. The logical-to-physical mapping across speculative branches is illustrated in @tbl-vol3-checkpointing-cow-page-tables.
+**Accelerator-side context virtualization (PagedAttention forking):** At the accelerator memory layer, speculative tree search (e.g., Tree-of-Thoughts or Monte Carlo Tree Search, detailed in @sec-vol3-deliberation) requires branching multiple candidate trajectories from an identical parent prompt. The logical-to-physical mapping across speculative branches is illustrated in @tbl-vol3-checkpointing-cow-page-tables.
 
 | Logical Block Index | Trajectory Branch A (Mapping) | Trajectory Branch B (CoW Fork) | Physical Frame ID     | Frame Content & Sharing Semantics               | Reference Count |
 |:--------------------|:------------------------------|:-------------------------------|:----------------------|:------------------------------------------------|:----------------|
@@ -412,9 +416,7 @@ This scheduling problem exposes a fundamental systems trade-off between **checkp
 * **Frequent Checkpoints (Small Interval $\Delta t$):** The system commits state after almost every turn. Recovery from a crash is nearly instantaneous, but normal forward execution stalls repeatedly while waiting for state flushes, wasting compute and bus bandwidth.
 * **Infrequent Checkpoints (Large Interval $\Delta t$):** Normal execution proceeds at maximum speed with minimal serialization pauses. However, when a physical crash or fail-plausible semantic bug occurs, the agent must roll back to an ancient snapshot, discarding tens of turns of reasoning and wasting hours of GPU FLOPs.
 
-#### First-principles derivation of the Young checkpoint trade-off
-
-We can derive the mathematically optimal balance from first principles [@young1974]. Consider an agent workflow running over an operational horizon $T$. System failures—encompassing both physical hardware faults and semantic hallucinations—follow a Poisson process with Mean Time Between Failures $M_{\text{MTBF}}$ (arrival rate $\lambda = 1 / M_{\text{MTBF}}$). Let $T_{\text{save}}$ denote the time required to serialize and durably commit a consolidated checkpoint snapshot, and $\Delta t$ denote the temporal checkpoint interval.
+**First-principles derivation of the Young checkpoint trade-off:** We can derive the mathematically optimal balance from first principles [@young1974]. Consider an agent workflow running over an operational horizon $T$. System failures—encompassing both physical hardware faults and semantic hallucinations—follow a Poisson process with Mean Time Between Failures $M_{\text{MTBF}}$ (arrival rate $\lambda = 1 / M_{\text{MTBF}}$). Let $T_{\text{save}}$ denote the time required to serialize and durably commit a consolidated checkpoint snapshot, and $\Delta t$ denote the temporal checkpoint interval.
 
 Over an execution duration $T$, the system performs $T / \Delta t$ checkpoints. The fraction of wall-clock time spent performing state serialization is $\mathcal{O}_{\text{save}}(\Delta t) = T_{\text{save}} / \Delta t$. Failures occur at rate $\lambda = 1 / M_{\text{MTBF}}$. Under the Poisson arrival assumption, failure events are uniformly distributed across any given checkpoint interval. A failure strikes, on average, halfway through an interval ($\Delta t / 2$). When this occurs, the runtime must roll back to the last snapshot and re-execute all intervening reasoning turns. The fractional time lost to recovery recomputation is $\mathcal{O}_{\text{recompute}}(\Delta t) = (\Delta t / 2) / M_{\text{MTBF}} = \Delta t / (2 M_{\text{MTBF}})$.
 
@@ -424,9 +426,7 @@ $$T_{\text{opt}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}}$$ {#eq-c
 
 The optimal checkpoint interval is simply the geometric mean of twice the checkpoint commit latency and the mean time between failures!
 
-#### Higher-order refinements: Daly's model
-
-Young's derivation assumes that process restart and hydration latency is negligible ($T_{\text{restart}} \approx 0$) and that failures never strike during the checkpoint write itself. In 2006, J. T. Daly [-@daly2006] extended Young's model via a Taylor expansion that incorporates nonzero restart latency $T_{\text{restart}}$, yielding @eq-checkpoint-daly-formula:
+**Higher-order refinements (Daly's model):** Young's derivation assumes that process restart and hydration latency is negligible ($T_{\text{restart}} \approx 0$) and that failures never strike during the checkpoint write itself. In 2006, J. T. Daly [-@daly2006] extended Young's model via a Taylor expansion that incorporates nonzero restart latency $T_{\text{restart}}$, yielding @eq-checkpoint-daly-formula:
 
 $$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}} \cdot \left[ 1 + \frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \right] - T_{\text{save}} \quad \left(\text{for } T_{\text{save}} < 2 M_{\text{MTBF}}\right)$$ {#eq-checkpoint-daly-formula}
 
@@ -546,9 +546,7 @@ If a failure occurs at step $k$, the forward transactions $T_1 \dots T_{k-1}$ ha
 
 $$\mathbb{E}[T_{\text{saga}}] = \left( \prod_{m=1}^N p_m \right) \sum_{i=1}^N T_{\text{fwd}}(i) + \sum_{k=1}^N \left[ (1 - p_k) \prod_{m=1}^{k-1} p_m \right] T_{\text{saga}}(k)$$ {#eq-checkpoint-expected-saga}
 
-#### Napkin math: Cumulative compensation debt in practice
-
-We can ground @eq-checkpoint-expected-saga by walking through the numbers for the 4-step administrative onboarding workflow:
+**Napkin math (Cumulative compensation debt in practice):** We can ground @eq-checkpoint-expected-saga by walking through the numbers for the 4-step administrative onboarding workflow:
 
 * $T_1$ (Google Workspace): $T_{\text{fwd}}(1) = 1.2\text{ s}$, $T_{\text{comp}}(1) = 0.8\text{ s}$, $p_1 = 0.99$
 * $T_2$ (GitHub Enterprise): $T_{\text{fwd}}(2) = 0.9\text{ s}$, $T_{\text{comp}}(2) = 0.6\text{ s}$, $p_2 = 0.98$
@@ -573,9 +571,7 @@ To prevent this failure mode, modern agent runtimes rely on **Durable Execution 
 2. **Replay-Based State Reconstruction:** When a worker process fails or migrates to a different cluster node, a replacement worker reconstructs the exact thread state, call stack, and local variables by replaying the logged event history. Completed activities are intercepted by the replay engine and resolved immediately from cached history rather than re-executing against external services.
 3. **Durable Compensation Chains:** Compensating transactions $C_i$ are registered as durable workflow compensation steps. If forward execution terminates abnormally at step $k$, the workflow orchestrator guarantees that the compensation sequence $C_{k-1} \dots C_1$ is durably enqueued and executed to completion regardless of intervening worker crashes.
 
-#### Secondary compensation failures and compensation debt
-
-A dangerous fallacy in naive saga implementations is assuming that compensating transactions are infallible. In distributed environments, compensation actions $C_i$ are themselves subject to network timeouts, third-party API rate limits, and transient infrastructure outages. When a compensating transaction fails, the runtime incurs **Compensation Debt**\index{Compensation Debt}.
+**Secondary compensation failures and compensation debt:** A dangerous fallacy in naive saga implementations is assuming that compensating transactions are infallible. In distributed environments, compensation actions $C_i$ are themselves subject to network timeouts, third-party API rate limits, and transient infrastructure outages. When a compensating transaction fails, the runtime incurs **Compensation Debt**\index{Compensation Debt}.
 
 To prevent secondary compensation failures from corrupting state, production architectures enforce three defensive guarantees:
 
@@ -629,13 +625,13 @@ The engineers have encountered the fundamental nightmare of systems debugging: a
 
 Why does an agent re-executed with identical prompt tokens and identical random seeds diverge from its historical path? Non-determinism manifests across two architectural tiers:
 
-#### Software and environment non-determinism
+**Software and environment non-determinism:**
 
 * **External API Response Volatility:** Web search results, weather APIs, and third-party database queries return different payloads across time.
 * **Asynchronous System Calls:** Reading `/dev/urandom`, querying system timestamps (`gettimeofday`), or inspecting dynamic process tables (`ps aux`) yields distinct observations at every turn.
 * **Network Socket Race Conditions:** Interleaved chunks in streaming HTTP responses arrive with variable chunk boundaries and latencies.
 
-#### Hardware and floating-point non-determinism
+**Hardware and floating-point non-determinism:**
 
 Even if all external software inputs are perfectly recorded, modern deep learning inference hardware is inherently non-deterministic at the bit level.
 
@@ -686,16 +682,12 @@ To achieve bit-accurate replayability despite hardware and environment non-deter
 
 The system operates across two operational modes:
 
-#### Record mode (live execution)
-
-During normal execution, the agent interacts with external environments through a virtualized I/O boundary. The runtime intercepts all non-deterministic inputs:
+**Record mode (live execution):** During normal execution, the agent interacts with external environments through a virtualized I/O boundary. The runtime intercepts all non-deterministic inputs:
 
 * **PRNG Virtualization:** The runtime intercepts calls to random number generators, logging the active 64-bit seed and step offset before each decode turn.
 * **I/O Interception and Logging:** Every external tool call, HTTP response body, Unix exit code, standard output stream, and system timestamp is captured at the byte level and appended to the Write-Ahead Log alongside the initiating action $a_t$.
 
-#### Replay mode (crash hydration and post-mortem debugging)
-
-When hydrating an agent after a node crash or during post-mortem root cause analysis, the runtime enforces **The Replay Invariant**\index{Replay Invariant}:
+**Replay mode (crash hydration and post-mortem debugging):** When hydrating an agent after a node crash or during post-mortem root cause analysis, the runtime enforces **The Replay Invariant**\index{Replay Invariant}:
 
 ::: {#dfn-replay-invariant .callout-definition title="The replay invariant"}
 **During trajectory replay, external mutating tools are never re-executed.** The physical network interface controller is disabled or stubbed. When the agent process emits an action $a_t$, the runtime intercepts the invocation, validates that $a_t$ matches the logged action hash, and injects the recorded observation $o_t^{\text{recorded}}$ directly from the Write-Ahead Log: $o_t^{\text{replay}} = \text{WAL}.\text{lookup}(\tau_{\text{id}}, t) \equiv o_t^{\text{record}}$.

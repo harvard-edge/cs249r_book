@@ -23,7 +23,6 @@
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{10}{10}{10}{95}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -47,23 +46,30 @@ Operating as a stochastic processor core executing autoregressive forward passes
 :::
 
 <!-- ======================================================================= -->
-<!-- SECTION 3.1: THE LIMITS OF GREEDY NEXT-TOKEN GENERATION                 -->
+<!-- SECTION 3.1: ARCHITECTURAL OVERVIEW: SPECULATIVE DELIBERATION            -->
+<!-- ======================================================================= -->
+## Architectural Overview: Test-Time Deliberation as Processor Speculation {#sec-vol3-deliberation-intro}
+
+In @sec-vol3-processor, we examined the single instruction cycle of the Stochastic Processor: an autoregressive forward pass emitting a token vector under physical memory bandwidth constraints. But an autoregressive step is fundamentally greedy and myopic ($p(y_t \mid y_{<t})$): the model optimizes only for the immediate next token without lookahead. On complex compositional reasoning tasks, greedy single-pass execution fails catastrophically under the Compounding Reliability Wall ($P_{\text{success}} \le p^T$). Once an erroneous token is materialized into the Key-Value (KV) cache, the append-only nature of autoregressive serving prevents backward correction, triggering rationalization cascades and context poisoning.
+
+In classical computer architecture, high-performance processors do not execute instructions blindly in a single, irreversible clock cycle. Microprocessors employ **speculative execution, branch prediction, and reorder buffers (ROB)**: the processor speculatively evaluates candidate execution branches within internal reservation stations before committing state transitions to architectural registers. If an intermediate branch condition evaluates to false, the pipeline flushes the speculative state and backtracks to an alternate path.
+
+**Test-Time Deliberation** is the Stochastic Processor's internal speculative execution engine. Rather than committing every token directly to the external environment, the processor allocates inference-time compute within its compute core to explore candidate reasoning paths, evaluate intermediate states using Process Reward Models (PRMs), and prune flawed branches:
+
+- **Micro-Architectural Search**: Deliberation operates inside the neural compute pipeline before external system calls or tool side-effects are dispatched.
+- **Compute vs. Parameter Trade-off**: Allocating inference-time compute allows smaller, memory-efficient models (e.g., an 8B model with search) to outperform massive models (e.g., a 70B model evaluated greedily) along the Pareto frontier of accuracy versus hardware serving cost.
+- **The Verification Tax**: Scaling search breadth and depth is bounded by the compute cost of intermediate verifiers ($C_{\text{ver}}$) and the memory overhead of tree-structured KV caches in GPU High-Bandwidth Memory.
+
+This chapter details the systems architecture of test-time deliberation. We first analyze the mathematical and hardware limits of greedy generation (@sec-vol3-deliberation-limits-greedy) and derive test-time compute scaling laws (@sec-vol3-deliberation-scaling-laws). We then evaluate deliberative search topologies (@sec-vol3-deliberation-topologies), formalize step-level Process Reward Models (@sec-vol3-deliberation-prm-vs-orm), derive the Tree Search Verification Tax (@sec-vol3-deliberation-tree-search), and engineer state-space compaction mechanisms to prevent memory exhaustion during parallel tree exploration (@sec-vol3-deliberation-compaction).
+
+<!-- ======================================================================= -->
+<!-- SECTION 3.2: THE LIMITS OF GREEDY NEXT-TOKEN GENERATION                 -->
 <!-- ======================================================================= -->
 ## The Limits of Greedy Next-Token Generation {#sec-vol3-deliberation-limits-greedy}
 
-Single-pass autoregressive generation rests on the fragile premise that local token optimization mirrors global reasoning correctness. In October 2024, an autonomous code-generation agent was deployed in a staging cluster to synthesize a distributed lock manager in Python using `asyncio` and `etcd3`. The task required 250 lines of precise synchronization logic. At line 48, having generated 1,850 tokens of class scaffolding, configuration parsing, and connection-pool management, the model reached the critical acquisition method:
+Single-pass autoregressive generation rests on the fragile assumption that local token-level optimization mirrors global reasoning correctness. In a multi-step task—such as synthesizing a synchronization protocol, solving a mathematical proof, or coordinating distributed state—an early mistake in scaffolding or dependency declaration can render all subsequent tokens invalid. Because standard autoregressive transformer serving is strictly append-only, previously emitted tokens materialized in the Key-Value (KV) cache cannot be retroactively modified in place.
 
-```python
-async def acquire(self, timeout: float = 5.0) -> bool:
-    # Attempting to acquire lease via etcd3 client
-    lease = self.client.lease(ttl=self.ttl)
-```
-
-At this point, the autoregressive context contained 1,850 tokens, but the model had omitted the top-level import statement `import etcd3` in lines 1 through 5. Because standard autoregressive transformer serving is strictly append-only, previously emitted tokens materialized in the Key-Value (KV) cache cannot be retroactively modified. The model could not backtrack to token position 12 to insert the missing module dependency.
-
-Conditioned on its own past emissions, the model encountered an irrecoverable contradiction: it needed to invoke an external library that it had failed to import. Rather than halting or issuing a recovery trap, the model fell into a classic *rationalization cascade*. It synthesized an in-memory stub class `class EtcdMockClient: ...` on line 52, masked the resulting connection failure inside an empty exception handler (`except Exception: pass`), and returned `True` unconditionally. The emitted program compiled syntactically, passed basic Abstract Syntax Tree (AST) validation, and deployed into staging, where concurrent workers immediately suffered silent race conditions, corrupting the shared cluster state.
-
-Understanding why high-capacity foundation models succumb to such pathological failures requires formalizing the mathematical limits of single-pass, greedy next-token generation.
+Conditioned on its own past emissions, an unguided model encounters an irrecoverable contradiction. Rather than executing a recovery trap, autoregressive models succumb to *rationalization cascades*: emitting syntactic boilerplate or plausible stubs that mask underlying failure while committing invalid mutations to live state. Understanding why high-capacity foundation models succumb to such failures requires formalizing the mathematical and systems limits of greedy next-token generation.
 
 ### Autoregressive factorization and the myopic horizon
 
@@ -151,13 +157,11 @@ where $\beta_{\text{test}}$ is the test-time scaling exponent and $\text{Error}_
 
 As illustrated in @fig-vol3-deliberation-compute-scaling (Panel A), test-time compute $C_{\text{test}}$ can be expanded along two primary axes:
 
-#### 1. Sequential deliberation scaling (latent chain-of-thought)
-In this regime, the inference runtime allows the model to emit a variable stream of internal "thinking tokens" $\mathbf{z} = (z_1, z_2, \dots, z_K)$ prior to emitting the external action $\mathbf{a}$, marginalizing over internal trajectories: $P(\mathbf{a} \mid \mathbf{x}) = \sum_{\mathbf{z}} P_\theta(\mathbf{a} \mid \mathbf{x}, \mathbf{z}) P_\theta(\mathbf{z} \mid \mathbf{x})$.
+**1. Sequential deliberation scaling (latent chain-of-thought):** In this regime, the inference runtime allows the model to emit a variable stream of internal "thinking tokens" $\mathbf{z} = (z_1, z_2, \dots, z_K)$ prior to emitting the external action $\mathbf{a}$, marginalizing over internal trajectories: $P(\mathbf{a} \mid \mathbf{x}) = \sum_{\mathbf{z}} P_\theta(\mathbf{a} \mid \mathbf{x}, \mathbf{z}) P_\theta(\mathbf{z} \mid \mathbf{x})$.
 
 From a hardware execution perspective, each thinking token $z_k$ acts as a **virtual transformer layer**. While an $L$-layer model possesses fixed physical depth, an autoregressive chain of $K$ deliberation tokens executes $K \cdot L$ sequential layer transformations over the hidden representation. This recurrent processing allows the model to iteratively refine its internal belief state, solve sub-problems sequentially, and correct intermediate calculation errors before committing to external token emissions.
 
-#### 2. Parallel search and verification scaling (search width)
-In this regime, the runtime generates multiple candidate hypotheses in parallel, constructing a search tree evaluated by external verifiers with total compute $C_{\text{test}} = \sum_{i=1}^N [C_{\text{gen}}(\tau_i) + C_{\text{ver}}(\tau_i)]$, where $N$ is the number of candidate rollouts, $C_{\text{gen}}$ is the token generation compute, and $C_{\text{ver}}$ is the verification cost.
+**2. Parallel search and verification scaling (search width):** In this regime, the runtime generates multiple candidate hypotheses in parallel, constructing a search tree evaluated by external verifiers with total compute $C_{\text{test}} = \sum_{i=1}^N [C_{\text{gen}}(\tau_i) + C_{\text{ver}}(\tau_i)]$, where $N$ is the number of candidate rollouts, $C_{\text{gen}}$ is the token generation compute, and $C_{\text{ver}}$ is the verification cost.
 
 ### The Pareto frontier of systems efficiency
 
@@ -337,21 +341,19 @@ The topology of $\mathcal{G}$ determines the degree of freedom the agent possess
 
 As illustrated in @fig-vol3-deliberation-execution-topologies, deliberative architectures span three primary graph topologies:
 
-#### 1. Linear chains (chain-of-thought / ReAct)
-The execution graph is a degenerate, unbranching chain ($v_0 \xrightarrow{a_1} v_1 \xrightarrow{a_2} \dots \xrightarrow{a_T} v_T$), as popularized by Chain-of-Thought prompting [@wei2022cot] and ReAct interleaving of reasoning traces with action calls [@yao2023react]:
+**1. Linear chains (chain-of-thought / ReAct):** The execution graph is a degenerate, unbranching chain ($v_0 \xrightarrow{a_1} v_1 \xrightarrow{a_2} \dots \xrightarrow{a_T} v_T$), as popularized by Chain-of-Thought prompting [@wei2022cot] and ReAct interleaving of reasoning traces with action calls [@yao2023react]:
 
 * **Branching Factor:** $b = 1$. Backtracking is impossible.
 * **Systems Profile:** Minimal memory overhead. At step $t$, the system maintains a single active KV cache sequence of length $L_t$.
 * **Failure Mode:** Irreversible error cascading. A flawed premise at $v_1$ corrupts all downstream vertices $v_{t > 1}$.
 
-#### 2. Branching trees (tree of thoughts / MCTS)
-The execution graph is an asymmetric tree $\mathcal{T}$ rooted at initial state $v_0$, as formulated in Tree of Thoughts [@yao2023tree] and language Monte Carlo Tree Search. At each node $v$, the policy network proposes $b$ candidate actions $\{a^{(1)}, \dots, a^{(b)}\}$, instantiating $b$ child vertices.
+**2. Branching trees (tree of thoughts / MCTS):** The execution graph is an asymmetric tree $\mathcal{T}$ rooted at initial state $v_0$, as formulated in Tree of Thoughts [@yao2023tree] and language Monte Carlo Tree Search. At each node $v$, the policy network proposes $b$ candidate actions $\{a^{(1)}, \dots, a^{(b)}\}$, instantiating $b$ child vertices.
+
 * **Branching Factor:** $b > 1$. Native backtracking supported.
 * **Systems Profile:** Memory footprint scales with the number of active leaf branches: $\mathcal{O}(b \cdot d)$. Requires state snapshotting and KV cache management.
 * **Failure Mode:** Combinatorial explosion. Without aggressive pruning, total node count expands exponentially as $\mathcal{O}(b^d)$.
 
-#### 3. Directed acyclic graphs (graph of thoughts)
-Generalizes tree search by allowing vertices to have multiple parents [@besta2024graph]. Graph of Thoughts (GoT) introduces three unique topological operations:
+**3. Directed acyclic graphs (graph of thoughts):** Generalizes tree search by allowing vertices to have multiple parents [@besta2024graph]. Graph of Thoughts (GoT) introduces three unique topological operations:
 
 1. **Thought Aggregation (Merging):** Combining independent partial solutions from disparate branches into a unified hypothesis: $v_{\text{merged}} = \text{aggregate}(v_A, v_B)$. For example, synthesizing a front-end React interface generated in Branch A with a back-end SQL query schema generated in Branch B.
 2. **Thought Refinement (Self-Loops):** Iteratively refining state $v_t$ via verbal reinforcement and reflective feedback loops ($v_t \to v_t'$) without spawning redundant sibling branches [@shinn2023reflexion].
@@ -431,8 +433,7 @@ This failure illustrates the classical **Credit Assignment Problem** in sequenti
 
 Consider an agent trajectory $\tau = (s_0, a_1, s_1, a_2, s_2, \dots, a_T, s_T)$ consisting of an alternating sequence of intermediate states and actions over horizon $T$.
 
-#### Outcome reward models (ORMs)
-An Outcome Reward Model evaluates the trajectory holistically, assigning a scalar score conditioned solely on the terminal state $s_T$ and the original context $s_0$: $R_{\text{ORM}}(\tau) = P(\text{task success} \mid s_0, s_T) \in [0, 1]$.
+**Outcome reward models (ORMs):** An Outcome Reward Model evaluates the trajectory holistically, assigning a scalar score conditioned solely on the terminal state $s_T$ and the original context $s_0$: $R_{\text{ORM}}(\tau) = P(\text{task success} \mid s_0, s_T) \in [0, 1]$.
 
 In reinforcement learning policy optimization, terminal rewards suffer from severe **credit dilution**: every action $a_t$ in the sequence receives the identical scalar return $(R_{\text{ORM}}(\tau) - b)$. If an agent executes 40 flawless bash commands to configure a Kubernetes cluster and makes a single typo on command 41 that crashes the pod, $R_{\text{ORM}} = 0$. At training time, this uniform penalty inflates gradient estimator variance quadratically as $\mathcal{O}(T^2)$, requiring millions of interaction trajectories to isolate the single failing action.[^prm-variance-derivation]
 
@@ -440,8 +441,7 @@ At inference time, the systems penalty of an ORM is even more severe: **speculat
 
 [^prm-variance-derivation]: For the formal derivation showing that policy gradient variance scales as $\mathcal{O}(T^2)$ under terminal outcome rewards and collapses to $\mathcal{O}(T)$ under localized process rewards, see @sec-vol3-appendix-math-credit-assignment.
 
-#### Process reward models (PRMs)
-A Process Reward Model [@lightman2023let] provides dense, step-level credit assignment by evaluating each discrete state transition $(s_{t-1}, a_t) \to s_t$: $r_t = r_{\text{PRM}}(s_{t-1}, a_t) \in [-1, 1]$, where $r_t$ reflects the logical correctness, safety, or progress of action $a_t$.
+**Process reward models (PRMs):** A Process Reward Model [@lightman2023let] provides dense, step-level credit assignment by evaluating each discrete state transition $(s_{t-1}, a_t) \to s_t$: $r_t = r_{\text{PRM}}(s_{t-1}, a_t) \in [-1, 1]$, where $r_t$ reflects the logical correctness, safety, or progress of action $a_t$.
 
 The value of an intermediate state $s_t$ during tree search can be formulated either multiplicatively (as the cumulative survival probability along the path, $V_{\text{path}}(s_t) = \prod_{k=1}^t \sigma(r_{\text{PRM}}(s_{k-1}, a_k))$) or additively (as discounted return, $V_{\text{return}}(s_t) = \sum_{k=t}^T \gamma^{k-t} r_{\text{PRM}}(s_{k-1}, a_k)$).
 
@@ -541,21 +541,18 @@ Deliberate inference maps problem solving onto tree search algorithms that balan
 
 As illustrated in @fig-vol3-deliberation-search-topologies, test-time search algorithms navigate decision trees under differing synchronization and memory constraints:
 
-#### 1. Best-of-$N$ sampling (rejection sampling)
-The simplest search baseline generates $N$ independent trajectories $\mathcal{T} = \{\tau_1, \tau_2, \dots, \tau_N\}$ with $\tau_i \sim \pi_\theta(\cdot \mid \mathbf{x})$ in parallel from prompt $\mathbf{x}$. Each trajectory is executed to terminal completion, and the selection oracle chooses the best outcome: $\tau^* = \arg\max_{\tau_i \in \mathcal{T}} \mathcal{R}(\tau_i)$.
+**1. Best-of-$N$ sampling (rejection sampling):** The simplest search baseline generates $N$ independent trajectories $\mathcal{T} = \{\tau_1, \tau_2, \dots, \tau_N\}$ with $\tau_i \sim \pi_\theta(\cdot \mid \mathbf{x})$ in parallel from prompt $\mathbf{x}$. Each trajectory is executed to terminal completion, and the selection oracle chooses the best outcome: $\tau^* = \arg\max_{\tau_i \in \mathcal{T}} \mathcal{R}(\tau_i)$.
 
 * **Systems Profile:** Embarrassingly parallel. Dispatches across large GPU batches, saturating tensor cores.
 * **Systems Flaw:** Severe token waste. If an unrecoverable hallucination occurs at step 2 of a 20-step trajectory, Best-of-$N$ blindly generates the remaining 18 steps to completion. Across $N$ failing branches, up to $70\%\text{--}90\%$ of generated tokens represent discarded compute.
 
-#### 2. Beam search
-Maintains a fixed frontier of $B$ active hypothesis beams at horizon step $t$: $\mathcal{B}_t = \{\tau_t^{(1)}, \dots, \tau_t^{(B)}\}$. At each step, the policy generates $K$ candidate next-step actions per beam, creating a candidate pool $\mathcal{C}_{t+1} = \bigcup_{b=1}^B \{ \tau_t^{(b)} \circ a_{t+1}^{(k)} \mid a_{t+1}^{(k)} \sim \pi_\theta(\cdot \mid \tau_t^{(b)}), \, k \in \{1, \dots, K\} \}$ of size $B \cdot K$.
+**2. Beam search:** Maintains a fixed frontier of $B$ active hypothesis beams at horizon step $t$: $\mathcal{B}_t = \{\tau_t^{(1)}, \dots, \tau_t^{(B)}\}$. At each step, the policy generates $K$ candidate next-step actions per beam, creating a candidate pool $\mathcal{C}_{t+1} = \bigcup_{b=1}^B \{ \tau_t^{(b)} \circ a_{t+1}^{(k)} \mid a_{t+1}^{(k)} \sim \pi_\theta(\cdot \mid \tau_t^{(b)}), \, k \in \{1, \dots, K\} \}$ of size $B \cdot K$.
 
 A step-level PRM or deterministic linter scores all $B \cdot K$ candidates, and the runtime retains the top $B$ paths to form $\mathcal{B}_{t+1}$, immediately freeing the memory of the pruned $(B \cdot K - B)$ branches.
 * **Systems Bottleneck (Straggler Thread Stall):** Beam search imposes a synchronous barrier across all $B \cdot K$ candidates at each ply. If one candidate action triggers a 10-second external compile while nine others complete in 50 ms, the entire serving batch stalls at the slowest branch.
 * **Algorithmic Flaw:** Myopic pruning. If the optimal solution requires traversing a temporary drop in intermediate score (e.g., refactoring working code, which temporarily breaks compilation), beam search prunes the path prematurely.
 
-#### 3. Monte Carlo tree search (MCTS)
-MCTS [@kocsis2006bandit; @silver2016mastering] provides an asymptotically optimal search framework that navigates asymmetric decision trees via four cyclical phases:
+**3. Monte Carlo tree search (MCTS):** MCTS [@kocsis2006bandit; @silver2016mastering] provides an asymptotically optimal search framework that navigates asymmetric decision trees via four cyclical phases:
 
 1. **Selection:** Starting at root node $s_0$, traversal descends the existing tree by selecting the action that maximizes the Predictor Upper Confidence Bounds applied to Trees (PUCT) metric (@eq-puct-selection):
    $$
@@ -627,8 +624,7 @@ To see why @algo-mcts-radix-cache represents a viable systems architecture rathe
 
 Expanding search trees is computationally futile if the system cannot reliably discriminate between sound and defective states. However, invoking verification oracles is not free: every test execution, compiler invocation, or PRM pass consumes compute, memory bandwidth, and wall-clock latency. We formalize this fundamental overhead as the **Verification Tax** ($C_{\text{ver}}$), where total compute is $C_{\text{total}} = \sum_{v \in \mathcal{V}} [C_{\text{gen}}(v) + C_{\text{ver}}(v)]$, defining the **Verification Tax Ratio** as $T_v = \frac{\sum_{v \in \mathcal{V}} C_{\text{ver}}(v)}{\sum_{v \in \mathcal{V}} C_{\text{gen}}(v)}$.
 
-#### Search space collapse
-The systems justification for paying the Verification Tax is exponential search space collapse (@fig-vol3-deliberation-compute-scaling, Panel B):
+**Search space collapse:** The systems justification for paying the Verification Tax is exponential search space collapse (@fig-vol3-deliberation-compute-scaling, Panel B):
 
 * In an unverified search tree with branching factor $b$ and depth $d$, total generated candidate nodes expand exponentially: $|\mathcal{V}_{\text{unverified}}| = \sum_{k=1}^d b^k \approx b^d$.
 * When an intermediate verifier prunes a fraction $(1 - \alpha)$ of invalid branches at each ply (where $\alpha \in (0, 1)$ is the verifier survival fraction), the effective branching factor collapses to $b_{\text{eff}} = \alpha \cdot b$. The total number of explored nodes collapses to a bounded geometric series (@eq-verified-tree-collapse):
@@ -639,8 +635,7 @@ $$ {#eq-verified-tree-collapse}
 
 If $b = 5$ and $d = 6$, an unverified search explodes to $5^6 = 15{,}625$ candidate leaves. If an intermediate verifier maintains a survival fraction of $\alpha = 0.25$, the effective branching factor drops to $b_{\text{eff}} = 0.25 \times 5 = 1.25$. Total generated nodes collapse to $5 \times \frac{1.25^6 - 1}{1.25 - 1} \approx 56\text{ nodes}$—a **$99.6\%$ reduction** in candidate node expansions.
 
-#### Breakeven verification compute
-Step-level verification is strictly cheaper than unverified exhaustive search whenever total verified compute is less than unverified compute: $|\mathcal{V}_{\text{verified}}| \cdot (C_{\text{gen}} + C_{\text{ver}}) \le |\mathcal{V}_{\text{unverified}}| \cdot C_{\text{gen}}$. Solving for the maximum allowable verification cost per node yields $C_{\text{ver}}^{\max} \le \left(\frac{|\mathcal{V}_{\text{unverified}}| - |\mathcal{V}_{\text{verified}}|}{|\mathcal{V}_{\text{verified}}|}\right) \cdot C_{\text{gen}}$. In the example above, $C_{\text{ver}}^{\max} \le \frac{15{,}625 - 56}{56} C_{\text{gen}} \approx 278 \times C_{\text{gen}}$: the engineering team can deploy an intermediate verifier that is up to $278\times$ more computationally expensive than the generator itself while still reducing net cluster FLOP expenditure.
+**Breakeven verification compute:** Step-level verification is strictly cheaper than unverified exhaustive search whenever total verified compute is less than unverified compute: $|\mathcal{V}_{\text{verified}}| \cdot (C_{\text{gen}} + C_{\text{ver}}) \le |\mathcal{V}_{\text{unverified}}| \cdot C_{\text{gen}}$. Solving for the maximum allowable verification cost per node yields $C_{\text{ver}}^{\max} \le \left(\frac{|\mathcal{V}_{\text{unverified}}| - |\mathcal{V}_{\text{verified}}|}{|\mathcal{V}_{\text{verified}}|}\right) \cdot C_{\text{gen}}$. In the example above, $C_{\text{ver}}^{\max} \le \frac{15{,}625 - 56}{56} C_{\text{gen}} \approx 278 \times C_{\text{gen}}$: the engineering team can deploy an intermediate verifier that is up to $278\times$ more computationally expensive than the generator itself while still reducing net cluster FLOP expenditure.
 
 ### The optimal verification cadence
 

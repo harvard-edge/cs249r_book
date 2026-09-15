@@ -23,7 +23,6 @@
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{10}{10}{95}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -44,11 +43,26 @@ Treating the context window as an active attention working set determines *what*
 - **Quantify** the trade-offs of hardware-aware KV cache compression, comparing FP8 numerical representations (E4M3 versus E5M2), outlier-channel isolation, and low-rank singular value decomposition (SVD) on Tensor Core throughput.
 :::
 
+## Architectural Overview: Virtual Memory for Attention Engines {#sec-vol3-virtualmem-intro}
+
+The working set model of attention established in @sec-vol3-working-sets demonstrated how active context must be managed, evicted, and pruned to keep inference feasible within finite context windows. Yet managing *which* tokens reside in context addresses only half of the memory challenge. The complementary physical challenge is *where* and *how* those tokens are allocated in accelerator High-Bandwidth Memory (HBM).
+
+In classical operating systems, early architectures allocated memory in contiguous physical extents. When processes requested memory dynamically, the system rapidly suffered from internal fragmentation (allocating fixed partitions larger than needed) and external fragmentation (free memory scattered in slivers too small to satisfy new requests). In the 1960s, virtual memory and hardware paging resolved this crisis by decoupling logical process addresses from physical page frames via page tables.
+
+Modern transformer serving runtimes face an identical architectural inflection point. Because autoregressive decoding generates tokens sequentially across unpredictable horizons, naive serving systems statically allocate contiguous tensor buffers sized for the model's maximum sequence length (such as $32\text{k}$ or $128\text{k}$ tokens). Under dynamic multi-turn agent workloads—characterized by non-deterministic rollout lengths, tree-structured speculative search, and shared system prompts—contiguous allocation strands up to 60 to 80 percent of expensive accelerator memory in unutilized buffers.
+
+This chapter details the virtual memory architecture of the Stochastic Computer:
+
+1. **Physical Attention Geometry:** Formalizing the exact byte footprint of Key-Value caches across MHA, MQA, GQA, and MLA architectures, and analyzing the fragmentation pathologies of contiguous allocation.
+2. **PagedAttention Mechanics:** Decoupling logical token sequences from physical HBM blocks using virtual block tables, eliminating external fragmentation and bounding internal waste.
+3. **Prefix Caching and Radix Trees:** Exploiting trajectory prefix overlap via dynamic Radix trees and Copy-on-Write (CoW) page sharing to enable zero-copy branching during test-time search.
+4. **Disaggregated and Compressed Serving:** Scaling memory beyond single-node HBM bounds through chunked prefill, remote RDMA paging, and hardware-aware FP8/INT4 quantization.
+
 ## The Physical Geometry of Attention Memory {#sec-vol3-virtualmem-geometry}
 
-An enterprise inference cluster hosting a fleet of 128 autonomous software engineering agents on an 8-GPU NVIDIA H100 node crashes with an Out-of-Memory (OOM) fault during a synchronized test-suite run. Hardware telemetry collected at the instant of failure reveals a striking physical anomaly: while the CUDA driver reports 100 percent allocated capacity across all $640\text{ GB}$ of High-Bandwidth Memory (HBM3), the aggregate token occupancy across active agent contexts accounts for only $218.8\text{ GB}$—an effective memory utilization of just 34.2 percent. More than $420\text{ GB}$ of expensive silicon memory sits completely idle, trapped inside pre-allocated contiguous tensor buffers reserved for theoretical worst-case sequence lengths that the agents never reached.
+In classical computer architecture, memory allocation pathologies arise when physical hardware constraints are hidden beneath inflexible software abstractions [@hennessy2011computer]. In production accelerator clusters, memory exhaustion frequently occurs not because physical silicon capacity is genuinely insufficient, but because contiguous allocation schemes strand memory in unusable internal and external fragmentation. While the driver reports 100 percent allocated capacity across accelerator High-Bandwidth Memory (HBM), aggregate token occupancy across active contexts often accounts for less than 35 percent of physical memory—leaving hundreds of gigabytes trapped inside pre-allocated contiguous tensor buffers reserved for theoretical worst-case sequence lengths that requests never reach.
 
-In classical computer architecture, memory allocation pathologies arise when physical hardware constraints are hidden beneath inflexible software abstractions [@hennessy2011computer]. While standard inference runtimes employ PagedAttention for high-throughput stateless batch serving, agentic workloads introduce a fundamentally different memory challenge: long-lived, tree-structured trajectories with heavy prefix sharing, dynamic rollouts, and multi-turn state persistence. In transformer-based serving runtimes, this pathology is rooted in the physical geometry of the **Key-Value (KV) cache**\index{Key-Value (KV) cache}. Autoregressive generation requires that every newly decoded token attend to the representations of all preceding tokens in the sequence. To avoid recomputing Key and Value activation vectors across dozens of transformer layers at every decode step, serving engines materialize these intermediate activations in accelerator memory. Understanding why contiguous allocation collapses requires first formalizing the mathematical footprint of these tensors across modern attention topologies.
+While standard inference runtimes employ PagedAttention for high-throughput stateless batch serving, agentic workloads introduce a fundamentally different memory challenge: long-lived, tree-structured trajectories with heavy prefix sharing, dynamic rollouts, and multi-turn state persistence. In transformer-based serving runtimes, this pathology is rooted in the physical geometry of the **Key-Value (KV) cache**\index{Key-Value (KV) cache}. Autoregressive generation requires that every newly decoded token attend to the representations of all preceding tokens in the sequence. To avoid recomputing Key and Value activation vectors across dozens of transformer layers at every decode step, serving engines materialize these intermediate activations in accelerator memory. Understanding why contiguous allocation collapses requires first formalizing the mathematical footprint of these tensors across modern attention topologies.
 
 ### Mathematical derivation of footprint per token
 
@@ -681,9 +695,7 @@ To see how @algo-radix-prefix-cache coordinates real-time inference across multi
    - If detachment leaves the parent node with only a single surviving child, the parent and child edges automatically merge, preserving the trie's compressed invariants.
    By pruning strictly from the outside in, ancestral prefixes (such as high-traffic system prompts and repomaps) remain pinned and intact for all active concurrent agents.
 
-#### Latency impact: Collapsing time-to-first-token (TTFT)
-
-In multi-turn autonomous agents, context histories routinely expand to $30{,}000\text{--}60{,}000$ tokens. On an NVIDIA H100 SXM5 GPU executing a 70B parameter model:
+**Latency impact: Collapsing time-to-first-token (TTFT):** In multi-turn autonomous agents, context histories routinely expand to $30{,}000\text{--}60{,}000$ tokens. On an NVIDIA H100 SXM5 GPU executing a 70B parameter model:
 
 - **Uncached Prefill Latency:** Computing prefill attention across $40{,}000$ tokens from scratch requires over $1.8 \times 10^{14}$ FLOPs, consuming approximately $420\text{--}500\text{ ms}$ of pure accelerator compute time before the first reasoning token can be emitted.
 - **RadixAttention Cache Hit:** The trie traversal in @algo-radix-prefix-cache executes entirely on the host CPU in less than $0.08\text{ ms}$. Because the $40{,}000$ prefix tokens hit resident HBM blocks, prefill computation is eliminated entirely. Time-To-First-Token (TTFT) collapses from $500\text{ ms}$ to under $14\text{ ms}$ (the latency of a single decode step)—a **$35\times$ reduction in responsiveness** that transforms interactive agent autonomy.

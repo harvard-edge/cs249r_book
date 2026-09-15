@@ -23,7 +23,6 @@
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{10}{10}{10}{95}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -46,11 +45,17 @@ This chapter bridges the gap between accelerator silicon microarchitecture and o
 
 :::
 
+## Architectural Overview: System Tokenomics, Fleet Capacity, and Economic Governance {#sec-vol3-tokenomics-intro}
+
+Distributed tracing, hermetic evaluation gyms, and reliability metrics (@sec-vol3-observability) provide the runtime observability required to detect semantic failure modes and quantify Trajectory Goodput across production agent fleets. However, making autonomous stochastic computing commercially viable requires connecting system telemetry directly to accelerator microarchitecture, hardware capacity planning, and organizational unit economics.
+
+Unlike human software engineers or deterministic microservices, autonomous agents consume computational resources at an unprecedented, non-linear rate. When an agent navigates a multi-step debugging or deployment task, each interaction turn expands its context window, consuming both compute-bound prompt prefill FLOPs and memory-bandwidth-bound token decode cycles. If an agent enters an unmonitored reasoning loop or triggers cascading tool retries, it can consume tens of millions of tokens in minutes, running up hundreds of dollars in cloud infrastructure expenditure without advancing state. Furthermore, serving fleets must handle bursty, heavy-tailed arrival distributions where long-horizon reasoning tasks threaten to exhaust high-bandwidth memory (HBM) and starve interactive requests.
+
+This chapter establishes the systems tokenomics and economic engineering required to size, provision, and govern production agent fleets. We first derive the Tokenomic Roofline Model, analyzing how memory bandwidth and arithmetic intensity dictate accelerator utilization across prefill and decode phases. We then quantify disaggregated token unit economics, establishing the return-on-investment (ROI) of prompt prefix caching, context compression, and Cost-per-Verified-Goal (CPVG). Next, we apply queueing theory ($M/M/k$ and $M/G/k$ approximations under Pareto service distributions) to size accelerator clusters and enforce tail-latency SLAs. To minimize inference expenditure, we architect multi-tier speculative model cascades and formalize the cost-optimal autonomy boundaries that identify when agents should be avoided in favor of deterministic code or human escalation. Finally, we implement runtime economic governance frameworks, including token leaky bucket limiters, monotonic quota attenuation, and automated financial circuit breakers.
+
 ## The Tokenomic Roofline Model {#sec-vol3-tokenomics-roofline}
 
-In late 2025, an enterprise engineering organization deployed an internal autonomous coding assistant across 1,200 software developers. The platform engineering team selected an open-weight 70-billion-parameter dense model, hosting it on private 8-way NVIDIA H100 SXM5 nodes. Each node provided 640 GB of high-bandwidth memory (HBM3) running at 3.35 TB/s per GPU, with aggregate peak compute exceeding 7.9 PFLOP/s in 16-bit half-precision floating-point arithmetic. Within hours of deployment, developer pull-request automation crawled to an intolerable 12 tokens per second per stream, and the cluster began rejecting incoming requests.
-
-Yet cluster telemetry revealed a bewildering anomaly: GPU Tensor Core utilization across the cluster hovered below 6 percent, while total server power consumption remained far below rated thermal design limits. Suspecting a software configuration defect, systems operators doubled the provisioned GPU count. The token generation latency did not improve by a single millisecond. The cluster was not constrained by floating-point execution units, PCIe transfer overhead, or network contention. It had collided head-on with the physical boundaries of the **Tokenomic Roofline Model**.
+A recurring systems paradox in autonomous agent deployments is the **Cold Silicon Anomaly**: when an organization hosts high-capacity open-weight models (such as 70-billion-parameter dense transformers) on private multi-GPU accelerator clusters to serve interactive coding agents, interactive token generation frequently crawls to 10 to 15 tokens per second per stream. Yet cluster telemetry reveals that GPU Tensor Core utilization hovers below 6 percent, while server power consumption remains far below rated thermal design limits. Doubling the provisioned GPU count yields zero reduction in single-stream latency. The cluster is not constrained by floating-point arithmetic units, PCIe bandwidth, or network contention; it has collided head-on with the physical boundaries of the **Tokenomic Roofline Model**.
 
 ### The classical Roofline model in accelerator silicon
 
@@ -698,19 +703,13 @@ $$U(\mathcal{M}_{\text{agent}}) > \max\left( U(\mathcal{M}_{\text{code}}), \, U(
 
 Evaluating @eq-vol3-tokenomics-autonomy-condition establishes five operational regimes where autonomous agents must be strictly forbidden in production systems architecture:
 
-#### Regime 1: Deterministic structured workflows
-
-When the input data conforms to a known schema, the business logic follows well-defined decision trees, and the outputs are standard API mutations (e.g., extract, transform, load (ETL) pipelines, user authentication, invoice calculation, and relational CRUD operations), $R_{\text{code}} \approx 1.0$.
+**Regime 1: Deterministic structured workflows.** When the input data conforms to a known schema, the business logic follows well-defined decision trees, and the outputs are standard API mutations (e.g., extract, transform, load (ETL) pipelines, user authentication, invoice calculation, and relational CRUD operations), $R_{\text{code}} \approx 1.0$.
 
 Because $C_{\text{code}} \le 10^{-4} \cdot C_{\text{agent}}$ and $T_{\text{code}} \le 10^{-3} \cdot T_{\text{agent}}$, deterministic software dominates autonomous agents by four to six orders of magnitude across every utility dimension. Employing an LLM to parse structured JSON or execute SQL queries over known schemas is an architectural anti-pattern.
 
-#### Regime 2: Hard real-time systems ($< 200\text{ ms}$)
+**Regime 2: Hard real-time systems ($< 200\text{ ms}$).** Because autoregressive decoding is bound by memory bandwidth ($I \approx 1$ FLOP/Byte), generating a modest 100-token thought sequence on a 70B parameter model requires a physical minimum execution time $T_{\text{decode}} = 100 \cdot (2 \cdot P_{\text{params}} / B_{\text{mem}}) = 100 \cdot (140 \times 10^9 / 3.35 \times 10^{12}) \approx 4.18\text{ s}$. Even with speculative decoding and small models, multi-turn agent loops cannot cross the sub-200 ms latency barrier. Systems requiring real-time reactivity (such as high-frequency trading, real-time robotics control loops, and interactive UI typing autocompletion) must deploy deterministic compiled code or single-pass distilled embedding classifiers.
 
-Because autoregressive decoding is bound by memory bandwidth ($I \approx 1$ FLOP/Byte), generating a modest 100-token thought sequence on a 70B parameter model requires a physical minimum execution time $T_{\text{decode}} = 100 \cdot (2 \cdot P_{\text{params}} / B_{\text{mem}}) = 100 \cdot (140 \times 10^9 / 3.35 \times 10^{12}) \approx 4.18\text{ s}$. Even with speculative decoding and small models, multi-turn agent loops cannot cross the sub-200 ms latency barrier. Systems requiring real-time reactivity (such as high-frequency trading, real-time robotics control loops, and interactive UI typing autocompletion) must deploy deterministic compiled code or single-pass distilled embedding classifiers.
-
-#### Regime 3: Irreversible, high blast-radius mutations with weak verifiability
-
-When an agent executes actions with severe, non-compensating external side effects (such as dropping production database partitions, wiring bank funds, submitting legally binding filings, or reconfiguring core BGP routing tables), the failure penalty $B_{\mathcal{M}}$ dwarfs the task value:
+**Regime 3: Irreversible, high blast-radius mutations with weak verifiability.** When an agent executes actions with severe, non-compensating external side effects (such as dropping production database partitions, wiring bank funds, submitting legally binding filings, or reconfiguring core BGP routing tables), the failure penalty $B_{\mathcal{M}}$ dwarfs the task value:
 
 $$B_{\mathcal{M}} \gg V_{\text{task}}$$
 
@@ -720,13 +719,9 @@ $$U(\mathcal{M}_{\text{agent}}) \ll 0$$
 
 These operations mandate **Human-in-the-Loop Escrow**, where the agent acts solely as a proposal engine, requiring cryptographic out-of-band human sign-off before mutating external state.
 
-#### Regime 4: Unbounded horizon trajectories without intermediate oracles
+**Regime 4: Unbounded horizon trajectories without intermediate oracles.** As established in @eq-vol3-tokenomics-cpvg-exponential, trajectory reliability decays geometrically with step count: $P_{\text{success}} \le p^N$. If a proposed autonomous task requires $N = 100$ sequential reasoning turns, and the runtime lacks intermediate unit tests or environmental oracles to verify progress every 3 to 5 steps, even an exceptional per-step accuracy of $p = 0.98$ results in a catastrophic completion rate of $P_{\text{success}} = (0.98)^{100} \approx 0.133$ (13.3 percent). Executing open-loop agents over long horizons burns massive token budgets to produce garbage state. Tasks lacking intermediate verification boundaries must be decomposed into human-managed sub-tasks.
 
-As established in @eq-vol3-tokenomics-cpvg-exponential, trajectory reliability decays geometrically with step count: $P_{\text{success}} \le p^N$. If a proposed autonomous task requires $N = 100$ sequential reasoning turns, and the runtime lacks intermediate unit tests or environmental oracles to verify progress every 3 to 5 steps, even an exceptional per-step accuracy of $p = 0.98$ results in a catastrophic completion rate of $P_{\text{success}} = (0.98)^{100} \approx 0.133$ (13.3 percent). Executing open-loop agents over long horizons burns massive token budgets to produce garbage state. Tasks lacking intermediate verification boundaries must be decomposed into human-managed sub-tasks.
-
-#### Regime 5: Low-economic-surplus micro-tasks ($V_{\text{task}} < C_{\text{agent}}$)
-
-When the business value of an automated outcome is negligible (e.g., auto-categorizing internal bug tracker tags worth $\$0.02$ in engineering time), spending $\$0.15$ in multi-turn agent tokens to autonomously read comments and inspect historical tickets produces a negative return on investment. Tasks must be triaged by economic surplus:
+**Regime 5: Low-economic-surplus micro-tasks ($V_{\text{task}} < C_{\text{agent}}$).** When the business value of an automated outcome is negligible (e.g., auto-categorizing internal bug tracker tags worth $\$0.02$ in engineering time), spending $\$0.15$ in multi-turn agent tokens to autonomously read comments and inspect historical tickets produces a negative return on investment. Tasks must be triaged by economic surplus:
 
 $$V_{\text{task}} - C_{\mathcal{M}} > 0$$
 
@@ -746,7 +741,7 @@ To prevent autonomous agent swarms from exhausting corporate cloud budgets durin
 
 : **Enterprise Agent Economic Governance Architecture**: Systems telemetry, trigger conditions, and automated circuit breaker actions across the runtime financial control plane. {#tbl-vol3-economic-governance-bus tbl-colwidths="[20,25,25,30]"}
 
-#### Token leaky bucket budget enforcement
+**Token leaky bucket budget enforcement:**
 
 Static financial caps alone cannot protect serving fleets from transient throughput shockwaves. If twenty autonomous agents simultaneously encounter complex tool exceptions and trigger unconstrained retries, they can exhaust multi-tenant GPU memory pages or trigger upstream provider HTTP 429 rate limits within milliseconds, crashing concurrent workloads.
 
@@ -771,7 +766,7 @@ While leaky bucket rate limiting protects backend accelerators from queue collap
 
 By coupling tokenomic cost modeling directly to leaky bucket scheduling, platforms protect backend accelerators from queue collapse while preventing costly agent trajectory aborts.
 
-#### Monotonic capability quota attenuation
+**Monotonic capability quota attenuation:**
 
 When an autonomous agent spawns subagents to parallelize work, it must not grant children unconstrained spending authority. Subagent capability tokens must enforce **monotonic quota attenuation**:
 
@@ -783,7 +778,7 @@ $$\text{Total Spend} \le \mathcal{B}_{\text{root}} \sum_{d=0}^\infty \alpha^d = 
 
 For $\alpha = 0.5$, the total financial blast radius of the entire subagent swarm can never exceed $2 \cdot \mathcal{B}_{\text{root}}$, completely eliminating infinite subagent recursion bombs.
 
-#### Derivative spend-rate tripwires
+**Derivative spend-rate tripwires:**
 
 Runtimes must monitor the temporal spending derivative:
 
@@ -791,7 +786,7 @@ $$\dot{C}(t) = \frac{dC}{dt}$$
 
 If an agent enters a tight retry loop against an external API returning HTTP 429 or compilation errors, $\dot{C}(t)$ surges. If the instantaneous burn rate exceeds a configured threshold (e.g., $\dot{C}(t) > \$10.00/\text{minute}$ for an individual task), the financial circuit breaker trips, terminating execution and alerting operators.
 
-#### Environmental state progress tripwires
+**Environmental state progress tripwires:**
 
 An agent trapped in a semantic dead-end often generates novel thoughts while repeating identical actions, burning tokens without mutating the environment. The runtime computes the environmental state delta between turns:
 

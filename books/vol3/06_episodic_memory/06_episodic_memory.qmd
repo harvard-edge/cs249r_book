@@ -27,7 +27,6 @@ engine: markdown
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{10}{10}{95}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -48,11 +47,25 @@ Even when virtual memory paging and prefix caching optimize volatile accelerator
 - **Diagnose** critical memory failure modes, including polarity blindness, context poisoning from stale tool observations, and the zombie memory trap in continuous agent deployments.
 :::
 
+## Architectural Overview: The Agent Storage Hierarchy {#sec-vol3-episodic-intro}
+
+In @sec-vol3-working-sets and @sec-vol3-virtual-memory, memory was bounded strictly to active execution: @sec-vol3-working-sets established the L1 working set model within the transformer context window, and @sec-vol3-virtual-memory organized physical High-Bandwidth Memory (HBM) into paged L2 virtual memory frames. However, both tiers share a defining physical constraint: they are volatile, ephemeral, and bounded by accelerator silicon economics. The moment a process crashes, an inference worker restarts, or a context window exceeds its physical capacity, the volatile working set is lost.
+
+In classical computer architecture, memory systems navigate the fundamental trade-off between access latency, bandwidth, and storage capacity across a strict hierarchy: high-speed registers and on-chip SRAM sit closest to arithmetic execution units, backed by dense main memory (DRAM), which in turn pages to non-volatile secondary storage (NVMe SSDs and distributed object stores) [@hennessy2011computer; @saltzer2009]. Conflating volatile context with durable memory forces agents into severe operational failure modes: either recomputing entire multi-turn trajectories from turn zero, or suffering context degradation as historical tokens flood the working set.
+
+An autonomous agent operating system requires an explicit third tier: **L3 Episodic Storage**. Just as an operating system filesystem preserves process artifacts across reboots, the agent storage subsystem captures historical trajectories, environmental diffs, tool execution traces, and consolidated reflections across unbounded operational horizons.
+
+This chapter details the systems architecture of non-volatile agent memory:
+
+1. **The Multi-Tier Memory Hierarchy:** Formalizing the access latency, bandwidth, capacity, and durability trade-offs across Parametric Weights ($\theta$), Volatile Context Working Sets, and Persistent Secondary Storage.
+2. **Approximate Nearest-Neighbor Retrieval:** Indexing semantic trajectories via HNSW graphs and IVF-PQ quantization, implementing semantic caching layers, and analyzing the failure mode of polarity blindness.
+3. **Symbolic Relational Knowledge Graphs:** Deterministically indexing structural code dependencies using Abstract Syntax Trees (ASTs) and Personalized PageRank (PPR) to hydrate context without vector ambiguity.
+4. **Episodic Memory Consolidation:** Implementing background consolidation pipelines (the agent "sleep cycle") using Ebbinghaus forgetting curves, Doyle's Truth Maintenance Systems, and Lamport logical clocks to resolve environmental contradictions.
+5. **End-to-End Retrieval SLAs:** Decomposing the latency budget of hybrid retrieval pipelines to bound Time-To-First-Token (TTFT) and prevent the prefill retrieval tax from violating real-time serving contracts.
+
 ## The Memory Hierarchy: From Registers to Secondary Storage {#sec-vol3-episodic-hierarchy}
 
-An autonomous site-reliability engineering agent is deployed to resolve an intermittent deadlock across a Kubernetes-orchestrated payments cluster. Over four hours and 140 sequential turns, the agent inspects container logs, parses configuration maps, queries Prometheus metrics, and isolates a race condition between a Redis cache invalidation webhook and a PostgreSQL write replica. At turn 141, an infrastructure host node crashes due to an out-of-memory (OOM) event on an adjacent pod. When the agent process restarts on a healthy node, its entire context window and volatile Key-Value (KV) cache are gone. Rehydrating from turn zero with only the initial user prompt, the agent has forgotten all 140 turns of investigative findings. It begins re-executing its initial diagnostic scripts, re-probes the database, triggers the identical race condition, and drops the payment replica a second time.
-
-This failure reveals the cost of conflating active reasoning context with durable memory. In classical computer architecture, memory systems balance access latency against storage capacity across a strict physical hierarchy: fast, expensive registers and SRAM caches sit adjacent to the arithmetic logic units, backed by larger, slower DRAM, which is in turn paged to non-volatile secondary storage [@hennessy2011computer; @saltzer2009]. An autonomous machine learning system requires an analogous storage hierarchy to decouple transient execution state from durable operational knowledge.
+In classical computer architecture, memory systems balance access latency against storage capacity across a strict physical hierarchy: fast, expensive registers and SRAM caches sit adjacent to the arithmetic logic units, backed by larger, slower DRAM, which is in turn paged to non-volatile secondary storage [@hennessy2011computer; @saltzer2009]. An autonomous machine learning system requires an analogous storage hierarchy to decouple transient execution state from durable operational knowledge. Conflating active reasoning context with durable memory leads to severe operational failures: when an infrastructure node crashes or an execution context exceeds physical memory limits, an agent without durable secondary storage loses its entire historical trajectory, forcing expensive and redundant re-execution from scratch.
 
 ### The tripartite memory abstraction
 
@@ -253,9 +266,7 @@ An agent semantic cache operates across two distinct tiers:
 1. **L1 Exact-Match Cache (Deterministic Key):** The query string is normalized and hashed via SHA-256. If an identical query was previously evaluated in the active session, the result is fetched in $\mathcal{O}(1)$ time from host RAM ($< 0.05\text{ ms}$). While exact caching incurs zero false positives, it is fragile: a minor difference in whitespace, reordered CLI arguments, or synonymous wording results in a cache miss.
 2. **L2 Semantic Cache (Approximate Metric Key):** The incoming query $q$ is mapped to embedding $\mathbf{v}_q$ and compared against an in-memory index of previously answered queries. If the nearest cached query $\mathbf{v}_{c}$ satisfies $S_C(\mathbf{v}_q, \mathbf{v}_c) \ge \tau_{\text{cache}}$, the runtime returns the cached retrieval context or model generation directly, bypassing the downstream secondary storage scan and model prefill.
 
-#### First-principles latency and cost napkin math
-
-The systems value of semantic caching is quantified by the gap between cache-hit and cache-miss execution latencies:
+**First-principles latency and cost napkin math:** The systems value of semantic caching is quantified by the gap between cache-hit and cache-miss execution latencies:
 
 - **Cache Hit Latency ($T_{\text{hit}}$):** Incurs only the local query embedding and in-memory index lookup: $T_{\text{hit}} = T_{\text{embed}} + T_{\text{cache\_scan}} \approx 2.8\text{ ms} + 0.2\text{ ms} = 3.0\text{ ms}$.
 - **Cache Miss Latency ($T_{\text{miss}}$):** Incurs the cache lookup plus the full retrieval, prompt assembly, prefill, and generation pipeline ($T_{\text{exec}}$): $T_{\text{miss}} = T_{\text{hit}} + T_{\text{exec}} \approx 3.0\text{ ms} + 600\text{ ms} = 603\text{ ms}$.
@@ -264,9 +275,7 @@ On a cache hit, the agent achieves a **$200\times$ latency reduction** ($3.0\tex
 
 Semantic caching slashes average turn latency by 34.5 percent while eliminating over a third of downstream inference token charges and accelerator prefill FLOPs.
 
-#### The similarity threshold dilemma and cache poisoning
-
-The central systems challenge in semantic caching is tuning the similarity threshold $\tau_{\text{cache}}$:
+**The similarity threshold dilemma and cache poisoning:** The central systems challenge in semantic caching is tuning the similarity threshold $\tau_{\text{cache}}$:
 
 - **Loose Threshold ($\tau_{\text{cache}} < 0.90$):** Yields high hit rates ($h > 0.60$) but triggers catastrophic **Cache Poisoning**\index{Cache Poisoning}. Because of polarity blindness, a query such as *"Is database migration 042 complete?"* will falsely match a cached entry for *"Database migration 042 failed"*, injecting an obsolete or inverted factual premise into the agent's active reasoning state.
 - **Strict Threshold ($\tau_{\text{cache}} > 0.98$):** Eliminates false positives, but collapses the hit rate ($h \to 0$), reducing the semantic cache to an expensive, high-latency duplicate of the exact L1 hash cache.
@@ -350,9 +359,7 @@ where:
 
 The stationary distribution $\mathbf{p}^* = \lim_{t \to \infty} \mathbf{p}^{(t)}$ satisfies the linear system $\mathbf{p}^* = \alpha [\mathbf{I} - (1 - \alpha) \mathbf{P}^T]^{-1} \mathbf{s}$. The stationary probability $p_v^*$ quantifies the structural relevance of symbol $v$ relative to the active seed set $\mathcal{S}$.
 
-#### First-principles systems math: Power iteration vs. matrix inversion
-
-While the analytical stationary distribution contains a matrix inverse, evaluating $[\mathbf{I} - (1 - \alpha) \mathbf{P}^T]^{-1}$ directly requires $\mathcal{O}(|V|^3)$ operations. For a mid-sized software repository containing $|V| = 50,000$ functions and classes, an exact inverse demands over $1.25 \times 10^{14}$ floating-point operations and hundreds of gigabytes of dense intermediate matrices—an unviable computation for an interactive tool turn.
+**First-principles systems math (Power iteration vs. matrix inversion):** While the analytical stationary distribution contains a matrix inverse, evaluating $[\mathbf{I} - (1 - \alpha) \mathbf{P}^T]^{-1}$ directly requires $\mathcal{O}(|V|^3)$ operations. For a mid-sized software repository containing $|V| = 50,000$ functions and classes, an exact inverse demands over $1.25 \times 10^{14}$ floating-point operations and hundreds of gigabytes of dense intermediate matrices—an unviable computation for an interactive tool turn.
 
 Production runtimes evaluate PPR using iterative **Power Iteration**\index{Power Iteration} over sparse adjacency matrices stored in **Compressed Sparse Row (CSR)**\index{Compressed Sparse Row} format:
 
@@ -421,9 +428,7 @@ To see how @algo-ppr-knapsack-packing constructs compact, structurally sound rep
    - Sorting by density $\rho_i$ and greedily packing candidate symbols until reaching budget $B$ guarantees a $(1 - 1/e)$ approximation to the optimal knapsack solution.
    - This ensures that concise, high-value structural anchors (e.g., function signatures, abstract interfaces, and typed protocol definitions) are prioritized over bloated implementation bodies.
 
-#### The architectural payoff for software agents
-
-In production coding agents (such as Aider or SWE-bench baselines), coupling graph diffusion with density-ordered packing resolves the primary failure mode of dense vector RAG:
+**The architectural payoff for software agents:** In production coding agents (such as Aider or SWE-bench baselines), coupling graph diffusion with density-ordered packing resolves the primary failure mode of dense vector RAG:
 
 - **Vector Cosine Blindness:** Dense embeddings excel at finding semantic keywords but are fundamentally blind to code topology (e.g., understanding that modifying class `PaymentGateway` requires inspecting the abstract interface in `types.py` rather than an irrelevant marketing document containing the word "payment").
 - **Structured Context Compaction:** By generating a skeletonized repo map via @algo-ppr-knapsack-packing, the runtime supplies the language model with an exact, syntactically valid structural map of all caller-callee dependencies within a strictly bounded $2{,}048$-token budget—retaining 95 percent of relevant symbol context while consuming less than 2 percent of a $128\text{k}$ context window.
@@ -491,9 +496,7 @@ Executing memory consolidation within an active agent's critical execution loop 
 
 During a sleep cycle, the consolidation engine processes raw execution trajectories $\tau = (s_0, a_0, o_0, \dots, s_T)$ through a three-stage reflection architecture:
 
-#### Importance scoring and the forgetting curve
-
-An agent that retains every raw terminal printout, JSON dump, and transient compiler warning quickly exhausts its secondary storage and degrades retrieval precision. In both human neurobiology and systems caching, memory durability is governed by intentional forgetting [@tulving1972episodic; @denning1970].
+**Importance scoring and the forgetting curve:** An agent that retains every raw terminal printout, JSON dump, and transient compiler warning quickly exhausts its secondary storage and degrades retrieval precision. In both human neurobiology and systems caching, memory durability is governed by intentional forgetting [@tulving1972episodic; @denning1970].
 
 Every memory item $m$ in the episodic ledger is assigned an intrinsic importance score $I(m) \in [1, 10]$ evaluating its long-term operational value. High-importance items ($I(m) \ge 8$) include fatal error post-mortems, architectural interface decisions, and user-specified constraints; low-importance items ($I(m) \le 3$) include transient directory listings and progress bar logs.
 
@@ -507,18 +510,14 @@ This exponential formulation provides clear systems mechanics:
 2. **Spaced Reinforcement:** Whenever an existing memory item $m$ is retrieved and successfully utilized by the agent to accomplish an action, its access timestamp updates ($t_{\text{accessed}} \leftarrow t_{\text{now}}$) and its half-life scales up: $t_{1/2} \leftarrow \min(t_{1/2} \cdot \gamma, t_{\max})$, where $\gamma \approx 1.5\text{--}2.0$ is the reinforcement factor. Frequently accessed architectural heuristics become nearly permanent, while one-off debugging traces naturally fade.
 3. **Sleep Compaction Threshold:** During offline sleep cycles, the consolidation engine computes the cumulative retention score $\text{Retention}(m) = \frac{I(m)}{10} \cdot \text{Recency}(m)$. Any memory item where $\text{Retention}(m) < \Theta_{\text{prune}}$ (e.g., $\Theta_{\text{prune}} = 0.05$) is evicted from the active L3 vector index and archived to compressed cold storage. This bounds the active vector index size to a stable steady state ($N_{\text{active}} \propto \text{Turn Rate} \times \bar{t}_{1/2}$) rather than allowing it to grow unbounded.
 
-#### Generative reflection
-
-The engine clusters recent memories with high importance scores and queries a background foundation model with meta-analytical reflection prompts:
+**Generative reflection:** The engine clusters recent memories with high importance scores and queries a background foundation model with meta-analytical reflection prompts:
 
 - *"Given these 25 tool execution failures across the last 50 turns, what is the single underlying architectural defect causing them?"*
 - *"Extract 3 durable procedural rules that must govern future database migrations based on these trajectory traces."*
 
 The generated reflections represent high-order semantic abstractions. The runtime embeds these reflections and inserts them back into the episodic hierarchy as parent nodes linked to their underlying leaf observations.
 
-#### Trajectory distillation
-
-Detailed trajectory turn sequences are compressed into canonical state-action summaries. The distillation compression ratio is defined as $\mathcal{R}_{\text{distill}} = |\text{Tokens}_{\text{distilled}}| / |\text{Tokens}_{\text{raw}}|$. In production runtimes, $\mathcal{R}_{\text{distill}}$ typically achieves values between $0.02$ and $0.05$—compressing raw trajectories by a factor of 20 to 50 while preserving causal operational lessons.
+**Trajectory distillation:** Detailed trajectory turn sequences are compressed into canonical state-action summaries. The distillation compression ratio is defined as $\mathcal{R}_{\text{distill}} = |\text{Tokens}_{\text{distilled}}| / |\text{Tokens}_{\text{raw}}|$. In production runtimes, $\mathcal{R}_{\text{distill}}$ typically achieves values between $0.02$ and $0.05$—compressing raw trajectories by a factor of 20 to 50 while preserving causal operational lessons.
 
 ### Doyle's truth maintenance system (TMS)
 
@@ -662,26 +661,20 @@ The total wall-clock latency of an agent interaction turn ($T_{\text{turn}}$) de
 
 Analyzing the physical rooflines of each retrieval stage reveals why naive architectures collapse:
 
-#### Query embedding latency ($T_{\text{embed}}$)
-
-Invoking an external cloud embedding API incurs Round-Trip Time (RTT) over the WAN, HTTP header serialization, and remote queueing delay: $T_{\text{embed, remote}} = 2 \cdot \text{RTT} + T_{\text{TLS}} + T_{\text{queue}} + T_{\text{compute}} \approx 2(40\text{ ms}) + 20\text{ ms} + 150\text{ ms} + 50\text{ ms} = 300\text{ ms}$.
+**Query embedding latency ($T_{\text{embed}}$):** Invoking an external cloud embedding API incurs Round-Trip Time (RTT) over the WAN, HTTP header serialization, and remote queueing delay: $T_{\text{embed, remote}} = 2 \cdot \text{RTT} + T_{\text{TLS}} + T_{\text{queue}} + T_{\text{compute}} \approx 2(40\text{ ms}) + 20\text{ ms} + 150\text{ ms} + 50\text{ ms} = 300\text{ ms}$.
 
 Conversely, deploying a dedicated local small encoder (e.g., a 110M parameter model such as BGE-Small or MiniLM) on a local GPU or CPU host running TensorRT yields $T_{\text{embed, local}} = (2 \cdot N_{\text{tokens}} \cdot P_{\text{embed}}) / P_{\text{peak\_flops}} \approx (2 \cdot 64 \cdot 1.1 \times 10^8) / (5 \times 10^{12}\text{ FLOPS}) \approx 0.0028\text{ s} = 2.8\text{ ms}$.
 
 Local embedding generation achieves a **$100\times$ latency reduction**, transforming an SLA-breaking bottleneck into a negligible fraction of the turn budget.
 
-#### Vector index search latency ($T_{\text{ann}}$)
-
-In an IVF-PQ architecture with ADC, index search consists of two phases:
+**Vector index search latency ($T_{\text{ann}}$):** In an IVF-PQ architecture with ADC, index search consists of two phases:
 
 - Precomputing the distance lookup table $\mathcal{D}$: $256 \cdot D$ arithmetic operations ($\approx 0.05\text{ ms}$).
 - Scanning candidate postings lists: Streaming $N_{\text{cand}} = \frac{n_{\text{probe}} N}{K_{\text{ivf}}}$ quantized records of $M$ bytes each across memory buses.
 
 The scan latency is strictly memory-bandwidth bound: $T_{\text{scan}} = (N_{\text{cand}} \cdot M) / B_{\text{mem}}$. For an episodic store of $N = 10^7$ memories with $K_{\text{ivf}} = 4096$, $n_{\text{probe}} = 32$, and $M = 64$, scanning $N_{\text{cand}} = (32 \times 10^7) / 4096 \approx 78,125\text{ vectors}$ ($\text{Data Volume} = 78,125 \times 64\text{ bytes} \approx 5.0\text{ MB}$) across host DRAM with $B_{\text{mem}} = 100\text{ GB/s}$ yields $T_{\text{scan}} = 5.0 \times 10^6\text{ bytes} / 10^{11}\text{ bytes/s} = 0.05\text{ ms}$. Total vector index search completes in under $0.2\text{ ms}$. Remote vector databases that require JSON-over-HTTP serialization add $200\text{--}400\text{ ms}$ of needless network overhead.
 
-#### Cross-encoder re-ranking vs. reciprocal rank fusion ($T_{\text{rerank}}$)
-
-A common design pitfall is passing the top-100 retrieved candidates into a heavy cross-encoder model for re-ranking. A cross-encoder concatenates the query with each candidate document, computing full self-attention across all tokens scaling as $\mathcal{O}(K_{\text{cand}} \cdot (L_q + L_d)^2)$. Evaluating 100 candidates of 256 tokens each through a 7B-parameter cross-encoder requires tens of trillions of FLOPs, imposing a 400 to 600 ms latency penalty.
+**Cross-encoder re-ranking vs. reciprocal rank fusion ($T_{\text{rerank}}$):** A common design pitfall is passing the top-100 retrieved candidates into a heavy cross-encoder model for re-ranking. A cross-encoder concatenates the query with each candidate document, computing full self-attention across all tokens scaling as $\mathcal{O}(K_{\text{cand}} \cdot (L_q + L_d)^2)$. Evaluating 100 candidates of 256 tokens each through a 7B-parameter cross-encoder requires tens of trillions of FLOPs, imposing a 400 to 600 ms latency penalty.
 
 Production architectures replace neural cross-encoders with **Reciprocal Rank Fusion (RRF)**\index{Reciprocal Rank Fusion}, an algorithmic scoring function that fuses ranked candidate lists from disparate retrieval modalities (e.g., dense vector search and sparse BM25) without forward-pass computation: $\text{RRF\_Score}(d) = \sum_{m \in \mathcal{M}} \frac{1}{k_0 + r_m(d)}$, where $\mathcal{M} = \{\text{dense}, \text{sparse}, \text{graph}\}$, $r_m(d)$ is the 1-based rank of document $d$ in retrieval modality $m$, and $k_0 \approx 60$ is a smoothing constant that bounds the influence of outlier top ranks.
 

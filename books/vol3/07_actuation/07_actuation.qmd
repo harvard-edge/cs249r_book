@@ -23,7 +23,6 @@
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
 \mlagentstack{10}{10}{10}{95}{10}{10}
-\caption{The Agentic Machine Learning Systems Stack.}
 \end{marginfigure}
 :::
 
@@ -45,11 +44,24 @@ When an autonomous agent attempts to execute an action in the physical or digita
 * **Evaluate** dynamic tool discovery mechanisms, schema vector indexing, and tool-result memoization to minimize prompt token tax and maximize accelerator working-set capacity.
 :::
 
+## Architectural Overview: The Agent I/O Subsystem {#sec-vol3-actuation-intro}
+
+In Part I and Part II, the Stochastic Computer operated entirely within its own internal silicon boundaries: generating tokens through the autoregressive processor core (Chapters 02 and 03) and managing volatile context working sets and persistent episodic storage (Chapters 04, 05, and 06). Throughout these layers, the foundation model operated as an oracle—a pure mathematical function mapping input tensors to output tensors. Whether the model generated elegant code or nonsensical gibberish, the physical world outside accelerator memory remained completely unmodified: no files were deleted, no databases updated, and no network packets transmitted.
+
+Part III marks the critical architectural boundary where the stochastic processor connects to external **I/O Peripherals**. The moment an agent is equipped with tools—such as shell execution, REST APIs, database drivers, and web browsers—inference ceases to be passive text generation. It becomes the deliberative phase of a closed-loop control system that causes effectful, irreversible side effects in external environments.
+
+Bridging probabilistic token streams to deterministic software APIs exposes fundamental systems challenges:
+
+- **The Actuation Boundary:** Translating continuous, stochastic token distributions into strictly typed, deterministic function arguments without syntax failures or argument hallucinations.
+- **Protocol Standardization:** Establishing standardized communication buses between models and tools (such as the Model Context Protocol) while controlling the heavy context bloat imposed by verbose JSON schemas.
+- **Idempotency and Replay:** Guaranteeing that network timeouts, retries, and partial failures do not cause duplicate executions of non-idempotent real-world actions.
+- **Dynamic Catalog Discovery:** Scaling tool registries to thousands of APIs without exhausting finite context windows or thrashing the KV cache.
+
+This chapter formalizes the peripheral bus and actuation layer of the Agent Operating System, establishing the protocols, contracts, and runtime mechanisms required for safe, deterministic external interaction.
+
 ## The I/O Subsystem of Agentic Runtimes {#sec-vol3-actuation-io-subsystem}
 
-During an automated maintenance cycle on a multi-tenant cloud cluster, an autonomous systems administration agent was tasked with pruning transient build artifacts from a local directory. Instructed via a natural language prompt, the foundation model emitted what appeared to be a standard shell command. However, because an environment variable in the path failed to resolve inside the model's unconstrained text generation stream, the model emitted `rm -rf /` instead of `rm -rf ./tmp/build_artifacts`. The host runtime, configured to pipe model text outputs directly into an interactive bash subprocess, executed the string with root administrative privileges. Within seconds, the host container filesystem was unlinked, corrupting system libraries, terminating running tenant jobs, and forcing a complete node evacuation across the physical cluster rack.
-
-This incident exposes the catastrophic fragility of treating tool actuation as an exercise in unstructured natural language text generation. In classical deep learning applications [@he2016; @vaswani2017], a machine learning model operates strictly as an **oracle**\index{Oracle}—a pure mathematical function mapping an input tensor to an output tensor. The forward pass computes activations through transformer layers, normalizes logits across a fixed vocabulary $\mathcal{V}$, and samples a token. Whether the model generates poetry, code, or erroneous gibberish, the physical world outside the device activation memory remains completely invariant: storage sectors are unmodified, memory outside the model's transient buffers is untouched, and zero network packets are dispatched to external hosts.
+Treating tool actuation as an exercise in unconstrained natural language text generation introduces catastrophic fragility into production systems. In classical deep learning applications [@he2016; @vaswani2017], a machine learning model operates strictly as an **oracle**\index{Oracle}—a pure mathematical function mapping an input tensor to an output tensor. The forward pass computes activations through transformer layers, normalizes logits across a fixed vocabulary $\mathcal{V}$, and samples a token. Storage sectors are unmodified, memory outside the model's transient buffers is untouched, and zero network packets are dispatched to external hosts.
 
 Agentic systems shatter this physical isolation. In an autonomous agent architecture, inference is not the termination of computation; it is merely the deliberative proposal phase of a closed control loop across environment states, actions, and observations.[^fn-actuation-pomdp-definition] When the neural policy $\pi_\theta(a_t \mid h_t)$ emits tokens corresponding to an external action $a_t \in \mathcal{A}$, those tokens cross the **actuation boundary**\index{Actuation boundary}—the physical demarcation line separating the continuous, probabilistic space of neural representations from the discrete, causal space of deterministic software environments.
 
@@ -268,18 +280,14 @@ When an external tool server exposes a schema with an argument `query: string`, 
 
 In computer architecture, data transfers between the CPU and peripherals are governed by bus width and cache line granularity (typically 64 bytes). In an agent runtime, tool invocations transfer over JSON-RPC wire frames. While JSON provides human readability and structural flexibility, it imposes substantial **payload serialization overhead** that directly degrades accelerator performance.
 
-#### The byte-to-token inflation factor
-
-JSON is structurally verbose: every field requires delimiter quotes, colons, brackets, and repeated key strings (`"jsonrpc"`, `"method"`, `"arguments"`). In production tokenizers (e.g., Byte-Pair Encoding with 32K–128K vocabularies), raw text data exhibits an average token density of approximately $1\,\text{KB} \approx 250 \text{ to } 300\text{ tokens}$.
+**The byte-to-token inflation factor:** JSON is structurally verbose: every field requires delimiter quotes, colons, brackets, and repeated key strings (`"jsonrpc"`, `"method"`, `"arguments"`). In production tokenizers (e.g., Byte-Pair Encoding with 32K–128K vocabularies), raw text data exhibits an average token density of approximately $1\,\text{KB} \approx 250 \text{ to } 300\text{ tokens}$.
 
 Consider an agent querying a SQL database, inspecting a directory tree, or retrieving a Git diff:
 
 - A modest $12\,\text{KB}$ tabular database query result converts into roughly $3,000\text{ to }3,600\text{ tokens}$.
 - If an agent executes an $N = 20$ step trajectory with an average tool response size of $5\,\text{KB}$ ($1,250\text{ tokens}$), the cumulative observation payload alone injects $\mathcal{S}_{\text{observations}} = 20 \times 1,250 = 25,000\text{ tokens}$ directly into the model's prompt context.
 
-#### Wire transport vs. accelerator memory impact
-
-From a networking perspective, transmitting $12\,\text{KB}$ over local `stdio` IPC takes less than $1.2\,\mu\text{s}$ through Linux pipe buffers (operating at $> 10\,\text{GB/s}$ memory bandwidth). Over remote HTTP/SSE connections, JSON serialization, TLS encryption, and TCP packet segmentation add an acceptable $5\,\text{ms} \text{ to } 25\,\text{ms}$.
+**Wire transport vs. accelerator memory impact:** From a networking perspective, transmitting $12\,\text{KB}$ over local `stdio` IPC takes less than $1.2\,\mu\text{s}$ through Linux pipe buffers (operating at $> 10\,\text{GB/s}$ memory bandwidth). Over remote HTTP/SSE connections, JSON serialization, TLS encryption, and TCP packet segmentation add an acceptable $5\,\text{ms} \text{ to } 25\,\text{ms}$.
 
 The critical systems bottleneck is not the wire transport—it is **accelerator Key-Value (KV) cache memory**. In an autoregressive agent, every token received from an external tool remains resident in the KV cache across all subsequent trajectory steps. For a 70B parameter model utilizing Grouped-Query Attention (GQA) with $H_{kv} = 8$ key-value heads, head dimension $d_h = 128$, and $L = 80$ layers in FP16 precision ($2\text{ bytes}$ per parameter), the memory consumed solely by storing past tool observation returns is $B_{\text{obs}} = 2 \cdot L \cdot H_{kv} \cdot d_h \cdot \mathcal{S}_{\text{observations}} \cdot 2 \text{ bytes} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 25,000 \cdot 2 \text{ bytes} \approx 8.19\,\text{GB}$. Over $8\,\text{GB}$ of physical HBM is permanently stranded per active agent stream solely retaining verbose JSON formatting strings.
 
@@ -358,8 +366,7 @@ To secure agentic actuation, we must abandon ambient authority and adopt **Capab
 - A capability designates both a specific resource and the specific set of operations permitted on that resource. To actuate, the caller must present the capability. Possession of the capability *is* the authority.
 
 ::: {#def-capability-lease}
-#### Definition: Capability lease
-A **Capability Lease**\index{Capability Lease} is a cryptographically signed, tamper-proof descriptor issued by the supervisor kernel:
+**Definition (Capability Lease):** A **Capability Lease**\index{Capability Lease} is a cryptographically signed, tamper-proof descriptor issued by the supervisor kernel:
 
 $$\mathcal{K} = \langle \text{AID}, \, \mathcal{R}_{\text{URI}}, \, \mathcal{O}_{\text{ops}}, \, \mathcal{C}_{\text{args}}, \, t_{\text{expire}}, \, \sigma_{\text{kernel}} \rangle$$
 
@@ -471,9 +478,7 @@ The compensating action $C_i$ does not execute a magical database rollback; rath
 
 If an agent trajectory fails at step $k \in \{1, \dots, n\}$ due to an unrecoverable exception or capability rejection, the supervisor orchestrator initiates **Backward Recovery**\index{Backward Recovery}. The runtime halts forward execution and executes the compensating transactions in reverse chronological order: $\text{RecoveryPath} = (C_{k-1}, C_{k-2}, \dots, C_1)$.
 
-#### Pivot steps and the point of no return
-
-Certain real-world actions are physically or legally **uncompensable**. Once executed, their side effects cannot be reversed by software:
+**Pivot steps and the point of no return:** Certain real-world actions are physically or legally **uncompensable**. Once executed, their side effects cannot be reversed by software:
 
 - Sending an email or SMS notification to an external customer.
 - Broadcasting a public message on a social network or market exchange.
@@ -491,9 +496,7 @@ Once execution successfully passes the pivot step, backward recovery is abolishe
 
 While model inference latency is relatively deterministic and bounded by memory bandwidth (generating tokens at $15\text{ to }30\,\text{ms}$ per token), tool execution latencies are fundamentally **heterogeneous, multimodal, and heavy-tailed**.
 
-#### The multimodal tool latency spectrum
-
-In production agent runtimes, tool execution times span five orders of magnitude:
+**The multimodal tool latency spectrum:** In production agent runtimes, tool execution times span five orders of magnitude:
 
 1. **In-Memory Operations ($0.1 - 2\,\text{ms}$):** String transformations, regex matching (`GrepSearch`), and cryptographic hashing.
 2. **Local POSIX Operations ($5 - 50\,\text{ms}$):** Reading local files (`FileView`), querying local git status, or spawning lightweight child processes.
@@ -506,9 +509,7 @@ Consider an external API with an average latency of $300\,\text{ms}$, but with a
 
 Nearly three out of four agent trajectories will be stalled by an external tool straggler. If the serving runtime holds the model's KV-cache pinned in GPU HBM throughout an 8-second external stall, it incurs a severe Tool-Wait memory tax, blocking other concurrent requests from utilizing the accelerator. Runtimes must deploy asynchronous execution loops, context paging to host DRAM, and deterministic execution timeouts.
 
-#### Compound error propagation across trajectory steps
-
-Tool execution is not only prone to latency variance; it is also prone to execution errors. At each step $k$, an action can fail at two distinct layers:
+**Compound error propagation across trajectory steps:** Tool execution is not only prone to latency variance; it is also prone to execution errors. At each step $k$, an action can fail at two distinct layers:
 
 1. **Model Actuation Error ($\epsilon_{\text{model}}$):** The model emits valid syntax, but selects an incorrect tool or provides semantically invalid parameters (e.g., querying a non-existent database column).
 2. **Environment & Infrastructure Error ($\epsilon_{\text{tool}}$):** The external service encounters a network timeout, concurrency conflict, permission denial, or transient 500 error.
@@ -563,15 +564,11 @@ Dynamic tool discovery transforms tool catalog management into a two-stage infor
 
 The two-stage retrieval pipeline operates as follows:
 
-#### Stage 1: Coarse semantic indexing and retrieval
-
-Every tool $T_i$ in the enterprise catalog is indexed offline within an approximate nearest neighbor (ANN) vector database (such as HNSW [@malkov2020hnsw]). The tool's representation is computed by passing its functional summary, operational keywords, and signature through a dense embedding model $\mathcal{E}_{\text{embed}}$: $\mathbf{e}_{T_i} = \mathcal{E}_{\text{embed}}(\text{ToolName}_i \,\|\, \text{Docstring}_i \,\|\, \text{Signature}_i) \in \mathbb{R}^d$. At trajectory step $t$, the agent runtime formulates a search query $\mathbf{q}_t$ from the agent's immediate deliberative thought tokens or recent interaction history: $\mathbf{q}_t = \mathcal{E}_{\text{embed}}(\text{AgentThought}_t) \in \mathbb{R}^d$.
+**Stage 1 (Coarse semantic indexing and retrieval):** Every tool $T_i$ in the enterprise catalog is indexed offline within an approximate nearest neighbor (ANN) vector database (such as HNSW [@malkov2020hnsw]). The tool's representation is computed by passing its functional summary, operational keywords, and signature through a dense embedding model $\mathcal{E}_{\text{embed}}$: $\mathbf{e}_{T_i} = \mathcal{E}_{\text{embed}}(\text{ToolName}_i \,\|\, \text{Docstring}_i \,\|\, \text{Signature}_i) \in \mathbb{R}^d$. At trajectory step $t$, the agent runtime formulates a search query $\mathbf{q}_t$ from the agent's immediate deliberative thought tokens or recent interaction history: $\mathbf{q}_t = \mathcal{E}_{\text{embed}}(\text{AgentThought}_t) \in \mathbb{R}^d$.
 
 The retrieval engine executes a Maximum Inner Product Search (MIPS) to retrieve the top-$K$ candidate tools ($K \in [3, 8]$, where $K \ll M$): $\mathcal{T}_{\text{active}} = \arg\max_{T_i \in \mathcal{T}_{\text{catalog}}}^{(K)} [(\mathbf{q}_t^\top \mathbf{e}_{T_i}) / (\|\mathbf{q}_t\| \|\mathbf{e}_{T_i}\|)]$.
 
-#### Stage 2: Just-in-time schema binding and masking
-
-Only the retrieved $K$ schemas are dynamically formatted and injected into the active prompt context. Simultaneously, the GPU serving engine compiles the active $K$ schemas into the active DFA logit mask tensor.
+**Stage 2 (Just-in-time schema binding and masking):** Only the retrieved $K$ schemas are dynamically formatted and injected into the active prompt context. Simultaneously, the GPU serving engine compiles the active $K$ schemas into the active DFA logit mask tensor.
 
 By restricting in-context tools to $K = 4$ deep candidates, prompt context overhead collapses from $35,000+$ tokens to under $1,500$ tokens, preserving KV-cache memory and eliminating attention confusion [@patil2023gorilla; @schick2023toolformer].
 
@@ -642,9 +639,7 @@ A tool operation is cacheable if its return is a deterministic function of its i
 
 When an agent issues a tool call matching an active entry in the result cache, the runtime completely bypasses external tool execution, returning the memoized observation payload in under $1\,\text{ms}$.
 
-#### Synergy with prompt prefix caching
-
-The integration of tool-result memoization with modern GPU serving engines (e.g., vLLM, SGLang) creates a powerful systems synergy with **Prompt Prefix Caching** [@kwon2023vllm; @zheng2023sglang].
+**Synergy with prompt prefix caching:** The integration of tool-result memoization with modern GPU serving engines (e.g., vLLM, SGLang) creates a powerful systems synergy with **Prompt Prefix Caching** [@kwon2023vllm; @zheng2023sglang].
 
 Modern large language model (LLM) serving engines organize KV-caches in radix trees. If an incoming request shares an identical token prefix with a previously executed request, the engine skips the compute-bound prefill phase for that prefix, reading the precomputed KV activations directly from GPU memory.
 
@@ -652,9 +647,7 @@ When a tool output is memoized, the exact observation string returned across the
 
 To ground this synergy in numbers: consider an agent that repeatedly executes a unit test suite via `pytest`. Executing the test runner inside an isolated container sandbox takes $12\,\text{seconds}$. Upon subsequent invocations with identical repository state ($\text{EnvHash}$), the content-addressed result cache returns the cached test output in $< 0.8\,\text{ms}$. Crucially, because the returned observation string is byte-for-byte identical, the GPU serving engine's Radix KV-cache achieves a 100 percent prefix hit across the preceding $14,000$ context tokens. Instead of waiting $12\,\text{s}$ for the test suite plus $210\,\text{ms}$ for context re-prefill ($2.9\text{ PFLOPs}$ on an H100), the step transitions in under $15\,\text{ms}$—an $800\times$ speedup that transforms an expensive physical I/O stall into an in-memory L1 cache hit.
 
-#### The counterpart hazard: KV-cache prefix busting
-
-While deterministic memoization unlocks 100 percent prefix cache hits, the inverse reality represents one of the most pervasive performance killers in agent serving: **non-deterministic observation returns**.
+**The counterpart hazard (KV-cache prefix busting):** While deterministic memoization unlocks 100 percent prefix cache hits, the inverse reality represents one of the most pervasive performance killers in agent serving: **non-deterministic observation returns**.
 
 If an external tool observation returns volatile, un-sanitized strings—such as ISO wall-clock timestamps (`[2026-09-13T14:20:01.204Z]`), ephemeral operating system process IDs (`[PID: 49102]`), fluctuating temporary scratch paths (`/tmp/scratch_8fa3b/`), or elapsed duration strings (`Executed in 4.12s`)—the observation token sequence diverges on every invocation. In modern Radix-tree KV caches, attention keys and values are indexed by strict token-level prefix identity. A single non-deterministic token injected at step $k$ instantly **busts the prefix cache** for the entire accumulated context. For all subsequent trajectory steps $k+1, \dots, N$, the serving engine cannot reuse precomputed activations and must re-evaluate the full multi-thousand-token prompt history through the prefill pipeline. To preserve prefix cache residency, high-performance agent runtimes must enforce **deterministic observation canonicalization**: volatile timestamps, process IDs, and memory addresses must be stripped or redirected to out-of-band telemetry logs before observation strings cross the actuation boundary.
 
