@@ -760,7 +760,9 @@ class WeightStreamingModel(ForwardModel):
         total_memory_required = (total_kv_bytes * 1.1).to("GB")
 
         feasible = total_memory_required <= hardware.memory.capacity
-        utilization = (total_memory_required / hardware.memory.capacity).magnitude if hardware.memory.capacity.magnitude > 0 else 1.0
+        # Convert to dimensionless before reading the magnitude: GB / GiB left
+        # unreduced overstated utilization by 2^30 / 10^9 = 7.4% (fixed 2026-09-15).
+        utilization = (total_memory_required / hardware.memory.capacity).to("dimensionless").magnitude if hardware.memory.capacity.magnitude > 0 else 1.0
 
         constraint_trace = []
         if feasible:

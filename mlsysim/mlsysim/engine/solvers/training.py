@@ -166,6 +166,7 @@ class TrainingMemoryModel(ForwardModel):
         gradient_accumulation_steps: int = 1,
         trainable_fraction: float = 1.0,
         communication_buffer_fraction: float = 0.05,
+        sequence_parallel: bool = True,
     ) -> TrainingMemoryResult:
         """Estimate per-accelerator training memory.
 
@@ -174,6 +175,13 @@ class TrainingMemoryModel(ForwardModel):
         states are sharded by tensor, pipeline, and expert parallelism first;
         ZeRO then shards optimizer, gradient, and parameter states across the
         data-parallel group according to its stage.
+
+        With ``tp_size > 1`` and ``sequence_parallel`` (the Megatron-LM recipe
+        Korthikanti et al. 2023 evaluate), every stored activation is split
+        across the tensor-parallel group, so the activation term divides by
+        ``tp_size`` (their Table 2). Without sequence parallelism the
+        LayerNorm and dropout activations stay replicated; that case keeps the
+        unsharded activation term as a conservative upper bound.
         """
         from ...core._validation import validate_at_least, validate_range
         from ...physics import calc_activation_memory
@@ -237,6 +245,10 @@ class TrainingMemoryModel(ForwardModel):
             precision_bytes=bpp,
             strategy=activation_checkpointing,
         )
+        if tp_size > 1 and sequence_parallel:
+            # (Added 2026-09-15: activations were never sharded by TP, so a
+            # TP=8 Llama-3 70B step reported ~8x its stored activations.)
+            activations = activations / tp_size
 
         # Gradient bucket: the staging buffer the DP allreduce drains from,
         # modeled as a small fraction of the gradient footprint.

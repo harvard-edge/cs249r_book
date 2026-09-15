@@ -12,6 +12,7 @@ import pytest
 # All tests in this file are solver-level correctness tests
 pytestmark = pytest.mark.solver
 
+from mlsysim.core.units import BYTES_FP16
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.registry import Systems
@@ -735,21 +736,56 @@ class TestCompressionModel:
     """Tests for quantization and pruning trade-off analysis."""
 
     @pytest.mark.smoke
-    def test_int8_compression_ratio_is_4x(self):
-        """INT8 quantization from FP32 baseline should yield 4x compression."""
-        resnet = Models.Vision.ResNet50
-        a100 = Hardware.Cloud.A100
-        solver = CompressionModel()
-        result = solver.solve(resnet, a100, method="quantization", target_bitwidth=8)
-        assert result.compression_ratio == pytest.approx(4.0, rel=0.01)
+    def test_int4_compression_ratio_is_4x_vs_explicit_fp16_baseline(self):
+        """INT4 against an FP16/BF16 baseline is 4x (16/4), as practice quotes it."""
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
+        result = CompressionModel().solve(
+            llama, h100, method="quantization", target_bitwidth=4, baseline_precision="fp16"
+        )
+        assert result.baseline_precision == "fp16"
+        assert result.compression_ratio == pytest.approx(4.0)
+        assert result.memory_savings_pct == pytest.approx(75.0)
+        # original size is the FP16 artifact: 2 bytes/param
+        expected_fp16_gb = llama.size_in_bytes(BYTES_FP16).to("GB").magnitude
+        assert result.original_size_gb.to("GB").magnitude == pytest.approx(expected_fp16_gb)
 
-    def test_int4_compression_ratio_is_8x(self):
-        """INT4 quantization from FP32 baseline should yield 8x compression."""
-        resnet = Models.Vision.ResNet50
-        a100 = Hardware.Cloud.A100
+    def test_int8_compression_ratio_is_2x_vs_explicit_fp16_baseline(self):
+        """INT8 against an FP16 baseline is 2x (16/8)."""
+        result = CompressionModel().solve(
+            Models.Vision.ResNet50, Hardware.Cloud.A100, method="quantization",
+            target_bitwidth=8, baseline_precision="fp16",
+        )
+        assert result.compression_ratio == pytest.approx(2.0)
+
+    @pytest.mark.parametrize("bits, expected", [(16, 2.0), (8, 4.0), (4, 8.0)])
+    def test_default_baseline_is_fp32(self, bits, expected):
+        """The default baseline is FP32, so existing results are unchanged: 32/b."""
+        result = CompressionModel().solve(
+            Models.Vision.ResNet50, Hardware.Cloud.A100, method="quantization",
+            target_bitwidth=bits,
+        )
+        assert result.baseline_precision == "fp32"
+        assert result.compression_ratio == pytest.approx(expected)
+
+    def test_baseline_precision_resolves_through_precision_map(self):
+        """Aliases share the map's storage width (bf16 == fp16) and unknown keys raise."""
         solver = CompressionModel()
-        result = solver.solve(resnet, a100, method="quantization", target_bitwidth=4)
-        assert result.compression_ratio == pytest.approx(8.0, rel=0.01)
+        args = (Models.Vision.ResNet50, Hardware.Cloud.A100)
+        bf16 = solver.solve(*args, target_bitwidth=4, baseline_precision="BF16")
+        assert bf16.baseline_precision == "bf16"
+        assert bf16.compression_ratio == pytest.approx(4.0)
+        with pytest.raises(ValueError):
+            solver.solve(*args, target_bitwidth=4, baseline_precision="fp12")
+
+    def test_memory_bound_speedup_tracks_baseline_ratio(self):
+        """Batch-1 LLM decode is memory-bound: speedup equals the baseline-relative ratio."""
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
+        fp16 = CompressionModel().solve(llama, h100, target_bitwidth=4, baseline_precision="fp16")
+        fp32 = CompressionModel().solve(llama, h100, target_bitwidth=4)
+        assert fp16.inference_speedup == pytest.approx(4.0)
+        assert fp32.inference_speedup == pytest.approx(8.0)
 
     @pytest.mark.parametrize("bitwidth", [8, 4, 2])
     def test_accuracy_delta_is_negative(self, bitwidth):
@@ -803,12 +839,14 @@ class TestCompressionModel:
         assert comp < orig
 
     def test_memory_savings_percentage(self):
-        """Memory savings for INT8 should be 75% (1 - 1/4)."""
+        """INT8 saves 75% of the default FP32 artifact (1 - 1/4) and 50% of an FP16 one (1 - 1/2)."""
         resnet = Models.Vision.ResNet50
         a100 = Hardware.Cloud.A100
         solver = CompressionModel()
         result = solver.solve(resnet, a100, method="quantization", target_bitwidth=8)
         assert result.memory_savings_pct == pytest.approx(75.0, rel=0.01)
+        fp16 = solver.solve(resnet, a100, method="quantization", target_bitwidth=8, baseline_precision="fp16")
+        assert fp16.memory_savings_pct == pytest.approx(50.0, rel=0.01)
 
 # ======================================================================
 # 8. Constants & Module Import Tests
@@ -920,6 +958,64 @@ class TestDistributedModel:
         cluster = Systems.Clusters.Research_256
         result = solver.solve(gpt3, cluster, batch_size=32)
         assert result.communication_latency.magnitude > 0
+
+    def test_tp_training_step_pays_four_allreduces_per_layer(self):
+        """Megatron-LM TP: 2 forward + 2 backward AllReduces per layer of one pipeline stage."""
+        import math
+
+        from mlsysim.engine.solvers.distributed import TP_ALLREDUCES_PER_LAYER_TRAINING
+        from mlsysim.engine.solvers.utils import _intra_node_latency
+        from mlsysim.physics import calc_ring_allreduce_time
+
+        model = Models.Language.Llama3_8B
+        cluster = Systems.Clusters.Research_256
+        result = DistributedModel().solve(
+            model, cluster, batch_size=1024, seq_len=2048, precision="fp16",
+            tp_size=8, pp_size=4, microbatch_count=16,
+        )
+        local_batch = 1024 // result.parallelism["dp"]
+        activation = local_batch * 2048 * model.hidden_dim * BYTES_FP16
+        one_allreduce = calc_ring_allreduce_time(
+            activation, 8, cluster.node.intra_node_bw, _intra_node_latency(cluster.node)
+        )
+        assert TP_ALLREDUCES_PER_LAYER_TRAINING == 4
+        # Stages run concurrently, so a step's wall-clock TP communication
+        # covers one stage's layers, not the whole model's.
+        layers_per_stage = math.ceil(model.layers / 4)
+        expected = (one_allreduce * 4 * layers_per_stage).m_as("ms")
+        assert result.tp_communication_latency.m_as("ms") == pytest.approx(expected)
+
+    def test_replica_step_shares_compute_across_model_parallel_group(self):
+        """A sharded 70B step is priced as compute on the TP x PP group, not offload on one GPU."""
+        model = Models.Language.Llama3_70B
+        cluster = Systems.Clusters.Training_512_H100
+        kw = dict(batch_size=512, seq_len=4096, tp_size=8, pp_size=2,
+                  microbatch_count=16, activation_recomputation=True)
+        slow = DistributedModel().solve(model, cluster, efficiency=0.40, **kw)
+        fast = DistributedModel().solve(model, cluster, efficiency=0.50, **kw)
+
+        node = slow.node_profile
+        assert node.feasible is True
+        assert node.offload_effective_bw is None
+        assert node.memory_footprint < cluster.node.accelerator.memory.capacity
+        # Full recomputation: 4x forward FLOPs per token over the replica's 16 GPUs.
+        local_batch = 512 // slow.parallelism["dp"]
+        step_flops = 4 * model.inference_flops * 4096 * local_batch
+        replica_flops = cluster.node.accelerator.compute.peak_flops * 0.40 * 16
+        assert node.latency_compute.m_as("s") == pytest.approx((step_flops / replica_flops).m_as("s"))
+        # Compute-bound, so a higher efficiency must shorten the step.
+        assert fast.node_profile.latency < node.latency
+
+    def test_pipeline_bubble_is_additive_idle_time(self):
+        """bubble_fraction is the idle share of the whole step, so idle time = compute * b / (1 - b)."""
+        result = DistributedModel().solve(
+            Models.Language.Llama3_8B, Systems.Clusters.Research_256,
+            batch_size=1024, seq_len=2048, tp_size=8, pp_size=4, microbatch_count=16,
+        )
+        b = result.bubble_fraction
+        assert b == pytest.approx(3 / (16 + 3))
+        expected = result.node_profile.latency * b / (1 - b)
+        assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(expected.m_as("ms"))
 
     def test_pipeline_parallelism_creates_bubble(self):
         """PP > 1 should introduce a non-zero pipeline bubble."""
@@ -1324,6 +1420,25 @@ class TestSensitivitySolver:
         assert baseline.peak_bw_actual == esp32.memory.sram_bandwidth
         assert result.sensitivities["memory_bandwidth"] <= 0.0 + 1e-9
 
+    def test_infeasible_baseline_is_flagged_not_silently_zero(self):
+        """Llama-3 70B FP16 (~141 GB) cannot fit one H100: flag it and bind on capacity."""
+        result = SensitivitySolver().solve(
+            Models.Language.Llama3_70B, Hardware.Cloud.H100, precision="fp16"
+        )
+        assert result.feasible is False
+        assert result.binding_constraint == "memory_capacity"
+        assert any("Memory Wall: FAILED" in line for line in result.constraint_trace)
+        assert any("infeasible baseline" in line for line in result.constraint_trace)
+
+    def test_feasible_baseline_reports_feasible_and_binding_trace(self):
+        """Llama-3 8B batch-1 decode on H100 fits and is bandwidth-bound."""
+        result = SensitivitySolver().solve(
+            Models.Language.Llama3_8B, Hardware.Cloud.H100, precision="fp16"
+        )
+        assert result.feasible is True
+        assert result.binding_constraint == "memory_bandwidth"
+        assert result.constraint_trace and "memory_bandwidth is binding" in result.constraint_trace[0]
+
 # ======================================================================
 # 18. SynthesisSolver
 # ======================================================================
@@ -1637,6 +1752,19 @@ class TestWeightStreamingModel:
         )
         assert 0.0 <= result.wafer_memory_utilization <= 1.0
 
+    def test_memory_utilization_is_a_unit_free_ratio(self):
+        """Required GB over GiB capacity must be reduced before reading the magnitude."""
+        from mlsysim.core.units import Q_
+
+        model, wafer = Models.Language.Llama3_8B, Hardware.Cloud.Cerebras_CS3
+        result = WeightStreamingModel().solve(model, wafer, seq_len=8192, batch_size=512)
+        kv_heads = model.kv_heads or model.heads
+        head_dim = model.hidden_dim // model.heads
+        kv_bytes = 8192 * kv_heads * head_dim * 2 * 2 * model.layers * 512  # K and V, FP16
+        expected = (Q_(kv_bytes * 1.1, "byte") / wafer.memory.capacity).to("dimensionless").magnitude
+        assert result.feasible is False
+        assert result.wafer_memory_utilization == pytest.approx(expected)
+
     def test_infeasible_when_sram_overflows(self):
         """Huge batch * long sequence should overflow 44GB on-wafer SRAM."""
         solver = WeightStreamingModel()
@@ -1791,11 +1919,15 @@ class TestCompressionInferenceSpeedup:
         assert result.inference_speedup > 1.0
 
     def test_fp8_quantization(self):
-        """FP8 quantization (8-bit) should yield 4x compression over FP32."""
+        """FP8 quantization (8-bit) yields 4x over the default FP32 baseline, 2x over an explicit FP16 one."""
         resnet = Models.Vision.ResNet50
         a100 = Hardware.Cloud.A100
         result = CompressionModel().solve(resnet, a100, method="quantization", target_bitwidth=8)
-        assert result.compression_ratio == pytest.approx(4.0)  # 32/8 = 4x
+        assert result.compression_ratio == pytest.approx(4.0)  # 32/8
+        fp16 = CompressionModel().solve(
+            resnet, a100, method="quantization", target_bitwidth=8, baseline_precision="fp16"
+        )
+        assert fp16.compression_ratio == pytest.approx(2.0)  # 16/8
 
 class TestReliabilityGoodput:
     """Tests for goodput_ratio added in Phase 3."""

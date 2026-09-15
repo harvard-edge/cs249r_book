@@ -35,6 +35,62 @@ Release body. Omit any section that has no entries for a given release.
 
 ## Unreleased
 
+### Bug Fixes
+
+- `CompressionModel` measured every ratio against a hard-coded FP32 baseline
+  with no way to change it, so INT4 always reported 8x compression and an 8x
+  memory-bound speedup, even for models served from FP16/BF16 weights where
+  practice quotes 4x. `solve`, `candidate`, and `sweep` now take a configurable
+  `baseline_precision` (resolved through `core.units.PRECISION_MAP`) that
+  defaults to `"fp32"`, so existing results are unchanged:
+  `compression_ratio = b_base / target_bitwidth`, and original sizes and the
+  Roofline regime use the baseline width. Pass `baseline_precision="fp16"` for
+  FP16/BF16-served models (INT4 = 4x). `CompressionResult` and
+  `CompressionCandidate` record the baseline; the Wall 13 equation now reads
+  `r = b_base/b`.
+- `DistributedModel` counted 2 tensor-parallel AllReduces per layer (the
+  forward path only) for a training step and priced them as one collective of
+  twice the activation size. Megatron-LM tensor parallelism runs two AllReduces
+  in the forward path and two in the backward path per layer (Shoeybi et al.
+  2019, p.4), so a training step now pays 4 separate AllReduces per layer, each
+  with its own ring latency term: the bandwidth term of `tp_communication_latency`
+  doubles and the latency term quadruples.
+- `SensitivitySolver` returned all-zero sensitivities with `peak_flops` named
+  as binding when the configuration does not fit in memory (for example
+  Llama-3 70B FP16 on one H100): the offload path pins latency, so no 10%
+  perturbation moves it, and `max()` broke the tie on the first key.
+  `SensitivityResult` now carries `feasible`; an infeasible baseline reports
+  `binding_constraint="memory_capacity"` and a `constraint_trace` with the
+  Memory Wall failure.
+- `DistributedModel` priced the local step with `Engine.solve` on the whole,
+  unsharded model on one accelerator and counted one token per sequence. Any
+  multi-billion-parameter transformer therefore failed the memory check and
+  was priced at the PCIe offload bandwidth, so step time ignored `efficiency`
+  and every TP/PP/DP split looked alike (Llama-3 70B at TP=8 on 512 H100s:
+  9.5 TB "per GPU"). The step is now one model-parallel replica: step FLOPs
+  (`inference_flops * seq_len * local_batch`, 3x for training, 4x with
+  recomputation) shared across its `tp * pp * ep` accelerators, and
+  feasibility from `TrainingMemoryModel` with the same TP/PP/EP/ZeRO
+  sharding, selective recomputation (full when `activation_recomputation`),
+  and the microbatches a 1F1B stage holds in flight. Non-transformer
+  workloads without model parallelism keep the `Engine.solve` path.
+  - Tensor-parallel communication now covers one pipeline stage's layers
+    (stages run concurrently) instead of charging every layer to every stage.
+  - The pipeline bubble is added as idle time `compute * b / (1 - b)`, since
+    `calc_pipeline_bubble` returns the idle share of the whole step; it was
+    added as `compute * b`, which understated it most for few microbatches.
+  - `effective_throughput` multiplies by the DP replica count, not the
+    accelerator count.
+- `ParallelismOptimizer` drops candidates whose replica does not fit once
+  activations are counted, prices pipelined candidates with one-sample
+  microbatches, takes `seq_len` and `activation_recomputation`, and names the
+  memory remedies when nothing fits.
+- `TrainingMemoryModel` never divided activations by the tensor-parallel
+  degree. With `sequence_parallel=True` (the default, Korthikanti et al. 2023)
+  activations shard across the TP group; `tp_size=1` results are unchanged.
+- `WeightStreamingModel.wafer_memory_utilization` divided GB by GiB without
+  reducing units, overstating utilization by 7.4%.
+
 ### Solvers, Models & Taxonomy
 
 - `ContinuousBatchingModel` now derives static and paged capacity from a
@@ -51,6 +107,24 @@ Release body. Omit any section that has no entries for a given release.
   latency at the mean request length.
 - Added `calc_capped_exponential_scale` and `calc_expected_paged_kv_tokens` to
   `mlsysim.physics`.
+- Added the `mlsysim.Agents` registry (`Coding.SWE_Bench_Runner`,
+  `Deliberation.TreeSearch`, `MultiAgent.SupervisorWorker`,
+  `Interactive.StreamingVoice`) and the `mlsysim.Embodied` registry
+  (`Quadruped.Spot`, `Humanoid.Atlas`, `Humanoid.Unitree_H1`,
+  `Manipulator.Panda`, `Drone.DJI_Matrice`, `AMR.LogisticsAMR`,
+  `Vehicle.Robotaxi`). Provenance states what is sourced. The Panda record is
+  a datasheet. Spot, Atlas, Unitree H1, and the DJI Matrice 350 RTK are
+  estimates that link their spec pages and name the unsourced fields. The AMR
+  and robotaxi are estimated class profiles, and the four agent profiles are
+  illustrative teaching assumptions.
+- Added `mlsysim.physics.agents` (trajectory step time and reliability, Pareto
+  trajectory-length tail, radix prefix-cache latency, test-time compute cost,
+  multi-agent coordination overhead, speedup, and optimal concurrency) and
+  `mlsysim.physics.robotics` (sensor-to-actuator latency, stopping distance
+  and maximum permitted velocity, kinetic energy, reflected inertia and seam
+  torque, inverted-pendulum fall time, actuator Joule heating, and
+  action-chunk cadence). Each docstring has a `Source:` line that cites a
+  checked reference or names the formula as a modeling assumption.
 
 ### Documentation
 

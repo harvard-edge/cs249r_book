@@ -257,7 +257,7 @@ and the binding constraint that limits further optimization.
 | Time | Activity | Format | Notes |
 |------|----------|--------|-------|
 | 11:45 | **The Fidelity Wall** | Lecture (8 min) | Quantization (fewer bits), pruning (fewer weights), distillation (smaller model). Key insight: storage always shrinks, but speedup depends on whether you are compute-bound or memory-bound. Structured vs unstructured pruning. |
-| 11:53 | **Exercise 3: Quantization trade-offs** | Hands-on (pair, 7 min) | Run Exercise 3. Compare FP16 vs INT4. Note compression ratio, accuracy delta, and speedup. "Is the speedup 8x or 4x? Why?" |
+| 11:53 | **Exercise 3: Quantization trade-offs** | Hands-on (pair, 7 min) | Run Exercise 3. Compare FP16 vs INT4. Note compression ratio, accuracy delta, and speedup. "With `baseline_precision=\"fp16\"` the ratio is 4x (8x against the FP32 default). Does 4x fewer bytes become a 4x speedup? Why?" |
 
 **Slide deck:** Section 4 (6--8 slides)
 

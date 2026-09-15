@@ -16,24 +16,10 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, Sequential
 from tinytorch.core.activations import ReLU, Sigmoid
 from tinytorch.core.losses import MSELoss as MeanSquaredError, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
-class Sequential:
-    """Simple sequential container for testing."""
-    def __init__(self, layers):
-        self.layers = layers
-    def __call__(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-    def parameters(self):
-        params = []
-        for layer in self.layers:
-            if hasattr(layer, 'parameters'):
-                params.extend(layer.parameters())
-        return params
 
 
 class TrainingTester:

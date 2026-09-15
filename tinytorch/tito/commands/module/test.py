@@ -249,7 +249,7 @@ class ModuleTestCommand(BaseCommand):
             # Foundation modules (01-08)
             1: [],
             2: [],
-            3: ["test_layers_integration.py"],
+            3: ["test_layers_composition.py"],
             4: [],  # Loss tests that need training moved to module 7+
             5: ["test_dataloader_integration.py"],  # DataLoader
             6: [],  # Autograd-only tests (gradient_flow requires optimizers)
