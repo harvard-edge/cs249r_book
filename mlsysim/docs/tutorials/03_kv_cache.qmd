@@ -230,7 +230,7 @@ def paged_blocks(tokens, page):
 def sample_lengths(seed, n, mean=2048, cap=max_seq):
     """n request lengths from a long-tailed distribution (avg well below the cap)."""
     rng = random.Random(seed)
-    return [min(cap, int(rng.expovariate(1 / mean))) for _ in range(n)]
+    return [max(1, min(cap, int(rng.expovariate(1 / mean)))) for _ in range(n)]
 
 
 class StaticAllocator:
@@ -272,20 +272,23 @@ class PagedAllocator:
 ```
 
 **Same memory budget, two strategies.** Feed both allocators the same stream of requests
-until the budget is exhausted, and watch where the memory goes:
+in arrival order until the next request no longer fits, and watch where the memory goes:
 
 ```{python}
-lens = sample_lengths(seed=42, n=100_000)
+def fill(alloc, lengths):
+    """Admit requests in arrival order; stop at the first one that does not fit."""
+    for t in lengths:
+        if not alloc.admit(t):
+            break
+    return alloc
 
-static = StaticAllocator(budget_tokens, max_seq)
-paged16 = PagedAllocator(budget_tokens, 16)
-paged64 = PagedAllocator(budget_tokens, 64)
-paged256 = PagedAllocator(budget_tokens, 256)
-for t in lens:
-    static.admit(t)
-    paged16.admit(t)
-    paged64.admit(t)
-    paged256.admit(t)
+
+lens = sample_lengths(seed=42, n=10_000)
+
+static = fill(StaticAllocator(budget_tokens, max_seq), lens)
+paged16 = fill(PagedAllocator(budget_tokens, 16), lens)
+paged64 = fill(PagedAllocator(budget_tokens, 64), lens)
+paged256 = fill(PagedAllocator(budget_tokens, 256), lens)
 
 
 def kv_tokens(alloc):
@@ -306,7 +309,7 @@ def decode_throughput(alloc):
 
 
 rows = []
-for label, alloc in [("Static (reserve 8K)", static), ("Paged (16 tok)", paged16),
+for label, alloc in [(f"Static (reserve {max_seq // 1024}K)", static), ("Paged (16 tok)", paged16),
                      ("Paged (64 tok)", paged64), ("Paged (256 tok)", paged256)]:
     rows.append([label, len(alloc.admitted),
                  f"{Q_(kv_tokens(alloc) * bytes_per_token, 'byte').to('GiB'):~.1f}",
@@ -320,20 +323,22 @@ table(["System", "Max Users", "KV Allocated", "Int Frag", "Throughput"], rows)
 ## Key Insight
 
 The same 65 GiB KV budget serves **65 users at 77.8% internal fragmentation** with static
-reservation — or **314 users at 0.4%** with 16-token pages. Static pays for the worst
+reservation — or **259 users at 0.4%** with 16-token pages. Static pays for the worst
 case (8K) on every request even though the average request is ~4× shorter; paged pays for
-what is used. The extra concurrency buys **1.78×** decode throughput under the
+what is used. The extra concurrency buys **1.47×** decode throughput under the
 memory-bound model from [Tutorial 2](02_two_phases.qmd).
 :::
 
-**The second kind of waste: external fragmentation.** Even a static allocator that hands
-out exact sizes (no reservation waste) fragments under churn: requests finish out of
-order, leaving holes too small for the next long request. Paged allocation never does —
-any free block works, so external fragmentation is ~0:
+**The second kind of waste: external fragmentation.** The static allocator above never
+suffers from this, because every freed slot is a full `max_seq` and fits any request. That
+is exactly the trade it makes, paying in internal waste instead. A contiguous allocator
+that hands out exact sizes avoids the reservation waste but fragments under churn:
+requests finish out of order, leaving holes too small for the next long request. Paged
+allocation never does — any free block works, so external fragmentation is ~0:
 
 ```{python}
 class FirstFitAllocator:
-    """Static contiguous allocation: variable-size chunks, first-fit, holes merge on free."""
+    """Contiguous exact-size allocation: variable-size chunks, first-fit, holes merge on free."""
 
     def __init__(self, budget_tokens):
         self.budget = budget_tokens
@@ -392,13 +397,12 @@ rng = random.Random(777)
 first_fit = FirstFitAllocator(budget_tokens)
 paged = PagedPool(budget_tokens, 16)
 
-# Fill both pools with variable-length requests until the first one fills up,
-# then complete every other request (finish out of order — the churn that
-# fragments contiguous memory).
-wave = [rng.randint(256, max_seq) for _ in range(200)]
-for t in wave:
-    first_fit.admit(t)
-    paged.admit(t)
+# Fill both pools in arrival order until each is full, then complete every other
+# request (finish out of order — the churn that fragments contiguous memory).
+# Both pools admit a prefix of the same wave, so index i is the same request in each.
+wave = [rng.randint(256, max_seq) for _ in range(400)]
+fill(first_fit, wave)
+fill(paged, wave)
 
 n_done = min(len(first_fit.allocated), len(paged.admitted))
 for i in range(0, n_done, 2):
@@ -410,8 +414,8 @@ new_reqs = [max_seq] * 10
 ff_adm = sum(first_fit.admit(t) for t in new_reqs)
 pg_adm = sum(paged.admit(t) for t in new_reqs)
 free_ff = int(sum(sz for _, sz in first_fit.holes))
-table(["System", "External Frag", "Free Tokens", "New 8K Req. Admitted"],
-      [["Static (first-fit)", f"{first_fit.external_frag_pct():.1%}", free_ff, f"{ff_adm}/10"],
+table(["System", "External Frag", "Free Tokens", f"New {max_seq // 1024}K Req. Admitted"],
+      [["Contiguous (first-fit)", f"{first_fit.external_frag_pct():.1%}", free_ff, f"{ff_adm}/10"],
        ["Paged (16 tok)", "~0%", int(paged.free_blocks * 16), f"{pg_adm}/10"]])
 ```
 
@@ -422,20 +426,20 @@ entries per sequence but waste more. Sweep the page size and watch both:
 ```{python}
 rows = []
 for page in [8, 16, 64, 256, 1024]:
-    a = PagedAllocator(budget_tokens, page)
-    for t in lens:
-        a.admit(t)
+    a = fill(PagedAllocator(budget_tokens, page), lens)
     n = len(a.admitted)
     blocks_per_req = sum(paged_blocks(t, page) for t in a.admitted) / n
     rows.append([page, n, f"{internal_frag_pct(a):.1%}", f"{blocks_per_req:.1f}",
-                 f"{kv_tokens(a) / budget_tokens:.1%}"])
+                 paged_blocks(max_seq, page), f"{kv_tokens(a) / budget_tokens:.1%}"])
 
-table(["Page Size", "Max Users", "Int Frag", "Blocks/Req", "Pool Used"], rows)
+table(["Page Size", "Max Users", "Int Frag", "Avg Blocks/Req",
+       f"Blocks/{max_seq // 1024}K Seq", "Pool Used"], rows)
 ```
 
-16-token pages (vLLM's default) sit at the sweet spot: 0.4% waste with ~106 blocks per
-8K sequence. Going to 1024-token pages slashes the block table to 2 entries per sequence
-but burns 22.2% of the cache as slack — the wrong trade for long-tail workloads.
+16-token pages (vLLM's default) sit at the sweet spot: 0.4% waste, with about 128 blocks
+for an average request and 512 for a full 8K sequence. Going to 1024-token pages shrinks
+the block table 64-fold (8 entries for a full 8K sequence) but burns 22.0% of the cache as
+slack and serves 50 fewer users, the wrong trade for long-tail workloads.
 
 **The third trick: sharing.** Because blocks are first-class, sequences can share them.
 Eight requests that begin with the same 1K-token system prompt (or eight beam-search
@@ -487,10 +491,12 @@ serve with Llama-3 8B at 128K context in FP16. Then try INT8. How many additiona
 does quantization buy you?
 
 **Exercise 3: Paged vs. static at long context.**
-Change `max_seq` in Section 5 to 32768 and re-run the notebook cells. Compare Static
-(reserve 32K) vs. Paged (16 tok) vs. Paged (256 tok). How many users does each serve?
-Why does page size matter more at long context? (Hint: page slack is per-request waste,
-so it hurts most when each request is long and few requests fit.)
+Change `max_seq` in Section 5 to 32768 and re-run the cells. How many users do Static
+(reserve 32K) and Paged (16 tok) serve now, and why does raising the worst case hurt one
+far more than the other? Then compare Paged (16 tok) with Paged (256 tok). Does page size
+matter more when requests get longer, or less? Test your prediction by passing
+`mean=16384` to `sample_lengths`. (Hint: page slack is at most one page per request, a
+fixed cost that shrinks as a share of a longer request.)
 
 **Self-check:** If a model has 32 layers, 8 KV-heads, 128 head_dim, and uses FP16
 (2 bytes), how many bytes does the KV-cache consume per token per user?
