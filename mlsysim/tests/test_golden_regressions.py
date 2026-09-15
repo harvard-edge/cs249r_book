@@ -113,13 +113,22 @@ def test_golden_distributed_llama3_8b_research_cluster():
     # TP comm 534.709 -> 1069.866 ms (bandwidth term exactly 2x, +0.448 ms
     # from counting the latency term per collective); step, throughput, and
     # scaling efficiency follow. DP comm and the bubble are unchanged.
-    assert result.step_latency_total.m_as("ms") == pytest.approx(5088.519845717895)
-    assert result.communication_latency.m_as("ms") == pytest.approx(1077.67958256)
+    # 2026-09-15: re-pinned after the replica fix. The local step was
+    # Engine.solve on the whole unsharded model on one GPU (infeasible, so
+    # priced at the offload bandwidth, one token per sequence); it is now one
+    # TP8 x PP4 replica: 6 * 16.06 GFLOP/token * 2048 tokens * 32 sequences over
+    # 32 GPUs at eta 0.45, 11.6 GB per GPU (fits); node latency is now 888 ms.
+    # TP comm covers one stage's 8 layers instead of all 32 (1069.9 -> 267.5 ms).
+    # The bubble is additive idle time, node * b / (1 - b) (was node * b).
+    # Effective throughput counts DP replicas (8), not accelerators (256).
+    assert result.node_profile.feasible is True
+    assert result.step_latency_total.m_as("ms") == pytest.approx(1329.5611807765017)
+    assert result.communication_latency.m_as("ms") == pytest.approx(275.2803539733333)
     assert result.dp_communication_latency.m_as("ms") == pytest.approx(7.813944444444444)
-    assert result.tp_communication_latency.m_as("ms") == pytest.approx(1069.8656381155556)
-    assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(546.9327631578948)
-    assert result.effective_throughput.m_as("1/s") == pytest.approx(6439.59363302376)
-    assert result.scaling_efficiency == pytest.approx(0.6807298792231218)
+    assert result.tp_communication_latency.m_as("ms") == pytest.approx(267.4664095288889)
+    assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(166.4653937057634)
+    assert result.effective_throughput.m_as("1/s") == pytest.approx(770.1789242988839)
+    assert result.scaling_efficiency == pytest.approx(0.6677507180067451)
     assert result.bubble_fraction == pytest.approx(0.15789473684210525)
 
 

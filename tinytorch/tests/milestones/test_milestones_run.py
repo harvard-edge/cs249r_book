@@ -92,14 +92,11 @@ class TestMilestoneRuns:
         """Milestone 01: Perceptron (1958) - Forward pass with random weights."""
         returncode, stdout, stderr = run_milestone("01", timeout=60)
 
-        # Should complete (even with errors in output, the script should finish)
+        # Should complete and show milestone achievement
         assert returncode == 0, f"Milestone 01 failed:\nstdout: {stdout}\nstderr: {stderr}"
-
-        # Should show the perceptron architecture
-        assert "Perceptron" in stdout or "perceptron" in stdout.lower()
-
-        # Should mention random weights (this is forward-pass only)
-        assert "random" in stdout.lower() or "Random" in stdout
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 01" in stdout
+        assert "Model Parameters" in stdout or "Decision Line" in stdout
+        assert "random" in stdout.lower()
 
     @pytest.mark.slow
     def test_milestone_02_xor_crisis(self):
@@ -107,12 +104,8 @@ class TestMilestoneRuns:
         returncode, stdout, stderr = run_milestone("02", timeout=60)
 
         assert returncode == 0, f"Milestone 02 failed:\nstdout: {stdout}\nstderr: {stderr}"
-
-        # Should mention XOR
-        assert "XOR" in stdout or "xor" in stdout.lower()
-
-        # Should show the limitation (can't solve XOR with single layer)
-        assert "75%" in stdout or "50%" in stdout or "cannot" in stdout.lower() or "limit" in stdout.lower()
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 02" in stdout
+        assert "CONFIRMED: XOR is UNSOLVABLE!" in stdout or "75%" in stdout
 
     @pytest.mark.slow
     def test_milestone_03_mlp_revival(self):
@@ -120,12 +113,9 @@ class TestMilestoneRuns:
         returncode, stdout, stderr = run_milestone("03", timeout=180)
 
         assert returncode == 0, f"Milestone 03 failed:\nstdout: {stdout}\nstderr: {stderr}"
-
-        # Should solve XOR with 100% accuracy
-        assert "100" in stdout and ("XOR" in stdout or "accuracy" in stdout.lower())
-
-        # Should train on digits
-        assert "digit" in stdout.lower() or "Digit" in stdout
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 03" in stdout
+        assert "XOR Solved" in stdout or "100%" in stdout
+        assert "TinyDigits" in stdout or "Test accuracy:" in stdout
 
     @pytest.mark.slow
     def test_milestone_04_cnn_tinydigits(self):
@@ -159,6 +149,7 @@ class TestMilestoneRuns:
         returncode, stdout, stderr = run_milestone("06", timeout=180)
 
         assert returncode == 0, f"Milestone 06 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 06" in stdout
 
         # Should mention optimization techniques
         assert any(term in stdout.lower() for term in [
@@ -167,32 +158,3 @@ class TestMilestoneRuns:
 
         # Should show compression ratio (4x for INT8)
         assert "4" in stdout and ("compress" in stdout.lower() or "×" in stdout or "x" in stdout.lower())
-
-
-class TestMilestoneSequence:
-    """Test that milestones can be run in sequence (simulates student journey)."""
-
-    @pytest.mark.slow
-    @pytest.mark.parametrize("milestone_id", ["01", "02", "03", "04", "05", "06"])
-    def test_milestone_completes(self, milestone_id):
-        """Each milestone should complete without errors (or with expected bonus challenge failures)."""
-        returncode, stdout, stderr = run_milestone(milestone_id, timeout=300)
-
-        # Milestone 05 has bonus challenges that may fail - the core reversal task passing is sufficient
-        # The individual test_milestone_05_transformer test validates the actual learning objective
-        if milestone_id == "05":
-            # Check that reversal (Challenge 1) passed - this is the core learning objective
-            assert reported_accuracy(stdout, "1. Reversal") >= 95, (
-                f"Milestone 05 reversal challenge should pass:\n"
-                f"stdout: {stdout[-2000:] if len(stdout) > 2000 else stdout}"
-            )
-            return  # Bonus challenges may fail, that's OK
-
-        assert returncode == 0, (
-            f"Milestone {milestone_id} failed with return code {returncode}\n"
-            f"stdout: {stdout[-2000:] if len(stdout) > 2000 else stdout}\n"
-            f"stderr: {stderr[-500:] if len(stderr) > 500 else stderr}"
-        )
-
-        # Should show achievement unlocked
-        assert "MILESTONE" in stdout.upper() or "Achievement" in stdout or "✅" in stdout
