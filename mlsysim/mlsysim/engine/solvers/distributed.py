@@ -365,32 +365,55 @@ class DistributedModel(ForwardModel):
         # Resolve the precision after Engine.solve so communication uses the
         # same canonical key and byte width as the local compute pass.
         precision, precision_bytes = resolve_precision(precision)
-        gradient_size = model.size_in_bytes(precision_bytes) / tp_size
+        # Each DP rank holds one TP x PP shard of the model, so a DP group's
+        # gradient buffer is the model divided by TP * PP. The TP * PP groups
+        # run their DP collectives concurrently on separate links, so the step
+        # waits for one group. (Fixed 2026-09-15: the buffer ignored PP.)
+        gradient_size = model.size_in_bytes(precision_bytes) / (tp_size * pp_size)
         if is_lora:
             gradient_size = gradient_size * 0.01
 
         # DP Communication
+        # The ranks of one DP group sit in different replicas. A replica of
+        # tp * pp * ep accelerators leaves accelerators_per_node // replica
+        # ranks of the group on each node (at least one). (Fixed 2026-09-15:
+        # the split counted accelerators rather than DP ranks per node, so a
+        # TP=8 group on 8-GPU nodes still ringed part of its gradients over
+        # NVLink, and one-accelerator nodes ringed over the intra-node link.)
         if dp_size > 1:
-            if fleet.node.accelerators_per_node > 1 and dp_size > fleet.node.accelerators_per_node:
-                # Hierarchical: Ring within node, then Ring across nodes
-                t_comm_dp = calc_hierarchical_allreduce_time(
-                    message_bytes=gradient_size,
-                    # ceil, not floor: 12 ranks on 8-GPU nodes span 2 nodes;
-                    # flooring to 1 modeled ZERO inter-node traffic (audit
-                    # fix 2026-06-06).
-                    n_nodes=math.ceil(dp_size / fleet.node.accelerators_per_node),
-                    gpus_per_node=fleet.node.accelerators_per_node,
-                    intra_node_bw=fleet.node.intra_node_bw,
-                    inter_node_bw=fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio,
-                    inter_node_lat=_inter_node_latency(fleet.fabric)
-                )
-            else:
-                # Single node or small DP: Intra-node only
+            replica_size = tp_size * pp_size * ep_size
+            ranks_per_node = max(1, fleet.node.accelerators_per_node // replica_size)
+            nodes_spanned = math.ceil(dp_size / ranks_per_node)
+            inter_node_bw = fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio
+            if nodes_spanned == 1:
+                # Whole DP group inside one node: intra-node ring.
                 t_comm_dp = calc_ring_allreduce_time(
                     gradient_size,
                     dp_size,
                     fleet.node.intra_node_bw,
                     _intra_node_latency(fleet.node)
+                )
+            elif ranks_per_node == 1:
+                # One rank per node: every ring hop crosses the fabric.
+                t_comm_dp = calc_ring_allreduce_time(
+                    gradient_size,
+                    dp_size,
+                    inter_node_bw,
+                    _inter_node_latency(fleet.fabric)
+                )
+            else:
+                # Several ranks per node across several nodes: ring within
+                # each node, then across nodes.
+                t_comm_dp = calc_hierarchical_allreduce_time(
+                    message_bytes=gradient_size,
+                    # ceil, not floor: 12 ranks on 8-rank nodes span 2 nodes;
+                    # flooring to 1 modeled ZERO inter-node traffic (audit
+                    # fix 2026-06-06).
+                    n_nodes=nodes_spanned,
+                    gpus_per_node=ranks_per_node,
+                    intra_node_bw=fleet.node.intra_node_bw,
+                    inter_node_bw=inter_node_bw,
+                    inter_node_lat=_inter_node_latency(fleet.fabric)
                 )
         else:
             t_comm_dp = Q_("0 ms")

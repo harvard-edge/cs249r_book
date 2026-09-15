@@ -81,6 +81,14 @@ Release body. Omit any section that has no entries for a given release.
     added as `compute * b`, which understated it most for few microbatches.
   - `effective_throughput` multiplies by the DP replica count, not the
     accelerator count.
+- `DistributedModel`'s data-parallel AllReduce sized each rank's gradients as
+  the model over TP, ignoring PP, and split the ring by accelerators per node
+  rather than DP ranks per node. A TP=8 group on 8-GPU nodes therefore ringed
+  part of its gradients over NVLink although every DP rank sits on a different
+  node, and one-accelerator nodes ringed over the intra-node link. Each rank
+  now holds a `tp * pp` shard, a node holds `accelerators_per_node // (tp * pp
+  * ep)` ranks of a group, and the collective is an intra-node ring, a fabric
+  ring (one rank per node), or hierarchical accordingly.
 - `ParallelismOptimizer` drops candidates whose replica does not fit once
   activations are counted, prices pipelined candidates with one-sample
   microbatches, takes `seq_len` and `activation_recomputation`, and names the
