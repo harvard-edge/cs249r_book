@@ -960,7 +960,9 @@ class TestDistributedModel:
         assert result.communication_latency.magnitude > 0
 
     def test_tp_training_step_pays_four_allreduces_per_layer(self):
-        """Megatron-LM TP: 2 forward + 2 backward AllReduces per layer, each its own ring collective."""
+        """Megatron-LM TP: 2 forward + 2 backward AllReduces per layer of one pipeline stage."""
+        import math
+
         from mlsysim.engine.solvers.distributed import TP_ALLREDUCES_PER_LAYER_TRAINING
         from mlsysim.engine.solvers.utils import _intra_node_latency
         from mlsysim.physics import calc_ring_allreduce_time
@@ -977,8 +979,43 @@ class TestDistributedModel:
             activation, 8, cluster.node.intra_node_bw, _intra_node_latency(cluster.node)
         )
         assert TP_ALLREDUCES_PER_LAYER_TRAINING == 4
-        expected = (one_allreduce * 4 * model.layers).m_as("ms")
+        # Stages run concurrently, so a step's wall-clock TP communication
+        # covers one stage's layers, not the whole model's.
+        layers_per_stage = math.ceil(model.layers / 4)
+        expected = (one_allreduce * 4 * layers_per_stage).m_as("ms")
         assert result.tp_communication_latency.m_as("ms") == pytest.approx(expected)
+
+    def test_replica_step_shares_compute_across_model_parallel_group(self):
+        """A sharded 70B step is priced as compute on the TP x PP group, not offload on one GPU."""
+        model = Models.Language.Llama3_70B
+        cluster = Systems.Clusters.Training_512_H100
+        kw = dict(batch_size=512, seq_len=4096, tp_size=8, pp_size=2,
+                  microbatch_count=16, activation_recomputation=True)
+        slow = DistributedModel().solve(model, cluster, efficiency=0.40, **kw)
+        fast = DistributedModel().solve(model, cluster, efficiency=0.50, **kw)
+
+        node = slow.node_profile
+        assert node.feasible is True
+        assert node.offload_effective_bw is None
+        assert node.memory_footprint < cluster.node.accelerator.memory.capacity
+        # Full recomputation: 4x forward FLOPs per token over the replica's 16 GPUs.
+        local_batch = 512 // slow.parallelism["dp"]
+        step_flops = 4 * model.inference_flops * 4096 * local_batch
+        replica_flops = cluster.node.accelerator.compute.peak_flops * 0.40 * 16
+        assert node.latency_compute.m_as("s") == pytest.approx((step_flops / replica_flops).m_as("s"))
+        # Compute-bound, so a higher efficiency must shorten the step.
+        assert fast.node_profile.latency < node.latency
+
+    def test_pipeline_bubble_is_additive_idle_time(self):
+        """bubble_fraction is the idle share of the whole step, so idle time = compute * b / (1 - b)."""
+        result = DistributedModel().solve(
+            Models.Language.Llama3_8B, Systems.Clusters.Research_256,
+            batch_size=1024, seq_len=2048, tp_size=8, pp_size=4, microbatch_count=16,
+        )
+        b = result.bubble_fraction
+        assert b == pytest.approx(3 / (16 + 3))
+        expected = result.node_profile.latency * b / (1 - b)
+        assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(expected.m_as("ms"))
 
     def test_pipeline_parallelism_creates_bubble(self):
         """PP > 1 should introduce a non-zero pipeline bubble."""

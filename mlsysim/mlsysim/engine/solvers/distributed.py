@@ -9,7 +9,8 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from ..engine import Engine
+from .. import calibration as cal
+from ..engine import Engine, PerformanceProfile
 from ..results import (
     DistributedResult,
     MoERoutingResult,
@@ -17,15 +18,17 @@ from ..results import (
     ParallelismOptimizerResult,
 )
 from ...physics import (
+    calc_bottleneck,
     calc_ring_allreduce_time,
     calc_hierarchical_allreduce_time,
     calc_all_to_all_time,
     calc_pipeline_bubble,
 )
 from ...core.units import ureg, Q_, resolve_precision
-from ...models.types import Workload, SparseTransformerWorkload
+from ...models.types import Workload, TransformerWorkload, SparseTransformerWorkload
 from ...systems.types import Fleet, NetworkFabric
 from .base import BaseOptimizer, ForwardModel
+from .training import TrainingMemoryModel
 from .utils import _inter_node_latency, _intra_node_latency
 
 # Megatron-LM tensor parallelism: each transformer layer all-reduces activations
@@ -34,6 +37,162 @@ from .utils import _inter_node_latency, _intra_node_latency
 # (f operators). Source: Shoeybi et al. (2019), arXiv 1909.08053, p.4.
 TP_ALLREDUCES_PER_LAYER_FORWARD = 2
 TP_ALLREDUCES_PER_LAYER_TRAINING = 2 * TP_ALLREDUCES_PER_LAYER_FORWARD
+
+# LoRA rank used to size the trainable fraction, matching
+# TransformerWorkload.training_memory's default.
+_LORA_RANK = 16
+
+
+def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
+                     local_batch: int, precision: str, efficiency: float,
+                     seq_len: int, tp_size: int, pp_size: int, ep_size: int,
+                     dp_size: int, zero_stage: int, is_lora: bool,
+                     activation_recomputation: bool, microbatch_count: int,
+                     gradient_accumulation_steps: int) -> PerformanceProfile:
+    """Roofline profile of ONE model-parallel replica for one training step.
+
+    A replica is the TP x PP x EP group of accelerators that holds one copy of
+    the model and processes one data-parallel shard (``local_batch`` samples)
+    of the global batch.
+
+    - Compute: a training step costs 3x the forward FLOPs (4x with activation
+      recomputation). Transformer registry FLOPs are per token, so a sample of
+      ``seq_len`` tokens costs ``inference_flops * seq_len``; other workloads
+      count FLOPs per sample. The replica's accelerators share the work, so
+      step compute time is ``step FLOPs / (tp * pp * ep * peak * efficiency)``.
+    - Memory: per-accelerator training state for transformers comes from
+      ``TrainingMemoryModel`` with the same TP/PP/EP/ZeRO sharding, selective
+      activation recomputation (full when ``activation_recomputation``), and
+      the microbatches a pipeline stage holds in flight under 1F1B.
+    - If that state does not fit, the replica is marked infeasible and its
+      memory traffic is priced at the offload bandwidth, the same convention
+      ``Engine.solve`` uses for a single device.
+
+    (Fixed 2026-09-15: DistributedModel previously called ``Engine.solve`` on
+    the whole, unsharded model on one accelerator, counted one token per
+    sequence, and so priced every multi-billion-parameter training step at
+    the PCIe offload bandwidth regardless of efficiency.)
+
+    Non-transformer workloads with no model parallelism keep the single-device
+    ``Engine.solve`` path unchanged.
+    """
+    accelerator = fleet.node.accelerator
+    replica_accelerators = tp_size * pp_size * ep_size
+    is_transformer = isinstance(model, TransformerWorkload)
+    if not is_transformer and replica_accelerators == 1:
+        return Engine.solve(
+            model, accelerator, batch_size=local_batch,
+            precision=precision, efficiency=efficiency,
+            is_training=True, seq_len=seq_len, zero_stage=zero_stage,
+            dp_size=dp_size, is_lora=is_lora,
+            activation_recomputation=activation_recomputation,
+        )
+
+    precision, bpp = resolve_precision(precision)
+    peak_flops = accelerator.compute.precision_flops.get(precision, accelerator.compute.peak_flops)
+    graph = model.lower(bpp)
+
+    # 1. Step compute shared across the replica's accelerators.
+    tokens_per_sample = seq_len if is_transformer else 1
+    sample_ops = graph.total_ops * tokens_per_sample
+    model_ops = sample_ops * 3 * local_batch
+    hardware_ops = sample_ops * (4 if activation_recomputation else 3) * local_batch
+    effective_flops = peak_flops * efficiency
+    compute_time = (hardware_ops / (effective_flops * replica_accelerators)).to("ms")
+
+    # 2. Per-accelerator training state.
+    if is_transformer:
+        trainable_fraction = 1.0
+        if is_lora:
+            lora_params = 2 * _LORA_RANK * (model.hidden_dim or 4096) * 4 * model.layers
+            trainable_fraction = min(lora_params / model.parameters.m_as("count"), 1.0)
+        # Under 1F1B the first stage holds activations for up to pp_size
+        # microbatches at once, each local_batch / microbatch_count samples.
+        in_flight_divisor = max(1, microbatch_count // pp_size) if pp_size > 1 else 1
+        memory = TrainingMemoryModel().solve(
+            model, accelerator, batch_size=local_batch * dp_size, seq_len=seq_len,
+            precision=precision,
+            activation_checkpointing="full" if activation_recomputation else "selective",
+            tp_size=tp_size, pp_size=pp_size, dp_size=dp_size, ep_size=ep_size,
+            zero_stage=zero_stage,
+            gradient_accumulation_steps=gradient_accumulation_steps * in_flight_divisor,
+            trainable_fraction=trainable_fraction,
+        )
+        memory_footprint = memory.total_memory
+        memory_trace = list(memory.constraint_trace)
+    else:
+        n_params = (graph.weight_bytes / bpp).to_base_units()
+        optimizer_state = n_params * Q_(cal.TRAINING_OPTIMIZER_BYTES_ADAM, "byte")
+        memory_footprint = ((graph.weight_bytes * 2 + optimizer_state) / replica_accelerators).to("GB")
+        memory_trace = []
+    feasible = memory_footprint <= accelerator.memory.capacity
+
+    # 3. Memory ceiling on one accelerator of the replica.
+    offload_spill = None
+    offload_bw = None
+    if feasible:
+        effective_bw = accelerator.memory.bandwidth
+    else:
+        offload_spill = memory_footprint - accelerator.memory.capacity
+        pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
+        pcie_bw = (
+            getattr(accelerator.interconnect, "bandwidth", pcie_fallback)
+            if accelerator.interconnect else pcie_fallback
+        )
+        effective_bw = min(accelerator.memory.bandwidth, pcie_bw)
+        offload_bw = effective_bw
+    weight_shard = graph.weight_bytes / replica_accelerators
+    memory_traffic = weight_shard + weight_shard * 0.1 * local_batch  # Engine.solve's heuristic
+    memory_time = (memory_traffic / effective_bw).to("ms")
+    roofline = calc_bottleneck(
+        hardware_ops / replica_accelerators, memory_traffic, effective_flops, effective_bw
+    )
+
+    # 4. Latency, utilization, and energy for the replica step.
+    dispatch_tax = accelerator.dispatch_tax
+    layer_tax = Q_((getattr(model, "layers", 1) or 1) * cal.FRAMEWORK_LAYER_TAX_MS * 3, "ms")
+    latency = max(compute_time.magnitude, memory_time.magnitude) * ureg.ms + dispatch_tax + layer_tax
+    latency_s = latency.to("s")
+    replica_peak = peak_flops * replica_accelerators
+    mfu = min(1.0, max(0.0, ((model_ops / latency_s) / replica_peak).to_base_units().magnitude))
+    hfu = min(1.0, max(0.0, ((hardware_ops / latency_s) / replica_peak).to_base_units().magnitude))
+    if accelerator.tdp is not None:
+        power = accelerator.tdp * (cal.ENERGY_IDLE_FRACTION + cal.ENERGY_DYNAMIC_FRACTION * hfu)
+        energy = (power * replica_accelerators * latency_s).to("J")
+    else:
+        energy = Q_("0 J")
+
+    fits = "fits" if feasible else "exceeds"
+    trace = [
+        f"Replica: TP{tp_size} x PP{pp_size} x EP{ep_size} = {replica_accelerators} accelerators "
+        f"process {local_batch} samples of {tokens_per_sample} tokens per step.",
+        f"Memory Wall: {memory_footprint.to('GB'):~.1fP} per accelerator {fits} "
+        f"{accelerator.memory.capacity.to('GB'):~.1fP} on {accelerator.name}.",
+    ] + memory_trace
+
+    return PerformanceProfile(
+        latency=latency,
+        latency_compute=compute_time,
+        latency_memory=memory_time,
+        latency_overhead=dispatch_tax + layer_tax,
+        throughput=Q_(local_batch / latency_s.magnitude, "1/s"),
+        bottleneck=roofline["bottleneck"],
+        arithmetic_intensity=Q_(roofline["intensity"], "flop/byte"),
+        energy=energy,
+        memory_footprint=memory_footprint,
+        peak_flops_actual=effective_flops,
+        peak_bw_actual=effective_bw,
+        mfu=mfu,
+        hfu=hfu,
+        feasible=feasible,
+        constraint_trace=trace,
+        offload_spill_bytes=offload_spill,
+        offload_effective_bw=offload_bw,
+        overhead_dominated=(
+            (dispatch_tax + layer_tax).to("ms").magnitude
+            > max(compute_time.magnitude, memory_time.magnitude)
+        ),
+    )
 
 class DistributedModel(ForwardModel):
     """
@@ -55,7 +214,10 @@ class DistributedModel(ForwardModel):
     Formula contract:
     - split total accelerators into TP * PP * EP model-parallel groups and DP
       replicas; the split must be exact.
-    - local step time comes from Engine.solve on the per-DP local batch.
+    - local step time is one model-parallel replica's training step on the
+      per-DP local batch (``_replica_profile``): step FLOPs shared across the
+      replica's TP * PP * EP accelerators, with per-accelerator sharded
+      training state deciding feasibility.
     - exposed communication = DP gradient collective + TP activation
       collectives (4 AllReduces per layer per training step: 2 forward,
       2 backward) + EP token all-to-all, optionally reduced by overlap.
@@ -176,7 +338,7 @@ class DistributedModel(ForwardModel):
             )
         dp_size = n_accelerators // parallel_group_size
 
-        # 2. Single Node Performance (Computation)
+        # 2. Replica Performance (Computation)
         # Global batch is divided by DP size (TP/PP/EP split the model, not the batch).
         local_batch = max(1, batch_size // dp_size)
         if batch_size < dp_size:
@@ -186,12 +348,14 @@ class DistributedModel(ForwardModel):
                 f"some ranks will be idle. Using local_batch=1.",
                 stacklevel=2,
             )
-        node_perf = Engine.solve(
-            model, fleet.node.accelerator, batch_size=local_batch,
-            precision=precision, efficiency=efficiency,
-            is_training=True, seq_len=seq_len, zero_stage=zero_stage,
-            dp_size=dp_size, is_lora=is_lora,
-            activation_recomputation=activation_recomputation
+        node_perf = _replica_profile(
+            model, fleet, batch_size=batch_size, local_batch=local_batch,
+            precision=precision, efficiency=efficiency, seq_len=seq_len,
+            tp_size=tp_size, pp_size=pp_size, ep_size=ep_size, dp_size=dp_size,
+            zero_stage=zero_stage, is_lora=is_lora,
+            activation_recomputation=activation_recomputation,
+            microbatch_count=microbatch_count,
+            gradient_accumulation_steps=gradient_accumulation_steps,
         )
 
         # 3. Communication Overhead (Network)
@@ -248,7 +412,11 @@ class DistributedModel(ForwardModel):
         if tp_size > 1:
             _, bpp = resolve_precision(precision)
             hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
-            n_layers = getattr(model, 'layers', 1) or 1
+            # Each pipeline stage's TP group all-reduces only its own layers,
+            # and the stages run concurrently, so a step's wall-clock TP
+            # communication covers one stage's layers (fixed 2026-09-15; it
+            # charged every layer of the model to every stage).
+            n_layers = math.ceil((getattr(model, 'layers', 1) or 1) / pp_size)
             activation_bytes_per_allreduce = local_batch * seq_len * hidden_dim * bpp.magnitude * ureg.byte
             # Select bandwidth: NVLink if TP fits within a node, IB if it spans nodes
             if tp_size <= fleet.node.accelerators_per_node:
@@ -298,7 +466,14 @@ class DistributedModel(ForwardModel):
         # Source: Narayanan et al. (2019), "PipeDream: Efficient Pipeline Parallelism"
         # Supports interleaved 1F1B schedules via v_stages
         bubble_fraction = calc_pipeline_bubble(pp_size, microbatch_count, v_stages=v_stages)
-        t_bubble = (node_perf.latency * bubble_fraction) if pp_size > 1 else Q_("0 ms")
+        # bubble_fraction is the idle share of the WHOLE pipelined step, so the
+        # idle time added to the busy compute time is compute * b / (1 - b)
+        # = compute * (p - 1) / (v * m). (Fixed 2026-09-15: compute * b
+        # understated the bubble, badly so for few microbatches.)
+        t_bubble = (
+            node_perf.latency * bubble_fraction / (1 - bubble_fraction)
+            if pp_size > 1 else Q_("0 ms")
+        )
 
         # 5. Total Latency and Scaling Efficiency
         # Apply congestion factor to all communication
@@ -352,7 +527,8 @@ class DistributedModel(ForwardModel):
             bubble_fraction=bubble_fraction,
             step_latency_total=step_latency_total,
             scaling_efficiency=scaling_efficiency,
-            effective_throughput=(n_accelerators * node_perf.throughput * scaling_efficiency),
+            # node_perf.throughput is one replica's samples/s; DP replicas add up.
+            effective_throughput=(dp_size * node_perf.throughput * scaling_efficiency),
             parallelism={"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size},
         )
 
@@ -582,7 +758,8 @@ class ParallelismOptimizer(BaseOptimizer):
     def solve(self, model: Workload, fleet: Fleet, batch_size: int,
               precision: str = "fp16", efficiency: float = 0.5,
               max_tp: Optional[int] = None, max_pp: Optional[int] = None,
-              overlap_comm: bool = True) -> ParallelismOptimizerResult:
+              overlap_comm: bool = True, seq_len: int = 2048,
+              activation_recomputation: bool = False) -> ParallelismOptimizerResult:
         """
         Search for the parallelism split (TP x PP x DP) that maximizes MFU.
 
@@ -592,8 +769,11 @@ class ParallelismOptimizer(BaseOptimizer):
         Candidates are pre-screened for memory feasibility — per-GPU weights
         plus same-size gradients must fit in 90% of HBM capacity, with
         weights sharded by TP*PP — then each survivor is priced with
-        ``DistributedModel`` and ranked by
-        ``MFU = scaling_efficiency * efficiency``.
+        ``DistributedModel``, dropped if its replica's training state
+        (activations included) does not fit, and ranked by
+        ``MFU = scaling_efficiency * efficiency``. Pipelined candidates use
+        one-sample microbatches (``microbatch_count`` = per-replica batch),
+        the schedule that minimizes both the bubble and in-flight activations.
 
         Parameters
         ----------
@@ -614,6 +794,10 @@ class ParallelismOptimizer(BaseOptimizer):
             Cap on pipeline-parallel degree (default: cluster size).
         overlap_comm : bool
             Whether DP communication overlaps the backward pass.
+        seq_len : int
+            Tokens per sample, for step FLOPs and activation memory.
+        activation_recomputation : bool
+            Whether replicas recompute activations (full recomputation).
 
         Returns
         -------
@@ -681,8 +865,13 @@ class ParallelismOptimizer(BaseOptimizer):
                     res = dist_model.solve(
                         model, fleet, batch_size=batch_size,
                         precision=precision, efficiency=efficiency,
-                        tp_size=tp, pp_size=pp, overlap_comm=overlap_comm
+                        tp_size=tp, pp_size=pp, overlap_comm=overlap_comm,
+                        seq_len=seq_len,
+                        activation_recomputation=activation_recomputation,
+                        microbatch_count=max(1, batch_size // dp) if pp > 1 else 1,
                     )
+                    if not res.node_profile.feasible:
+                        continue  # Infeasible once activations are counted
 
                     # Store candidate
                     candidates.append({
@@ -695,7 +884,11 @@ class ParallelismOptimizer(BaseOptimizer):
                     continue
 
         if not candidates:
-            raise ValueError("No valid parallelism configurations found for this cluster size.")
+            raise ValueError(
+                "No valid parallelism configuration: no TP x PP x DP split of this cluster "
+                "fits its training state (activations included) in accelerator memory. "
+                "Enable activation_recomputation, lower batch_size or seq_len, or add accelerators."
+            )
 
         # 2. Find best
         best = max(candidates, key=lambda x: x["mfu"])

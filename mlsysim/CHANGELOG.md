@@ -62,6 +62,32 @@ Release body. Omit any section that has no entries for a given release.
   `SensitivityResult` now carries `feasible`; an infeasible baseline reports
   `binding_constraint="memory_capacity"` and a `constraint_trace` with the
   Memory Wall failure.
+- `DistributedModel` priced the local step with `Engine.solve` on the whole,
+  unsharded model on one accelerator and counted one token per sequence. Any
+  multi-billion-parameter transformer therefore failed the memory check and
+  was priced at the PCIe offload bandwidth, so step time ignored `efficiency`
+  and every TP/PP/DP split looked alike (Llama-3 70B at TP=8 on 512 H100s:
+  9.5 TB "per GPU"). The step is now one model-parallel replica: step FLOPs
+  (`inference_flops * seq_len * local_batch`, 3x for training, 4x with
+  recomputation) shared across its `tp * pp * ep` accelerators, and
+  feasibility from `TrainingMemoryModel` with the same TP/PP/EP/ZeRO
+  sharding, selective recomputation (full when `activation_recomputation`),
+  and the microbatches a 1F1B stage holds in flight. Non-transformer
+  workloads without model parallelism keep the `Engine.solve` path.
+  - Tensor-parallel communication now covers one pipeline stage's layers
+    (stages run concurrently) instead of charging every layer to every stage.
+  - The pipeline bubble is added as idle time `compute * b / (1 - b)`, since
+    `calc_pipeline_bubble` returns the idle share of the whole step; it was
+    added as `compute * b`, which understated it most for few microbatches.
+  - `effective_throughput` multiplies by the DP replica count, not the
+    accelerator count.
+- `ParallelismOptimizer` drops candidates whose replica does not fit once
+  activations are counted, prices pipelined candidates with one-sample
+  microbatches, takes `seq_len` and `activation_recomputation`, and names the
+  memory remedies when nothing fits.
+- `TrainingMemoryModel` never divided activations by the tensor-parallel
+  degree. With `sequence_parallel=True` (the default, Korthikanti et al. 2023)
+  activations shard across the TP group; `tp_size=1` results are unchanged.
 - `WeightStreamingModel.wafer_memory_utilization` divided GB by GiB without
   reducing units, overstating utilization by 7.4%.
 
