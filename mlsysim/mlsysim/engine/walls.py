@@ -221,7 +221,7 @@ FIDELITY = Wall(
     domain=Domain.ALGORITHM,
     resolver_name="CompressionModel",
     constraint="Compression trades model fidelity for efficiency.",
-    equation="r = b_base/b (quantization; b_base = 16 for FP16/BF16 models); r = 1/(1-s) (pruning)",
+    equation="r = b_base/b (quantization; configurable b_base, default 32 for FP32, 16 for FP16/BF16 models); r = 1/(1-s) (pruning)",
     sources=[
         "Han et al. (2015), Deep Compression",
         "Gholami et al. (2021), Quantization Survey",

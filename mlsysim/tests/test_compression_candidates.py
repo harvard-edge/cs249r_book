@@ -42,14 +42,14 @@ def test_sweep_passes_baseline_precision_to_every_candidate():
         {"label": "INT4 weights", "method": "quantization", "target_bitwidth": 4},
     ]
     default = solver.sweep(Models.Language.Llama3_8B, Hardware.Cloud.H100, configs)
-    fp32 = solver.sweep(
-        Models.Language.Llama3_8B, Hardware.Cloud.H100, configs, baseline_precision="fp32"
+    fp16 = solver.sweep(
+        Models.Language.Llama3_8B, Hardware.Cloud.H100, configs, baseline_precision="fp16"
     )
 
-    assert [c.baseline_precision for c in default.candidates] == ["fp16", "fp16"]
-    assert [c.compression_ratio for c in default.candidates] == pytest.approx([2.0, 4.0])
-    assert [c.baseline_precision for c in fp32.candidates] == ["fp32", "fp32"]
-    assert [c.compression_ratio for c in fp32.candidates] == pytest.approx([4.0, 8.0])
+    assert [c.baseline_precision for c in default.candidates] == ["fp32", "fp32"]
+    assert [c.compression_ratio for c in default.candidates] == pytest.approx([4.0, 8.0])
+    assert [c.baseline_precision for c in fp16.candidates] == ["fp16", "fp16"]
+    assert [c.compression_ratio for c in fp16.candidates] == pytest.approx([2.0, 4.0])
 
 
 def test_unstructured_pruning_marks_missing_fast_path_when_required():

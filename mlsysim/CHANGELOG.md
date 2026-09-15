@@ -37,14 +37,16 @@ Release body. Omit any section that has no entries for a given release.
 
 ### Bug Fixes
 
-- `CompressionModel` measured every ratio against a hard-coded FP32 baseline,
-  so INT4 reported 8x compression and an 8x memory-bound speedup for models
-  served from FP16/BF16 weights. `solve`, `candidate`, and `sweep` now take
-  `baseline_precision` (default `"fp16"`, resolved through
-  `core.units.PRECISION_MAP`): `compression_ratio = b_base / target_bitwidth`,
-  and original sizes and the Roofline regime use the baseline width. Pass
-  `baseline_precision="fp32"` for FP32-trained artifacts. `CompressionResult`
-  and `CompressionCandidate` record the baseline; the Wall 13 equation now reads
+- `CompressionModel` measured every ratio against a hard-coded FP32 baseline
+  with no way to change it, so INT4 always reported 8x compression and an 8x
+  memory-bound speedup, even for models served from FP16/BF16 weights where
+  practice quotes 4x. `solve`, `candidate`, and `sweep` now take a configurable
+  `baseline_precision` (resolved through `core.units.PRECISION_MAP`) that
+  defaults to `"fp32"`, so existing results are unchanged:
+  `compression_ratio = b_base / target_bitwidth`, and original sizes and the
+  Roofline regime use the baseline width. Pass `baseline_precision="fp16"` for
+  FP16/BF16-served models (INT4 = 4x). `CompressionResult` and
+  `CompressionCandidate` record the baseline; the Wall 13 equation now reads
   `r = b_base/b`.
 - `DistributedModel` counted 2 tensor-parallel AllReduces per layer (the
   forward path only) for a training step and priced them as one collective of

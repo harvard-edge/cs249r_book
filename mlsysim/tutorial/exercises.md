@@ -157,8 +157,9 @@ Compare the FP16 baseline with INT4 quantization. Run the compression
 model and then run `Engine.solve()` at both precisions.
 
 ```python
-# Compression analysis
-result = compress.solve(model, hw, method="quantization", target_bitwidth=4)
+# Compression analysis (measured against the FP16 weights the model ships in)
+result = compress.solve(model, hw, method="quantization", target_bitwidth=4,
+                        baseline_precision="fp16")
 print(f"Compression ratio:   {result.compression_ratio:.1f}x")
 print(f"Original size:       {result.original_size_gb:~P.2f}")
 print(f"Compressed size:     {result.compressed_size_gb:~P.2f}")
@@ -181,10 +182,11 @@ become a 4x speedup here, and why?
 
 ### Hint
 
-The `CompressionModel` measures compression ratio from the precision the
-model ships in, `baseline_precision="fp16"` by default, so INT4 gives a 4x
-ratio (16/4). Pass `baseline_precision="fp32"` and the same INT4 model reads
-as 8x (32/4): a ratio is only meaningful next to its baseline. Whether the
+The `CompressionModel` measures compression ratio against a configurable
+`baseline_precision` that defaults to `"fp32"`, so without the argument INT4
+reads as 8x (32/4). Llama-3-8B ships in FP16, so the task passes
+`baseline_precision="fp16"` and INT4 gives a 4x ratio (16/4): a ratio is only
+meaningful next to its baseline. Whether the
 ratio becomes a speedup depends on whether the workload is compute-bound or
 memory-bound. At batch_size=1, LLM inference is memory-bound, so the speedup
 tracks with the reduction in bytes moved, not FLOPS saved.

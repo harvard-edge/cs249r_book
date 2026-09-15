@@ -45,7 +45,7 @@ class CompressionModel(ForwardModel):
     def solve(self, model: Workload, hardware: HardwareNode, method: str = "quantization",
               target_bitwidth: int = 8, sparsity: float = 0.0,
               sparsity_type: str = "unstructured",
-              baseline_precision: str = "fp16") -> CompressionResult:
+              baseline_precision: str = "fp32") -> CompressionResult:
         """
         Solves for compression gains and estimated accuracy impact.
 
@@ -68,12 +68,11 @@ class CompressionModel(ForwardModel):
             - structured: both storage and compute savings
             - n_m: hardware 2:4 sparsity with 2x speedup at 50% sparsity (Ampere+)
         baseline_precision : str
-            Precision of the uncompressed model that ratios and sizes are
-            measured against, resolved through ``core.units.PRECISION_MAP``
-            (default ``"fp16"``: LLMs are trained and served from FP16/BF16
-            weights, so INT4 is quoted as 4x). Pass ``"fp32"`` for a model
-            whose reference artifact is FP32 (for example a CNN exported
-            from FP32 training), where INT8 is 4x and INT4 is 8x.
+            Configurable precision of the uncompressed model that ratios and
+            sizes are measured against, resolved through
+            ``core.units.PRECISION_MAP``. Defaults to ``"fp32"`` (INT8 is 4x,
+            INT4 is 8x). Pass ``"fp16"`` for models trained and served from
+            FP16/BF16 weights, such as most LLMs, where INT4 is quoted as 4x.
 
         Returns
         -------
@@ -86,11 +85,11 @@ class CompressionModel(ForwardModel):
         -----
         Conventions and branch logic:
 
-        - Sizes are measured against ``baseline_precision`` (FP16/BF16 by
-          default, 2 bytes/param), so quantization's
-          ``compression_ratio = b_base / target_bitwidth`` (16/4 = 4x for INT4
-          from FP16; 32/4 = 8x only when an FP32 baseline is requested). A
-          target wider than the baseline is an upcast and yields a ratio < 1.
+        - Sizes are measured against the configurable ``baseline_precision``
+          (FP32 by default, 4 bytes/param), so quantization's
+          ``compression_ratio = b_base / target_bitwidth`` (32/4 = 8x for INT4
+          by default; 16/4 = 4x with ``baseline_precision="fp16"``). A target
+          wider than the baseline is an upcast and yields a ratio < 1.
         - ``estimated_accuracy_delta`` is a signed fraction (e.g. -0.005 =
           -0.5 percentage points top-1), taken from survey medians in
           ``engine/calibration.py`` (Gholami 2021 for quantization; Blalock
@@ -108,9 +107,10 @@ class CompressionModel(ForwardModel):
         from ...core._validation import validate_at_least, validate_range
         validate_at_least(target_bitwidth, 1, "target_bitwidth")
         validate_range(sparsity, 0.0, 1.0, "sparsity")
-        # Ratios are relative to the precision the uncompressed model actually
-        # ships in. The FP32 hard-code (fixed 2026-09-15) reported INT4 as 8x
-        # against FP16/BF16-served LLMs, where practice and the paper quote 4x.
+        # Ratios are relative to a configurable baseline precision (2026-09-15).
+        # The FP32 default keeps every existing result unchanged; the former
+        # hard-code offered no way to measure FP16/BF16-served LLMs, where
+        # practice and the paper quote INT4 as 4x (baseline_precision="fp16").
         baseline_precision, baseline_bytes = resolve_precision(baseline_precision)
         baseline_bits = baseline_bytes.to("byte").magnitude * BITS_PER_BYTE
         original_size = model.size_in_bytes(baseline_bytes)
@@ -204,7 +204,7 @@ class CompressionModel(ForwardModel):
         max_accuracy_drop: Optional[float] = None,
         min_speedup: Optional[float] = None,
         require_hardware_support: bool = False,
-        baseline_precision: str = "fp16",
+        baseline_precision: str = "fp32",
     ) -> CompressionCandidate:
         """Evaluate one compression configuration with feasibility metadata.
 
@@ -297,7 +297,7 @@ class CompressionModel(ForwardModel):
         min_speedup: Optional[float] = None,
         require_hardware_support: bool = False,
         objective: str = "min_size_max_speed_preserve_quality",
-        baseline_precision: str = "fp16",
+        baseline_precision: str = "fp32",
     ) -> CompressionSweepResult:
         """Evaluate a compression design space and mark Pareto candidates.
 
