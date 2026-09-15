@@ -21,6 +21,33 @@ def test_generation_replays_every_token_and_restores_uncached_model():
     np.testing.assert_allclose(model(Tensor(tokens)).data, before)
 
 
+
+def test_cached_replay_scope_preserves_ordinary_single_token_forward():
+    from tinytorch.core.transformers import GPT
+    from tinytorch.core.tensor import Tensor
+    from tinytorch.perf.memoization import enable_kv_cache, disable_kv_cache
+
+    generation = _import_milestone(MILESTONES_DIR / '06_2018_mlperf/02_generation_speedup.py')
+    model = GPT(vocab_size=11, embed_dim=8, num_layers=2, num_heads=2, max_seq_len=4)
+    tokens = np.array([[1, 3, 2, 7]])
+    expected = generation.replay_prefixes(model, tokens)
+    ordinary_token = Tensor([[5]])
+    expected_single = model(ordinary_token).data.copy()
+    cache = enable_kv_cache(model)
+    try:
+        # Repeated timing runs reset the cache, use the prefix, then leave scope.
+        for _ in range(2):
+            actual = generation.replay_prefixes(model, tokens, cache)
+            np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=1e-5)
+            assert cache.seq_pos == tokens.shape[1]
+            np.testing.assert_allclose(model(ordinary_token).data, expected_single, atol=1e-6)
+        # A failed replay must also release the cached execution scope.
+        with pytest.raises((ValueError, IndexError)):
+            generation.replay_prefixes(model, np.array([[1, 99]]), cache)
+        np.testing.assert_allclose(model(ordinary_token).data, expected_single, atol=1e-6)
+    finally:
+        disable_kv_cache(model)
+
 def test_generation_rejects_different_cached_computation(monkeypatch):
     from tinytorch.core.transformers import GPT
     generation = _import_milestone(MILESTONES_DIR / '06_2018_mlperf/02_generation_speedup.py')

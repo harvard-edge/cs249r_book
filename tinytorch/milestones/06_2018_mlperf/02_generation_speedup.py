@@ -12,6 +12,7 @@ The attention work across N prefixes is cubic without a cache and quadratic
 with a cache. Actual speedup depends on sequence length and machine overhead;
 there is no required timing ratio.
 """
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 import time
@@ -28,20 +29,23 @@ def replay_prefixes(model, tokens, cache=None):
 
     The cache cursor advances once after all layers process a token. Resetting
     at entry makes each replay an independent request, including warmup runs.
+    Cached forwards run inside an explicit generation scope; ordinary forwards
+    resume when the scope exits, including after an exception.
     """
     from tinytorch.core.tensor import Tensor
 
     if cache is not None:
         cache.reset()
     logits = []
-    for position in range(tokens.shape[1]):
-        if cache is None:
-            output = model(Tensor(tokens[:, :position + 1]))
-        else:
-            output = model(Tensor(tokens[:, position:position + 1]),
-                           start_pos=cache.seq_pos)
-            cache.advance()
-        logits.append(output.data[:, -1, :].copy())
+    with cache.generation() if cache is not None else nullcontext():
+        for position in range(tokens.shape[1]):
+            if cache is None:
+                output = model(Tensor(tokens[:, :position + 1]))
+            else:
+                output = model(Tensor(tokens[:, position:position + 1]),
+                               start_pos=cache.seq_pos)
+                cache.advance()
+            logits.append(output.data[:, -1, :].copy())
     return np.stack(logits, axis=1)
 
 

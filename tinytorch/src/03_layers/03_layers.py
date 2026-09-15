@@ -845,41 +845,48 @@ mask:     [2.0,  0.0,  2.0,  0.0 ]   ← kept values are 2.0, not 1.0
 # %% nbgrader={"grade": true, "grade_id": "test-generate-dropout-mask", "locked": true, "points": 3}
 def test_unit_generate_dropout_mask():
     """🧪 Test _generate_dropout_mask output properties."""
-    print("🧪 Unit Test: Dropout Mask Generation...")
+    # Isolate this graded test from earlier cells and preserve the learner's RNG.
+    global rng
+    previous_rng = rng
+    rng = np.random.default_rng(7)
+    try:
+        print("🧪 Unit Test: Dropout Mask Generation...")
 
-    d = Dropout(0.5)
-    mask = d._generate_dropout_mask((1000,))
+        d = Dropout(0.5)
+        mask = d._generate_dropout_mask((1000,))
 
-    # Shape must match the requested shape
-    assert mask.shape == (1000,), f"Expected shape (1000,), got {mask.shape}"
+        # Shape must match the requested shape
+        assert mask.shape == (1000,), f"Expected shape (1000,), got {mask.shape}"
 
-    # Every element must be either 0.0 or 2.0 (= 1/(1-0.5))
-    unique_vals = set(np.unique(mask.data))
-    assert unique_vals <= {0.0, 2.0}, \
-        f"Mask values should be {{0.0, 2.0}}, got {unique_vals}"
+        # Every element must be either 0.0 or 2.0 (= 1/(1-0.5))
+        unique_vals = set(np.unique(mask.data))
+        assert unique_vals <= {0.0, 2.0}, \
+            f"Mask values should be {{0.0, 2.0}}, got {unique_vals}"
 
-    # Statistically, about 50% should survive (3-sigma tolerance)
-    non_zero = np.count_nonzero(mask.data)
-    std_err = np.sqrt(1000 * 0.5 * 0.5)
-    assert 500 - 3 * std_err < non_zero < 500 + 3 * std_err, \
-        f"Expected ~500 survivors, got {non_zero}"
+        # Statistically, about 50% should survive (3-sigma tolerance)
+        non_zero = np.count_nonzero(mask.data)
+        std_err = np.sqrt(1000 * 0.5 * 0.5)
+        assert 500 - 3 * std_err < non_zero < 500 + 3 * std_err, \
+            f"Expected ~500 survivors, got {non_zero}"
 
-    # Test with different dropout probability
-    d2 = Dropout(0.3)
-    mask2 = d2._generate_dropout_mask((2000,))
+        # Test with different dropout probability
+        d2 = Dropout(0.3)
+        mask2 = d2._generate_dropout_mask((2000,))
 
-    # Values should be 0.0 or 1/(1-0.3) ≈ 1.4286
-    expected_scale = 1.0 / 0.7
-    non_zero_vals = mask2.data[mask2.data != 0.0]
-    assert np.allclose(non_zero_vals, expected_scale), \
-        f"Surviving values should be {expected_scale:.4f}, got {np.unique(non_zero_vals)}"
+        # Values should be 0.0 or 1/(1-0.3) ≈ 1.4286
+        expected_scale = 1.0 / 0.7
+        non_zero_vals = mask2.data[mask2.data != 0.0]
+        assert np.allclose(non_zero_vals, expected_scale), \
+            f"Surviving values should be {expected_scale:.4f}, got {np.unique(non_zero_vals)}"
 
-    # About 70% should survive for p=0.3
-    survival_rate = np.count_nonzero(mask2.data) / 2000
-    assert 0.60 < survival_rate < 0.80, \
-        f"Expected ~70% survival for p=0.3, got {survival_rate:.1%}"
+        # About 70% should survive for p=0.3
+        survival_rate = np.count_nonzero(mask2.data) / 2000
+        assert 0.60 < survival_rate < 0.80, \
+            f"Expected ~70% survival for p=0.3, got {survival_rate:.1%}"
 
-    print("✅ Dropout mask generation works correctly!")
+        print("✅ Dropout mask generation works correctly!")
+    finally:
+        rng = previous_rng
 
 if __name__ == "__main__":
     test_unit_generate_dropout_mask()
@@ -980,65 +987,72 @@ This test validates our Dropout layer implementation works correctly.
 # %% nbgrader={"grade": true, "grade_id": "test-dropout", "locked": true, "points": 10}
 def test_unit_dropout_layer():
     """🧪 Test Dropout layer implementation."""
-    print("🧪 Unit Test: Dropout Layer...")
-
-    # Test dropout creation
-    dropout = Dropout(0.5)
-    assert dropout.p == 0.5
-
-    # Test inference mode (should pass through unchanged)
-    x = Tensor([1, 2, 3, 4])
-    y_inference = dropout.forward(x, training=False)
-    assert np.array_equal(x.data, y_inference.data), "Inference should pass through unchanged"
-
-    # Test training mode with zero dropout (should pass through unchanged)
-    dropout_zero = Dropout(0.0)
-    y_zero = dropout_zero.forward(x, training=True)
-    assert np.array_equal(x.data, y_zero.data), "Zero dropout should pass through unchanged"
-
-    # Test training mode with full dropout (should zero everything)
-    dropout_full = Dropout(1.0)
-    y_full = dropout_full.forward(x, training=True)
-    assert np.allclose(y_full.data, 0), "Full dropout should zero everything"
-
-    # Test training mode with partial dropout
-    # Note: This is probabilistic, so we test statistical properties
-    x_large = Tensor(np.ones((1000,)))  # Large tensor for statistical significance
-    y_train = dropout.forward(x_large, training=True)
-
-    # Count non-zero elements (approximately 50% should survive)
-    non_zero_count = np.count_nonzero(y_train.data)
-    expected = 500
-    # Use 3-sigma bounds: std = sqrt(n*p*(1-p)) = sqrt(1000*0.5*0.5) ≈ 15.8
-    std_error = np.sqrt(1000 * 0.5 * 0.5)
-    lower_bound = expected - 3 * std_error  # ≈ 453
-    upper_bound = expected + 3 * std_error  # ≈ 547
-    assert lower_bound < non_zero_count < upper_bound, \
-        f"Expected {expected}±{3*std_error:.0f} survivors, got {non_zero_count}"
-
-    # Test scaling (surviving elements should be scaled by 1/(1-p) = 2.0)
-    surviving_values = y_train.data[y_train.data != 0]
-    expected_value = 2.0  # 1.0 / (1 - 0.5)
-    assert np.allclose(surviving_values, expected_value), f"Surviving values should be {expected_value}"
-
-    # Test no parameters
-    params = dropout.parameters()
-    assert len(params) == 0, "Dropout should have no parameters"
-
-    # Test invalid probability
+    # Isolate this graded test from earlier cells and preserve the learner's RNG.
+    global rng
+    previous_rng = rng
+    rng = np.random.default_rng(7)
     try:
-        Dropout(-0.1)
-        assert False, "Should raise ValueError for negative probability"
-    except ValueError:
-        pass
+        print("🧪 Unit Test: Dropout Layer...")
 
-    try:
-        Dropout(1.1)
-        assert False, "Should raise ValueError for probability > 1"
-    except ValueError:
-        pass
+        # Test dropout creation
+        dropout = Dropout(0.5)
+        assert dropout.p == 0.5
 
-    print("✅ Dropout layer works correctly!")
+        # Test inference mode (should pass through unchanged)
+        x = Tensor([1, 2, 3, 4])
+        y_inference = dropout.forward(x, training=False)
+        assert np.array_equal(x.data, y_inference.data), "Inference should pass through unchanged"
+
+        # Test training mode with zero dropout (should pass through unchanged)
+        dropout_zero = Dropout(0.0)
+        y_zero = dropout_zero.forward(x, training=True)
+        assert np.array_equal(x.data, y_zero.data), "Zero dropout should pass through unchanged"
+
+        # Test training mode with full dropout (should zero everything)
+        dropout_full = Dropout(1.0)
+        y_full = dropout_full.forward(x, training=True)
+        assert np.allclose(y_full.data, 0), "Full dropout should zero everything"
+
+        # Test training mode with partial dropout
+        # Note: This is probabilistic, so we test statistical properties
+        x_large = Tensor(np.ones((1000,)))  # Large tensor for statistical significance
+        y_train = dropout.forward(x_large, training=True)
+
+        # Count non-zero elements (approximately 50% should survive)
+        non_zero_count = np.count_nonzero(y_train.data)
+        expected = 500
+        # Use 3-sigma bounds: std = sqrt(n*p*(1-p)) = sqrt(1000*0.5*0.5) ≈ 15.8
+        std_error = np.sqrt(1000 * 0.5 * 0.5)
+        lower_bound = expected - 3 * std_error  # ≈ 453
+        upper_bound = expected + 3 * std_error  # ≈ 547
+        assert lower_bound < non_zero_count < upper_bound, \
+            f"Expected {expected}±{3*std_error:.0f} survivors, got {non_zero_count}"
+
+        # Test scaling (surviving elements should be scaled by 1/(1-p) = 2.0)
+        surviving_values = y_train.data[y_train.data != 0]
+        expected_value = 2.0  # 1.0 / (1 - 0.5)
+        assert np.allclose(surviving_values, expected_value), f"Surviving values should be {expected_value}"
+
+        # Test no parameters
+        params = dropout.parameters()
+        assert len(params) == 0, "Dropout should have no parameters"
+
+        # Test invalid probability
+        try:
+            Dropout(-0.1)
+            assert False, "Should raise ValueError for negative probability"
+        except ValueError:
+            pass
+
+        try:
+            Dropout(1.1)
+            assert False, "Should raise ValueError for probability > 1"
+        except ValueError:
+            pass
+
+        print("✅ Dropout layer works correctly!")
+    finally:
+        rng = previous_rng
 
 if __name__ == "__main__":
     test_unit_dropout_layer()

@@ -478,3 +478,27 @@ class TestGELUActivation:
         assert np.isclose(output.data[1], 1000.0, atol=1e-5), "GELU(1000) should be 1000"
         assert not np.isnan(output.data[2]), "GELU(-inf) must not evaluate to NaN"
 
+
+
+@pytest.mark.parametrize("dim", [0, 1, -1])
+def test_softmax_masked_slices_preserve_unmasked_distribution(dim):
+    """A fully masked slice stays zero without corrupting neighboring slices."""
+    values = np.array([[-np.inf, -np.inf, -np.inf],
+                       [0.0, -np.inf, np.log(3.0)]], dtype=np.float32)
+    expected = np.array([[0.0, 0.0, 0.0], [0.25, 0.0, 0.75]], dtype=np.float32)
+    if dim == 0:
+        values, expected = values.T, expected.T
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        output = Softmax()(Tensor(values), dim=dim)
+    np.testing.assert_allclose(output.data, expected, atol=1e-7)
+
+
+def test_activations_handle_float32_boundary_values():
+    """Finite representable inputs must not overflow intermediate gate arithmetic."""
+    largest = np.finfo(np.float32).max
+    x = Tensor([-largest, largest])
+    with np.errstate(over="raise", invalid="raise"):
+        gelu = GELU()(x)
+        softmax = Softmax()(x)
+    np.testing.assert_array_equal(gelu.data, [0.0, largest])
+    np.testing.assert_array_equal(softmax.data, [0.0, 1.0])

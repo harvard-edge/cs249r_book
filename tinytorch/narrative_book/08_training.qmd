@@ -1,19 +1,22 @@
 # The Training Engine: The Five-Step Loop {#sec-training}
 
-Chapter 7 left you with an optimizer that has two methods, `zero_grad()` and `step()`, and with every other part of a framework already built: tensors, layers, a loss, a data loader, and an autograd engine that fills in `.grad` when you call `loss.backward()`. The question this chapter answers is the one a practitioner asks the first time they write a loop by hand. In what order do I call these things, what breaks if I get the order wrong, and what does the loop have to remember from one batch to the next?
+A weight starts at $1$, and its gradient is also $1$. With learning rate $0.1$, the optimizer moves it to $0.9$. On the next batch, `backward()` adds the new gradient to the old buffer unless the loop clears it. The optimizer from @sec-optimizers can implement its update rule correctly and still receive the wrong gradient. The training engine must establish which forward and backward computations belong to each update.
 
-The answer is a small class called `Trainer`. Its core is five calls in a fixed order, shown in @fig-training-pipeline. Around that core sit four conveniences that every real training job needs: a learning rate that changes over time, a guard against gradients that spike, a switch between training and evaluation behavior, and a way to save progress to disk so a crash costs minutes rather than days. Each is a few lines. Together they are the difference between a script that runs once and a job you can stop, restart, and trust.
+`Trainer` assembles the components built so far into one call path. It keeps parameters fixed while a batch produces a loss and gradients, then lets the optimizer update them and clears the gradient buffers. Several batches can contribute to the same update if their contributions are weighted by sample count. The boundaries in @fig-training-pipeline determine where scheduling, clipping, evaluation, and checkpointing attach to this loop.
 
-![The five-step training loop: zero_grad, forward, loss, backward, step](assets/images/diagrams/08_training-diag-1.svg){#fig-training-pipeline}
+::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**An accumulation window**: Forward, loss, and backward repeat while parameters stay fixed. At the window boundary, the Trainer averages by actual samples, optionally clips, updates parameters, and clears gradients." fig-alt="Two rows of three boxes. The upper row connects forward pass, scalar batch-mean loss, and sample-weighted backward. The lower row connects gradient averaging, optional clipping, and update followed by clearing. A note includes the final partial window."}
+![](assets/images/diagrams/08_training-diag-1.svg)
+:::
 
 ---
 
 ## The Problem
 
-Chapter 6 built `backward()` so that it *adds* into `param.grad` rather than overwriting it. That choice was forced. When two branches of a network share a parameter, its gradient is the sum of both contributions, and adding is how the sum happens. The price is that nothing ever clears `.grad` on its own. If you forget to clear it, the second batch's gradient lands on top of the first, the third on top of both, and the optimizer steps along the running total.
+Chapter 6 built `backward()` so that it *adds* into `param.grad` rather than overwriting it. That choice was forced. When two branches of a network share a parameter, its gradient is the sum of both contributions, and adding is how the sum happens. The price is that nothing ever clears `.grad` on its own. Without a clear, the second batch's gradient lands on top of the first, the third on top of both, and the optimizer steps along the running total.
 
 No exception is raised. The loss simply stops behaving. The smallest example that shows it is a single weight $w$ with loss $\tfrac{1}{2}w^2$, whose gradient is $w$ itself, trained with plain gradient descent at learning rate $0.1$.
 
+::: {#lst-training-uncleared-gradient lst-cap="**Uncleared gradients**: The old gradient changes the next update even for one weight."}
 ```python
 import numpy as np
 
@@ -27,8 +30,10 @@ for step in range(1, 9):
     # forgotten zero_grad(): backward() adds this step's gradient to the old ones
     grad_bad = grad_bad + w_bad
     w_bad = w_bad - lr * grad_bad
-    print(f"step {step}   correct w = {w_ok:.4f}   forgotten w = {w_bad:+.4f}")
+    print(f"step {step}   correct w = {w_ok:.4f}   "
+          f"forgotten w = {w_bad:+.4f}")
 ```
+:::
 
 ```
 step 1   correct w = 0.9000   forgotten w = +0.9000
@@ -41,9 +46,9 @@ step 7   correct w = 0.4783   forgotten w = -0.7341
 step 8   correct w = 0.4305   forgotten w = -0.9153
 ```
 
-The correct column walks steadily toward the minimum at zero. The forgotten column reaches zero in four steps, overshoots, and keeps swinging. For this loss the swing never dies out, because the accumulated gradient acts like a spring that always pulls too hard. For a real network the errors compound until the loss reads `NaN`, and the only evidence is a curve that looked fine for a while and then did not.
+The correct column walks steadily toward the minimum at zero. The forgotten column crosses zero between steps four and five, then keeps swinging. For this loss, the accumulated gradient creates an undamped oscillation rather than convergence. Other models can oscillate, diverge, or produce nonfinite values. None of those outcomes is needed to identify the bug: the second update already uses a gradient from two different parameter values.
 
-Two other bugs belong to the same family. Calling `optimizer.step()` before `loss.backward()` updates the parameters with whatever gradient is in the buffer, which is either nothing or last batch's. Forgetting to switch the model into evaluation mode leaves dropout (Chapter 3) zeroing half the activations while you measure test accuracy. None of these crash. The defense is not cleverness. It is a fixed order, written once, in one place, that every epoch runs through the same way.
+Calling `optimizer.step()` before `loss.backward()` has the same ownership problem. It uses whatever gradients remain, or skips parameters whose gradients are `None`. Leaving dropout active during evaluation changes the predictions being measured. These mistakes need not raise an exception, so the Trainer establishes the order and mode at the entry to each pass.
 
 ---
 
@@ -61,33 +66,31 @@ Each step of the loop reads state that the previous step wrote, and that depende
 | 4 | `loss.backward()` | the tape | every `param.grad`, by accumulation |
 | 5 | `optimizer.step()` | `param.grad`, optimizer buffers | `param.data`, optimizer buffers |
 
-: What each of the five steps reads and writes. A step can only run after the step that produced its inputs. {#tbl-training-five-step-contract tbl-colwidths="[8,34,28,30]"}
+: **The five-step state contract**: Each operation reads the state produced by its prerequisites. {#tbl-training-five-step-contract tbl-colwidths="[8,34,28,30]"}
 
 The contract is about which computation an update represents. *Every optimizer step must use the intended objective evaluated at one unchanged set of parameter values.* For a single batch, that objective is the batch mean. Later, accumulation combines several batch means with sample-count weights before stepping. Clearing separates those intentional windows; skipping the clear mixes an old objective into the new one. Moving the parameters before backward finishes is another violation because local rules still read operands from the earlier forward pass. The `Trainer` centralizes this ordering so every epoch observes the same boundaries.
 
 ### What the loop remembers
 
-The five steps handle one batch. Around them sit two more loops, one over the batches in a dataset (one pass is an epoch) and one over epochs. The `Trainer` owns the state that outlives a single batch: how many epochs and optimizer steps have completed, the current learning rate, and a history of losses for plotting. It also owns the `training` flag from Chapter 3, setting it to `True` before a training pass and `False` before evaluation, so layers like dropout behave correctly without the caller remembering.
+The five steps handle one batch. Around them sit two more loops, one over the batches in a dataset (one pass is an epoch) and one over epochs. The `Trainer` owns the state that outlives a single batch: how many epochs and optimizer steps have completed, the current learning rate, and a history of losses for plotting. It stores `training_mode` and sets `model.training` at the start of each pass. The `_forward` helper also passes the mode to models whose `forward` signature accepts `training`, including the `Sequential` container from chapter 3. That explicit argument is what reaches its dropout layers.
 
-That is the whole model. A fixed order for one batch, and a little state that carries from one batch to the next. The four conveniences from the opening (the schedule, the clip, the evaluation switch, and the checkpoint) each attach to that state at one point in the loop, and I introduce each of them beside its code, where the reason for it is easiest to see.
+The model and optimizer retain the parameter objects; the optimizer also retains its update buffers. The Trainer holds references to those collaborators, rather than creating a second set of weights. Batch counters and sample sums are local to one `train_epoch` call, while `epoch`, `step`, and `history` remain on the Trainer when that call returns. These different lifetimes explain both accumulation and the checkpoint boundary.
 
 ---
 
 ## The Code
 
 ::: {.callout-note title="Source Code Mapping"}
-The listings in this section are extracted from Module 08 (`src/08_training/08_training.py`) by name when the book is built, so a renamed function in the module fails the build instead of drifting from the chapter. Module 08 writes each `Trainer` method as its own exercise cell and attaches it to the class afterward (`Trainer.train_epoch = trainer_train_epoch`), so the listings show the functions under the names the module gives them; the six checkpoint serialization helpers on the class are elided except the one the Checkpoints section discusses.
+The registered listings in this section are extracted by name from Module 08 (`src/08_training/08_training.py`). The listing check detects renamed functions or excerpts that no longer match the source. Module 08 writes each `Trainer` method as its own exercise cell and attaches it to the class afterward (`Trainer.train_epoch = trainer_train_epoch`), so the listings show the functions under the names the module gives them; the six checkpoint serialization helpers on the class are elided except the one the Checkpoints section discusses.
 :::
 
-The first two pieces stand alone. The `Trainer` itself needs a `Tensor` with `backward()` (Chapter 6), a model built from `Layer` objects (Chapter 3), a loss (Chapter 4), a `DataLoader` (Chapter 5), and an optimizer (Chapter 7).
+The first two pieces stand alone. The Trainer then needs a model with `forward()` and `parameters()`, a loss with `forward()`, an optimizer, and an iterable of `(inputs, targets)` batches. The DataLoader from chapter 5 supplies that iterable; a Python list of batches works as well. Importing Module 08 enables the backward rules from chapter 6.
 
 ### The schedule
 
-Chapter 7 treated the learning rate $\eta$ as a constant, and for the runs in that chapter's traces, a few steps long, a constant was fine. Milestone I still gets away with one. It trains XOR for 500 epochs at $\eta = 0.5$ and the digit classifier for 100 steps at $\eta = 0.01$, both problems small enough that a fixed rate reaches the answer. A run of any length is different. Early on, the parameters are far from anything good, the gradient points roughly the right way for a long distance, and a big $\eta$ covers ground. Late in the run the parameters sit near a minimum, and the same big $\eta$ hops back and forth across it instead of settling in. One number cannot be right at both ends.
+With $\eta = 0.1$, a gradient of $2$ moves a weight by $0.2$ under plain SGD. With $\eta = 0.01$, the same gradient moves it by $0.02$. A schedule changes this multiplier as training progresses without changing the optimizer's update rule. It can allow larger early updates and smaller later ones; whether that helps depends on the objective and the chosen endpoints.
 
-The naive fix is a compromise, an $\eta$ small enough not to bounce at the end, paid for with epochs of slow progress at the start. The next fix, dropping $\eta$ by a factor of ten at a few hand-chosen epochs, works, but it adds two or three more numbers to tune, and each of them costs a full run to evaluate.
-
-What if $\eta$ were a smooth function of progress instead, with nothing to choose beyond the two endpoints? The cosine schedule (Loshchilov and Hutter, 2016) glides from $\eta_{\max}$ to $\eta_{\min}$ along half a cosine wave over $T$ epochs:
+`CosineSchedule` connects a maximum rate to a minimum rate along half a cosine wave over $T$ epochs:
 
 $$\eta_t = \eta_{\min} + \tfrac{1}{2}\,(\eta_{\max} - \eta_{\min})\left(1 + \cos\frac{\pi t}{T}\right)$$
 
@@ -95,15 +98,13 @@ At $t = 0$ the cosine is $1$ and $\eta_0 = \eta_{\max}$. At $t = T$ the cosine i
 
 {{< include _listings/08_training/CosineSchedule.qmd >}}
 
-Notice the guard at the top of `get_lr`. Past the last epoch the cosine would start climbing again, so the class returns the floor instead, which is what a run that outlasts its planned length wants. PyTorch's `CosineAnnealingLR` is the same formula, advanced by however often you call `scheduler.step()`, which in production is once per optimizer step rather than once per epoch.
+The guard at the top of `get_lr` returns the floor once `epoch >= total_epochs`. Without it, continuing to evaluate the cosine would eventually raise the rate again. The Trainer asks for `get_lr(self.epoch)` before processing any batches, so every optimizer update in that epoch uses the same scheduled rate. With `total_epochs=4`, four calls to `train_epoch` use indices 0 through 3; index 4 reaches the floor only if training continues for another epoch.
 
 ### Clipping
 
-Most batches in a run produce a gradient of about the same size. Once in a while one does not. Deep transformers (Chapter 13) and recurrent networks have loss surfaces with cliffs in them, and a batch that lands near one produces a gradient ten or a hundred times larger than its neighbors. Chapter 7's `SGD` multiplies whatever gradient it is handed by $\eta$ and steps, so that one batch moves the parameters ten or a hundred times farther than usual, into a region where activations saturate or the loss reads `NaN`, and the run does not come back. Nothing in the five steps notices. The loss on the next batch is enormous, and by then the parameters that produced the good curve are gone.
+Suppose two parameter tensors have gradients $[3,4]$ and $[0,12]$. Their separate lengths are $5$ and $12$. Clipping each independently to length $2.5$ multiplies the first by $0.5$ and the second by about $0.2083$, changing their relative contributions. The combined gradient points in a different direction.
 
-A guard has to sit between `backward()` and `step()`, and the obvious version clips each gradient tensor to a maximum length on its own. That bounds the step, but it also bends it. A model is many parameter tensors, and if the spike lives in one of them, per-tensor clipping shrinks that tensor and leaves the rest alone, so the combined step no longer points where the gradient pointed. The optimizer then takes a bounded step in a direction nobody asked for.
-
-Can we bound the length of the step without touching its direction? Yes, by treating all the gradients in the model, across every parameter tensor, as one long vector and measuring the length of that:
+Global clipping treats the gradients as one long vector. Its length is $13$, so one coefficient, $2.5/13$, scales every entry. For plain SGD without momentum or decay, this also bounds the update length by the learning rate times $2.5$. For Adam or momentum SGD, the clipping operation bounds the current gradient; the optimizer's stored state still participates in the eventual update. The global norm is
 
 $$\|\mathbf{g}\|_{\text{global}} = \sqrt{\sum_{i=1}^{P} \|\mathbf{g}_i\|^2}$$
 
@@ -111,15 +112,13 @@ where $\mathbf{g}_i$ is the gradient of the $i$-th of $P$ parameter tensors and 
 
 {{< include _listings/08_training/clip_grad_norm.qmd >}}
 
-Three things to notice. Parameters whose `.grad` is `None` are skipped in both passes; a parameter that no path of the tape reached contributes nothing to the norm and has nothing to scale. A gradient may be the bare array Chapter 6's `backward()` leaves or a `Tensor` assigned by hand, and the function reads and scales either in place. And the function returns the norm it measured *before* clipping, because that number is the best early warning a training log can carry. A pre-clip norm that jumps is the spike described above, visible one step before the loss shows it. PyTorch's `clip_grad_norm_` is the same two passes, down to the variable name `clip_coef`.
+Parameters whose `.grad` is `None` contribute nothing to the norm. For the remaining parameters, the function accepts either the NumPy gradient array produced by backward or a Tensor assigned by hand. It replaces the array stored in `param.grad`, or in `param.grad.data` for the Tensor case, with scaled values. An external reference to the old array does not become a reference to the replacement. Squaring in float64 avoids overflowing the norm calculation for large finite float32 gradients. The returned value is the norm before clipping, so a caller can record how much scaling the update required.
 
 ### The Trainer and the five steps
 
-Every training script in existence runs the five calls of @tbl-training-five-step-contract, and nearly all of them write the calls out by hand. That is the naive way, and The Problem section priced its cost. Each new script is a fresh chance to put `zero_grad()` in the wrong place, and the failure that follows does not announce itself. It shows up as a loss curve that looked fine for a while and then did not, after hours of compute, with no line number to point at. The fix is to write the order once, in one place, and never expose the steps individually. That place is the `Trainer`.
+`train_epoch` is the public entry for training. It clears gradients, chooses the epoch's learning rate, and repeatedly calls `_process_batch`. That helper performs forward, loss, and backward. When an update is due, `_optimizer_update` averages and optionally clips the gradients, calls `optimizer.step()`, then clears the buffers. This split lets the Trainer process several batches before changing any parameters.
 
-Its constructor stores the five collaborators and initializes the state that outlives a batch. The loop itself is two private methods split at a natural seam. `_process_batch` is steps 2 through 4, and `_optimizer_update` is step 5 followed immediately by step 1 for the next round. The seam is there for a reason, and the reason is the batch that does not fit.
-
-Chapter 6 did the napkin math. One saved activation tensor for a batch of 16 sequences of 2048 tokens at width 4096 is about 268 MB, a transformer layer saves several, and a model has tens of layers, so the memory a batch needs during `backward()` grows in proportion to the batch. If the recipe you are reproducing used a batch of 64 and your GPU holds 16, the naive choices are to buy four GPUs or to train at 16 and accept a noisier gradient and a different recipe from the one you set out to reproduce.
+A larger batch requires more live activation storage during backward. Processing four samples together, for example, keeps intermediates for all four until their backward work completes. Processing two samples at a time can release each smaller graph after backward while retaining only the parameter gradients needed to combine their contributions.
 
 The `.grad` buffers can hold the contributions from several **micro-batches**, smaller batches processed before one optimizer update. Run forward, loss, and backward on each micro-batch, releasing its graph afterward, while leaving parameters fixed and preserving their accumulated gradients. Only when the window is complete does the optimizer step. For equal-size batches the desired mean gradient is
 
@@ -133,7 +132,7 @@ The equivalence to a single concatenated batch also assumes that splitting does 
 
 {{< include _listings/08_training/Trainer.qmd >}}
 
-The class body itself holds only plumbing: six small helpers that turn the model, optimizer, and schedule into dictionaries for a checkpoint and back, and `_forward`, which settles a question Chapter 3 left open. A `Sequential` takes `training` as a call argument so that `Dropout` knows which path to run, while a bare `Linear` or Chapter 13's `GPT` takes only the inputs, so the helper inspects `model.forward` on each call and passes the flag only when that signature accepts it. Every forward pass the `Trainer` makes goes through it, with the flag set from `training_mode`. The constructor and the two halves of the loop each live in their own cell.
+The class body supplies checkpoint helpers and `_forward`. The latter inspects `model.forward` and passes `training=self.training_mode` only when the method accepts that argument. A `Sequential` receives it; a bare `Linear` needs only the input. This dispatch keeps the training loop independent of the model container. The constructor and the two halves of the loop each live in their own source cell.
 
 {{< include _listings/08_training/trainer_init.qmd >}}
 
@@ -141,9 +140,9 @@ The class body itself holds only plumbing: six small helpers that turn the model
 
 {{< include _listings/08_training/optimizer_update.qmd >}}
 
-Follow the values across the two helpers. `_process_batch` reads `inputs.shape[0]`, calls `_forward`, and asks `loss_fn.forward` for the scalar batch mean. `np.ones_like(loss.data) * batch_size` supplies a seed with exactly the loss shape required by Chapter 6. The method leaves sample-summed derivatives in `.grad` and returns the corresponding sample-summed loss as a Python float. It neither steps the optimizer nor clears the gradients.
+Follow the values across the two helpers. `_process_batch` reads `inputs.shape[0]`, calls `_forward`, and asks `loss_fn.forward` for the scalar batch mean. `np.ones_like(loss.data)` times `batch_size` supplies a seed with exactly the loss shape required by Chapter 6. The method leaves sample-summed derivatives in `.grad` and returns the corresponding sample-summed loss as a Python float. It neither steps the optimizer nor clears the gradients.
 
-`_optimizer_update(sample_count)` consumes those sums. It divides each existing parameter gradient by `sample_count`, computes the optional clipping norm on that mean, updates the weights, and clears the buffers. Normalizing before clipping is essential: a threshold applied to a sum would become more restrictive merely because the window contained more samples. The constructor also marks model parameters trainable, but the optimizer must still own the same parameter objects. A flag can enable recording; it cannot add a missing weight to the optimizer's list.
+`_optimizer_update(sample_count)` consumes those sums. It first materializes `model.parameters()` as a list, because normalization and clipping must be able to visit the same parameters even if the model returns a generator. It divides each existing gradient by `sample_count`, computes the optional clipping norm on that mean, updates the weights, and clears the buffers. Normalizing before clipping is essential: a threshold applied to a sum would become more restrictive merely because the window contained more samples. The constructor also marks model parameters trainable, but the optimizer must still own the same parameter objects. A flag can enable recording; it cannot add a missing weight to the optimizer's list.
 
 ### One epoch
 
@@ -155,25 +154,23 @@ The naive loop for accumulation fires an update whenever the batch index is a mu
 
 {{< include _listings/08_training/train_epoch.qmd >}}
 
-The returned loss uses a separate denominator: total samples in the epoch. `total_loss` adds the sample-summed values returned by `_process_batch`; dividing by `total_samples` gives every observed sample equal weight. It is the mean of losses measured as training progressed, not a new evaluation of the final parameters. Changing accumulation can change the parameter trajectory and therefore the observed losses, but it does not change the reporting weights merely by regrouping the same values. The `model.training = True` line is for models that keep a mode flag of their own, such as Chapter 9's batch normalization; the `Sequential` models of Chapter 3 get the flag through `_forward` instead. PyTorch Lightning and the Hugging Face `Trainer` own this same epoch loop on top of the hand-written five steps.
+The returned loss uses a separate denominator: total samples in the epoch. `total_loss` adds the sample-summed values returned by `_process_batch`; dividing by `total_samples` gives every observed sample equal weight. It is the mean of losses measured as training progressed, not a new evaluation of the final parameters. Changing accumulation can change the parameter trajectory and therefore the observed losses, but it does not change the reporting weights merely by regrouping the same values. On a successful return, `step` has increased once per optimizer update and `epoch` once for the completed call. The pending counters no longer exist, and all optimizer-owned gradients have been cleared. An empty loader produces the reference implementation's `0.0` loss placeholder and advances the epoch without an update; it is not evidence of a perfectly fitted dataset.
 
 ### Evaluation
 
-After each epoch you want one number on data the model has never trained on. Milestone I reports test accuracy on 47 held-out digit images after every epoch, and that number is the only one that says whether the network learned rather than memorized.
+A binary classifier returning probabilities `[[0.9], [0.1]]` for labels `[[1], [0]]` predicts both labels correctly. Taking `argmax` over each one-column row would instead return zero twice. Evaluation therefore needs a metric appropriate to the loss, as well as a forward pass that leaves the training state undisturbed.
 
-The naive way is to run the training forward pass on the test set and count. Two things are wrong with it. Dropout (Chapter 3) is still on, so the network you measure has half its activations zeroed at random, and the accuracy you read is lower than the model's and different every time you read it. And nothing marks the pass as a measurement, so a `backward()` left in by habit fills `.grad` with gradients of the test loss, and the next `step()` trains on the data you were supposed to be measuring. Both mistakes are silent; the number prints either way.
-
-`evaluate` rules out both by construction. It turns `training_mode` off, so `_forward` hands every `Dropout` the identity path, runs steps 2 and 3 only, sums the loss over the loader, and, when the outputs look like class scores (more than one column), counts how often the largest score lands on the true label. Labels may arrive as integers or as one-hot rows (Chapter 4); both cases reduce to an index comparison.
+`evaluate` sets `training_mode` and `model.training` to `False`, then calls `_forward` and `loss_fn.forward` inside `no_grad()`. The first change disables dropout in a Sequential; the second prevents autograd from retaining a graph for a backward pass that will never occur. These are separate controls. Turning off recording alone does not turn off dropout.
 
 {{< include _listings/08_training/evaluate.qmd >}}
 
-The reported evaluation loss weights each batch mean by its sample count, then divides by the total number of examples. A short final batch therefore has the same per-example weight as every full batch. Accuracy likewise divides total correct predictions by total examples. This routine reports accuracy only for multiclass outputs; a single-column binary classifier needs its own probability threshold.
+The evaluation loss uses the same sample weighting as the training report. CrossEntropyLoss computes class accuracy by comparing the largest-logit index with each integer target. BinaryCrossEntropyLoss thresholds probabilities and targets at `>= 0.5` and counts correct binary entries, including every label in a multilabel output. Regression and custom losses return `0.0` as an unused accuracy placeholder. Output width cannot identify the task: a two-column output may represent two regression values.
 
-There is no `backward()` here, so `.grad` is never touched and the parameters cannot move. The forward pass runs inside Chapter 6's `no_grad()`, so no tape is recorded and the saved activations Chapter 6 priced, tens of gigabytes on a real model, are never allocated. PyTorch's `model.eval()` and `torch.no_grad()` are the same two moves, and the bridge section says what the second one buys.
+There is no backward or optimizer update, so existing parameter gradients and weights remain unchanged. The pass still allocates the arrays needed to calculate predictions and losses; `no_grad()` removes their retention for backward, not the forward computation itself. On return, the Trainer remains in evaluation mode and appends the loss to `history['eval_loss']`. The next `train_epoch` explicitly switches training back on.
 
 ### Checkpoints
 
-A run that takes days is a run that will be interrupted. The node fails, the job is preempted, someone reboots the machine, and everything since the start is gone unless it was written to disk. So a training script saves a **checkpoint** every epoch or so, a file preserving the state that its serializer knows how to restore: the parameters, the optimizer's own state, the epoch and step counters, and the loss history. (The word is unrelated to the activation checkpointing of Chapter 6, which trades recomputation for memory inside one backward pass.)
+After two Adam updates, restoring only the weights discards the moment estimates and their ages. The next call to `step()` then follows a different trajectory even on identical data. A **checkpoint** preserves the state needed to continue the supported computation: parameters, optimizer state and hyperparameters, schedule settings, clipping configuration, mode, counters, and history. (The word is unrelated to the activation checkpointing of Chapter 6, which trades recomputation for memory inside one backward pass.)
 
 The naive save is `open(path, 'wb')` followed by `pickle.dump`. Opening for writing truncates the old file to zero bytes first, then the new bytes stream in over the next seconds, and a training job is exactly the kind of process that gets killed during those seconds. A kill that lands mid-write leaves a truncated file that `pickle.load` rejects, and the previous checkpoint is already gone, because the open destroyed it. The crash the checkpoint existed to protect against has now cost the run and the checkpoint together.
 
@@ -181,7 +178,7 @@ The implementation writes to `path + ".tmp"`, closes that file, and calls `os.re
 
 Atomic replacement is narrower than durability after power loss. This code does not call `fsync` on the file or directory, and its fixed temporary name assumes one writer per checkpoint path. The mechanism protects the destination from interrupted serialization; it is not a transaction protocol for concurrent writers or a guarantee that all bytes have reached persistent storage.
 
-`save_checkpoint` gathers the state into one dictionary, serializes it with `pickle` (the same serializer Chapter 5 described for handing samples between processes), and performs that write-then-rename. `load_checkpoint` reverses it, copying parameter values back into the live tensors so the model, optimizer, schedule, and counters agree.
+`save_checkpoint` gathers the state into one dictionary, serializes it with `pickle`, Python's mechanism for writing object data to a byte stream, and performs that write-then-rename. `load_checkpoint` reverses it, copying parameter values back into the live tensors so the model, optimizer, schedule, and counters agree.
 
 {{< include _listings/08_training/save_checkpoint.qmd >}}
 
@@ -191,15 +188,15 @@ The dictionaries come from the helpers on the class. The model helper copies eve
 
 {{< include _listings/08_training/get_optimizer_state.qmd >}}
 
-The entry stores optimizer hyperparameters, the global call counter, per-parameter update counts, and the arrays returned by `get_momentum_state()`. For SGD those arrays are velocities; for Adam and AdamW they are the two moment buffers. Loading restores this state on an already constructed optimizer. The model helper checks parameter counts and shapes before copying values into existing tensors; matching architecture and optimizer class remain the caller's responsibility.
+The entry stores optimizer hyperparameters, the global call counter, per-parameter update counts, and the arrays returned by `get_momentum_state()`. For SGD those arrays are velocities; for Adam and AdamW they are the two moment buffers. Loading restores this state on an already constructed optimizer. The model helper checks parameter counts and shapes before replacing their data arrays with copies. It preserves the Tensor objects, so the optimizer's references still reach the model's weights. Matching architecture, parameter order, and optimizer class remain the caller's responsibility. Restoring `grad_clip_norm` also matters: a resumed Trainer with default clipping disabled must not take an unclipped update when the saved run used clipping. An older checkpoint without this field leaves the current configuration unchanged.
 
-This is an epoch-boundary checkpoint. With the same next batch and a deterministic model, restored SGD, Adam, and AdamW take the same next update as uninterrupted training, including bias correction and decay. The file does not preserve random generator state, an unfinished accumulation window, loader position, or later nonparameter buffers such as running normalization statistics. Older checkpoints that lack optimizer ages cannot promise exact continuation. Exercise 3 checks the supported boundary before considering these additional states.
+The supported save point is an epoch boundary, after pending gradients have been applied and cleared. With the same next batch and a deterministic model, restored SGD, Adam, and AdamW take the same next update as uninterrupted training, including bias correction and decay. The file does not preserve random generator state, an unfinished accumulation window, loader position, or later nonparameter buffers such as running normalization statistics. Older checkpoints that lack optimizer ages cannot promise exact continuation. Exercise 3 checks the supported boundary before considering these additional states. A failed load is not a rollback operation: counters and other fields may already have changed before a later compatibility check raises, so an incompatible checkpoint should be rejected rather than treated as a partial resume.
 
 ---
 
 ## A Worked Trace
 
-The smallest run that exercises all five steps is a model with one weight, one training sample, and mean squared error. Take $w = 0.5$, input $x = 1$, target $y = 1$, and plain gradient descent at $\eta = 0.1$. The loss is $(wx - y)^2$ and its gradient with respect to $w$ is $2(wx - y)\,x$.
+The smallest run that exercises all five steps is a model with one weight, one training sample, and mean squared error, traced in @tbl-training-loop-trace. Take $w = 0.5$, input $x = 1$, target $y = 1$, and plain gradient descent at $\eta = 0.1$. The loss is $(wx - y)^2$ and its gradient with respect to $w$ is $2(wx - y)\,x$.
 
 | Iteration | 1. `zero_grad` | 2. forward $wx$ | 3. loss $(wx-y)^2$ | 4. backward $\partial \mathcal{L}/\partial w$ | 5. step $w - \eta\,\text{grad}$ |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -207,10 +204,11 @@ The smallest run that exercises all five steps is a model with one weight, one t
 | 2 | `grad = None` | $0.600$ | $0.1600$ | $2(0.6 - 1)(1) = -0.800$ | $0.6 + 0.08 = \mathbf{0.680}$ |
 | 3 | `grad = None` | $0.680$ | $0.1024$ | $2(0.68 - 1)(1) = -0.640$ | $0.68 + 0.064 = \mathbf{0.744}$ |
 
-: Three iterations of the five-step loop on a one-weight model. Each iteration's forward reads the $w$ that the previous step wrote. {#tbl-training-loop-trace tbl-colwidths="[10,14,14,16,24,22]"}
+: **A one-weight update**: Each iteration's forward reads the $w$ that the previous update wrote. {#tbl-training-loop-trace tbl-colwidths="[10,14,14,16,24,22]"}
 
 The residual $wx - y$ shrinks by a factor of $0.8$ each time, so the loss falls by $0.64$ and $w$ approaches $1$. Feeding the same sample through `Trainer.train_epoch` with a batch size of one produces the same three losses and the same final $w = 0.744$; the Trainer adds bookkeeping, not arithmetic.
 
+::: {#lst-training-single-weight-run lst-cap="**A one-weight training run**: Three epochs follow the arithmetic in the worked trace."}
 ```python
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
@@ -222,11 +220,13 @@ from tinytorch.core.training import Trainer
 model = Linear(1, 1, bias=False)
 model.weight.data[:] = 0.5
 trainer = Trainer(model, SGD(model.parameters(), lr=0.1), MSELoss())
-loader = DataLoader(TensorDataset(Tensor([[1.0]]), Tensor([[1.0]])), batch_size=1)
+dataset = TensorDataset(Tensor([[1.0]]), Tensor([[1.0]]))
+loader = DataLoader(dataset, batch_size=1)
 for it in range(1, 4):
     loss = trainer.train_epoch(loader)
     print(f"epoch {it}: loss = {loss:.4f}  w -> {model.weight.data[0, 0]:.3f}")
 ```
+:::
 
 ```
 epoch 1: loss = 0.2500  w -> 0.600
@@ -236,6 +236,7 @@ epoch 3: loss = 0.1024  w -> 0.744
 
 A short accumulation window exposes a bug that the one-sample default cannot. Consider the same bias-free model initialized to zero, two examples with input one and target one, followed by one example with input one and target three. The first batch has mean loss one and mean weight gradient minus two; seeding by its size contributes minus four. The second has mean loss nine and contributes minus six. Their combined gradient is minus ten divided by three, so SGD at learning rate 0.1 sets the weight to one third. Dividing the two batch gradients equally would overweight the last example.
 
+::: {#lst-training-unequal-batches lst-cap="**Unequal batches in one window**: The final partial window averages three samples before updating."}
 ```python
 model = Linear(1, 1, bias=False)
 model.weight.data[:] = 0.0
@@ -250,22 +251,35 @@ print(f"loss={loss:.6f}, weight={model.weight.data[0, 0]:.6f}")
 print(trainer.step, model.weight.grad)
 # 1 None
 ```
+:::
+
+The first batch has shape `(2, 1)` and the second `(1, 1)`; both produce a scalar loss and a weight gradient of shape `(1, 1)`. The state in @tbl-training-window-state shows what survives each helper return while the weight stays at zero.
+
+| Point in the call | Pending batches | Pending samples | Weight gradient | Loss sum |
+| :--- | :--- | :--- | :--- | :--- |
+| Epoch entry, after clearing | 0 | 0 | `None` | 0 |
+| After first batch | 1 | 2 | $-4$ | 2 |
+| After second batch | 2 | 3 | $-10$ | 11 |
+| Inside the tail update, after averaging | 2 | 3 | $-10/3$ | 11 |
+| Epoch return | local state ends | local state ends | `None` | reported as $11/3$ |
+
+: **One unequal accumulation window**: The gradient and loss sums use the same sample weights. The optimizer changes the weight only after the final division. {#tbl-training-window-state tbl-colwidths="[34,16,16,18,16]"}
 
 Only two batches arrived, although the configured window length was four. The tail still gets one update using all three samples, and the reported loss is `(2 * 1 + 1 * 9) / 3`. `None` confirms that the update cleared the gradients. This trace checks the meaning of the counters as well as the arithmetic, which a falling loss curve alone would not establish.
 
-Clipping needs a model with more than one parameter tensor to show why the norm is global. Take gradients $\mathbf{g}_1 = [3, 4]$ and $\mathbf{g}_2 = [0, 0]$ with $\gamma_{\max} = 2.5$.
+The clipping example from the code discussion uses two nonzero gradient tensors. Take $\mathbf{g}_1 = [3, 4]$ and $\mathbf{g}_2 = [0, 12]$ with $\gamma_{\max} = 2.5$. Both tensors contribute to the global norm in @tbl-gradient-clipping-trace.
 
 | Quantity | Value |
 | :--- | :--- |
-| Sum of squares | $3^2 + 4^2 + 0^2 + 0^2 = 25$ |
-| Global norm | $\sqrt{25} = 5.00$ |
-| Clip coefficient | $2.5 / 5.00 = 0.50$ |
-| $\mathbf{g}_1$ after clipping | $[1.5, 2.0]$, norm $2.50$ |
-| $\mathbf{g}_2$ after clipping | $[0, 0]$ |
+| Sum of squares | $3^2 + 4^2 + 0^2 + 12^2 = 169$ |
+| Global norm | $\sqrt{169} = 13.00$ |
+| Clip coefficient | $2.5 / 13 \approx 0.1923$ |
+| $\mathbf{g}_1$ after clipping | $[0.5769, 0.7692]$, norm $0.9615$ |
+| $\mathbf{g}_2$ after clipping | $[0, 2.3077]$ |
 
-: Global-norm clipping of two gradient tensors. The direction of $\mathbf{g}_1$ (the ratio $4:3$) survives; only its length changes. {#tbl-gradient-clipping-trace tbl-colwidths="[40,60]"}
+: **Global-norm clipping**: One coefficient preserves the direction of the concatenated vector; its new length is $2.5$. Entries are rounded to four decimal places. {#tbl-gradient-clipping-trace tbl-colwidths="[40,60]"}
 
-The cosine schedule with $\eta_{\max} = 0.10$, $\eta_{\min} = 0.01$, and $T = 4$ gives five rates, one per epoch boundary.
+The cosine schedule with $\eta_{\max} = 0.10$, $\eta_{\min} = 0.01$, and $T = 4$ gives five boundary values in @tbl-cosine-schedule-trace. The first four training epochs use indices 0 through 3; the fifth uses the floor at index 4.
 
 | Epoch $t$ | $\cos(\pi t / 4)$ | $\tfrac{1}{2}(1 + \cos)$ | $\eta_t = 0.01 + 0.09 \times \text{factor}$ |
 | :--- | :--- | :--- | :--- |
@@ -275,10 +289,11 @@ The cosine schedule with $\eta_{\max} = 0.10$, $\eta_{\min} = 0.01$, and $T = 4$
 | 3 | $-0.7071$ | $0.1464$ | $\mathbf{0.0232}$ |
 | 4 | $-1.0000$ | $0.0000$ | $\mathbf{0.0100}$ |
 
-: Cosine schedule over four epochs. The drop is smallest at the ends and largest in the middle. {#tbl-cosine-schedule-trace tbl-colwidths="[16,24,24,36]"}
+: **Cosine schedule boundaries**: The drop is smallest at the ends and largest in the middle. {#tbl-cosine-schedule-trace tbl-colwidths="[16,24,24,36]"}
 
-All three tables can be checked with a few lines of NumPy.
+The one-weight, clipping, and schedule calculations can also be checked directly with NumPy.
 
+::: {#lst-training-arithmetic-checks lst-pos="H" lst-cap="**Checking the arithmetic**: NumPy reproduces the gradient, clipping, and schedule calculations."}
 ```python
 import numpy as np
 
@@ -290,54 +305,86 @@ for it in range(1, 4):
     loss = (pred - y) ** 2         # 3. loss
     grad = 2 * (pred - y) * x      # 4. backward
     w = w - lr * grad              # 5. step
-    print(f"iteration {it}: pred = {pred:.3f}  loss = {loss:.4f}  grad = {grad:+.3f}  w -> {w:.3f}")
+    print(f"iteration {it}: pred = {pred:.3f}  loss = {loss:.4f}  "
+          f"grad = {grad:+.3f}  w -> {w:.3f}")
 
 # Global-norm clipping on two gradient tensors, max_norm = 2.5
-g1, g2 = np.array([3.0, 4.0]), np.array([0.0, 0.0])
+g1, g2 = np.array([3.0, 4.0]), np.array([0.0, 12.0])
 global_norm = np.sqrt(np.sum(g1 ** 2) + np.sum(g2 ** 2))
 coef = min(1.0, 2.5 / global_norm)
-print(f"global norm {global_norm:.2f}, coefficient {coef:.2f}, g1 -> {(g1 * coef).tolist()}")
+print(f"global norm {global_norm:.2f}, coefficient {coef:.4f}")
+print(f"g1 -> {(g1 * coef).tolist()}")
 
 # Cosine schedule, max_lr = 0.10, min_lr = 0.01, four epochs
 for t in range(5):
     lr_t = 0.01 + 0.5 * (0.10 - 0.01) * (1.0 + np.cos(np.pi * t / 4))
     print(f"epoch {t}: lr = {lr_t:.4f}")
 ```
+:::
+
+A restart should preserve the next update, not merely recover a plausible weight. Reuse the Trainer and the unequal batches from the accumulation trace, whose weight is now one third. Set clipping to `0.5`, save, and load into a fresh model with a different learning rate and no clipping configured.
+
+::: {#lst-training-checkpoint-continuation lst-pos="H" lst-cap="**Checking a resumed update**: A fresh Trainer recovers the saved clipping configuration and next update."}
+```python
+import tempfile
+from pathlib import Path
+
+trainer.grad_clip_norm = 0.5
+restored_model = Linear(1, 1, bias=False)
+restored = Trainer(
+    restored_model, SGD(restored_model.parameters(), lr=0.9), MSELoss())
+with tempfile.TemporaryDirectory() as directory:
+    path = Path(directory) / "resume.pkl"
+    trainer.save_checkpoint(path)
+    restored.load_checkpoint(path)
+
+assert restored.optimizer.lr == trainer.optimizer.lr == 0.1
+assert restored.grad_clip_norm == 0.5
+expected_loss = trainer.train_epoch(batches, accumulation_steps=4)
+actual_loss = restored.train_epoch(batches, accumulation_steps=4)
+np.testing.assert_allclose(actual_loss, expected_loss)
+np.testing.assert_allclose(restored_model.weight.data, model.weight.data)
+print(f"resumed weight={restored_model.weight.data[0, 0]:.6f}")
+# resumed weight=0.383333
+```
+:::
+
+The next mean gradient is $-8/3$, which clipping changes to $-0.5$. SGD adds $0.05$ to the saved weight. Both Trainers finish with `epoch=2`, `step=2`, and cleared gradients. Without restoring the clipping threshold, the new Trainer would use the larger, unclipped update even though it loaded the correct weight and learning rate.
 
 ---
 
 ## From TinyTorch to Production
 
-PyTorch ships no `Trainer` in its core library. The five calls are written by hand in nearly every PyTorch script in existence, in exactly this order, and libraries such as PyTorch Lightning and the Hugging Face `Trainer` exist to write them for you with the same conveniences this chapter added. What changes in production is not the contract but the cost of each step, and most of the differences below are responses to that cost.
+The reference loop makes two decisions separately: what objective a gradient represents, and how to execute the operations that produce it. Production systems can change execution without changing the first decision. A gradient accumulation implementation still needs the correct sample denominator, whether its arrays live in NumPy or on an accelerator.
 
-Evaluation is the clearest case. PyTorch pairs `model.eval()` with a `torch.no_grad()` block, which tells autograd not to record a tape at all, and Module 08's `evaluate` does the same with Chapter 6's `no_grad()`. Without it the pass would build a tape it never uses; on a real model that tape holds every intermediate activation, and Chapter 6 showed those activations dominate training memory. Turning recording off is what lets a GPU evaluate with a batch many times larger than it could train with. The `zero_grad` step also matured. Since PyTorch 2.0, `optimizer.zero_grad()` sets each `.grad` to `None` by default rather than filling it with zeros, which skips a memory write per parameter and is exactly what Chapter 7's `zero_grad` does.
+Evaluation retains the separation between mode and recording. [PyTorch's autograd notes](https://docs.pytorch.org/docs/2.14/notes/autograd.html#evaluation-mode-nn-module-eval) distinguish `model.eval()`, which changes layer behavior, from `torch.no_grad()`, which disables graph recording. The resulting memory reduction depends on which intermediates the training graph would otherwise retain, so it does not establish a fixed ratio between evaluation and training batch sizes.
 
-Clipping is the same algorithm under the name `torch.nn.utils.clip_grad_norm_`, down to the variable `clip_coef`. The difference is that a model may have hundreds of parameter tensors, and computing hundreds of separate norms would mean hundreds of separate GPU launches, so PyTorch computes them in one fused pass. Clipping also acquires a neighbor under the mixed-precision training that Chapter 7 described. With gradients stored in 16-bit floats, small values round to zero, so the loss is multiplied by a large constant before `backward()` and the gradients must be divided back (`scaler.unscale_(optimizer)`) *before* clipping, or the clip threshold is compared against scaled numbers. That is a new step inserted between 4 and 5, and getting its position wrong is a common silent bug of the kind this chapter opened with.
+PyTorch's [global clipping implementation](https://docs.pytorch.org/docs/main/generated/torch.nn.utils.clip_grad_norm_.html) can apply operations across lists of tensors through a `foreach` path when supported. This reduces per-tensor dispatch overhead, but it is not a guarantee that the entire clipping operation uses one GPU kernel. With mixed precision, a separate scaling mechanism may multiply the loss to keep small derivatives representable. The accumulated gradients must then be unscaled before comparing their norm to the clipping threshold, as shown in the [mixed-precision examples](https://docs.pytorch.org/docs/main/notes/amp_examples.html). This is the same requirement as normalizing sample sums before clipping in TinyTorch: the threshold must see gradients in the intended units.
 
-Schedules move from once per epoch to once per step. PyTorch's `CosineAnnealingLR` scheduler implements the same formula, but production runs usually call `scheduler.step()` after every `optimizer.step()`, with $T$ counted in steps, and prepend a short linear warmup from zero so the first updates on random weights are small. PyTorch even warns if it detects `scheduler.step()` running before `optimizer.step()`, which is the same ordering discipline applied to one more component.
+A schedule's unit is also part of its contract. PyTorch's [CosineAnnealingLR](https://docs.pytorch.org/docs/main/generated/torch.optim.lr_scheduler.CosineAnnealingLR.html) advances on calls to `scheduler.step()`. A caller can place those calls at epoch or update boundaries, with the horizon expressed in the corresponding units. TinyTorch makes a simpler choice, looking up a rate by the epoch counter and holding it fixed throughout that pass.
 
-Checkpoints grow in what they must contain. `torch.save` writes a dictionary much like TinyTorch's, but the optimizer entry is `optimizer.state_dict()`, which includes every momentum and moment buffer, and serious training scripts add the scheduler state, the random number generator state, and the data loader's position so that a resumed run reproduces the uninterrupted one bit for bit. `torch.save` itself does not write to a temporary file and rename; the frameworks built on top of it add that, along with saving in a background thread so the GPUs do not idle while gigabytes go to disk.
-
-Across many GPUs the contract holds without modification. Under `DistributedDataParallel` every GPU holds a full copy of the model and runs the same five steps on its own slice of the batch. The single addition is inside step 4: as each parameter's gradient finishes, it is averaged across all GPUs with an all-reduce (a collective operation after which every GPU holds the same average), and this communication overlaps with the rest of the backward pass so the network is busy while the GPUs are still computing. Step 5 then runs identically everywhere, and the copies stay in sync. When even one copy of the optimizer state is too large, ZeRO (named in Chapter 7) shards it across GPUs, but each GPU still executes the same five steps on its shard.
+For checkpointing, PyTorch's [general checkpoint example](https://docs.pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-a-general-checkpoint-for-inference-and-or-resuming-training) saves the model and optimizer state dictionaries together with training metadata. Reproducing a particular run can require additional state, such as random generators and the loader's position, as well as deterministic execution. Saving those fields is a separate concern from protecting the destination file during a write. TinyTorch exposes both boundaries with an explicit state dictionary and temporary-file replacement; it does not implement a complete snapshot of the process.
 
 | Concern | TinyTorch `Trainer` | PyTorch |
 | :--- | :--- | :--- |
 | The five steps | `_process_batch` + `_optimizer_update` | Written by hand, same order |
 | Evaluation | `training=False` through `_forward`, inside `no_grad()` | `model.eval()` + `torch.no_grad()` |
-| Clipping | `clip_grad_norm`, one tensor at a time | `clip_grad_norm_`, fused across tensors |
-| Schedule | Per epoch, set before the epoch | Per step, `scheduler.step()` after `optimizer.step()` |
+| Clipping | Global norm, NumPy passes over tensors | Global norm, optional multi-tensor path |
+| Schedule | Epoch-indexed lookup before training | Caller chooses epoch or update units |
 | Accumulation | Sum sample-weighted gradients; divide by actual window samples before clipping | Same weighting required; dividing by $k$ assumes equal full batches |
-| Checkpoint | Parameters, lr, SGD/Adam/AdamW buffers, schedule, Trainer counters, history; optimizer step count omitted | Optimizer state dict plus explicitly saved RNG and loader state |
+| Checkpoint | Parameters, optimizer buffers and ages, configuration, counters, history | State dictionaries plus application-selected run state |
 
-: The training loop in TinyTorch and in PyTorch. Every row is the same mechanism; the right column adds what scale demands. {#tbl-training-production-bridge tbl-colwidths="[18,38,44]"}
+: **The same contracts at different scales**: Execution choices and saved state vary, while an update still requires correctly weighted gradients at fixed parameters. {#tbl-training-production-bridge tbl-colwidths="[18,38,44]"}
 
-What to look for in your own work follows from the table. Find the five calls in any script you inherit and check their order, especially `zero_grad`, which is the one most often misplaced. Log the number `clip_grad_norm_` returns; a sudden jump in the pre-clip norm is the earliest sign of a run going wrong. When resuming from a checkpoint, confirm the optimizer state was saved, not only the weights. And when a loss curve looks wrong with no error in sight, suspect the loop before the model.
+The comparison in @tbl-training-production-bridge gives a useful review order for a training program. First identify where parameters can change and where gradients are cleared. Then check the sample denominator, the units seen by clipping, and the state restored before the next update. A loss curve can suggest a problem; these boundaries identify the computation the program actually performed.
 
 ---
 
 ## Summary
 
-Module 08 builds a `Trainer` that runs the five-step loop (zero_grad, forward, loss, backward, step) in a fixed order and keeps the state that outlives a batch: epoch and step counters, the learning rate, and a loss history. Accumulation sums sample-weighted derivatives and averages by the actual sample count before clipping. The surrounding code supplies a cosine schedule, evaluation without gradient recording, and checkpoints that replace the destination atomically after serialization. The principle to keep is the contract behind the order: every optimizer step must see the intended objective's gradient computed at unchanged parameters. The checkpoint has its own boundary: saved parameter and moment arrays do not by themselves guarantee exact continuation when the optimizer counter or random state is missing. Milestone I takes the five-step loop, the evaluation pass, and every class the `Trainer` wraps for granted and asks whether the engine you have assembled since Chapter 1 can, run end to end, learn XOR and classify handwritten digits.
+A call to `train_epoch` clears old gradients, sets the epoch's learning rate, and enters `_process_batch` for each batch. That helper returns a sample-summed loss and leaves sample-summed derivatives in parameter gradients. `_optimizer_update` divides by actual window samples, clips if configured, updates the shared weights, and clears gradients. This boundary handles both unequal batches and a short final window.
+
+Evaluation changes mode and disables recording while preserving weights and existing gradients. Checkpointing preserves parameters, optimizer buffers and ages, hyperparameters, clipping, schedule settings, counters, and history at an epoch boundary. With a matching deterministic model and the same next batch, this state preserves the next update; random execution and loader position require additional state. Milestone I uses these contracts to test the complete engine on XOR and handwritten digits. The next layer mechanisms can then build on a loop whose state transitions are explicit.
 
 ---
 
@@ -347,4 +394,8 @@ Module 08 builds a `Trainer` that runs the five-step loop (zero_grad, forward, l
 
 2. **Per-tensor versus global clipping.** Write `clip_each_tensor(parameters, max_norm)` that clips every gradient tensor to `max_norm` on its own. Apply both clipping functions to the gradients $\mathbf{g}_1 = [3, 4]$ and $\mathbf{g}_2 = [0.3, 0.4]$ with `max_norm = 2.5`, then compute the angle between the concatenated clipped vector and the concatenated original. Which function preserves the direction, and by how many degrees does the other one turn it?
 
-3. **Check the next update.** Use a deterministic one-weight model and fixed batches with `AdamW`, saving after two updates. Construct an identical fresh model and an optimizer with different initial hyperparameters, load the checkpoint, and compare the next update against uninterrupted training. Check the moments, per-parameter update counts, and restored hyperparameters. Explain which additional state would be needed if the loader shuffled samples or the model used dropout.
+3. **Check the next update.** Use a deterministic one-weight model and fixed batches with `AdamW`, saving after two updates. Construct an identical fresh model and an optimizer with different initial hyperparameters, load the checkpoint, and compare the next update against uninterrupted training. Enable clipping before saving. Check the moments, per-parameter update counts, restored hyperparameters, and clipping threshold. Explain which additional state would be needed if the loader shuffled samples or the model used dropout.
+
+4. **Trace the accumulation boundary.** Repeat the unequal-batch example with `accumulation_steps=2` and `4`, recording the weight, gradients, and counters. Explain why both give the same update. Then use `accumulation_steps=1` and predict why the final weight changes. Set the learning rate to zero and verify that the reported sample-weighted loss is independent of the grouping.
+
+5. **Choose the metric.** Evaluate the probabilities `[[0.9], [0.1]]` against binary targets `[[1], [0]]`, then evaluate the same arrays with MSELoss. Predict both returned accuracy values. Explain why changing output shape alone cannot choose the task, and design a test for a two-output regression model.

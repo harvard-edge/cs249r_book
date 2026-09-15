@@ -9,18 +9,18 @@
 
 - The systematic optimization workflow: measure, optimize, validate, repeat
 - Why profiling before optimizing beats heroic rewrites
-- How to achieve 8× compression and 10× speedup with minimal accuracy loss
+- How to distinguish modeled storage savings, measured accuracy, and measured latency
 :::
 
 ## Overview
 
-This is the **Optimization Milestone** — the third and final act of the historical arc. The Foundation Milestones proved your training loop learns. The Architecture Milestones proved your layers match real data. This one proves your *optimization stack* — the Profiler (Module 14), Quantization (15), Compression (16), Acceleration (17), and KV-Cache (18) you just finished — can turn a working model into a shippable one.
+This is the **Optimization Milestone** — the third and final act of the historical arc. The Foundation Milestones proved your training loop learns. The Architecture Milestones proved your layers match real data. This one proves your *optimization stack* — the Profiler (Module 14), Quantization (15), Compression (16), Acceleration (17), and KV-Cache (18) you just finished — can evaluate changes to a working model.
 
 2018. ML research is sprinting; deployment is crawling. BERT-Large lands at 340M parameters and won't fit on a phone. ResNet-152 inference blows past production latency budgets. Teams ship two-year-old models because the new ones are too slow, too big, too expensive — and every vendor's benchmark numbers use a different dataset, batch size, and accuracy floor, so you can't even tell whose hardware is faster.
 
 MLPerf changes that. One protocol, one accuracy floor, one set of reference models — apples-to-apples across CPUs, GPUs, TPUs, and accelerators that didn't exist last year. Optimization stops being an afterthought and becomes the discipline that decides who ships.
 
-You compress YOUR models 8× and accelerate YOUR transformer generation 10× using the same measure → optimize → validate loop production teams run. That's the gap between a research demo and a shipped product, closed in two scripts.
+You compare rounded and pruned models against a baseline, then compare cached and uncached generation. The two scripts report measured accuracy and latency. They also distinguish modeled packed INT8 storage from the dense arrays that the candidates actually use.
 
 ## What You'll Build
 
@@ -62,38 +62,40 @@ tito module status
 cd milestones/06_2018_mlperf
 
 # Part 1: Optimize MLP/CNN (profiling + quantization + pruning)
-python 01_optimization_olympics.py
-# Expected: 4-8x compression with <2% accuracy loss
+python3 01_optimization_olympics.py
+# Reports: actual dense bytes, modeled INT8 bytes, accuracy, latency
 
 # Part 2: Speed up Transformer generation (KV caching)
-python 02_generation_speedup.py
-# Expected: 6-10x faster generation
+python3 02_generation_speedup.py
+# Reports: output agreement and measured baseline/cached speed ratio
 ```
 
 ## Expected Results
 
 **Static model optimization (script 01)**
 
-@tbl-milestone-06-static-optimization tracks model size and accuracy through each static optimisation stage.
+@tbl-milestone-06-static-optimization compares independent candidates rather than a cumulative compression pipeline.
 
-| Optimization | Size | Accuracy | Notes |
-|--------------|------|----------|-------|
-| Baseline (FP32) | 100% | 85–90% | Full precision |
-| + Quantization (INT8) | 25% | 84–89% | 4× smaller |
-| + Pruning (50%) | 12.5% | 82–87% | 8× smaller total |
+| Candidate | Actual storage | Accuracy and latency | Additional report |
+|-----------|----------------|----------------------|-------------------|
+| Baseline | Dense FP32 | Measured reference | Parameter bytes |
+| Rounded weights | Dense FP32 | Measured independently | Modeled INT8 code bytes, excluding metadata |
+| Pruned weights | Dense FP32 | Measured independently | Zero fraction |
 
-: **Expected size and accuracy at each static optimization stage.** {#tbl-milestone-06-static-optimization}
+: **Storage representation and measurements for each independent candidate.** {#tbl-milestone-06-static-optimization}
 
 **Generation speedup (script 02)**
 
-@tbl-milestone-06-generation-speedup shows per-token generation speed with and without the KV cache.
+@tbl-milestone-06-generation-speedup shows median total prefix-replay time with and without the KV cache.
 
-| Mode | Time/Token | Speedup |
+| Mode | Prefix-replay time | Speed ratio |
 |------|------------|---------|
-| Without KV-Cache | ~10 ms | 1× |
-| With KV-Cache | ~1 ms | 6–10× |
+| Without KV-Cache | Measured baseline | 1× |
+| With KV-Cache | Measured cached time | Baseline time / cached time |
 
-: **Per-token generation speed with and without the KV cache.** {#tbl-milestone-06-generation-speedup}
+: **Measured replay time for the same token sequence with and without the KV cache.** {#tbl-milestone-06-generation-speedup}
+
+Small workloads can be slower with caching. Output agreement is required; speedup is an experimental result.
 
 ## The Aha Moment: Systematic Beats Heroic
 
@@ -110,23 +112,20 @@ Result: weeks of work, marginal gains, introduced bugs.
 **The right way (systematic optimization):**
 
 ```
-1. MEASURE:   Profile shows 70% of time is in attention,
-              80% of memory is Linear layers
-2. OPTIMIZE:  Add KV-cache (targets the 70%),
-              quantize Linear layers (targets the 80%)
-3. VALIDATE:  Accuracy drops 1.5% (acceptable),
-              8x faster (huge win)
-4. REPEAT:    Profile again, find next bottleneck
+1. MEASURE:   Record baseline accuracy, dense bytes, and latency
+2. OPTIMIZE:  Create rounded and pruned candidates independently
+3. VALIDATE:  Measure each candidate on the same held-out data
+4. REPEAT:    Keep useful changes and investigate remaining costs
 ```
 
-Result: 10× faster, 8× smaller, 2% accuracy cost — achieved in days.
+Result: a comparison that reveals whether each change meets your accuracy and performance requirements.
 
 **This is what separates ML researchers from ML engineers:**
 
 - YOUR Profiler (Module 14) identifies real bottlenecks (not assumed ones)
-- YOUR Quantization (Module 15) reduces memory 4×
-- YOUR Pruning (Module 16) reduces parameters 50%+
-- YOUR KV-Cache (Module 18) speeds up generation 10×
+- YOUR Quantization (Module 15) exposes rounding error and modeled packed storage
+- YOUR Pruning (Module 16) changes the zero fraction without shrinking dense arrays
+- YOUR KV-Cache (Module 18) avoids recomputing past keys and values
 
 The full loop — measure, optimize, validate — runs on YOUR tools, not someone else's library.
 
@@ -139,14 +138,14 @@ This milestone closes the historical arc. Every optimization tool you exercise h
 | Component | Your Module | What It Does |
 |-----------|-------------|--------------|
 | `Profiler` | Module 14 | YOUR measurement and bottleneck identification |
-| `quantize()` | Module 15 | YOUR INT8/FP16 conversion |
-| `prune()` | Module 16 | YOUR weight pruning |
-| `vectorize()` | Module 17 | YOUR accelerated operations |
+| Quantization tools | Module 15 | Weight rounding and storage estimates |
+| Pruning tools | Module 16 | Weight masking and sparsity measurement |
+| Vectorization principles | Module 17 | Understanding dense NumPy execution |
 | `KVCache` | Module 18 | YOUR key-value caching for generation |
 
 : **TinyTorch components that power the MLPerf milestone.** {#tbl-milestone-06-code-powers}
 
-No external optimization libraries. Every speedup, every byte saved, traces back to code you wrote.
+The measured candidates still execute dense float32 operations. Packed storage and sparse execution require additional implementations.
 
 ## Historical Context
 
@@ -156,8 +155,8 @@ That protocol marks the moment ML engineering became as load-bearing as ML resea
 
 ## Systems Insights
 
-- **Memory** — 4–16× compression with under 2% accuracy loss is routine, not heroic.
-- **Latency** — 10–40× speedup from caching and batching alone, before touching the model.
+- **Memory** — modeled code bytes, actual dense allocations, and sparse representations are different quantities.
+- **Latency** — caching removes repeated work but adds overhead; measure the balance on your workload.
 - **Trade-offs** — every win costs accuracy, latency, or memory. Profiling tells you which one to spend; intuition will lie to you.
 
 ## What's Next
@@ -165,7 +164,7 @@ That protocol marks the moment ML engineering became as load-bearing as ML resea
 With Milestone 06 the historical arc closes. Six recreations, nineteen modules, one framework you wrote yourself end-to-end. You've:
 
 - Built every core component (Modules 01–13)
-- Optimized and benchmarked for production deployment (Modules 14–19)
+- Implemented and measured optimization techniques (Modules 14–19)
 - Proven mastery by recreating six landmark systems (Milestones 01–06)
 
 What's left is the test no recreation can give you. The **Capstone** (Module 20) is the Torch Olympics — open-ended problems, fixed budgets, your framework, your call. The history lessons end here. The competition starts next.

@@ -331,7 +331,7 @@ The patterns you implement here — pre-norm, residual streams, causal masking, 
 @fig-gpt-architecture shows the full GPT stack you will assemble, from token IDs at the bottom to logits at the top.
 
 ::: {#fig-gpt-architecture}
-![](../assets/images/svg/modules-transformer-gpt-architecture.svg){fig-alt="Complete GPT architecture as a vertical stack. Token IDs (orange entry) -> Embeddings (token + position, blue processing) -> Transformer Block 1 (green) -> Transformer Block 2 (green) -> N Blocks (green, dashed border signaling repetition) -> Final LayerNorm (blue) -> Language Head (grey neutral exit)."}
+![](../assets/images/svg/modules-transformer-gpt-architecture.svg){fig-alt="GPT forward path from token IDs through token and learned position embeddings, repeated pre-LN transformer blocks, final LayerNorm, and a separate linear language head producing vocabulary logits."}
 :::
 
 **Implementation roadmap:**
@@ -475,7 +475,10 @@ Here's the complete implementation, showing how a few targeted statistical opera
 
 The code in @lst-13-layernorm makes this concrete.
 
-```python
+```{python}
+#| label: lst-13-layernorm
+#| lst-cap: "**LayerNorm implementation**. Computes per-sample mean and variance over the feature axis, then applies a learnable affine transform."
+#| eval: false
 class LayerNorm:
     def __init__(self, normalized_shape, eps=1e-5):
         self.normalized_shape = normalized_shape
@@ -499,8 +502,6 @@ class LayerNorm:
         return normalized * self.gamma + self.beta
 ```
 
-: **Listing 13.1 — LayerNorm implementation**. Computes per-sample mean and variance over the feature axis, then applies a learnable affine transform. {#lst-13-layernorm}
-
 The formula is small: `output = (x - μ) / σ * γ + β`. The effect is large. Forcing every activation back to a consistent scale keeps gradients in a sane range, which is the difference between a 12-layer model that trains and a 12-layer model that diverges in the first 100 steps. The learnable `gamma` and `beta` let the model recover any distribution it needs, so the normalization step costs you no expressiveness.
 
 The `eps = 1e-5` guards against the rare case where every feature in a row is identical and variance hits zero. Without it, you divide by zero on the first batch.
@@ -515,7 +516,10 @@ Here's how the transformer block implements pre-norm with residuals:
 
 The code in @lst-13-pre-norm-forward makes this concrete.
 
-```python
+```{python}
+#| label: lst-13-pre-norm-forward
+#| lst-cap: "**Pre-norm transformer block forward pass**. LayerNorm runs before each sub-layer while residual additions write back into the unnormalized stream."
+#| eval: false
 def forward(self, x, mask=None):
     # First sub-layer: attention with pre-norm
     normed1 = self.ln1.forward(x)
@@ -530,8 +534,6 @@ def forward(self, x, mask=None):
     return output
 ```
 
-: **Listing 13.2 — Pre-norm transformer block forward pass**. LayerNorm runs before each sub-layer while residual additions write back into the unnormalized stream. {#lst-13-pre-norm-forward}
-
 Notice the asymmetry: each sub-layer *reads* a normalized copy of the input but *writes* its contribution back into the unnormalized residual stream. The normalized path keeps the sub-layer well-behaved; the residual path keeps information flowing intact across the depth of the network.
 
 ### The MLP: Computational Capacity Through Expansion
@@ -542,7 +544,10 @@ The standard recipe is wide-then-narrow: expand the embedding to 4$\times$ its w
 
 The code in @lst-13-mlp makes this concrete.
 
-```python
+```{python}
+#| label: lst-13-mlp
+#| lst-cap: "**Position-wise MLP**. Expands to 4x hidden width, applies GELU, and projects back. Holds most of the block's parameters."
+#| eval: false
 class MLP:
     def __init__(self, embed_dim, hidden_dim=None):
         if hidden_dim is None:
@@ -558,8 +563,6 @@ class MLP:
         output = self.linear2.forward(hidden)
         return output
 ```
-
-: **Listing 13.3 — Position-wise MLP**. Expands to 4x hidden width, applies GELU, and projects back. Holds most of the block's parameters. {#lst-13-mlp}
 
 GELU replaced ReLU in transformer models because it gates smoothly instead of with a hard cutoff at zero, which gives cleaner gradients for language modeling. The choice matters less than the width: most modern variants (GELU, SwiGLU, GeGLU) train to similar loss curves at this scale.
 
@@ -594,7 +597,10 @@ The transformer block is where all components unite into a coherent processing u
 
 The code in @lst-13-transformer-block makes this concrete.
 
-```python
+```{python}
+#| label: lst-13-transformer-block
+#| lst-cap: "**Complete TransformerBlock class**. Wires MultiHeadAttention, two LayerNorms, and an MLP into a single pre-norm block with residual connections."
+#| eval: false
 class TransformerBlock:
     def __init__(self, embed_dim, num_heads, mlp_ratio=4):
         self.attention = MultiHeadAttention(embed_dim, num_heads)
@@ -616,8 +622,6 @@ class TransformerBlock:
 
         return output
 ```
-
-: **Listing 13.4 — Complete TransformerBlock class**. Wires MultiHeadAttention, two LayerNorms, and an MLP into a single pre-norm block with residual connections. {#lst-13-transformer-block}
 
 Think of the data flow as a *residual stream*: the input embeddings enter, and every sub-layer adds its contribution on top without overwriting what came before. By the final block, the stream is the original embeddings plus contributions from every attention and MLP sub-layer in the stack — like a stack of transparencies, each adding detail to the same underlying image.
 

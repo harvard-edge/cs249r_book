@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Check source solutions in a disposable package, without overwriting notebooks.
 
-Added 2026-09-11 after reference solutions passed release checks despite broken
-training and numerical edge cases. Shared by pre-commit and CI.
+Shared by pre-commit and CI to check numerical and training behavior.
 """
 from pathlib import Path
 import os
@@ -13,7 +12,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 REGRESSIONS = (
-    # 2026-09-11: audit cases run against fresh source exports, not stale packages.
+    # Build these tests against the canonical source exports.
     "01_tensor/test_tensor_core.py",
     "04_losses/test_losses_core.py",
     "05_dataloader/test_batch_contract.py",
@@ -32,6 +31,21 @@ REGRESSIONS = (
     "08_training/test_accumulation_windows.py",
     "15_quantization/test_constant_roundtrip.py",
     "16_compression/test_distillation_training.py",
+    "02_activations/test_activations_core.py",
+    "03_layers/test_layers_notebook_rng.py",
+    "04_losses/test_losses_source.py",
+    "05_dataloader/test_image_layout_source.py",
+    "06_autograd/test_backward_boundaries.py",
+    "07_optimizers/test_optimizer_validation.py",
+    "08_training/test_training_edge_cases.py",
+    "09_convolutions/test_pooling_source_regressions.py",
+    "10_tokenization/test_tokenization_source_regressions.py",
+    "13_transformers/test_transformer_gradient_flow.py",
+    "15_quantization/test_quantization_composition.py",
+    "16_compression/test_compression_source.py",
+    "18_memoization/test_18_memoization_progressive.py",
+    "19_benchmarking/test_benchmark_contracts.py",
+    "20_capstone/test_source_validation.py",
 )
 
 
@@ -57,9 +71,13 @@ def main() -> int:
 
         tests = sandbox / "tests"
         tests.mkdir()
+        # Keep the canonical layout for tests that load notebook source cells.
+        shutil.copytree(ROOT / "src", sandbox / "src")
         for relative in REGRESSIONS:
             source = ROOT / "tests" / relative
-            shutil.copyfile(source, tests / source.name)
+            destination = tests / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
         env = os.environ.copy()
         env.update(PYTHONPATH=str(sandbox), TINYTORCH_QUIET="1")
         return subprocess.run(

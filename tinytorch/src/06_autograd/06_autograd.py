@@ -580,16 +580,14 @@ def backward(self, grad_output):
 
     APPROACH:
     1. Extract input tensors from self.inputs
-    2. Initialize gradients to None; promote a left vector to a row and a right
-       vector to a column, restoring these axes on grad_output as well
+    2. Initialize grad_a and grad_b to None
     3. For first input (a): if it requires gradients:
        - Set grad_a = grad_output
        - Use _reduce_broadcast_grad() to handle shape mismatch if needed
     4. For second input (b): if it requires gradients:
        - Set grad_b = grad_output
        - Use _reduce_broadcast_grad() to handle shape mismatch if needed
-    5. Remove any promoted vector axes and return (grad_a, grad_b). The engine
-       sums broadcast batch dimensions back to each input shape.
+    5. Return (grad_a, grad_b), each reduced to its input shape.
 
     EXAMPLE (Same Shape):
     >>> a = Tensor([1, 2, 3], requires_grad=True)
@@ -1128,8 +1126,8 @@ def backward(self, grad_output):
     1. Extract input tensor x from self.inputs
     2. Initialize grad_x to None
     3. If x requires gradients:
-       - Permute grad_output using np.argsort(self.axes)
-       - Use np.transpose(grad_output, np.argsort(self.axes))
+       - Normalize negative axes, then permute grad_output using their inverse
+       - Use np.transpose(grad_output, np.argsort(normalized_axes))
     4. Return tuple (grad_x,)
 
     EXAMPLE:
@@ -1139,7 +1137,7 @@ def backward(self, grad_output):
     >>> # grad_X = np.transpose(grad_output, inverse_axes)
 
     HINTS:
-    - inverse_axes = tuple(np.argsort(self.axes)); if axes[i] = j then inverse_axes[j] = i
+    - Normalize axes with axis % x.data.ndim before finding their inverse
     - Apply np.transpose(grad_output, inverse_axes)
     - Return as single-element tuple: (grad_x,)
     """
@@ -1150,7 +1148,8 @@ def backward(self, grad_output):
     if isinstance(x, Tensor) and x.requires_grad:
         # Permute gradient back to original axis order.
         # If axes[i] = j, then inverse_axes[j] = i.
-        inverse_axes = tuple(np.argsort(self.axes))
+        normalized_axes = tuple(axis % x.data.ndim for axis in self.axes)
+        inverse_axes = tuple(np.argsort(normalized_axes))
         grad_x = np.transpose(grad_output, inverse_axes)
 
     return (grad_x,)
@@ -1464,14 +1463,16 @@ def backward(self, grad_output):
 
     APPROACH:
     1. tensor, = self.inputs
-    2. count = tensor.data.size // self.output.data.size (elements averaged per output)
+    2. Count elements along the reduced axes (even when the output is empty)
     3. Expand grad_output back to tensor.data.shape with _expand_reduced, divide by count
     """
     ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
-        count = tensor.data.size // self.output.data.size
+        axes = tuple(range(tensor.data.ndim)) if self.axis is None else self.axis
+        axes = (axes,) if isinstance(axes, (int, np.integer)) else tuple(axes)
+        count = np.prod([tensor.data.shape[axis] for axis in axes], dtype=int)
         return _expand_reduced(grad_output, tensor.data.shape, self.axis, self.keepdims) / count,
     return None,
     ### END SOLUTION
@@ -2145,7 +2146,8 @@ def backward(self, grad_output):
     1. Extract input tensor from self.inputs
     2. If tensor requires gradients:
        - Compute s = σ(1.702 * x) with Module 02's stable sigmoid
-       - Product rule: gelu_grad = s + x * 1.702 * s * (1 - s)
+       - Product rule: gelu_grad = s + x * (s * (1 - s)) * 1.702
+       - At negative/positive infinity use the limiting derivatives 0/1
        - Multiply by grad_output
     3. Else return (None,)
 
@@ -2160,8 +2162,12 @@ def backward(self, grad_output):
         x = tensor.data
         # forward: gelu(x) = x * sig(1.702x)   (Module 02)
         # d/dx [x * sig(1.702x)] = sig(1.702x) + x * 1.702 * sig(1.702x) * (1 - sig(1.702x))
-        sig = SigmoidFunction().forward(1.702 * x)   # Module 02's stable sigmoid
-        gelu_grad = sig + x * 1.702 * sig * (1.0 - sig)
+        # Large finite inputs may overflow the gate, which correctly saturates.
+        with np.errstate(over='ignore'):
+            sig = SigmoidFunction().forward(1.702 * x)
+        # At infinity the correction tends to zero; avoid evaluating inf * 0.
+        finite_x = np.where(np.isinf(x), 0.0, x)
+        gelu_grad = sig + finite_x * (sig * (1.0 - sig)) * 1.702
 
         return (grad_output * gelu_grad,)
     return (None,)
@@ -2359,6 +2365,7 @@ def backward(self, grad_output):
        - Clip predictions: p = np.clip(predictions.data, eps, 1-eps)
        - Get targets: y = targets.data
        - Apply BCE derivative: (p - y) / (p * (1-p) * N)
+       - Zero it outside the clipping interval, where forward is constant
        - Multiply by grad_output
        - Return (result, None): targets carry no gradient
     3. Else return (None, None)
@@ -2371,7 +2378,8 @@ def backward(self, grad_output):
 
     HINTS:
     - BCE derivative: ∂BCE/∂p = (p - y) / (p * (1-p)) per sample
-    - Clip predictions to avoid log(0) instability
+    - Clip predictions to avoid log(0) instability; outer regions have zero gradient
+    - At the clipping boundaries, use the one-sided derivative from the interior
     - Divide by N for mean loss
     """
     ### BEGIN SOLUTION role="scaffold"
@@ -2385,6 +2393,10 @@ def backward(self, grad_output):
 
         # Gradient: (p - y) / (p * (1-p) * N)
         grad = (p - y) / (p * (1 - p) * num_samples)
+        # Forward is constant outside the clipping interval. At a boundary,
+        # choose the derivative from the interior of that interval.
+        unclipped = (predictions.data >= eps) & (predictions.data <= 1 - eps)
+        grad = np.where(unclipped, grad, 0.0)
 
         return grad * grad_output, None
     return None, None

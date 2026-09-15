@@ -112,59 +112,23 @@ class ModuleTestCommand(BaseCommand):
         modules/ is tested; falling back to the reference in src/ would report
         the instructor's code as the student's (#2117).
         """
-        console = self.console
-        project_root = self.config.project_root
-        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
-        notebook_path = project_root / "modules" / module_name / f"{short_name}.ipynb"
+        # Share certification with `module complete`: merely executing a blank
+        # notebook is not evidence that its required tests were present or ran.
+        from .workflow import ModuleWorkflowCommand
 
-        if not notebook_path.exists():
-            return False, (
-                f"Notebook not found: {notebook_path} "
-                f"(run: tito module start {module_number})"
-            )
-
-        env = os.environ.copy()
-        pythonpath = env.get("PYTHONPATH", "")
-        if pythonpath:
-            env["PYTHONPATH"] = f"{project_root}{os.pathsep}{pythonpath}"
-        else:
-            env["PYTHONPATH"] = str(project_root)
-
-        runner = (
-            "import json, sys; from pathlib import Path; "
-            "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
-            "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
-            "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
-        )
-        cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
-
+        workflow = ModuleWorkflowCommand(self.config)
+        workflow.console = self.console
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=project_root,
-                env=env,
-                timeout=300,
-            )
-
-            if verbose:
-                if result.stdout:
-                    console.print("[dim]" + result.stdout + "[/dim]")
-                if result.stderr:
-                    console.print("[yellow]" + result.stderr + "[/yellow]")
-
-            if result.returncode == 0:
-                return True, result.stdout
-            else:
-                return False, result.stderr
-
+            result = workflow._run_inline_unit_tests(module_name, verbose)
         except subprocess.TimeoutExpired:
             return False, "Test timeout (>5 minutes)"
-        except Exception as e:
-            return False, f"Test execution failed: {str(e)}"
+        except Exception as error:
+            return False, f"Test execution failed: {error}"
+        output = "\n".join(
+            test.get("error") or test["name"] for test in result["tests"]
+        )
+        passed = result["returncode"] == 0 and result["failed"] == 0 and result["passed"] > 0
+        return passed, output
 
     def run_module_pytest(
         self, module_name: str, module_number: str, verbose: bool = False
@@ -261,7 +225,7 @@ class ModuleTestCommand(BaseCommand):
             10: [],  # Tokenization: self-contained, no integration deps
             11: [],  # Embeddings: tested in NLP pipeline (module 12)
             12: ["test_nlp_pipeline_flow.py"],  # Attention
-            13: ["test_nlp_pipeline_flow.py"],  # Transformers
+            13: ["test_transformer_pipeline_flow.py"],  # Transformers
 
             # Performance modules (14-19) - build on all previous
             # These use the same integration tests to ensure optimizations
