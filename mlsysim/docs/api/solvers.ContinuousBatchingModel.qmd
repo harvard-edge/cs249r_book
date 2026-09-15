@@ -4,15 +4,41 @@
 solvers.ContinuousBatchingModel()
 ```
 
-Analyzes production LLM serving with Continuous Batching and PagedAttention.
+Compares static KV reservation with PagedAttention under continuous batching.
 
-Traditional static batching suffers from severe memory fragmentation and
-padding waste. This model simulates the throughput improvements achieved by
-iteration-level scheduling and non-contiguous KV cache allocation.
+Decode is memory-bound, so the number of requests sharing a step is the
+throughput lever, and the KV-cache allocator decides how many fit. A static
+allocator reserves a contiguous slot of ``max_seq_len`` tokens for every
+request; PagedAttention hands out fixed-size blocks on demand. This model
+sizes both from the same KV budget and a request-length distribution, then
+compares memory-bound decode throughput at each allocator's concurrency.
+
+Kwon et al. (2023) profile contiguous pre-allocation (their Orca baselines)
+and find that only 20.4% to 38.2% of KV-cache memory holds actual token
+states (Fig. 2). The rest is reserved slots for future tokens, internal
+fragmentation from over-provisioning for the maximum sequence length, and
+external fragmentation from the memory allocator (Sec. 3.1, Fig. 3). vLLM
+limits each request's waste to one block (Sec. 4.2) and reaches 96.3%
+token-state usage (Fig. 2).
+
+Scope and assumptions:
+
+- The static baseline is max-length reservation, like Kwon's "Orca (Max)".
+  It is modeled with no external fragmentation because every slot has the
+  same size, although Kwon et al. still attribute 8.9% of Orca (Max) KV
+  memory to external fragmentation and other overhead. Exact-size and
+  power-of-two contiguous allocators, which trade reservation waste for
+  external fragmentation, are not modeled.
+- Both allocators are sized with every admitted request at its full length
+  (peak occupancy). A request mid-generation holds fewer paged blocks, so
+  paged capacity is conservative, while static reserves ``max_seq_len``
+  for the whole request lifetime either way.
+- Request lengths are exponential, cut off at ``max_seq_len``, with mean
+  ``mean_request_tokens`` (``calc_capped_exponential_scale``).
 
 Literature Source:
 1. Kwon et al. (2023), "Efficient Memory Management for Large Language Model
-   Serving with PagedAttention."
+   Serving with PagedAttention," SOSP '23.
 2. Yu et al. (2022), "ORCA: A Distributed Serving System for
    Transformer-Based Generative Models."
 
@@ -20,7 +46,7 @@ Literature Source:
 
 | Name | Description |
 | --- | --- |
-| [solve](#mlsysim.solvers.ContinuousBatchingModel.solve) | Calculates continuous batching throughput and PagedAttention memory. |
+| [solve](#mlsysim.solvers.ContinuousBatchingModel.solve) | Compare static max-length KV reservation with paged allocation. |
 
 ### solve { #mlsysim.solvers.ContinuousBatchingModel.solve }
 
@@ -28,7 +54,8 @@ Literature Source:
 solvers.ContinuousBatchingModel.solve(
     model,
     hardware,
-    seq_len,
+    max_seq_len,
+    mean_request_tokens=None,
     max_batch_size=1,
     page_size=16,
     precision='fp16',
@@ -36,4 +63,4 @@ solvers.ContinuousBatchingModel.solve(
 )
 ```
 
-Calculates continuous batching throughput and PagedAttention memory.
+Compare static max-length KV reservation with paged allocation.

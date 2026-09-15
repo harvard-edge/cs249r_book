@@ -28,6 +28,13 @@ from ...systems.types import Fleet, NetworkFabric
 from .base import BaseOptimizer, ForwardModel
 from .utils import _inter_node_latency, _intra_node_latency
 
+# Megatron-LM tensor parallelism: each transformer layer all-reduces activations
+# after attention and after the MLP in the forward pass (g operators), and
+# all-reduces the matching activation gradients in the backward pass
+# (f operators). Source: Shoeybi et al. (2019), arXiv 1909.08053, p.4.
+TP_ALLREDUCES_PER_LAYER_FORWARD = 2
+TP_ALLREDUCES_PER_LAYER_TRAINING = 2 * TP_ALLREDUCES_PER_LAYER_FORWARD
+
 class DistributedModel(ForwardModel):
     """
     Resolves fleet-wide communication, synchronization, and pipelining constraints.
@@ -49,8 +56,9 @@ class DistributedModel(ForwardModel):
     - split total accelerators into TP * PP * EP model-parallel groups and DP
       replicas; the split must be exact.
     - local step time comes from Engine.solve on the per-DP local batch.
-    - exposed communication = DP gradient collective + TP activation collective
-      + EP token all-to-all, optionally reduced by overlap.
+    - exposed communication = DP gradient collective + TP activation
+      collectives (4 AllReduces per layer per training step: 2 forward,
+      2 backward) + EP token all-to-all, optionally reduced by overlap.
     - total step latency = local compute + exposed communication + pipeline
       bubble, adjusted by explicit congestion and straggler multipliers.
     """
@@ -58,7 +66,7 @@ class DistributedModel(ForwardModel):
     produces = DistributedResult
     _fallacies = {
         "Doubling GPUs halves training time": "Reality: communication overhead grows with N. Amdahl's Law always applies — there is a serial fraction (AllReduce, pipeline bubble) that limits speedup.",
-        "Tensor parallelism is free within a node": "Reality: TP requires 2 AllReduce operations per layer on activations over NVLink. At TP=8 on H100, this can consume 10-20% of step time.",
+        "Tensor parallelism is free within a node": "Reality: a training step with TP requires 4 AllReduce operations per layer on activations and their gradients (2 forward, 2 backward) over NVLink. At TP=8 on H100, this can consume 10-20% of step time.",
         "More data parallelism is always better": "Reality: beyond the critical batch size (McCandlish et al. 2018), additional DP provides diminishing returns in convergence per step.",
     }
 
@@ -224,10 +232,16 @@ class DistributedModel(ForwardModel):
             t_comm_dp = Q_("0 ms")
 
         # TP Communication (activation AllReduce, intra-node NVLink)
-        # TP requires 2 AllReduce ops per transformer layer on activations:
-        # one after the column-parallel MLP, one after the row-parallel attention.
-        # Volume per AllReduce = batch_size * seq_len * hidden_dim * precision_bytes
-        # Source: Shoeybi et al. (2019), "Megatron-LM"
+        # Megatron-LM places one AllReduce after the attention block and one
+        # after the MLP block in the forward pass, and their conjugates (the
+        # f operators) all-reduce the activation gradients in the backward
+        # pass: "two all-reduces in the forward path and two in the backward
+        # path" per layer (Shoeybi et al. 2019, arXiv 1909.08053, p.4).
+        # DistributedModel prices a training step (Engine.solve is_training=True),
+        # so every layer pays 4 AllReduces. (Fixed 2026-09-15: the model counted
+        # only the 2 forward-path AllReduces, halving TP communication.)
+        # Each AllReduce is a separate collective with its own ring latency
+        # (alpha) term, over batch_size * seq_len * hidden_dim * precision_bytes.
         # NOTE: This analytical model evaluates TP AllReduces as sequential to establish
         # a conservative upper bound. In practice, modern frameworks overlap this
         # communication with the next layer's computation to reduce exposed latency.
@@ -235,9 +249,7 @@ class DistributedModel(ForwardModel):
             _, bpp = resolve_precision(precision)
             hidden_dim = getattr(model, 'hidden_dim', 4096) or 4096
             n_layers = getattr(model, 'layers', 1) or 1
-            activation_bytes_per_allreduce = local_batch * seq_len * hidden_dim * bpp.magnitude
-            # 2 AllReduces per layer (attention + MLP)
-            tp_volume = 2 * n_layers * activation_bytes_per_allreduce * ureg.byte
+            activation_bytes_per_allreduce = local_batch * seq_len * hidden_dim * bpp.magnitude * ureg.byte
             # Select bandwidth: NVLink if TP fits within a node, IB if it spans nodes
             if tp_size <= fleet.node.accelerators_per_node:
                 tp_bw = fleet.node.intra_node_bw
@@ -246,11 +258,11 @@ class DistributedModel(ForwardModel):
                 tp_bw = fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio
                 tp_lat = _inter_node_latency(fleet.fabric)
             t_comm_tp = calc_ring_allreduce_time(
-                tp_volume / n_layers,  # per-layer volume
+                activation_bytes_per_allreduce,
                 tp_size,
                 tp_bw,
                 tp_lat
-            ) * n_layers  # total across all layers (sequential, conservative upper bound)
+            ) * TP_ALLREDUCES_PER_LAYER_TRAINING * n_layers  # sequential, conservative upper bound
         else:
             t_comm_tp = Q_("0 ms")
 

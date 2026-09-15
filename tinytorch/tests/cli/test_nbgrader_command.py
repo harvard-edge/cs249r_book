@@ -116,7 +116,7 @@ def test_generate_resolves_module_suffix(tmp_path):
     assert (tmp_path / "assignments" / "source" / "01_tensor" / "tensor.ipynb").exists()
 
 
-def test_generate_tier_option_is_hidden_but_parseable(tmp_path, capsys):
+def test_generate_tier_option_is_parseable_and_documented(tmp_path, capsys):
     command = NBGraderCommand(make_config(tmp_path))
     parser = argparse.ArgumentParser()
     command.add_arguments(parser)
@@ -127,7 +127,7 @@ def test_generate_tier_option_is_hidden_but_parseable(tmp_path, capsys):
     with pytest.raises(SystemExit):
         parser.parse_args(["generate", "--help"])
     help_text = capsys.readouterr().out
-    assert "--tier" not in help_text
+    assert "--tier" in help_text
 
 
 def test_generate_fails_when_notebook_has_no_nbgrader_metadata(tmp_path):

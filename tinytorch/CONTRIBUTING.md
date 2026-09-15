@@ -78,6 +78,7 @@ git checkout -b feature/your-improvement
 # 3. Make changes following standards in CONTRIBUTING.md
 # 4. Test thoroughly
 pytest tests/
+tito dev export 01    # build the notebook from src/ (module test no longer falls back to src/)
 tito module test 01
 
 # 5. Commit with descriptive messages
@@ -106,8 +107,12 @@ All contributions must pass:
 1. **Module Tests** (run tests for a specific module):
    ```bash
    pytest tests/NN_name/             # e.g., pytest tests/01_tensor/
+   tito dev export NN                # build the notebook from src/ first
    tito module test NN               # e.g., tito module test 01
    ```
+
+   `tito module test` runs the notebook in `modules/`, never `src/`, so export
+   the module before testing it.
 
 2. **Integration Tests**:
    ```bash

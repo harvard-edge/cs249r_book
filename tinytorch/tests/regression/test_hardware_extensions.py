@@ -125,5 +125,11 @@ class TestHardwareExtensions:
         print(f"  NumPy BLAS: {numpy_ms:.3f} ms")
         print(f"  SIMD GEMM:  {simd_ms:.3f} ms")
 
-        assert simd_ms > 0
-        assert numpy_ms > 0
+        # Verify correctness and finite values
+        C_numpy = np.matmul(A, B)
+        C_simd = simd_matmul(A, B)
+        np.testing.assert_allclose(C_simd, C_numpy, rtol=1e-4, atol=1e-4)
+        assert C_simd.shape == (M, N)
+        assert np.isfinite(C_simd).all()
+        assert 0 < simd_ms < 5000, f"SIMD GEMM time {simd_ms} ms out of expected bounds"
+        assert 0 < numpy_ms < 5000, f"NumPy BLAS time {numpy_ms} ms out of expected bounds"

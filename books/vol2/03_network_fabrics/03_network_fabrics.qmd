@@ -1560,6 +1560,55 @@ Assume independent transceiver-degradation events with the same per-device proba
 
 :::
 
+#### Lossless fabric hazards: Deadlock loops, storms, and watchdog recovery {#sec-network-pfc-hazards}
+
+While priority flow control provides the illusion of a lossless physical layer, relying on link-layer backpressure introduces structural failure modes that do not exist in loss-tolerant packet-switched networks. When switch queues cannot drop packets to relieve congestion, pressure propagates backward through the network graph, creating two distinct hyperscale failure modes: **credit deadlocks** and **PFC storms**.
+
+::: {#dfn-network-fabrics-pfc-deadlock .callout-definition title="PFC credit deadlock and cyclic buffer dependency"}
+
+***PFC credit deadlock***\index{PFC deadlock!definition}\index{Cyclic buffer dependency!definition} is a permanent distributed lockup where a set of switch port queues form a closed dependency cycle, each holding packets destined for the next queue while simultaneously paused by backpressure from that same queue.
+
+1.  **Significance**: A single credit deadlock permanently halts traffic across all participating ports and upstream links, requiring manual intervention or watchdog timeouts that discard packets to recover.
+2.  **Distinction**: Unlike a PFC storm (which is a transient cascade of backpressure triggered by a slow-draining endpoint), a credit deadlock is a static, self-sustaining topological cycle that cannot resolve itself even after traffic injection stops.
+3.  **Common pitfall**: Assuming multi-stage Clos (fat-tree) fabrics are inherently immune to deadlocks. Dynamic multipath routing, link failures, and address resolution flooding can introduce cyclic forwarding dependencies across switch tiers.
+
+:::
+
+##### The graph mechanics of credit deadlocks {#sec-network-deadlock-graph}
+
+In a lossless network, a switch cannot forward a packet to downstream buffer $B_j$ if $B_j$ is full; instead, it holds the packet in upstream buffer $B_i$ and awaits credit or pause clearance. A directed **buffer dependency graph** $G = (V, E)$ formalizes this relationship:
+
+-   Each vertex $B_k \in V$ represents a packet buffer or virtual lane queue at a switch port.
+-   A directed edge $(B_i, B_j) \in E$ exists if a packet currently occupying buffer $B_i$ requires buffer $B_j$ along its routing path to make forward progress.
+
+A PFC credit deadlock (definition \ref{dfn-network-fabrics-pfc-deadlock}) occurs if and only if the buffer dependency graph contains a directed cycle, governed by the cyclic dependency condition in @eq-network-buffer-dependency-cycle:
+
+$$B_1 \to B_2 \to \dots \to B_k \to B_1$$ {#eq-network-buffer-dependency-cycle}
+
+When each buffer in the cycle fills beyond its configured pause threshold, each port asserts a PFC PAUSE frame to its predecessor. Because no buffer can advance a packet into a paused successor, no buffer can drain, and no port can de-assert its PAUSE signal. The entire cycle freezes permanently.
+
+In production AI fabrics, deadlocks typically arise from three operational triggers:
+
+1.  **Transient routing loops**: During link failure or BGP convergence, routing tables across neighboring switches can become temporarily inconsistent, routing packets in a multi-hop forwarding loop. Under lossy IP routing, such packets loop until their Time-to-Live (TTL) expires and are dropped. Under lossless PFC, the loop instantly fills switch buffers and locks the entire path into an unrecoverable credit cycle.
+2.  **Multicast and broadcast flooding**: As revealed in Microsoft's hyperscale incident (war story \ref{ws-network-fabrics-microsoft-pfc-deadlock}), address resolution requests or flooded unknown unicast packets replicated across all ports can overwhelm egress buffers, causing pause frames to loop back into shared switch memory.
+3.  **Non-tree physical links and failover paths**: Sibling cross-connects between leaf switches or asymmetric failover paths can violate strict hierarchical routing rules, forming cycles across switch tiers.
+
+##### PFC storms and victim flows {#sec-network-pfc-storms}
+
+In contrast to a static topological cycle, a **PFC storm**\index{PFC storm!definition} is a dynamic, runaway amplification phenomenon. A single "slow drainer"—an accelerator stalled by memory bus saturation, operating system preemption, or a degraded transceiver with elevated bit error rates—fails to consume packets at wire speed.
+
+The attached Top-of-Rack (ToR) switch queue fills and sends a PAUSE frame to the sender. Because multi-port switches aggregate traffic from many sources across shared packet buffers, the paused queue blocks buffer allocation for unrelated packets (head-of-line blocking). Upstream leaf switches then fill their buffers and emit PAUSE frames to all connected spine switches. Within tens of milliseconds, pause frames cascade throughout the entire multi-tier fabric, pausing traffic between node pairs that never communicated with the original stalled worker. These impacted streams are termed **victim flows**\index{Victim flow!definition}.
+
+##### Watchdog recovery and the lossy alternative {#sec-network-pfc-watchdogs-and-lossy}
+
+To recover from deadlocks without rebooting physical switches, modern Ethernet switch operating systems implement **PFC watchdog timers**\index{PFC watchdog!definition}:
+
+-   **Detection**: The switch continuously monitors the duration of active PAUSE states on each queue. If a queue remains paused for longer than a configured threshold $T_{\text{watchdog}}$ (typically $50\text{--}200\text{ ms}$), the switch declares a deadlock or slow-drainer anomaly.
+-   **Mitigation**: The watchdog trips, disables PFC on that specific queue, and flushes the buffer by **dropping packets** until the queue empties.
+-   **The systems trade-off**: Watchdogs successfully break deadlock cycles, but converting lossless traffic into packet loss forces transport layers to initiate recovery. In RoCEv2 deployments using Go-Back-N recovery, a dropped packet invalidates all subsequent packets in flight, triggering retransmission timeouts that stall the synchronous AllReduce collective for tens of milliseconds.
+
+This systemic brittleness is driving hyperscale operators toward next-generation architectures such as the Ultra Ethernet Consortium (UEC) [@ultraEthernet2025specification], detailed in @sec-network-fabrics-protocol-convergence, and loss-tolerant RDMA designs [@mittal2018irn]. By combining packet spraying across all multipath links with line-rate packet trimming and hardware-accelerated selective retransmission, modern fabrics eliminate the need for link-layer PFC entirely, preventing deadlocks and storms by construction.
+
 ### Proactive congestion control: DCQCN and HPCC {#sec-network-fabrics-congestion-control}
 
 To avoid the blunt instrument of PFC pauses, high-performance fabrics rely on proactive congestion control to modulate injection rates before buffers overflow. In BSP workloads, proactive control is a *latency requirement*, not an *optional throughput optimization*. If a single packet is delayed by a congested switch queue, the entire cluster must wait for that straggler to complete the synchronization step. The tail latency of the network effectively becomes the average step time of the training job.

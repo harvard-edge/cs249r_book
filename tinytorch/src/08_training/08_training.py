@@ -785,7 +785,7 @@ sample then contributes one sample's weight, even if earlier batches were larger
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-process-batch", "solution": true}
-#| export
+#| exporti
 def _trainer_process_batch(self, inputs, targets):
     """
     Process one batch: forward pass, loss computation, backward pass.
@@ -835,7 +835,7 @@ so changing the batch partition does not change the clipping threshold.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-optimizer-update", "solution": true}
-#| export
+#| exporti
 def _trainer_optimizer_update(self, sample_count=1):
     """
     Average accumulated gradients, clip if enabled, and step the optimizer.

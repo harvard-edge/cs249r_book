@@ -3573,6 +3573,49 @@ In large installations, the cable plant alone can take weeks to install and test
 
 As rack power densities climb toward 100 kW for liquid-cooled clusters, the inefficiency of per-server AC conversion becomes untenable. Traditional designs dedicate volume in every chassis to redundant AC power supply units (PSUs), while many dense-rack designs use **rack-level DC power distribution**\index{Rack-level DC power distribution}. In this architecture, a centralized power shelf converts mains AC to a **48V DC busbar**\index{48V DC busbar} that runs the height of the rack, replacing individual server PSUs. This consolidation eliminates one conversion stage, yielding a system-wide efficiency gain of 2--3 percent -- a meaningful reduction in thermal load when training a 175B-parameter model across thousands of GPUs. Power is delivered via the 48V bus directly to the server backplane, where compact DC-to-DC converters step it down to 12V and finally to the GPU's sub-1V operating voltage. Pioneered by Google and Meta through the Open Compute Project, this topology reduces failure points and recovers valuable chassis volume for hydraulic cooling loops and high-bandwidth interconnects.
 
+#### Power delivery networks and transient dynamics {#sec-compute-power-delivery-transients}
+
+Stepping voltage down from 48V to sub-1V operating levels at the silicon die introduces an acute physical challenge: managing dynamic current slew rates ($di/dt$) across the **Power Delivery Network (PDN)**\index{Power Delivery Network!definition}.
+
+Modern AI accelerators operate at supply voltages below one volt ($V_{\text{core}} \approx 0.7\text{--}0.9\text{ V}$) while consuming $700\text{--}1{,}200\text{ W}$ each. By conservation of power ($P = V \cdot I$), a single accelerator draws sustained currents exceeding $I_{\text{core}} \approx 1{,}000\text{--}1{,}500\text{ A}$. Across a dense liquid-cooled rack housing 36 to 72 accelerators (e.g., drawing $100\text{--}120\text{ kW}$), the aggregate core current reaches $50{,}000\text{--}100{,}000\text{ A}$ at the silicon level.
+
+::: {#dfn-compute-infrastructure-power-delivery-network .callout-definition title="Power delivery network (PDN) and transient dynamics"}
+
+***Power delivery network (PDN)***\index{Power Delivery Network!definition}\index{Transient Voltage Droop!definition} is the physical electrical distribution hierarchy connecting the facility power supply to the on-die transistor gates, whose parasitic loop inductance ($L_{\text{parasitic}}$) induces transient voltage fluctuations ($\Delta V = L \frac{di}{dt}$) during rapid changes in processor switching activity.
+
+1.  **Significance**: Synchronous distributed training creates severe step-function current transients when thousands of GPUs transition simultaneously between communication stalls and dense matrix multiplication, threatening voltage collapse or catastrophic dielectric breakdown.
+2.  **Distinction**: Unlike thermal constraints (which operate over seconds or minutes due to thermal mass), PDN transients operate in the nanosecond-to-microsecond domain, far too fast for feedback loops in data-center power shelves to compensate.
+3.  **Common pitfall**: Relying solely on passive board-level capacitors to suppress transients. High-frequency transients must be mitigated through a multi-tier decoupling hierarchy spanning on-die trench capacitors, package capacitors, and firmware-coordinated software power ramping.
+
+:::
+
+In high-speed electrical circuits, any change in current through an inductive path generates an induced voltage offset governed by Faraday's law of induction, formulated in @eq-compute-pdn-droop:
+
+$$\Delta V = L_{\text{parasitic}} \frac{di}{dt}$$ {#eq-compute-pdn-droop}
+
+where $L_{\text{parasitic}}$ is the cumulative loop inductance of the PDN (encompassing the rack busbar, board power planes, voltage regulator module (VRM) traces, socket connector pins, and chip package interposers), and $\frac{di}{dt}$ is the current slew rate.
+
+In distributed deep learning, this physical property becomes an operational hazard due to the synchronous nature of the bulk synchronous parallel (BSP) execution model:
+
+-   **The transient trigger**: During a collective communication barrier (such as an AllReduce or pipeline bubble), Tensor Cores sit idle while waiting for network packets. Core current drops to an idle floor of roughly $200\text{ A}$. The instant communication completes, all 32 to 72 GPUs in the rack simultaneously issue dense Tensor Core GEMM instructions within nanoseconds.
+-   **Transient magnitude**: Core current spikes from $200\text{ A}$ to $1{,}200\text{ A}$ in less than $10\text{ ns}$, producing a current slew rate exceeding:
+    $$\frac{di}{dt} \approx \frac{1{,}000\text{ A}}{10^{-8}\text{ s}} = 10^{11}\text{ A/s}$$
+-   **Voltage droop**: Even with an extraordinarily low parasitic inductance of only $1\text{ nH}$ ($10^{-9}\text{ H}$) between the VRM and the silicon die, @eq-compute-pdn-droop dictates a voltage collapse of:
+    $$\Delta V = 10^{-9}\text{ H} \times 10^{11}\text{ A/s} = 100\text{ mV}$$
+    When operating at a nominal $V_{\text{core}}$ of $0.8\text{ V}$, a $100\text{ mV}$ droop represents a $12.5$ percent voltage drop—well beyond the standard $\pm 5$ percent operating tolerance window.
+
+This transient excursion creates two distinct failure modes:
+
+1.  **Under-voltage droop**: If core voltage droops below the minimum operating threshold ($V_{\text{min}}$), gate propagation delay increases ($t_{\text{prop}} \propto 1/V$). Logic paths fail to meet clock setup times, leading to silent data corruption (flipped bits in activations) or immediate processor machine-check exceptions and unrecoverable node resets.
+2.  **Over-voltage overshoot**: When a massive GEMM finishes abruptly, the sudden collapse of current causes the stored magnetic energy in the parasitic inductors ($\frac{1}{2} L I^2$) to discharge into the circuit, generating a positive voltage spike. If this spike exceeds the transistor gate dielectric breakdown voltage, it causes physical punch-through, permanently destroying silicon gates.
+
+To contain these transients (definition \ref{dfn-compute-infrastructure-power-delivery-network}), modern AI compute infrastructure employs a **multi-tier decoupling hierarchy** paired with software power smoothing:
+
+-   **High-frequency on-die decoupling**: Deep-trench capacitors (DTC) and land-side capacitors (LSC) embedded directly within or underneath the silicon interposer. With ultra-low parasitic inductance ($<10\text{ pH}$), they provide immediate charge storage for the first $0.1\text{--}1\text{ ns}$ of current transition.
+-   **Mid-frequency package and socket decoupling**: High-density multilayer ceramic capacitors (MLCC) mounted directly on the package substrate and adjacent to the socket on the baseboard, buffering transients in the $1\text{--}100\text{ ns}$ window.
+-   **Low-frequency bulk decoupling**: Polymer tantalum and aluminum electrolytic capacitors on the VRM and power shelf, sustaining charge over the microsecond domain until the switched-mode power supplies adjust their duty cycle.
+-   **Firmware and software power smoothing**: Because physical capacitors consume valuable silicon and board area, modern GPU architectures implement software-coordinated power ramping. When launching massive GEMM kernels following a barrier, GPU microcode or CUDA runtime introduces micro-throttling or staggered pipeline ramp-up cycles over tens of microseconds, bounding the maximum $\frac{di}{dt}$ slope and ensuring voltage excursions remain safely within operational margins.
+
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_bandwidth
@@ -3942,7 +3985,7 @@ class EmergingInfrastructureRecap:
     wse_memoryx_bw_tb_per_s_str = fmt_bandwidth(wse.interconnect.bandwidth, unit=TB / second, precision=1, commas=False)
 ```
 
-A new data center will host three or four generations of accelerators over its 15-year structural lifetime, so future-facing technologies matter only when they change a durable planning constraint. The useful test is not whether a technology is novel, but which wall it moves, what new wall appears after the move, and which fleet-design decision changes as a result. Compute Express Link (CXL) moves the memory-capacity boundary. Wafer-scale integration moves the chip-to-chip communication boundary. Advanced packaging moves the die boundary inside the accelerator package. None of them repeals the physics of data movement; each relocates the place where infrastructure teams must spend power, cooling, cost, and software complexity.
+A new data center will host three or four generations of accelerators over its 15-year structural lifetime, so future-facing technologies matter only when they change a durable planning constraint. The useful test is not whether a technology is novel, but which wall it moves, what new wall appears after the move, and which fleet-design decision changes as a result. Compute Express Link (CXL) moves the memory-capacity boundary. Wafer-scale integration moves the chip-to-chip communication boundary. Advanced packaging moves the die boundary inside the accelerator package. Optical circuit switching moves the fabric topology and power boundary. None of them repeals the physics of data movement; each relocates the place where infrastructure teams must spend power, cooling, cost, and software complexity.
 
 ### Compute express link (CXL) {#sec-compute-cxl}
 
@@ -3972,7 +4015,32 @@ The lesson for infrastructure planners is not that wafer-scale systems replace G
 
 Underpinning both directions is the evolution of **advanced packaging**\index{Advanced packaging}. Packaging moves the boundary inside the accelerator package rather than all the way out to the rack or all the way in to a single wafer, and it matters because the reticle limit is only about `{python} ReticleLimitRecap.reticle_limit_mm2_str` for a single exposure. **2.5D interposers**\index{2.5D interposers}, such as TSMC's CoWoS, mount compute dies and HBM stacks on a shared silicon substrate, allowing chiplet-based accelerators to behave like a single device for most software. **3D stacking**\index{3D stacking}, with approaches such as SoIC, places SRAM caches or logic directly above one another and shortens data paths further. The H100-to-B200 transition shows the fleet consequence: the package can deliver far more local arithmetic and die-to-die bandwidth, but the rack must absorb higher power density, tighter cooling requirements, and less tolerance for power transients before the silicon advantage becomes useful infrastructure.
 
-The common theme is relocation rather than elimination. CXL moves capacity outward into a fabric and leaves bandwidth as the limiting discipline. Wafer-scale integration moves communication inward and leaves capacity and yield as the limiting disciplines. Advanced packaging compresses die-to-die distance and leaves power density as the limiting discipline. Infrastructure planning therefore still begins by identifying where the next byte moves, how quickly it must arrive, and what physical system must be built so that movement does not dominate the workload.
+### Reconfigurable topologies and optical circuit switching {#sec-compute-reconfigurable-topologies-ocs}
+
+While CXL and advanced packaging address memory and die boundaries, warehouse-scale computing increasingly encounters an interconnect power and topology constraint. In modern clusters spanning tens of thousands of accelerators, conventional multi-tier Clos networks rely on electrical packet switches. Every network hop incurs an Optical-Electrical-Optical (OEO) conversion: incoming photons hit a photodiode, high-speed SerDes circuits deserialize the electrical signal, switch ASICs buffer and route packets across crossbars, and output SerDes drive lasers to re-transmit light over optical fiber.
+
+At 800 Gb/s and 1.6 Tb/s per-port data rates, SerDes and transceiver electronics consume significant energy—often accounting for 10 to 20 percent of total data center power. Furthermore, fixed electrical Clos topologies are cabled statically, locking the facility into a single oversubscription ratio and rigid bisection pattern regardless of whether the running workload is pipeline-dominated, data-parallel, or all-to-all expert-routed.
+
+::: {#dfn-compute-infrastructure-optical-circuit-switching .callout-definition title="Optical circuit switching"}
+
+***Optical Circuit Switching (OCS)***\index{Optical Circuit Switching!definition}\index{OCS!reconfigurable topology} is a physical networking architecture that routes optical signals directly using Micro-Electro-Mechanical Systems (MEMS) mirror arrays without Optical-Electrical-Optical (OEO) conversion, enabling dynamic, software-defined topology reconfiguration and high energy efficiency at warehouse scale.
+
+1.  **Significance**: Because photons pass through mirror reflections without digital processing, an OCS consumes virtually zero active switching power ($<5$ W per switch chassis, compared to multi-kilowatt electrical switch chassis) and is inherently protocol- and bitrate-agnostic. A fiber infrastructure deployed with OCS can scale from 400 Gb/s to 800 Gb/s and 1.6 Tb/s without replacing switches.
+2.  **Distinction**: Unlike electrical packet switches (which inspect headers, buffer packets in SRAM, and make nanosecond routing decisions per packet), an OCS establishes semi-static physical optical circuits with millisecond-scale switching latency ($10$--$30$ ms), making it suitable for topology-level reconfiguration rather than dynamic packet routing.
+3.  **Common pitfall**: Assuming OCS replaces packet switching entirely. OCS operates at circuit granularity: it configures cluster-scale topologies (such as 3D tori or job-specific sub-clusters) and routes around hardware faults, while packet switching or accelerator-native interconnects handle fine-grained, intra-step message routing.
+
+:::
+
+Google's TPU v4 supercomputer [@jouppi2023] demonstrated the architectural power of optical circuit switching in production. Instead of wiring 4,096 chips into an inflexible electrical fat-tree, the system groups accelerators into $4 \times 4 \times 4$ node cubes and routes the inter-cube links through an array of 3D MEMS optical circuit switches (codenamed Palomar).
+
+This architecture delivers two fundamental operational capabilities:
+
+1.  **Workload-tailored topologies**: The physical interconnect can be reconfigured dynamically to match the communication structure of the running workload. A model utilizing 1D pipeline parallelism can configure its slice as an elongated cylinder; a 2D/3D tensor-parallel model can configure a compact, cubic 3D torus with minimal average hop count; and an MoE workload can maximize bisection bandwidth across specific expert groups.
+2.  **Dynamic fault recovery and boundary wrapping**: In massive accelerator pods, optical transceivers and cables are among the most frequent failure components. In a static torus or tree, a single link or node failure can isolate a dimension or degrade the entire pod. With OCS, the cluster manager detects the defective tray or fiber and commands the MEMS mirrors to rotate, optically bypassing the failed unit and splicing healthy nodes into a complete, smaller torus slice in tens of milliseconds without manual cable intervention.
+
+The trade-off is switching latency. Because MEMS mirrors physically rotate to steer collimated light beams, reconfiguration takes $10$ to $30$ milliseconds—seven orders of magnitude slower than electrical packet switching ($10$ to $100$ nanoseconds). Consequently, OCS moves the power and protocol wall while leaving reconfiguration latency as the binding discipline: it is deployed for job-level topology allocation and fault isolation, not for per-message dynamic routing.
+
+The common theme is relocation rather than elimination. CXL moves capacity outward into a fabric and leaves bandwidth as the limiting discipline. Wafer-scale integration moves communication inward and leaves capacity and yield as the limiting disciplines. Advanced packaging compresses die-to-die distance and leaves power density as the limiting discipline. Optical circuit switching eliminates transceiver OEO power and leaves switching reconfiguration latency as the limiting discipline. Infrastructure planning therefore still begins by identifying where the next byte moves, how quickly it must arrive, and what physical system must be built so that movement does not dominate the workload.
 
 ## Fallacies and pitfalls {#sec-compute-fallacies-pitfalls}
 

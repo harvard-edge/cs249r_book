@@ -259,6 +259,8 @@ def _(CompressionModel, resolve_mlsysim_ref, v1_10_variant):
         max_accuracy_drop=float(v1_10_defaults["max_accuracy_drop"]),
         min_speedup=float(v1_10_defaults["min_speedup"]),
         require_hardware_support=bool(v1_10_defaults["require_hardware_support"]),
+        # Every track compares against its "FP32 baseline" artifact.
+        baseline_precision="fp32",
     )
     v1_10_candidate_rows = tuple(
         v1_10_candidate_to_row(candidate) for candidate in v1_10_compression_sweep.candidates

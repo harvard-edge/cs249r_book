@@ -32,7 +32,7 @@ OPTIONED_COMMANDS = (
     "shade",
     "clip",
     "coordinate",
-    "begin\\{scope\}",  # \begin{scope}[...]
+    "begin\\{scope\\}",  # \begin{scope}[...]
 )
 
 OPTION_CAPTURE_PATTERNS = [

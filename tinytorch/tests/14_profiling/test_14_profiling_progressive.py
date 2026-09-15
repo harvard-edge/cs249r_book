@@ -219,9 +219,13 @@ class TestRegressionPrevention:
         """✅ Module 07"""
         from tinytorch.core.optimizers import SGD
         from tinytorch.core.layers import Linear
+        from tinytorch.core.tensor import Tensor
         layer = Linear(3, 2)
-        opt = SGD(layer.parameters(), lr=0.01)
-        assert hasattr(opt, 'step')
+        opt = SGD(layer.parameters(), lr=0.1)
+        w_before = layer.weight.data.copy()
+        layer.weight.grad = Tensor(np.ones_like(layer.weight.data))
+        opt.step()
+        assert not np.allclose(layer.weight.data, w_before)
 
     def test_convolutions_still_work(self):
         """✅ Module 09"""

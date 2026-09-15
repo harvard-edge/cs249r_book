@@ -161,12 +161,16 @@ class TestRegressionPrevention:
 
     def test_progressive_compatibility(self):
         """Test that Module 01 maintains backwards compatibility."""
-        # Basic imports should still work
-        import sys
-        import os
-        from pathlib import Path
+        from tinytorch.core.tensor import Tensor
+        import numpy as np
 
-        # These capabilities should never break
-        assert callable(Path), "Path functionality broken"
-        assert hasattr(sys, 'version_info'), "System info broken"
-        assert hasattr(os, 'environ'), "Environment access broken"
+        t = Tensor([1.0, 2.0, 3.0])
+        assert t.shape == (3,), "Tensor shape broken"
+        t_add = t + t
+        assert t_add.shape == (3,), "Tensor addition broken"
+        assert np.allclose(t_add.data, [2.0, 4.0, 6.0]), "Tensor addition numerical parity broken"
+        t_mul = t * 2.0
+        assert np.allclose(t_mul.data, [2.0, 4.0, 6.0]), "Tensor scalar multiplication broken"
+        t_mat = Tensor([[1.0, 2.0], [3.0, 4.0]])
+        t_matmul = t_mat @ t_mat
+        assert t_matmul.shape == (2, 2), "Tensor matmul broken"

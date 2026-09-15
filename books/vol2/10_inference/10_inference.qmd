@@ -30,7 +30,7 @@ engine: jupyter
 \mlfleetstack{15}{20}{35}{20}{100}{45}{5}{0}
 \end{marginfigure}
 
-_Why does inference cost eventually dwarf training cost, and what does this mean for system design?_
+_Why does inference cost eventually dwarf training cost?_
 
 Training is a one-time expense; serving continues for the model's operational lifetime. A model trained once for millions of dollars may serve billions of requests, each consuming compute, memory, network, and energy. For a successful production model, inference operating expense can exceed the original training cost by orders of magnitude. That cost structure shapes the architecture. Milliseconds of latency and percentage points of accelerator utilization compound across billions of requests. Performance engineering supplied the local toolkit---fusion, precision, compilation, and algorithmic changes such as speculative decoding---and this chapter applies those tools at serving scale. Batching, sharding, routing, autoscaling, and isolation must preserve strict latency budgets under live traffic. Reliability requirements also intensify because downtime means lost revenue and broken user experiences rather than delayed experiments. In C³ terms, serving batches compute for throughput while holding coordination overhead within tail-latency budgets.
 
@@ -1613,6 +1613,95 @@ This dropped P99 latency to $L_{\text{lat}} =$ `{python} A100HardwareScenario.p9
 
 :::
 
+### Chunked prefill and prompt-decode interleaving {#sec-inference-chunked-prefill}
+
+Continuous batching decouples batch admission from iteration boundaries, but in production workloads, requests arrive with widely disparate prompt lengths. Processing these prompts exposes a fundamental systems tension between the two operational phases of autoregressive language models:
+
+1.  **Prefill phase**: Computes key-value representations across all prompt tokens ($S_{\text{prompt}}$) concurrently. Because all prompt tokens are processed in parallel, the linear projection general matrix multiply (GEMM) operations operate on large sequence dimensions ($M = S_{\text{prompt}}$). For an attention layer with hidden dimension $d_{\text{model}}$, arithmetic intensity scales with prompt length:
+    $$\text{AI}_{\text{prefill}} \approx \frac{2 \cdot S_{\text{prompt}} \cdot d_{\text{model}}^2}{2 \cdot d_{\text{model}}^2} = S_{\text{prompt}} \quad \left[\frac{\text{FLOPs}}{\text{byte of weights loaded}}\right]$$
+    When $S_{\text{prompt}}$ exceeds the accelerator's operational ridge point ($\sim 150\text{--}250\text{ FLOP/byte}$ on modern Tensor Core hardware), prefill is strictly **compute-bound**.
+
+2.  **Decode phase**: Generates a single token per sequence sequentially. With typical batch sizes ($B_{\text{dec}} \le 64$), the arithmetic intensity $\text{AI}_{\text{decode}} \approx B_{\text{dec}} \ll \text{ridge point}$, making decode strictly **memory-bandwidth bound**. Every decode step requires streaming the entire model parameter set from High Bandwidth Memory (HBM) into on-chip SRAM to perform a single vector-matrix multiplication.
+
+::: {#dfn-inference-chunked-prefill .callout-definition title="Chunked prefill"}
+
+***Chunked prefill***\index{Chunked prefill!definition} is an LLM serving mechanism that divides long prompt evaluations into discrete token chunks of size at most $C_{\text{chunk}}$, interleaving prefill computation with ongoing decode iterations within a shared token budget.
+
+1.  **Significance**: It resolves the prompt-decode interference problem where monolithic prefills stall active decode streams for hundreds of milliseconds, ensuring bounded Time Between Tokens (TBT) and preserving interactive streaming service-level objectives (SLOs).
+2.  **Distinction**: Unlike monolithic continuous batching (which executes an entire prompt to completion before initiating decoding), chunked prefill treats prefill as a multi-step iterative process co-scheduled alongside memory-bound decode tokens.
+3.  **Common pitfall**: Sizing the chunk budget $C_{\text{chunk}}$ too small incurs kernel launch and attention mask overheads, degrading overall prefill throughput. Sizing it too large allows prefill compute to monopolize execution time, causing TBT tail spikes.
+
+:::
+
+In standard continuous batching, an incoming prompt is processed monolithically before entering the decode pool. If an incoming request contains $8{,}192$ prompt tokens, evaluating its prefill in one monolithic kernel takes $100\text{--}300\text{ ms}$ on an 8-GPU tensor-parallel cluster. Because modern accelerators cannot preempt a running compute kernel without prohibitive context-switch and memory-dump overhead, all active decode streams across the serving engine are stalled for the entire duration of that prefill kernel.
+
+This creates severe tail latency in **Time Between Tokens (TBT)**\index{Time Between Tokens!definition}\index{Inter-token latency!definition} (also known as inter-token latency). While the incoming request experiences optimal Time to First Token (TTFT), existing interactive users experience a perceptible freeze, violating interactive streaming SLOs (which commonly mandate $\text{P99 TBT} \le 30\text{--}50\text{ ms}$).
+
+#### The chunked prefill scheduling mechanism {#sec-inference-chunked-prefill-scheduling}
+
+To eliminate this interference, chunked prefill (definition \ref{dfn-inference-chunked-prefill}, pioneered by Sarathi-Serve [@agrawal2024sarathi] and adopted by modern serving engines such as vLLM) partitions prompts into fixed-size chunks of at most $C_{\text{chunk}}$ tokens (typically $256\text{--}512$ tokens). A prompt of length $S_{\text{prompt}}$ is evaluated across $\lceil S_{\text{prompt}} / C_{\text{chunk}} \rceil$ separate scheduling iterations.
+
+In each iteration, the scheduler constructs a **hybrid batch** combining active decode requests with prefill chunks under a global iteration token budget $T_{\text{budget}}$, as formulated in @eq-chunked-prefill-budget:
+
+$$B_{\text{dec}} + \sum_{k \in \mathcal{P}_{\text{active}}} C_k \le T_{\text{budget}}$$ {#eq-chunked-prefill-budget}
+
+where $B_{\text{dec}}$ is the number of active decode tokens and $C_k$ is the token chunk allocated to waiting prefill request $k$. @Algo-chunked-prefill-scheduler formalizes this iteration-level hybrid scheduling loop.
+
+```pseudocode
+#| label: algo-chunked-prefill-scheduler
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+\begin{algorithm}
+\caption{Chunked prefill and hybrid batch scheduler}
+\begin{algorithmic}
+\Require waiting prefill queue $\mathcal{Q}_{\text{prefill}}$; active decode set $\mathcal{D}$; iteration token budget $T_{\text{budget}}$; maximum chunk size $C_{\text{chunk}}$
+\Ensure generated tokens for decode requests; incremental KV-cache construction for prefills
+\While{serving engine is active}
+    \State $B_{\text{dec}} \gets |\mathcal{D}|$
+    \State $T_{\text{rem}} \gets T_{\text{budget}} - B_{\text{dec}}$
+    \State $\mathcal{B}_{\text{prefill}} \gets \emptyset$
+    \While{$T_{\text{rem}} > 0$ \textbf{and} $\mathcal{Q}_{\text{prefill}}$ not empty}
+        \State select head prefill request $R_i \in \mathcal{Q}_{\text{prefill}}$
+        \State $C_i \gets \min(C_{\text{chunk}}, T_{\text{rem}}, \text{remaining\_prompt\_tokens}(R_i))$
+        \State $\mathcal{B}_{\text{prefill}} \gets \mathcal{B}_{\text{prefill}} \cup \{(R_i, C_i)\}$
+        \State $T_{\text{rem}} \gets T_{\text{rem}} - C_i$
+    \EndWhile
+    \State run unified hybrid forward pass over $(\mathcal{D}, \mathcal{B}_{\text{prefill}})$
+    \State append newly generated tokens for all $R \in \mathcal{D}$
+    \For{$(R_i, C_i) \in \mathcal{B}_{\text{prefill}}$}
+        \State update prompt offset: $R_i.\text{offset} \gets R_i.\text{offset} + C_i$
+        \If{$R_i.\text{offset} = R_i.\text{prompt\_length}$}
+            \State promote $R_i$ from $\mathcal{Q}_{\text{prefill}}$ to $\mathcal{D}$
+        \EndIf
+    \EndFor
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+```
+
+#### Amortizing weight loading through piggybacking {#sec-inference-chunked-prefill-piggybacking}
+
+Interleaving prefill chunks with decode iterations produces a profound hardware efficiency win termed **decode piggybacking**\index{Decode piggybacking!definition}.
+
+In an isolated decode step, streaming the model parameters ($W_{\text{model}}$ bytes) from HBM to registers achieves low arithmetic intensity because only $B_{\text{dec}}$ tokens perform matrix-vector multiplication against those weights. Compute units sit idle during the majority of the memory transfer cycle.
+
+In a hybrid iteration, the model weights loaded from HBM into on-chip cache and registers are simultaneously reused for both the compute-dense prefill chunk ($C_{\text{chunk}}$ tokens) and the memory-bound decode tokens ($B_{\text{dec}}$ tokens). The iteration execution time is governed by @eq-chunked-prefill-step-time:
+
+$$T_{\text{step}} = \max\left(\frac{W_{\text{model}}}{\text{BW}_{\text{mem}}}, \frac{2 \cdot (B_{\text{dec}} + C_{\text{chunk}}) \cdot P_{\text{model}}}{P_{\text{peak}}}\right)$$ {#eq-chunked-prefill-step-time}
+
+where $P_{\text{model}}$ is the active parameter count, $\text{BW}_{\text{mem}}$ is HBM memory bandwidth, and $P_{\text{peak}}$ is peak accelerator compute throughput. When $C_{\text{chunk}}$ is chosen such that the compute time matches the memory streaming time, decode tokens effectively execute for "free" in terms of memory bandwidth, dramatically increasing decode throughput while guaranteeing that $T_{\text{step}} \le \text{SLO}_{\text{TBT}}$.
+
+::: {#exmp-inference-sarathi-chunked-prefill-implementation .callout-example title="Sarathi: Chunked prefill implementation"}
+
+**Scenario**: An LLM inference server receives a mix of long input prompts ($10{,}000+$ tokens) and interactive short decode requests [@agrawal2024sarathi].
+
+**Diagnosis**: Un-chunked prompt prefills monopolize GPU compute engines for hundreds of milliseconds, blocking decode steps for concurrent requests and triggering severe inter-token latency spikes.
+
+**Systems lesson**: Chunked prefill (Sarathi-Serve) divides long prompt prefills into fixed-size chunks (e.g., $512$ tokens/chunk), interleaving prefill chunks with decode iterations. Bounding prefill execution time per iteration prevents decode stalls and maintains inter-token SLOs.
+
+:::
+
 The batching strategies examined so far divide along a fundamental constraint boundary. Vision workloads are compute-bound with fixed-shape tensors, so every image in a batch undergoes identical arithmetic, reducing the batch formation problem to packing a GPU's compute pipeline as tightly as possible. LLM workloads are memory-bound with variable-length sequences, so the KV cache grows per-request and per-token, shifting the batch formation problem to memory accounting, eviction policies, and iteration-level scheduling that continuous batching provides. Each regime produced a different dominant strategy because the scarce resource differs: compute throughput for vision, memory capacity for language.
 
 Recommendation systems present a third constraint regime that resembles neither. *Sparse embedding lookups*, not *dense matrix multiplications*, dominate both compute time and memory traffic. A single recommendation request may touch millions of embedding table entries scattered across shards, while the dense ranking head that follows is comparatively small. This access pattern demands a batching strategy organized around feature types and embedding locality rather than around request shape or sequence length.
@@ -2678,16 +2767,6 @@ That budget determines how many sequences can coexist before the scheduler must 
 
 :::
 
-::: {#exmp-inference-sarathi-chunked-prefill-implementation .callout-example title="Sarathi: Chunked prefill implementation"}
-
-**Scenario**: An LLM inference server receives a mix of long input prompts (10k+ tokens) and interactive short decode requests [@agrawal2024sarathi].
-
-**Diagnosis**: Un-chunked prompt prefills monopolize GPU compute engines for hundreds of milliseconds, blocking decode steps for concurrent requests and triggering severe inter-token latency spikes.
-
-**Systems lesson**: Chunked prefill (Sarathi-Serve) divides long prompt prefills into fixed-size chunks (e.g., 200 tokens/chunk), interleaving prefill chunks with decode iterations. Bounding prefill execution time per iteration prevents decode stalls and maintains inter-token SLOs.
-
-:::
-
 ### Adapter state and locality {#sec-inference-scale-lora-multi-tenancy}
 
 KV-cache management makes one GPU safe for many concurrent requests; multi-tenant adapter serving asks the same serving process to manage another kind of resident state. The KV cache is per-token attention state. A low-rank adaptation (LoRA) adapter is a per-tenant weight delta. Both must be available at the moment a decode step runs, and both can erase batching gains if the scheduler ignores locality. As serving platforms scale to support thousands of concurrent users on a single foundation model, personalization introduces a new memory bottleneck. LoRA stores a small set of user- or task-specific adapter weights that modify a shared base model without copying the full model. When 10,000 users each have a unique LoRA adapter applied to the same 140 GB base model, replicating the base weights for each user is physically impossible. Instead, the base model remains pinned in HBM, while user-specific adapters are brought into the fast on-chip working set as needed.
@@ -2697,6 +2776,56 @@ KV-cache management makes one GPU safe for many concurrent requests; multi-tenan
 This multi-tenant serving pattern shifts the fundamental performance constraint from compute throughput to adapter locality. As the continuous batching scheduler interleaves requests from different users, adapter weights may have to move repeatedly from HBM into SRAM or registers before each generation step. The effect is similar to an operating-system context switch: the accelerator has work to do, but it first waits for the state belonging to the next tenant. If the adapter swap latency exceeds the compute time of the generation step, the GPU compute cores stall. Efficient multi-tenancy therefore batches requests by active adapter when possible and coordinates adapter placement with KV-cache paging so personalization does not erase the benefit of sharing the base model.
 
 :::
+
+#### Multi-LoRA serving and batched adapter execution {#sec-inference-multi-lora-serving}
+
+In multi-tenant environments, thousands of fine-tuned adapters share a single base foundation model. For a linear projection layer with base weights $W_0 \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$, an adapter $k$ parameterizes the forward transformation using low-rank decomposition matrices $A_k \in \mathbb{R}^{r_k \times d_{\text{in}}}$ and $B_k \in \mathbb{R}^{d_{\text{out}} \times r_k}$ with rank $r_k \ll \min(d_{\text{in}}, d_{\text{out}})$ (typically $r \in \{8, 16, 64\}$), as formulated in @eq-lora-forward:
+
+$$y = x W_0 + \frac{\alpha_k}{r_k} x A_k^T B_k^T$$ {#eq-lora-forward}
+
+where $\alpha_k$ is a fixed scaling factor. For a 70B-parameter base model, storing full parameter duplicates for 1,000 fine-tuned variants would require 140 TB of GPU memory. In contrast, 1,000 rank-16 adapters consume only $\sim 150\text{ GB}$ in aggregate, making co-location physically viable.
+
+However, serving requests with heterogeneous adapters in a single continuous batch introduces a critical execution dilemma:
+
+1.  **Adapter-grouped batching**: If the scheduler groups incoming requests by adapter ID into separate batches, continuous batching degenerates into small, fragmented batches (often batch size 1 or 2 for low-traffic adapters). This forfeits the high throughput of shared weight streaming and imposes unacceptable queuing delays on cold adapters.
+2.  **Sequential adapter kernel dispatch**: If requests with different adapters are packed into a single batch, the base projection $X W_0$ runs efficiently as a single dense GEMM across all tokens. However, evaluating the individual adapter deltas requires dispatching separate small matrix-vector multiplication kernels for each request's unique adapter $(A_{k(i)}, B_{k(i)})$. Launching hundreds of small GEMMs per layer introduces severe CPU launch serialization, kernel launch latency ($\sim 3\text{--}5\ \mu\text{s}$ per kernel), and low GPU streaming multiprocessor (SM) occupancy.
+
+::: {#dfn-inference-multi-lora-bgmv .callout-definition title="Batched gather-matrix-vector multiplication (BGMV)"}
+
+***Batched gather-matrix-vector multiplication (BGMV)***\index{Batched Gather-Matrix-Vector multiplication!definition}\index{BGMV!definition} is a specialized GPU kernel that computes heterogeneous low-rank matrix-vector products across varying adapters within a single unified kernel launch, dynamically gathering adapter weights from a memory pool according to a per-token adapter index vector.
+
+1.  **Significance**: It eliminates the kernel launch serialization and memory underutilization of multi-adapter serving, allowing hundreds of distinct LoRA adapters to be evaluated concurrently in the same forward pass with negligible overhead compared to base model execution.
+2.  **Distinction**: Standard GEMMs require all elements in a batch to multiply against the same weight tensor. BGMV performs a segmented matrix multiplication where each batch element multiplies against its own adapter weight slice via indirect pointer indexing.
+3.  **Common pitfall**: Storing all adapter weights in contiguous HBM leads to severe external memory fragmentation. Production systems back BGMV with paged adapter tables analogous to virtual memory page tables.
+
+:::
+
+Systems such as Punica [@chen2023punica] and S-LoRA [@lin2023slora] resolve the execution dilemma through two architectural mechanisms (definition \ref{dfn-inference-multi-lora-bgmv}):
+
+##### Batched gather-matrix-vector (BGMV) kernels {#sec-inference-bgmv-kernel}
+
+Instead of launching separate kernels for each request, BGMV (and its generalized segmented GEMM variant) executes all adapter projections within a single kernel launch.
+
+For input activations $X = [x_1; x_2; \dots; x_B] \in \mathbb{R}^{B \times d_{\text{in}}}$, the scheduler constructs an integer mapping vector $M \in \mathbb{Z}^B$ where $M[i] = k(i)$ denotes the adapter ID assigned to request $i$. The BGMV kernel assigns thread blocks to tokens in the batch:
+
+1.  **Gather**: Each thread block loads its corresponding token activation $x_i$ into shared memory and reads the adapter pointer from $M[i]$.
+2.  **Down-projection**: The thread block performs the vector-matrix product $v_i = x_i A_{k(i)}^T \in \mathbb{R}^{1 \times r_{k(i)}}$. Because $r \ll d_{\text{in}}$, $v_i$ fits comfortably within GPU registers.
+3.  **Up-projection**: The thread block multiplies $v_i$ by $B_{k(i)}^T \in \mathbb{R}^{r_{k(i)} \times d_{\text{out}}}$, yielding the adapter delta $\Delta y_i = \frac{\alpha_{k(i)}}{r_{k(i)}} v_i B_{k(i)}^T$.
+4.  **Accumulation**: The kernel adds $\Delta y_i$ in-place to the output of the base model projection $y_i = x_i W_0 + \Delta y_i$.
+
+By fusing the adapter projection and gathering weights dynamically across threads, BGMV achieves over 90 percent of peak memory bandwidth efficiency and avoids hundreds of micro-kernel launches per step.
+
+##### Unified paged adapter memory management {#sec-inference-paged-adapter-memory}
+
+To manage thousands of adapters without exhausting GPU HBM, S-LoRA [@lin2023slora] organizes adapter storage into a multi-tier memory hierarchy governed by paged memory management:
+
+-   **Paged adapter pool**: GPU HBM allocates a static memory pool partitioned into fixed-size physical pages (e.g., 2 MB chunks). Adapter matrices $A_k$ and $B_k$ are allocated non-contiguously across free pages, eliminating external fragmentation when adapters of varying ranks ($r \in \{8, 16, 32, 64\}$) are dynamically loaded and unloaded.
+-   **Asynchronous prefetching over PCIe**: Infrequently accessed adapters are kept in host CPU DRAM or NVMe storage. When a request targeting an un-cached adapter arrives in the waiting queue, the scheduler initiates an asynchronous direct memory access (DMA) copy over PCIe Gen5 into free HBM adapter pages while the GPU executes current decode iterations.
+-   **Tensor-parallel adapter sharding**: Under Megatron-style tensor parallelism, adapter weights are partitioned to match the base model sharding:
+    -   *Column-parallel layers*: Base weights $W_0 = [W_0^{(1)} \mid W_0^{(2)}]$ are split by columns. The adapter down-projection $A_k$ is replicated across all ranks, while the up-projection $B_k$ is column-sharded ($B_k = [B_k^{(1)} \mid B_k^{(2)}]$), requiring zero communication before or after the adapter operation.
+    -   *Row-parallel layers*: Base weights $W_0 = [W_0^{(1)} / W_0^{(2)}]$ are split by rows. The adapter down-projection $A_k$ is row-sharded ($A_k = [A_k^{(1)} / A_k^{(2)}]$) and $B_k$ is row-sharded. The partial outputs are summed across ranks using the existing AllReduce collective of the base layer.
+
+Because the adapter sharding aligns identically with the base model, multi-LoRA execution introduces **zero additional communication collectives** across the distributed fabric.
 
 The same locality problem reappears at a larger scale when the model itself exceeds single-GPU capacity. For a 175-billion-parameter foundation model, even the weights must be split across multiple devices, so inference becomes a sharding problem before it becomes a scheduling problem.
 

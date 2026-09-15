@@ -288,6 +288,12 @@ def calc_paged_kv_cache_size(
     (pages). This eliminates external fragmentation but introduces internal
     fragmentation in the final allocated page.
 
+    This sizes one known sequence length. When ``seq_len`` is a multiple of the
+    page size the waste is zero for every page size, so a single length cannot
+    show the page-size trade-off. ``calc_expected_paged_kv_tokens`` averages the
+    last-page tail over a distribution of request lengths, which is what makes
+    page size matter for capacity planning.
+
     Parameters
     ----------
     n_layers : int
@@ -329,6 +335,105 @@ def calc_paged_kv_cache_size(
         2 * n_layers * n_heads * head_dim * padded_seq_len * batch_size * bpe
     ).to(ureg.byte)
     return size, frag_pct
+
+
+def calc_capped_exponential_scale(mean_tokens, max_tokens):
+    """
+    Solves for the exponential scale whose context-capped mean is ``mean_tokens``.
+
+    Request lengths are modeled as ``S = min(X, S_max)`` with
+    ``X ~ Exponential(mu)``: short requests are common, long ones are rare, and
+    a request that would run past the context window is cut off at ``S_max``.
+    The capped mean is ``E[S] = mu * (1 - exp(-S_max / mu))``, which rises
+    monotonically from 0 toward ``S_max`` as ``mu`` grows, so exactly one scale
+    matches any ``0 < mean_tokens < S_max``. At ``mean_tokens == S_max`` every
+    request fills the window (the fixed-length limit) and the scale is infinite.
+
+    The exponential shape is a modeling assumption, chosen because it is the
+    maximum-entropy distribution for a positive length with a known mean. It
+    is not fitted to a serving trace.
+
+    Parameters
+    ----------
+    mean_tokens : float
+        Mean tokens per request after the cap, ``0 < mean_tokens <= max_tokens``.
+    max_tokens : float
+        Context-window cap ``S_max`` in tokens (> 0).
+
+    Returns
+    -------
+    float
+        Exponential scale ``mu`` in tokens (``math.inf`` in the fixed-length limit).
+    """
+    if max_tokens <= 0:
+        raise ValueError(f"max_tokens ({max_tokens}) must be positive")
+    if not 0 < mean_tokens <= max_tokens:
+        raise ValueError(
+            f"mean_tokens ({mean_tokens}) must be in (0, max_tokens={max_tokens}]"
+        )
+    rho = mean_tokens / max_tokens
+    if rho >= 1.0:
+        return math.inf
+    # Substitute t = S_max / mu, so rho = (1 - e^-t) / t, which decreases from
+    # 1 to 0. Because (1 - e^-t) / t < 1 / t, the root lies below t = 1 / rho.
+    lo, hi = 0.0, 1.0 / rho
+    for _ in range(100):
+        mid = 0.5 * (lo + hi)
+        if -math.expm1(-mid) / mid > rho:
+            lo = mid
+        else:
+            hi = mid
+    return max_tokens / (0.5 * (lo + hi))
+
+
+def calc_expected_paged_kv_tokens(mean_request_tokens, max_seq_len, page_size_tokens=16):
+    """
+    Expected KV tokens a paged allocator holds per request, and the waste inside.
+
+    PagedAttention (Kwon et al., 2023, Sec. 4.2) hands a request fixed-size
+    blocks on demand, so a request of ``S`` tokens holds ``ceil(S / p)`` blocks
+    and wastes at most the unused tail of its last block. With request lengths
+    ``S = min(X, S_max)`` and ``X`` exponential (``calc_capped_exponential_scale``),
+    the expected block count has a closed form from summing tail probabilities:
+
+        E[ceil(S/p)] = sum_{j=0}^{K-1} P(S > j p) = (1 - r^K) / (1 - r)
+        r = exp(-p / mu),  K = ceil(S_max / p)
+
+    The expected allocation is ``p * E[ceil(S/p)]`` and the expected internal
+    fragmentation is ``1 - mean / allocation``. When ``mu >> p`` the tail
+    averages about ``p / 2`` tokens, so larger pages waste proportionally more
+    even when ``S_max`` divides evenly by ``p``. In the fixed-length limit
+    (``mean_request_tokens == max_seq_len``) the allocation is
+    ``ceil(S_max / p) * p``, matching ``calc_paged_kv_cache_size``.
+
+    Parameters
+    ----------
+    mean_request_tokens : float
+        Mean tokens a request fills, ``0 < mean_request_tokens <= max_seq_len``.
+    max_seq_len : int
+        Longest context a request may reach, in tokens.
+    page_size_tokens : int, optional
+        Tokens per block (defaults to 16, the vLLM default).
+
+    Returns
+    -------
+    tuple
+        A 2-tuple containing:
+        - allocated_tokens (float): Expected KV tokens allocated per request.
+        - internal_frag (float): Expected unused fraction of that allocation (0.0 to 1.0).
+    """
+    validate_at_least(page_size_tokens, 1, "page_size_tokens")
+    mu = calc_capped_exponential_scale(mean_request_tokens, max_seq_len)
+    max_blocks = math.ceil(max_seq_len / page_size_tokens)
+    if math.isinf(mu):
+        expected_blocks = float(max_blocks)
+    else:
+        s = page_size_tokens / mu
+        # expm1 keeps the geometric series accurate when p << mu (r close to 1).
+        expected_blocks = math.expm1(-max_blocks * s) / math.expm1(-s)
+    allocated_tokens = page_size_tokens * expected_blocks
+    internal_frag = max(0.0, 1.0 - mean_request_tokens / allocated_tokens)
+    return allocated_tokens, internal_frag
 
 
 def calc_speculative_branch_capacity(
