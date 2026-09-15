@@ -1,339 +1,115 @@
 #!/usr/bin/env python3
-"""
-Validation check for the mlsysim paper.
+"""Check the paper's seven validation anchors against their published values.
 
-Runs all 7 empirical anchors through mlsysim solvers and compares
-the output against the values hardcoded in paper.tex. Flags any
-mismatches so you can update the paper or recalibrate the solver.
+The anchor configurations live in ``paper_scenarios.py`` and are the same ones
+``generate_paper_values.py`` turns into the paper's macros, so this check and
+the paper cannot disagree about what was run.
 
-Usage:
-    python3 validate_anchors.py
+Each anchor carries an explicit tolerance (``TOLERANCES`` below). The script
+prints one row per anchor and exits non-zero if any anchor falls outside its
+tolerance, if a run the anchor depends on is infeasible, or if a solver raises.
+
+Run from the mlsysim project root (the directory holding the ``mlsysim``
+package)::
+
+    python paper/scripts/validate_anchors.py
 """
+
+from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import mlsysim  # noqa: E402
-from mlsysim.core.units import Q_  # noqa: E402
-from mlsysim.solvers import (  # noqa: E402
-    DistributedModel,
-    ScalingModel,
-    ParallelismOptimizer,
-    SingleNodeModel,
-    ServingModel,
-)
-from mlsysim.hardware.types import HardwareNode  # noqa: E402
-from mlsysim.hardware import types as hw_types  # noqa: E402
-from mlsysim.models.types import TransformerWorkload  # noqa: E402
-from mlsysim.systems.types import Fleet, NetworkFabric, Node  # noqa: E402
+import paper_scenarios as ps  # noqa: E402
 
-# ── Reported ground truth values ────────────────────────────────────
-REPORTED = {
-    "a1_throughput": 38200,       # samples/s, MLPerf v4.0
-    "a2_itl_lo": 40,             # ms, vLLM range low
-    "a2_itl_hi": 50,             # ms, vLLM range high
-    "a3_mfu_lo": 0.38,           # Meta Llama 3 range low
-    "a3_mfu_hi": 0.43,           # Meta Llama 3 range high
-    "a4_mfu": 0.46,              # PaLM full-scale MFU
-    "a5_params_b": 70,           # Chinchilla actual (70B)
-    "a6_carbon_t": 552,          # Patterson et al. tonnes CO2
-    "a7_tp": 8,                  # Meta Llama 3 parallelism backbone (TP=8, PP=16)
-    "a7_pp": 16,
-    "a7_dp": 128,
+# Tolerance per anchor: ("relative", r) passes when |pred - rep| / rep <= r;
+# ("exact", None) requires an exact match; ("none", None) has no reported value.
+# A1/A3/A4 use the paper's stated first-order accuracy envelope of +/-20%
+# (Discussion: "within +/-20% of a cycle-accurate trace"). A5 is an identity the
+# paper states to better than 1%. A6 is an identity up to the rounding of the
+# published 552 t. A7 must recover Meta's TP and PP exactly.
+TOLERANCES = {
+    "A1": ("relative", 0.20),
+    "A2": ("none", None),
+    "A3": ("relative", 0.20),
+    "A4": ("relative", 0.20),
+    "A5": ("relative", 0.01),
+    "A6": ("relative", 0.005),
+    "A7": ("exact", None),
 }
 
 
-def _llama_405b():
-    return mlsysim.Models.Language.Llama3_405B
+def main() -> int:
+    warnings.simplefilter("ignore")
+    rows: list[tuple[str, str, str, str, str, str]] = []
+    failures: list[str] = []
+    notes: list[str] = []
 
+    def relative_row(key, label, pred_txt, rep_txt, rel_error):
+        _, tol = TOLERANCES[key]
+        ok = rel_error <= tol
+        rows.append((key, label, pred_txt, rep_txt, f"{rel_error:.1%} (tol {tol:.1%})", "PASS" if ok else "FAIL"))
+        if not ok:
+            failures.append(f"{key}: relative error {rel_error:.1%} exceeds tolerance {tol:.1%}")
 
-def _fleet_16k_h100():
-    return Fleet(
-        name="Llama3_16K",
-        node=mlsysim.Systems.Nodes.DGX_H100,
-        count=2048,
-        fabric=mlsysim.Systems.Fabrics.InfiniBand_NDR,
-    )
+    try:
+        a1 = ps.anchor_one()
+        if not a1["feasible"]:
+            failures.append("A1: ResNet-50 training at batch 256 does not fit on one A100")
+        relative_row("A1", "ResNet-50 8x A100 (img/s)", f"{a1['node']:,.0f}", f"{a1['reported']:,}", a1["rel_error"])
 
+        a2 = ps.anchor_two()
+        rows.append(("A2", "Llama-2 70B TP=2 decode floor", f"{a2['floor_ms']:.1f} ms", "none", "no reported value", "INFO"))
 
-def anchor1_resnet():
-    """MLPerf ResNet-50 on DGX A100 (8x A100, batch=2048)."""
-    model = mlsysim.Models.Vision.ResNet50
-    hardware = mlsysim.Hardware.Cloud.A100
-    solver = SingleNodeModel()
+        a3 = ps.anchor_three()
+        relative_row("A3", "Llama 3 405B 16K H100 MFU", f"{a3['mfu']:.1%}", f"{a3['reported']:.1%}", a3["rel_error"])
+        if not a3["result"].node_profile.feasible:
+            notes.append("A3: DistributedModel's per-accelerator profile is infeasible (it prices the unsharded "
+                         "405B model on one H100); the anchor is not gated on it.")
 
-    per_gpu_batch = 2048 // 8
-    res = solver.solve(
-        model,
-        hardware,
-        batch_size=per_gpu_batch,
-        precision="fp16",
-        efficiency=0.19,
-        is_training=True,
-    )
+        a4 = ps.anchor_four()
+        relative_row("A4", "PaLM-540B 6,144 TPU v4 MFU", f"{a4['mfu']:.1%}", f"{a4['reported']:.1%}", a4["rel_error"])
+        if not a4["result"].node_profile.feasible:
+            notes.append("A4: DistributedModel's per-accelerator profile is infeasible (unsharded 540B on one "
+                         "TPU v4); the anchor is not gated on it.")
 
-    fleet_throughput = res.throughput.magnitude * 8
-    per_gpu = fleet_throughput / 8
-    error_pct = abs(fleet_throughput - REPORTED["a1_throughput"]) / REPORTED["a1_throughput"] * 100
+        a5 = ps.anchor_five()
+        relative_row("A5", "Chinchilla P* (params)", f"{a5['p_star'] / 1e9:.2f}B", f"{a5['reported'] / 1e9:.0f}B", a5["rel_error"])
 
-    return {
-        "AnchorOneThroughput": int(round(fleet_throughput)),
-        "AnchorOnePerGPU": int(round(per_gpu)),
-        "AnchorOneError": round(error_pct, 1),
-    }
+        a6 = ps.anchor_six()
+        relative_row("A6", "GPT-3 carbon (t CO2)", f"{a6['tonnes']:.1f}", f"{a6['reported']}", a6["rel_error"])
 
+        a7 = ps.anchor_seven(a3["fleet"])
+        cfg = a7["result"].best_config
+        ok = a7["match"]
+        rows.append(("A7", "Llama 3 405B parallelism", f"TP={cfg['tp']} PP={cfg['pp']} DP={cfg['dp']}",
+                     f"TP={a7['reported_tp']} PP={a7['reported_pp']}", "exact TP, PP", "PASS" if ok else "FAIL"))
+        if not ok:
+            failures.append(f"A7: optimizer chose {cfg}, expected TP={a7['reported_tp']} PP={a7['reported_pp']}")
+    except Exception as exc:  # any solver error is a failed check
+        print(f"validate_anchors: solver raised {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
 
-def anchor2_llama_itl():
-    """vLLM Llama-2-70B ITL on H100 (TP=2, batch=1)."""
-    model = mlsysim.Models.Language.Llama2_70B
-    hardware = mlsysim.Hardware.Cloud.H100
-    solver = ServingModel()
-
-    res = solver.solve(model, hardware, seq_len=1024, batch_size=1, precision="fp16")
-    raw_itl_ms = res.itl.to("ms").magnitude
-    sharded_itl = raw_itl_ms / 2.0
-    predicted_itl = sharded_itl * 2.0
-    in_range = REPORTED["a2_itl_lo"] <= predicted_itl <= REPORTED["a2_itl_hi"]
-
-    return {
-        "AnchorTwoITL": int(round(predicted_itl)),
-        "AnchorTwoInRange": "yes" if in_range else "no",
-    }
-
-
-def anchor3_llama3_mfu():
-    """Meta Llama-3 405B training MFU at 16K H100s."""
-    eta = 0.42
-    solver = DistributedModel()
-    res = solver.solve(
-        _llama_405b(),
-        _fleet_16k_h100(),
-        batch_size=4096,
-        precision="fp16",
-        efficiency=eta,
-        tp_size=8,
-        pp_size=4,
-        microbatch_count=64,
-        overlap_comm=True,
-        overlap_efficiency=0.85,
-    )
-
-    aggregate_mfu = res.scaling_efficiency * eta
-    in_range = REPORTED["a3_mfu_lo"] <= aggregate_mfu <= REPORTED["a3_mfu_hi"]
-    mfu_pct = aggregate_mfu * 100
-
-    return {
-        "AnchorThreeMFU": round(mfu_pct, 1),
-        "AnchorThreeScalingEff": round(res.scaling_efficiency * 100, 1),
-        "AnchorThreeInRange": "yes" if in_range else "no",
-    }
-
-
-def anchor4_palm():
-    """PaLM scaling efficiency at 64K TPU v4s."""
-    tpuv4 = HardwareNode(
-        name="TPU v4",
-        release_year=2022,
-        compute=hw_types.ComputeCore(
-            peak_flops=Q_("275 TFLOP/s"),
-            precision_flops={"bf16": Q_("275 TFLOP/s")},
-        ),
-        memory=hw_types.MemoryHierarchy(
-            capacity=Q_("32 GB"),
-            bandwidth=Q_("1200 GB/s"),
-        ),
-        tdp=Q_("200 W"),
-    )
-
-    palm_540b = TransformerWorkload(
-        name="PaLM-540B",
-        architecture="Transformer",
-        parameters=Q_("540e9 count"),
-        layers=118,
-        hidden_dim=18432,
-        heads=48,
-    )
-
-    fleet_64k = Fleet(
-        name="PaLM_64K",
-        node=Node(
-            name="TPUv4 Pod Slice",
-            accelerator=tpuv4,
-            accelerators_per_node=4,
-            intra_node_bw=Q_("400 GB/s"),
-            nics_per_node=4,
-        ),
-        count=64000 // 4,
-        fabric=NetworkFabric(
-            name="ICI",
-            bandwidth=Q_("24 GB/s"),
-            oversubscription_ratio=2.0,
-        ),
-    )
-
-    eta = 0.47
-    solver = DistributedModel()
-    res = solver.solve(
-        palm_540b,
-        fleet_64k,
-        batch_size=64000,
-        precision="fp16",
-        efficiency=eta,
-        tp_size=4,
-        pp_size=1,
-        overlap_comm=True,
-        overlap_efficiency=0.85,
-    )
-
-    aggregate_mfu = res.scaling_efficiency * eta
-    mfu_pct = aggregate_mfu * 100
-    error_pct = abs(aggregate_mfu - REPORTED["a4_mfu"]) / REPORTED["a4_mfu"] * 100
-
-    return {
-        "AnchorFourMFU": int(round(mfu_pct)),
-        "AnchorFourError": round(error_pct, 1),
-    }
-
-
-def anchor5_chinchilla():
-    """Chinchilla scaling law: optimal P* for Chinchilla's C = 5.88e23 FLOPs."""
-    solver = ScalingModel()
-    res = solver.solve(compute_budget=Q_("5.88e23 flop"))
-    p_opt_b = res.optimal_parameters.to("Gcount").magnitude
-
-    error_pct = abs(p_opt_b - REPORTED["a5_params_b"]) / REPORTED["a5_params_b"] * 100
-
-    res_1e24 = solver.solve(compute_budget=Q_("1e24 flop"))
-    p_1e24_b = res_1e24.optimal_parameters.to("Gcount").magnitude
-    d_1e24_t = res_1e24.optimal_tokens.to("Tcount").magnitude
-
-    return {
-        "AnchorFiveParams": int(round(p_opt_b)),
-        "AnchorFiveError": round(error_pct, 1),
-        "AnchorFiveLargeP": int(round(p_1e24_b)),
-        "AnchorFiveLargeD": round(d_1e24_t, 1),
-    }
-
-
-def anchor6_carbon():
-    """GPT-3 training carbon: Patterson et al. energy × US grid intensity."""
-    energy_mwh = 1287
-    grid_ci = 429
-    carbon_t = energy_mwh * grid_ci / 1000
-    error_pct = abs(carbon_t - REPORTED["a6_carbon_t"]) / REPORTED["a6_carbon_t"] * 100
-
-    return {
-        "AnchorSixEnergyMWh": int(round(energy_mwh)),
-        "AnchorSixCarbonT": int(round(carbon_t)),
-        "AnchorSixError": round(error_pct, 1),
-    }
-
-
-def anchor7_parallelism():
-    """Llama-3 parallelism optimizer: find TP/PP/DP for 405B on 16K H100s."""
-    optimizer = ParallelismOptimizer()
-    res = optimizer.solve(
-        _llama_405b(),
-        _fleet_16k_h100(),
-        batch_size=4096,
-        precision="fp16",
-        efficiency=0.55,
-        overlap_comm=True,
-    )
-
-    best = res.best_config
-    match = (
-        best["tp"] == REPORTED["a7_tp"]
-        and best["pp"] == REPORTED["a7_pp"]
-        and best["dp"] == REPORTED["a7_dp"]
-    )
-
-    return {
-        "AnchorSevenTP": best["tp"],
-        "AnchorSevenPP": best["pp"],
-        "AnchorSevenDP": best["dp"],
-        "AnchorSevenMatch": "yes" if match else "no",
-        "AnchorSevenSearched": res.total_searched,
-    }
-
-
-PAPER_CLAIMS = {
-    "Anchor 1": {"key_value": 37500, "key_name": "throughput (s/s)", "reported": 38200},
-    "Anchor 2": {"key_value": 43, "key_name": "ITL (ms)", "reported": "40-50"},
-    "Anchor 3": {"key_value": 39.1, "key_name": "MFU (%)", "reported": "38-43"},
-    "Anchor 4": {"key_value": 43, "key_name": "MFU (%)", "reported": 46},
-    "Anchor 5": {"key_value": 70, "key_name": "P* (B params)", "reported": 70},
-    "Anchor 6": {"key_value": 552, "key_name": "CO2 (tonnes)", "reported": 552},
-    "Anchor 7": {"key_value": "TP=8,PP=16,DP=128", "key_name": "parallelism", "reported": "TP=8,PP=16,CP=16"},
-}
-
-KEY_EXTRACTORS = {
-    "Anchor 1": lambda r: r["AnchorOneThroughput"],
-    "Anchor 2": lambda r: r["AnchorTwoITL"],
-    "Anchor 3": lambda r: r["AnchorThreeMFU"],
-    "Anchor 4": lambda r: r["AnchorFourMFU"],
-    "Anchor 5": lambda r: r["AnchorFiveParams"],
-    "Anchor 6": lambda r: r["AnchorSixCarbonT"],
-    "Anchor 7": lambda r: f"TP={r['AnchorSevenTP']},PP={r['AnchorSevenPP']},DP={r['AnchorSevenDP']}",
-}
-
-
-def main():
-    """Run all anchors, compare solver output vs paper claims."""
-    anchors = [
-        ("Anchor 1", "ResNet-50 DGX A100", anchor1_resnet),
-        ("Anchor 2", "Llama-2-70B ITL", anchor2_llama_itl),
-        ("Anchor 3", "Llama-3 MFU", anchor3_llama3_mfu),
-        ("Anchor 4", "PaLM scaling", anchor4_palm),
-        ("Anchor 5", "Chinchilla P*", anchor5_chinchilla),
-        ("Anchor 6", "GPT-3 carbon", anchor6_carbon),
-        ("Anchor 7", "Llama-3 parallelism", anchor7_parallelism),
-    ]
-
-    print("mlsysim Validation Report")
-    print("=" * 70)
-    print(f"  {'Anchor':<30} {'Solver':>10} {'Paper':>10} {'Reported':>10}  Match?")
-    print("-" * 70)
-
-    failed = 0
-    mismatches = 0
-    for key, desc, fn in anchors:
-        try:
-            result = fn()
-            solver_val = KEY_EXTRACTORS[key](result)
-            claim = PAPER_CLAIMS[key]
-            paper_val = claim["key_value"]
-
-            if isinstance(solver_val, (int, float)) and isinstance(paper_val, (int, float)):
-                match = abs(solver_val - paper_val) / max(abs(paper_val), 1) < 0.05
-            else:
-                match = str(solver_val) == str(paper_val)
-
-            status = "OK" if match else "MISMATCH"
-            if not match:
-                mismatches += 1
-
-            print(
-                f"  {key + ': ' + desc:<30} {str(solver_val):>10} "
-                f"{str(paper_val):>10} {str(claim['reported']):>10}  {status}"
-            )
-
-        except Exception as e:
-            failed += 1
-            print(f"  {key + ': ' + desc:<30} {'FAIL':>10} {'':>10} {'':>10}  {e}")
-
-    print("=" * 70)
-    if mismatches:
-        print(f"  {mismatches} mismatch(es) — update paper.tex or calibrate solver")
-    if failed:
-        print(f"  {failed} anchor(s) failed to run")
-        sys.exit(1)
-    elif mismatches == 0:
-        print("  All values match.")
+    widths = [max(len(r[i]) for r in rows + [("Anchor", "Scenario", "Predicted", "Reported", "Error", "Status")])
+              for i in range(6)]
+    header = ("Anchor", "Scenario", "Predicted", "Reported", "Error", "Status")
+    print("  ".join(h.ljust(w) for h, w in zip(header, widths)))
+    print("  ".join("-" * w for w in widths))
+    for r in rows:
+        print("  ".join(c.ljust(w) for c, w in zip(r, widths)))
+    for n in notes:
+        print(f"note: {n}")
+    if failures:
+        print(f"\n{len(failures)} anchor check(s) failed:", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f}", file=sys.stderr)
+        return 1
+    print("\nAll anchors within tolerance.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
