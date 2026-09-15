@@ -493,7 +493,13 @@ def section_anchors(V: Values) -> None:
     V.num("AnchorThreeOverlap", ps.A3_CONFIG["overlap_efficiency"], "paper_scenarios.A3_CONFIG", nd=2)
     V.num("AnchorThreeEta", ps.A3_ETA, "paper_scenarios.A3_ETA", nd=2)
     V.pct("AnchorThreeScalingEffPct", d.scaling_efficiency, src + ".scaling_efficiency")
-    V.pct("AnchorThreeMfuPct", a3["mfu"], src + ".scaling_efficiency x 0.42")
+    V.pct("AnchorThreeMfuPct", a3["mfu"], src + ".scaling_efficiency x .node_profile.mfu")
+    V.num("AnchorThreeZeroStage", ps.A3_CONFIG["zero_stage"], "paper_scenarios.A3_CONFIG")
+    V.num("AnchorThreeMemoryGB", a3["memory_gb"], src + ".node_profile.memory_footprint (GB)", nd=1)
+    V.text("AnchorThreeMemoryFits", "fits" if a3["feasible"] else "exceeds", src + ".node_profile.feasible")
+    V.num("AnchorThreeCapacityGB", Hardware.Cloud.H100.memory.capacity.m_as("GB"), "Hardware.Cloud.H100.memory.capacity (GB)", nd=1)
+    V.num("AnchorThreeComputeSeconds", d.node_profile.latency.m_as("s"), src + ".node_profile.latency", nd=1)
+    V.num("AnchorThreeBubbleSeconds", d.pipeline_bubble_latency.m_as("s"), src + ".pipeline_bubble_latency", nd=1)
     V.pct("AnchorThreeBubbleFractionPct", d.bubble_fraction, src + ".bubble_fraction")
     V.pct("AnchorThreeBubbleShareOfStepPct", (d.pipeline_bubble_latency / d.step_latency_total).m_as(""),
           src + ".pipeline_bubble_latency / .step_latency_total")
@@ -509,13 +515,23 @@ def section_anchors(V: Values) -> None:
     V.num("AnchorFourChipsPerHost", ps.A4_CHIPS_PER_HOST, "paper_scenarios.A4_CHIPS_PER_HOST")
     V.num("AnchorFourTp", ps.A4_CONFIG["tp_size"], "paper_scenarios.A4_CONFIG")
     V.num("AnchorFourTflops", Hardware.Cloud.TPUv4.compute.peak_flops.m_as("TFLOPs/s"), "Hardware.Cloud.TPUv4.compute.peak_flops")
-    V.num("AnchorFourFabricGBs", ps.A4_FABRIC_BW.m_as("GB/s"), "paper_scenarios.A4_FABRIC_BW")
-    V.num("AnchorFourOversubscription", ps.A4_OVERSUBSCRIPTION, "paper_scenarios.A4_OVERSUBSCRIPTION")
+    V.num("AnchorFourPodChips", ps.A4_POD_CHIPS, "paper_scenarios.A4_POD_CHIPS (PaLM Sec. 4)")
+    V.num("AnchorFourIciGBs", Hardware.Cloud.TPUv4.nvlink.bandwidth_per_direction.m_as("GB/s"),
+          "Hardware.Cloud.TPUv4.nvlink.bandwidth_per_direction (Jouppi et al. 2023, Table 4)")
+    V.num("AnchorFourDcnBurstTbps", ps.A4_DCN_BURST_GBS * 8 / 1000, "paper_scenarios.A4_DCN_BURST_GBS (PaLM Sec. 4)")
+    V.num("AnchorFourDcnPerChipGBs", ps.A4_DCN_PER_CHIP.m_as("GB/s"), "PaLM cross-pod burst / 6,144 chips (GB/s)", nd=2)
     V.num("AnchorFourBatch", ps.A4_CONFIG["batch_size"], "paper_scenarios.A4_CONFIG")
     V.num("AnchorFourEta", ps.A4_ETA, "paper_scenarios.A4_ETA", nd=2)
     V.pct("AnchorFourScalingEffPct", d4.scaling_efficiency, a4["source"] + ".scaling_efficiency")
-    V.pct("AnchorFourMfuPct", a4["mfu"], a4["source"] + ".scaling_efficiency x 0.47")
+    V.pct("AnchorFourMfuPct", a4["mfu"], a4["source"] + ".scaling_efficiency x .node_profile.mfu")
+    V.num("AnchorFourDp", d4.parallelism["dp"], a4["source"] + ".parallelism['dp']")
+    V.num("AnchorFourZeroStage", ps.A4_CONFIG["zero_stage"], "paper_scenarios.A4_CONFIG")
+    V.num("AnchorFourSeqLen", ps.A4_CONFIG["seq_len"], "paper_scenarios.A4_CONFIG")
+    V.num("AnchorFourMemoryGB", a4["memory_gb"], a4["source"] + ".node_profile.memory_footprint (GB)", nd=1)
+    V.text("AnchorFourMemoryFits", "fits" if a4["feasible"] else "exceeds", a4["source"] + ".node_profile.feasible")
     V.pct("AnchorFourReportedMfuPct", a4["reported"], "paper_scenarios.A4_REPORTED_MFU (PaLM)")
+    V.pct("AnchorFourReportedHfuPct", ps.A4_REPORTED_HFU, "paper_scenarios.A4_REPORTED_HFU (PaLM Sec. 4.1)")
+    V.pct("AnchorFourReplicaMfuPct", d4.node_profile.mfu, a4["source"] + ".node_profile.mfu (excludes rematerialization)")
     V.pct("AnchorFourErrorPct", a4["rel_error"], "|MFU - reported| / reported")
     V.num("AnchorFourErrorPoints", a4["abs_error_points"], "|MFU - reported| in percentage points", nd=1)
 
@@ -830,14 +846,18 @@ def section_researchers(V: Values) -> None:
     V.section("Case R3, Wall 14, fallacy, and architecture-stack figure: Llama-3 70B on Training_512_H100")
     fleet, llama70 = Systems.Clusters.Training_512_H100, Models.Language.Llama3_70B
     eta, days = 0.40, 30
+    # TP within each node, ZeRO-1 optimizer sharding across DP, and full activation
+    # recomputation: without the last two the TP=8 state does not fit an 80 GB H100.
     kw = dict(batch_size=1024, precision="fp16", efficiency=eta, tp_size=8, pp_size=1,
+              zero_stage=1, activation_recomputation=True,
               overlap_comm=True, overlap_efficiency=0.85, seq_len=4096)
     d = DistributedModel().solve(llama70, fleet, **kw)
     src = ("DistributedModel().solve(Models.Language.Llama3_70B, Systems.Clusters.Training_512_H100, batch_size=1024, "
-           "efficiency=0.40, tp_size=8, pp_size=1, overlap_comm=True, overlap_efficiency=0.85, seq_len=4096)")
-    mfu = d.scaling_efficiency * eta
-    mem = TrainingMemoryModel().solve(llama70, H100, batch_size=1024, seq_len=4096, precision="fp16",
-                                      tp_size=8, dp_size=d.parallelism["dp"])
+           "efficiency=0.40, tp_size=8, pp_size=1, zero_stage=1, activation_recomputation=True, "
+           "overlap_comm=True, overlap_efficiency=0.85, seq_len=4096)")
+    # Replica MFU counts model FLOPs only, so full recomputation lowers it to 3/4 of eta.
+    mfu = d.scaling_efficiency * d.node_profile.mfu
+    require(d.node_profile.feasible, "R3: the Llama-3 70B replica must fit in H100 memory")
     quebec, iowa = Infrastructure.Datacenters.Quebec_Hydro, Infrastructure.Datacenters.Iowa_Reference
     rel = ReliabilityModel().solve(fleet, job_duration_hours=days * 24)
     econ = EconomicsModel().solve(fleet, duration_days=days, datacenter=quebec, mfu=mfu)
@@ -874,11 +894,12 @@ def section_researchers(V: Values) -> None:
     V.num("CaseRThreeTpCommMs", d.tp_communication_latency.m_as("ms"), src + ".tp_communication_latency")
     V.num("CaseRThreeCommMs", d.communication_latency.m_as("ms"), src + ".communication_latency")
     V.pct("CaseRThreeScalingEffPct", d.scaling_efficiency, src + ".scaling_efficiency")
-    V.pct("CaseRThreeMfuPct", mfu, src + ".scaling_efficiency x 0.40")
+    V.pct("CaseRThreeMfuPct", mfu, src + ".scaling_efficiency x .node_profile.mfu")
+    V.pct("CaseRThreeReplicaMfuPct", d.node_profile.mfu, src + ".node_profile.mfu")
     V.text("CaseRThreeNodeBottleneck", d.node_profile.bottleneck, src + ".node_profile.bottleneck")
-    V.num("CaseRThreePerGpuMemoryGB", mem.total_memory.m_as("GB"),
-          "TrainingMemoryModel().solve(Llama3_70B, H100, batch_size=1024, seq_len=4096, tp_size=8, dp_size=64).total_memory", nd=1)
-    V.text("CaseRThreeMemoryFits", "fits" if mem.feasible else "exceeds", "TrainingMemoryModel(...).feasible")
+    V.num("CaseRThreePerGpuMemoryGB", d.node_profile.memory_footprint.m_as("GB"),
+          src + ".node_profile.memory_footprint (TrainingMemoryModel with the same sharding)", nd=1)
+    V.text("CaseRThreeMemoryFits", "fits" if d.node_profile.feasible else "exceeds", src + ".node_profile.feasible")
     V.num("CaseRThreeFleetMtbfHours", rel.fleet_mtbf.m_as("hour"), "ReliabilityModel().solve(Training_512_H100, job_duration_hours=720).fleet_mtbf", nd=1)
     V.num("CaseRThreeCheckpointIntervalMin", rel.optimal_checkpoint_interval.m_as("minute"),
           "ReliabilityModel().solve(Training_512_H100, 720).optimal_checkpoint_interval")
@@ -904,7 +925,7 @@ def section_researchers(V: Values) -> None:
     V.audit["R3_node_profile"] = {"feasible": d.node_profile.feasible, "bottleneck": d.node_profile.bottleneck}
 
     V.pct("WallFourteenTpCommSharePct", (d.tp_communication_latency / d.step_latency_total).m_as(""),
-          src + ".tp_communication_latency / .step_latency_total (a DistributedModel fix is in progress elsewhere)")
+          src + ".tp_communication_latency / .step_latency_total")
     V.pct("WallFourteenDpCommSharePct", (d.dp_communication_latency * (1 - kw["overlap_efficiency"]) / d.step_latency_total).m_as(""),
           src + " exposed DP communication / .step_latency_total")
     V.pct("FallacyCommCommFractionPct", 1 - d.scaling_efficiency, "1 - " + src + ".scaling_efficiency")
@@ -926,9 +947,12 @@ def section_researchers(V: Values) -> None:
     require(min_pp is not None, "R4: no pipeline depth is memory-feasible")
     tp_max, params = f2k.node.accelerators_per_node, gpt3.parameters.m_as("count")
 
-    def state_gb(pp):  # mirrors the ParallelismOptimizer memory screen (engine/solvers/distributed.py)
-        w = gpt3.size_in_bytes() / tp_max / pp
-        return (2 * w + Q_(params * cal.TRAINING_OPTIMIZER_BYTES_ADAM / (tp_max * pp), "byte")).m_as("GB")
+    def state_gb(pp):  # replica training state (activations included) the optimizer checks at TP = node size
+        dp = f2k.total_accelerators // (tp_max * pp)
+        replica = DistributedModel().solve(
+            gpt3, f2k, tp_size=tp_max, pp_size=pp, overlap_comm=True,
+            microbatch_count=max(1, okw["batch_size"] // dp) if pp > 1 else 1, **okw)
+        return replica.node_profile.memory_footprint.m_as("GB")
 
     V.num("CaseRFourGpus", f2k.total_accelerators, "Production_2K.total_accelerators")
     V.num("CaseRFourBatch", okw["batch_size"], "scenario input")
@@ -939,8 +963,9 @@ def section_researchers(V: Values) -> None:
     V.num("CaseRFourCandidates", opt.total_searched, src + ".total_searched (memory-feasible candidates evaluated)")
     V.pct("CaseRFourBestMfuPct", opt.best_mfu, src + ".best_mfu")
     V.num("CaseRFourMinPp", min_pp, "smallest max_pp for which ParallelismOptimizer finds a feasible split")
-    V.num("CaseRFourStateAtMinPpGB", state_gb(min_pp), "optimizer memory screen at TP=node size, PP=CaseRFourMinPp (GB)", nd=1)
-    V.num("CaseRFourStateBelowMinPpGB", state_gb(max(1, min_pp // 2)), "optimizer memory screen at PP=CaseRFourMinPp/2 (GB)", nd=1)
+    V.num("CaseRFourStateAtMinPpGB", state_gb(min_pp), "DistributedModel replica memory_footprint at TP=node size, PP=CaseRFourMinPp (GB)", nd=1)
+    V.num("CaseRFourStateBelowMinPpGB", state_gb(max(1, min_pp // 2)), "DistributedModel replica memory_footprint at PP=CaseRFourMinPp/2 (GB)", nd=1)
+    V.num("CaseRFourCapacityGB", H100.memory.capacity.m_as("GB"), "Hardware.Cloud.H100.memory.capacity (GB)", nd=1)
     V.num("CaseRFourScreenCapGB", 0.9 * H100.memory.capacity.m_as("GB"), "0.9 x Hardware.Cloud.H100.memory.capacity (GB)", nd=1)
 
 
@@ -1042,6 +1067,13 @@ def section_listings(V: Values) -> None:
     V.num("ScenarioESpeedup", (base.itl / spec.itl).m_as(""), "ScenarioEBaseItlMs / ScenarioESpecItlMs", nd=2)
     V.num("ScenarioEAcceptance", 0.75, "scenario input", nd=2)
 
+    ev = mlsysim.Scenarios.ChatbotServing.evaluate()  # Scenario F
+    for level, word in ((ev.feasibility, "Feasibility"), (ev.performance, "Performance"), (ev.macro, "Macro")):
+        src_f = f"Scenarios.ChatbotServing.evaluate().{word.lower()}"
+        V.text(f"ScenarioF{word}Status", level.status, src_f + ".status")
+        V.text(f"ScenarioF{word}Summary", level.summary, src_f + ".summary")
+    V.text("ScenarioFPassedAll", str(ev.passed_all), "Scenarios.ChatbotServing.evaluate().passed_all")
+
     g = ParallelismOptimizer().solve(llama70, fleet, batch_size=2048, precision="fp16", efficiency=0.5)  # Scenario G
     src = "ParallelismOptimizer().solve(Llama3_70B, Research_256, batch_size=2048, efficiency=0.5)"
     V.num("ScenarioGTp", g.best_config["tp"], src + ".best_config")
@@ -1068,11 +1100,15 @@ def section_listings(V: Values) -> None:
     frontier = TransformerWorkload(name="Frontier-Model", architecture="transformer", parameters=opt.optimal_parameters,
                                    layers=80, hidden_dim=8192, heads=64)
     f8k = Systems.Clusters.Frontier_8K
-    perf = DistributedModel().solve(frontier, f8k, batch_size=4096, tp_size=8, pp_size=4, seq_len=4096)
+    # One-sequence microbatches: 4,096 sequences over DP = 8,192 / (8 x 4) = 256 leaves 16 per replica.
+    compose_microbatches = 4096 // (f8k.total_accelerators // (8 * 4))
+    perf = DistributedModel().solve(frontier, f8k, batch_size=4096, tp_size=8, pp_size=4, seq_len=4096,
+                                    microbatch_count=compose_microbatches)
     duration = (perf.step_latency_total * (opt.optimal_tokens.m_as("count") / (4096 * 4096))).m_as("day")
     tco = EconomicsModel().solve(f8k, duration_days=duration)
     V.num("ListingComposePstarB", opt.optimal_parameters.m_as("count") / 1e9, "ScalingModel().solve(Q_('4e24 flop')).optimal_parameters / 1e9")
-    V.pct("ListingComposeScalingEffPct", perf.scaling_efficiency, "DistributedModel().solve(Frontier-Model, Frontier_8K, batch_size=4096, tp_size=8, pp_size=4, seq_len=4096).scaling_efficiency")
+    V.pct("ListingComposeScalingEffPct", perf.scaling_efficiency, "DistributedModel().solve(Frontier-Model, Frontier_8K, batch_size=4096, tp_size=8, pp_size=4, seq_len=4096, microbatch_count=16).scaling_efficiency")
+    V.num("ListingComposeMicrobatches", compose_microbatches, "4096 // (Frontier_8K.total_accelerators // 32)")
     V.num("ListingComposeDays", duration, "step_latency_total x optimal_tokens / (4096 x 4096)", nd=1)
     V.num("ListingComposeTcoUSD", tco.tco_usd, "EconomicsModel().solve(Frontier_8K, duration_days=ListingComposeDays).tco_usd")
 

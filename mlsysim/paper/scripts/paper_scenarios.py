@@ -34,13 +34,15 @@ from mlsysim.solvers import (  # noqa: E402
 from mlsysim.systems.types import Fleet, NetworkFabric, Node  # noqa: E402
 
 # ── Published values (no registry home yet) ─────────────────────────────────
-# A1: NVIDIA DeepLearningExamples, TensorFlow ResNet-50 v1.5, AMP + XLA,
-#     8x A100 80GB, batch 256 per GPU; images/s for the whole node.
+# A1: NVIDIA DeepLearningExamples, TensorFlow ResNet-50 v1.5, AMP + XLA, DGX A100
+#     (8x A100 40GB), TensorFlow 20.06-tf1-py3 container, batch 256 per GPU; images/s for the node.
 A1_REPORTED_IMG_PER_S = 17_400
 # A3: Llama 3 herd paper (Llama Team, 2024), Table 4: 16,384 H100 at 8K sequence, 41% MFU.
 A3_REPORTED_MFU = 0.41
 # A4: PaLM (Chowdhery et al.), model FLOPs utilization of the 540B run: 46.2%.
 A4_REPORTED_MFU = 0.462
+# PaLM Sec. 4.1: analytically computed hardware FLOPs utilization, including rematerialization.
+A4_REPORTED_HFU = 0.578
 # A5: Chinchilla (Hoffmann et al., 2022) trained 70B parameters on 1.4T tokens.
 A5_CHINCHILLA_PARAMS = 70e9
 A5_CHINCHILLA_TOKENS = 1.4e12
@@ -55,16 +57,35 @@ A1_GPUS = 8
 A1_CONFIG = dict(batch_size=256, precision="fp16", efficiency=0.19, is_training=True)
 A2_TP_DEGREE = 2
 A3_ETA = 0.42
+# Llama 3 herd paper, Sec. 3.3.2 and Table 4: TP=8, CP=1, PP=16, DP=128 on 16K H100 at 8,192
+# tokens, a global batch of 2,048 sequences (16 per DP group). FSDP shards optimizer states and
+# gradients but not the weights (ZeRO-2), and training runs without activation checkpointing.
+# Sixteen sequences per DP group allow at most 16 one-sequence microbatches. Meta's interleaved
+# schedule (V stages per rank, V not published) and its tensor deallocation are not modeled, so
+# the bubble is the plain 1F1B bubble and mlsysim's activation accounting puts this layout just
+# over 80 GiB; the anchor reports that rather than changing Meta's configuration.
 A3_CONFIG = dict(batch_size=2048, precision="fp16", efficiency=A3_ETA, tp_size=8, pp_size=16,
-                 microbatch_count=64, overlap_comm=True, overlap_efficiency=0.85, seq_len=8192)
+                 microbatch_count=16, zero_stage=2, overlap_comm=True, overlap_efficiency=0.85,
+                 seq_len=8192)
 A4_ETA = 0.47
-A4_CHIPS, A4_CHIPS_PER_HOST = 6144, 4
-A4_INTRA_HOST_BW = Q_("400 GB/s")
-A4_FABRIC_BW = Q_("24 GB/s")
-A4_OVERSUBSCRIPTION = 2.0
-A4_CONFIG = dict(batch_size=2048, precision="fp16", efficiency=A4_ETA, tp_size=4, pp_size=1,
-                 overlap_comm=True, overlap_efficiency=0.85)
-A7_CONFIG = dict(batch_size=2048, precision="fp16", efficiency=A3_ETA, overlap_comm=True)
+# PaLM, Sec. 4: two TPU v4 Pods of 3,072 chips on 768 hosts each (4 chips per host), connected
+# over the datacenter network. Inside a pod the chips reach one another over ICI, whose bandwidth
+# comes from the registry (Hardware.Cloud.TPUv4.nvlink, Jouppi et al. 2023, Table 4). Cross-pod
+# gradient transfers burst to "an aggregate burst of 81 Tbps across all hosts"; spread over the
+# 6,144 chips, that measured burst stands in for the per-chip DCN bandwidth (a floor on capacity).
+A4_CHIPS, A4_POD_CHIPS, A4_CHIPS_PER_HOST = 6144, 3072, 4
+A4_DCN_BURST_GBS = 81_000 / 8  # 81 Tbps in GB/s
+A4_DCN_PER_CHIP = Q_(A4_DCN_BURST_GBS / A4_CHIPS, "GB/s")
+# PaLM, Sec. 4: pipeline-free; each 3,072-chip pod uses 12-way model parallelism and 256-way fully
+# sharded data parallelism, with two-way data parallelism across the two pods (512 DP ranks).
+# Batch 2,048 sequences of 2,048 tokens, with rematerialization (Sec. 4.1).
+A4_CONFIG = dict(batch_size=2048, precision="fp16", efficiency=A4_ETA, tp_size=12, pp_size=1,
+                 zero_stage=3, activation_recomputation=True, overlap_comm=True,
+                 overlap_efficiency=0.85, seq_len=2048)
+# At Meta's 8,192 tokens no split fits mlsysim's activation accounting without recomputation
+# (see A3), so the search runs with full recomputation.
+A7_CONFIG = dict(batch_size=2048, precision="fp16", efficiency=A3_ETA, overlap_comm=True, seq_len=8192,
+                 activation_recomputation=True)
 A7_WIDE_MAX_TP = 64
 
 
@@ -80,12 +101,13 @@ def palm_540b() -> TransformerWorkload:
 
 
 def palm_fleet() -> Fleet:
-    node = Node(name="TPU v4 host (4 chips)", accelerator=Hardware.Cloud.TPUv4,
-                accelerators_per_node=A4_CHIPS_PER_HOST, intra_node_bw=A4_INTRA_HOST_BW,
-                nics_per_node=A4_CHIPS_PER_HOST)
-    fabric = NetworkFabric(name="ICI-class fabric", bandwidth=A4_FABRIC_BW,
-                           oversubscription_ratio=A4_OVERSUBSCRIPTION)
-    return Fleet(name="PaLM 6144 TPU v4", node=node, count=A4_CHIPS // A4_CHIPS_PER_HOST, fabric=fabric)
+    """Two 3,072-chip TPU v4 pods: ICI inside each pod, the datacenter network between them."""
+    tpu = Hardware.Cloud.TPUv4
+    node = Node(name="TPU v4 Pod (3,072 chips on ICI)", accelerator=tpu,
+                accelerators_per_node=A4_POD_CHIPS, intra_node_bw=tpu.nvlink.bandwidth_per_direction,
+                nics_per_node=A4_POD_CHIPS // A4_CHIPS_PER_HOST)
+    fabric = NetworkFabric(name="Datacenter network (PaLM cross-pod burst)", bandwidth=A4_DCN_PER_CHIP)
+    return Fleet(name="PaLM 6144 TPU v4", node=node, count=A4_CHIPS // A4_POD_CHIPS, fabric=fabric)
 
 
 def anchor_one() -> dict:
@@ -115,28 +137,35 @@ def anchor_two() -> dict:
 def anchor_three() -> dict:
     fleet = llama3_16k_fleet()
     result = DistributedModel().solve(Models.Language.Llama3_405B, fleet, **A3_CONFIG)
-    mfu = result.scaling_efficiency * A3_ETA
+    # Fleet MFU = replica MFU (model FLOPs only, so recomputation is excluded) x scaling efficiency.
+    mfu = result.scaling_efficiency * result.node_profile.mfu
     return {
         "fleet": fleet, "result": result, "mfu": mfu, "reported": A3_REPORTED_MFU,
+        "feasible": result.node_profile.feasible,
+        "memory_gb": result.node_profile.memory_footprint.m_as("GB"),
         "rel_error": abs(mfu - A3_REPORTED_MFU) / A3_REPORTED_MFU,
         "abs_error_points": abs(mfu - A3_REPORTED_MFU) * 100,
         "source": ("DistributedModel().solve(Models.Language.Llama3_405B, Fleet(DGX_H100 x 2048, InfiniBand_NDR), "
-                   "batch_size=2048, efficiency=0.42, tp_size=8, pp_size=16, microbatch_count=64, "
-                   "overlap_comm=True, overlap_efficiency=0.85, seq_len=8192)"),
+                   "batch_size=2048, efficiency=0.42, tp_size=8, pp_size=16, microbatch_count=16, "
+                   "zero_stage=2, overlap_comm=True, overlap_efficiency=0.85, seq_len=8192)"),
     }
 
 
 def anchor_four() -> dict:
     fleet = palm_fleet()
     result = DistributedModel().solve(palm_540b(), fleet, **A4_CONFIG)
-    mfu = result.scaling_efficiency * A4_ETA
+    # Replica MFU excludes the rematerialization FLOPs, matching PaLM's MFU definition.
+    mfu = result.scaling_efficiency * result.node_profile.mfu
     return {
         "fleet": fleet, "result": result, "mfu": mfu, "reported": A4_REPORTED_MFU,
+        "feasible": result.node_profile.feasible,
+        "memory_gb": result.node_profile.memory_footprint.m_as("GB"),
         "rel_error": abs(mfu - A4_REPORTED_MFU) / A4_REPORTED_MFU,
         "abs_error_points": abs(mfu - A4_REPORTED_MFU) * 100,
-        "source": ("DistributedModel().solve(PaLM-540B [118 layers, d=18432, 48 heads], Fleet(1536 x 4-chip "
-                   "Hardware.Cloud.TPUv4 hosts, 400 GB/s intra-host, 24 GB/s ICI-class fabric, 2x oversubscribed), "
-                   "batch_size=2048, efficiency=0.47, tp_size=4, pp_size=1, overlap_comm=True)"),
+        "source": ("DistributedModel().solve(PaLM-540B [118 layers, d=18432, 48 heads], Fleet(2 x 3072-chip "
+                   "Hardware.Cloud.TPUv4 pods on ICI, datacenter network at PaLM's 81 Tbps burst / 6144 chips), "
+                   "batch_size=2048, efficiency=0.47, tp_size=12, pp_size=1, zero_stage=3, "
+                   "activation_recomputation=True, overlap_comm=True, seq_len=2048)"),
     }
 
 
@@ -178,5 +207,6 @@ def anchor_seven(fleet: Fleet | None = None) -> dict:
         "reported_tp": A7_REPORTED_TP, "reported_pp": A7_REPORTED_PP,
         "match": best.best_config["tp"] == A7_REPORTED_TP and best.best_config["pp"] == A7_REPORTED_PP,
         "source": ("ParallelismOptimizer().solve(Models.Language.Llama3_405B, Fleet(DGX_H100 x 2048, InfiniBand_NDR), "
-                   "batch_size=2048, efficiency=0.42, overlap_comm=True)"),
+                   "batch_size=2048, efficiency=0.42, overlap_comm=True, seq_len=8192, "
+                   "activation_recomputation=True)"),
     }
