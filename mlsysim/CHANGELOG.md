@@ -134,6 +134,13 @@ Release body. Omit any section that has no entries for a given release.
   action-chunk cadence). Each docstring has a `Source:` line that cites a
   checked reference or names the formula as a modeling assumption.
 
+### Hardware Registry
+
+- `Hardware.Cloud.TPUv4` records its inter-chip interconnect (ICI) as 300 GB/s
+  per direction, six links at 50 GB/s (Jouppi et al. 2023, Table 4, which
+  quotes the A100's NVLink at the same one-way convention). Its provenance now
+  carries the paper's actual title.
+
 ### Documentation
 
 - Align website tutorials and landing pages with canonical nested registry paths
