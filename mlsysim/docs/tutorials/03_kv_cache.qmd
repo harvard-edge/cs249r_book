@@ -72,7 +72,6 @@ Engine = mlsysim.Engine
 ```python
 import mlsysim
 from mlsysim.solvers import ServingModel
-from mlsysim.solvers import ContinuousBatchingModel
 ```
 
 ---
@@ -192,31 +191,282 @@ on incomplete sequences. **PagedAttention** (from vLLM) allocates KV-cache in sm
 fixed-size pages — exactly like how an operating system uses virtual memory paging to
 avoid physical memory fragmentation. Just as the OS maps virtual pages to physical frames
 on demand, PagedAttention maps KV-cache blocks to GPU memory on demand, eliminating
-fragmentation and fitting more concurrent requests:
+fragmentation and fitting more concurrent requests.
+
+Let's prove it with an experiment: two allocators competing for the same memory budget.
+We fix the worst-case context at 8K tokens, but draw request lengths from a long-tailed
+distribution — most requests are far shorter than the worst case, which is exactly the
+workload that punishes static allocation.
+
+**Set up the KV math.** Reuse the model and GPU from the Silicon Zoo and compute the cache
+cost of a single token:
 
 ```{python}
-from mlsysim.solvers import ContinuousBatchingModel
+import random
+from mlsysim import Q_
+from mlsysim.show import table
 
-cb_solver = ContinuousBatchingModel()
+model = mlsysim.Models.Language.Llama3_8B
+hardware = mlsysim.Hardware.Cloud.H100
 
-rows = []
-for label, max_b, page in [("Static (baseline)", 32, 2048), ("Paged (16 tok)", 32, 16), ("Paged (64 tok)", 32, 64)]:
-    cb = cb_solver.solve(
-        model=model, hardware=hardware,
-        seq_len=4096, max_batch_size=max_b,
-        page_size=page, precision="fp16"
-    )
-    rows.append([label, cb.max_active_requests,
-                 f"{cb.throughput_tokens_per_sec:.0f} t/s",
-                 f"{cb.memory_fragmentation_pct:.1f}%",
-                 f"{cb.speedup_vs_static:.1f}x"])
-
-table(["System", "Max Users", "Throughput", "Frag", "Speedup"], rows)
+# KV cache bytes per token (FP16): 2 (K+V) x layers x kv_heads x head_dim x 2 bytes
+head_dim = model.hidden_dim // model.heads
+bytes_per_token = 2 * model.layers * model.kv_heads * head_dim * 2
+max_seq = 8192  # worst-case context length we must support
+kv_budget = hardware.memory.capacity - model.size_in_bytes()  # HBM left after weights
+budget_tokens = int(kv_budget.to("byte").magnitude // bytes_per_token)
 ```
 
-Paged attention reduces fragmentation from ~50% to single digits, allowing more concurrent
-requests from the same memory budget. This is why vLLM and TensorRT-LLM default to paged
-KV-cache management in production.
+**The two allocators.** Static contiguous reserves a full `max_seq` slot per request,
+whether the request needs it or not. Paged hands out fixed-size blocks on demand — a
+request only pays for the blocks it actually fills:
+
+```{python}
+def paged_blocks(tokens, page):
+    """Whole blocks needed for `tokens` tokens (ceiling division)."""
+    return -(-tokens // page)
+
+
+def sample_lengths(seed, n, mean=2048, cap=max_seq):
+    """n request lengths from a long-tailed distribution (avg well below the cap)."""
+    rng = random.Random(seed)
+    return [min(cap, int(rng.expovariate(1 / mean))) for _ in range(n)]
+
+
+class StaticAllocator:
+    """Static contiguous KV: every request reserves a full max_seq slot up front."""
+
+    def __init__(self, budget_tokens, max_seq):
+        self.budget = budget_tokens
+        self.max_seq = max_seq
+        self.reserved = 0
+        self.used_tokens = 0
+        self.admitted = []
+
+    def admit(self, tokens):
+        if self.reserved + self.max_seq <= self.budget:
+            self.reserved += self.max_seq
+            self.used_tokens += tokens
+            self.admitted.append(tokens)
+            return True
+        return False
+
+
+class PagedAllocator:
+    """Paged KV: fixed-size blocks handed out on demand from a free-block pool."""
+
+    def __init__(self, budget_tokens, page):
+        self.page = page
+        self.free_blocks = budget_tokens // page
+        self.used_tokens = 0
+        self.admitted = []
+
+    def admit(self, tokens):
+        need = paged_blocks(tokens, self.page)
+        if need <= self.free_blocks:
+            self.free_blocks -= need
+            self.used_tokens += tokens
+            self.admitted.append(tokens)
+            return True
+        return False
+```
+
+**Same memory budget, two strategies.** Feed both allocators the same stream of requests
+until the budget is exhausted, and watch where the memory goes:
+
+```{python}
+lens = sample_lengths(seed=42, n=100_000)
+
+static = StaticAllocator(budget_tokens, max_seq)
+paged16 = PagedAllocator(budget_tokens, 16)
+paged64 = PagedAllocator(budget_tokens, 64)
+paged256 = PagedAllocator(budget_tokens, 256)
+for t in lens:
+    static.admit(t)
+    paged16.admit(t)
+    paged64.admit(t)
+    paged256.admit(t)
+
+
+def kv_tokens(alloc):
+    if isinstance(alloc, StaticAllocator):
+        return alloc.reserved
+    return sum(paged_blocks(t, alloc.page) * alloc.page for t in alloc.admitted)
+
+
+def internal_frag_pct(alloc):
+    return 1 - alloc.used_tokens / kv_tokens(alloc)
+
+
+def decode_throughput(alloc):
+    # Memory-bound decode (Tutorial 2): weights + used KV streamed once per token
+    step_bytes = model.size_in_bytes().magnitude + alloc.used_tokens * bytes_per_token
+    step_sec = step_bytes / hardware.memory.bandwidth.to("byte/s").magnitude
+    return len(alloc.admitted) / step_sec
+
+
+rows = []
+for label, alloc in [("Static (reserve 8K)", static), ("Paged (16 tok)", paged16),
+                     ("Paged (64 tok)", paged64), ("Paged (256 tok)", paged256)]:
+    rows.append([label, len(alloc.admitted),
+                 f"{Q_(kv_tokens(alloc) * bytes_per_token, 'byte').to('GiB'):~.1f}",
+                 f"{internal_frag_pct(alloc):.1%}",
+                 f"{decode_throughput(alloc):,.0f} t/s"])
+
+table(["System", "Max Users", "KV Allocated", "Int Frag", "Throughput"], rows)
+```
+
+::: {.callout-important}
+## Key Insight
+
+The same 65 GiB KV budget serves **65 users at 77.8% internal fragmentation** with static
+reservation — or **314 users at 0.4%** with 16-token pages. Static pays for the worst
+case (8K) on every request even though the average request is ~4× shorter; paged pays for
+what is used. The extra concurrency buys **1.78×** decode throughput under the
+memory-bound model from [Tutorial 2](02_two_phases.qmd).
+:::
+
+**The second kind of waste: external fragmentation.** Even a static allocator that hands
+out exact sizes (no reservation waste) fragments under churn: requests finish out of
+order, leaving holes too small for the next long request. Paged allocation never does —
+any free block works, so external fragmentation is ~0:
+
+```{python}
+class FirstFitAllocator:
+    """Static contiguous allocation: variable-size chunks, first-fit, holes merge on free."""
+
+    def __init__(self, budget_tokens):
+        self.budget = budget_tokens
+        self.holes = [(0, budget_tokens)]
+        self.allocated = {}
+        self._next_id = 0
+
+    def admit(self, tokens):
+        for i, (s, sz) in enumerate(self.holes):
+            if sz >= tokens:
+                self.holes.pop(i)
+                if sz > tokens:
+                    self.holes.insert(i, (s + tokens, sz - tokens))
+                self.allocated[self._next_id] = (s, tokens)
+                self._next_id += 1
+                return True
+        return False
+
+    def free(self, rid):
+        s, sz = self.allocated.pop(rid)
+        self.holes.append((s, sz))
+        self.holes.sort()
+        merged = []
+        for s, sz in self.holes:
+            if merged and merged[-1][0] + merged[-1][1] == s:
+                merged[-1] = (merged[-1][0], merged[-1][1] + sz)
+            else:
+                merged.append((s, sz))
+        self.holes = merged
+
+    def external_frag_pct(self):
+        free = sum(sz for _, sz in self.holes)
+        largest = max((sz for _, sz in self.holes), default=0)
+        return 0.0 if free == 0 else 1 - largest / free
+
+
+class PagedPool:
+    def __init__(self, budget_tokens, page):
+        self.page = page
+        self.free_blocks = budget_tokens // page
+        self.admitted = []
+
+    def admit(self, tokens):
+        need = paged_blocks(tokens, self.page)
+        if need <= self.free_blocks:
+            self.free_blocks -= need
+            self.admitted.append(tokens)
+            return True
+        return False
+
+    def free(self, tokens):
+        self.free_blocks += paged_blocks(tokens, self.page)
+
+
+rng = random.Random(777)
+first_fit = FirstFitAllocator(budget_tokens)
+paged = PagedPool(budget_tokens, 16)
+
+# Fill both pools with variable-length requests until the first one fills up,
+# then complete every other request (finish out of order — the churn that
+# fragments contiguous memory).
+wave = [rng.randint(256, max_seq) for _ in range(200)]
+for t in wave:
+    first_fit.admit(t)
+    paged.admit(t)
+
+n_done = min(len(first_fit.allocated), len(paged.admitted))
+for i in range(0, n_done, 2):
+    first_fit.free(i)
+    paged.free(paged.admitted[i])
+
+# A fresh wave of worst-case requests arrives — who can still admit them?
+new_reqs = [max_seq] * 10
+ff_adm = sum(first_fit.admit(t) for t in new_reqs)
+pg_adm = sum(paged.admit(t) for t in new_reqs)
+free_ff = int(sum(sz for _, sz in first_fit.holes))
+table(["System", "External Frag", "Free Tokens", "New 8K Req. Admitted"],
+      [["Static (first-fit)", f"{first_fit.external_frag_pct():.1%}", free_ff, f"{ff_adm}/10"],
+       ["Paged (16 tok)", "~0%", int(paged.free_blocks * 16), f"{pg_adm}/10"]])
+```
+
+**Page size: the fragmentation knob.** Page size trades waste against bookkeeping. Small
+pages leave a smaller unused tail on each sequence; large pages mean fewer block-table
+entries per sequence but waste more. Sweep the page size and watch both:
+
+```{python}
+rows = []
+for page in [8, 16, 64, 256, 1024]:
+    a = PagedAllocator(budget_tokens, page)
+    for t in lens:
+        a.admit(t)
+    n = len(a.admitted)
+    blocks_per_req = sum(paged_blocks(t, page) for t in a.admitted) / n
+    rows.append([page, n, f"{internal_frag_pct(a):.1%}", f"{blocks_per_req:.1f}",
+                 f"{kv_tokens(a) / budget_tokens:.1%}"])
+
+table(["Page Size", "Max Users", "Int Frag", "Blocks/Req", "Pool Used"], rows)
+```
+
+16-token pages (vLLM's default) sit at the sweet spot: 0.4% waste with ~106 blocks per
+8K sequence. Going to 1024-token pages slashes the block table to 2 entries per sequence
+but burns 22.2% of the cache as slack — the wrong trade for long-tail workloads.
+
+**The third trick: sharing.** Because blocks are first-class, sequences can share them.
+Eight requests that begin with the same 1K-token system prompt (or eight beam-search
+branches that fork from one prefix) can point at the *same* blocks via reference counts —
+copy-on-write — instead of storing the prefix eight times:
+
+```{python}
+prefix, gen, n_req = 1024, 512, 8
+
+rows = []
+static_kv = n_req * max_seq
+no_share = n_req * paged_blocks(prefix + gen, 16) * 16
+shared = paged_blocks(prefix, 16) * 16 + n_req * paged_blocks(gen, 16) * 16
+for label, kv in [("Static (reserve max)", static_kv),
+                  ("Paged, no sharing", no_share),
+                  ("Paged + shared prefix", shared)]:
+    rows.append([label, f"{Q_(kv * bytes_per_token, 'byte').to('MiB'):~.1f}",
+                 f"{kv / static_kv:.1%}"])
+
+table(["Scheme", "KV Allocated", "vs Static"], rows)
+```
+
+Sharing the prefix cuts peak KV from 1536 MiB to 640 MiB — a 58% saving that grows with
+the number of concurrent requests sharing the prompt. Production systems call this
+*prefix caching*; it is why shared system prompts and few-shot examples are so cheap to
+serve.
+
+Paged attention therefore attacks the memory wall from three directions at once: it
+eliminates reservation waste (~78% → <1% internal fragmentation), survives churn with ~0
+external fragmentation, and shares common prefixes across requests. This is why vLLM and
+TensorRT-LLM default to paged KV-cache management in production.
 
 ---
 
@@ -237,9 +487,10 @@ serve with Llama-3 8B at 128K context in FP16. Then try INT8. How many additiona
 does quantization buy you?
 
 **Exercise 3: Paged vs. static at long context.**
-Run the `ContinuousBatchingModel` for Llama-3 8B at seq_len=32768 with max_batch_size=16.
-Compare page_size=16 vs. page_size=256. Which gives better throughput? Why does page size
-matter more at long context?
+Change `max_seq` in Section 5 to 32768 and re-run the notebook cells. Compare Static
+(reserve 32K) vs. Paged (16 tok) vs. Paged (256 tok). How many users does each serve?
+Why does page size matter more at long context? (Hint: page slack is per-request waste,
+so it hurts most when each request is long and few requests fit.)
 
 **Self-check:** If a model has 32 layers, 8 KV-heads, 128 head_dim, and uses FP16
 (2 bytes), how many bytes does the KV-cache consume per token per user?
@@ -257,7 +508,7 @@ matter more at long context?
 - **At short context, cache is negligible** — model weights dominate and you can serve many users
 - **At long context, cache dominates** — a single 128K user's cache can exceed model weights
 - **The OOM boundary depends on context length x batch size**, not just model size
-- **Paged attention reduces fragmentation**, fitting more concurrent requests in the same memory
+- **Paged attention reduces fragmentation**, fitting more concurrent requests in the same memory and sharing common prefixes across requests
 :::
 
 ---
