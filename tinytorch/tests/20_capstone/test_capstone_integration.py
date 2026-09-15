@@ -2,7 +2,7 @@
 """
 Integration tests for Module 20: Capstone.
 
-The capstone's product is a submission: a JSON-serialisable record whose numbers
+The capstone's product is a submission: a JSON-serializable record whose numbers
 must come from the benchmark that produced them. These tests check the pipeline
 end to end and pin the improvement arithmetic.
 """
@@ -40,7 +40,7 @@ def test_benchmark_report_measures_the_model_it_is_given():
     assert small["latency_ms_mean"] > 0, "Latency measured as zero or negative"
 
 
-def test_submission_is_json_serialisable_and_carries_provenance():
+def test_submission_is_json_serializable_and_carries_provenance():
     X, y = _data()
     report = BenchmarkReport("baseline")
     report.benchmark_model(SimpleMLP(), X, y)
@@ -106,7 +106,7 @@ def test_improvements_are_computed_from_the_two_reports():
 
 if __name__ == "__main__":
     test_benchmark_report_measures_the_model_it_is_given()
-    test_submission_is_json_serialisable_and_carries_provenance()
+    test_submission_is_json_serializable_and_carries_provenance()
     test_improvements_are_computed_from_the_two_reports()
     print("✅ Capstone integration tests passed")
 

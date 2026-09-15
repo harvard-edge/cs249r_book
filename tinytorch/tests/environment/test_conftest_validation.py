@@ -20,7 +20,7 @@ Categories:
     -k registry        # _MODULE_REGISTRY completeness and schema
     -k paths           # export-file path invariants
     -k flags           # required=True/False split
-    -k check           # _check_module_exported helper behaviour
+    -k check           # _check_module_exported helper behavior
     -k soft_vs_hard    # two-tier warning vs hard-failure routing
 
 What we test:
@@ -288,7 +288,7 @@ class TestKeySymbols:
 
 
 # ===========================================================================
-# 6. _check_module_exported behaviour
+# 6. _check_module_exported behavior
 # ===========================================================================
 
 class TestCheckModuleExported:

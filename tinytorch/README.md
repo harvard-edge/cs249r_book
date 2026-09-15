@@ -337,6 +337,22 @@ TinyTorch/
 
 ---
 
+## 🧪 Testing & Verification Architecture
+
+TinyTorch features an automated, multi-tiered test suite (~1,400 tests across 20 modules) engineered to catch defects early and deliver immediate educational feedback to learners.
+
+- **Three-Phase Module Testing (`tito module test <NN>`)**:
+  1. **Phase 1: Inline Unit Tests** - Immediate assertion checks embedded directly within notebook cells.
+  2. **Phase 2: Educational Pytest (`--tinytorch`)** - Displays structured `WHAT`, `WHY`, and `STUDENT LEARNING` explanations on failures to guide learners through fixes.
+  3. **Phase 3: Cumulative Integration Tests** - Runs cross-module integration tests inherited up through the current module.
+- **Cross-Module Integration (`tests/integration/`)**: Backpropagation validation across deep layers, full training loops, and end-to-end computer vision and NLP pipelines.
+- **Bug & Hardware Regressions (`tests/regression/`)**: Prevents silent backprop regressions, verifies shape compatibility, and validates hardware acceleration parity (C++ SIMD, Apple Metal MPS, Triton).
+- **Historical Milestones (`tests/milestones/`)**: Proves student-built frameworks can train real neural architectures (1958 Perceptron to 2020 MLPerf).
+
+For the full test suite breakdown, conventions, and running instructions, see **[tests/README.md](tests/README.md)**.
+
+---
+
 ## Join the Community
 
 TinyTorch is part of the [ML Systems Book](https://mlsysbook.ai) ecosystem. We're building an open community of learners and educators passionate about ML systems.

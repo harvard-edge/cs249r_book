@@ -4,7 +4,7 @@ Module 08: Training - Coverage Tests
 
 Tests for the parts of Module 08 that are implemented but have no test coverage:
 - CosineSchedule correctness
-- clip_grad_norm behaviour
+- clip_grad_norm behavior
 - Trainer.save_checkpoint / load_checkpoint round-trip
 - Trainer.evaluate (loss and accuracy)
 - Scheduler integration inside Trainer.train_epoch

@@ -2,7 +2,7 @@
 """
 Integration tests for Module 17: Acceleration.
 
-Every acceleration technique in this module is an optimisation, which means its
+Every acceleration technique in this module is an optimization, which means its
 one non-negotiable property is that it does not change the answer. These tests
 pin each fast path to a reference computation.
 """
