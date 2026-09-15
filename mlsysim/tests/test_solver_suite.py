@@ -1715,6 +1715,19 @@ class TestWeightStreamingModel:
         )
         assert 0.0 <= result.wafer_memory_utilization <= 1.0
 
+    def test_memory_utilization_is_a_unit_free_ratio(self):
+        """Required GB over GiB capacity must be reduced before reading the magnitude."""
+        from mlsysim.core.units import Q_
+
+        model, wafer = Models.Language.Llama3_8B, Hardware.Cloud.Cerebras_CS3
+        result = WeightStreamingModel().solve(model, wafer, seq_len=8192, batch_size=512)
+        kv_heads = model.kv_heads or model.heads
+        head_dim = model.hidden_dim // model.heads
+        kv_bytes = 8192 * kv_heads * head_dim * 2 * 2 * model.layers * 512  # K and V, FP16
+        expected = (Q_(kv_bytes * 1.1, "byte") / wafer.memory.capacity).to("dimensionless").magnitude
+        assert result.feasible is False
+        assert result.wafer_memory_utilization == pytest.approx(expected)
+
     def test_infeasible_when_sram_overflows(self):
         """Huge batch * long sequence should overflow 44GB on-wafer SRAM."""
         solver = WeightStreamingModel()

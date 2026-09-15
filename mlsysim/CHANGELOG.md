@@ -62,6 +62,8 @@ Release body. Omit any section that has no entries for a given release.
   `SensitivityResult` now carries `feasible`; an infeasible baseline reports
   `binding_constraint="memory_capacity"` and a `constraint_trace` with the
   Memory Wall failure.
+- `WeightStreamingModel.wafer_memory_utilization` divided GB by GiB without
+  reducing units, overstating utilization by 7.4%.
 
 ### Solvers, Models & Taxonomy
 
