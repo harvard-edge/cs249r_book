@@ -1380,6 +1380,25 @@ class TestSensitivitySolver:
         assert baseline.peak_bw_actual == esp32.memory.sram_bandwidth
         assert result.sensitivities["memory_bandwidth"] <= 0.0 + 1e-9
 
+    def test_infeasible_baseline_is_flagged_not_silently_zero(self):
+        """Llama-3 70B FP16 (~141 GB) cannot fit one H100: flag it and bind on capacity."""
+        result = SensitivitySolver().solve(
+            Models.Language.Llama3_70B, Hardware.Cloud.H100, precision="fp16"
+        )
+        assert result.feasible is False
+        assert result.binding_constraint == "memory_capacity"
+        assert any("Memory Wall: FAILED" in line for line in result.constraint_trace)
+        assert any("infeasible baseline" in line for line in result.constraint_trace)
+
+    def test_feasible_baseline_reports_feasible_and_binding_trace(self):
+        """Llama-3 8B batch-1 decode on H100 fits and is bandwidth-bound."""
+        result = SensitivitySolver().solve(
+            Models.Language.Llama3_8B, Hardware.Cloud.H100, precision="fp16"
+        )
+        assert result.feasible is True
+        assert result.binding_constraint == "memory_bandwidth"
+        assert result.constraint_trace and "memory_bandwidth is binding" in result.constraint_trace[0]
+
 # ======================================================================
 # 18. SynthesisSolver
 # ======================================================================

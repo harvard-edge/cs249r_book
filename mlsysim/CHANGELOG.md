@@ -53,6 +53,13 @@ Release body. Omit any section that has no entries for a given release.
   2019, p.4), so a training step now pays 4 separate AllReduces per layer, each
   with its own ring latency term: the bandwidth term of `tp_communication_latency`
   doubles and the latency term quadruples.
+- `SensitivitySolver` returned all-zero sensitivities with `peak_flops` named
+  as binding when the configuration does not fit in memory (for example
+  Llama-3 70B FP16 on one H100): the offload path pins latency, so no 10%
+  perturbation moves it, and `max()` broke the tie on the first key.
+  `SensitivityResult` now carries `feasible`; an infeasible baseline reports
+  `binding_constraint="memory_capacity"` and a `constraint_trace` with the
+  Memory Wall failure.
 
 ### Solvers, Models & Taxonomy
 
