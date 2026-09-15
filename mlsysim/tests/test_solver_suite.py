@@ -370,7 +370,7 @@ class TestServingCapacityModel:
             h100,
             qps=5.0,
             target_p99_latency_ms=2_000,
-            seq_len=512,
+            max_seq_len=512,
             output_tokens=32,
             max_batch_size=8,
             max_replicas=64,
@@ -385,10 +385,10 @@ class TestServingCapacityModel:
         llama = Models.Language.Llama3_8B
         h100 = Hardware.Cloud.H100
         low = ServingCapacityModel().solve(
-            llama, h100, qps=1.0, target_p99_latency_ms=2_000, seq_len=512, output_tokens=32, max_replicas=64
+            llama, h100, qps=1.0, target_p99_latency_ms=2_000, max_seq_len=512, output_tokens=32, max_replicas=64
         )
         high = ServingCapacityModel().solve(
-            llama, h100, qps=20.0, target_p99_latency_ms=2_000, seq_len=512, output_tokens=32, max_replicas=64
+            llama, h100, qps=20.0, target_p99_latency_ms=2_000, max_seq_len=512, output_tokens=32, max_replicas=64
         )
 
         assert high.required_replicas >= low.required_replicas
@@ -402,7 +402,7 @@ class TestServingCapacityModel:
             h100,
             qps=1.0,
             target_p99_latency_ms=10_000,
-            seq_len=512,
+            max_seq_len=512,
             output_tokens=16,
             max_batch_size=1,
             max_replicas=4,
@@ -410,6 +410,24 @@ class TestServingCapacityModel:
 
         assert result.feasible is False
         assert result.bottleneck == "Memory"
+
+    def test_shorter_requests_raise_per_replica_capacity(self):
+        """Paged concurrency and QPS capacity grow when requests fill less than the context."""
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
+        common = dict(
+            qps=1.0, target_p99_latency_ms=600_000, max_seq_len=8192,
+            output_tokens=256, max_batch_size=4096, max_replicas=8,
+        )
+        full = ServingCapacityModel().solve(llama, h100, **common)
+        short = ServingCapacityModel().solve(llama, h100, mean_request_tokens=2048, **common)
+
+        assert full.active_batch_size == 65
+        assert short.active_batch_size == 259
+        assert short.per_replica_qps_capacity > full.per_replica_qps_capacity
+        # Base latency is evaluated at the mean length, so the larger paged batch
+        # must still pass ServingModel's memory check.
+        assert short.bottleneck != "Memory"
 
 class TestMoERoutingModel:
     """Tests for MoE routing imbalance modeling."""
@@ -1450,7 +1468,7 @@ class TestCheckpointModel:
 # ======================================================================
 
 class TestContinuousBatchingModel:
-    """Tests for PagedAttention continuous batching."""
+    """Tests for static max-length KV reservation vs PagedAttention."""
 
     @pytest.mark.smoke
     def test_feasible_small_model_large_gpu(self):
@@ -1458,7 +1476,7 @@ class TestContinuousBatchingModel:
         solver = ContinuousBatchingModel()
         result = solver.solve(
             Models.Language.Llama3_8B, Hardware.Cloud.H100,
-            seq_len=1024, max_batch_size=32, page_size=16,
+            max_seq_len=1024, max_batch_size=32, page_size=16,
         )
         assert result.feasible is True
         assert result.throughput_tokens_per_sec > 0
@@ -1468,37 +1486,38 @@ class TestContinuousBatchingModel:
         solver = ContinuousBatchingModel()
         result = solver.solve(
             Models.Language.GPT3, Hardware.Cloud.T4,
-            seq_len=2048, max_batch_size=1, page_size=16,
+            max_seq_len=2048, max_batch_size=1, page_size=16,
         )
         assert result.feasible is False
         assert result.throughput_tokens_per_sec == 0.0
+        assert result.static_max_active_requests == 0
 
     def test_max_active_requests_bounded_by_memory(self):
         """Active requests cannot exceed what KV cache memory allows."""
         solver = ContinuousBatchingModel()
         result = solver.solve(
             Models.Language.Llama3_8B, Hardware.Cloud.H100,
-            seq_len=1024, max_batch_size=256, page_size=16,
+            max_seq_len=1024, max_batch_size=256, page_size=16,
         )
         assert result.max_active_requests <= 256
         assert result.max_active_requests >= 1
 
-    def test_fragmentation_bounded(self):
-        """Memory fragmentation percentage must be in [0, 100]."""
-        solver = ContinuousBatchingModel()
-        result = solver.solve(
+    def test_fragmentation_is_a_fraction(self):
+        """Internal fragmentation is a fraction of the allocated KV tokens."""
+        result = ContinuousBatchingModel().solve(
             Models.Language.Llama3_8B, Hardware.Cloud.H100,
-            seq_len=512, max_batch_size=16, page_size=16,
+            max_seq_len=512, mean_request_tokens=300, max_batch_size=16, page_size=16,
         )
-        assert 0.0 <= result.memory_fragmentation_pct <= 100.0
+        assert 0.0 <= result.paged_internal_fragmentation < 1.0
+        assert 0.0 <= result.static_internal_fragmentation < 1.0
 
     def test_speedup_vs_static_at_least_one(self):
-        """Continuous batching should be at least as fast as static batching."""
-        solver = ContinuousBatchingModel()
-        result = solver.solve(
+        """When memory binds, paging admits at least as many requests as static reservation."""
+        result = ContinuousBatchingModel().solve(
             Models.Language.Llama3_8B, Hardware.Cloud.H100,
-            seq_len=1024, max_batch_size=32, page_size=16,
+            max_seq_len=1024, mean_request_tokens=256, max_batch_size=4096, page_size=16,
         )
+        assert result.max_active_requests >= result.static_max_active_requests
         assert result.speedup_vs_static >= 1.0
 
     def test_smaller_page_size_less_fragmentation(self):
@@ -1506,9 +1525,72 @@ class TestContinuousBatchingModel:
         solver = ContinuousBatchingModel()
         model = Models.Language.Llama3_8B
         hw = Hardware.Cloud.H100
-        res_large = solver.solve(model, hw, seq_len=1024, max_batch_size=16, page_size=64)
-        res_small = solver.solve(model, hw, seq_len=1024, max_batch_size=16, page_size=4)
-        assert res_small.memory_fragmentation_pct <= res_large.memory_fragmentation_pct
+        res_large = solver.solve(model, hw, max_seq_len=1024, mean_request_tokens=512, max_batch_size=16, page_size=64)
+        res_small = solver.solve(model, hw, max_seq_len=1024, mean_request_tokens=512, max_batch_size=16, page_size=4)
+        assert res_small.paged_internal_fragmentation < res_large.paged_internal_fragmentation
+
+    def test_page_size_matters_when_context_divides_evenly(self):
+        """Regression: at a 4096-token context, pages of 16/64/2048 once all reported 0% waste."""
+        solver = ContinuousBatchingModel()
+        results = [
+            solver.solve(
+                Models.Language.Llama3_8B, Hardware.Cloud.H100, max_seq_len=4096,
+                mean_request_tokens=1024, max_batch_size=4096, page_size=page,
+            )
+            for page in (16, 64, 2048)
+        ]
+        fragmentation = [r.paged_internal_fragmentation for r in results]
+        capacity = [r.max_active_requests for r in results]
+        assert 0.0 < fragmentation[0] < fragmentation[1] < fragmentation[2]
+        assert capacity[0] >= capacity[1] > capacity[2]
+
+    def test_fixed_length_requests_make_allocators_coincide(self):
+        """With every request filling the context, static and paged admit the same batch."""
+        solver = ContinuousBatchingModel()
+        for page in (16, 64, 2048):
+            result = solver.solve(
+                Models.Language.Llama3_8B, Hardware.Cloud.H100,
+                max_seq_len=4096, max_batch_size=4096, page_size=page,
+            )
+            assert result.max_active_requests == result.static_max_active_requests
+            assert result.paged_internal_fragmentation == pytest.approx(0.0, abs=1e-12)
+            assert result.static_internal_fragmentation == pytest.approx(0.0)
+            assert result.speedup_vs_static == pytest.approx(1.0)
+
+    def test_static_waste_is_one_minus_mean_over_max(self):
+        """Static reservation leaves 1 - mean/max of every slot unused."""
+        result = ContinuousBatchingModel().solve(
+            Models.Language.Llama3_8B, Hardware.Cloud.H100,
+            max_seq_len=8192, mean_request_tokens=2048, max_batch_size=4096,
+        )
+        assert result.static_internal_fragmentation == pytest.approx(0.75)
+
+    def test_reference_llama3_8b_h100_8k_context(self):
+        """Matches the KV-cache tutorial allocators: 65 static vs 259 paged users."""
+        result = ContinuousBatchingModel().solve(
+            Models.Language.Llama3_8B, Hardware.Cloud.H100,
+            max_seq_len=8192, mean_request_tokens=2048, max_batch_size=4096, page_size=16,
+        )
+        assert result.static_max_active_requests == 65
+        assert result.max_active_requests == 259
+        assert result.paged_internal_fragmentation == pytest.approx(0.0038, abs=5e-4)
+        assert result.speedup_vs_static == pytest.approx(1.56, abs=0.01)
+
+    def test_batch_cap_binding_both_allocators_removes_advantage(self):
+        """If the scheduler cap binds before memory, allocation policy cannot help."""
+        result = ContinuousBatchingModel().solve(
+            Models.Language.Llama3_8B, Hardware.Cloud.H100,
+            max_seq_len=8192, mean_request_tokens=2048, max_batch_size=16,
+        )
+        assert result.max_active_requests == result.static_max_active_requests == 16
+        assert result.speedup_vs_static == pytest.approx(1.0)
+
+    def test_rejects_mean_longer_than_context(self):
+        with pytest.raises(ValueError, match="mean_request_tokens"):
+            ContinuousBatchingModel().solve(
+                Models.Language.Llama3_8B, Hardware.Cloud.H100,
+                max_seq_len=1024, mean_request_tokens=2048,
+            )
 
 # ======================================================================
 # 22. WeightStreamingModel
