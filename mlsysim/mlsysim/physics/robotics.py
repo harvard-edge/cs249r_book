@@ -27,6 +27,10 @@ def calc_sensor_to_actuator_latency(
     """
     Calculate the total end-to-end perception-to-actuation loop latency.
 
+    Source: modeling assumption. The stages are summed as a serial pipeline,
+    not taken from a published model; sampling phase, jitter, and queueing
+    between stages are ignored.
+
     Parameters
     ----------
     sensor_latency : Quantity
@@ -59,6 +63,12 @@ def calc_safe_stopping_distance(
 
     Equation:
         d_stop = v * tau_latency + (v^2) / (2 * a_max) + delta_loc + delta_margin
+
+    Source: reaction distance v * tau plus constant-deceleration braking
+    distance v^2 / (2 * a), from v^2 = v0^2 + 2 * a * (x - x0) (OpenStax,
+    University Physics Volume 1, Sec. 3.4, Eq. 3.14; Example 3.10 adds
+    reaction-time travel to braking distance the same way). The additive
+    localization and clearance margins are a modeling assumption.
 
     Parameters
     ----------
@@ -112,6 +122,11 @@ def calc_max_permitted_velocity(
         v_max = -a * tau + sqrt((a * tau)^2 + 2 * a * D_eff)
     where D_eff = D_clear - delta_loc - delta_margin. If D_eff <= 0, v_max = 0.
 
+    Source: derived here as the positive root of the
+    calc_safe_stopping_distance quadratic, so it rests on the same kinematics
+    (OpenStax, University Physics Volume 1, Sec. 3.4, Eq. 3.14) and the same
+    additive-margin modeling assumption.
+
     Parameters
     ----------
     d_clear : Quantity
@@ -160,6 +175,8 @@ def calc_kinetic_energy(mass, velocity):
     Equation:
         E_k = 0.5 * m * v^2
 
+    Source: OpenStax, University Physics Volume 1, Sec. 7.2, Eq. 7.6.
+
     Parameters
     ----------
     mass : Quantity
@@ -189,6 +206,14 @@ def calc_seam_acceleration_torque_jump(gear_ratio: float, rotor_inertia, delta_a
 
     Equation:
         tau_spike = J_reflected * delta_accel = (N^2 * J_rotor) * delta_accel
+
+    Source: tau = I * alpha (OpenStax, University Physics Volume 1, Sec. 10.7,
+    Eq. 10.25) applied to the rotor's apparent (reflected) inertia
+    G^2 * I_rotor (Lynch and Park, Modern Robotics, Cambridge University
+    Press, 2017, Sec. 8.9.2). Link inertia, load, friction, and gear
+    compliance are omitted, so this is the reflected-rotor share of the spike;
+    treating the seam as an instantaneous acceleration step is a modeling
+    assumption.
 
     Parameters
     ----------
@@ -228,6 +253,16 @@ def calc_inverted_pendulum_fall_time(
 
     If initial perturbation theta_0 and fall threshold theta_fall are given:
         t_fall = tau_0 * ln(2 * theta_fall / theta_0)
+
+    Source: the linear inverted pendulum, whose natural frequency is
+    omega_0 = sqrt(g / h), so tau_0 = sqrt(L / g) (Caron, "Biped Stabilization
+    by Linear Feedback of the Variable-Height Inverted Pendulum Model",
+    arXiv:1909.07732, Sec. II). The t_fall expression is derived here, not
+    taken from a published model. With zero initial angular velocity the
+    linearized solution is theta(t) = theta_0 * cosh(t / tau_0), so
+    t = tau_0 * acosh(theta_fall / theta_0), and ln(2x) approximates acosh(x)
+    for x >> 1 (it overestimates by about 5% at x = 2). The small-angle
+    linearization also loses accuracy as theta_fall grows.
 
     Parameters
     ----------
@@ -273,6 +308,12 @@ def calc_actuator_thermal_power(current, resistance, duty_cycle: float = 1.0):
     Equation:
         P_loss = (I^2 * R) * duty_cycle
 
+    Source: Joule heating P = I^2 * R (OpenStax, University Physics Volume 2,
+    Sec. 9.5, Eq. 9.13) for one winding at constant resistance. Scaling by
+    duty_cycle is a modeling assumption; it takes the current as constant
+    while on and zero while off, and ignores the rise of winding resistance
+    with temperature.
+
     Parameters
     ----------
     current : Quantity
@@ -297,6 +338,13 @@ def calc_actuator_thermal_power(current, resistance, duty_cycle: float = 1.0):
 def calc_action_chunk_cadence(chunk_horizon_steps: int, control_loop_hz, brain_inference_hz):
     """
     Evaluate the freshness and execution headroom of an action chunking policy.
+
+    Source: action chunking, predicting a sequence of actions per policy query,
+    is from Zhao et al., "Learning Fine-Grained Bimanual Manipulation with
+    Low-Cost Hardware" (ACT), arXiv:2304.13705. The chunk-duration and
+    headroom arithmetic (chunk steps over control rate, divided by the
+    inference period) is a modeling assumption of this package, not taken
+    from that paper.
 
     Parameters
     ----------
@@ -335,6 +383,10 @@ def calc_reflected_inertia(gear_ratio: float, rotor_inertia):
 
     Equation:
         J_reflected = N^2 * J_rotor
+
+    Source: Lynch and Park, Modern Robotics, Cambridge University Press, 2017,
+    Sec. 8.9.2 ("Apparent Inertia"), where G^2 * I_rotor is the rotor's
+    apparent (often called reflected) inertia for gear ratio G.
 
     Parameters
     ----------

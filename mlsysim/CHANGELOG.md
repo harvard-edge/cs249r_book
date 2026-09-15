@@ -51,6 +51,24 @@ Release body. Omit any section that has no entries for a given release.
   latency at the mean request length.
 - Added `calc_capped_exponential_scale` and `calc_expected_paged_kv_tokens` to
   `mlsysim.physics`.
+- Added the `mlsysim.Agents` registry (`Coding.SWE_Bench_Runner`,
+  `Deliberation.TreeSearch`, `MultiAgent.SupervisorWorker`,
+  `Interactive.StreamingVoice`) and the `mlsysim.Embodied` registry
+  (`Quadruped.Spot`, `Humanoid.Atlas`, `Humanoid.Unitree_H1`,
+  `Manipulator.Panda`, `Drone.DJI_Matrice`, `AMR.LogisticsAMR`,
+  `Vehicle.Robotaxi`). Provenance states what is sourced. The Panda record is
+  a datasheet. Spot, Atlas, Unitree H1, and the DJI Matrice 350 RTK are
+  estimates that link their spec pages and name the unsourced fields. The AMR
+  and robotaxi are estimated class profiles, and the four agent profiles are
+  illustrative teaching assumptions.
+- Added `mlsysim.physics.agents` (trajectory step time and reliability, Pareto
+  trajectory-length tail, radix prefix-cache latency, test-time compute cost,
+  multi-agent coordination overhead, speedup, and optimal concurrency) and
+  `mlsysim.physics.robotics` (sensor-to-actuator latency, stopping distance
+  and maximum permitted velocity, kinetic energy, reflected inertia and seam
+  torque, inverted-pendulum fall time, actuator Joule heating, and
+  action-chunk cadence). Each docstring has a `Source:` line that cites a
+  checked reference or names the formula as a modeling assumption.
 
 ### Documentation
 
