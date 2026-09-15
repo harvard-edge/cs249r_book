@@ -13,31 +13,17 @@ import numpy as np
 rng = np.random.default_rng(7)
 import pytest
 
+# Add project root to path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, project_root)
+
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Layer, Linear, Sequential
 
 
-class Sequential:
-    """Simple sequential container for testing."""
-    def __init__(self, layers=None):
-        self.layers = layers if layers else []
-    def add(self, layer):
-        self.layers.append(layer)
-    def __call__(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-    def parameters(self):
-        params = []
-        for layer in self.layers:
-            if hasattr(layer, 'parameters'):
-                params.extend(layer.parameters())
-        return params
-
-
-class Flatten:
+class Flatten(Layer):
     """Flatten layer for testing."""
-    def __call__(self, x):
+    def forward(self, x):
         batch_size = x.shape[0]
         return x.reshape(batch_size, -1)
 
@@ -90,12 +76,12 @@ def test_complete_neural_networks():
 
     print("\n3. Deep Network with Many Layers:")
     # Demonstrate deep composition
-    deep_net = Sequential()
     layer_sizes = [100, 80, 60, 40, 20, 10]
-
+    deep_layers = []
     for i in range(len(layer_sizes) - 1):
-        deep_net.add(Linear(layer_sizes[i], layer_sizes[i+1]))
+        deep_layers.append(Linear(layer_sizes[i], layer_sizes[i+1]))
         print(f"   Added layer: {layer_sizes[i]} -> {layer_sizes[i+1]}")
+    deep_net = Sequential(deep_layers)
 
     # Test deep network
     deep_input = Tensor(rng.standard_normal((8, 100)))
