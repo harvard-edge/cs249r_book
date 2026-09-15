@@ -431,6 +431,8 @@ class ValidateCommand:
                   note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
             Scope("callout-ref-form", "_run_callout_ref_form",
                   note="custom numbered callouts (dfn/exmp/nbk/pri/... from custom-numbered-blocks.yml) are referenced with \\ref{id}, never @id"),
+            Scope("redundant-xref-prefix", "_run_redundant_xref_prefix",
+                  note="no redundant section/chapter/table/figure nouns before @-crossrefs"),
             Scope("unlinked-prose-refs", "_run_unlinked_prose_refs",
                   note="hardcoded Appendix A / Section 3.1 / Chapter 2 in prose must use @sec- cross-references"),
             Scope("cross-volume-epub-refs", "_run_cross_volume_epub_refs",
@@ -7401,6 +7403,7 @@ class ValidateCommand:
         # stale, producing 30 false mismatches against correct content.)
         "callout-war-story": (
             ("Context", "Mechanism", "Impact", "Fix", "Systems lesson"),
+            ("Context", "Mechanism", "Impact", "Response", "Systems lesson"),
             ("Context", "Failure mode", "Systems lesson"),
             ("Context", "Failure mode", "Consequence", "Systems lesson"),
             ("Context", "Failure mode", "Resolution", "Systems lesson"),
@@ -8613,6 +8616,64 @@ class ValidateCommand:
         return ValidationRunResult(
             name="callout-ref-form",
             description="Custom numbered callouts must use \\ref{id}, not @id",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_redundant_xref_prefix(self, root: Path) -> ValidationRunResult:
+        """Flag redundant prose nouns preceding native cross-references.
+
+        Quarto's native cross-reference resolver automatically prepends the
+        appropriate label ('section', 'chapter', 'figure', 'table', 'equation',
+        'listing', 'algorithm') when rendering `@sec-`, `@fig-`, `@tbl-`,
+        `@eq-`, `@lst-`, `@algo?-`.
+
+        Writing 'Section @sec-foo' or 'Table @tbl-bar' causes Quarto to duplicate
+        the noun in output, rendering 'Section section X.Y' or 'Table table A.B'.
+        Prose must use bare `@sec-` / `@Sec-`, `@tbl-` / `@Tbl-`, etc.
+        (Custom callout references via \\ref{} are exempt and supply their own noun).
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        pat = re.compile(
+            r"\b(sections?|chapters?|appendi(?:x|ces)|tables?|figures?|figs?\.?|equations?|eqs?\.?|listings?|algorithms?)\s+@([A-Za-z0-9_-]+)",
+            re.IGNORECASE,
+        )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|"):
+                    continue
+
+                for m in pat.finditer(line):
+                    noun = m.group(1)
+                    target = m.group(2)
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="redundant_xref_prefix",
+                            message=(
+                                f"Redundant noun '{noun}' before native cross-reference '@{target}'. "
+                                f"Quarto auto-generates the noun label; write '@{target}' or '@{target.capitalize()}' directly."
+                            ),
+                            severity="error",
+                            suggestion=f"Remove '{noun}' and use '@{target}' (or '@{target.capitalize()}' at sentence start)",
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="redundant-xref-prefix",
+            description="Flag redundant nouns before @-crossrefs",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
