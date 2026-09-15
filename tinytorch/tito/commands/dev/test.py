@@ -823,11 +823,14 @@ class DevTestCommand(BaseCommand):
     def _run_user_journey(self, project_root: Path, args: Namespace) -> TestResult:
         """Run full user journey validation (destructive).
 
-        This simulates exactly what a user does:
+        This simulates what a user does:
         1. Reset (clear modules/ and tinytorch/core/) - like fresh install
         2. For each module:
-           a. tito module start XX --no-jupyter (creates notebook)
-           b. tito module complete XX (tests + exports)
+           a. tito module start XX --no-jupyter (creates the student notebook)
+           b. check that notebook holds no reference solutions (#1684)
+           c. tito dev export XX (fills in the reference, standing in for a
+              student who solved the module)
+           d. tito module complete XX (tests + exports the notebook)
         3. Run milestones at unlock checkpoints (not all at the end)
 
         Milestone checkpoints (based on required_modules):
@@ -959,9 +962,63 @@ class DevTestCommand(BaseCommand):
                     print(f"  └─ MODULE {module_num}: FAILED (start error)")
                 continue
 
-            # Step B: tito module complete (tests + exports notebook to tinytorch/core/)
+            # Step B: the notebook `module start` made must hold no reference
+            # solutions and at least one stub to implement (#1684).
             if ci_mode:
-                print(f"  │  → Step 2: tito module complete {module_num}", end=" ", flush=True)
+                print("  │  → Step 2: student notebook has stubs, no solutions", end=" ", flush=True)
+            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+            student_notebook = project_root / "modules" / module_name / f"{short_name}.ipynb"
+            notebook_text = (
+                student_notebook.read_text(encoding="utf-8") if student_notebook.exists() else ""
+            )
+            if (
+                not notebook_text
+                or "BEGIN SOLUTION" in notebook_text
+                or "END SOLUTION" in notebook_text
+                or "raise NotImplementedError()" not in notebook_text
+            ):
+                failed_modules.append(f"{module_num}:student_notebook")
+                if ci_mode:
+                    print("✗ FAILED")
+                    print(f"  │    {student_notebook.name}: missing, leaks solutions, or has no stubs")
+                    print(f"  └─ MODULE {module_num}: FAILED (student notebook)")
+                continue
+            if ci_mode:
+                print("✓")
+
+            # Step C: fill in the reference, standing in for a student who
+            # solved the module, so `complete` certifies working code.
+            if ci_mode:
+                print(f"  │  → Step 3: tito dev export {module_num} (reference solution)", end=" ", flush=True)
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(project_root / "bin" / "tito"),
+                     "dev", "export", module_num],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    cwd=project_root,
+                    timeout=120
+                )
+                if result.returncode != 0:
+                    failed_modules.append(f"{module_num}:fill_reference")
+                    if ci_mode:
+                        print("✗ FAILED")
+                        print(f"  └─ MODULE {module_num}: FAILED (fill reference)")
+                    continue
+                if ci_mode:
+                    print("✓")
+            except subprocess.TimeoutExpired:
+                failed_modules.append(f"{module_num}:fill_reference_timeout")
+                if ci_mode:
+                    print("✗ TIMEOUT (>120s)")
+                    print(f"  └─ MODULE {module_num}: FAILED (fill reference timeout)")
+                continue
+
+            # Step D: tito module complete (tests + exports notebook to tinytorch/core/)
+            if ci_mode:
+                print(f"  │  → Step 4: tito module complete {module_num}", end=" ", flush=True)
             try:
                 result = subprocess.run(
                     [sys.executable, str(project_root / "bin" / "tito"),

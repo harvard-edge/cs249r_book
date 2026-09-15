@@ -437,13 +437,16 @@ class ModuleWorkflowCommand(BaseCommand):
         return self._open_jupyter(module_name)
 
     def _create_module_from_src(self, module_name: str) -> bool:
-        """Create a module in modules/ by converting from src/.
+        """Create the student notebook in modules/ from src/.
 
-        Uses the same conversion logic as 'tito dev export' but only creates
-        the student-facing notebook, without exporting to the tinytorch package.
-        Full `src/` (including `### BEGIN SOLUTION` ... `### END SOLUTION` blocks) is
-        passed through to jupytext so notebooks match the source-of-truth and exports
-        remain consistent for `tito module complete` and CI user-journey.
+        Uses the same jupytext conversion as 'tito dev export', then clears the
+        student-core solution regions to nbgrader's stub, following the student
+        release tier (scaffold regions stay solved). Nothing is exported to the
+        package here; `tito module complete` exports whatever the student writes.
+
+        2026-09-15: this used to pass the full reference through, which handed
+        every learner the answers (#1684). The CI user journey now checks this
+        notebook, then fills in the reference itself with `tito dev export`.
         """
         from ..export_utils import convert_py_to_notebook
 
@@ -451,8 +454,13 @@ class ModuleWorkflowCommand(BaseCommand):
         if not src_path.exists():
             return False
 
-        # Convert src/*.py to modules/*.ipynb using jupytext
-        return convert_py_to_notebook(src_path, self.venv_path, self.console)
+        return convert_py_to_notebook(
+            src_path,
+            self.venv_path,
+            self.console,
+            student=True,
+            project_root=self.config.project_root,
+        )
 
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
