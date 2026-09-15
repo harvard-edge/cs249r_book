@@ -1,21 +1,63 @@
 # TinyTorch Regression Tests
 ## Ensuring Core Infrastructure Works Correctly
 
-This directory contains regression tests that ensure TinyTorch's core functionality works correctly so students don't get stuck on infrastructure issues.
+This directory contains regression tests that ensure TinyTorch's core functionality, past defect fixes, and cross-subsystem contracts remain reliable so students do not encounter infrastructure failures.
 
 ---
 
 ## 📋 Test Coverage
 
-### Shape Compatibility Tests
-**File**: `test_conv_linear_dimensions.py`
-**What it tests**: Convolution output dimensions match Linear layer expectations
-**Why it matters**: Students shouldn't debug dimension mismatches in their CNNs
+### Shape Compatibility Regressions
+- **File**: `test_conv_linear_dimensions.py`
+- **What it tests**: Convolution output dimensions match Linear layer expectations after flattening.
+- **Why it matters**: Students should not debug dimension calculation mismatches in their CNN architectures.
 
-### Tensor Reshaping Tests
-**File**: `test_transformer_reshaping.py`
-**What it tests**: Transformer 3D outputs work with Linear 2D layers
-**Why it matters**: Language model architectures should "just work"
+### Tensor Reshaping Regressions
+- **File**: `test_transformer_reshaping.py`
+- **What it tests**: 3D sequence outputs from Transformer blocks feed cleanly into 2D Linear projection layers.
+- **Why it matters**: Autoregressive LM head projections must compose without manual reshape boilerplate.
+
+### Gradient Flow Bug Regressions
+- **File**: `test_gradient_flow_fixes.py`
+- **What it tests**: Specific backpropagation fixes from milestone implementation:
+  1. Batched 3D matmul (`np.matmul` vs `np.dot`)
+  2. `transpose()` preserving `requires_grad` and autograd graph history
+  3. `SubBackward` and `DivBackward` autograd operations
+  4. `Softmax` and `Dropout` executing via Tensor operations
+  5. `Embedding` parameter gradient retention
+  6. `MultiHeadAttention` batched operations without `.data` extraction
+  7. `LayerNorm` maintaining autograd gradients
+- **Why it matters**: Prevents silent gradient disconnection bugs from returning.
+
+### NLP Components Gradient Flow
+- **File**: `test_nlp_components_gradient_flow.py`
+- **What it tests**: End-to-end gradient transmission through the NLP module stack:
+  - Tokenization index validation
+  - Embedding and PositionalEncoding gradient accumulation
+  - Scaled dot-product attention with and without causal masks
+  - Multi-head attention projection weight and bias gradients
+  - LayerNorm and MLP gradient flow
+  - Full TinyGPT training step parameter updates
+- **Why it matters**: Verifies that every learnable tensor across Modules 10-13 receives non-zero gradients during training.
+
+### Hardware Extension Parity and Acceleration
+- **File**: `test_hardware_extensions.py`
+- **What it tests**:
+  - C++ SIMD GEMM (AVX2/NEON + OpenMP) numerical parity against NumPy reference
+  - OpenAI Triton fused Bias + GELU kernel parity and CPU fallback
+  - Apple Metal MPS matrix multiplication numerical parity
+  - Dimension mismatch validation on hardware-accelerated kernels
+- **Why it matters**: Ensures hardware acceleration produces numerically identical results to reference NumPy implementations.
+
+### Capstone & Olympics Infrastructure
+- **File**: `test_olympics.py`
+- **What it tests**:
+  - `SimpleMLP` architecture and parameter accounting
+  - `BenchmarkReport` metrics calculation (latency, throughput, memory, accuracy)
+  - `OlympicEvent` qualification threshold rules
+  - Submission JSON schema generation, serialization, and round-trip validation
+  - `tito olympics` CLI command execution
+- **Why it matters**: Protects the final student benchmark harness and qualification scoring.
 
 ---
 
@@ -23,124 +65,21 @@ This directory contains regression tests that ensure TinyTorch's core functional
 
 ### Run All Regression Tests
 ```bash
-pytest tests/regression/
+pytest tests/regression/ -v
 ```
 
-### Run Specific Bug Test
+### Run Specific Bug Regressions
 ```bash
-pytest tests/regression/test_issue_20241125_conv_fc_shapes.py -v
-```
-
-### Run with Coverage
-```bash
-pytest tests/regression/ --cov=tinytorch --cov-report=html
+pytest tests/regression/test_gradient_flow_fixes.py -v
 ```
 
 ---
 
 ## 📝 Adding New Regression Tests
 
-When you discover a bug:
+When fixing a bug:
 
-1. **Create Test File**: `test_issue_YYYYMMDD_description.py`
-
-2. **Use Bug Tracking Template**:
-```python
-"""
-BUG TRACKING:
-============
-Bug ID: BUG-YYYY-MM-DD-XXX
-Date Found: YYYY-MM-DD
-Found By: [Name/System]
-Severity: [Critical/High/Medium/Low]
-
-DESCRIPTION:
-[What broke and under what conditions]
-
-REPRODUCTION:
-[Exact steps to reproduce]
-
-ROOT CAUSE:
-[Why it happened]
-
-FIX:
-[What was changed to fix it]
-
-PREVENTION:
-[How this test prevents recurrence]
-"""
-```
-
-3. **Write Specific Test**: Test the EXACT scenario that failed
-
-4. **Verify Test Catches Bug**:
-   - Test should FAIL without the fix
-   - Test should PASS with the fix
-
-5. **Update This README**: Add entry to Bug Index
-
----
-
-## 🎯 Testing Philosophy
-
-**Every bug tells a story about a gap in our testing.**
-
-When we find a bug, we ask:
-1. Why didn't existing tests catch this?
-2. What test would have prevented it?
-3. Are there similar bugs we haven't found yet?
-
-**The goal**: Build a test suite so comprehensive that bugs become impossible.
-
----
-
-## 📊 Regression Test Statistics
-
-- **Total Bugs Found**: 2
-- **Bugs with Regression Tests**: 2 (100%)
-- **Test Coverage**: 100% of discovered issues
-- **Last Updated**: 2024-11-25
-
----
-
-## 🔄 Integration with CI/CD
-
-These regression tests run automatically on:
-- Every commit to main branch
-- Every pull request
-- Nightly comprehensive test suite
-
-Failures in regression tests block deployment to ensure fixed bugs never return.
-
----
-
-## 🏆 Success Metrics
-
-We measure success by:
-1. **Zero Regressions**: No bug returns after being fixed
-2. **Fast Detection**: Regression tests catch issues immediately
-3. **Clear Documentation**: Every test explains the bug it prevents
-4. **Continuous Growth**: New bugs always get new tests
-
----
-
-## 📚 Learning from Bugs
-
-Each bug teaches us something:
-
-- **Conv Shape Mismatch**: Always calculate dimensions programmatically, never manually
-- **Transformer Reshape**: Consider tensor dimensionality at module boundaries
-- **[Future bugs will add lessons here]**
-
----
-
-## 🚀 Future Improvements
-
-- [ ] Add performance regression tests
-- [ ] Create fuzz testing for edge cases
-- [ ] Build automatic bug report generation
-- [ ] Implement regression test metrics dashboard
-
----
-
-Remember: **A bug fixed without a test is a bug waiting to return.**
+1. **Create Test File**: `test_issue_YYYYMMDD_description.py` (or add to `test_gradient_flow_fixes.py`).
+2. **Document the Defect**: Include description, reproduction steps, root cause, and fix.
+3. **Verify Test Catches Bug**: Ensure the test fails without the fix and passes with it.
+4. **Update This README**: Add an entry under Test Coverage.
