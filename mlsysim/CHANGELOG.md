@@ -35,6 +35,23 @@ Release body. Omit any section that has no entries for a given release.
 
 ## Unreleased
 
+### Solvers, Models & Taxonomy
+
+- `ContinuousBatchingModel` now derives static and paged capacity from a
+  request-length distribution instead of assuming static batching reaches 60%
+  of the paged batch. Static allocation reserves `max_seq_len` per request;
+  paged allocation holds `ceil(S/p)` blocks averaged over exponential request
+  lengths capped at `max_seq_len` with mean `mean_request_tokens`. Page size
+  now changes fragmentation and capacity even when the context divides evenly
+  by the page size, and `speedup_vs_static` compares memory-bound decode
+  throughput at the two concurrencies. Provenance now cites Kwon et al. (2023)
+  Fig. 2 correctly (20.4% to 38.2% of KV memory holds token states under
+  contiguous pre-allocation).
+- `ServingCapacityModel` accepts `mean_request_tokens` and evaluates base
+  latency at the mean request length.
+- Added `calc_capped_exponential_scale` and `calc_expected_paged_kv_tokens` to
+  `mlsysim.physics`.
+
 ### Documentation
 
 - Align website tutorials and landing pages with canonical nested registry paths
@@ -55,6 +72,16 @@ Release body. Omit any section that has no entries for a given release.
   `Ops.Monitoring`, and `core.calibration` (solver/engine parameters only).
 - Added `Infrastructure.Pricing` (`Cloud`, `Storage`, `Labeling`, `Fleet`, `Capital`).
   Appendix lineage audits registry paths and rejects stale `defaults.*` references.
+
+### Breaking Changes
+
+- `ContinuousBatchingModel.solve()` and `ServingCapacityModel.solve()` rename
+  `seq_len` to `max_seq_len`.
+- `ContinuousBatchingResult.memory_fragmentation_pct` is replaced by
+  `paged_internal_fragmentation` and `static_internal_fragmentation`
+  (fractions in [0, 1]). New fields: `static_max_active_requests`,
+  `static_throughput_tokens_per_sec`, `static_kv_cache_size`, and
+  `mean_request_tokens`.
 
 ## v0.1.2 (2026-05-17) — CLI & Website Release Polish
 
