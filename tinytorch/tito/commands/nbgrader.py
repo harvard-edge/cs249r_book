@@ -20,15 +20,19 @@ from rich.panel import Panel
 from rich.text import Text
 
 from .base import BaseCommand
+from ..core.solutions import (
+    RELEASE_TIERS,
+    SOLUTION_BEGIN_MARKER,
+    SOLUTION_END_MARKER,
+    VALID_SOLUTION_ROLES,
+    apply_release_tier,
+    solution_role,
+    solution_role_action,
+)
 
 
 MODULE_DIR_RE = re.compile(r"^(\d{2})_[A-Za-z0-9_]+$")
-SOLUTION_BEGIN_MARKER = "### BEGIN SOLUTION"
-SOLUTION_END_MARKER = "### END SOLUTION"
 TEST_FUNCTION_RE = re.compile(r"^\s*def\s+test_", flags=re.MULTILINE)
-SOLUTION_ROLE_RE = re.compile(r"\brole=[\"']?([A-Za-z0-9_-]+)")
-RELEASE_TIERS = ("student", "challenge", "instructor")
-VALID_SOLUTION_ROLES = {"core", "scaffold", "challenge", "instructor"}
 
 
 class NBGraderCommand(BaseCommand):
@@ -539,65 +543,15 @@ class NBGraderCommand(BaseCommand):
 
     def _apply_release_tier(self, source: str, release_tier: str) -> Tuple[str, List[str]]:
         """Apply TinyTorch release-role policy before nbgrader stripping."""
-        if not source or (SOLUTION_BEGIN_MARKER not in source and SOLUTION_END_MARKER not in source):
-            return source, []
-
-        lines = source.splitlines()
-        out = []
-        errors = []
-        in_solution = False
-        action = "strip"
-
-        for line in lines:
-            if SOLUTION_BEGIN_MARKER in line:
-                if in_solution:
-                    errors.append("nested BEGIN SOLUTION marker")
-                role = self._solution_role(line)
-                if role not in VALID_SOLUTION_ROLES:
-                    errors.append(f"unknown solution role '{role}'")
-                    role = "core"
-                action = self._solution_role_action(role, release_tier)
-                in_solution = True
-                if action == "strip":
-                    out.append(line)
-                continue
-
-            if SOLUTION_END_MARKER in line:
-                if not in_solution:
-                    errors.append("END SOLUTION marker without matching BEGIN SOLUTION")
-                    out.append(line)
-                    continue
-                if action == "strip":
-                    out.append(line)
-                in_solution = False
-                action = "strip"
-                continue
-
-            if not in_solution or action in {"strip", "keep"}:
-                out.append(line)
-
-        if in_solution:
-            errors.append("BEGIN SOLUTION marker without matching END SOLUTION")
-
-        result = "\n".join(out)
-        if source.endswith("\n"):
-            result += "\n"
-        return result, errors
+        return apply_release_tier(source, release_tier)
 
     @staticmethod
     def _solution_role(marker_line: str) -> str:
-        match = SOLUTION_ROLE_RE.search(marker_line)
-        return match.group(1) if match else "core"
+        return solution_role(marker_line)
 
     @staticmethod
     def _solution_role_action(role: str, release_tier: str) -> str:
-        if release_tier == "instructor":
-            return "keep"
-        if role == "instructor":
-            return "remove"
-        if release_tier == "challenge":
-            return "strip" if role == "challenge" else "keep"
-        return "strip" if role == "core" else "keep"
+        return solution_role_action(role, release_tier)
 
     def _release(self, args: Namespace) -> int:
         if args.all:
