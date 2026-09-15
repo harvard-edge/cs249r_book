@@ -29,6 +29,8 @@ from .memory import (
     calc_kv_cache_size,
     calc_mla_cache_size,
     calc_paged_kv_cache_size,
+    calc_capped_exponential_scale,
+    calc_expected_paged_kv_tokens,
     calc_speculative_branch_capacity,
 )
 from .communication import (
@@ -124,6 +126,8 @@ __all__ = [
     "calc_kv_cache_size",
     "calc_mla_cache_size",
     "calc_paged_kv_cache_size",
+    "calc_capped_exponential_scale",
+    "calc_expected_paged_kv_tokens",
     "calc_speculative_branch_capacity",
     "calc_ring_allreduce_time",
     "calc_point_to_point_time",

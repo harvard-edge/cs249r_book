@@ -171,12 +171,23 @@ class MoERoutingResult(SolverResult):
 
 
 class ContinuousBatchingResult(SolverResult):
-    """Result from ContinuousBatchingModel: production LLM serving with PagedAttention."""
+    """Result from ContinuousBatchingModel: static max-length KV reservation vs PagedAttention.
+
+    Unprefixed throughput, request, TTFT, and ITL fields describe the paged
+    allocator; ``static_*`` fields describe max-length reservation on the same
+    KV budget. Fragmentation fields are fractions in [0, 1] of allocated KV
+    tokens left unused inside each request's allocation.
+    """
     feasible: bool
     throughput_tokens_per_sec: float
     max_active_requests: int
-    memory_fragmentation_pct: float
+    static_throughput_tokens_per_sec: float
+    static_max_active_requests: int
+    mean_request_tokens: float
+    paged_internal_fragmentation: float
+    static_internal_fragmentation: float
     paged_kv_cache_size: Quantity
+    static_kv_cache_size: Quantity
     ttft: Quantity
     itl: Quantity
     speedup_vs_static: float
