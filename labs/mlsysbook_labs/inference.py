@@ -72,6 +72,22 @@ class BatchingResult:
 
 
 @dataclass(frozen=True)
+class PagedAttentionResult:
+    page_size_tokens: int
+    avg_seq_len: int
+    max_seq_len: int
+    contiguous_internal_waste_pct: float
+    contiguous_external_waste_pct: float
+    contiguous_usable_memory_pct: float
+    paged_internal_waste_pct: float
+    paged_external_waste_pct: float
+    paged_usable_memory_pct: float
+    memory_recovered_pct: float
+    concurrency_gain_multiplier: float
+    block_table_entries_per_req: int
+
+
+@dataclass(frozen=True)
 class ServingPlanResult:
     target_qps: float
     max_batch: int
@@ -282,3 +298,70 @@ def serving_plan(
         savings_pct=savings,
         oom=state.oom,
     )
+
+
+def paged_attention_fragmentation(
+    *,
+    avg_seq_len: int = 512,
+    max_seq_len: int = 4096,
+    page_size_tokens: int = 16,
+    external_fragmentation_pct: float = 25.0,
+) -> PagedAttentionResult:
+    """Evaluate memory fragmentation recovery from PagedAttention.
+
+    Compares contiguous pre-allocation against virtual memory block tables
+    (Kwon et al., 2023 / vLLM).
+    """
+    s_avg = max(16, int(avg_seq_len))
+    s_max = max(s_avg, int(max_seq_len))
+    page_size = max(4, int(page_size_tokens))
+    ext_frag = max(0.0, min(50.0, float(external_fragmentation_pct)))
+
+    # Contiguous allocation wastes:
+    # 1. Internal: reserving s_max for sequences that only generate s_avg
+    contig_internal = (1.0 - (s_avg / s_max)) * 100.0
+    # 2. External: unusable memory gaps between dynamic allocations
+    contig_external = ext_frag
+    contig_usable = (100.0 - contig_internal) * (1.0 - contig_external / 100.0)
+
+    # PagedAttention:
+    # Pages are allocated dynamically on-demand; only the last page has internal waste
+    last_page_waste_tokens = page_size / 2.0
+    paged_internal = (last_page_waste_tokens / s_avg) * 100.0
+    paged_external = 0.0
+    paged_usable = 100.0 - paged_internal
+
+    mem_recovered = max(0.0, paged_usable - contig_usable)
+    gain = paged_usable / contig_usable if contig_usable > 0 else 1.0
+    blocks_per_req = math.ceil(s_avg / page_size)
+
+    return PagedAttentionResult(
+        page_size_tokens=page_size,
+        avg_seq_len=s_avg,
+        max_seq_len=s_max,
+        contiguous_internal_waste_pct=contig_internal,
+        contiguous_external_waste_pct=contig_external,
+        contiguous_usable_memory_pct=contig_usable,
+        paged_internal_waste_pct=paged_internal,
+        paged_external_waste_pct=paged_external,
+        paged_usable_memory_pct=paged_usable,
+        memory_recovered_pct=mem_recovered,
+        concurrency_gain_multiplier=gain,
+        block_table_entries_per_req=blocks_per_req,
+    )
+
+
+__all__ = [
+    "BatchingResult",
+    "CostCrossoverResult",
+    "InferenceEconomyProfile",
+    "PagedAttentionResult",
+    "ServingPlanResult",
+    "StateCapacityResult",
+    "batching_speedup",
+    "cost_crossover",
+    "inference_economy_profile",
+    "paged_attention_fragmentation",
+    "serving_plan",
+    "state_capacity",
+]

@@ -356,7 +356,11 @@ def _(
             latency,
         )
         hier_total_ms = hier_total_q.m_as("ms")
-        crossover_gb = (latency * bandwidth).to(ureg.GB).magnitude
+        try:
+            from mlsysim.physics.communication import calc_ring_tree_crossover_size
+            crossover_gb = calc_ring_tree_crossover_size(n, latency, bandwidth).to(ureg.GB).magnitude
+        except Exception:
+            crossover_gb = (latency * bandwidth).to(ureg.GB).magnitude
 
         ring_binding = "alpha latency term" if ring_alpha_ms >= ring_beta_ms else "beta bandwidth term"
         tree_binding = "alpha latency term" if tree_alpha_ms >= tree_beta_ms else "beta bandwidth term"
@@ -772,7 +776,7 @@ def _(mo, v2_06_defaults):
             "C) The winner depends on alpha, beta, N, and payload size": "depends",
             "D) FLOPs dominate once the collective is chosen": "flops",
         },
-        value="C) The winner depends on alpha, beta, N, and payload size",
+        value=None,
         label="Part A prediction - which rule chooses between ring and tree costs?",
     )
     partB_prediction = mo.ui.radio(
@@ -782,7 +786,7 @@ def _(mo, v2_06_defaults):
             "C) Topology changes diagrams but not collective time": "label_only",
             "D) Participant count matters but local grouping does not": "participants_only",
         },
-        value="A) Topology can make a collective infeasible or no longer dominant",
+        value=None,
         label=f"Part B prediction - what changes the dominant collective for {v2_06_defaults['topology']}?",
     )
     partC_prediction = mo.ui.radio(
@@ -792,7 +796,7 @@ def _(mo, v2_06_defaults):
             "C) Async overlap makes bandwidth irrelevant": "free_overlap",
             "D) Compression only changes optimizer math, not systems behavior": "optimizer_only",
         },
-        value="A) Compression and overlap reduce exposed time but carry validation risk",
+        value=None,
         label="Part C prediction - what risk remains after hiding or shrinking communication?",
     )
     partD_prediction = mo.ui.radio(
@@ -802,8 +806,8 @@ def _(mo, v2_06_defaults):
             "C) Optimization risk rejects the naive plan": "optimization",
             "D) The fastest modeled plan should always be approved": "fastest",
         },
-        value="C) Optimization risk rejects the naive plan",
-        label="Part D prediction - which guardrail will reject the naive alternative?",
+        value=None,
+        label="Part D prediction - which guardrail is most likely to reject the naive plan?",
     )
 
     partA_checkpoint = mo.ui.radio(

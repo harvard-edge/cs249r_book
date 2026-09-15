@@ -339,7 +339,7 @@ def _(gated_hypothesis_card, hyp_options, hyp_prompt, mo):
     # ZONE B: Prediction Widget (Gated Hypothesis Lock)
     pred_wall_radio = mo.ui.radio(
         options=hyp_options,
-        value=list(hyp_options.keys())[0],
+        value=None,
     )
     hypothesis_card = gated_hypothesis_card(
         pred_wall_radio,
@@ -478,8 +478,11 @@ def _(
     weight_bytes = param_count * bytes_per_param
 
     if track_key == "cloud":
-        # KV cache: 2 * num_layers * (hidden_dim // 32) * seq_len * batch_size * bytes
-        kv_cache_bytes = float(2 * active_model.layers * (active_model.hidden_dim // 32) * curr_s * curr_b * bytes_per_param)
+        # KV cache calculated via mlsysim model method accounting for GQA heads
+        if hasattr(active_model, "get_kv_cache_size"):
+            kv_cache_bytes = float(active_model.get_kv_cache_size(seq_len=curr_s, batch_size=curr_b, precision=bytes_per_param * ureg.byte).m_as("byte"))
+        else:
+            kv_cache_bytes = float(2 * active_model.layers * getattr(active_model, "kv_heads", 8) * (active_model.hidden_dim // getattr(active_model, "heads", 32)) * curr_s * curr_b * bytes_per_param)
         activation_label = "KV-Cache"
         activation_bytes = kv_cache_bytes
     elif track_key == "embodied":

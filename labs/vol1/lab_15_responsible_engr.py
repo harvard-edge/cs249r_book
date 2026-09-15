@@ -31,6 +31,8 @@ async def _():
         ACADEMIC_LAB_CSS,
         big_takeaways,
         build_lab_report,
+        carbon_budget,
+        explanation_overhead,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
@@ -54,6 +56,8 @@ async def _():
         apply_plotly_theme,
         big_takeaways,
         build_lab_report,
+        carbon_budget,
+        explanation_overhead,
         get_lab_metadata,
         get_lab_track_variant,
         get_track_profile,
@@ -1384,6 +1388,8 @@ def _(
 
 @app.cell(hide_code=True)
 def _(
+    carbon_budget,
+    explanation_overhead,
     ledger,
     mo,
     partA_policy,
@@ -1421,6 +1427,8 @@ def _(
             partD_owner.value,
         )
     )
+    _carbon = carbon_budget(v1_15_resp)
+    _explanation = explanation_overhead(v1_15_resp)
     ledger.save(chapter=15, design={
         "chapter": "v1_15",
         "track_id": v1_15_profile.track_id,
@@ -1451,6 +1459,10 @@ def _(
         "audit_retention_days": partD_log_retention.value,
         "audit_owner": partD_owner.value,
         "governance_decision": partD_decision.value,
+        "carbon_kgco2_per_year": _carbon.total_kgco2_per_year,
+        "carbon_multiplier": _carbon.carbon_multiplier,
+        "explanation_latency_ms": _explanation.explanation_latency_ms,
+        "explanation_method": _explanation.method,
         "carry_forward_constraint": "threshold, privacy, safety, and audit gates must pass in the V1 capstone",
     })
 
@@ -1475,6 +1487,8 @@ def _(
         <div class="mlsysbook-field"><strong>Safety canary</strong>{partC_canary_pct.value}% / {partC_rollback_minutes.value:g}m</div>
         <div class="mlsysbook-field"><strong>Audit owner</strong>{partD_owner.value or 'pending'}</div>
         <div class="mlsysbook-field"><strong>Harmed party</strong>{v1_15_resp.harmed_party}</div>
+        <div class="mlsysbook-field"><strong>Carbon / Year</strong>{_carbon.total_kgco2_per_year:,.1f} kgCO2</div>
+        <div class="mlsysbook-field"><strong>Explain overhead</strong>+{_explanation.explanation_latency_ms:.1f} ms</div>
       </div>
       <div style="margin-top:10px; color:#475569; line-height:1.55;">
         The ledger records each student decision. All predictions and a final recommendation mark the design complete.

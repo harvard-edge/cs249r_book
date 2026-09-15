@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mlsysbook_labs import (
+    calc_selection_inequality,
     coverage_profile,
     data_policy_decision,
     data_selection_profile,
@@ -68,3 +69,28 @@ def test_data_policy_decision_names_next_data_and_blind_spot():
     assert "language" in decision.next_data.lower()
     assert decision.accepted_blind_spot
     assert decision.rejected_alternatives
+
+
+def test_selection_inequality_demonstrates_selection_paradox():
+    profile = _profile("cloud_fleet")
+
+    # Fast proxy scoring saves compute
+    proxy_result = calc_selection_inequality(
+        profile,
+        policy_id="subgroup_balanced",
+        scoring_method="proxy",
+        n_runs=1,
+    )
+    assert proxy_result.t_selection_hours < proxy_result.t_train_total_hours
+    assert proxy_result.is_favorable is True
+    assert proxy_result.net_speedup > 1.0
+
+    # Multi-run amortization increases net speedup
+    multi_run = calc_selection_inequality(
+        profile,
+        policy_id="subgroup_balanced",
+        scoring_method="proxy",
+        n_runs=5,
+    )
+    assert multi_run.net_speedup > proxy_result.net_speedup
+    assert multi_run.break_even_runs >= 1

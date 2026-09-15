@@ -1,7 +1,6 @@
-"""Shared roofline helpers for track-aware hardware acceleration labs."""
-
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -158,4 +157,79 @@ def fusion_traffic(
         eager_time_us=eager_time_us,
         fused_time_us=fused_time_us,
         speedup=speedup,
+    )
+
+
+@dataclass(frozen=True)
+class FlashAttentionTrafficResult:
+    seq_len: int
+    head_dim: int
+    tile_br: int
+    tile_bc: int
+    bytes_per_elem: int
+    naive_hbm_bytes: float
+    flash_hbm_bytes: float
+    traffic_reduction_ratio: float
+    naive_time_ms: float
+    flash_time_ms: float
+    speedup: float
+    sram_required_kb: float
+
+
+def flash_attention_traffic(
+    *,
+    seq_len: int = 4096,
+    head_dim: int = 128,
+    tile_br: int = 128,
+    tile_bc: int = 128,
+    precision: str = "fp16",
+    bandwidth_gbs: float = 3350.0,
+    peak_tflops: float = 989.0,
+) -> FlashAttentionTrafficResult:
+    """Compute HBM memory traffic reduction between Naive Attention and FlashAttention."""
+    bytes_per_elem = {"fp32": 4, "fp16": 2, "bf16": 2, "int8": 1}.get(precision.lower(), 2)
+    s = max(128, int(seq_len))
+    d = max(32, int(head_dim))
+    br = max(16, int(tile_br))
+    bc = max(16, int(tile_bc))
+    bw_bytes_per_sec = max(bandwidth_gbs, 1.0) * 1e9
+    peak_flops_per_sec = max(peak_tflops, 0.001) * 1e12
+
+    # Naive Attention: materializes intermediate S = QK^T and P = Softmax(S) into HBM
+    naive_bytes = (4 * s * d + 4 * s * s) * bytes_per_elem
+
+    # FlashAttention (Tiled): keeps intermediate S and P in SRAM
+    # FlashAttention-2 loads Q once, streams K and V in tiles of size Bc
+    min_bytes = 4 * s * d * bytes_per_elem
+    num_tiles_q = math.ceil(s / br)
+    flash_bytes = max(min_bytes, (2 * s * d + 2 * num_tiles_q * bc * d) * bytes_per_elem)
+    reduction = naive_bytes / flash_bytes if flash_bytes > 0 else 1.0
+
+    # Timing:
+    flops_naive = 4 * s * s * d + 2 * s * s  # QK^T (2s^2d) + PV (2s^2d) + Softmax (2s^2)
+    flops_flash = flops_naive * 1.15  # 15% recomputation overhead for online softmax
+    t_naive_mem = naive_bytes / bw_bytes_per_sec
+    t_naive_comp = flops_naive / peak_flops_per_sec
+    naive_time_ms = max(t_naive_mem, t_naive_comp) * 1000.0
+
+    t_flash_mem = flash_bytes / bw_bytes_per_sec
+    t_flash_comp = flops_flash / peak_flops_per_sec
+    flash_time_ms = max(t_flash_mem, t_flash_comp) * 1000.0
+
+    speedup = naive_time_ms / flash_time_ms if flash_time_ms > 0 else 1.0
+    sram_kb = (br * d + 2 * bc * d + br * bc) * bytes_per_elem / 1024.0
+
+    return FlashAttentionTrafficResult(
+        seq_len=s,
+        head_dim=d,
+        tile_br=br,
+        tile_bc=bc,
+        bytes_per_elem=bytes_per_elem,
+        naive_hbm_bytes=float(naive_bytes),
+        flash_hbm_bytes=float(flash_bytes),
+        traffic_reduction_ratio=reduction,
+        naive_time_ms=naive_time_ms,
+        flash_time_ms=flash_time_ms,
+        speedup=speedup,
+        sram_required_kb=sram_kb,
     )

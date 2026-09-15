@@ -413,7 +413,7 @@ def _(mo):
             "C) It improves because more devices create redundancy": "improves",
             "D) It cannot be estimated from MTBF": "unknowable",
         },
-        value="B) It falls by about 10x when fleet size grows 10x",
+        value=None,
         label="Part A prediction: if the fleet grows 10x, what happens to aggregate MTBF?",
     )
     v2_07_part_b_prediction = mo.ui.radio(
@@ -423,7 +423,7 @@ def _(mo):
             "C) Choose the interval where save overhead and expected rework balance": "optimum",
             "D) Use the same interval for every fleet": "fixed",
         },
-        value="C) Choose the interval where save overhead and expected rework balance",
+        value=None,
         label="Part B prediction: what checkpoint interval policy is safest?",
     )
     v2_07_part_c_prediction = mo.ui.radio(
@@ -433,7 +433,7 @@ def _(mo):
             "C) Detection, restart, load, and warmup time": "recovery_terms",
             "D) All of these become design amounts": "all_amounts",
         },
-        value="D) All of these become design amounts",
+        value=None,
         label="Part C prediction: which amount can dominate failure cost?",
     )
     v2_07_part_d_prediction = mo.ui.radio(
@@ -443,7 +443,7 @@ def _(mo):
             "C) Latency, quality, or safety guardrails": "performance",
             "D) Any one of these can reject the plan": "any_guardrail",
         },
-        value="D) Any one of these can reject the plan",
+        value=None,
         label="Part D prediction: which guardrail can reject a fault-tolerance plan?",
     )
     return (
@@ -689,7 +689,11 @@ def _(
         _mtbf_min = max(0.001, _exposure["system_mtbf_h"] * 60.0)
         _write_min = max(0.001, float(v2_07_write_min.value))
         _interval_min = max(0.001, float(v2_07_checkpoint_interval_min.value))
-        _tau_opt = math.sqrt(2.0 * _write_min * _mtbf_min)
+        try:
+            from mlsysim.physics.reliability import calc_young_daly_interval
+            _tau_opt = float(calc_young_daly_interval(_write_min * 60.0, _mtbf_min * 60.0).m_as("minute"))
+        except Exception:
+            _tau_opt = math.sqrt(2.0 * _write_min * _mtbf_min)
         _save_tax = _write_min / _interval_min
         _rework_tax = _interval_min / (2.0 * _mtbf_min)
         _total_tax = _save_tax + _rework_tax

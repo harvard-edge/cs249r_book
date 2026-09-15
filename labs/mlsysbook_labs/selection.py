@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from mlsysim.core.units import ureg
+from mlsysim.physics.performance import dTime
+
+from .registry_refs import resolve_mlsysim_ref
 from .schemas import LabTrackVariant, TrackProfile
 
 
@@ -116,6 +121,21 @@ class DataPolicyDecisionResult:
     residual_risk: str
     rejected_alternatives: tuple[str, ...]
     memo_summary: str
+
+
+@dataclass(frozen=True)
+class SelectionInequalityResult:
+    scoring_method: str
+    scoring_flops_per_sample: float
+    t_selection_hours: float
+    t_train_total_hours: float
+    t_train_subset_hours: float
+    total_time_baseline_hours: float
+    total_time_curated_hours: float
+    net_speedup: float
+    break_even_runs: int
+    is_favorable: bool
+    selection_overhead_pct: float
 
 
 def _quantity_to_float(value: Any, unit: str, default: float) -> float:
@@ -396,6 +416,110 @@ def data_policy_decision(
     )
 
 
+def calc_selection_inequality(
+    profile: DataSelectionTrackProfile,
+    *,
+    policy_id: str,
+    scoring_method: str = "target",
+    n_runs: int = 1,
+    fraction_multiplier: float = 1.0,
+    epochs: int = 3,
+    efficiency_eta: float = 0.35,
+    num_devices: int | None = None,
+    hardware: Any = None,
+    model: Any = None,
+) -> SelectionInequalityResult:
+    """Evaluate the Selection Inequality: T_selection + T_train(D_sub) < T_train(D_tot).
+
+    Models whether the overhead of scoring and filtering data is compensated
+    by training compute savings, accounting for proxy models and multi-run amortization.
+    """
+    if hardware is None and profile.hardware_ref:
+        try:
+            hardware = resolve_mlsysim_ref(profile.hardware_ref)
+        except Exception:
+            hardware = None
+    if model is None and profile.model_ref:
+        try:
+            model = resolve_mlsysim_ref(profile.model_ref)
+        except Exception:
+            model = None
+
+    # Resolve hardware peak throughput
+    compute = getattr(hardware, "compute", None) if hardware else None
+    peak_flops = getattr(compute, "peak_flops", None) if compute else None
+    if peak_flops is not None and hasattr(peak_flops, "to"):
+        peak_q = peak_flops.to("flop/s")
+    else:
+        peak_q = 1e12 * (ureg.flop / ureg.second)
+
+    dev_count = num_devices if num_devices is not None else max(1, getattr(hardware, "accelerator_count", 1) or 1)
+
+    # Resolve model forward FLOPs per sample
+    inf_flops = getattr(model, "inference_flops", None) if model else None
+    if inf_flops is not None and hasattr(inf_flops, "to"):
+        fwd_flops = float(inf_flops.to("flop").magnitude)
+    elif inf_flops is not None:
+        fwd_flops = float(inf_flops)
+    else:
+        fwd_flops = 1e10
+
+    method_key = scoring_method.strip().lower().replace("-", "_").replace(" ", "_")
+    if method_key in {"target", "target_model", "heavyweight"}:
+        scoring_ratio = 1.0
+    elif method_key in {"proxy", "proxy_model", "lightweight"}:
+        scoring_ratio = 0.05
+    elif method_key in {"cached_hash", "hash", "minhash", "embeddings", "lsh"}:
+        scoring_ratio = 0.001
+    else:
+        scoring_ratio = 1.0
+
+    scoring_flops_per_sample = fwd_flops * scoring_ratio
+    n_total = profile.dataset_size_k * 1000.0
+    policy = _policy(profile, policy_id)
+    fraction = max(0.01, min(1.0, (policy.dataset_fraction_pct / 100.0) * float(fraction_multiplier)))
+    n_subset = n_total * fraction
+
+    # Selection ops: 1 forward pass per sample in total dataset
+    ops_selection = n_total * scoring_flops_per_sample
+    # Training ops: forward + backward (approx 3x forward) per epoch
+    train_flops_per_sample = 3.0 * fwd_flops * max(1, epochs)
+    ops_train_total = n_total * train_flops_per_sample
+    ops_train_subset = n_subset * train_flops_per_sample
+
+    eta = max(0.01, min(1.0, float(efficiency_eta)))
+    t_sel_q = dTime(ops_selection * ureg.flop, dev_count, peak_q, eta)
+    t_tot_q = dTime(ops_train_total * ureg.flop, dev_count, peak_q, eta)
+    t_sub_q = dTime(ops_train_subset * ureg.flop, dev_count, peak_q, eta)
+
+    t_sel_h = float(t_sel_q.to(ureg.hour).magnitude)
+    t_tot_h = float(t_tot_q.to(ureg.hour).magnitude)
+    t_sub_h = float(t_sub_q.to(ureg.hour).magnitude)
+
+    runs = max(1, int(n_runs))
+    total_time_baseline = runs * t_tot_h
+    total_time_curated = t_sel_h + (runs * t_sub_h)
+    speedup = total_time_baseline / total_time_curated if total_time_curated > 0 else 0.0
+    savings_per_run = t_tot_h - t_sub_h
+    break_even = math.ceil(t_sel_h / savings_per_run) if savings_per_run > 0 else 9999
+    is_favorable = total_time_curated < total_time_baseline
+    selection_overhead = (t_sel_h / total_time_curated * 100.0) if total_time_curated > 0 else 0.0
+
+    return SelectionInequalityResult(
+        scoring_method=scoring_method,
+        scoring_flops_per_sample=scoring_flops_per_sample,
+        t_selection_hours=t_sel_h,
+        t_train_total_hours=t_tot_h,
+        t_train_subset_hours=t_sub_h,
+        total_time_baseline_hours=total_time_baseline,
+        total_time_curated_hours=total_time_curated,
+        net_speedup=speedup,
+        break_even_runs=break_even,
+        is_favorable=is_favorable,
+        selection_overhead_pct=selection_overhead,
+    )
+
+
 __all__ = [
     "CoverageCellResult",
     "CoverageProfileResult",
@@ -403,7 +527,9 @@ __all__ = [
     "DataPolicyDecisionResult",
     "DataPolicyOption",
     "DataSelectionTrackProfile",
+    "SelectionInequalityResult",
     "SelectionUtilityResult",
+    "calc_selection_inequality",
     "coverage_profile",
     "data_policy_decision",
     "data_selection_profile",

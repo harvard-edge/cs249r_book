@@ -6,6 +6,7 @@ from mlsysbook_labs import (
     get_lab_track_variant,
     get_track_profile,
     inference_economy_profile,
+    paged_attention_fragmentation,
     resolve_mlsysim_ref,
     serving_plan,
     state_capacity,
@@ -83,3 +84,19 @@ def test_serving_plan_sizes_daily_cost():
     assert result.replicas_needed > 0
     assert result.daily_cost > 0
     assert result.baseline_daily_cost >= result.daily_cost
+
+
+def test_paged_attention_fragmentation_recovers_memory_waste():
+    result = paged_attention_fragmentation(
+        avg_seq_len=512,
+        max_seq_len=4096,
+        page_size_tokens=16,
+        external_fragmentation_pct=25.0,
+    )
+
+    assert result.contiguous_internal_waste_pct > 80.0
+    assert result.paged_internal_waste_pct < 5.0
+    assert result.paged_external_waste_pct == 0.0
+    assert result.memory_recovered_pct > 70.0
+    assert result.concurrency_gain_multiplier > 5.0
+    assert result.block_table_entries_per_req == 32

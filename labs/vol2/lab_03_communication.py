@@ -908,7 +908,7 @@ def _(mo, v2_03_lens):
             "C) Link bandwidth alone, regardless of payload": "bandwidth_only",
             "D) Topology only, before payload size is known": "topology_only",
         },
-        value="A) The fixed startup latency alpha",
+        value=None,
         label="Part A prediction - which term will bind for the current payload and path?",
     )
     partB_prediction = mo.ui.radio(
@@ -918,7 +918,7 @@ def _(mo, v2_03_lens):
             "C) More participants always improves synchronization": "participants",
             "D) Hop count matters, but oversubscription does not": "hops_only",
         },
-        value="B) The narrowest bisection cut controls feasible parallel work",
+        value=None,
         label="Part B prediction - what decides whether parallel communication remains feasible?",
     )
     partC_prediction = mo.ui.radio(
@@ -928,7 +928,7 @@ def _(mo, v2_03_lens):
             "C) Background traffic is unrelated to synchronous work": "background",
             "D) Local placement choices cannot create fleet-wide bottlenecks": "local_only",
         },
-        value="A) Topology-aware placement keeps utilization below the tail-risk limit",
+        value=None,
         label="Part C prediction - what prevents a local communication choice from becoming a fleet bottleneck?",
     )
     partD_prediction = mo.ui.radio(
@@ -938,7 +938,7 @@ def _(mo, v2_03_lens):
             "C) Topology/placement guardrails will reject the naive plan": "topology",
             "D) One passing metric is enough to approve the plan": "single_metric",
         },
-        value="C) Topology/placement guardrails will reject the naive plan",
+        value=None,
         label="Part D prediction - which guardrail is most likely to reject the naive plan?",
     )
 

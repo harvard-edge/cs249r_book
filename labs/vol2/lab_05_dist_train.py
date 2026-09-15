@@ -331,7 +331,7 @@ def _(gated_hypothesis_card, hyp_options, hyp_prompt, mo):
     # ZONE B: Prediction Widget (Gated Hypothesis Lock)
     pred_scaling_radio = mo.ui.radio(
         options=hyp_options,
-        value=list(hyp_options.keys())[0],
+        value=None,
     )
     hypothesis_card = gated_hypothesis_card(
         pred_scaling_radio,
@@ -484,13 +484,26 @@ def _(
     mem_grads = (grads_total_gb / model_shards) / (dp_shards if curr_zero >= 2 else 1.0)
     mem_opt = (opt_total_gb / model_shards) / (dp_shards if curr_zero >= 1 else 1.0)
 
-    # Activation memory per GPU
-    if curr_recomp == "full":
-        mem_act = 4.0 / model_shards
-    elif curr_recomp == "none":
-        mem_act = 60.0 / model_shards
-    else:  # selective
-        mem_act = 16.0 / model_shards
+    # Activation memory per GPU (using mlsysim.physics.memory)
+    try:
+        from mlsysim.physics.memory import calc_activation_memory
+        act_bytes = calc_activation_memory(
+            n_layers=int(num_layers),
+            seq_len=4096 if track_key == "cloud" else 512,
+            batch_size=max(1, curr_m),
+            hidden_dim=int(hidden_dim),
+            n_heads=64 if track_key == "cloud" else 12,
+            precision_bytes=bpp,
+            strategy=curr_recomp,
+        )
+        mem_act = (act_bytes.m_as("byte") / 1e9) / max(1, curr_tp)
+    except Exception:
+        if curr_recomp == "full":
+            mem_act = (4.0 * curr_m) / model_shards
+        elif curr_recomp == "none":
+            mem_act = (60.0 * curr_m) / model_shards
+        else:  # selective
+            mem_act = (16.0 * curr_m) / model_shards
 
     vram_allocated_gb = mem_weights + mem_grads + mem_opt + mem_act
     is_oom = vram_allocated_gb > vram_per_gpu_gb
@@ -520,6 +533,10 @@ def _(
         tp_comm_ms = float(dist_res.tp_communication_latency.m_as("ms"))
         dp_comm_ms = float(dist_res.dp_communication_latency.m_as("ms"))
         bubble_ms = float(dist_res.pipeline_bubble_latency.m_as("ms"))
+        if curr_zero == 3:
+            # ZeRO-3 / FSDP requires forward AllGather, backward AllGather, backward ReduceScatter (1.5x volume)
+            dp_comm_ms *= 1.5
+            step_ms += dp_comm_ms * 0.333
         bubble_frac = float(dist_res.bubble_fraction)
         scaling_eff = float(dist_res.scaling_efficiency)
         compute_ms = max(0.0, step_ms - (tp_comm_ms + dp_comm_ms + bubble_ms))

@@ -32,6 +32,7 @@ async def _():
         MathPeek,
         big_takeaways,
         build_lab_report,
+        flash_attention_traffic,
         gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
@@ -54,6 +55,7 @@ async def _():
         apply_plotly_theme,
         big_takeaways,
         build_lab_report,
+        flash_attention_traffic,
         gated_hypothesis_card,
         get_lab_metadata,
         get_lab_track_variant,
@@ -701,7 +703,7 @@ def _(mo, v2_09_packet):
             "Launch or coordination overhead": "overhead",
             "Fleet capacity, not local code": "capacity",
         },
-        value="Data movement / memory bandwidth",
+        value=None,
         label=f"Part A prediction: what is the active bottleneck for {v2_09_packet['label']}?",
     )
     partA_pressure = mo.ui.slider(
@@ -743,7 +745,7 @@ def _(mo, v2_09_packet):
             "Block: this is a detectable regression": "block",
             "Ignore variance and use the latest run": "ignore",
         },
-        value="Ship: the change is clearly safe",
+        value=None,
         label="Part B prediction: what release decision will the evidence support?",
     )
     partB_samples = mo.ui.slider(start=3, stop=50, value=8, step=1, label="Repeated runs per variant")
@@ -789,7 +791,7 @@ def _(mo, v2_09_packet):
             "Overbought: too much cost for the demand": "overbuy",
             "Unknown until p99 is included": "unknown",
         },
-        value="Enough headroom: launch as sized",
+        value=None,
         label="Part C prediction: what will the capacity plan reveal?",
     )
     partC_demand = mo.ui.slider(
@@ -845,7 +847,7 @@ def _(mo, v2_09_money, v2_09_packet):
             "Aggressive precision/cache compression": "precision",
             "Speculative or algorithmic path": "algorithmic",
         },
-        value="Target measured bottleneck",
+        value=None,
         label="Part D prediction: which candidate will survive the report guardrails?",
     )
     partD_risk_budget = mo.ui.slider(
@@ -985,6 +987,7 @@ def _(
     apply_plotly_theme,
     big_takeaways,
     build_lab_report,
+    flash_attention_traffic,
     gated_hypothesis_card,
     go,
     instrumentation_console,
@@ -1133,6 +1136,13 @@ def _(
             ),
             "switch to the bottleneck-targeted lever, then reprofile before claiming a win",
         ))
+        _flash = flash_attention_traffic(
+            seq_len=2048,
+            head_dim=128,
+            tile_br=128,
+            tile_bc=128,
+            precision="fp16",
+        )
         items.append(MathPeek(
             r"T_{p50} \approx \max(T_{data}, T_{compute}) + T_{overhead}, \quad T_{p99} \approx T_{p50} \cdot M_{tail} \cdot L_{tail}",
             {
@@ -1143,7 +1153,8 @@ def _(
                 "measured p99": v2_09_ms(v2_09_partA_base['p99_ms']),
                 "tail multiplier": f"{v2_09_packet['tail_multiplier']:.2f}x",
                 "speedup": f"{v2_09_partA_speedup:.2f}x",
-                "chapter source": "Volume II, Chapter 9: The Iron Law of ML Performance",
+                "flashattention sram reduction": f"{_flash.traffic_reduction_ratio:.1f}x ({_flash.naive_hbm_bytes / 1e6:.1f} MB -> {_flash.flash_hbm_bytes / 1e6:.1f} MB)",
+                "chapter source": "Volume II, Chapter 9: The Iron Law of ML Performance & FlashAttention",
             },
         ))
         items.append(mo.Html(f"""

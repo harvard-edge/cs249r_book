@@ -778,7 +778,7 @@ def _(
             "Distillation": "distillation",
             "No compression / keep baseline": "no_compression",
         },
-        value="INT8 quantization",
+        value=None,
         label="Which single method is most likely to win for this track?",
     )
     partA_method = mo.ui.dropdown(
@@ -794,7 +794,7 @@ def _(
             "About 5x": "5x",
             "About 10x": "10x",
         },
-        value="About 1x",
+        value=None,
         label="At 90 percent sparsity, what speedup do you expect?",
     )
     partC_sparsity_pct = mo.ui.slider(start=0, stop=90, value=90, step=10, label="Sparsity (%)")
@@ -823,7 +823,7 @@ def _(
             "Validation coverage blocks release": "validation_coverage",
             "Dense student is ready to ship": "ship",
         },
-        value="Teacher quality blocks release",
+        value=None,
         label="Which distillation risk most likely blocks release?",
     )
     partC_teacher_quality = mo.ui.dropdown(
@@ -854,7 +854,7 @@ def _(
 
     partD_pred = mo.ui.radio(
         options=v1_10_recipe_prediction_options,
-        value=f"Best feasible recipe: {v1_10_best_candidate_label}",
+        value=None,
         label="Which recipe survives this track's release gate?",
     )
     partD_quant_bit = mo.ui.dropdown(

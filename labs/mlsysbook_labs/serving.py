@@ -312,7 +312,7 @@ def batching_tax(
     arrival = max(0.0001, float(arrival_qps))
     formation_ms = (batch - 1) / (2 * arrival) * 1000.0
     gain = max(1.0, float(efficiency_gain))
-    batched_service_ms = service_ms * (1 + 0.08 * math.log2(batch)) / gain
+    batched_service_ms = service_ms * (1 + 0.08 * math.log2(batch))
     effective_batch_qps = arrival / batch
     queue = queueing_latency(
         arrival_qps=effective_batch_qps,

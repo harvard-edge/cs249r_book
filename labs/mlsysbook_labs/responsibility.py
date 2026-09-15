@@ -273,14 +273,16 @@ def metric_conflict(
 def explanation_overhead(
     profile: ResponsibilityTrackProfile,
     *,
-    method: str,
-    features: int,
-    coverage_pct: float,
+    method: str | None = None,
+    features: int | None = None,
+    coverage_pct: float | None = None,
 ) -> ExplanationOverheadResult:
     """Compute explanation latency overhead for common teaching methods."""
-    method_key = method.strip().lower().replace(" ", "_").replace("-", "_")
-    features = max(1, int(features))
-    coverage = _clamp(coverage_pct, 0.0, 100.0)
+    method_str = profile.explanation_method if method is None else method
+    method_key = method_str.strip().lower().replace(" ", "_").replace("-", "_")
+    features_val = profile.explanation_features if features is None else features
+    features = max(1, int(features_val))
+    coverage = _clamp(profile.explanation_coverage_pct if coverage_pct is None else coverage_pct, 0.0, 100.0)
     if method_key in {"none", "off"}:
         multiplier = 0.0
     elif method_key in {"feature_importance", "fi"}:
@@ -374,14 +376,17 @@ def responsibility_budget(
 def carbon_budget(
     profile: ResponsibilityTrackProfile,
     *,
-    retrain_frequency_per_year: int,
-    explanation_coverage_pct: float,
-    grid_ci_g_per_kwh: float,
+    retrain_frequency_per_year: int | None = None,
+    explanation_coverage_pct: float | None = None,
+    grid_ci_g_per_kwh: float | None = None,
 ) -> CarbonBudgetResult:
     """Compute annual carbon for retraining plus explanation overhead."""
-    retrains = max(1, int(retrain_frequency_per_year))
-    coverage = _clamp(explanation_coverage_pct, 0.0, 100.0)
-    grid_ci = max(0.0, float(grid_ci_g_per_kwh))
+    rf = profile.retrain_frequency_per_year if retrain_frequency_per_year is None else retrain_frequency_per_year
+    retrains = max(1, int(rf))
+    cov = profile.explanation_coverage_pct if explanation_coverage_pct is None else explanation_coverage_pct
+    coverage = _clamp(cov, 0.0, 100.0)
+    ci = profile.grid_ci_g_per_kwh if grid_ci_g_per_kwh is None else grid_ci_g_per_kwh
+    grid_ci = max(0.0, float(ci))
     tdp_w = max(profile.tdp_w, 0.001)
     base_event_kwh = tdp_w * (profile.base_latency_ms / 1000.0) / 3_600_000.0
     events_per_year = max(0, profile.inference_events_per_day) * 365

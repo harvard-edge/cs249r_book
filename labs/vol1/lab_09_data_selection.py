@@ -30,6 +30,7 @@ async def _():
         MathPeek,
         big_takeaways,
         build_lab_report,
+        calc_selection_inequality,
         coverage_profile,
         data_policy_decision,
         data_selection_profile,
@@ -57,6 +58,7 @@ async def _():
         apply_plotly_theme,
         big_takeaways,
         build_lab_report,
+        calc_selection_inequality,
         coverage_profile,
         data_policy_decision,
         data_selection_profile,
@@ -767,6 +769,7 @@ def _(coverage_profile, selection_utility):
 
 @app.cell
 def _(
+    calc_selection_inequality,
     coverage_profile,
     data_policy_decision,
     selection_frontier,
@@ -849,6 +852,13 @@ def _(
         v1_09_risk_tolerance.value,
         v1_09_validation_focus.value,
     )
+    v1_09_inequality = calc_selection_inequality(
+        v1_09_selection,
+        policy_id=v1_09_policy_choice.value,
+        scoring_method="proxy",
+        n_runs=1,
+        fraction_multiplier=v1_09_fraction_multiplier.value,
+    )
     return (
         v1_09_amount_system,
         v1_09_coverage,
@@ -858,6 +868,7 @@ def _(
         v1_09_current_saturation,
         v1_09_decision,
         v1_09_frontier,
+        v1_09_inequality,
         v1_09_label_rows,
         v1_09_label_selected_row,
         v1_09_release,
@@ -889,6 +900,7 @@ def _(
     v1_09_decision,
     v1_09_failure_card,
     v1_09_fraction_multiplier,
+    v1_09_inequality,
     v1_09_label_budget_multiplier,
     v1_09_label_prediction,
     v1_09_label_rows,
@@ -1360,26 +1372,29 @@ def _(
             ))
         items.extend([
             mo.accordion({
-                "Math Peek / Source Model - total data cost": mo.md("""
+                "Math Peek / Source Model - total data cost & selection inequality": mo.md(f"""
     The chapter's total data cost model is:
 
     $$
-    C_{total} = C_{acquire} + C_{label} + C_{store} + C_{process}
+    C_{{total}} = C_{{acquire}} + C_{{label}} + C_{{store}} + C_{{process}}
     $$
 
-    The selection engineering gate is:
+    The selection engineering gate (**Selection Inequality**) is:
 
     $$
-    T_{selection} + T_{train}(D_{subset}) < T_{train}(D_{total})
+    T_{{selection}} + T_{{train}}(D_{{subset}}) < T_{{train}}(D_{{total}})
     $$
 
-    Part C turns that idea into a track-local label frontier: labels, review,
-    processing, storage, quality, coverage, and rare-event floors must all pass.
+    **Live MLSysIM Physics for {v1_09_selection.label}:**
+    - $T_{{selection}}$ (proxy scoring {v1_09_selection.dataset_size_k:.0f}k examples): **{v1_09_inequality.t_selection_hours:.2f} hours**
+    - $T_{{train}}(D_{{subset}})$ ({v1_09_inequality.scoring_method}, {v1_09_selected_utility.selected_examples_k:.1f}k examples): **{v1_09_inequality.t_train_subset_hours:.2f} hours**
+    - $T_{{train}}(D_{{total}})$ (baseline full dataset): **{v1_09_inequality.t_train_total_hours:.2f} hours**
+    - **Selection Speedup:** **{v1_09_inequality.net_speedup:.2f}x** (Break-even runs: **{v1_09_inequality.break_even_runs}**)
     """)
             }),
             source_trace({
                 "chapter_anchor": "Cost Modeling and Selection Inequality",
-                "shared_helper": "selection_utility()",
+                "shared_helper": "calc_selection_inequality()",
                 "notebook_model": "v1_09_label_frontier_rows()",
                 "track_amount_system": v1_09_amount_system["amount_system"],
             }, summary="Part C cost bars derive from the V1-09 profile costs plus track-specific label/review factors."),

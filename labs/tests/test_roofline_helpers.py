@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mlsysbook_labs import (
+    flash_attention_traffic,
     fusion_traffic,
     gemm_workload,
     get_lab_track_variant,
@@ -57,3 +58,20 @@ def test_fusion_traffic_reduces_memory_time():
     assert result.eager_bytes > result.fused_bytes
     assert result.eager_time_us > result.fused_time_us
     assert result.speedup == 3.0
+
+
+def test_flash_attention_traffic_reduces_hbm_memory_traffic():
+    result = flash_attention_traffic(
+        seq_len=4096,
+        head_dim=128,
+        tile_br=128,
+        tile_bc=128,
+        precision="fp16",
+        bandwidth_gbs=3350.0,
+        peak_tflops=989.0,
+    )
+
+    assert result.naive_hbm_bytes > result.flash_hbm_bytes
+    assert result.traffic_reduction_ratio > 10.0
+    assert result.speedup > 1.5
+    assert result.sram_required_kb < 256.0

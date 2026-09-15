@@ -41,6 +41,7 @@ async def _():
         get_track_profile,
         inference_economy_profile,
         instrumentation_console,
+        paged_attention_fragmentation,
         report_export_panel,
         resolve_mlsysim_ref,
         serving_plan,
@@ -73,6 +74,7 @@ async def _():
         math,
         mo,
         np,
+        paged_attention_fragmentation,
         report_export_panel,
         resolve_mlsysim_ref,
         serving_plan,
@@ -613,7 +615,7 @@ def _(mo, v2_10_inference):
             "C) Months -- setup cost dominates for a quarter or more": "months",
             "D) Never in the first year -- setup remains dominant": "never",
         },
-        value="B) Weeks -- serving overtakes setup during early rollout",
+        value=None,
         label=(
             f"{v2_10_inference.label}: when does cumulative {v2_10_inference.cost_label} "
             "exceed the one-time setup/training budget?"
@@ -624,7 +626,7 @@ def _(mo, v2_10_inference):
             "A) Prefill / input pass -- prompt or window processing controls the first response": "prefill",
             "B) Decode / output loop -- repeated output steps control the live service": "decode",
         },
-        value="B) Decode / output loop -- repeated output steps control the live service",
+        value=None,
         label=(
             f"{v2_10_inference.label}: which amount system is more likely to bind "
             "after the request is live?"
@@ -710,7 +712,7 @@ def _(mo, v2_10_inference, v2_10_variant):
             "C) A few sessions -- state/cache is the first wall": "few",
             "D) One or zero sessions -- memory fails immediately": "one",
         },
-        value="C) A few sessions -- state/cache is the first wall",
+        value=None,
         label=(
             f"{v2_10_inference.model_name} on {v2_10_inference.hardware_name}: "
             "how many concurrent sessions fit before memory fails?"
@@ -771,7 +773,7 @@ def _(mo, v2_10_inference):
             "C) Dynamic batching": "dynamic",
             "D) Continuous batching": "continuous",
         },
-        value="D) Continuous batching",
+        value=None,
         label="Which scheduling policy wins for this workload after variance and SLO risk are counted?",
     )
     _context = max(64, v2_10_inference.context_tokens)
@@ -842,7 +844,7 @@ def _(mo, v2_10_inference, v2_10_variant):
             "C) Minimal static policy -- SLO/deadline fails": "slo_fail",
             "D) Guardrail-balanced policy -- best feasible option": "best_feasible",
         },
-        value="D) Guardrail-balanced policy -- best feasible option",
+        value=None,
         label="Release review: which serving policy survives all guardrails?",
     )
     _target = v2_10_inference.demand_qps
@@ -968,6 +970,7 @@ def _(
     partD_routing,
     partD_schedule,
     partD_target_qps,
+    paged_attention_fragmentation,
     report_export_panel,
     serving_plan,
     state_capacity,
@@ -1268,6 +1271,11 @@ def _(
             f"({_state.state_per_request_gb:.3g} GB) must fit inside {_state.total_memory_gb:.3g} GB."
         )
         _gap_detail = "The bucket matches the computed capacity." if partB_prediction.value == _actual_bucket else f"Computed max concurrency is {_state.max_concurrent}, so the memory wall is {_actual_bucket}."
+        _paged = paged_attention_fragmentation(
+            avg_seq_len=int(partB_context_tokens.value // 4) if partB_context_tokens.value > 64 else 64,
+            max_seq_len=int(partB_context_tokens.value),
+            page_size_tokens=16,
+        )
 
         _items.extend([
             instrumentation_console(
@@ -1303,7 +1311,9 @@ def _(
                     "state per session": f"{_state.state_per_request_gb:.4f} GB ({_state.state_kind})",
                     "max concurrent sessions": str(_state.max_concurrent),
                     "available headroom": f"{_state.available_gb:.2f} GB",
-                    "chapter source": "KV-Cache Scaling & Activation State Walls",
+                    "pagedattention recovered memory": f"{_paged.memory_recovered_pct:.1f}% recovered (contiguous usable: {_paged.contiguous_usable_memory_pct:.1f}% vs paged: {_paged.paged_usable_memory_pct:.1f}%)",
+                    "paged concurrency gain": f"{_paged.concurrency_gain_multiplier:.1f}x ({_paged.block_table_entries_per_req} virtual blocks/req)",
+                    "chapter source": "KV-Cache Scaling & PagedAttention Virtual Memory (§10.4.3)",
                 },
             ),
             mo.Html(f"""
