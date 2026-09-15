@@ -89,21 +89,39 @@ class ModuleTestCommand(BaseCommand):
 
     # Module mapping and normalization now imported from core.modules
 
+    @staticmethod
+    def _scoped_test_env(module_number: str) -> Dict[str, str]:
+        """Environment for pytest runs, with conftest's export gate scoped.
+
+        TINYTORCH_EXPORT_CHECK_THROUGH=NN holds the run to modules 01..NN, so
+        testing module 01 is not refused because modules 02-04 are unexported.
+        """
+        env = os.environ.copy()
+        if str(module_number).isdigit():
+            env["TINYTORCH_EXPORT_CHECK_THROUGH"] = str(int(module_number))
+        return env
+
     def run_inline_tests(
         self, module_name: str, module_number: str, verbose: bool = False
     ) -> Tuple[bool, str]:
         """
-        Phase 1: Run inline unit tests from the module source file.
+        Phase 1: Run inline unit tests from the student's notebook.
 
         These are the quick sanity checks embedded in the module itself,
-        triggered by the if __name__ == "__main__" block.
+        triggered by the if __name__ == "__main__" block. Only the notebook in
+        modules/ is tested; falling back to the reference in src/ would report
+        the instructor's code as the student's (#2117).
         """
         console = self.console
         project_root = self.config.project_root
         short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
         notebook_path = project_root / "modules" / module_name / f"{short_name}.ipynb"
-        src_dir = project_root / "src"
-        module_file = src_dir / module_name / f"{module_name}.py"
+
+        if not notebook_path.exists():
+            return False, (
+                f"Notebook not found: {notebook_path} "
+                f"(run: tito module start {module_number})"
+            )
 
         env = os.environ.copy()
         pythonpath = env.get("PYTHONPATH", "")
@@ -112,18 +130,13 @@ class ModuleTestCommand(BaseCommand):
         else:
             env["PYTHONPATH"] = str(project_root)
 
-        if notebook_path.exists():
-            runner = (
-                "import json, sys; from pathlib import Path; "
-                "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
-                "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
-                "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
-            )
-            cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
-        elif module_file.exists():
-            cmd = [sys.executable, str(module_file.absolute())]
-        else:
-            return False, f"Module file not found: {notebook_path} or {module_file}"
+        runner = (
+            "import json, sys; from pathlib import Path; "
+            "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
+            "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
+            "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
+        )
+        cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
 
         try:
             result = subprocess.run(
@@ -188,6 +201,7 @@ class ModuleTestCommand(BaseCommand):
                 encoding="utf-8",
                 errors="replace",
                 cwd=self.config.project_root,
+                env=self._scoped_test_env(module_number),
                 timeout=300,
             )
 
@@ -292,6 +306,7 @@ class ModuleTestCommand(BaseCommand):
                 encoding="utf-8",
                 errors="replace",
                 cwd=self.config.project_root,
+                env=self._scoped_test_env(module_number),
                 timeout=600,  # 10 minute timeout for integration tests
             )
 

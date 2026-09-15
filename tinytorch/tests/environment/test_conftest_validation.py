@@ -444,5 +444,62 @@ class TestValidatePackageSoftVsHard:
         )
 
 
+# ===========================================================================
+# 8. _validate_package_exported(through=N): scoped to the module under test
+# ===========================================================================
+
+class TestValidatePackageScopedThrough:
+    """
+    `tito module complete NN` scopes the gate to modules 01..NN (#2117).
+
+    2026-09-15: the unscoped gate demanded modules 01-04 while a student was
+    completing module 01, tito read that trip as "no tests", and the
+    progressive tests for modules 01-03 never ran.
+    """
+
+    @staticmethod
+    def _fail_modules_2_to_4(num, title, export_file, import_path, key_symbol):
+        if num in (2, 3, 4):
+            return [f"Module {num:02d} ({title}): missing exported file tinytorch/{export_file}"]
+        return []
+
+    @staticmethod
+    def _working_tensor():
+        import unittest.mock as mock
+        mock_tensor = mock.MagicMock()
+        mock_tensor.return_value = mock.MagicMock(spec=["data", "shape", "size", "dtype"])
+        return mock.patch.dict("sys.modules", {"tinytorch": mock.MagicMock(Tensor=mock_tensor)})
+
+    def test_later_required_modules_do_not_block_module_01(self, monkeypatch):
+        monkeypatch.setattr(_conftest, "_check_module_exported", self._fail_modules_2_to_4)
+        with self._working_tensor():
+            is_valid, hard_errors = _conftest._validate_package_exported(through=1)
+        assert is_valid, f"Completing module 01 must not require modules 02-04: {hard_errors}"
+
+    def test_required_modules_within_scope_stay_hard(self, monkeypatch):
+        monkeypatch.setattr(_conftest, "_check_module_exported", self._fail_modules_2_to_4)
+        with self._working_tensor():
+            is_valid, hard_errors = _conftest._validate_package_exported(through=3)
+        assert not is_valid
+        assert any("Module 02" in e for e in hard_errors)
+        assert any("Module 03" in e for e in hard_errors)
+        assert not any("Module 04" in e for e in hard_errors)
+
+    def test_unscoped_gate_still_requires_01_to_04(self, monkeypatch):
+        monkeypatch.setattr(_conftest, "_check_module_exported", self._fail_modules_2_to_4)
+        with self._working_tensor():
+            is_valid, hard_errors = _conftest._validate_package_exported()
+        assert not is_valid
+        assert any("Module 04" in e for e in hard_errors)
+
+    def test_scope_is_read_from_environment(self, monkeypatch):
+        monkeypatch.setenv("TINYTORCH_EXPORT_CHECK_THROUGH", "03")
+        assert _conftest._export_check_through() == 3
+        monkeypatch.setenv("TINYTORCH_EXPORT_CHECK_THROUGH", "")
+        assert _conftest._export_check_through() is None
+        monkeypatch.delenv("TINYTORCH_EXPORT_CHECK_THROUGH")
+        assert _conftest._export_check_through() is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
