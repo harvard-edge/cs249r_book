@@ -51,6 +51,8 @@ from mlsysim.physics import (
     calc_pareto_conditional_survival,
     calc_pareto_mean_residual_life,
     calc_paged_kv_cache_size,
+    calc_capped_exponential_scale,
+    calc_expected_paged_kv_tokens,
     calc_queue_latency_mmc,
     calc_failure_probability,
     calc_effective_flops,
@@ -703,6 +705,64 @@ class TestPagedKVCacheSize:
             seq_len=2050, batch_size=1, page_size_tokens=16,
         )
         assert frag == pytest.approx(14 / 2064, rel=1e-4)
+
+# ======================================================================
+# calc_capped_exponential_scale / calc_expected_paged_kv_tokens
+# ======================================================================
+
+class TestCappedExponentialScale:
+    """Exponential request lengths cut off at the context window."""
+
+    def test_capped_mean_roundtrip(self):
+        mu = calc_capped_exponential_scale(2048, 8192)
+        assert mu * (1 - math.exp(-8192 / mu)) == pytest.approx(2048, rel=1e-9)
+
+    def test_short_mean_approaches_uncapped_scale(self):
+        # mean << cap: the cap almost never binds, so mu is the mean itself.
+        assert calc_capped_exponential_scale(64, 8192) == pytest.approx(64, rel=1e-9)
+
+    def test_fixed_length_limit_is_infinite(self):
+        assert math.isinf(calc_capped_exponential_scale(4096, 4096))
+
+    def test_rejects_mean_above_cap(self):
+        with pytest.raises(ValueError, match="mean_tokens"):
+            calc_capped_exponential_scale(5000, 4096)
+
+
+class TestExpectedPagedKVTokens:
+    """Expected paged allocation averaged over request lengths."""
+
+    def test_fixed_length_matches_single_sequence_formula(self):
+        # Every request is 4097 tokens: ceil(4097/16) * 16 = 4112, 15 slots unused.
+        alloc, frag = calc_expected_paged_kv_tokens(4097, 4097, 16)
+        assert alloc == pytest.approx(4112)
+        assert frag == pytest.approx(15 / 4112)
+
+    def test_page_size_matters_when_context_divides_evenly(self):
+        # A single 4096-token sequence wastes nothing at any of these page sizes;
+        # a distribution of lengths does not.
+        fracs = [calc_expected_paged_kv_tokens(1024, 4096, p)[1] for p in (16, 64, 2048)]
+        assert 0 < fracs[0] < fracs[1] < fracs[2]
+
+    def test_small_pages_waste_about_half_a_page(self):
+        alloc, _ = calc_expected_paged_kv_tokens(2048, 8192, 16)
+        assert alloc - 2048 == pytest.approx(8, abs=0.5)
+
+    def test_matches_monte_carlo(self):
+        import random
+
+        mean, cap, page = 2048, 8192, 256
+        mu = calc_capped_exponential_scale(mean, cap)
+        rng = random.Random(0)
+        n = 200_000
+        used = allocated = 0.0
+        for _ in range(n):
+            s = min(cap, rng.expovariate(1 / mu))
+            used += s
+            allocated += math.ceil(s / page) * page
+        alloc, _ = calc_expected_paged_kv_tokens(mean, cap, page)
+        assert used / n == pytest.approx(mean, rel=0.01)
+        assert allocated / n == pytest.approx(alloc, rel=0.01)
 
 # ======================================================================
 # calc_queue_latency_mmc
