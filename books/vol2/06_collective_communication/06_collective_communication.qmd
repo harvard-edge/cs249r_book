@@ -929,7 +929,50 @@ If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllT
 
 :::
 
-In practice, MoE routing is rarely perfectly uniform. Popular experts receive more tokens than unpopular ones, creating load imbalance that translates to communication imbalance. If one expert receives 3$\times$ more tokens than average, the GPU hosting that expert receives 3$\times$ more incoming data, and dependent expert computation waits for that hotspot even though AllToAll is not a barrier. Large MoE systems use auxiliary load-balancing losses and capacity factors to bound this skew. Those controls trade routing freedom and possible token overflow against a lower maximum receive volume, so their value should be evaluated through end-to-end model quality and step time rather than communication balance alone.
+#### Dynamic routing and expert imbalance in MoE AllToAll {#sec-collective-communication-moe-dynamic-routing}
+
+The worked trace in notebook \ref{nbk-collective-communication-alltoall-moe-token-routing} assumes uniform token routing: every expert receives an identical share of tokens. In production MoE models, routing decisions are dynamic and data-dependent, fundamentally altering the collective communication profile.
+
+##### The dispatch and combine lifecycle
+
+In an MoE transformer layer with $E$ experts distributed across $P$ ranks ($E/P$ experts per rank), each rank holds a local batch of $T$ tokens. A gating router computes top-$k$ routing probabilities over all $E$ experts for each token. This induces two consecutive collective communication phases per MoE layer:
+
+1.  **Token Dispatch (All-to-All)**: Each rank partitions its $T$ local token activation vectors ($\mathbf{x} \in \mathbb{R}^{d_{\text{model}}}$) according to the destination ranks hosting the selected experts. Devices execute an AllToAll collective (or variable-size `AllToAllv`) to route tokens across the fabric to the expert host ranks.
+2.  **Token Combine (All-to-All)**: After each rank computes forward passes through its assigned local expert feed-forward networks (FFNs), a second AllToAll collective routes the resulting output vectors back to the originating ranks. Each rank then computes the weighted combination of expert outputs:
+    $$\mathbf{y}_i = \sum_{j \in \text{top-}k} g_{i,j} \cdot \text{Expert}_j(\mathbf{x}_i)$$
+
+##### Capacity factors and bounded allocation
+
+In dense models, collective buffer sizes are static and deterministic. In sparse MoE models, the number of tokens routed to expert $e$ is a stochastic variable $N_e \sim \text{Binomial}(P \cdot T, p_e)$. To avoid dynamic memory allocation and buffer reallocation overhead during communication, systems pre-allocate static expert buffers parameterized by an **expert capacity factor** $C \ge 1.0$ [@lepikhin2021gshard; @fedus2022switch]:
+$$\text{Capacity}_e = \left\lceil \frac{P \times T \times k}{E} \times C \right\rceil$$
+
+The capacity factor exposes a fundamental systems trade-off:
+
+*   **When $C = 1.0$**: Buffers are sized strictly for the uniform expectation. Under routing skew, any tokens assigned to an expert beyond its capacity are *dropped* (bypassed via residual connections without expert computation), degrading training convergence and downstream task accuracy.
+*   **When $C > 1.0$**: Buffers accommodate routing variance (typically $C = 1.25$–$1.5$), preventing token dropping. However, to maintain uniform collective communication, buffers must be padded with dummy tokens to fixed capacity, inflating the physical data volume crossing the network by $C\times$ and forcing GPUs to compute matrix multiplications on padded null tokens.
+*   **Dropless dynamic routing**: Modern high-throughput frameworks utilize variable-size `AllToAllv` with dynamic memory buffers, eliminating padding overhead while preserving all tokens. However, dynamic routing exposes execution time directly to routing skew.
+
+##### Bisection saturation and straggler tails
+
+Because token routing is determined by input semantics, certain "celebrity" experts inevitably receive disproportionate token volumes. If one expert receives $\gamma \times$ the average load ($\gamma > 1$), the GPU hosting that expert receives $\gamma \times$ more incoming data during dispatch.
+
+This skew creates two compounding performance bottlenecks:
+
+1.  **Inbound reception bottleneck**: The completion time of the dispatch collective is bounded by the slowest receiver. Even if 95 percent of GPUs complete their AllToAll exchanges in tens of microseconds, the entire cluster stalls waiting for the hottest destination rank to ingest its oversized payload:
+    $$T_{\text{dispatch}} \ge \frac{M_{\text{max}} \times d_{\text{model}} \times \text{sizeof(dtype)}}{\text{BW}_{\text{rx}}}$$
+    where $M_{\text{max}} = \max_p \sum_{e \in \text{rank } p} N_e$.
+2.  **Bisection fabric saturation**: Unlike Ring AllReduce (which maps communication onto nearest-neighbor ring links), AllToAll generates a complete bipartite exchange where $(P-1)/P \approx 1$ of all tokens must cross the cluster network fabric. In an oversubscribed fabric with oversubscription ratio $R:1$, the usable bisection bandwidth $\text{BW}_{\text{bisect}} = (P \cdot \text{BW}_{\text{inject}}) / (2R)$ throttles the exchange:
+    $$T_{\text{dispatch}} \ge \frac{V_{\text{cut}}}{\text{BW}_{\text{bisect}}}$$
+
+##### Hierarchical MoE exchange
+
+To mitigate both bisection saturation and small-message overhead across thousands of GPUs, hierarchical MoE runtimes decompose the flat AllToAll into a two-level collective [@hwang2023tutel]:
+
+1.  **Intra-node aggregation**: GPUs use intra-node NVLink to coalesce tokens destined for any expert residing on the same remote server node.
+2.  **Inter-node exchange**: Nodes execute an inter-node AllToAll over InfiniBand or RoCE, exchanging aggregated, coarse-grained payloads rather than thousands of fine-grained pairwise messages.
+3.  **Intra-node distribution**: Receiving GPUs use NVLink to scatter incoming tokens to the exact GPUs hosting the targeted experts.
+
+This hierarchical decomposition reduces the number of concurrent inter-node network flows from $P(P-1)$ to $N_{\text{nodes}}(N_{\text{nodes}}-1)$, replacing fine-grained, latency-sensitive packets with bandwidth-saturating message bursts that shield the data center bisection from packet fragmentation.
 
 #### Selecting an AllToAll schedule {#sec-collective-communication-alltoall-schedule-selection}
 

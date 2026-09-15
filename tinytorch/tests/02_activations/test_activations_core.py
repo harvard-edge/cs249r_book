@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.activations import ReLU, Sigmoid, Tanh, Softmax
+from tinytorch.core.activations import ReLU, Sigmoid, Tanh, Softmax, GELU
 from tinytorch.core.tensor import Tensor
 
 
@@ -457,3 +457,24 @@ def test_sigmoid_stable_for_extreme_finite_inputs(shape):
     assert np.all(np.isfinite(output.data))
     expected = np.array(0) if shape == () else np.array([0, 0.26894142, 0.5, 0.73105858, 1]).reshape(shape)
     np.testing.assert_allclose(output.data, expected, atol=1e-7)
+
+
+class TestGELUActivation:
+    """Test GELU (Gaussian Error Linear Unit) activation."""
+
+    def test_gelu_forward(self):
+        gelu = GELU()
+        x = Tensor(np.array([-1.0, 0.0, 1.0]))
+        output = gelu(x)
+        assert np.isclose(output.data[1], 0.0, atol=1e-5), "GELU(0) should be 0"
+        assert output.data[0] < 0.0, "GELU(-1) should be slightly negative"
+        assert output.data[2] > 0.8, "GELU(1) should be positive (~0.84)"
+
+    def test_gelu_extreme_values(self):
+        gelu = GELU()
+        x = Tensor(np.array([-1000.0, 1000.0, -np.inf]))
+        output = gelu(x)
+        assert np.isclose(output.data[0], 0.0, atol=1e-5), "GELU(-1000) should be 0"
+        assert np.isclose(output.data[1], 1000.0, atol=1e-5), "GELU(1000) should be 1000"
+        assert not np.isnan(output.data[2]), "GELU(-inf) must not evaluate to NaN"
+

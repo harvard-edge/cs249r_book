@@ -373,7 +373,9 @@ class Tensor:
         HINT: Use np.array(data, dtype=np.float32) to convert data to NumPy array
         """
         ### BEGIN SOLUTION
-        if isinstance(data, (list, tuple)) and len(data) > 0 and isinstance(data[0], Tensor):
+        if isinstance(data, Tensor):
+            data = data.data
+        elif isinstance(data, (list, tuple)) and len(data) > 0 and isinstance(data[0], Tensor):
             data = np.stack([t.data for t in data])
         self.data = np.array(data, dtype=np.float32)
         self.shape = self.data.shape
@@ -693,6 +695,12 @@ class Tensor:
             axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return Permute.apply(self, axes=tuple(axes))
         ### END SOLUTION
+
+    def permute(self, *axes):
+        """Permute tensor dimensions according to axes. Delegates to Permute.apply."""
+        if len(axes) == 1 and isinstance(axes[0], (list, tuple)):
+            axes = axes[0]
+        return Permute.apply(self, axes=tuple(axes))
 
     def sum(self, axis=None, keepdims=False):
         """Sum all elements or along an axis. Delegates to the Sum operation."""

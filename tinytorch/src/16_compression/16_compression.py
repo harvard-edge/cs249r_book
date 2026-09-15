@@ -709,7 +709,8 @@ def structured_prune(model, prune_ratio=0.5):
     # Prune the hidden Linear layers. The last Linear is the head: its output
     # channels are the classes, so zeroing them removes classes, not neurons.
     # A model with a single Linear has nothing else to prune and is pruned as is.
-    linears = [layer for layer in model.layers if isinstance(layer, Linear)]
+    layers = model.layers if hasattr(model, 'layers') else [model]
+    linears = [layer for layer in layers if isinstance(layer, Linear)]
     hidden = linears[:-1] if len(linears) > 1 else linears
 
     for layer in hidden:

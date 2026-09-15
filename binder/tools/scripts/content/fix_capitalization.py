@@ -8,7 +8,7 @@ awareness to avoid breaking:
 - Triple bold definitions (***Term***)
 - Section headers (## ...)
 - Callout titles (title="...")
-- Index entries (\index{...})
+- Index entries (\\index{...})
 - Table headers
 - Code fences, Python cells, YAML, LaTeX math
 
