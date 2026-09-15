@@ -46,6 +46,13 @@ Release body. Omit any section that has no entries for a given release.
   `baseline_precision="fp32"` for FP32-trained artifacts. `CompressionResult`
   and `CompressionCandidate` record the baseline; the Wall 13 equation now reads
   `r = b_base/b`.
+- `DistributedModel` counted 2 tensor-parallel AllReduces per layer (the
+  forward path only) for a training step and priced them as one collective of
+  twice the activation size. Megatron-LM tensor parallelism runs two AllReduces
+  in the forward path and two in the backward path per layer (Shoeybi et al.
+  2019, p.4), so a training step now pays 4 separate AllReduces per layer, each
+  with its own ring latency term: the bandwidth term of `tp_communication_latency`
+  doubles and the latency term quadruples.
 
 ### Solvers, Models & Taxonomy
 

@@ -956,6 +956,27 @@ class TestDistributedModel:
         result = solver.solve(gpt3, cluster, batch_size=32)
         assert result.communication_latency.magnitude > 0
 
+    def test_tp_training_step_pays_four_allreduces_per_layer(self):
+        """Megatron-LM TP: 2 forward + 2 backward AllReduces per layer, each its own ring collective."""
+        from mlsysim.engine.solvers.distributed import TP_ALLREDUCES_PER_LAYER_TRAINING
+        from mlsysim.engine.solvers.utils import _intra_node_latency
+        from mlsysim.physics import calc_ring_allreduce_time
+
+        model = Models.Language.Llama3_8B
+        cluster = Systems.Clusters.Research_256
+        result = DistributedModel().solve(
+            model, cluster, batch_size=1024, seq_len=2048, precision="fp16",
+            tp_size=8, pp_size=4, microbatch_count=16,
+        )
+        local_batch = 1024 // result.parallelism["dp"]
+        activation = local_batch * 2048 * model.hidden_dim * BYTES_FP16
+        one_allreduce = calc_ring_allreduce_time(
+            activation, 8, cluster.node.intra_node_bw, _intra_node_latency(cluster.node)
+        )
+        assert TP_ALLREDUCES_PER_LAYER_TRAINING == 4
+        expected = (one_allreduce * 4 * model.layers).m_as("ms")
+        assert result.tp_communication_latency.m_as("ms") == pytest.approx(expected)
+
     def test_pipeline_parallelism_creates_bubble(self):
         """PP > 1 should introduce a non-zero pipeline bubble."""
         solver = DistributedModel()

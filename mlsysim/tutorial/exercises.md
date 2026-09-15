@@ -281,8 +281,8 @@ overhead.
 The optimizer typically finds **TP=8, PP=2, DP=4** or a nearby configuration.
 
 - **TP=8** keeps tensor parallelism within a single DGX node (8 GPUs connected
-  by NVLink at 900 GB/s), minimizing communication latency for the 2 AllReduce
-  operations per layer.
+  by NVLink at 900 GB/s), minimizing communication latency for the 4 AllReduce
+  operations per layer in each training step (2 forward, 2 backward).
 - **PP=2** splits the 80 layers across 2 pipeline stages, reducing per-GPU
   memory to fit in 80 GB HBM.
 - **DP=4** provides data parallelism across 4 groups, allowing a reasonable
