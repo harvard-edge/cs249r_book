@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.1"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="Lab 00: The Architect's Portal · MLSysBook")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LAB 00: THE ARCHITECT'S PORTAL

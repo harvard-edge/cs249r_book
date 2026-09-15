@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="Lab 09: The Optimization Trap · MLSysBook")
 
 
 @app.cell

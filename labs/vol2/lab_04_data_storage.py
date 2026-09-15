@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="Lab 04: The Storage Wall · MLSysBook")
 
 
 @app.cell

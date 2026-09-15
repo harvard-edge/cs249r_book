@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="Lab 17: The Fleet Synthesis · MLSysBook")
 
 
 @app.cell

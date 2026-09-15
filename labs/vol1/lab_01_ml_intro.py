@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full")
+app = marimo.App(width="full", app_title="Lab 01: The AI Triad · MLSysBook")
 
 
 @app.cell
@@ -119,7 +119,14 @@ def _(
         v1_01_hardware,
         v1_01_model,
     )
-    return v1_01_profile, v1_01_track_id, v1_01_triad, v1_01_variant
+    return (
+        v1_01_hardware,
+        v1_01_model,
+        v1_01_profile,
+        v1_01_track_id,
+        v1_01_triad,
+        v1_01_variant,
+    )
 
 
 @app.cell
@@ -402,11 +409,22 @@ def _(
     mo,
     track_arc_context,
     track_context,
+    v1_01_hardware,
     v1_01_metadata,
+    v1_01_model,
     v1_01_profile,
     v1_01_track_picker,
     v1_01_variant,
 ):
+    v1_01_hw_display = getattr(v1_01_hardware, "name", v1_01_variant.hardware_ref)
+    v1_01_model_display = getattr(v1_01_model, "name", v1_01_variant.model_ref)
+    v1_01_invariants = mo.md(r"""
+* **The Silent Degradation Invariant:** In ML systems, failure does not manifest as stack traces. Distribution drift $P_{\text{prod}}(X) \neq P_{\text{train}}(X)$ degrades output quality while execution uptime remains 100%.
+* **The Triad Bottleneck Invariant:** System throughput and quality are bounded by $\min(\text{Data Readiness}, \text{Algorithmic Efficiency}, \text{Machine Capacity})$. Optimizing a non-binding axis yields zero end-to-end improvement.
+* **The Evidence Asymmetry Invariant:** Offline validation loss curves cannot prove real-time latency bounds, thermal stability, or rare-event safety margins. Production requires operational runtime evidence.
+* **The Migration Guardrail:** Resolving the primary bottleneck immediately shifts the system constraint to the next axis. Systems design requires planning for bottleneck migration.
+""")
+
     mo.vstack([
         LAB_CSS,
         ACADEMIC_LAB_CSS,
@@ -433,10 +451,10 @@ def _(
                 <strong>Stakeholder:</strong> {v1_01_variant.stakeholder}
               </span>
               <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Hardware:</strong> {v1_01_variant.hardware_ref}
+                <strong>Hardware:</strong> {v1_01_hw_display}
               </span>
               <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Model:</strong> {v1_01_variant.model_ref}
+                <strong>Model:</strong> {v1_01_model_display}
               </span>
               <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
                 <strong>Primary Focus:</strong> AI Triad Diagnosis
@@ -452,18 +470,13 @@ def _(
               System Scenario: {v1_01_profile.label} Production Diagnosis
             </h3>
             <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
-              You are operating as the <strong>{v1_01_variant.stakeholder}</strong>. Your deployment target is <strong>{v1_01_variant.hardware_ref}</strong> running <strong>{v1_01_variant.model_ref}</strong>. Model quality is silently drifting under production workload pressure, while crash logs and infrastructure health checks remain completely green. You must identify which axis of the Data-Algorithm-Machine triad binds before committing engineering resources.
+              You are operating as the <strong>{v1_01_variant.stakeholder}</strong>. Your deployment target is <strong>{v1_01_hw_display}</strong> running <strong>{v1_01_model_display}</strong>. Model quality is silently drifting under production workload pressure, while crash logs and infrastructure health checks remain completely green. You must identify which axis of the Data-Algorithm-Machine triad binds before committing engineering resources.
             </p>
             <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
               <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
                 The Architectural Invariants of the AI Triad:
               </div>
-              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
-                <li><strong>The Silent Degradation Invariant:</strong> In ML systems, failure does not manifest as stack traces. Distribution drift $P_{{\\text{{prod}}}}(X) \\neq P_{{\\text{{train}}}}(X)$ degrades output quality while execution uptime remains 100%.</li>
-                <li><strong>The Triad Bottleneck Invariant:</strong> System throughput and quality are bounded by $\\min(\\text{{Data Readiness}}, \\text{{Algorithmic Efficiency}}, \\text{{Machine Capacity}})$. Optimizing a non-binding axis yields zero end-to-end improvement.</li>
-                <li><strong>The Evidence Asymmetry Invariant:</strong> Offline validation loss curves cannot prove real-time latency bounds, thermal stability, or rare-event safety margins. Production requires operational runtime evidence.</li>
-                <li><strong>The Migration Guardrail:</strong> Resolving the primary bottleneck immediately shifts the system constraint to the next axis. Systems design requires planning for bottleneck migration.</li>
-              </ul>
+              {v1_01_invariants.text}
             </div>
           </div>
         </div>
