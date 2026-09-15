@@ -18,7 +18,7 @@ from ...physics import (
     calc_bottleneck,
 )
 from ...core.types import Quantity
-from ...core.units import Q_
+from ...core.units import BITS_PER_BYTE, resolve_precision
 from .. import calibration as cal
 from ...models.types import Workload
 from ...hardware.types import HardwareNode
@@ -44,7 +44,8 @@ class CompressionModel(ForwardModel):
 
     def solve(self, model: Workload, hardware: HardwareNode, method: str = "quantization",
               target_bitwidth: int = 8, sparsity: float = 0.0,
-              sparsity_type: str = "unstructured") -> CompressionResult:
+              sparsity_type: str = "unstructured",
+              baseline_precision: str = "fp32") -> CompressionResult:
         """
         Solves for compression gains and estimated accuracy impact.
 
@@ -66,19 +67,29 @@ class CompressionModel(ForwardModel):
             - unstructured: storage savings only, no inference speedup
             - structured: both storage and compute savings
             - n_m: hardware 2:4 sparsity with 2x speedup at 50% sparsity (Ampere+)
+        baseline_precision : str
+            Configurable precision of the uncompressed model that ratios and
+            sizes are measured against, resolved through
+            ``core.units.PRECISION_MAP``. Defaults to ``"fp32"`` (INT8 is 4x,
+            INT4 is 8x). Pass ``"fp16"`` for models trained and served from
+            FP16/BF16 weights, such as most LLMs, where INT4 is quoted as 4x.
 
         Returns
         -------
         CompressionResult
             Compression metrics including memory savings, inference speedup,
-            and estimated accuracy delta.
+            and estimated accuracy delta, plus the ``baseline_precision`` they
+            are relative to.
 
         Notes
         -----
         Conventions and branch logic:
 
-        - Sizes are measured against an **FP32 baseline** (4 bytes/param), so
-          quantization's ``compression_ratio = 32 / target_bitwidth``.
+        - Sizes are measured against the configurable ``baseline_precision``
+          (FP32 by default, 4 bytes/param), so quantization's
+          ``compression_ratio = b_base / target_bitwidth`` (32/4 = 8x for INT4
+          by default; 16/4 = 4x with ``baseline_precision="fp16"``). A target
+          wider than the baseline is an upcast and yields a ratio < 1.
         - ``estimated_accuracy_delta`` is a signed fraction (e.g. -0.005 =
           -0.5 percentage points top-1), taken from survey medians in
           ``engine/calibration.py`` (Gholami 2021 for quantization; Blalock
@@ -96,17 +107,23 @@ class CompressionModel(ForwardModel):
         from ...core._validation import validate_at_least, validate_range
         validate_at_least(target_bitwidth, 1, "target_bitwidth")
         validate_range(sparsity, 0.0, 1.0, "sparsity")
-        original_size = model.size_in_bytes(Q_("4 byte")) # FP32 baseline
+        # Ratios are relative to a configurable baseline precision (2026-09-15).
+        # The FP32 default keeps every existing result unchanged; the former
+        # hard-code offered no way to measure FP16/BF16-served LLMs, where
+        # practice and the paper quote INT4 as 4x (baseline_precision="fp16").
+        baseline_precision, baseline_bytes = resolve_precision(baseline_precision)
+        baseline_bits = baseline_bytes.to("byte").magnitude * BITS_PER_BYTE
+        original_size = model.size_in_bytes(baseline_bytes)
         inference_speedup = 1.0
 
         if method == "quantization":
-            compression_ratio = 32 / target_bitwidth
+            compression_ratio = baseline_bits / target_bitwidth
             # Source: Gholami et al. (2021), "A Survey of Quantization Methods"
             # Conservative estimates: <1% for FP8, <1% for INT8, 2-5% for INT4
             if target_bitwidth >= 16:
-                # FP16/BF16/FP32: no meaningful compression from FP32 baseline
+                # FP16/BF16/FP32 targets: float formats with no quantization
+                # error (ratio 1x at the baseline width, < 1x for an upcast).
                 accuracy_delta = 0.0
-                compression_ratio = 32 / target_bitwidth  # 2x for FP16, 1x for FP32
             elif target_bitwidth == 8:
                 # FP8/INT8: use FP8 accuracy delta (near-lossless, -0.2%)
                 accuracy_delta = cal.QUANT_ACCURACY_DELTA_FP8
@@ -118,7 +135,7 @@ class CompressionModel(ForwardModel):
             # Inference speedup depends on compute vs memory boundedness
             # Memory-bound workloads: speedup ≈ compression_ratio (less data to move)
             # Compute-bound workloads: speedup depends on hardware low-precision support
-            graph = model.lower(Q_("4 byte"))  # FP32 baseline graph
+            graph = model.lower(baseline_bytes)  # baseline-precision graph
             roofline = calc_bottleneck(
                 graph.total_ops, graph.weight_bytes,
                 hardware.compute.peak_flops, hardware.memory.bandwidth
@@ -164,6 +181,7 @@ class CompressionModel(ForwardModel):
         compressed_size = original_size / compression_ratio
 
         return CompressionResult(
+            baseline_precision=baseline_precision,
             original_size_gb=original_size.to("GB"),
             compressed_size_gb=compressed_size.to("GB"),
             compression_ratio=compression_ratio,
@@ -186,8 +204,13 @@ class CompressionModel(ForwardModel):
         max_accuracy_drop: Optional[float] = None,
         min_speedup: Optional[float] = None,
         require_hardware_support: bool = False,
+        baseline_precision: str = "fp32",
     ) -> CompressionCandidate:
-        """Evaluate one compression configuration with feasibility metadata."""
+        """Evaluate one compression configuration with feasibility metadata.
+
+        Sizes, ratios, and speedups are relative to ``baseline_precision``
+        (see ``solve``).
+        """
         normalized_method = method.lower()
         normalized_sparsity_type = self._normalize_sparsity_type(sparsity_type)
         result = self.solve(
@@ -197,6 +220,7 @@ class CompressionModel(ForwardModel):
             target_bitwidth=target_bitwidth,
             sparsity=sparsity,
             sparsity_type=normalized_sparsity_type,
+            baseline_precision=baseline_precision,
         )
         hardware_supported = self._hardware_supported(
             hardware,
@@ -228,6 +252,7 @@ class CompressionModel(ForwardModel):
             f"model={model.name}",
             f"hardware={hardware.name}",
             f"method={normalized_method}",
+            f"baseline_precision={result.baseline_precision}",
             f"target_bitwidth={target_bitwidth}",
             f"sparsity={sparsity}",
             f"sparsity_type={normalized_sparsity_type}",
@@ -245,6 +270,7 @@ class CompressionModel(ForwardModel):
             target_bitwidth=target_bitwidth if normalized_method == "quantization" else None,
             sparsity=sparsity,
             sparsity_type=normalized_sparsity_type,
+            baseline_precision=result.baseline_precision,
             original_size_gb=result.original_size_gb,
             compressed_size_gb=result.compressed_size_gb,
             compression_ratio=result.compression_ratio,
@@ -271,8 +297,13 @@ class CompressionModel(ForwardModel):
         min_speedup: Optional[float] = None,
         require_hardware_support: bool = False,
         objective: str = "min_size_max_speed_preserve_quality",
+        baseline_precision: str = "fp32",
     ) -> CompressionSweepResult:
-        """Evaluate a compression design space and mark Pareto candidates."""
+        """Evaluate a compression design space and mark Pareto candidates.
+
+        Every candidate is measured against the same ``baseline_precision``
+        so sizes, ratios, and speedups are comparable across the sweep.
+        """
         candidates: List[CompressionCandidate] = []
         for config in candidate_configs:
             candidate_kwargs = dict(config)
@@ -283,6 +314,7 @@ class CompressionModel(ForwardModel):
                 max_accuracy_drop=max_accuracy_drop,
                 min_speedup=min_speedup,
                 require_hardware_support=require_hardware_support,
+                baseline_precision=baseline_precision,
                 **candidate_kwargs,
             )
             candidates.append(candidate)

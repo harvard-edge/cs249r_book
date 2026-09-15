@@ -35,6 +35,69 @@ Release body. Omit any section that has no entries for a given release.
 
 ## Unreleased
 
+### Bug Fixes
+
+- `CompressionModel` measured every ratio against a hard-coded FP32 baseline
+  with no way to change it, so INT4 always reported 8x compression and an 8x
+  memory-bound speedup, even for models served from FP16/BF16 weights where
+  practice quotes 4x. `solve`, `candidate`, and `sweep` now take a configurable
+  `baseline_precision` (resolved through `core.units.PRECISION_MAP`) that
+  defaults to `"fp32"`, so existing results are unchanged:
+  `compression_ratio = b_base / target_bitwidth`, and original sizes and the
+  Roofline regime use the baseline width. Pass `baseline_precision="fp16"` for
+  FP16/BF16-served models (INT4 = 4x). `CompressionResult` and
+  `CompressionCandidate` record the baseline; the Wall 13 equation now reads
+  `r = b_base/b`.
+- `DistributedModel` counted 2 tensor-parallel AllReduces per layer (the
+  forward path only) for a training step and priced them as one collective of
+  twice the activation size. Megatron-LM tensor parallelism runs two AllReduces
+  in the forward path and two in the backward path per layer (Shoeybi et al.
+  2019, p.4), so a training step now pays 4 separate AllReduces per layer, each
+  with its own ring latency term: the bandwidth term of `tp_communication_latency`
+  doubles and the latency term quadruples.
+- `SensitivitySolver` returned all-zero sensitivities with `peak_flops` named
+  as binding when the configuration does not fit in memory (for example
+  Llama-3 70B FP16 on one H100): the offload path pins latency, so no 10%
+  perturbation moves it, and `max()` broke the tie on the first key.
+  `SensitivityResult` now carries `feasible`; an infeasible baseline reports
+  `binding_constraint="memory_capacity"` and a `constraint_trace` with the
+  Memory Wall failure.
+
+### Solvers, Models & Taxonomy
+
+- `ContinuousBatchingModel` now derives static and paged capacity from a
+  request-length distribution instead of assuming static batching reaches 60%
+  of the paged batch. Static allocation reserves `max_seq_len` per request;
+  paged allocation holds `ceil(S/p)` blocks averaged over exponential request
+  lengths capped at `max_seq_len` with mean `mean_request_tokens`. Page size
+  now changes fragmentation and capacity even when the context divides evenly
+  by the page size, and `speedup_vs_static` compares memory-bound decode
+  throughput at the two concurrencies. Provenance now cites Kwon et al. (2023)
+  Fig. 2 correctly (20.4% to 38.2% of KV memory holds token states under
+  contiguous pre-allocation).
+- `ServingCapacityModel` accepts `mean_request_tokens` and evaluates base
+  latency at the mean request length.
+- Added `calc_capped_exponential_scale` and `calc_expected_paged_kv_tokens` to
+  `mlsysim.physics`.
+- Added the `mlsysim.Agents` registry (`Coding.SWE_Bench_Runner`,
+  `Deliberation.TreeSearch`, `MultiAgent.SupervisorWorker`,
+  `Interactive.StreamingVoice`) and the `mlsysim.Embodied` registry
+  (`Quadruped.Spot`, `Humanoid.Atlas`, `Humanoid.Unitree_H1`,
+  `Manipulator.Panda`, `Drone.DJI_Matrice`, `AMR.LogisticsAMR`,
+  `Vehicle.Robotaxi`). Provenance states what is sourced. The Panda record is
+  a datasheet. Spot, Atlas, Unitree H1, and the DJI Matrice 350 RTK are
+  estimates that link their spec pages and name the unsourced fields. The AMR
+  and robotaxi are estimated class profiles, and the four agent profiles are
+  illustrative teaching assumptions.
+- Added `mlsysim.physics.agents` (trajectory step time and reliability, Pareto
+  trajectory-length tail, radix prefix-cache latency, test-time compute cost,
+  multi-agent coordination overhead, speedup, and optimal concurrency) and
+  `mlsysim.physics.robotics` (sensor-to-actuator latency, stopping distance
+  and maximum permitted velocity, kinetic energy, reflected inertia and seam
+  torque, inverted-pendulum fall time, actuator Joule heating, and
+  action-chunk cadence). Each docstring has a `Source:` line that cites a
+  checked reference or names the formula as a modeling assumption.
+
 ### Documentation
 
 - Align website tutorials and landing pages with canonical nested registry paths
@@ -55,6 +118,16 @@ Release body. Omit any section that has no entries for a given release.
   `Ops.Monitoring`, and `core.calibration` (solver/engine parameters only).
 - Added `Infrastructure.Pricing` (`Cloud`, `Storage`, `Labeling`, `Fleet`, `Capital`).
   Appendix lineage audits registry paths and rejects stale `defaults.*` references.
+
+### Breaking Changes
+
+- `ContinuousBatchingModel.solve()` and `ServingCapacityModel.solve()` rename
+  `seq_len` to `max_seq_len`.
+- `ContinuousBatchingResult.memory_fragmentation_pct` is replaced by
+  `paged_internal_fragmentation` and `static_internal_fragmentation`
+  (fractions in [0, 1]). New fields: `static_max_active_requests`,
+  `static_throughput_tokens_per_sec`, `static_kv_cache_size`, and
+  `mean_request_tokens`.
 
 ## v0.1.2 (2026-05-17) — CLI & Website Release Polish
 

@@ -118,8 +118,11 @@ class ModuleResetCommand(BaseCommand):
         console.print(f"[cyan]Resetting module {normalized}: {module_name}[/cyan]")
         console.print()
 
-        # Convert src/ to notebook in modules/
-        success = convert_py_to_notebook(src_path, self.venv_path, console)
+        # Convert src/ to a student notebook in modules/ (solutions cleared, #1684)
+        success = convert_py_to_notebook(
+            src_path, self.venv_path, console,
+            student=True, project_root=self.config.project_root,
+        )
 
         if success:
             # Update progress tracking (remove from completed)
@@ -172,7 +175,10 @@ class ModuleResetCommand(BaseCommand):
                 console.print(f"[yellow]  ⚠ Source not found, skipping[/yellow]")
                 continue
 
-            success = convert_py_to_notebook(src_path, self.venv_path, console)
+            success = convert_py_to_notebook(
+                src_path, self.venv_path, console,
+                student=True, project_root=self.config.project_root,
+            )
             if success:
                 console.print(f"[green]  ✓ {module_name} reset[/green]")
                 reset_count += 1

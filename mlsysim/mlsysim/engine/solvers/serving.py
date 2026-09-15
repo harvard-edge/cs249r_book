@@ -278,7 +278,8 @@ class ServingCapacityModel(ForwardModel):
         hardware: HardwareNode,
         qps: float,
         target_p99_latency_ms: float,
-        seq_len: int = 2048,
+        max_seq_len: int = 2048,
+        mean_request_tokens: Optional[float] = None,
         output_tokens: int = 128,
         max_batch_size: int = 32,
         precision: str = "fp16",
@@ -292,9 +293,10 @@ class ServingCapacityModel(ForwardModel):
         upward (1, 2, ...) until the estimated request P99 meets the target:
 
         1. ``ContinuousBatchingModel`` sizes the per-replica active batch and
-           token throughput under the memory wall;
-        2. ``ServingModel`` (at that batch) gives TTFT/ITL, so the base
-           request latency is ``TTFT + ITL * output_tokens``;
+           token throughput under the memory wall, using paged allocation over
+           the request-length distribution;
+        2. ``ServingModel`` (at that batch and the mean request length) gives
+           TTFT/ITL, so the base request latency is ``TTFT + ITL * output_tokens``;
         3. ``TailLatencyModel`` (M/M/c) adds the P99 queue wait at each
            candidate replica count.
 
@@ -311,8 +313,12 @@ class ServingCapacityModel(ForwardModel):
             Target aggregate arrival rate in queries per second (> 0).
         target_p99_latency_ms : float
             End-to-end P99 latency target in milliseconds.
-        seq_len : int
-            Input context length in tokens.
+        max_seq_len : int
+            Longest context a request may reach, prompt plus generated tokens.
+        mean_request_tokens : float, optional
+            Mean KV tokens a request fills, in ``(0, max_seq_len]``. ``None``
+            means every request fills ``max_seq_len``. Shorter requests raise
+            paged concurrency in ``ContinuousBatchingModel``.
         output_tokens : int
             Generated tokens per request; converts token throughput to QPS.
         max_batch_size : int
@@ -337,7 +343,7 @@ class ServingCapacityModel(ForwardModel):
 
         validate_positive(qps, "qps")
         validate_positive(target_p99_latency_ms, "target_p99_latency_ms")
-        validate_at_least(seq_len, 1, "seq_len")
+        validate_at_least(max_seq_len, 1, "max_seq_len")
         validate_at_least(output_tokens, 1, "output_tokens")
         validate_at_least(max_batch_size, 1, "max_batch_size")
         validate_at_least(max_replicas, 1, "max_replicas")
@@ -347,16 +353,21 @@ class ServingCapacityModel(ForwardModel):
         batching = ContinuousBatchingModel().solve(
             model=model,
             hardware=hardware,
-            seq_len=seq_len,
+            max_seq_len=max_seq_len,
+            mean_request_tokens=mean_request_tokens,
             max_batch_size=max_batch_size,
             precision=precision,
             efficiency=efficiency,
         )
         active_batch = max(1, batching.max_active_requests)
+        # Latency is evaluated at the mean request length. Flooring keeps the
+        # ServingModel memory check inside the paged allocation that admitted
+        # this batch, because the expected paged allocation per request is at
+        # least the mean length.
         serving = ServingModel().solve(
             model=model,
             hardware=hardware,
-            seq_len=seq_len,
+            seq_len=max(1, int(batching.mean_request_tokens)),
             batch_size=active_batch,
             precision=precision,
             efficiency=efficiency,
@@ -465,37 +476,81 @@ class ServingCapacityModel(ForwardModel):
 
 class ContinuousBatchingModel(ForwardModel):
     """
-    Analyzes production LLM serving with Continuous Batching and PagedAttention.
+    Compares static KV reservation with PagedAttention under continuous batching.
 
-    Traditional static batching suffers from severe memory fragmentation and
-    padding waste. This model simulates the throughput improvements achieved by
-    iteration-level scheduling and non-contiguous KV cache allocation.
+    Decode is memory-bound, so the number of requests sharing a step is the
+    throughput lever, and the KV-cache allocator decides how many fit. A static
+    allocator reserves a contiguous slot of ``max_seq_len`` tokens for every
+    request; PagedAttention hands out fixed-size blocks on demand. This model
+    sizes both from the same KV budget and a request-length distribution, then
+    compares memory-bound decode throughput at each allocator's concurrency.
+
+    Kwon et al. (2023) profile contiguous pre-allocation (their Orca baselines)
+    and find that only 20.4% to 38.2% of KV-cache memory holds actual token
+    states (Fig. 2). The rest is reserved slots for future tokens, internal
+    fragmentation from over-provisioning for the maximum sequence length, and
+    external fragmentation from the memory allocator (Sec. 3.1, Fig. 3). vLLM
+    limits each request's waste to one block (Sec. 4.2) and reaches 96.3%
+    token-state usage (Fig. 2).
+
+    Scope and assumptions:
+
+    - The static baseline is max-length reservation, like Kwon's "Orca (Max)".
+      It is modeled with no external fragmentation because every slot has the
+      same size, although Kwon et al. still attribute 8.9% of Orca (Max) KV
+      memory to external fragmentation and other overhead. Exact-size and
+      power-of-two contiguous allocators, which trade reservation waste for
+      external fragmentation, are not modeled.
+    - Both allocators are sized with every admitted request at its full length
+      (peak occupancy). A request mid-generation holds fewer paged blocks, so
+      paged capacity is conservative, while static reserves ``max_seq_len``
+      for the whole request lifetime either way.
+    - Request lengths are exponential, cut off at ``max_seq_len``, with mean
+      ``mean_request_tokens`` (``calc_capped_exponential_scale``).
 
     Literature Source:
     1. Kwon et al. (2023), "Efficient Memory Management for Large Language Model
-       Serving with PagedAttention."
+       Serving with PagedAttention," SOSP '23.
     2. Yu et al. (2022), "ORCA: A Distributed Serving System for
        Transformer-Based Generative Models."
     """
     requires = ("workload", "hardware")
     produces = ContinuousBatchingResult
 
-    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, max_batch_size: int = 1, page_size: int = 16, precision: str = "fp16", efficiency: float = 0.5) -> ContinuousBatchingResult:
-        """Calculate continuous-batching throughput and PagedAttention memory.
+    def solve(
+        self,
+        model: TransformerWorkload,
+        hardware: HardwareNode,
+        max_seq_len: int,
+        mean_request_tokens: Optional[float] = None,
+        max_batch_size: int = 1,
+        page_size: int = 16,
+        precision: str = "fp16",
+        efficiency: float = 0.5,
+    ) -> ContinuousBatchingResult:
+        """Compare static max-length KV reservation with paged allocation.
 
-        Models a decode-dominated serving replica:
+        With KV budget ``M_KV`` (HBM capacity minus weights) and ``k`` KV bytes
+        per token:
 
-        - **Capacity**: KV memory per sequence comes from
-          ``calc_paged_kv_cache_size`` (page-granular allocation, so internal
-          fragmentation is bounded by one page per sequence); the number of
-          concurrent requests is what fits in HBM after the weights.
-        - **Latency**: TTFT is the prefill compute time (linear ``2*P*S`` plus
-          attention ``4*L*H*d*S^2`` FLOPs) plus the dispatch tax; ITL is
-          memory-bound — (weights + total KV) streamed once per token over
-          HBM bandwidth.
-        - **Speedup vs static batching**: static allocation is modeled as
-          reaching only ~60% of the continuous batch size, reflecting the
-          20-40% external fragmentation measured by Kwon et al. (2023).
+        - **Static reservation**: every request reserves ``max_seq_len`` tokens,
+          so ``N_static = floor(M_KV / (k * S_max))`` and the unused share of
+          each reservation is ``1 - S_mean / S_max``.
+        - **Paged allocation**: the budget is a pool of ``floor(M_KV / (k * p))``
+          blocks and a request of ``S`` tokens holds ``ceil(S / p)`` of them, so
+          ``N_paged = floor(pool / E[ceil(S / p)])``. The unused share is the
+          expected tail of each request's last block
+          (``calc_expected_paged_kv_tokens``), which grows with page size.
+        - Both counts are capped by ``max_batch_size``. When the cap binds for
+          both allocators, allocation policy cannot change throughput.
+        - **Throughput**: decode is memory-bound and streams the weights once
+          per step plus the KV tokens requests have actually filled (reserved
+          but empty slots are not read), ``t_step = (W + N * S_mean * k) / BW``
+          and tokens/s ``= N / t_step``. ``speedup_vs_static`` is the paged
+          throughput over the static throughput, each at its own ``N``.
+        - **TTFT** is the worst-case prefill of a full scheduler batch
+          (``max_batch_size`` prompts of ``max_seq_len`` tokens): linear
+          ``2*P*S`` plus attention ``4*L*H*d*S^2`` FLOPs, plus the dispatch tax.
 
         Parameters
         ----------
@@ -503,12 +558,19 @@ class ContinuousBatchingModel(ForwardModel):
             The model being served (layers, heads, hidden_dim, kv_heads).
         hardware : HardwareNode
             The accelerator (HBM capacity/bandwidth, dispatch tax).
-        seq_len : int
-            Sequence length in tokens (context for KV sizing and prefill).
+        max_seq_len : int
+            Longest context a request may reach, prompt plus generated tokens.
+            Static allocation reserves this much KV for every request.
+        mean_request_tokens : float, optional
+            Mean KV tokens a request actually fills, in ``(0, max_seq_len]``.
+            Lengths are exponential, cut off at ``max_seq_len``, with this mean
+            (``calc_capped_exponential_scale``). ``None`` means every request
+            fills ``max_seq_len``; with no length variance, static and paged
+            allocation coincide up to page rounding.
         max_batch_size : int
             Scheduler cap on concurrent requests.
         page_size : int
-            PagedAttention page size in tokens (vLLM default 16).
+            PagedAttention block size in tokens (vLLM default 16).
         precision : str
             Numerical precision for weights and KV cache.
         efficiency : float
@@ -517,23 +579,39 @@ class ContinuousBatchingModel(ForwardModel):
         Returns
         -------
         ContinuousBatchingResult
-            Token throughput (tokens/s), max active requests, fragmentation
-            percentage, KV cache size, TTFT/ITL, and speedup vs static.
+            Paged and static concurrency and token throughput, internal
+            fragmentation of each allocator (fractions), allocated KV, TTFT/ITL,
+            and speedup vs static.
         """
+        from ...core._validation import validate_at_least, validate_range
+        from ...physics import calc_expected_paged_kv_tokens
+
+        validate_at_least(max_seq_len, 1, "max_seq_len")
+        validate_at_least(max_batch_size, 1, "max_batch_size")
+        validate_at_least(page_size, 1, "page_size")
+        validate_range(efficiency, 1e-9, 1.0, "efficiency")
+        if mean_request_tokens is None:
+            mean_request_tokens = max_seq_len
+        if not 0 < mean_request_tokens <= max_seq_len:
+            raise ValueError(
+                f"mean_request_tokens ({mean_request_tokens}) must be in (0, max_seq_len={max_seq_len}]"
+            )
+        mean_request_tokens = float(mean_request_tokens)
+
         precision, bpp = resolve_precision(precision)
         peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
 
-        # Base latency metrics (including attention O(S²) term)
+        # Worst-case TTFT: a full scheduler batch of max-length prompts (linear
+        # term plus the attention O(S²) term).
         n_layers = getattr(model, 'layers', 1) or 1
         n_heads = getattr(model, 'heads', 32) or 32
         head_dim = (getattr(model, 'hidden_dim', 4096) or 4096) // n_heads
-        linear_flops = 2 * model.parameters.to(ureg.count).magnitude * seq_len * max_batch_size
-        attention_flops = 4 * n_layers * n_heads * head_dim * seq_len**2 * max_batch_size
+        linear_flops = 2 * model.parameters.to(ureg.count).magnitude * max_seq_len * max_batch_size
+        attention_flops = 4 * n_layers * n_heads * head_dim * max_seq_len**2 * max_batch_size
         prefill_ops = (linear_flops + attention_flops) * ureg.flop
         t_prefill = (prefill_ops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
 
-        # KV budget is whatever HBM remains after the weights are pinned resident;
-        # the concurrent-request count is bounded by how many sequences fit in it.
+        # KV budget is whatever HBM remains after the weights are pinned resident.
         model_weights_bytes = model.size_in_bytes(bpp)
         max_memory_for_kv = hardware.memory.capacity - model_weights_bytes
 
@@ -542,69 +620,95 @@ class ContinuousBatchingModel(ForwardModel):
                 feasible=False,
                 constraint_trace=[f"Memory Wall: FAILED. Weights ({model_weights_bytes.to('GB'):~P}) exceed available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}."],
                 throughput_tokens_per_sec=0.0, max_active_requests=0,
-                memory_fragmentation_pct=0.0, paged_kv_cache_size=Q_("0 GB"),
-                ttft=t_prefill, itl=Q_("1000000 ms"), speedup_vs_static=1.0
+                static_throughput_tokens_per_sec=0.0, static_max_active_requests=0,
+                mean_request_tokens=mean_request_tokens,
+                paged_internal_fragmentation=0.0, static_internal_fragmentation=0.0,
+                paged_kv_cache_size=Q_("0 GB"), static_kv_cache_size=Q_("0 GB"),
+                ttft=t_prefill, itl=Q_("1000000 ms"), speedup_vs_static=1.0,
             )
 
-        # Calculate memory using PagedAttention formulas
-        from ...physics import calc_paged_kv_cache_size
-        n_heads = model.kv_heads or model.heads or 32
-        h_dim = model.hidden_dim or 4096
-        head_dim = h_dim // (model.heads or 32)
+        # KV bytes one token occupies (K and V across all layers, MLA-aware), and
+        # the KV budget expressed in tokens.
+        kv_bytes_per_token = model.get_kv_cache_size(seq_len=1, batch_size=1, precision=bpp)
+        budget_tokens = (max_memory_for_kv / kv_bytes_per_token).to_base_units().magnitude
 
-        bytes_per_seq, frag_pct = calc_paged_kv_cache_size(
-            model.layers, n_heads,
-            head_dim,
-            seq_len, batch_size=1, page_size_tokens=page_size, bytes_per_elem=bpp
+        # Static reservation: a contiguous max_seq_len slot per request, sized for
+        # the worst case whatever the request actually uses. Floors are deliberate:
+        # a partially fitting request cannot be admitted.
+        static_capacity = int(budget_tokens // max_seq_len)
+        static_requests = min(static_capacity, max_batch_size)
+        static_frag = 1.0 - mean_request_tokens / max_seq_len
+
+        # Paged allocation: a pool of fixed-size blocks, each request holding
+        # ceil(S/p) blocks, averaged over the request-length distribution.
+        paged_tokens_per_request, paged_frag = calc_expected_paged_kv_tokens(
+            mean_request_tokens, max_seq_len, page_size_tokens=page_size
         )
+        pool_blocks = int(budget_tokens // page_size)
+        # The epsilon keeps an exact fit (fixed-length requests) from flooring one
+        # request short on floating-point round-off.
+        paged_capacity = int(math.floor(pool_blocks * page_size / paged_tokens_per_request + 1e-9))
+        active_requests = min(paged_capacity, max_batch_size)
 
-        # int() truncates: a partially-fitting sequence cannot be admitted, so the
-        # memory-derived limit rounds down; the scheduler cap then takes the min.
-        max_possible_requests = int((max_memory_for_kv / bytes_per_seq).to_base_units().magnitude)
-        active_requests = min(max_possible_requests, max_batch_size)
+        def decode_step(n_requests: int) -> Quantity:
+            # Memory-bound step: weights once, plus the KV tokens requests have filled.
+            filled_kv = kv_bytes_per_token * (n_requests * mean_request_tokens)
+            return ((model_weights_bytes + filled_kv) / hardware.memory.bandwidth).to("ms")
 
+        # One step emits one token per active request, so tokens/s is the batch
+        # size over the step time.
+        t_decode_per_token = decode_step(active_requests)
+        throughput = (active_requests / t_decode_per_token).to("1/s").magnitude if active_requests > 0 else 0.0
+        static_throughput = (
+            (static_requests / decode_step(static_requests)).to("1/s").magnitude if static_requests > 0 else 0.0
+        )
+        if static_throughput > 0:
+            speedup = throughput / static_throughput
+        elif throughput > 0:
+            # Paging admits requests that a max-length reservation cannot fit at all.
+            speedup = float("inf")
+        else:
+            speedup = 1.0
+
+        weights_gb = model_weights_bytes.to("GB")
         constraint_trace = []
         if active_requests > 0:
-            constraint_trace.append(f"Memory Wall: Passed. Can fit {active_requests} concurrent requests (Weights: {model_weights_bytes.to('GB'):~P}, Max KV available: {max_memory_for_kv.to('GB'):~P}) on {hardware.name}.")
+            constraint_trace.append(f"Memory Wall: Passed. Paged allocation fits {active_requests} concurrent requests (Weights: {weights_gb:~P}, Max KV available: {max_memory_for_kv.to('GB'):~P}) on {hardware.name}.")
         else:
-            constraint_trace.append(f"Memory Wall: FAILED. Cannot fit even 1 request. Weights ({model_weights_bytes.to('GB'):~P}) exceed or leave no room for KV cache in available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
+            constraint_trace.append(f"Memory Wall: FAILED. Cannot fit even 1 request. Weights ({weights_gb:~P}) exceed or leave no room for KV cache in available {hardware.memory.capacity.to('GB'):~P} on {hardware.name}.")
 
-        total_kv_cache = bytes_per_seq * active_requests
-
-        # Throughput: each decode step streams weights once (shared by the whole
-        # batch) plus every active sequence's KV — the memory-bound step time.
-        t_decode_per_token = ((model_weights_bytes + total_kv_cache) / hardware.memory.bandwidth).to("ms")
-
-        if active_requests == 0 or t_decode_per_token.magnitude == 0:
-            # Degenerate cases (nothing fits, or zero step time) — report zero
-            # throughput rather than dividing by zero below.
-            throughput = 0.0
-            speedup = 1.0
+        if mean_request_tokens >= max_seq_len:
+            lengths = f"every request fills max_seq_len={max_seq_len}"
         else:
-            # One step emits one token per active request, so tokens/s is the
-            # batch size over the step time.
-            throughput = (active_requests / t_decode_per_token).to("1/s").magnitude
-            # Static batching comparison:
-            # With contiguous KV allocation, memory fragmentation limits the max batch.
-            # Kwon et al. (2023) measured 20-40% external fragmentation in static allocation.
-            # We model static batching as achieving ~60% of continuous batching's batch size
-            # due to fragmentation waste, with no internal fragmentation savings.
-            static_frag_factor = 0.6  # effective batch = 60% of continuous (Kwon et al. 2023)
-            static_effective_batch = max(1, int(active_requests * static_frag_factor))
-            static_t_decode = ((model_weights_bytes + (bytes_per_seq * static_effective_batch)) / hardware.memory.bandwidth).to("ms")
-            static_throughput = (static_effective_batch / static_t_decode).to("1/s").magnitude
-            speedup = throughput / static_throughput if static_throughput > 0 else 1.0
+            lengths = f"mean {mean_request_tokens:,.0f} tokens, exponential up to max_seq_len={max_seq_len}"
+        speedup_str = "unbounded (static fits no request)" if math.isinf(speedup) else f"{speedup:.2f}x"
+        constraint_trace.append(
+            f"Batching Wall: request lengths {lengths}. Static max-length reservation fits "
+            f"{static_requests} requests ({static_frag:.1%} of each reservation unused); "
+            f"{page_size}-token pages fit {active_requests} ({paged_frag:.1%} unused in last blocks); "
+            f"decode throughput vs static {speedup_str} (Kwon et al., 2023)."
+        )
+        if 0 < active_requests == static_requests == max_batch_size:
+            constraint_trace.append(
+                f"Batching Wall: max_batch_size={max_batch_size} binds both allocators, "
+                "so allocation policy does not change throughput."
+            )
 
         return ContinuousBatchingResult(
             feasible=active_requests > 0,
             constraint_trace=constraint_trace,
             throughput_tokens_per_sec=throughput,
             max_active_requests=active_requests,
-            memory_fragmentation_pct=frag_pct,
-            paged_kv_cache_size=total_kv_cache.to("GB"),
+            static_throughput_tokens_per_sec=static_throughput,
+            static_max_active_requests=static_requests,
+            mean_request_tokens=mean_request_tokens,
+            paged_internal_fragmentation=paged_frag,
+            static_internal_fragmentation=static_frag,
+            paged_kv_cache_size=(kv_bytes_per_token * (active_requests * paged_tokens_per_request)).to("GB"),
+            static_kv_cache_size=(kv_bytes_per_token * (static_requests * max_seq_len)).to("GB"),
             ttft=t_prefill,
             itl=t_decode_per_token,
-            speedup_vs_static=speedup
+            speedup_vs_static=speedup,
         )
 
 class WeightStreamingModel(ForwardModel):

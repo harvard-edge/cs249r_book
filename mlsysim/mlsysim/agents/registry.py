@@ -66,7 +66,7 @@ class InteractiveAgents(Registry):
         sandbox_startup_latency=0.0 * ureg.ms,
         reference_model=Models.Language.Llama3_70B,
         serving_node=Systems.Nodes.DGX_H100,
-        metadata=Metadata(provenance=pc.DEPLOYMENT_ENVELOPES),
+        metadata=Metadata(provenance=pc.STREAMING_VOICE_AGENT_PROFILE),
     )
 
 

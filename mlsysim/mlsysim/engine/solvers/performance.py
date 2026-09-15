@@ -333,8 +333,12 @@ class SensitivitySolver(BaseSolver):
         Returns
         -------
         SensitivityResult
-            Per-parameter sensitivities, the binding constraint name, and the
-            baseline latency.
+            Per-parameter sensitivities, the binding constraint name, the
+            baseline latency, and ``feasible``. If the baseline does not fit
+            in memory, ``feasible`` is False, ``binding_constraint`` is
+            ``"memory_capacity"``, and ``constraint_trace`` carries the Memory
+            Wall failure: the offload path pins latency, so the sensitivities
+            (typically all zero) do not rank hardware levers.
         """
         baseline = Engine.solve(model, hardware, precision=precision, efficiency=efficiency)
         t_base = baseline.latency.to("ms").magnitude
@@ -366,11 +370,30 @@ class SensitivitySolver(BaseSolver):
         t_mem = Engine.solve(model, hw_mem, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_capacity"] = (t_mem - t_base) / t_base if t_base > 0 else 0.0
 
-        # The binding constraint is the parameter whose upgrade moves latency
-        # most (abs() because improvements show up as negative sensitivities).
-        binding = max(sensitivities, key=lambda k: abs(sensitivities[k]))
+        if baseline.feasible:
+            # The binding constraint is the parameter whose upgrade moves latency
+            # most (abs() because improvements show up as negative sensitivities).
+            binding = max(sensitivities, key=lambda k: abs(sensitivities[k]))
+            trace = [
+                f"Sensitivity: {binding} is binding "
+                f"({sensitivities[binding]:+.4f} latency change per {perturbation_pct:g}% upgrade)."
+            ]
+        else:
+            # Infeasible baseline (fixed 2026-09-15): the model spills out of
+            # HBM, Engine.solve prices every byte at the offload bandwidth, and
+            # a small perturbation of FLOPs, HBM bandwidth, or capacity leaves
+            # latency unchanged. max() over those all-zero sensitivities used
+            # to name "peak_flops" as binding. The real constraint is capacity.
+            binding = "memory_capacity"
+            trace = list(baseline.constraint_trace or []) + [
+                "Sensitivity: infeasible baseline. The model does not fit in memory, so "
+                "memory_capacity is binding and the perturbation sensitivities are not a "
+                "ranking of hardware levers until the configuration fits."
+            ]
 
         return SensitivityResult(
+            constraint_trace=trace,
+            feasible=baseline.feasible,
             sensitivities=sensitivities,
             binding_constraint=binding,
             baseline_latency=baseline.latency,

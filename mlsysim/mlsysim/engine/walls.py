@@ -132,9 +132,9 @@ BATCHING = Wall(
     name="Batching",
     domain=Domain.NODE,
     resolver_name="ContinuousBatchingModel",
-    constraint="Static batching wastes memory through KV-cache fragmentation.",
-    equation="KV_paged = 2 × L × H × D × ⌈S/p⌉ × p × B × b",
-    sources=["Kwon et al. (2023), vLLM / PagedAttention"],
+    constraint="Static KV reservation pays for the maximum sequence length on every request; paged allocation pays only for the blocks each request fills.",
+    equation="N_static = ⌊M_KV / (k × S_max)⌋; N_paged = ⌊M_KV / (k × p × E[⌈S/p⌉])⌋",
+    sources=["Kwon et al. (2023), vLLM / PagedAttention (SOSP '23), Sec. 3.1, Sec. 4.2, Fig. 2"],
 )
 
 STREAMING = Wall(
@@ -221,7 +221,7 @@ FIDELITY = Wall(
     domain=Domain.ALGORITHM,
     resolver_name="CompressionModel",
     constraint="Compression trades model fidelity for efficiency.",
-    equation="r = 32/b (quantization); r = 1/(1-s) (pruning)",
+    equation="r = b_base/b (quantization; configurable b_base, default 32 for FP32, 16 for FP16/BF16 models); r = 1/(1-s) (pruning)",
     sources=[
         "Han et al. (2015), Deep Compression",
         "Gholami et al. (2021), Quantization Survey",

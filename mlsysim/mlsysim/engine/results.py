@@ -171,12 +171,23 @@ class MoERoutingResult(SolverResult):
 
 
 class ContinuousBatchingResult(SolverResult):
-    """Result from ContinuousBatchingModel: production LLM serving with PagedAttention."""
+    """Result from ContinuousBatchingModel: static max-length KV reservation vs PagedAttention.
+
+    Unprefixed throughput, request, TTFT, and ITL fields describe the paged
+    allocator; ``static_*`` fields describe max-length reservation on the same
+    KV budget. Fragmentation fields are fractions in [0, 1] of allocated KV
+    tokens left unused inside each request's allocation.
+    """
     feasible: bool
     throughput_tokens_per_sec: float
     max_active_requests: int
-    memory_fragmentation_pct: float
+    static_throughput_tokens_per_sec: float
+    static_max_active_requests: int
+    mean_request_tokens: float
+    paged_internal_fragmentation: float
+    static_internal_fragmentation: float
     paged_kv_cache_size: Quantity
+    static_kv_cache_size: Quantity
     ttft: Quantity
     itl: Quantity
     speedup_vs_static: float
@@ -282,7 +293,12 @@ class ScalingResult(SolverResult):
 
 
 class CompressionResult(SolverResult):
-    """Result from CompressionModel: compression trade-offs."""
+    """Result from CompressionModel: compression trade-offs.
+
+    ``original_size_gb``, ``compression_ratio``, ``memory_savings_pct`` and
+    ``inference_speedup`` are all relative to ``baseline_precision``.
+    """
+    baseline_precision: str
     original_size_gb: Quantity
     compressed_size_gb: Quantity
     compression_ratio: float
@@ -298,6 +314,7 @@ class CompressionCandidate(SolverResult):
     target_bitwidth: Optional[int] = None
     sparsity: float = 0.0
     sparsity_type: str = "unstructured"
+    baseline_precision: str
     original_size_gb: Quantity
     compressed_size_gb: Quantity
     compression_ratio: float
@@ -356,7 +373,14 @@ class InferenceScalingResult(SolverResult):
 
 
 class SensitivityResult(SolverResult):
-    """Result from SensitivitySolver: binding constraint identification."""
+    """Result from SensitivitySolver: binding constraint identification.
+
+    ``feasible`` mirrors the baseline solve. When it is False the model does
+    not fit in memory, ``binding_constraint`` is ``"memory_capacity"``, and
+    ``constraint_trace`` explains why the perturbation sensitivities are not
+    a ranking of hardware levers.
+    """
+    feasible: bool
     sensitivities: Dict[str, float]
     binding_constraint: str
     baseline_latency: Quantity
