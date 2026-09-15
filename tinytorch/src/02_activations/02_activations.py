@@ -249,7 +249,7 @@ class SigmoidFunction(Function):
         (exp(1000) is inf in float32). The unit test runs your code with NumPy
         set to raise on overflow, so the naive form fails it
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="core"
         # Both branches use the same bounded exponential, so neither overflows.
         z = np.exp(-np.abs(x))
         result = np.where(x >= 0, 1.0 / (1.0 + z), z / (1.0 + z))
@@ -514,7 +514,7 @@ class TanhFunction(Function):
 
         HINT: NumPy provides np.tanh function
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Apply tanh using NumPy
         result = np.tanh(x)
         return result
@@ -661,8 +661,13 @@ class GELUFunction(Function):
 
         HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
-        ### BEGIN SOLUTION
-        return x * SigmoidFunction().forward(1.702 * x)
+        ### BEGIN SOLUTION role="scaffold"
+        sig = SigmoidFunction().forward(1.702 * x)
+        with np.errstate(invalid="ignore"):
+            out = x * sig
+        if np.any(np.isneginf(x)):
+            out = np.where(np.isneginf(x), 0.0, out)
+        return out
         ### END SOLUTION
 
 
@@ -799,16 +804,18 @@ class SoftmaxFunction(Function):
         ### BEGIN SOLUTION
         # Numerical stability: subtract max to prevent overflow
         x_max = np.max(x, axis=self.dim, keepdims=True)
-        x_shifted = x - x_max
+        safe_max = np.where(np.isneginf(x_max), 0.0, x_max)
+        x_shifted = x - safe_max
 
         # Compute exponentials
         exp_values = np.exp(x_shifted)
 
         # Sum along dimension
         exp_sum = np.sum(exp_values, axis=self.dim, keepdims=True)
+        safe_sum = np.where(exp_sum == 0, 1.0, exp_sum)
 
         # Normalize to get probabilities
-        result = exp_values / exp_sum
+        result = exp_values / safe_sum
         return result
         ### END SOLUTION
 

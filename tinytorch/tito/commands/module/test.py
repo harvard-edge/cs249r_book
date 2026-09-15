@@ -20,6 +20,7 @@ When a student runs `tito module test 05`, we want them to understand:
 Each phase builds confidence and understanding.
 """
 
+import os
 import subprocess
 import sys
 from argparse import ArgumentParser, Namespace
@@ -98,20 +99,41 @@ class ModuleTestCommand(BaseCommand):
         triggered by the if __name__ == "__main__" block.
         """
         console = self.console
-        src_dir = self.config.project_root / "src"
+        project_root = self.config.project_root
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_path = project_root / "modules" / module_name / f"{short_name}.ipynb"
+        src_dir = project_root / "src"
         module_file = src_dir / module_name / f"{module_name}.py"
 
-        if not module_file.exists():
-            return False, f"Module file not found: {module_file}"
+        env = os.environ.copy()
+        pythonpath = env.get("PYTHONPATH", "")
+        if pythonpath:
+            env["PYTHONPATH"] = f"{project_root}{os.pathsep}{pythonpath}"
+        else:
+            env["PYTHONPATH"] = str(project_root)
+
+        if notebook_path.exists():
+            runner = (
+                "import json, sys; from pathlib import Path; "
+                "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
+                "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
+                "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
+            )
+            cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
+        elif module_file.exists():
+            cmd = [sys.executable, str(module_file.absolute())]
+        else:
+            return False, f"Module file not found: {notebook_path} or {module_file}"
 
         try:
             result = subprocess.run(
-                [sys.executable, str(module_file)],
+                cmd,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                cwd=self.config.project_root,
+                cwd=project_root,
+                env=env,
                 timeout=300,
             )
 

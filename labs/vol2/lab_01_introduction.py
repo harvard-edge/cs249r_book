@@ -479,7 +479,7 @@ def _(ACADEMIC_LAB_CSS, COLORS, LAB_CSS, mo, v2_01_lens, v2_01_profile, v2_01_tr
         ACADEMIC_LAB_CSS,
         mo.Html(f"""
         <div class="mlsysbook-lab-header" style="--mlsysbook-accent:{COLORS['BlueLine']};">
-            <div class="mlsysbook-meta">Machine Learning Systems at Scale - Volume II - Lab 01</div>
+            <div class="mlsysbook-meta">Scaling Machine Learning Systems - Volume II - Lab 01</div>
             <h1>Scale Changes the Unit</h1>
             <p>
                 Work through one shared concept sequence: the fleet is the unit,

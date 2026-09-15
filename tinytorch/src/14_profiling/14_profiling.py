@@ -326,12 +326,12 @@ def _count_layer_parameters(layer) -> int:
     Returns:
         int: Number of learnable parameters (0 for parameterless layers)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     params = 0
-    if hasattr(layer, 'weight'):
+    if hasattr(layer, 'weight') and layer.weight is not None:
         params += layer.weight.data.size
-        if hasattr(layer, 'bias') and layer.bias is not None:
-            params += layer.bias.data.size
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        params += layer.bias.data.size
     return params
     ### END SOLUTION
 
@@ -439,7 +439,7 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
     Returns:
         int: FLOP count for one forward pass
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if not (hasattr(model, 'kernel_size') and hasattr(model, 'in_channels') and hasattr(model, 'out_channels')):
         return 0
 
@@ -450,9 +450,13 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
 
     input_h, input_w = input_shape[-2], input_shape[-1]
     stride = model.stride if hasattr(model, 'stride') else 1
+    stride_h = stride if isinstance(stride, int) else stride[0]
+    stride_w = stride if isinstance(stride, int) else stride[1]
     padding = model.padding if hasattr(model, 'padding') else 0
-    output_h = (input_h + 2 * padding - kernel_h) // stride + 1
-    output_w = (input_w + 2 * padding - kernel_w) // stride + 1
+    pad_h = padding if isinstance(padding, int) else padding[0]
+    pad_w = padding if isinstance(padding, int) else padding[1]
+    output_h = (input_h + 2 * pad_h - kernel_h) // stride_h + 1
+    output_w = (input_w + 2 * pad_w - kernel_w) // stride_w + 1
 
     return output_h * output_w * kernel_h * kernel_w * in_channels * out_channels * 2
     ### END SOLUTION
@@ -777,7 +781,7 @@ def _calculate_memory_efficiency(useful_memory_mb: float, peak_memory_mb: float)
     Returns:
         float: Efficiency in [0.0, 1.0]
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     ratio = useful_memory_mb / max(peak_memory_mb, 0.001)
     return min(ratio, 1.0)
     ### END SOLUTION
@@ -881,7 +885,7 @@ def _compute_derived_metrics(flops: int, latency_ms: float,
     Returns:
         dict with gflops_per_second, memory_bandwidth_mbs, computational_efficiency
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     latency_seconds = latency_ms / 1000.0
     gflops_per_second = (flops / 1e9) / max(latency_seconds, 1e-6)
     memory_bandwidth = peak_memory_mb / max(latency_seconds, 1e-6)
@@ -986,7 +990,7 @@ def _estimate_backward_costs(forward_flops: int,
     Returns:
         dict with backward_flops and backward_latency_ms
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     return {
         'backward_flops': forward_flops * 2,
         'backward_latency_ms': forward_latency_ms * 2
@@ -1075,7 +1079,7 @@ def _estimate_optimizer_memory(gradient_memory_mb: float) -> Dict[str, float]:
     Returns:
         dict mapping optimizer name to its extra memory in MB
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     return {
         'sgd': 0,
         'adam': gradient_memory_mb * 2,
@@ -1176,7 +1180,7 @@ class Profiler:
         - Use defaultdict(int) for operation counters
         - measurements dict will store timing results
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.measurements = {}
         self.operation_counts = defaultdict(int)
         self.memory_tracker = None
@@ -1214,7 +1218,7 @@ class Profiler:
         - Use parameter.data.size for tensor element count
         - Handle models with and without parameters() method
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if hasattr(model, 'parameters'):
             return sum(p.data.size for p in model.parameters())
         if hasattr(model, 'weight'):
@@ -1242,7 +1246,7 @@ class Profiler:
         Returns:
             int: Total FLOP count across all layers
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         total_flops = 0
         current_shape = input_shape
         for layer in model.layers:
@@ -1284,7 +1288,7 @@ class Profiler:
 
         HINT: Use model.__class__.__name__ to identify layer type
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         model_name = model.__class__.__name__
 
         if model_name == 'Linear':
@@ -1339,7 +1343,7 @@ class Profiler:
         Returns:
             float: Parameter memory in megabytes
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         param_count = self.count_parameters(model)
         return (param_count * BYTES_PER_FLOAT32) / MB_TO_BYTES
         ### END SOLUTION
@@ -1379,7 +1383,7 @@ class Profiler:
 
         HINT: tracemalloc.start() / get_traced_memory() / stop() lifecycle
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Own the tracing session only if the caller has not already started it.
         owns_trace = not tracemalloc.is_tracing()
         if owns_trace:
@@ -1436,7 +1440,7 @@ class Profiler:
         - Use time.perf_counter() for high precision
         - Use median instead of mean for robustness against outliers
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if iterations < 1 or warmup < 0:
             raise ValueError("iterations must be positive and warmup nonnegative")
         # Warmup runs to stabilize performance
@@ -1483,7 +1487,7 @@ class Profiler:
         - Create dummy input for latency measurement
         - Include layer type information in profile
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Create dummy input for latency measurement
         dummy_input = self._dummy_input(layer, input_shape)
 
@@ -1530,7 +1534,7 @@ class Profiler:
 
         HINT: Compose helper outputs with ** unpacking into return dict
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         param_count = self.count_parameters(model)
         flops = self.count_flops(model, input_tensor.shape)
         memory_stats = self.measure_memory(model, input_tensor.shape)
@@ -1580,7 +1584,7 @@ class Profiler:
 
         HINT: Gradient memory equals parameter memory (one gradient per parameter)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         fwd = self.profile_forward_pass(model, input_tensor)
         bwd = _estimate_backward_costs(fwd['flops'], fwd['latency_ms'])
 

@@ -450,7 +450,7 @@ def _reduce_broadcast_grad(grad, original_shape):
 
     HINT: Two separate loops — one for leading dims, one for singleton dims.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Step 1: Remove leading dimensions that weren't in original tensor
     # Example: grad (32, 128) with original (128,) → sum over axis 0
     while grad.ndim > len(original_shape):
@@ -459,7 +459,7 @@ def _reduce_broadcast_grad(grad, original_shape):
     # Step 2: Collapse dimensions where original had size 1
     # Example: grad (10, 5) with original (10, 1) → sum over axis 1 with keepdims
     for i in range(len(original_shape)):
-        if original_shape[i] == 1 and grad.shape[i] > 1:
+        if i < grad.ndim and original_shape[i] == 1 and grad.shape[i] > 1:
             grad = grad.sum(axis=i, keepdims=True)
     
     return grad
@@ -612,7 +612,7 @@ def backward(self, grad_output):
     - Check isinstance(tensor, Tensor) and tensor.requires_grad before computing
     - Return None for inputs that don't require gradients
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     a, b = self.inputs
     grad_a = grad_b = None
 
@@ -710,7 +710,7 @@ def backward(self, grad_output):
     - Use _reduce_broadcast_grad() to handle broadcasting correctly
     - b is always a Tensor here (Tensor.__mul__ wrapped any scalar), so b.data is safe
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     a, b = self.inputs
     grad_a = grad_b = None
 
@@ -786,7 +786,7 @@ def backward(self, grad_output):
     - Use _reduce_broadcast_grad() to handle broadcasting correctly
     - The negative sign is crucial for correct gradient flow
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     a, b = self.inputs
     grad_a = grad_b = None
 
@@ -862,7 +862,7 @@ def backward(self, grad_output):
     - b is always a Tensor here (Tensor.__truediv__ wrapped any scalar), so b.data is safe
     - b² means b.data ** 2
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     a, b = self.inputs
     grad_a = grad_b = None
 
@@ -1143,7 +1143,7 @@ def backward(self, grad_output):
     - Apply np.transpose(grad_output, inverse_axes)
     - Return as single-element tuple: (grad_x,)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     x, = self.inputs
     grad_x = None
 
@@ -1246,7 +1246,7 @@ def backward(self, grad_output):
       where plain assignment would silently keep only the last value
     - Return as single-element tuple: (grad_input,)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
     grad_input = None
 
@@ -1335,7 +1335,7 @@ def backward(self, grad_output):
     - Use .reshape() method on grad_output numpy array
     - Return as single-element tuple: (grad_x,)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     x, = self.inputs
     grad_x = None
 
@@ -1418,7 +1418,7 @@ def backward(self, grad_output):
     - Multiply ones by grad_output (broadcasting handles scalar/tensor)
     - Return as single-element tuple: (grad_result,)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1467,7 +1467,7 @@ def backward(self, grad_output):
     2. count = tensor.data.size // self.output.data.size (elements averaged per output)
     3. Expand grad_output back to tensor.data.shape with _expand_reduced, divide by count
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1491,7 +1491,7 @@ def backward(self, grad_output):
     2. winners = (tensor.data == expanded output)
     3. Return the expanded grad_output times winners, divided by the number of ties per output
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if not (isinstance(tensor, Tensor) and tensor.requires_grad):
@@ -1518,7 +1518,7 @@ def backward(self, grad_output):
 
     TODO: Return grad_output unchanged (as a one-element tuple).
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1539,7 +1539,7 @@ def backward(self, grad_output):
 
     HINT: grad_output * ~self.mask
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1928,7 +1928,7 @@ def backward(self, grad_output):
     - Output is saved as self.output by apply(), which this module completes further down
     - This avoids recomputing sigmoid during backward pass
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -1996,7 +1996,7 @@ def backward(self, grad_output):
     - Output is saved as self.output by apply(), which this module completes further down
     - This avoids recomputing tanh during backward pass
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -2081,7 +2081,7 @@ def backward(self, grad_output):
     - Use keepdims=True in np.sum to maintain dimensions for broadcasting
     - Vectorized formula: softmax * (grad_output - sum(grad_output * softmax))
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -2153,7 +2153,7 @@ def backward(self, grad_output):
     - SigmoidFunction().forward(1.702 * x) gives a stable σ without rewriting it
     - The two terms are "what passes" and "how the gate moves"; both carry gradient
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:
@@ -2374,7 +2374,7 @@ def backward(self, grad_output):
     - Clip predictions to avoid log(0) instability
     - Divide by N for mean loss
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     predictions, targets = self.inputs
 
     if isinstance(predictions, Tensor) and predictions.requires_grad:
@@ -2551,7 +2551,7 @@ def _one_hot_encode(targets, batch_size, num_classes):
 
     HINT: Use advanced indexing with np.arange for the row indices.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     one_hot = np.zeros((batch_size, num_classes), dtype=np.float32)
     one_hot[np.arange(batch_size), targets] = 1.0
     return one_hot
@@ -2662,7 +2662,7 @@ def backward(self, grad_output):
     - Use _stable_softmax() for numerically stable softmax
     - Use _one_hot_encode() for target encoding
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     logits, targets = self.inputs
 
     if isinstance(logits, Tensor) and logits.requires_grad:
@@ -2701,7 +2701,7 @@ def backward(self, grad_output):
     2. total = np.sum(grad_output, axis=self.dim, keepdims=True)
     3. Return (grad_output - softmax * total,)
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     tensor, = self.inputs
 
     if isinstance(tensor, Tensor) and tensor.requires_grad:

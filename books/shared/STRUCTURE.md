@@ -65,7 +65,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | backmatter | `backmatter/glossary/glossary.qmd` |
 |  | backmatter | `backmatter/references.qmd` |
 
-## Volume II: Machine Learning Systems at Scale (`vol2`)
+## Volume II: Scaling Machine Learning Systems (`vol2`)
 
 17 chapters. Reading order:
 

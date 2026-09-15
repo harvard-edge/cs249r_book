@@ -319,7 +319,7 @@ def _compute_attention_scores(Q: Tensor, K: Tensor) -> Tensor:
 
     HINT: Use K.transpose(-2, -1) to swap the last two dimensions
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     K_t = K.transpose(-2, -1)
     return Q.matmul(K_t)
     ### END SOLUTION
@@ -384,7 +384,7 @@ def _scale_scores(scores: Tensor, d_k: int) -> Tensor:
 
     HINT: Use math.sqrt() for the square root
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     scale_factor = 1.0 / math.sqrt(d_k)
     return scores * scale_factor
     ### END SOLUTION
@@ -450,7 +450,7 @@ def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
 
     HINT: mask=0 means "block this position", mask=1 means "allow"
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if np.any((mask.data != 0) & (mask.data != 1)):
         raise ValueError("Attention mask must contain only 0 (blocked) or 1 (allowed)")
     if np.any(np.sum(mask.data, axis=-1) == 0):
@@ -745,7 +745,7 @@ class MultiHeadAttention:
         - Need 4 Linear layers: q_proj, k_proj, v_proj, out_proj
         - Each projection maps embed_dim → embed_dim
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not isinstance(embed_dim, (int, np.integer)) or embed_dim <= 0:
             raise ValueError("embed_dim must be a positive integer")
         if not isinstance(num_heads, (int, np.integer)) or num_heads <= 0:
@@ -788,7 +788,7 @@ class MultiHeadAttention:
 
         HINT: reshape(batch, seq, heads, head_dim) then transpose(1, 2)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         x = x.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
         return x.transpose(1, 2)
         ### END SOLUTION
@@ -810,7 +810,7 @@ class MultiHeadAttention:
 
         HINT: transpose(1, 2) then reshape(batch, seq, embed_dim)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         x = x.transpose(1, 2)
         return x.reshape(batch_size, seq_len, self.embed_dim)
         ### END SOLUTION
@@ -916,7 +916,7 @@ class MultiHeadAttention:
         - Use extend() to add all parameters from each layer to the list
         - Total should be 8 tensors: 4 layers × 2 parameters each
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         params = []
         params.extend(self.q_proj.parameters())
         params.extend(self.k_proj.parameters())

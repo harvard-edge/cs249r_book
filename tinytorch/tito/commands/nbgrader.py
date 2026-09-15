@@ -7,8 +7,11 @@ staging; nbgrader owns release, collection, autograding, feedback, and export.
 """
 
 import json
+import os
 import re
+import shutil
 import subprocess
+import sys
 from argparse import ArgumentParser, Namespace, SUPPRESS
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -84,7 +87,7 @@ class NBGraderCommand(BaseCommand):
             "--tier",
             choices=RELEASE_TIERS,
             default="student",
-            help=SUPPRESS,
+            help="Scaffolding tier: 'student' (default, guided archetypes), 'challenge' (unassisted), 'instructor' (full solutions)",
         )
 
         release_parser = subparsers.add_parser(
@@ -730,16 +733,25 @@ class NBGraderCommand(BaseCommand):
     def _analytics(self, args: Namespace) -> int:
         """Show simple local analytics for an assignment."""
         assignment = self._resolve_assignment_name(args.assignment) or args.assignment
-        submitted = self.submitted_dir / assignment
-        autograded = self.autograded_dir / assignment
-
         self.console.print(f"Analytics for assignment: {assignment}")
-        if not submitted.exists():
+
+        if not self.submitted_dir.exists():
+            self.console.print(f"[red]No submissions directory found[/red]")
+            return 1
+
+        submissions = [
+            d for d in self.submitted_dir.iterdir()
+            if d.is_dir() and (d / assignment).exists()
+        ]
+        if not submissions:
             self.console.print(f"[red]No submissions found for {assignment}[/red]")
             return 1
 
-        submissions = sorted(d for d in submitted.iterdir() if d.is_dir())
-        graded = sorted(d for d in autograded.iterdir() if d.is_dir()) if autograded.exists() else []
+        graded = [
+            d for d in self.autograded_dir.iterdir()
+            if d.is_dir() and (d / assignment).exists()
+        ] if self.autograded_dir.exists() else []
+
         self.console.print(f"Total submissions: {len(submissions)}")
         self.console.print(f"Graded submissions: {len(graded)}")
         self.console.print(f"Pending submissions: {max(0, len(submissions) - len(graded))}")
@@ -769,16 +781,28 @@ class NBGraderCommand(BaseCommand):
 
     def _run_external(self, cmd: List[str], *, capture_output: bool = False) -> subprocess.CompletedProcess:
         """Run an external command from the TinyTorch project root."""
+        exec_cmd = list(cmd)
+        if exec_cmd and not shutil.which(exec_cmd[0]):
+            if exec_cmd[0] in {"nbgrader", "jupytext"}:
+                exec_cmd = [sys.executable, "-m", exec_cmd[0]] + exec_cmd[1:]
+
+        env = dict(os.environ)
+        py_bin_dir = str(Path(sys.executable).resolve().parent)
+        current_path = env.get("PATH", "")
+        if py_bin_dir not in current_path:
+            env["PATH"] = f"{py_bin_dir}:{current_path}"
+
         try:
             return subprocess.run(
-                cmd,
+                exec_cmd,
                 cwd=self.project_root,
                 check=False,
                 capture_output=capture_output,
                 text=True, encoding="utf-8", errors="replace",
+                env=env,
             )
         except FileNotFoundError as exc:
-            return subprocess.CompletedProcess(cmd, 127, "", str(exc))
+            return subprocess.CompletedProcess(exec_cmd, 127, "", str(exc))
 
     def _show_available_modules(self) -> None:
         modules = self._get_module_directories()

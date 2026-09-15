@@ -623,7 +623,7 @@ class Conv2d:
 
         HINT: Convert kernel_size to tuple if it's an integer
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.in_channels = in_channels
         self.out_channels = out_channels
 
@@ -676,7 +676,7 @@ class Conv2d:
         HINT: The formula is the same for height and width, just with
         different input dimensions.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
         out_height = (in_h + 2 * self.padding - kernel_h) // self.stride + 1
         out_width = (in_w + 2 * self.padding - kernel_w) // self.stride + 1
@@ -703,7 +703,7 @@ class Conv2d:
         HINT: np.pad takes a tuple of (before, after) pairs per dimension.
         Use (0,0) for batch and channel dims, (padding, padding) for spatial.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if self.padding > 0:
             return np.pad(x_data,
                          ((0, 0), (0, 0),
@@ -1342,7 +1342,7 @@ class MaxPool2d:
 
         HINT: Default stride equals kernel_size for non-overlapping windows
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Handle kernel_size as int or tuple
         if isinstance(kernel_size, int):
             self.kernel_size = (kernel_size, kernel_size)
@@ -1376,7 +1376,7 @@ class MaxPool2d:
 
         HINT: This formula is identical to convolution's output shape formula.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
         out_height = (in_h + 2 * self.padding - kernel_h) // self.stride + 1
         out_width = (in_w + 2 * self.padding - kernel_w) // self.stride + 1
@@ -1409,7 +1409,7 @@ class MaxPool2d:
         HINT: Initialize max_val to -np.inf so any real value is larger.
         The input position is (oh * stride + k_h, ow * stride + k_w).
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
         output = np.zeros((batch_size, channels, out_h, out_w))
 
@@ -1450,7 +1450,7 @@ class MaxPool2d:
         >>> out = pool(x)
         >>> print(out.shape)  # Should be (1, 3, 4, 4)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Step 1: Validate input
         validate_4d_input(x, "MaxPool2d")
 
@@ -1737,7 +1737,7 @@ class AvgPool2d:
         2. Set stride to kernel_size if not provided
         3. Store padding parameter
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Handle kernel_size as int or tuple
         if isinstance(kernel_size, int):
             self.kernel_size = (kernel_size, kernel_size)
@@ -1771,7 +1771,7 @@ class AvgPool2d:
 
         HINT: This formula is identical to MaxPool2d and Conv2d output shapes.
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
         out_height = (in_h + 2 * self.padding - kernel_h) // self.stride + 1
         out_width = (in_w + 2 * self.padding - kernel_w) // self.stride + 1
@@ -1805,7 +1805,7 @@ class AvgPool2d:
         HINT: Unlike max pooling, you accumulate a sum and then divide.
         The input position is (oh * stride + k_h, ow * stride + k_w).
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
         output = np.zeros((batch_size, channels, out_h, out_w))
 
@@ -1846,7 +1846,7 @@ class AvgPool2d:
         >>> out = pool(x)
         >>> print(out.shape)  # Should be (1, 3, 4, 4)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Step 1: Validate input
         validate_4d_input(x, "AvgPool2d")
 
@@ -2174,7 +2174,7 @@ class BatchNorm2d:
         >>> print(bn.gamma.shape)  # (64,)
         >>> print(bn.training)     # True
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
@@ -2219,7 +2219,7 @@ class BatchNorm2d:
         - Use len(x.shape) to check dimensionality
         - Use ❌ What → 💡 Why → 🔧 Fix error message format
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if len(x.shape) != 4:
             if len(x.shape) == 3:
                 raise ValueError(
@@ -2269,7 +2269,7 @@ class BatchNorm2d:
         - np.mean(x.data, axis=(0, 2, 3)) gives per-channel mean
         - Running update: running = (1 - momentum) * running + momentum * batch
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if self.training:
             # Compute batch statistics per channel
             # Mean over batch and spatial dimensions: axes (0, 2, 3)
@@ -2311,7 +2311,7 @@ class BatchNorm2d:
           advertise no gradients, the optimizer would update nothing, and the
           network would silently not learn
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self._validate_input(x)
 
         batch_size, channels, height, width = x.shape
@@ -2864,7 +2864,7 @@ class SimpleCNN:
         Final feature size: 32 channels × 8 × 8 = 2048 features
         Linear(in_features, out_features) maps those 2048 features to num_classes logits
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Convolutional layers
         self.conv1 = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
         self.pool1 = MaxPool2d(kernel_size=2, stride=2)
@@ -2900,7 +2900,7 @@ class SimpleCNN:
         >>> logits = model(Tensor(rng.standard_normal((2, 3, 32, 32))))
         >>> print(logits.shape)  # (2, 10)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # First conv block
         x = self.conv1(x)
         x = self.relu(x)  # ReLU activation

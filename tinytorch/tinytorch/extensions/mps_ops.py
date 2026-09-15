@@ -17,6 +17,7 @@
 """Apple Silicon Metal / MPS Acceleration Bridge for TinyTorch.
 
 Demonstrates unified memory zero-copy dispatch on Apple M-series chips.
+This is a standalone, optional accelerator extension (not generated from src/).
 """
 
 import numpy as np

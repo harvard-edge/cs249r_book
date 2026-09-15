@@ -713,6 +713,11 @@ def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
     - Formula: dequantized = (quantized - zero_point) * scale
     """
     ### BEGIN SOLUTION
+    if scale <= 0 or not np.isfinite(scale):
+        raise ValueError(f"Scale must be positive and finite, got {scale}")
+    if not (-128 <= zero_point <= 127):
+        raise ValueError(f"Zero point must be in [-128, 127], got {zero_point}")
+
     # Apply inverse quantization formula
     # This is the correct inverse of: quantized = (value / scale) + zero_point
     # Therefore: value = (quantized - zero_point) * scale
@@ -902,7 +907,7 @@ class QuantizedLinear:
         - Store all quantization parameters (scale, zero_point) for later dequantization
         - Initialize input_scale and input_zero_point to None (set during calibration)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.original_layer = linear_layer
 
         # Quantize weights
@@ -944,7 +949,7 @@ class QuantizedLinear:
         - Use the same scale/zero_point formula as quantize_int8()
         - Handle edge case where all inputs have the same value (constant tensor)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="core"
         # Collect all input values
         all_values = []
         for inp in sample_inputs:
@@ -998,13 +1003,15 @@ class QuantizedLinear:
 
         NOTE: Production quantization uses INT8 GEMM libraries for speed
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="core"
         # For educational purposes, we dequantize and compute in FP32
         # Production systems use specialized INT8 GEMM operations
 
         # Round the input onto the calibrated grid and back, so the activations
         # carry the same rounding (and saturation) they would on INT8 hardware
         if self.input_scale is not None:
+            if not np.all(np.isfinite(x.data)):
+                raise ValueError("QuantizedLinear forward requires finite input values")
             q_x = np.clip(np.round(x.data / self.input_scale + self.input_zero_point),
                           INT8_MIN_VALUE, INT8_MAX_VALUE)
             x = Tensor((q_x - self.input_zero_point) * self.input_scale)
@@ -1036,7 +1043,7 @@ class QuantizedLinear:
 
     def memory_usage(self) -> Dict[str, float]:
         """Model packed INT8 bytes, including metadata; not actual NumPy storage."""
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="core"
         # Original FP32 usage
         original_weight_bytes = self.original_layer.weight.data.size * BYTES_PER_FLOAT32
         original_bias_bytes = 0
@@ -1222,7 +1229,7 @@ def _collect_layer_inputs(model, layer_index: int, calibration_data: List[Tensor
     HINT:
     - Use model.layers[j].forward(x) to pass through each preceding layer
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     sample_inputs = []
     for data in calibration_data[:max_samples]:
         x = data
@@ -1334,7 +1341,7 @@ def _quantize_single_layer(layer: Linear, calibration_inputs: Optional[List[Tens
     - QuantizedLinear(layer) handles weight/bias quantization
     - quantized_layer.calibrate(inputs) sets input quantization parameters
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     quantized_layer = QuantizedLinear(layer)
 
     if calibration_inputs is not None:
@@ -1440,7 +1447,7 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
     - Use _collect_layer_inputs() to get calibration activations
     - Use _quantize_single_layer() to create the replacement
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if hasattr(model, 'layers'):
         for i, layer in enumerate(model.layers):
             if isinstance(layer, Linear):
@@ -1605,7 +1612,7 @@ def _measure_layer_bytes(layer, is_quantized: bool = False) -> Tuple[int, int]:
     - QuantizedLinear.memory_usage() returns a dict with 'quantized_bytes'
     - Regular layers: sum param.data.size for count, multiply by BYTES_PER_FLOAT32 for bytes
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="core"
     if is_quantized and isinstance(layer, QuantizedLinear):
         memory_info = layer.memory_usage()
         param_count = sum(p.data.size for p in layer.parameters())
@@ -1723,7 +1730,7 @@ def analyze_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     - Use _measure_layer_bytes(layer) for original FP32 layers
     - Use _measure_layer_bytes(layer, is_quantized=True) for quantized layers
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="core"
     # Measure original model
     original_params = 0
     original_bytes = 0

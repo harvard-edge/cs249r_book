@@ -253,7 +253,7 @@ class CosineSchedule:
 
     HINT: Use np.cos() and np.pi for the cosine calculation
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     def __init__(self, max_lr: float = DEFAULT_MAX_LR, min_lr: float = DEFAULT_MIN_LR, total_epochs: int = DEFAULT_TOTAL_EPOCHS):
         self.max_lr = max_lr
         self.min_lr = min_lr
@@ -380,7 +380,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
     - Only clip if total_norm > max_norm
     - Modify gradients in-place for efficiency
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if not np.isfinite(max_norm) or max_norm < 0:
         raise ValueError("max_norm must be finite and nonnegative")
     parameters = list(parameters)
@@ -630,7 +630,7 @@ Trainer State After __init__:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-init", "solution": true}
-#| export
+#| exporti
 def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
     """
     Initialize trainer with model and training components.
@@ -660,7 +660,7 @@ def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm
     HINT: This is straightforward assignment. The key insight is WHAT state
     a training system needs to track across epochs.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     self.model = model
     self.optimizer = optimizer
     self.loss_fn = loss_fn
@@ -785,7 +785,7 @@ sample then contributes one sample's weight, even if earlier batches were larger
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-process-batch", "solution": true}
-#| export
+#| exporti
 def _trainer_process_batch(self, inputs, targets):
     """
     Process one batch: forward pass, loss computation, backward pass.
@@ -808,7 +808,7 @@ def _trainer_process_batch(self, inputs, targets):
     HINT: The loss function must return a scalar batch mean. Multiplying by
           inputs.shape[0] undoes its batch averaging without retaining batches.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     batch_size = inputs.shape[0]
     if batch_size == 0:
         raise ValueError("Training batches must contain at least one sample")
@@ -835,7 +835,7 @@ so changing the batch partition does not change the clipping threshold.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-optimizer-update", "solution": true}
-#| export
+#| exporti
 def _trainer_optimizer_update(self, sample_count=1):
     """
     Average accumulated gradients, clip if enabled, and step the optimizer.
@@ -848,7 +848,7 @@ def _trainer_optimizer_update(self, sample_count=1):
     3. Call optimizer.step() to update weights
     4. Call optimizer.zero_grad() to reset gradients
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if sample_count <= 0:
         raise ValueError("An optimizer update needs a positive sample count")
     params = self.model.parameters()
@@ -873,7 +873,7 @@ training epoch with accumulation, scheduling, and history tracking.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-train-epoch", "solution": true}
-#| export
+#| exporti
 def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     """
     Train for one epoch through the dataset.
@@ -1154,7 +1154,7 @@ no gradient clipping.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-evaluate", "solution": true}
-#| export
+#| exporti
 def trainer_evaluate(self, dataloader):
     """
     Evaluate model on dataset without updating parameters.
@@ -1184,7 +1184,7 @@ def trainer_evaluate(self, dataloader):
     - Handle both integer targets and one-hot targets
     - accuracy = correct / total if total > 0 else 0.0
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     self.model.training = False
     self.training_mode = False
 
@@ -1326,7 +1326,7 @@ Checkpoint Contents:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-save-checkpoint", "solution": true}
-#| export
+#| exporti
 def trainer_save_checkpoint(self, path: str):
     """
     Save parameters, optimizer, scheduler, and epoch history for resumption.
@@ -1360,7 +1360,7 @@ def trainer_save_checkpoint(self, path: str):
     - Clean the temp file up if the write fails, so a failed save leaves nothing
       behind.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     checkpoint = {
         'epoch': self.epoch,
         'step': self.step,
@@ -1473,7 +1473,7 @@ checkpoint.pkl ──→ pickle.load() ──→ restore epoch, step
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-load-checkpoint", "solution": true}
-#| export
+#| exporti
 def trainer_load_checkpoint(self, path: str):
     """
     Load training state from checkpoint.
@@ -1498,7 +1498,7 @@ def trainer_load_checkpoint(self, path: str):
 
     HINT: The private _set_*_state() helpers are already provided.
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     with open(path, 'rb') as f:
         checkpoint = pickle.load(f)
 

@@ -1,4 +1,4 @@
-# Volume II: Machine Learning Systems at Scale
+# Volume II: Scaling Machine Learning Systems
 
 *Distributed systems and production infrastructure for ML.*
 

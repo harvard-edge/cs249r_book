@@ -383,7 +383,7 @@ def measure_sparsity(model) -> float:
 
     HINT: Use np.sum() to count zeros efficiently
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     total_params = 0
     zero_params = 0
 
@@ -703,13 +703,14 @@ def structured_prune(model, prune_ratio=0.5):
     - Find the lowest-norm channels: np.argpartition(norms, k)[:k] or np.argsort(norms)[:k]
     - Set entire channels to zero: weight[:, prune_indices] = 0
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if not np.isfinite(prune_ratio) or not 0 <= prune_ratio <= 1:
         raise ValueError("prune_ratio must be between 0 and 1")
     # Prune the hidden Linear layers. The last Linear is the head: its output
     # channels are the classes, so zeroing them removes classes, not neurons.
     # A model with a single Linear has nothing else to prune and is pruned as is.
-    linears = [layer for layer in model.layers if isinstance(layer, Linear)]
+    layers = model.layers if hasattr(model, 'layers') else [model]
+    linears = [layer for layer in layers if isinstance(layer, Linear)]
     hidden = linears[:-1] if len(linears) > 1 else linears
 
     for layer in hidden:
@@ -887,7 +888,7 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     - Choose k = int(rank_ratio * min(m, n))
     - Return U[:,:k], S[:k], V[:k,:] for reconstruction
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if not np.isfinite(rank_ratio) or not 0 < rank_ratio <= 1:
         raise ValueError("rank_ratio must be in (0, 1]")
     m, n = weight_matrix.shape
@@ -1100,7 +1101,7 @@ class KnowledgeDistillation:
             temperature: Softening parameter for distributions
             alpha: Weight for soft target loss (1-alpha for hard targets)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not np.isfinite(temperature) or temperature <= 0:
             raise ValueError("temperature must be finite and positive")
         if not np.isfinite(alpha) or not 0 <= alpha <= 1:
@@ -1135,7 +1136,7 @@ class KnowledgeDistillation:
         - Sum over classes, then mean over samples for both loss terms
         - Class IDs may be NumPy integers or integer-valued Tensor data
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if student_logits.ndim != 2 or student_logits.shape != teacher_logits.shape:
             raise ValueError("Student and teacher logits must have matching (batch, classes) shapes")
         batch_size, num_classes = student_logits.shape
@@ -1347,7 +1348,7 @@ def compress_model(model, compression_config):
 
     HINT: Apply techniques sequentially and measure results
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Validate before modifying any weights; unsupported work must not be
     # recorded as successfully applied.
     if 'low_rank' in compression_config:

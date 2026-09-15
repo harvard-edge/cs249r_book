@@ -268,7 +268,7 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     - Use np.matmul() for batch support and optimization
     - Trust BLAS to handle the vectorization magic
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Input validation for matrix multiplication
     if len(a.shape) < 2 or len(b.shape) < 2:
         raise ValueError(
@@ -592,7 +592,7 @@ def unfused_gelu(x: Tensor) -> Tensor:
     - Create each step as: temp = Tensor(operation)
     - This forces memory allocation for educational comparison
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Unfused version - creates many intermediate arrays
     sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
 

@@ -564,3 +564,27 @@ def test_scalar_copy_operations_preserve_rank(operation):
     assert result.shape == ()
     assert result.data == 3.0
     assert not np.shares_memory(result.data, tensor.data)
+
+
+def test_tensor_permute():
+    """Verify Tensor.permute rearranges dimensions correctly."""
+    t = Tensor(np.arange(24).reshape((2, 3, 4)))
+    p1 = t.permute(0, 2, 1)
+    assert p1.shape == (2, 4, 3)
+    p2 = t.permute((2, 0, 1))
+    assert p2.shape == (4, 2, 3)
+    assert not np.shares_memory(t.data, p1.data)
+
+
+def test_tensor_from_existing_tensor():
+    """Verify Tensor(t) works cleanly for both arrays and 0-D scalar tensors."""
+    scalar_t = Tensor(5.0)
+    wrapped_scalar = Tensor(scalar_t)
+    assert wrapped_scalar.shape == ()
+    assert float(wrapped_scalar.data) == 5.0
+
+    array_t = Tensor([1, 2, 3])
+    wrapped_array = Tensor(array_t)
+    assert wrapped_array.shape == (3,)
+    assert np.array_equal(wrapped_array.data, [1, 2, 3])
+

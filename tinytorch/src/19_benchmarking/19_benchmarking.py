@@ -61,7 +61,7 @@ results = benchmark.run_latency_benchmark()
 
 **Why this matters:**
 - **Learning:** Complete benchmarking ecosystem in one focused module for rigorous evaluation
-- **TorchPerf Olympics:** The Benchmark class provides the standardized framework for capstone submissions
+- **TinyTorch Olympics:** The Benchmark class provides the standardized framework for capstone submissions
 - **Consistency:** All benchmarking operations and reporting in benchmarking.benchmark
 - **Integration:** Works seamlessly with optimization modules (M14-18) for complete systems evaluation
 """
@@ -323,7 +323,7 @@ class BenchmarkResult:
     - Store both raw data and summary statistics
     - Include confidence intervals for professional reporting
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     metric_name: str
     values: List[float]
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -662,7 +662,7 @@ class Benchmark:
         - Use platform module for system info
         - os.cpu_count() can return None, use fallback
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if warmup_runs < 0 or measurement_runs <= 0:
             raise ValueError("warmup_runs must be nonnegative and measurement_runs positive")
         self.models = models
@@ -742,7 +742,7 @@ Input Tensor ──> Warmup Runs (discard) ──> Measurement Runs ──> Benc
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-latency", "solution": true}
-#| export
+#| exporti
 def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model inference latency using Profiler.
@@ -876,7 +876,7 @@ def _simulated_accuracy(model: Any, dataset: Any, num_samples: int = 32) -> floa
       lands near 0.5, which is exactly the discrimination we want
     - Never let the score depend on getattr(model, 'name') or the model's index
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Vary the probe per dataset, deterministically and without hashing.
     seed = 7 + sum(repr(dataset).encode()) % 1000
     probe_rng = np.random.default_rng(seed)
@@ -982,7 +982,7 @@ Model ──> Dataset 1 ──> accuracy_1 ──┐
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-accuracy", "solution": true}
-#| export
+#| exporti
 def benchmark_run_accuracy_benchmark(self, simulate: bool = False) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model accuracy across datasets.
@@ -1002,7 +1002,7 @@ def benchmark_run_accuracy_benchmark(self, simulate: bool = False) -> Dict[str, 
       its index -- a score keyed to identity is a fabricated benchmark
     - Record simulated=True in metadata so a reader can tell the two apart
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     results = {}
 
     for i, model in enumerate(self.models):
@@ -1096,7 +1096,7 @@ Model ──> Profiler.measure_memory() ──> peak_memory_mb
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-memory", "solution": true}
-#| export
+#| exporti
 def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model memory usage using Profiler.
@@ -1113,7 +1113,7 @@ def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 
     - memory_stats['peak_memory_mb'] is the primary metric
     - Parameter storage is a different metric; do not substitute it for allocator peaks
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     results = {}
 
     for i, model in enumerate(self.models):
@@ -1183,7 +1183,7 @@ This is the primary interface for multi-model evaluation.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-compare", "solution": true}
-#| export
+#| exporti
 def benchmark_compare_models(self, metric: str = "latency"):
     """
     Compare models across a specific metric.
@@ -1199,7 +1199,7 @@ def benchmark_compare_models(self, metric: str = "latency"):
     - Support 'latency', 'accuracy', 'memory' metrics
     - Return list of dicts with model, metric, mean, std, ci_lower, ci_upper, count
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if metric == "latency":
         results = self.run_latency_benchmark()
     elif metric == "accuracy":
@@ -1390,7 +1390,7 @@ class BenchmarkSuite:
         - Use Path(output_dir) for cross-platform paths
         - The Benchmark instance handles individual model measurements
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.models = models
         self.datasets = datasets
         self.output_dir = Path(output_dir)
@@ -1454,7 +1454,7 @@ Models ──> Latency Benchmark ──┐
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-run", "solution": true}
-#| export
+#| exporti
 def benchsuite_run_full_benchmark(self, simulate: bool = False) -> Dict[str, Dict[str, BenchmarkResult]]:
     """
     Run all benchmark categories.
@@ -1472,7 +1472,7 @@ def benchsuite_run_full_benchmark(self, simulate: bool = False) -> Dict[str, Dic
     - Print progress messages for each benchmark type
     - Return the complete results dict
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     print("🧪 Running comprehensive benchmark suite...")
 
     # Run all benchmark types
@@ -1570,7 +1570,7 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
     - Energy model: ENERGY_BASE_JOULES + (lat/1000) * ENERGY_JOULES_PER_SECOND + mem * ENERGY_JOULES_PER_MB
     - Use zip() to pair latency and memory measurements
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     energy_results = {}
 
     for i, model in enumerate(self.models):
@@ -1654,7 +1654,7 @@ across all four metrics. The best performer in each category is highlighted gree
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-plot", "solution": true}
-#| export
+#| exporti
 def benchsuite_plot_results(self, save_plots: bool = True):
     """
     Generate visualization plots for benchmark results.
@@ -1673,7 +1673,7 @@ def benchsuite_plot_results(self, save_plots: bool = True):
     - For accuracy, higher is better
     - Use alpha=0.7 for bars, capsize=5 for error bars
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if not self.results:
         print("No results to plot. Run benchmark first.")
         return
@@ -1892,7 +1892,7 @@ def _benchsuite_format_results_summary(self) -> List[str]:
        b. Find the best performer (min for latency/memory/energy, max for accuracy)
        c. List all models with mean ± std
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     lines = []
     lines.append("## Benchmark Results Summary")
     lines.append("")
@@ -1948,7 +1948,7 @@ def _benchsuite_format_recommendations(self) -> List[str]:
     - Normalize: 1 - (val - min) / (max - min) for lower-is-better
     - Normalize: (val - min) / (max - min) for higher-is-better
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     lines = []
     lines.append("## Recommendations")
     lines.append("")
@@ -2009,7 +2009,7 @@ markdown report and save it to disk.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-report", "solution": true}
-#| export
+#| exporti
 def benchsuite_generate_report(self) -> str:
     """
     Generate comprehensive benchmark report.
@@ -2022,7 +2022,7 @@ def benchsuite_generate_report(self) -> str:
     3. Call self._format_recommendations() for trade-off analysis
     4. Save to output_dir/benchmark_report.md
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if not self.results:
         return "No benchmark results available. Run benchmark first."
 
@@ -2339,7 +2339,7 @@ class MLPerf:
           A seed that no phase reads makes random_seed a lie, and a benchmark
           whose seed does nothing is not reproducible no matter what it prints
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.random_seed = random_seed
 
         # Standard MLPerf benchmark configurations
@@ -2442,7 +2442,7 @@ def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
     - Use precise_timer() context manager
     - Convert elapsed seconds to ms: timer.elapsed * 1000
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Warmup phase (10% of runs)
     warmup_runs = max(1, num_runs // 10)
     print(f"   Warming up ({warmup_runs} runs)...")
@@ -2558,7 +2558,7 @@ def _extract_pred_array(pred) -> np.ndarray:
     2. Otherwise convert to numpy array
     3. Flatten if multi-dimensional
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if hasattr(pred, 'data'):
         pred_array = pred.data
     else:
@@ -2616,7 +2616,7 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     - Do not adjust the score by the model's name. A benchmark that rewards a
       model for calling itself 'efficient' measures marketing, not the model
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     rng = np.random.default_rng(self.random_seed)
     if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']:
         # Binary classification
@@ -2734,7 +2734,7 @@ Config Lookup ──> Generate Inputs ──> _run_latency_test() ──> _run_a
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-run", "solution": true}
-#| export
+#| exporti
 def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
                               num_runs: int = 100,
                               test_inputs: Optional[List[Any]] = None,
@@ -2762,7 +2762,7 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     - Audio data: rng.standard_normal, Image data: rng.integers(0,256)/255
     - compliant = accuracy_met AND latency_met
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     if benchmark_name not in self.benchmarks:
         available = list(self.benchmarks.keys())
         raise ValueError(
@@ -2989,7 +2989,7 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
     - overall_compliant = compliance_rate == 1.0
     - Set model_name from first successful result
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     compliant_benchmarks = []
     total_benchmarks = len(results)
 
@@ -3065,7 +3065,7 @@ def _mlperf_format_compliance_summary(self, report_data: Dict[str, Any]) -> str:
     2. Show overall COMPLIANT/NON-COMPLIANT status
     3. List each benchmark with PASS/FAIL and metrics
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     summary_lines = []
     summary_lines.append("# TinyTorch Classroom Benchmark Report (not official MLPerf)")
     summary_lines.append("=" * 40)
@@ -3106,7 +3106,7 @@ Combine data compilation, JSON serialization, and summary formatting.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-scorecard", "solution": true}
-#| export
+#| exporti
 def mlperf_generate_compliance_report(self, results: Dict[str, Dict[str, Any]],
                                            output_path: str = "mlperf_report.json") -> str:
     """
@@ -3120,7 +3120,7 @@ def mlperf_generate_compliance_report(self, results: Dict[str, Dict[str, Any]],
     3. Format summary with self._format_compliance_summary(report_data)
     4. Save summary markdown alongside JSON
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     # Compile structured report data
     report_data = self._compile_report_data(results)
 
@@ -3391,7 +3391,7 @@ def _collect_base_metrics(base_name: str, benchmark_results: Dict) -> Dict[str, 
     HINTS:
     - Keys are model names, sometimes with a suffix such as base_latency_ms
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     base_metrics = {}
     for metric_type, results in benchmark_results.items():
         for model_name, result in results.items():
@@ -3466,7 +3466,7 @@ def _calculate_improvements(base_metrics: Dict[str, float], opt_metrics: Dict[st
     - Check opt_metrics[metric] > 0 before dividing
     - Use f'{metric_type}_speedup' as key names
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     improvements = {}
     for metric_type in ['latency', 'memory', 'energy']:
         if metric_type in base_metrics and metric_type in opt_metrics:
@@ -3546,7 +3546,7 @@ def _generate_recommendations(all_improvements: Dict[str, Dict[str, float]]) -> 
     - Iterate over all_improvements items (opt_name -> improvements dict)
     - Overall score = (sum of capped speedups + accuracy_retention * 5) / count
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     best_latency = None
     best_memory = None
     best_accuracy = None
@@ -3702,7 +3702,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
     >>> results = analyze_optimization_techniques(base_model, [quant, pruned], datasets)
     >>> print(results['recommendations'])
     """
-    ### BEGIN SOLUTION
+    ### BEGIN SOLUTION role="scaffold"
     all_models = [base_model] + optimized_models
     suite = BenchmarkSuite(all_models, datasets)
 

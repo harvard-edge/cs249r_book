@@ -104,7 +104,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 # Import TinyTorch components
 from tinytorch import Tensor, SGD, CrossEntropyLoss
 from tinytorch.core.spatial import Conv2d, MaxPool2d
-from tinytorch.core.layers import Linear, ReLU
+from tinytorch.core.layers import Linear
+from tinytorch.core.activations import ReLU
 from tinytorch.core.dataloader import DataLoader, TensorDataset
 
 console = Console()

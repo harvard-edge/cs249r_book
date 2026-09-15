@@ -21,7 +21,7 @@ OUT = CONTENTS / "shared" / "STRUCTURE.md"
 
 VOLUMES = {
     "vol1": "Volume I: Introduction to Machine Learning Systems",
-    "vol2": "Volume II: Machine Learning Systems at Scale",
+    "vol2": "Volume II: Scaling Machine Learning Systems",
     "vol3": "Volume III: Agentic Machine Learning Systems",
     "vol4": "Volume IV: Physical AI Systems",
 }

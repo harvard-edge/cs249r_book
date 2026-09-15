@@ -48,10 +48,36 @@ Tito owns TinyTorch-specific staging. It keeps the existing grading policy from 
 ### **Using NBGrader via Tito**
 We provide `tito nbgrader` commands for grading workflows.
 
+### **Release Tiers**
+
+TinyTorch supports three assignment staging tiers via `--tier <tier>`:
+
+| Release Tier | CLI Flag | Student Implementation Scope | Best For |
+|:---|:---|:---|:---|
+| **Student** *(Default)* | `--tier student` | **41 Core Archetypes** (195 secondary helper blocks scaffolded) | Standard 14-week university courses (Harvard CS249r model) |
+| **Challenge** | `--tier challenge` | **All 236 Blocks** (full implementation from scratch) | Advanced graduate courses, hackathons, honors tracks |
+| **Instructor** | `--tier instructor` | **0 Blocks** (complete reference solutions retained) | Solution keys, grading rubrics, and TA references |
+
+#### The "One-Archetype-Per-Concept" Pedagogical Model
+In a standard course, students should build the foundational mechanisms without suffering from repetitive typing fatigue:
+- **Core Archetypes (Student builds)**: Matrix multiplication, strided views, autograd backward Vector-Jacobian Products, numerical log-sum-exp stabilization, multi-head projection splitting, causal attention masking, KV cache token indexing, and INT8 quantization scale/zero-point math.
+- **Scaffolded Helpers (`role="scaffold"`)**: Secondary methods, repetitive shape checkers, pretty-printers, and auxiliary helpers. Once a student demonstrates mastery of the first representative concept, downstream boilerplate is provided.
+
+### **Hardware Extensions Track (`tinytorch.extensions`)**
+To expose students to production accelerator bridging without breaking the pure-NumPy curriculum:
+- **`simd_ops.py` / `cpp_simd_gemm.cpp`**: Native C++ SIMD vectorization with AVX2/NEON and OpenMP multithreading.
+- **`triton_gelu.py`**: OpenAI Triton GPU kernel with automatic SRAM block tiling (falls back gracefully to NumPy on CPU).
+- **`mps_ops.py`**: Apple Silicon Metal Performance Shaders unified-memory dispatch.
+
+Hardware extensions are completely optional and modular; they demonstrate real-world systems acceleration while preserving 100% CPU compatibility for autograding.
+
 ### **1. Prepare Assignments**
 ```bash
-# Stage instructor source assignment from the generated TinyTorch notebook
-tito nbgrader generate 01_tensor
+# Stage student assignment (default: 41 core archetypes)
+tito nbgrader generate 01_tensor --tier student
+
+# Or stage full challenge assignment
+tito nbgrader generate 01_tensor --tier challenge
 
 # Create student release notebook with solutions removed
 tito nbgrader release 01_tensor
