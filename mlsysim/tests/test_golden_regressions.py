@@ -121,14 +121,18 @@ def test_golden_distributed_llama3_8b_research_cluster():
     # TP comm covers one stage's 8 layers instead of all 32 (1069.9 -> 267.5 ms).
     # The bubble is additive idle time, node * b / (1 - b) (was node * b).
     # Effective throughput counts DP replicas (8), not accelerators (256).
+    # 2026-09-15 (later): re-pinned after the DP group fix. Each DP rank holds a
+    # TP8 x PP4 shard (1/32 of the model, was 1/8), and with TP=8 on 8-GPU nodes
+    # every rank sits on its own node, so the 8-rank ring crosses the 100GbE
+    # fabric instead of mostly riding NVLink: DP comm 7.8 -> 71.0 ms.
     assert result.node_profile.feasible is True
-    assert result.step_latency_total.m_as("ms") == pytest.approx(1329.5611807765017)
-    assert result.communication_latency.m_as("ms") == pytest.approx(275.2803539733333)
-    assert result.dp_communication_latency.m_as("ms") == pytest.approx(7.813944444444444)
+    assert result.step_latency_total.m_as("ms") == pytest.approx(1392.7097363320572)
+    assert result.communication_latency.m_as("ms") == pytest.approx(338.42890952888894)
+    assert result.dp_communication_latency.m_as("ms") == pytest.approx(70.9625)
     assert result.tp_communication_latency.m_as("ms") == pytest.approx(267.4664095288889)
     assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(166.4653937057634)
-    assert result.effective_throughput.m_as("1/s") == pytest.approx(770.1789242988839)
-    assert result.scaling_efficiency == pytest.approx(0.6677507180067451)
+    assert result.effective_throughput.m_as("1/s") == pytest.approx(735.2572996989894)
+    assert result.scaling_efficiency == pytest.approx(0.6374734159866081)
     assert result.bubble_fraction == pytest.approx(0.15789473684210525)
 
 

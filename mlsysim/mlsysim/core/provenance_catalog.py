@@ -270,7 +270,7 @@ GOOGLE_TPU_V2_V3 = _lit(
 
 GOOGLE_TPU_V4 = _lit(
     "prov:google-tpu-v4",
-    "Jouppi et al. (2023), TPU v4: An Optically Reconfigurable Supercomputer for Training Deep Neural Networks",
+    "Jouppi et al. (2023), TPU v4: An Optically Reconfigurable Supercomputer for Machine Learning with Hardware Support for Embeddings, ISCA",
     url="https://arxiv.org/abs/2304.01433",
 )
 

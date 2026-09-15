@@ -81,6 +81,14 @@ Release body. Omit any section that has no entries for a given release.
     added as `compute * b`, which understated it most for few microbatches.
   - `effective_throughput` multiplies by the DP replica count, not the
     accelerator count.
+- `DistributedModel`'s data-parallel AllReduce sized each rank's gradients as
+  the model over TP, ignoring PP, and split the ring by accelerators per node
+  rather than DP ranks per node. A TP=8 group on 8-GPU nodes therefore ringed
+  part of its gradients over NVLink although every DP rank sits on a different
+  node, and one-accelerator nodes ringed over the intra-node link. Each rank
+  now holds a `tp * pp` shard, a node holds `accelerators_per_node // (tp * pp
+  * ep)` ranks of a group, and the collective is an intra-node ring, a fabric
+  ring (one rank per node), or hierarchical accordingly.
 - `ParallelismOptimizer` drops candidates whose replica does not fit once
   activations are counted, prices pipelined candidates with one-sample
   microbatches, takes `seq_len` and `activation_recomputation`, and names the
@@ -125,6 +133,13 @@ Release body. Omit any section that has no entries for a given release.
   torque, inverted-pendulum fall time, actuator Joule heating, and
   action-chunk cadence). Each docstring has a `Source:` line that cites a
   checked reference or names the formula as a modeling assumption.
+
+### Hardware Registry
+
+- `Hardware.Cloud.TPUv4` records its inter-chip interconnect (ICI) as 300 GB/s
+  per direction, six links at 50 GB/s (Jouppi et al. 2023, Table 4, which
+  quotes the A100's NVLink at the same one-way convention). Its provenance now
+  carries the paper's actual title.
 
 ### Documentation
 

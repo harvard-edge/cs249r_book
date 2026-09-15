@@ -1006,6 +1006,25 @@ class TestDistributedModel:
         # Compute-bound, so a higher efficiency must shorten the step.
         assert fast.node_profile.latency < node.latency
 
+    def test_dp_ring_crosses_fabric_when_each_node_holds_one_rank(self):
+        """TP=8 on 8-GPU nodes puts one DP rank per node: a fabric ring over a TP x PP gradient shard."""
+        from mlsysim.engine.solvers.utils import _inter_node_latency
+        from mlsysim.physics import calc_ring_allreduce_time
+
+        model = Models.Language.Llama3_70B
+        cluster = Systems.Clusters.Training_512_H100
+        result = DistributedModel().solve(
+            model, cluster, batch_size=512, seq_len=4096, tp_size=8, pp_size=2,
+            microbatch_count=16, activation_recomputation=True,
+        )
+        dp = result.parallelism["dp"]
+        shard = model.size_in_bytes(BYTES_FP16) / (8 * 2)
+        fabric = cluster.fabric
+        expected = calc_ring_allreduce_time(
+            shard, dp, fabric.bandwidth / fabric.oversubscription_ratio, _inter_node_latency(fabric)
+        )
+        assert result.dp_communication_latency.m_as("ms") == pytest.approx(expected.m_as("ms"))
+
     def test_pipeline_bubble_is_additive_idle_time(self):
         """bubble_fraction is the idle share of the whole step, so idle time = compute * b / (1 - b)."""
         result = DistributedModel().solve(
