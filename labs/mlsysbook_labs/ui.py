@@ -30,6 +30,8 @@ ACADEMIC_LAB_CSS = mo.Html(
   --mlsysbook-danger: #B42318;
   --mlsysbook-readable-width: 1040px;
   --mlsysbook-panel-width: 1040px;
+  --panel-width: 1040px !important;
+  --readable-width: 1040px !important;
 
   /* Native Marimo & shadow-DOM variable cascade */
   --primary: #A51C30;
@@ -457,10 +459,15 @@ ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {
   max-width: min(var(--mlsysbook-panel-width), 100%) !important;
   margin-left: auto !important;
   margin-right: auto !important;
+  box-sizing: border-box !important;
 }
-.output.block > div {
+.output.block > div,
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {
   width: 100% !important;
   max-width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  box-sizing: border-box !important;
 }
 marimo-ui-element {
   display: block !important;
@@ -468,6 +475,7 @@ marimo-ui-element {
   max-width: 100% !important;
 }
 marimo-tabs,
+.marimo-ui-tabs,
 div[style*="border-left:4px solid"][style*="border-radius:0 10px"],
 div[style*="border-left: 4px solid"][style*="border-radius: 0 10px"],
 div[style*="border-left:4px solid"][style*="border-radius:0px 10px"],
@@ -477,6 +485,7 @@ div[style*="border-left: 4px solid"][style*="border-radius: 0px 10px"] {
   max-width: min(var(--mlsysbook-panel-width), 100%) !important;
   margin-left: auto !important;
   margin-right: auto !important;
+  box-sizing: border-box !important;
 }
 marimo-tabs {
   overflow-x: visible !important;
@@ -484,10 +493,17 @@ marimo-tabs {
 }
 marimo-callout-output {
   display: block !important;
-  width: min(var(--mlsysbook-readable-width), 100%) !important;
-  max-width: min(var(--mlsysbook-readable-width), 100%) !important;
+  width: min(var(--mlsysbook-panel-width), 100%) !important;
+  max-width: min(var(--mlsysbook-panel-width), 100%) !important;
   margin-left: auto !important;
   margin-right: auto !important;
+  box-sizing: border-box !important;
+}
+div[role="tabpanel"],
+div[role="tabpanel"] > * {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
 }
 .mlsysbook-version {
   color: var(--mlsysbook-muted);

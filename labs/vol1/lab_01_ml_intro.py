@@ -781,15 +781,20 @@ def _(
 
     def _module_banner(color, background, label, text):
         return mo.Html(f"""
-        <div style="border-left:4px solid {color}; background:{background};
-                    border-radius:0 8px 8px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{color};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 4px solid {color}; border-radius: 8px; padding: 16px 20px; margin: 14px auto; box-shadow: 0 1px 3px rgba(0,0,0,0.04); box-sizing: border-box;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
                 {label}
             </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                "{text}"
+            <div style="font-style: italic; font-size: 0.98rem; color: #1E293B; line-height: 1.6;">
+                &ldquo;{text}&rdquo;
             </div>
+        </div>
+        """)
+
+    def _prediction_gate(prompt_text):
+        return mo.Html(f"""
+        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 4px solid #1F407A; border-radius: 8px; padding: 14px 20px; margin: 14px auto; box-shadow: 0 1px 3px rgba(0,0,0,0.04); box-sizing: border-box; color: #334155; font-size: 0.92rem; line-height: 1.5;">
+            <strong style="color: #1F407A;">Prediction Required:</strong> {prompt_text}
         </div>
         """)
 
@@ -837,7 +842,7 @@ def _(
             partA_pred,
         ]
         if partA_pred.value is None:
-            items.append(mo.callout(mo.md("Make the prediction first, then the degradation instrument unlocks."), kind="warn"))
+            items.append(_prediction_gate("Make the prediction above to unlock the operational degradation instruments and active controls."))
             return mo.vstack(items)
 
         items.append(mo.hstack([partA_drift, partA_months, partA_cadence], widths="equal"))
@@ -933,7 +938,7 @@ def _(
             partB_pred,
         ]
         if partB_pred.value is None:
-            items.append(mo.callout(mo.md("Make the D-A-M prediction first. The readiness controls stay hidden until you commit."), kind="warn"))
+            items.append(_prediction_gate("Make the D-A-M prediction above. The readiness controls stay hidden until you commit."))
             return mo.vstack(items)
 
         items.append(mo.hstack([partB_data, partB_algorithm, partB_machine], widths="equal"))
@@ -1030,7 +1035,7 @@ def _(
             partC_pred,
         ]
         if partC_pred.value is None:
-            items.append(mo.callout(mo.md("Commit to an evidence prediction before changing model scale or operating pressure."), kind="warn"))
+            items.append(_prediction_gate("Commit to an evidence prediction above before changing model scale or operating pressure."))
             return mo.vstack(items)
 
         items.append(mo.hstack([partC_model_scale, partC_pressure], widths="equal"))
@@ -1125,7 +1130,7 @@ def _(
             partD_pred,
         ]
         if partD_pred.value is None:
-            items.append(mo.callout(mo.md("Predict the lifecycle budget strategy before opening the intervention frontier."), kind="warn"))
+            items.append(_prediction_gate("Predict the lifecycle budget strategy above before opening the intervention frontier."))
             return mo.vstack(items)
 
         items.append(mo.hstack([partD_data_budget, partD_algorithm_budget, partD_machine_budget, partD_selected], widths="equal"))
