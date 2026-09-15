@@ -35,6 +35,18 @@ Release body. Omit any section that has no entries for a given release.
 
 ## Unreleased
 
+### Bug Fixes
+
+- `CompressionModel` measured every ratio against a hard-coded FP32 baseline,
+  so INT4 reported 8x compression and an 8x memory-bound speedup for models
+  served from FP16/BF16 weights. `solve`, `candidate`, and `sweep` now take
+  `baseline_precision` (default `"fp16"`, resolved through
+  `core.units.PRECISION_MAP`): `compression_ratio = b_base / target_bitwidth`,
+  and original sizes and the Roofline regime use the baseline width. Pass
+  `baseline_precision="fp32"` for FP32-trained artifacts. `CompressionResult`
+  and `CompressionCandidate` record the baseline; the Wall 13 equation now reads
+  `r = b_base/b`.
+
 ### Solvers, Models & Taxonomy
 
 - `ContinuousBatchingModel` now derives static and paged capacity from a

@@ -12,6 +12,7 @@ import pytest
 # All tests in this file are solver-level correctness tests
 pytestmark = pytest.mark.solver
 
+from mlsysim.core.units import BYTES_FP16
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.registry import Systems
@@ -735,21 +736,53 @@ class TestCompressionModel:
     """Tests for quantization and pruning trade-off analysis."""
 
     @pytest.mark.smoke
-    def test_int8_compression_ratio_is_4x(self):
-        """INT8 quantization from FP32 baseline should yield 4x compression."""
-        resnet = Models.Vision.ResNet50
-        a100 = Hardware.Cloud.A100
-        solver = CompressionModel()
-        result = solver.solve(resnet, a100, method="quantization", target_bitwidth=8)
-        assert result.compression_ratio == pytest.approx(4.0, rel=0.01)
+    def test_int4_compression_ratio_is_4x_vs_default_fp16_baseline(self):
+        """INT4 from the default FP16/BF16 baseline is 4x (16/4), as practice quotes it."""
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
+        result = CompressionModel().solve(llama, h100, method="quantization", target_bitwidth=4)
+        assert result.baseline_precision == "fp16"
+        assert result.compression_ratio == pytest.approx(4.0)
+        assert result.memory_savings_pct == pytest.approx(75.0)
+        # original size is the FP16 artifact: 2 bytes/param
+        expected_fp16_gb = llama.size_in_bytes(BYTES_FP16).to("GB").magnitude
+        assert result.original_size_gb.to("GB").magnitude == pytest.approx(expected_fp16_gb)
 
-    def test_int4_compression_ratio_is_8x(self):
-        """INT4 quantization from FP32 baseline should yield 8x compression."""
-        resnet = Models.Vision.ResNet50
-        a100 = Hardware.Cloud.A100
+    def test_int8_compression_ratio_is_2x_vs_default_fp16_baseline(self):
+        """INT8 from the default FP16 baseline is 2x (16/8)."""
+        result = CompressionModel().solve(
+            Models.Vision.ResNet50, Hardware.Cloud.A100, method="quantization", target_bitwidth=8
+        )
+        assert result.compression_ratio == pytest.approx(2.0)
+
+    @pytest.mark.parametrize("bits, expected", [(16, 2.0), (8, 4.0), (4, 8.0)])
+    def test_explicit_fp32_baseline_ratios(self, bits, expected):
+        """An FP32 baseline stays available on request: 32/b."""
+        result = CompressionModel().solve(
+            Models.Vision.ResNet50, Hardware.Cloud.A100, method="quantization",
+            target_bitwidth=bits, baseline_precision="fp32",
+        )
+        assert result.baseline_precision == "fp32"
+        assert result.compression_ratio == pytest.approx(expected)
+
+    def test_baseline_precision_resolves_through_precision_map(self):
+        """Aliases share the map's storage width (bf16 == fp16) and unknown keys raise."""
         solver = CompressionModel()
-        result = solver.solve(resnet, a100, method="quantization", target_bitwidth=4)
-        assert result.compression_ratio == pytest.approx(8.0, rel=0.01)
+        args = (Models.Vision.ResNet50, Hardware.Cloud.A100)
+        bf16 = solver.solve(*args, target_bitwidth=4, baseline_precision="BF16")
+        assert bf16.baseline_precision == "bf16"
+        assert bf16.compression_ratio == pytest.approx(4.0)
+        with pytest.raises(ValueError):
+            solver.solve(*args, target_bitwidth=4, baseline_precision="fp12")
+
+    def test_memory_bound_speedup_tracks_baseline_ratio(self):
+        """Batch-1 LLM decode is memory-bound: speedup equals the baseline-relative ratio."""
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
+        fp16 = CompressionModel().solve(llama, h100, target_bitwidth=4)
+        fp32 = CompressionModel().solve(llama, h100, target_bitwidth=4, baseline_precision="fp32")
+        assert fp16.inference_speedup == pytest.approx(4.0)
+        assert fp32.inference_speedup == pytest.approx(8.0)
 
     @pytest.mark.parametrize("bitwidth", [8, 4, 2])
     def test_accuracy_delta_is_negative(self, bitwidth):
@@ -803,12 +836,14 @@ class TestCompressionModel:
         assert comp < orig
 
     def test_memory_savings_percentage(self):
-        """Memory savings for INT8 should be 75% (1 - 1/4)."""
+        """INT8 saves 50% of an FP16 artifact (1 - 1/2) and 75% of an FP32 one (1 - 1/4)."""
         resnet = Models.Vision.ResNet50
         a100 = Hardware.Cloud.A100
         solver = CompressionModel()
         result = solver.solve(resnet, a100, method="quantization", target_bitwidth=8)
-        assert result.memory_savings_pct == pytest.approx(75.0, rel=0.01)
+        assert result.memory_savings_pct == pytest.approx(50.0, rel=0.01)
+        fp32 = solver.solve(resnet, a100, method="quantization", target_bitwidth=8, baseline_precision="fp32")
+        assert fp32.memory_savings_pct == pytest.approx(75.0, rel=0.01)
 
 # ======================================================================
 # 8. Constants & Module Import Tests
@@ -1791,11 +1826,15 @@ class TestCompressionInferenceSpeedup:
         assert result.inference_speedup > 1.0
 
     def test_fp8_quantization(self):
-        """FP8 quantization (8-bit) should yield 4x compression over FP32."""
+        """FP8 quantization (8-bit) yields 2x over FP16 by default, 4x over an explicit FP32 baseline."""
         resnet = Models.Vision.ResNet50
         a100 = Hardware.Cloud.A100
         result = CompressionModel().solve(resnet, a100, method="quantization", target_bitwidth=8)
-        assert result.compression_ratio == pytest.approx(4.0)  # 32/8 = 4x
+        assert result.compression_ratio == pytest.approx(2.0)  # 16/8
+        fp32 = CompressionModel().solve(
+            resnet, a100, method="quantization", target_bitwidth=8, baseline_precision="fp32"
+        )
+        assert fp32.compression_ratio == pytest.approx(4.0)  # 32/8
 
 class TestReliabilityGoodput:
     """Tests for goodput_ratio added in Phase 3."""

@@ -19,6 +19,8 @@ def test_candidate_records_feasible_source_traced_int8_oura():
         size_limit=Hardware.Tiny.OuraRing.memory.flash_capacity,
         max_accuracy_drop=0.01,
         require_hardware_support=True,
+        # TinyML CNNs ship from FP32 training, so INT8 is quoted as 4x.
+        baseline_precision="fp32",
     )
 
     assert isinstance(candidate, CompressionCandidate)
@@ -26,9 +28,28 @@ def test_candidate_records_feasible_source_traced_int8_oura():
     assert candidate.feasible
     assert candidate.hardware_supported
     assert candidate.binding_constraint == "none"
+    assert candidate.baseline_precision == "fp32"
     assert candidate.compression_ratio == pytest.approx(4.0)
     assert "CompressionModel.solve" in candidate.source_trace
+    assert "baseline_precision=fp32" in candidate.source_trace
     assert any("hardware=Oura Ring" in item for item in candidate.source_trace)
+
+
+def test_sweep_passes_baseline_precision_to_every_candidate():
+    solver = CompressionModel()
+    configs = [
+        {"label": "INT8 weights", "method": "quantization", "target_bitwidth": 8},
+        {"label": "INT4 weights", "method": "quantization", "target_bitwidth": 4},
+    ]
+    default = solver.sweep(Models.Language.Llama3_8B, Hardware.Cloud.H100, configs)
+    fp32 = solver.sweep(
+        Models.Language.Llama3_8B, Hardware.Cloud.H100, configs, baseline_precision="fp32"
+    )
+
+    assert [c.baseline_precision for c in default.candidates] == ["fp16", "fp16"]
+    assert [c.compression_ratio for c in default.candidates] == pytest.approx([2.0, 4.0])
+    assert [c.baseline_precision for c in fp32.candidates] == ["fp32", "fp32"]
+    assert [c.compression_ratio for c in fp32.candidates] == pytest.approx([4.0, 8.0])
 
 
 def test_unstructured_pruning_marks_missing_fast_path_when_required():

@@ -175,30 +175,31 @@ print(f"INT4 latency: {int4.latency:~P.2f}  bottleneck: {int4.bottleneck}")
 
 ### Question
 
-What is the memory savings from FP32 baseline to INT4 for Llama-3-8B?
-What is the estimated accuracy degradation? Is the speedup closer to
-8x or 4x, and why?
+What is the memory savings from the FP16 baseline to INT4 for Llama-3-8B?
+What is the estimated accuracy degradation? Does the 4x compression ratio
+become a 4x speedup here, and why?
 
 ### Hint
 
-The `CompressionModel` measures compression ratio from the **FP32 baseline**
-(32-bit), so INT4 gives an 8x ratio on paper (32/4). But inference speedup
-depends on whether the workload is compute-bound or memory-bound. At
-batch_size=1, LLM inference is memory-bound, so the speedup tracks with
-the reduction in bytes moved, not FLOPS saved.
+The `CompressionModel` measures compression ratio from the precision the
+model ships in, `baseline_precision="fp16"` by default, so INT4 gives a 4x
+ratio (16/4). Pass `baseline_precision="fp32"` and the same INT4 model reads
+as 8x (32/4): a ratio is only meaningful next to its baseline. Whether the
+ratio becomes a speedup depends on whether the workload is compute-bound or
+memory-bound. At batch_size=1, LLM inference is memory-bound, so the speedup
+tracks with the reduction in bytes moved, not FLOPS saved.
 
 <details>
 <summary><strong>Expected Answer</strong></summary>
 
-- **Memory savings:** ~87.5% (8x compression from FP32 to INT4 baseline),
-  reducing the model from ~32 GB (FP32) to ~4 GB (INT4).
+- **Memory savings:** 75% (4x compression from FP16 to INT4), reducing the
+  model from ~16 GB (FP16) to ~4 GB (INT4).
 - **Accuracy delta:** Approximately 2-5% degradation (conservative estimate
   from the Gholami et al. survey).
 - **Inference speedup:** At batch_size=1, the workload is memory-bound, so
-  the speedup is roughly **proportional to the bytes reduction**. Compared to
-  FP16 inference (the practical baseline), the speedup from INT4 is ~4x in
-  memory traffic. The exact speedup depends on whether the hardware has
-  native INT4 execution units (B200 does, H100 does not).
+  the speedup is roughly **proportional to the bytes reduction**: ~4x in
+  memory traffic relative to FP16. The exact speedup depends on whether the
+  hardware has native INT4 execution units (B200 does, H100 does not).
 
 </details>
 

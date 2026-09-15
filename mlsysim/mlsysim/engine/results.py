@@ -293,7 +293,12 @@ class ScalingResult(SolverResult):
 
 
 class CompressionResult(SolverResult):
-    """Result from CompressionModel: compression trade-offs."""
+    """Result from CompressionModel: compression trade-offs.
+
+    ``original_size_gb``, ``compression_ratio``, ``memory_savings_pct`` and
+    ``inference_speedup`` are all relative to ``baseline_precision``.
+    """
+    baseline_precision: str
     original_size_gb: Quantity
     compressed_size_gb: Quantity
     compression_ratio: float
@@ -309,6 +314,7 @@ class CompressionCandidate(SolverResult):
     target_bitwidth: Optional[int] = None
     sparsity: float = 0.0
     sparsity_type: str = "unstructured"
+    baseline_precision: str
     original_size_gb: Quantity
     compressed_size_gb: Quantity
     compression_ratio: float
