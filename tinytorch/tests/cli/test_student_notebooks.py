@@ -1,19 +1,24 @@
 """
-Student notebooks from `tito module start` (#1684).
+Student notebooks and module completion (#1684, #2117).
 
 `tito module start` must give a learner a notebook with the student-core
-solutions cleared, for every module, while `tito dev export` keeps the full
-reference for contributors.
+solutions cleared, for every module, and `tito module complete` must certify
+the learner's notebook, never the reference implementation in src/.
 """
 
 import io
+import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 from rich.console import Console
 
 from tito.commands.export_utils import convert_py_to_notebook
+from tito.commands.module.test import ModuleTestCommand
+from tito.commands.module.workflow import ModuleWorkflowCommand
+from tito.core.config import CLIConfig
 from tito.core.solutions import (
     TEXT_STUB,
     cells_with_solution_markers,
@@ -33,6 +38,17 @@ def _cell(source: str, cell_type: str = "code") -> dict:
 
 def _quiet_console() -> Console:
     return Console(file=io.StringIO(), width=120)
+
+
+def _write_notebook(path: Path, code_cells) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    notebook = {
+        "cells": [_cell(source) for source in code_cells],
+        "metadata": {},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    path.write_text(json.dumps(notebook), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -180,3 +196,74 @@ def test_reference_conversion_keeps_solutions_for_dev_export(tmp_path):
     text = (tmp_path / "modules" / "01_demo" / "demo.ipynb").read_text(encoding="utf-8")
     assert "BEGIN SOLUTION" in text
     assert "return x + 1" in text
+
+
+# ---------------------------------------------------------------------------
+# `tito module complete` certifies the student's notebook
+# ---------------------------------------------------------------------------
+
+def _workflow(root: Path) -> ModuleWorkflowCommand:
+    command = ModuleWorkflowCommand(CLIConfig.from_project_root(root))
+    command.console = _quiet_console()
+    return command
+
+
+def test_unit_tests_never_fall_back_to_reference_source(tmp_path, monkeypatch):
+    src_file = tmp_path / "src" / "01_tensor" / "01_tensor.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text('print("✅ reference implementation passes")\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = _workflow(tmp_path)._run_inline_unit_tests("01_tensor", verbose=False)
+
+    assert result["passed"] == 0
+    assert result["failed"] == 1
+
+
+def test_unit_tests_fail_when_notebook_crashes_after_passing_tests(tmp_path, monkeypatch):
+    _write_notebook(
+        tmp_path / "modules" / "01_tensor" / "tensor.ipynb",
+        [
+            'print("✅ Tensor creation works correctly!")\n',
+            "raise NotImplementedError()\n",
+        ],
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = _workflow(tmp_path)._run_inline_unit_tests("01_tensor", verbose=False)
+
+    assert result["failed"] >= 1
+
+
+def test_integration_tests_scope_export_gate_and_fail_when_it_trips(tmp_path, monkeypatch):
+    test_file = tmp_path / "tests" / "01_tensor" / "test_01_tensor_progressive.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["env"] = kwargs.get("env") or {}
+        return subprocess.CompletedProcess(
+            cmd, 4, stdout="", stderr="❌ TINYTORCH PACKAGE NOT EXPORTED\n  • Module 01 (Tensor): broken",
+        )
+
+    monkeypatch.setattr("tito.commands.module.workflow.subprocess.run", fake_run)
+    monkeypatch.chdir(tmp_path)
+
+    result = _workflow(tmp_path)._run_integration_tests("01_tensor", verbose=False)
+
+    assert seen["env"].get("TINYTORCH_EXPORT_CHECK_THROUGH") == "1"
+    assert result["failed"] == 1
+
+
+def test_module_test_command_requires_student_notebook(tmp_path):
+    src_file = tmp_path / "src" / "01_tensor" / "01_tensor.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text('print("✅ reference implementation passes")\n', encoding="utf-8")
+    command = ModuleTestCommand(CLIConfig.from_project_root(tmp_path))
+    command.console = _quiet_console()
+
+    ok, message = command.run_inline_tests("01_tensor", "01")
+
+    assert not ok
+    assert "tito module start 01" in message

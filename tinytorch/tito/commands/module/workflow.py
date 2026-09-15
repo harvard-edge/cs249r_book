@@ -771,7 +771,7 @@ class ModuleWorkflowCommand(BaseCommand):
         unit_test_count = 0
         integration_test_count = 0
 
-        # Step 1: Run UNIT tests (test source files, don't need exported package)
+        # Step 1: Run the inline unit tests in the student's own notebook
         if not skip_tests:
             self.console.print("[bold]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold]")
             self.console.print()
@@ -789,9 +789,9 @@ class ModuleWorkflowCommand(BaseCommand):
 
             self.console.print(f"   ✅ Unit tests: {unit_result['passed']}/{unit_result['passed']} passed")
 
-        # Step 1.5: Catch notebook syntax errors before export. Unit tests run
-        # against the instructor src/ file, so a SyntaxError in the student
-        # notebook would otherwise slip through to a silent, broken export.
+        # Step 1.5: Catch notebook syntax errors before export. Export runs
+        # nbdev without executing the notebook, so with --skip-tests a
+        # SyntaxError would otherwise slip through to a silent, broken export.
         if not skip_export:
             syntax_check = self._check_notebook_syntax(module_name)
             if not syntax_check['ok']:
@@ -1039,7 +1039,7 @@ class ModuleWorkflowCommand(BaseCommand):
     def run_module_tests(self, module_name: str, verbose: bool = True) -> int:
         """
         Run comprehensive tests for a module:
-        1. Inline unit tests (from src/XX_modulename/XX_modulename.py)
+        1. Inline unit tests (from the student's notebook in modules/XX_modulename/)
         2. Progressive integration tests (from tests/XX_modulename/test_XX_modulename_progressive.py)
         """
         from rich.table import Table
@@ -1099,17 +1099,31 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def _run_inline_unit_tests(self, module_name: str, verbose: bool) -> Dict[str, int]:
-        """Run inline unit tests and parse output for detailed display.
+        """Run the inline unit tests in the student's notebook and parse the output.
 
-        Prefers the student's working notebook in modules/ so that tests
-        actually certify the student's implementation (#2117). Falls back
-        to the instructor reference in src/ if no notebook exists.
+        Only the working notebook in modules/ is certified (#2117). There is
+        deliberately no fallback to the reference in src/: with the notebook
+        missing, a fallback would pass on the instructor's code and mark the
+        module complete for work the student never did.
         """
         project_root = Path.cwd()
         short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
         notebook_path = project_root / "modules" / module_name / f"{short_name}.ipynb"
-        src_dir = project_root / "src" / module_name
-        dev_file = src_dir / f"{module_name}.py"
+
+        if not notebook_path.exists():
+            module_num = module_name.split("_", 1)[0]
+            error = (
+                f"Notebook not found: modules/{module_name}/{short_name}.ipynb "
+                f"(run: tito module start {module_num})"
+            )
+            if verbose:
+                self.console.print(f"   [red]❌ {error}[/red]")
+            return {
+                'passed': 0,
+                'failed': 1,
+                'tests': [{'name': 'notebook', 'passed': False, 'error': error}],
+                'returncode': 1,
+            }
 
         # Set up environment with project root in PYTHONPATH
         # This allows module code to import from tinytorch.core.*
@@ -1120,20 +1134,13 @@ class ModuleWorkflowCommand(BaseCommand):
         else:
             env['PYTHONPATH'] = str(project_root)
 
-        if notebook_path.exists():
-            runner = (
-                "import json, sys; from pathlib import Path; "
-                "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
-                "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
-                "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
-            )
-            cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
-        elif dev_file.exists():
-            cmd = [sys.executable, str(dev_file.absolute())]
-        else:
-            if verbose:
-                self.console.print(f"   [dim yellow]No module file found: {notebook_path} or {dev_file}[/dim yellow]")
-            return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
+        runner = (
+            "import json, sys; from pathlib import Path; "
+            "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
+            "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
+            "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
+        )
+        cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
 
         # Run the module file (which triggers if __name__ == "__main__" tests)
         result = subprocess.run(
@@ -1201,6 +1208,13 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print(f"   [dim yellow]No integration tests found: {primary_test_file}[/dim yellow]")
             return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
 
+        # Scope conftest's export gate to this module and the ones before it,
+        # so completing module 01 is not blocked by modules 02-04 being absent.
+        env = os.environ.copy()
+        module_num = module_name.split("_", 1)[0]
+        if module_num.isdigit():
+            env["TINYTORCH_EXPORT_CHECK_THROUGH"] = str(int(module_num))
+
         # Run pytest with verbose output
         result = subprocess.run(
             [
@@ -1217,38 +1231,32 @@ class ModuleWorkflowCommand(BaseCommand):
             text=True,
             encoding="utf-8",
             errors="replace",
-            cwd=project_root
+            cwd=project_root,
+            env=env,
         )
 
         # Parse pytest output
         tests_run = self._parse_pytest_output(result.stdout, result.stderr)
 
-        if not tests_run and result.returncode != 0:
-            # pytest itself errored (e.g. a collection-time import failure in
-            # the exported package) rather than legitimately having zero
-            # tests. Surface this as a failure instead of silently reporting
-            # "no integration tests for this module" -- except for two cases
-            # that are not real collection failures:
-            #   - exit code 5: pytest's own "no tests collected" signal
-            #   - exit code 4: a pytest.UsageError, which conftest.py raises
-            #     from _validate_package_exported() when core modules that
-            #     come *later* in the build order haven't been exported yet.
-            #     That check is unconditional (it requires every core file to
-            #     exist, not just the one under test), so it legitimately
-            #     trips for early modules during a progressive build.
+        no_tests_collected = result.returncode == 5
+        if result.returncode != 0 and not no_tests_collected and all(t['passed'] for t in tests_run):
+            # pytest failed without a FAILED test line: a collection-time
+            # import error, an ERROR in setup, or conftest's export gate (exit
+            # code 4, "TINYTORCH PACKAGE NOT EXPORTED") finding one of this
+            # student's own modules missing or broken. All are real failures.
+            #
+            # 2026-09-15: exit code 4 used to be exempt, because the gate
+            # demanded modules 01-04 even while completing module 01. That
+            # skipped every progressive test for modules 01-03 and let a broken
+            # export pass (#2117). The gate now honours
+            # TINYTORCH_EXPORT_CHECK_THROUGH, so a trip means a real problem.
             error_msg = (result.stderr or result.stdout).strip()
-            is_no_tests_collected = result.returncode == 5
-            is_progressive_export_gate = (
-                result.returncode == 4
-                and "TINYTORCH PACKAGE NOT EXPORTED" in error_msg
-            )
-            if not is_no_tests_collected and not is_progressive_export_gate:
-                concise_error = '\n'.join(error_msg.split('\n')[:5]) if error_msg else "pytest exited with an error"
-                tests_run = [{
-                    'name': 'pytest_collection',
-                    'passed': False,
-                    'error': concise_error,
-                }]
+            concise_error = '\n'.join(error_msg.split('\n')[:5]) if error_msg else "pytest exited with an error"
+            tests_run.append({
+                'name': 'pytest_collection',
+                'passed': False,
+                'error': concise_error,
+            })
 
         if verbose:
             for test in tests_run:
@@ -1301,6 +1309,17 @@ class ModuleWorkflowCommand(BaseCommand):
                     'passed': passed,
                     'error': error
                 })
+
+        # A crash after some tests printed ✅ still fails the run. Counting only
+        # the markers let a notebook that raised NotImplementedError partway
+        # through report every test it reached as passed (#2117, 2026-09-15).
+        if tests and returncode != 0:
+            error_msg = stderr.strip() if stderr.strip() else stdout.strip()
+            tests.append({
+                'name': 'module_execution',
+                'passed': False,
+                'error': '\n'.join(error_msg.split('\n')[-3:]) if error_msg else "Test execution failed",
+            })
 
         # If no explicit test markers found, infer from return code
         if not tests:
@@ -1394,9 +1413,9 @@ class ModuleWorkflowCommand(BaseCommand):
 
     def _check_notebook_syntax(self, module_name: str) -> dict:
         """Compile each code cell of the student notebook to catch syntax errors
-        before export. Unit tests run against the instructor ``src/`` file, while
-        export runs nbdev on the student notebook, so a SyntaxError in the
-        notebook would otherwise slip silently into a broken package.
+        before export. Export runs nbdev on the notebook without executing it,
+        so when unit tests are skipped a SyntaxError in the notebook would
+        otherwise slip silently into a broken package.
 
         Returns ``{'ok': bool, 'error': Optional[str]}``. A missing notebook is
         not an error; some flows have nothing to check yet.
