@@ -107,13 +107,19 @@ def test_golden_distributed_llama3_8b_research_cluster():
     # the collective beta terms instead of the 900 GB/s bidirectional total,
     # so intra-node-bound communication latencies roughly doubled (they were
     # ~2x optimistic before). findings_provenance.md M1.
-    assert result.step_latency_total.m_as("ms") == pytest.approx(4553.363026660118)
-    assert result.communication_latency.m_as("ms") == pytest.approx(542.5227635022222)
+    # 2026-09-15: re-pinned after the TP AllReduce count fix. A training step
+    # pays 4 AllReduces per layer (2 forward + 2 backward, Megatron-LM p.4),
+    # each its own ring collective, instead of one 2x-sized collective.
+    # TP comm 534.709 -> 1069.866 ms (bandwidth term exactly 2x, +0.448 ms
+    # from counting the latency term per collective); step, throughput, and
+    # scaling efficiency follow. DP comm and the bubble are unchanged.
+    assert result.step_latency_total.m_as("ms") == pytest.approx(5088.519845717895)
+    assert result.communication_latency.m_as("ms") == pytest.approx(1077.67958256)
     assert result.dp_communication_latency.m_as("ms") == pytest.approx(7.813944444444444)
-    assert result.tp_communication_latency.m_as("ms") == pytest.approx(534.7088190577778)
+    assert result.tp_communication_latency.m_as("ms") == pytest.approx(1069.8656381155556)
     assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(546.9327631578948)
-    assert result.effective_throughput.m_as("1/s") == pytest.approx(7196.439161152336)
-    assert result.scaling_efficiency == pytest.approx(0.760736071277139)
+    assert result.effective_throughput.m_as("1/s") == pytest.approx(6439.59363302376)
+    assert result.scaling_efficiency == pytest.approx(0.6807298792231218)
     assert result.bubble_fraction == pytest.approx(0.15789473684210525)
 
 

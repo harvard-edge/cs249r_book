@@ -293,7 +293,12 @@ class ScalingResult(SolverResult):
 
 
 class CompressionResult(SolverResult):
-    """Result from CompressionModel: compression trade-offs."""
+    """Result from CompressionModel: compression trade-offs.
+
+    ``original_size_gb``, ``compression_ratio``, ``memory_savings_pct`` and
+    ``inference_speedup`` are all relative to ``baseline_precision``.
+    """
+    baseline_precision: str
     original_size_gb: Quantity
     compressed_size_gb: Quantity
     compression_ratio: float
@@ -309,6 +314,7 @@ class CompressionCandidate(SolverResult):
     target_bitwidth: Optional[int] = None
     sparsity: float = 0.0
     sparsity_type: str = "unstructured"
+    baseline_precision: str
     original_size_gb: Quantity
     compressed_size_gb: Quantity
     compression_ratio: float
@@ -367,7 +373,14 @@ class InferenceScalingResult(SolverResult):
 
 
 class SensitivityResult(SolverResult):
-    """Result from SensitivitySolver: binding constraint identification."""
+    """Result from SensitivitySolver: binding constraint identification.
+
+    ``feasible`` mirrors the baseline solve. When it is False the model does
+    not fit in memory, ``binding_constraint`` is ``"memory_capacity"``, and
+    ``constraint_trace`` explains why the perturbation sensitivities are not
+    a ranking of hardware levers.
+    """
+    feasible: bool
     sensitivities: Dict[str, float]
     binding_constraint: str
     baseline_latency: Quantity

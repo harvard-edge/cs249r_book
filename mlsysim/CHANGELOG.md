@@ -35,6 +35,34 @@ Release body. Omit any section that has no entries for a given release.
 
 ## Unreleased
 
+### Bug Fixes
+
+- `CompressionModel` measured every ratio against a hard-coded FP32 baseline
+  with no way to change it, so INT4 always reported 8x compression and an 8x
+  memory-bound speedup, even for models served from FP16/BF16 weights where
+  practice quotes 4x. `solve`, `candidate`, and `sweep` now take a configurable
+  `baseline_precision` (resolved through `core.units.PRECISION_MAP`) that
+  defaults to `"fp32"`, so existing results are unchanged:
+  `compression_ratio = b_base / target_bitwidth`, and original sizes and the
+  Roofline regime use the baseline width. Pass `baseline_precision="fp16"` for
+  FP16/BF16-served models (INT4 = 4x). `CompressionResult` and
+  `CompressionCandidate` record the baseline; the Wall 13 equation now reads
+  `r = b_base/b`.
+- `DistributedModel` counted 2 tensor-parallel AllReduces per layer (the
+  forward path only) for a training step and priced them as one collective of
+  twice the activation size. Megatron-LM tensor parallelism runs two AllReduces
+  in the forward path and two in the backward path per layer (Shoeybi et al.
+  2019, p.4), so a training step now pays 4 separate AllReduces per layer, each
+  with its own ring latency term: the bandwidth term of `tp_communication_latency`
+  doubles and the latency term quadruples.
+- `SensitivitySolver` returned all-zero sensitivities with `peak_flops` named
+  as binding when the configuration does not fit in memory (for example
+  Llama-3 70B FP16 on one H100): the offload path pins latency, so no 10%
+  perturbation moves it, and `max()` broke the tie on the first key.
+  `SensitivityResult` now carries `feasible`; an infeasible baseline reports
+  `binding_constraint="memory_capacity"` and a `constraint_trace` with the
+  Memory Wall failure.
+
 ### Solvers, Models & Taxonomy
 
 - `ContinuousBatchingModel` now derives static and paged capacity from a
