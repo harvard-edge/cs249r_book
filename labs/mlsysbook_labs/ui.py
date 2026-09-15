@@ -28,8 +28,8 @@ ACADEMIC_LAB_CSS = mo.Html(
   --mlsysbook-ok: #247A4D;
   --mlsysbook-warn: #9A5B00;
   --mlsysbook-danger: #B42318;
-  --mlsysbook-readable-width: 980px;
-  --mlsysbook-panel-width: 980px;
+  --mlsysbook-readable-width: 1040px;
+  --mlsysbook-panel-width: 1040px;
 
   /* Native Marimo & shadow-DOM variable cascade */
   --primary: #A51C30;
@@ -105,6 +105,7 @@ ACADEMIC_LAB_CSS = mo.Html(
   margin: 12px auto;
   width: min(var(--mlsysbook-panel-width), 100%);
   max-width: min(var(--mlsysbook-panel-width), 100%);
+  box-sizing: border-box;
 }
 .mlsysbook-recap h2,
 .mlsysbook-panel h2 {
@@ -121,26 +122,31 @@ ACADEMIC_LAB_CSS = mo.Html(
   text-transform: uppercase;
 }
 .mlsysbook-intro-panel {
-  background: linear-gradient(180deg, #FFFFFF 0%, var(--mlsysbook-intro) 100%);
-  border-color: #C9D8EE;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
   border-left: 4px solid var(--mlsysbook-blue);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
 }
 .mlsysbook-track-panel {
-  background: linear-gradient(135deg, #F8FFFB 0%, #FFFFFF 72%);
-  border-color: #B8D8C6;
-  border-left: 6px solid var(--mlsysbook-ok);
-  box-shadow: 0 6px 16px rgba(31, 64, 122, 0.08);
-  margin-top: 22px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-left: 4px solid var(--mlsysbook-blue);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+  margin-top: 14px;
 }
 .mlsysbook-launch-panel {
-  background: linear-gradient(135deg, #F8FFFB 0%, var(--mlsysbook-launch) 76%);
-  border-color: #B8D8C6;
-  border-left: 4px solid var(--mlsysbook-ok);
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-left: 4px solid var(--mlsysbook-muted);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+  margin-top: 14px;
 }
 .mlsysbook-track-panel .mlsysbook-section-label,
 .mlsysbook-launch-panel .mlsysbook-section-label,
 .mlsysbook-thread-panel .mlsysbook-section-label {
-  color: var(--mlsysbook-ok);
+  color: var(--mlsysbook-muted);
 }
 .mlsysbook-thread-panel {
   background: #F8FFFB;
