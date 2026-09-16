@@ -10,14 +10,14 @@ Adheres strictly to Vol 3 Figure 1.10 standard & tinytorch/palette.md:
 - ~85% greyscale, max 1 accent node in #fff1e8 fill / #ff8246 stroke
 - Uniform 1pt stroke weights, rx="2" rounded corners
 - Standard polygon arrowheads, TeX Gyre Heros / Helvetica font stack
-- Synchronizes output to book/ and quarto/ asset directories
+- Synchronizes output to book/ and guide/ asset directories
 """
 
 from pathlib import Path
 
 DEST_DIRS = [
     Path("tinytorch/book/assets/images/diagrams"),
-    Path("tinytorch/quarto/assets/images/diagrams"),
+    Path("tinytorch/guide/assets/images/diagrams"),
 ]
 
 HEADER = """<?xml version="1.0" encoding="UTF-8"?>

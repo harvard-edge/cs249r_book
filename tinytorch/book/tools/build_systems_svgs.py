@@ -10,7 +10,7 @@ Strict compliance with Vol 3 Figure 1.10 standard & tinytorch/palette.md:
 - Max 1 accent node/container per diagram
 - Fonts: TeX Gyre Heros, Helvetica Neue, Arial, sans-serif
 - Uniform stroke weights, crisp geometry, tactile systems intuition.
-- Dual-synchronized to book/ and quarto/ asset directories.
+- Dual-synchronized to book/ and guide/ asset directories.
 """
 
 from pathlib import Path
@@ -18,7 +18,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEST_DIRS = [
     REPO_ROOT / "tinytorch/book/assets/images/diagrams",
-    REPO_ROOT / "tinytorch/quarto/assets/images/diagrams",
+    REPO_ROOT / "tinytorch/guide/assets/images/diagrams",
 ]
 
 def write_svg(filename: str, content: str):

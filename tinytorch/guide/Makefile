@@ -1,5 +1,5 @@
 # =============================================================================
-# TinyTorch quarto build
+# TinyTorch guide build
 # =============================================================================
 # Two Quarto projects share this directory:
 #   • the website (this directory's _quarto.yml, project type "website")

@@ -18,7 +18,7 @@ TINYTORCH_DIR = NARRATIVE_BOOK_DIR.parent
 
 DEST_DIRS = [
     NARRATIVE_BOOK_DIR / "assets/images/diagrams",
-    TINYTORCH_DIR / "quarto/assets/images/diagrams",
+    TINYTORCH_DIR / "guide/assets/images/diagrams",
 ]
 
 

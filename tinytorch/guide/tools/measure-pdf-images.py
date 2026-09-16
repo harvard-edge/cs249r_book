@@ -20,8 +20,8 @@ Pipeline:
      repeat on every page (the fire-emoji in our header is the
      canonical example) collapse into one row so the report isn't
      300x noise.
-  3. Walk source images on disk under `quarto/assets/` and
-     `quarto/modules/**`. For each image file, read its native
+  3. Walk source images on disk under `guide/assets/` and
+     `guide/modules/**`. For each image file, read its native
      pixel dimensions via PNG/JPEG/SVG header parsing. Build a
      `native_dims -> source_path` lookup.
   4. For each unique PDF image, resolve its source file by matching
@@ -37,7 +37,7 @@ Pipeline:
      exactly which author line the override should land on.
   7. Emit TSV to stdout.
 
-Usage (from `tinytorch/quarto/`):
+Usage (from `tinytorch/guide/`):
   python3 tools/measure-pdf-images.py
   python3 tools/measure-pdf-images.py --verbose    # include OK rows
   python3 tools/measure-pdf-images.py --json       # machine-readable
@@ -172,7 +172,7 @@ def build_qmd_index(site_root: Path) -> dict[str, list[QmdRef]]:
     qmd_files = [
         q for q in site_root.rglob("*.qmd")
         if "_build" not in q.parts
-        and "quarto/pdf" not in str(q).replace("\\", "/")
+        and "guide/pdf" not in str(q).replace("\\", "/")
     ]
     for qmd in qmd_files:
         try:

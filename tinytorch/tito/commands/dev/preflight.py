@@ -705,7 +705,7 @@ class PreflightCommand(BaseCommand):
 
         doc_files = [
             ("README.md", "Main README"),
-            ("quarto/getting-started.qmd", "Getting Started"),
+            ("guide/getting-started.qmd", "Getting Started"),
             ("CONTRIBUTING.md", "Contributing Guide"),
         ]
 
