@@ -45,7 +45,7 @@ Treating the context window as an active attention working set determines *what*
 
 ## Architectural Overview: Virtual Memory for Attention Engines {#sec-vol3-virtualmem-intro}
 
-The working set model of attention established in @sec-vol3-working-sets demonstrated how active context must be managed, evicted, and pruned to keep inference feasible within finite context windows. Yet managing *which* tokens reside in context addresses only half of the memory challenge. The complementary physical challenge is *where* and *how* those tokens are allocated in accelerator High-Bandwidth Memory (HBM).
+The working set model of attention established in @sec-vol3-working-sets demonstrated how active context must be managed, evicted, and pruned to keep inference feasible within finite context windows. Yet managing *which* tokens reside in context addresses only half of the memory challenge. The complementary physical challenge is *where* and *how* those tokens are allocated in accelerator HBM.
 
 In classical operating systems, early architectures allocated memory in contiguous physical extents. When processes requested memory dynamically, the system rapidly suffered from internal fragmentation (allocating fixed partitions larger than needed) and external fragmentation (free memory scattered in slivers too small to satisfy new requests). In the 1960s, virtual memory and hardware paging resolved this crisis by decoupling logical process addresses from physical page frames via page tables.
 
@@ -56,11 +56,11 @@ This chapter details the virtual memory architecture of the Stochastic Computer:
 1. **Physical Attention Geometry:** Formalizing the exact byte footprint of Key-Value caches across MHA, MQA, GQA, and MLA architectures, and analyzing the fragmentation pathologies of contiguous allocation.
 2. **PagedAttention Mechanics:** Decoupling logical token sequences from physical HBM blocks using virtual block tables, eliminating external fragmentation and bounding internal waste.
 3. **Prefix Caching and Radix Trees:** Exploiting trajectory prefix overlap via dynamic Radix trees and Copy-on-Write (CoW) page sharing to enable zero-copy branching during test-time search.
-4. **Disaggregated and Compressed Serving:** Scaling memory beyond single-node HBM bounds through chunked prefill, remote RDMA paging, and hardware-aware FP8/INT4 quantization.
+4. **Disaggregated and Compressed Serving:** Scaling memory beyond single-node HBM bounds through chunked prefill, remote direct memory access (RDMA) paging, and hardware-aware FP8/INT4 quantization.
 
 ## The Physical Geometry of Attention Memory {#sec-vol3-virtualmem-geometry}
 
-In classical computer architecture, memory allocation pathologies arise when physical hardware constraints are hidden beneath inflexible software abstractions [@hennessy2011computer]. In production accelerator clusters, memory exhaustion frequently occurs not because physical silicon capacity is genuinely insufficient, but because contiguous allocation schemes strand memory in unusable internal and external fragmentation. While the driver reports 100 percent allocated capacity across accelerator High-Bandwidth Memory (HBM), aggregate token occupancy across active contexts often accounts for less than 35 percent of physical memory—leaving hundreds of gigabytes trapped inside pre-allocated contiguous tensor buffers reserved for theoretical worst-case sequence lengths that requests never reach.
+In classical computer architecture, memory allocation pathologies arise when physical hardware constraints are hidden beneath inflexible software abstractions [@hennessy2011computer]. In production accelerator clusters, memory exhaustion frequently occurs not because physical silicon capacity is genuinely insufficient, but because contiguous allocation schemes strand memory in unusable internal and external fragmentation. While the driver reports 100 percent allocated capacity across accelerator HBM, aggregate token occupancy across active contexts often accounts for less than 35 percent of physical memory—leaving hundreds of gigabytes trapped inside pre-allocated contiguous tensor buffers reserved for theoretical worst-case sequence lengths that requests never reach.
 
 While standard inference runtimes employ PagedAttention for high-throughput stateless batch serving, agentic workloads introduce a fundamentally different memory challenge: long-lived, tree-structured trajectories with heavy prefix sharing, dynamic rollouts, and multi-turn state persistence. In transformer-based serving runtimes, this pathology is rooted in the physical geometry of the **Key-Value (KV) cache**\index{Key-Value (KV) cache}. Autoregressive generation requires that every newly decoded token attend to the representations of all preceding tokens in the sequence. To avoid recomputing Key and Value activation vectors across dozens of transformer layers at every decode step, serving engines materialize these intermediate activations in accelerator memory. Understanding why contiguous allocation collapses requires first formalizing the mathematical footprint of these tensors across modern attention topologies.
 
@@ -819,7 +819,7 @@ The lifecycle of an agent request under PD disaggregation executes in three phas
 2. **Remote KV Block Transfer:** The $P$-instance transfers the materialized KV cache blocks across a high-speed data center network directly into the target $D$-instance's HBM.
 3. **Continuous Decode Streaming:** The $D$-instance, optimized for massive batching concurrency and maximum HBM capacity, links the received physical blocks into its local PagedAttention block table. It executes autoregressive decode iterations at stable, low-jitter Time-Per-Output-Token (TPOT) latencies until generation completes.
 
-### Remote direct memory access (RDMA) and network transfer mechanics
+### RDMA and network transfer mechanics
 
 The fundamental viability of PD disaggregation hinges on network bandwidth. If the time required to transfer the KV cache from a $P$-instance to a $D$-instance exceeds the time saved by compute specialization, disaggregation collapses.
 
