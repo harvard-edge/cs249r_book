@@ -434,70 +434,51 @@ The code in @lst-08-training-train-epoch makes this concrete.
 
 ```{python}
 #| label: lst-08-training-train-epoch
-#| lst-cap: "**`Trainer.train_epoch()` orchestrates the inner loop: forward, loss, backward, clip, step, zero-grad, with gradient accumulation and scheduler update.**"
+#| lst-cap: "**The training loop: zero gradients, set scheduler LR, process batches with sample weighting, and step the optimizer.**"
 #| eval: false
-def train_epoch(self, dataloader, accumulation_steps=1):
+def train_epoch(self, dataloader, accumulation_steps: int = 1) -> float:
     """Train for one epoch through the dataset."""
     self.model.training = True
     self.training_mode = True
+    self.optimizer.zero_grad()
 
-    total_loss = 0.0
-    num_batches = 0
-    accumulated_loss = 0.0
-
-    for batch_idx, (inputs, targets) in enumerate(dataloader):
-        # Forward pass
-        outputs = self.model.forward(inputs)
-        loss = self.loss_fn.forward(outputs, targets)
-
-        # Scale loss for accumulation
-        scaled_loss = loss.data / accumulation_steps
-        accumulated_loss += scaled_loss
-
-        # Backward pass
-        loss.backward()
-
-        # Update parameters every accumulation_steps
-        if (batch_idx + 1) % accumulation_steps == 0:
-            # Gradient clipping
-            if self.grad_clip_norm is not None:
-                params = self.model.parameters()
-                clip_grad_norm(params, self.grad_clip_norm)
-
-            # Optimizer step
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-
-            total_loss += accumulated_loss
-            accumulated_loss = 0.0
-            num_batches += 1
-            self.step += 1
-
-    # Handle remaining accumulated gradients
-    if accumulated_loss > 0:
-        if self.grad_clip_norm is not None:
-            params = self.model.parameters()
-            clip_grad_norm(params, self.grad_clip_norm)
-
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-        total_loss += accumulated_loss
-        num_batches += 1
-
-    avg_loss = total_loss / max(num_batches, 1)
-    self.history['train_loss'].append(avg_loss)
-
-    # Update scheduler
+    # Update scheduler at the start of each epoch so LR is set before training begins
     if self.scheduler is not None:
         current_lr = self.scheduler.get_lr(self.epoch)
         self.optimizer.lr = current_lr
         self.history['learning_rates'].append(current_lr)
 
+    total_loss = 0.0
+    total_samples = 0
+    pending_samples = 0
+    pending = 0  # batches waiting for an optimizer step
+
+    for inputs, targets in dataloader:
+        batch_size = inputs.shape[0]
+        total_loss += self._process_batch(inputs, targets)
+        total_samples += batch_size
+        pending_samples += batch_size
+        pending += 1
+
+        # Update parameters every accumulation_steps batches
+        if pending == accumulation_steps:
+            self._optimizer_update(pending_samples)
+            pending_samples = 0
+            pending = 0
+            self.step += 1
+
+    # A short tail (batch count not divisible by accumulation_steps) still gets its step
+    if pending > 0:
+        self._optimizer_update(pending_samples)
+        self.step += 1
+
+    avg_loss = total_loss / max(total_samples, 1)
+    self.history['train_loss'].append(avg_loss)
     self.epoch += 1
     return avg_loss
 ```
 
-Each iteration processes one batch: the model turns inputs into predictions, the loss function scores them against targets, the backward pass fills `.grad` on every parameter, the clipper bounds the global norm, and the optimizer applies the step. Total loss divided by batch count is the average training loss you watch to see convergence.
+Each iteration processes one batch: the model turns inputs into predictions, the loss function scores them against targets, the backward pass fills `.grad` on every parameter, the clipper bounds the global norm, and the optimizer applies the step. Total loss divided by sample count is the average training loss you watch to see convergence.
 
 While this implementation reads like standard sequential Python, scaling this loop to production hardware transforms it into a highly asynchronous, choreographed dance between the host CPU (dispatching kernel instructions) and the target GPU (executing them massively in parallel).
 
@@ -527,9 +508,9 @@ The code in @lst-08-training-evaluate makes this concrete.
 
 ```{python}
 #| label: lst-08-training-evaluate
-#| lst-cap: "**`Trainer.evaluate()` flips the model to eval mode, runs forward-only passes, and reports average loss and accuracy without touching parameters.**"
+#| lst-cap: "**`Trainer.evaluate()` flips the model to eval mode, runs forward-only passes inside `no_grad()`, and reports sample-weighted loss and accuracy.**"
 #| eval: false
-def evaluate(self, dataloader):
+def evaluate(self, dataloader) -> Tuple[float, float]:
     """Evaluate model without updating parameters."""
     self.model.training = False
     self.training_mode = False
@@ -537,28 +518,32 @@ def evaluate(self, dataloader):
     total_loss = 0.0
     correct = 0
     total = 0
+    total_samples = 0
 
     for inputs, targets in dataloader:
-        # Forward pass only (no backward!)
-        outputs = self.model.forward(inputs)
-        loss = self.loss_fn.forward(outputs, targets)
+        # Forward pass only through _forward, wrapped in no_grad() to prevent memory leaks
+        with no_grad():
+            outputs = self._forward(inputs)
+            loss = self.loss_fn.forward(outputs, targets)
 
-        total_loss += loss.data
+        batch_size = inputs.shape[0]
+        total_loss += float(loss.data) * batch_size
+        total_samples += batch_size
 
-        # Calculate accuracy (for classification)
-        if len(outputs.data.shape) > 1:  # Multi-class
+        # Task-specific evaluation metrics
+        if isinstance(self.loss_fn, CrossEntropyLoss):
             predictions = np.argmax(outputs.data, axis=1)
-            if len(targets.data.shape) == 1:  # Integer targets
-                correct += np.sum(predictions == targets.data)
-            else:  # One-hot targets
-                correct += np.sum(predictions == np.argmax(targets.data, axis=1))
-            total += len(predictions)
+            correct += np.sum(predictions == targets.data)
+            total += predictions.size
+        elif isinstance(self.loss_fn, BinaryCrossEntropyLoss):
+            predictions = outputs.data >= 0.5
+            correct += np.sum(predictions == (targets.data >= 0.5))
+            total += predictions.size
 
-    avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
+    avg_loss = total_loss / total_samples if total_samples > 0 else 0.0
     accuracy = correct / total if total > 0 else 0.0
 
     self.history['eval_loss'].append(avg_loss)
-
     return avg_loss, accuracy
 ```
 
@@ -615,14 +600,18 @@ The code in @lst-08-training-clip-grad-norm makes this concrete.
 #| label: lst-08-training-clip-grad-norm
 #| lst-cap: "**`clip_grad_norm()` rescales gradients uniformly when the global norm exceeds `max_norm`, preserving their relative magnitudes.**"
 #| eval: false
-def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
+def clip_grad_norm(parameters: Iterable, max_norm: float = 1.0) -> float:
     """Clip gradients by global norm to prevent exploding gradients."""
+    parameters = list(parameters)
+    if not parameters:
+        return 0.0
+
     # Compute global norm across all parameters
     total_norm = 0.0
     for param in parameters:
         if param.grad is not None:
             grad_data = param.grad if isinstance(param.grad, np.ndarray) else param.grad.data
-            total_norm += np.sum(grad_data ** 2)
+            total_norm += np.sum(grad_data.astype(np.float64) ** 2)
 
     total_norm = np.sqrt(total_norm)
 
@@ -639,7 +628,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
     return float(total_norm)
 ```
 
-Consider gradients `[100, 200, 50]` with global norm √(100² + 200² + 50²) ≈ 229. With `max_norm=1.0`, the clip coefficient is `1.0 / 229 ≈ 0.00437`, and every gradient is scaled by it: `[0.437, 0.873, 0.218]`. The new norm is exactly 1.0, but the relative magnitudes survive — the second gradient is still twice the first.
+Consider gradients `[100, 200, 50]` with global norm √(100² + 200² + 50²) ≈ 229. With `max_norm=1.0`, the clip coefficient is `1.0 / 229 ≈ 0.00437`, and every gradient is scaled by it: `[0.437, 0.873, 0.218]`. The new norm is exactly 1.0, but the relative magnitudes survive — the second gradient is still twice the first. Notice also that converting `parameters = list(parameters)` at the start prevents generator exhaustion, so the second scaling pass reliably visits every parameter.
 
 This uniform scaling is crucial. If we clipped each gradient independently to 1.0, we'd get `[1.0, 1.0, 1.0]`, destroying the information that the second parameter needs larger updates than the first. Global norm clipping prevents explosions while respecting the gradient's message about relative importance.
 
@@ -653,10 +642,10 @@ The code in @lst-08-training-save-checkpoint makes this concrete.
 
 ```{python}
 #| label: lst-08-training-save-checkpoint
-#| lst-cap: "**`Trainer.save_checkpoint()` pickles the full training state: parameters, optimizer buffers, scheduler, epoch/step counters, and history.**"
+#| lst-cap: "**`Trainer.save_checkpoint()` atomically pickles training state: parameters, optimizer buffers, scheduler, epoch/step counters, and history.**"
 #| eval: false
 def save_checkpoint(self, path: str):
-    """Save complete training state for resumption."""
+    """Save complete training state for resumption via atomic file replace."""
     checkpoint = {
         'epoch': self.epoch,
         'step': self.step,
@@ -668,9 +657,13 @@ def save_checkpoint(self, path: str):
     }
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'wb') as f:
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, 'wb') as f:
         pickle.dump(checkpoint, f)
+    os.replace(tmp_path, path)
 ```
+
+Writing to `f"{path}.tmp"` and renaming atomically with `os.replace` guarantees crash resilience: a failed run or interrupted process never leaves a half-written, corrupt checkpoint where a good checkpoint used to be.
 
 Model state is straightforward: copy all parameter tensors. Optimizer state is more subtle: SGD with momentum stores velocity buffers (one per parameter), Adam stores two moment buffers (first and second moments). Scheduler state captures current learning rate progression. Training metadata includes epoch counter and loss history.
 
@@ -705,15 +698,15 @@ After loading, training resumes as if the interruption never happened. The next 
 
 ### Computational Complexity
 
-Training cost is a function of architecture and dataset size. For a fully connected network with `L` layers of width `d`, the forward pass is O(d² × L) — matrix multiplications dominate. The backward pass has the same complexity, since autograd revisits every operation. With `N` samples and batch size `B`, one epoch is `N / B` iterations.
+Training cost is a function of architecture and dataset size. For a fully connected network with `L` layers of width `d`, the forward pass across a batch of $B$ samples is $O(B \cdot d^2 \cdot L)$ — matrix multiplications dominate. The backward pass has the same asymptotic complexity ($2\times$ forward FLOPs), since autograd revisits every operation. With `N` total samples and batch size `B`, one epoch consists of `N / B` iterations.
 
 Total training cost for E epochs:
 
 ```
-Time per iteration:    O(d² × L) × 2     (forward + backward)
+Work per iteration:    O(B × d² × L) × 2     (forward + backward for B samples)
 Iterations per epoch:  N / B
 Total iterations:      (N / B) × E
-Total complexity:      O((N × E × d² × L) / B)
+Total complexity:      O(N × E × d² × L)
 ```
 
 Real numbers make this concrete. A 2-layer network (`d=512`) on 10,000 samples (batch size 32) for 100 epochs:

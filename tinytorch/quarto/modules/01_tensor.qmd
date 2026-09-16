@@ -340,7 +340,7 @@ In this module you build that data structure from scratch. By the end, your `Ten
 
 **Implementation roadmap:**
 
-@tbl-01-tensor-implementation-roadmap lays out the implementation in order, one part at a time.
+As shown in @fig-01_tensor-diag-1, the `Tensor` abstraction encapsulates raw numerical storage, shape metadata, and operation dispatch. @tbl-01-tensor-implementation-roadmap lays out the implementation in order, one part at a time.
 
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
@@ -506,29 +506,28 @@ The memory savings are not academic. Adding a `(768,)` vector to a `(32, 512, 76
 
 ### Views vs. Copies
 
-When you reshape a tensor, does it allocate new memory or just create a different view of the same data? The answer has huge implications for both performance and correctness.
+When you reshape or transpose an array in NumPy or PyTorch, does it allocate new memory or create a view? In pure NumPy and PyTorch, reshaping and transposing create *views* that share memory with the source (an $O(1)$ metadata update).
 
-A view shares memory with its source. Reshaping a 1 GB tensor is instant because you're just changing the metadata that describes how to interpret the bytes, not copying the bytes themselves. But this creates an important gotcha: modifying a view modifies the original.
+However, in **TinyTorch**, `Tensor.__init__` enforces an explicit systems invariant: **all constructed Tensors own independent storage**. Every operation result returned by `Function.apply` passes through `np.array(..., dtype=np.float32)`, creating an isolated copy:
 
 ```python
 x = Tensor([1, 2, 3, 4])
-y = x.reshape(2, 2)  # y is a VIEW of x
-y.data[0, 0] = 99    # This also changes x!
+y = x.reshape(2, 2)  # TinyTorch wraps the NumPy view in fresh, copied storage
+y.data[0, 0] = 99    # In TinyTorch, x is NOT modified!
+print(x.data[0, 0])  # Still 1.0
 ```
 
-Arithmetic operations like addition always create copies because they compute new values. This is safer but uses more memory. Production code carefully manages views to avoid both memory blowup (too many copies) and silent bugs (unexpected mutations through views).
+This deliberate design choice eliminates tricky mutation bugs where modifying an intermediate activation accidentally corrupts an earlier layer or invalidates tape recording in autograd.
 
-@tbl-01-tensor-view-vs-copy contrasts the memory and time cost of view operations against the copying ones.
+@tbl-01-tensor-view-vs-copy contrasts the memory and time cost of native view operations against TinyTorch's constructor copy.
 
-| Operation | Type | Memory | Time |
-|-----------|------|--------|------|
-| `reshape()` | View* | Shared | O(1) |
-| `transpose()` | View* | Shared | O(1) |
-| `+ - * /` | Copy | New allocation | O(n) |
+| Operation | NumPy / PyTorch Native | TinyTorch `Tensor` | Time Complexity |
+|-----------|------------------------|--------------------|-----------------|
+| `reshape()` | View (Shared buffer) | Fresh Allocation (Copied buffer) | $O(n)$ copy on wrap |
+| `transpose()` | View (Strided swap) | Fresh Allocation (Copied buffer) | $O(n)$ copy on wrap |
+| `+ - * /` | New allocation | New allocation | $O(n)$ |
 
-: **Memory and time cost of view operations versus copying ops.** {#tbl-01-tensor-view-vs-copy}
-
-*When data is contiguous in memory
+: **Memory and time cost of native views versus TinyTorch copying operations.** {#tbl-01-tensor-view-vs-copy}
 
 ### Matrix Multiplication
 
@@ -804,9 +803,9 @@ loss = z.mean()
 Let's walk through each line to understand the comparison:
 
 - **Line 1 (Import)**: Both frameworks use a simple import. TinyTorch exposes `Tensor` from `core.tensor`; PyTorch uses `torch.tensor()` as a factory function.
-- **Line 3 (Creation)**: TinyTorch infers dtype from input; PyTorch requires explicit `dtype=torch.float32` for floating-point operations. This explicitness matters for performance tuning in production.
+- **Line 3 (Creation)**: TinyTorch automatically enforces `float32` precision across all inputs; PyTorch defaults to int64 for integers and requires explicit `dtype=torch.float32`. This explicitness matters for performance tuning in production.
 - **Line 4 (Broadcasting)**: Both handle `x + 2` identically, broadcasting the scalar across all elements. Same semantics, same result.
-- **Line 5 (Matrix multiply)**: TinyTorch uses `.matmul()` method; PyTorch supports both `.matmul()` and the `@` operator. The operation is identical.
+- **Line 5 (Matrix multiply)**: Both TinyTorch and PyTorch support the `.matmul()` method and the infix `@` operator via `__matmul__`.
 - **Line 6 (Reduction)**: Both use `.mean()` to reduce the tensor to a scalar. Reductions like this are fundamental to computing loss values.
 
 :::{.callout-tip title="What's Identical"}
@@ -829,11 +828,11 @@ A single matrix multiply can absorb 90% of training time. Every micro-optimizati
 :::{.callout-tip title="Check Your Understanding — Tensor"}
 Before moving on, verify you can articulate each of the following:
 
-- [ ] Why `reshape` is O(1) metadata update while `transpose` breaks contiguity and triggers cache misses on later iteration.
+- [ ] Why pure NumPy `reshape` is an O(1) metadata update while `transpose` breaks contiguity, and why TinyTorch copies on wrap to guarantee referential safety.
 - [ ] How right-to-left broadcasting lets `(32, 1, 768) + (512, 768)` produce `(32, 512, 768)` without materializing a tiled copy.
 - [ ] Why matmul is O(n^3) — and why doubling matrix size multiplies runtime by 8x, not 4x.
-- [ ] The memory distinction between views (share bytes with source) and copies (fresh allocation), and why silent mutation through a view is a systems bug.
-- [ ] How a scalar logit of 32 × 3 × 224 × 224 image batch lands at ~18.4 MB in float32, and why batch size is the first knob to turn when the GPU runs Out of Memory (OOM).
+- [ ] The memory distinction between native views (shared buffer) and TinyTorch copies (fresh allocation), and why accidental in-place mutation corrupts autograd graphs.
+- [ ] How an image batch of 32 × 3 × 224 × 224 lands at ~18.4 MB in float32, and why batch size is the first knob to turn when the GPU runs Out of Memory (OOM).
 
 If any of these feels fuzzy, revisit Core Concepts (Broadcasting, Views vs. Copies, Matrix Multiplication, Computational Complexity) before moving on.
 :::
@@ -890,28 +889,28 @@ Result: **(32, 512, 768)**
 The 1 broadcasts to 512, and 32 is prepended.
 :::
 
-**Q5: Views vs Copies**
+**Q5: Views vs Copies in TinyTorch**
 
-You reshape a 1GB tensor, then modify one element in the reshaped version. What happens to the original tensor? What if you had used `x + 0` instead of reshape?
+You reshape a 1GB tensor, then modify one element in the reshaped version. What happens to the original tensor in TinyTorch vs PyTorch?
 
 :::{.callout-tip collapse="true" title="Answer"}
 
-**Reshape (view)**: The original tensor IS modified. Reshape creates a view that shares memory with the original. Changing `y.data[0,0] = 99` also changes `x.data[0]`.
+**In PyTorch / pure NumPy (Views)**: The original tensor IS modified because `view()` or `reshape()` shares the underlying buffer.
 
-**Addition (copy)**: The original tensor is NOT modified. `x + 0` creates a new tensor with freshly allocated memory. The values are identical but stored in different locations.
+**In TinyTorch (Constructor Copy)**: The original tensor is **NOT** modified. TinyTorch's `Tensor` constructor deliberately copies NumPy arrays into fresh `float32` buffers upon wrapping.
 
-This distinction matters enormously for:
+This deliberate trade-off trades a small memory allocation overhead to guarantee referential safety across operations:
 
-- **Memory** — Views use 0 extra bytes; copies use n extra bytes.
-- **Performance** — Views are O(1); copies are O(n).
-- **Correctness** — Unexpected mutations through views are a common source of bugs.
+- **Safety** — Avoids unintended graph mutations during backward passes.
+- **Independence** — Intermediate layer outputs are immutable snapshots.
+- **Trade-off** — Reshape incurs an $O(n)$ copy on wrap rather than an $O(1)$ stride metadata update.
 :::
 
 ## Key Takeaways
 
 - **Tensor as universal carrier:** one class holds every value the rest of the framework touches — scalars, vectors, 4-D image batches — because broadcasting makes shape compatibility a runtime concern, not a compile-time one.
 - **Broadcasting replaces tiling:** right-to-left alignment lets a `(768,)` bias merge with a `(32, 512, 768)` activation tensor for the cost of the vector, not the expanded 48 MB copy.
-- **Views vs. copies is a systems decision:** `reshape` and `transpose` are O(1) metadata edits that share memory; arithmetic ops allocate new buffers. Mixing them up causes either memory blowup or silent mutation.
+- **Views vs. copies is a systems decision:** pure NumPy views share memory while TinyTorch constructor copies guarantee isolated storage; mixing them up causes either memory blowup or silent mutation.
 - **Matmul is the cubic tax:** O(n^3) compute on O(n^2) bytes makes matmul compute-bound and cache-sensitive, which is why every real framework routes it through tiled BLAS kernels.
 - **Contiguity is physical, shape is logical:** `transpose` rearranges strides without moving bytes, so iteration order breaks cache locality — hence the `.contiguous()` call after transpose in production code.
 

@@ -428,10 +428,11 @@ Object-oriented interface wrapping the standalone quantization functions. Provid
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `quantize_model` | `quantize_model(model, calibration_data=None)` | Quantize model via static method |
-| `analyze_model_sizes` | `analyze_model_sizes(original, quantized)` | Compare original vs quantized model sizes |
+| `quantize_tensor` | `quantize_tensor(tensor: Tensor) -> Tuple[Tensor, float, int]` | Delegates to `quantize_int8()` |
+| `dequantize_tensor` | `dequantize_tensor(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor` | Delegates to `dequantize_int8()` |
+| `quantize_model` | `quantize_model(model, calibration_data=None) -> Dict[str, Any]` | Returns quantized parameter artifacts and packed size stats |
 
-: **Core methods on the Quantizer convenience class.** {#tbl-15-quantization-quantizer-api}
+: **Core static methods on the Quantizer convenience class.** {#tbl-15-quantization-quantizer-api}
 
 ## Core Concepts
 
@@ -458,29 +459,40 @@ The code in @lst-15-quantize-int8 makes this concrete.
 
 ```{python}
 #| label: lst-15-quantize-int8
-#| lst-cap: "**Asymmetric INT8 quantize function**. Derives scale and zero-point from the tensor's min/max range, then maps FP32 values into `[-128, 127]` with rounding and clipping."
+#| lst-cap: "**Asymmetric INT8 quantize function**. Handles constant edge cases, nudges range to straddle zero, then maps FP32 values into `[-128, 127]` with rounding and clipping."
 #| eval: false
 def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     """Quantize FP32 tensor to INT8 using asymmetric quantization."""
     data = tensor.data
+    if data.size == 0 or not np.all(np.isfinite(data)):
+        raise ValueError("Quantization requires nonempty finite values")
 
     # Step 1: Find dynamic range
     min_val = float(np.min(data))
     max_val = float(np.max(data))
 
     # Step 2: Handle edge case (constant tensor)
-    if abs(max_val - min_val) < EPSILON:
-        scale = 1.0
-        zero_point = 0
+    if max_val == min_val:
+        c = min_val
+        if c == 0:
+            scale = 1.0
+            zero_point = 0
+        else:
+            zero_point = -1 if c > 0 else 1
+            scale = abs(c)
         quantized_data = np.zeros_like(data, dtype=np.int8)
         return Tensor(quantized_data), scale, zero_point
 
-    # Step 3: Calculate scale and zero_point
+    # Step 3: Nudge range to include zero (prevents zero-point clamping error)
+    min_val = min(min_val, 0.0)
+    max_val = max(max_val, 0.0)
+
+    # Step 4: Calculate scale and zero_point
     scale = (max_val - min_val) / (INT8_RANGE - 1)
     zero_point = int(np.round(INT8_MIN_VALUE - min_val / scale))
     zero_point = int(np.clip(zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
 
-    # Step 4: Apply quantization formula
+    # Step 5: Apply quantization formula
     quantized_data = np.round(data / scale + zero_point)
     quantized_data = np.clip(quantized_data, INT8_MIN_VALUE, INT8_MAX_VALUE).astype(np.int8)
 
@@ -549,6 +561,16 @@ The code in @lst-15-quantized-linear-forward makes this concrete.
 #| eval: false
 def forward(self, x: Tensor) -> Tensor:
     """Forward pass with quantized computation."""
+    # Round input onto calibrated grid if calibrated
+    if self.input_scale is not None:
+        if not np.all(np.isfinite(x.data)):
+            raise ValueError("QuantizedLinear forward requires finite input values")
+        q_x = np.clip(
+            np.round(x.data.astype(np.float64) / self.input_scale + self.input_zero_point),
+            INT8_MIN_VALUE, INT8_MAX_VALUE,
+        )
+        x = dequantize_int8(Tensor(q_x), self.input_scale, self.input_zero_point)
+
     # Dequantize weights
     weight_fp32 = dequantize_int8(self.q_weight, self.weight_scale, self.weight_zero_point)
 

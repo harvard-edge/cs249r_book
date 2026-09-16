@@ -451,28 +451,27 @@ The code in @lst-16-compression-magnitude-prune makes this concrete.
 
 ```{python}
 #| label: lst-16-compression-magnitude-prune
-#| lst-cap: "**Magnitude pruning via a global percentile threshold**."
+#| lst-cap: "**Magnitude pruning via global ranking and stable selection**."
 #| eval: false
 def magnitude_prune(model, sparsity=0.9):
     """Remove weights with smallest magnitudes to achieve target sparsity."""
-    # Collect all weights from model (excluding biases)
-    all_weights = []
-    weight_params = []
+    if not np.isfinite(sparsity) or not 0 <= sparsity <= 1:
+        raise ValueError("sparsity must be between 0 and 1")
+    weight_params = [p for p in model.parameters() if p.ndim > 1]
+    if not weight_params:
+        return model
 
-    for param in model.parameters():
-        if len(param.shape) > 1:  # Only weight matrices, not bias vectors
-            all_weights.extend(param.data.flatten())
-            weight_params.append(param)
+    # Rank globally, using stable sort to break ties cleanly
+    magnitudes = np.concatenate([np.abs(p.data).ravel() for p in weight_params])
+    prune_count = int(sparsity * magnitudes.size)
+    prune_mask = np.zeros(magnitudes.size, dtype=bool)
+    prune_mask[np.argsort(magnitudes, kind="stable")[:prune_count]] = True
 
-    # Calculate magnitude threshold at desired percentile
-    magnitudes = np.abs(all_weights)
-    threshold = np.percentile(magnitudes, sparsity * 100)
-
-    # Apply pruning mask: zero out weights below threshold
+    offset = 0
     for param in weight_params:
-        mask = np.abs(param.data) >= threshold
-        param.data = param.data * mask  # In-place zeroing
-
+        mask = prune_mask[offset:offset + param.size].reshape(param.shape)
+        param.data[mask] = 0
+        offset += param.size
     return model
 ```
 
@@ -570,30 +569,31 @@ The code in @lst-16-compression-distillation-loss makes this concrete.
 
 ```{python}
 #| label: lst-16-compression-distillation-loss
-#| lst-cap: "**Temperature-scaled distillation loss combining soft and hard targets**."
+#| lst-cap: "**Temperature-scaled distillation loss combining soft and hard targets**. Returns a differentiable `Tensor` so the student can backpropagate gradients."
 #| eval: false
-def _softmax(self, logits):
-    """Compute softmax with numerical stability."""
-    exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
-    return exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+def distillation_loss(self, student_logits: Tensor, teacher_logits: Tensor, true_labels) -> Tensor:
+    """Calculate a differentiable, batch-mean distillation loss."""
+    if student_logits.ndim != 2 or student_logits.shape != teacher_logits.shape:
+        raise ValueError("Student and teacher logits must have matching (batch, classes) shapes")
+    batch_size, num_classes = student_logits.shape
 
-def distillation_loss(self, student_logits, teacher_logits, true_labels):
-    """Calculate combined distillation loss."""
-    # Soften distributions with temperature
-    student_soft = self._softmax(student_logits / self.temperature)
-    teacher_soft = self._softmax(teacher_logits / self.temperature)
+    # Student stays differentiable; teacher logits are treated as detached constants
+    student_log_probs = log_softmax(student_logits / self.temperature)
+    teacher_log_probs = log_softmax(Tensor(teacher_logits.data) / self.temperature)
+    teacher_probs = Tensor(np.exp(teacher_log_probs.data))
 
-    # Soft target loss (KL divergence)
-    soft_loss = self._kl_divergence(student_soft, teacher_soft)
+    # Soft target loss: batch-mean KL(teacher || student)
+    soft_loss = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(axis=-1).mean()
 
-    # Hard target loss (cross-entropy)
-    student_hard = self._softmax(student_logits)
-    hard_loss = self._cross_entropy(student_hard, true_labels)
+    # Hard target loss: cross-entropy with ground-truth labels
+    hard_log_probs = log_softmax(student_logits)
+    labels = true_labels.data if isinstance(true_labels, Tensor) else np.asarray(true_labels)
+    if labels.ndim == 1:
+        hard_loss = hard_log_probs[np.arange(batch_size), labels.astype(np.intp)].mean() * -1.0
+    else:
+        hard_loss = (Tensor(labels) * hard_log_probs).sum(axis=-1).mean() * -1.0
 
-    # Combined loss
-    total_loss = self.alpha * soft_loss + (1 - self.alpha) * hard_loss
-
-    return total_loss
+    return self.alpha * soft_loss + (1 - self.alpha) * hard_loss
 ```
 
 Dividing logits by temperature before softmax spreads probability mass across classes. At `temperature=1` you get the usual peaked softmax. At `temperature=3` the distribution flattens, exposing the teacher's relative uncertainty between classes. The student learns both what the teacher picks *and* what it almost picked.
@@ -612,21 +612,23 @@ The code in @lst-16-compression-low-rank makes this concrete.
 #| label: lst-16-compression-low-rank
 #| lst-cap: "**Low-rank approximation via truncated SVD**."
 #| eval: false
-def low_rank_approximate(weight_matrix, rank_ratio=0.5):
+def low_rank_approximate(weight_matrix: np.ndarray, rank_ratio: float = 0.5):
     """Approximate weight matrix using SVD-based low-rank decomposition."""
+    if not np.isfinite(rank_ratio) or not 0 < rank_ratio <= 1:
+        raise ValueError("rank_ratio must be in (0, 1]")
     m, n = weight_matrix.shape
 
-    # Perform SVD: W = U @ diag(S) @ V
+    # Perform SVD: W = U @ diag(S) @ V^T
     U, S, V = np.linalg.svd(weight_matrix, full_matrices=False)
 
-    # Keep only top-k singular values
+    # Determine target rank
     max_rank = min(m, n)
     target_rank = max(1, int(rank_ratio * max_rank))
 
-    # Truncate to target rank
-    U_truncated = U[:, :target_rank]     # (m, k)
-    S_truncated = S[:target_rank]         # (k,)
-    V_truncated = V[:target_rank, :]      # (k, n)
+    # Copy the slices to release the full SVD backing arrays from memory
+    U_truncated = U[:, :target_rank].copy()
+    S_truncated = S[:target_rank].copy()
+    V_truncated = V[:target_rank, :].copy()
 
     return U_truncated, S_truncated, V_truncated
 ```

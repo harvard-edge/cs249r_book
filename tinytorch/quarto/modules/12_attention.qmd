@@ -505,16 +505,14 @@ The code in @lst-12-masked-softmax makes this concrete.
 
 ```{python}
 #| label: lst-12-masked-softmax
-#| lst-cap: "**Masked softmax and value-weighted sum**. Adds `-1e9` at masked positions, normalizes via softmax, then weights values to produce the attended output."
+#| lst-cap: "**Masked softmax and value-weighted sum**. Replaces blocked scores with `-inf` via `masked_fill`, normalizes via softmax, then weights values to produce the attended output."
 #| eval: false
 # From scaled_dot_product_attention
 
-# Apply causal mask if provided (set masked positions to large negative)
+# Apply causal mask if provided (set blocked positions to -infinity)
 if mask is not None:
-    mask_data = mask.data
-    adder_mask = (1.0 - mask_data) * MASK_VALUE  # MASK_VALUE = -1e9
-    adder_mask_tensor = Tensor(adder_mask, requires_grad=False)
-    scores = scores + adder_mask_tensor
+    allowed = np.broadcast_to(mask.data, scores.shape)
+    scores = scores.masked_fill(allowed == 0, float("-inf"))
 
 # Softmax converts scores to probability distribution
 softmax = Softmax()
@@ -524,7 +522,7 @@ attention_weights = softmax(scores, dim=-1)  # Normalize along last dimension
 output = attention_weights.matmul(V)
 ```
 
-The mask trick is worth pausing on. Masked positions get `-1e9` added to their score; after `exp`, that's a number indistinguishable from zero, so they receive no attention weight at all. Allowed positions get `+0` and pass through unchanged. The whole operation stays differentiable — there is no `if` in the gradient path — and the constraint is enforced exactly.
+The mask trick is worth pausing on. Masked positions get `-inf` assigned to their score; after `exp`, that's a number indistinguishable from zero (`exp(-inf) == 0.0`), so they receive no attention weight at all and their gradients are blocked. Allowed positions pass through unchanged. The whole operation stays differentiable — there is no `if` in the gradient path — and the constraint is enforced exactly.
 
 ### Multi-Head Attention: Parallel Relationship Learning
 
@@ -557,6 +555,12 @@ Q = Q.transpose(1, 2)
 K = K.transpose(1, 2)
 V = V.transpose(1, 2)
 
+# Reshape mask (batch, seq_q, seq_k) to (batch, 1, seq_q, seq_k) for broadcasting across heads
+mask_reshaped = mask
+if mask is not None and len(mask.shape) == 3:
+    batch_size_mask, seq_q_mask, seq_k_mask = mask.shape
+    mask_reshaped = mask.reshape(batch_size_mask, 1, seq_q_mask, seq_k_mask)
+
 # Apply attention to all heads at once
 attended, _ = scaled_dot_product_attention(Q, K, V, mask=mask_reshaped)
 
@@ -583,13 +587,13 @@ The mask itself is a lower-triangular matrix — ones on and below the diagonal,
  [1, 1, 1, 1]]   # Position 3 sees the whole prefix
 ```
 
-Combined with the `-1e9` trick from the previous section, exactly the upper triangle of every attention matrix is zeroed out before the weighted sum. The reader should pause on this: the mask is the *only* thing that turns a bidirectional encoder (like BERT) into an autoregressive decoder (like GPT). Same code, same parameters, one extra triangular tensor.
+Combined with the `-inf` trick from the previous section, exactly the upper triangle of every attention matrix is zeroed out before the weighted sum. The reader should pause on this: the mask is the *only* thing that turns a bidirectional encoder (like BERT) into an autoregressive decoder (like GPT). Same code, same parameters, one extra triangular tensor.
 
 ### Computational Complexity: The O(n²) Reality
 
 Attention's power comes from all-to-all connectivity: every position can attend to every other position. But this creates quadratic scaling in both computation and memory. For sequence length n, the attention matrix has n² elements. The vectorized `Q @ K^T` operation computes all n² similarity scores in one matrix multiplication, softmax normalizes n² values, and applying attention to values multiplies n² weights by the value vectors.
 
-The memory cost is the part that bites first. For GPT-3 with 2048-token context, a single attention matrix stores `2048² = 4,194,304` float32 values — 16 MB. With 96 layers stacked, attention matrices alone consume 1.5 GB before you account for activations, gradients, Q/K/V projections, or anything else. That is the quadratic wall, and it is the reason every long-context system you've heard of has a paper attached to it.
+The memory cost is the part that bites first. For GPT-3 with 2048-token context and 96 attention heads per layer, a single head's attention matrix stores $2048^2 = 4,194,304$ float32 values — 16 MB. Across 96 heads, that is **1.5 GB per layer**. With 96 layers stacked, attention matrices alone consume **~144 GB** of activation memory per sample in a batch before you account for activations, gradients, Q/K/V projections, or anything else. That is the quadratic wall, and it is the reason every long-context system you've heard of has a paper attached to it.
 
 @tbl-12-attention-step-complexity summarises the time and memory cost of the core operations.
 
@@ -858,10 +862,10 @@ Causal masking zeros out the upper triangle (roughly half the attention matrix).
 
 **In your implementation: NO computation saved**
 
-Your code computes the full attention matrix, then adds -1e9 to masked positions:
+Your code computes the full attention matrix, then fills blocked positions with `-inf`:
 ```python
 scores = Q.matmul(K_t)  # Full n² computation
-scores = scores + adder_mask_tensor  # Masking happens after
+scores = scores.masked_fill(allowed == 0, float("-inf"))  # Masking happens after
 ```
 
 **Why no savings:**
@@ -893,32 +897,27 @@ Training attention requires storing activations for backpropagation. How much me
 
 **Forward pass (inference):**
 
-- Attention matrix: n² values
+- Attention matrix: $n^2$ values per head ($B \times H \times n^2$ total)
 
 **Backward pass (training) additional memory:**
 
-- Gradient of attention weights: n² values
-- Gradient of Q, K, V: 3 × (n × d) values
-- Intermediate gradients from softmax: n² values
+- Gradient of attention weights: $n^2$ values per head (needed to backpropagate to Q and K)
+- Intermediate activations (softmax inputs/outputs) retained for the chain rule: $n^2$ values per head
+- Note: The Adam optimizer tracks **model parameters** (weights and biases in Q/K/V projections), **not** dynamic activation matrices like attention scores. Attention matrices carry zero optimizer state.
 
-**With Adam optimizer (standard for transformers):**
+**Total activation memory multiplier for attention matrix alone:**
 
-- First moment (momentum): n² values
-- Second moment (velocity): n² values
+- Forward activation saved for backward: 1×
+- Backward gradient: +1×
+- Intermediate softmax activation: +1×
+- **Total: ~3× inference activation memory**
 
-**Total multiplier for attention matrix alone:**
+**For GPT-3 scale (96 layers, 96 heads, 2048 context, batch size 1):**
 
-- Forward: 1× (attention weights)
-- Backward: +2× (gradients)
-- Optimizer: +2× (Adam state)
-- **Total: 5× inference memory**
+- Inference activation: $96 \text{ layers} \times 96 \text{ heads} \times 16\text{ MB} \approx \mathbf{144\text{ GB}}$
+- Training activation (without checkpointing): $144\text{ GB} \times 3 \approx \mathbf{432\text{ GB}}$ just for attention matrices!
 
-**For GPT-3 scale (96 layers, 2048 context):**
-
-- Inference: 96 × 16 MB = 1.5 GB
-- Training: 96 × 16 MB × 5 = **7.5 GB** just for attention gradients and optimizer state.
-
-This excludes Q/K/V matrices, feed-forward networks, embeddings, and activations from other layers. Full GPT-3 training requires 350+ GB.
+This quadratic activation memory explosion is why **activation checkpointing** (recomputing attention during backward rather than storing it) and **FlashAttention** are mandatory for training large language models.
 :::
 
 ## Key Takeaways

@@ -409,18 +409,33 @@ The properties you expose are summarised in @tbl-20-capstone-report-properties.
 
 : **Data properties stored on the BenchmarkReport class.** {#tbl-20-capstone-report-properties}
 
-### Core Methods
+### BenchmarkReport Methods
 
 @tbl-20-capstone-report-methods lists the methods on the report class.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `benchmark_model` | `benchmark_model(model, X_test, y_test, num_runs=100) -> dict` | Measures accuracy, latency (mean ± std), throughput, memory |
-| `generate_submission` | `generate_submission(baseline_report, optimized_report=None, ...) -> dict` | Creates standardized JSON with baseline, optimized, improvements |
-| `save_submission` | `save_submission(submission, filepath="submission.json") -> str` | Writes JSON to file with validation |
-| `validate_submission_schema` | `validate_submission_schema(submission) -> bool` | Validates structure and value ranges |
+| `benchmark_model` | `benchmark_model(model, X_test, y_test, num_runs=100) -> dict` | Measures accuracy, latency (mean, std, median), throughput, memory |
+| `measure_latency` | `measure_latency(model, X_batch, num_runs=100) -> List[float]` | Single-sample latency timing with warmup |
+| `measure_memory` | `measure_memory(model) -> float` | Model parameter memory footprint in MB |
 
 : **Core methods on the BenchmarkReport class.** {#tbl-20-capstone-report-methods}
+
+### Torch Olympics Competition Harness
+
+The `tinytorch.olympics` module provides rules and submission tools for classroom competitions:
+
+@tbl-20-capstone-olympics-api lists the competition events and submission helpers.
+
+| Symbol | Signature / Values | Description |
+|--------|---------------------|-------------|
+| `OlympicEvent` | `LATENCY_SPRINT`, `MEMORY_CHALLENGE`, `ACCURACY_CONTEST`, `EXTREME_PUSH` | Enum defining competitive challenge categories |
+| `qualifies_event` | `qualifies_event(metrics: Dict[str, float], event: OlympicEvent) -> bool` | Checks whether candidate metrics satisfy competition threshold constraints |
+| `generate_submission` | `generate_submission(baseline_report, optimized_report=None, student_name="Student", event=None) -> dict` | Creates standardized submission payload comparing baseline vs candidate |
+| `save_submission` | `save_submission(submission, filepath="submission.json") -> str` | Serializes and writes submission JSON to disk |
+| `validate_submission_schema` | `validate_submission_schema(submission: dict) -> bool` | Validates JSON schema integrity and required fields |
+
+: **Torch Olympics competition harness API.** {#tbl-20-capstone-olympics-api}
 
 ### Module Dependencies and Imports
 
@@ -510,7 +525,8 @@ self.metrics = {
     'accuracy': float(accuracy),
     'latency_ms_mean': float(avg_latency),
     'latency_ms_std': float(std_latency),
-    'throughput_samples_per_sec': float(1000 / avg_latency)
+    'latency_ms_median': float(median_latency),
+    'throughput_samples_per_sec': float(throughput),
 }
 ```
 
@@ -539,24 +555,41 @@ A capstone submission must measure the *composite* effect. Optimizations interac
 
 Many beginners confuse latency and throughput because both relate to speed. They measure fundamentally different things.
 
-**Latency** measures per-sample speed: how long does it take to process one input? This matters for real-time applications where users wait for results. Your implementation measures latency by timing single-sample inference:
+**Latency** measures per-sample speed: how long does it take to process one input? This matters for real-time applications where users wait for results. Your implementation measures latency by timing single-sample inference with warmup and `precise_timer`:
 
 ```python
-# Latency: time for ONE sample
-start = time.time()
-_ = model.forward(X_test[:1])  # Shape: (1, features)
-latency_ms = (time.time() - start) * 1000
+# Latency: time for ONE sample after untimed warmup
+for _ in range(5):
+    _ = model.forward(X_test[:1])
+
+latencies = []
+for _ in range(num_runs):
+    with precise_timer() as timer:
+        _ = model.forward(X_test[:1])
+    latencies.append(timer.elapsed * 1000)  # in ms
 ```
 
 A model with 10ms latency processes one input in 10 milliseconds. The user submits a query and waits 10ms. That number lives or dies on user experience.
 
-**Throughput** measures batch capacity: how many inputs can you process per second? This is the metric for offline jobs grinding through millions of examples. Your implementation derives it from latency:
+**Throughput** measures batch processing capacity: how many total inputs can the system process per second? This is the metric for offline jobs grinding through millions of examples. Critically, throughput is **timed separately on the full batch**, not derived from single-sample latency:
 
 ```python
-throughput_samples_per_sec = 1000 / avg_latency
+# Throughput: time the WHOLE test batch together
+batch_size = X_test.shape[0]
+for _ in range(5):
+    _ = model.forward(X_test)
+
+batch_seconds = []
+for _ in range(num_runs):
+    with precise_timer() as timer:
+        _ = model.forward(X_test)
+    batch_seconds.append(timer.elapsed)
+
+# Samples processed per second across the batch
+throughput_samples_per_sec = batch_size / max(np.median(batch_seconds), 1e-9)
 ```
 
-At 10ms per sample, throughput is 1000 / 10 = 100 samples/second — but only if you process one sample at a time. Batching changes the math. A batch of 32 samples might take 50ms total, which is 640 samples/second of throughput at the cost of 50ms per-request latency.
+At 10ms per single sample, computing `1000 / 10 = 100` samples/second would severely undercount actual throughput if the model processes a batch of 32 samples in 50ms (achieving $32 / 0.050 = 640$ samples/second!). Conversely, running large batches increases throughput at the expense of per-request latency. Deriving throughput via `1000 / avg_latency` is an anti-pattern because it erases this fundamental hardware trade-off.
 
 The trade-off: **Batching increases throughput but hurts latency.** A production API serving individual user requests optimizes for latency to maintain a snappy user experience. A background batch processing pipeline optimizes for throughput to minimize total compute costs. Choosing between them is a fundamental architectural decision.
 

@@ -483,7 +483,7 @@ The code in @lst-11-embedding-forward makes this concrete.
 
 ```{python}
 #| label: lst-11-embedding-forward
-#| lst-cap: "**Embedding forward pass**. NumPy fancy indexing replaces a one-hot matmul, making lookup O(1) per token."
+#| lst-cap: "**Embedding forward pass**. Gathers embedding rows via EmbeddingFunction.apply, recording operations for autograd."
 #| eval: false
 def forward(self, indices: Tensor) -> Tensor:
     """Forward pass: lookup embeddings for given indices."""
@@ -494,20 +494,11 @@ def forward(self, indices: Tensor) -> Tensor:
             f"got min={np.min(indices.data)}, max={np.max(indices.data)}"
         )
 
-    # Perform embedding lookup using advanced indexing
-    # This is equivalent to one-hot multiplication but much more efficient
-    embedded = self.weight.data[indices.data.astype(int)]
-
-    # Create result tensor with gradient tracking
-    result = Tensor(embedded, requires_grad=self.weight.requires_grad)
-
-    if result.requires_grad:
-        result._grad_fn = EmbeddingBackward(self.weight, indices)
-
-    return result
+    # Perform embedding lookup through EmbeddingFunction for autograd tracking
+    return EmbeddingFunction.apply(self.weight, indices=indices.data.astype(int))
 ```
 
-The work happens in `self.weight.data[indices.data.astype(int)]`. NumPy's fancy indexing pulls rows 1, 42, and 7 in a single operation, broadcasting cleanly over batched inputs of any shape. It is mathematically equivalent to multiplying a one-hot matrix against the weight table — but it is orders of magnitude faster and allocates no intermediate tensor.
+Under the hood, `EmbeddingFunction.forward` performs `weight[self.indices]`. NumPy's fancy indexing pulls the rows in a single gather operation, broadcasting cleanly over batched inputs of any shape. During the backward pass, `EmbeddingFunction.backward` uses `np.add.at` to scatter incoming gradients back into only the accessed rows of the weight matrix.
 
 ### Embedding Table Mechanics
 
@@ -526,7 +517,7 @@ self.weight = Tensor(
 
 This initialization scale ensures gradients neither explode nor vanish at the start of training. The limit is computed from both vocabulary size and embedding dimension, balancing the fan-in and fan-out of the embedding layer.
 
-During training, gradients flow back through the lookup operation to update only the embeddings that were accessed. If your batch contains tokens `[5, 10, 10, 5]`, only rows 5 and 10 of the embedding table receive gradient updates. This sparse gradient pattern is handled by the `EmbeddingBackward` gradient function, making embedding updates extremely efficient even for vocabularies with millions of tokens.
+During training, gradients flow back through the lookup operation to update only the embeddings that were accessed. If your batch contains tokens `[5, 10, 10, 5]`, only rows 5 and 10 of the embedding table receive gradient updates. This sparse gradient pattern is handled by the `EmbeddingFunction` gradient rule, making embedding updates extremely efficient even for vocabularies with millions of tokens.
 
 :::{.callout-note title="Systems Implication: Sparse Gradient Updates and Embedding Memory Layout"}
 The embedding table is the largest *single* tensor in most language models — GPT-3's token embeddings alone consume 2.3 GB — yet a forward pass only touches the handful of rows corresponding to tokens in the current batch. Treating the embedding step as a **row-sparse scatter/gather** (rather than a dense matmul against a one-hot matrix) is what keeps training tractable: you never materialize the `(batch × seq, vocab)` one-hot tensor, you never multiply by it, and the backward pass only writes gradients into the rows that were read. Production frameworks go further — they store the embedding matrix in row-major layout so each lookup is one contiguous HBM transaction per token, use sparse gradient tensors in the optimizer (Adam state for only the accessed rows), and in distributed training shard the table across devices so no single GPU has to hold all 2.3 GB. Every one of these optimizations is a direct consequence of the lookup-as-sparse-scatter pattern you just implemented.
@@ -554,27 +545,22 @@ The code in @lst-11-positional-forward makes this concrete.
 
 ```{python}
 #| label: lst-11-positional-forward
-#| lst-cap: "**PositionalEncoding forward pass**. Slices position embeddings to current sequence length and adds them to token embeddings while preserving gradient flow."
+#| lst-cap: "**PositionalEncoding forward pass**. Slices position embeddings to current sequence length and reshapes to add batch dimension while preserving autograd tracking."
 #| eval: false
-def forward(self, x: Tensor) -> Tensor:
+def forward(self, x: Tensor, start_pos: int = 0) -> Tensor:
     """Add positional encodings to input embeddings."""
     batch_size, seq_len, embed_dim = x.shape
 
-    # Slice position embeddings for this sequence length
-    # Tensor slicing preserves gradient flow (from Module 01's __getitem__)
-    pos_embeddings = self.position_embeddings[:seq_len]
+    # Slice position embeddings for current sequence segment
+    # start_pos is 0 during whole-sequence training; during KV-cached generation,
+    # it corresponds to the position of the newly generated token
+    pos_embeddings = self.position_embeddings[start_pos:start_pos + seq_len]
 
-    # Reshape to add batch dimension: (1, seq_len, embed_dim)
-    pos_data = pos_embeddings.data[np.newaxis, :, :]
-    pos_embeddings_batched = Tensor(pos_data, requires_grad=pos_embeddings.requires_grad)
+    # Reshape to (1, seq_len, embed_dim) for batch broadcasting — preserves autograd!
+    pos_embeddings_batched = pos_embeddings.reshape(1, seq_len, embed_dim)
 
-    # Copy gradient function to preserve backward connection
-    if hasattr(pos_embeddings, '_grad_fn') and pos_embeddings._grad_fn is not None:
-        pos_embeddings_batched._grad_fn = pos_embeddings._grad_fn
-
-    # Add positional information - gradients flow through both x and pos_embeddings!
-    result = x + pos_embeddings_batched
-    return result
+    # Element-wise addition: gradients flow through both x and position_embeddings
+    return x + pos_embeddings_batched
 ```
 
 The slicing operation `self.position_embeddings[:seq_len]` preserves gradient tracking because TinyTorch's Tensor `__getitem__` (from Module 01) maintains the connection to the original parameter. This allows backpropagation to update only the position embeddings actually used in the forward pass.
@@ -603,7 +589,10 @@ pe = np.zeros((max_seq_len, embed_dim), dtype=np.float32)
 
 # Apply sine to even indices, cosine to odd indices
 pe[:, 0::2] = np.sin(position * div_term)
-pe[:, 1::2] = np.cos(position * div_term)
+if embed_dim % 2 == 1:
+    pe[:, 1::2] = np.cos(position * div_term[:-1])
+else:
+    pe[:, 1::2] = np.cos(position * div_term)
 ```
 
 This creates a unique vector for each position where low-index dimensions oscillate rapidly (high frequency) and high-index dimensions change slowly (low frequency). The pattern allows the model to learn relative positions through dot products, and crucially, can extrapolate to sequences longer than seen during training.
@@ -982,6 +971,3 @@ You'll build scaled dot-product attention: the mechanism that lets every embeddi
 
 Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 :::
-----------------------|
-| **12: Attention** | Context-aware representations | `attention(embed_layer(tokens))` creates query, key, value |
-| **13: Transformers** | Complete sequence-to-sequence | `transformer(embed_layer(src), embed_layer(tgt))` |

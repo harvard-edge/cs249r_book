@@ -346,7 +346,7 @@ You'll build five of them: ReLU, Sigmoid, Tanh, GELU, and Softmax. Along the way
 
 **Implementation roadmap:**
 
-@tbl-02-activations-implementation-roadmap lays out the implementation in order, one part at a time.
+As illustrated in @fig-02_activations-diag-1, each activation function defines a distinct transfer curve: elementwise functions preserve shape while Softmax normalizes across a designated axis. @tbl-02-activations-implementation-roadmap lays out the implementation in order, one part at a time.
 
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
@@ -373,8 +373,8 @@ probabilities = softmax(logits)  # Converts to probability distribution (sums to
 
 To keep this module focused, you will **not** implement:
 
-- Gradient computation (`backward()` methods are stubs for now — automatic differentiation is a later module)
-- Learnable parameters (activations are fixed mathematical functions)
+- Gradient computation (`backward()` methods are attached in Module 06 via autograd)
+- Learnable parameters (activations are fixed mathematical transformations with `parameters() -> []`)
 - Advanced variants (LeakyReLU, ELU, Swish — PyTorch ships dozens; you'll build the core five that cover ~95% of real architectures)
 - GPU acceleration (your NumPy implementation runs on CPU)
 
@@ -382,24 +382,27 @@ The forward pass is enough to build intuition. Gradients show up in Module 06.
 
 ## API Reference
 
-This section provides a quick reference for the activation classes you'll build. Each activation is a callable object with a `forward()` method that transforms an input tensor element-wise.
+This section provides a quick reference for the activation classes you'll build. Each activation follows a clean two-tier design: a `Function` subclass executing array operations, wrapped by a callable layer object implementing `parameters(self) -> []`.
 
 ### Activation Pattern
 
 All activations follow this structure:
 
 ```python
-class ActivationName:
-    def forward(self, x: Tensor) -> Tensor:
-        # Apply mathematical transformation
+class ActivationNameFunction(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        # Mathematical kernel operating on raw NumPy arrays
         pass
+
+class ActivationName:
+    def parameters(self) -> list:
+        return []  # Activations own no trainable parameters
+
+    def forward(self, x: Tensor) -> Tensor:
+        return ActivationNameFunction.apply(x)
 
     def __call__(self, x: Tensor) -> Tensor:
         return self.forward(x)
-
-    def backward(self, grad: Tensor) -> Tensor:
-        # Stub — autograd adds gradient computation later
-        pass
 ```
 
 ### Core Activations
@@ -477,11 +480,20 @@ That's the entire reason this module exists. Five small functions are what separ
 ReLU (Rectified Linear Unit) is deceptively simple: it zeros out negative values and leaves positive values unchanged. Here's the complete implementation from your module:
 
 ```python
+class ReLUFunction(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        return np.maximum(0, x)
+
 class ReLU:
+    def parameters(self):
+        return []
+
     def forward(self, x: Tensor) -> Tensor:
         """Apply ReLU activation element-wise."""
-        result = np.maximum(0, x.data)
-        return Tensor(result)
+        return ReLUFunction.apply(x)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
 ```
 
 This simplicity is ReLU's greatest strength. The operation is a single comparison per element: O(n) with a tiny constant factor. Modern CPUs can execute billions of comparisons per second. Compare this to sigmoid, which requires computing an exponential for every element.
@@ -507,38 +519,47 @@ The code in @lst-02-activations-sigmoid makes this concrete.
 
 ```{python}
 #| label: lst-02-activations-sigmoid
-#| lst-cap: "**Numerically stable Sigmoid using a piecewise formula to avoid overflow on either side of zero.**"
+#| lst-cap: "**Numerically stable Sigmoid using bounded non-positive exponents.**"
 #| eval: false
+class SigmoidFunction(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        # Both branches use bounded exponential z = exp(-|x|), guaranteed <= 0
+        z = np.exp(-np.abs(x))
+        return np.where(x >= 0, 1.0 / (1.0 + z), z / (1.0 + z))
+
 class Sigmoid:
+    def parameters(self):
+        return []
+
     def forward(self, x: Tensor) -> Tensor:
         """Apply sigmoid activation element-wise."""
-        z = np.clip(x.data, -500, 500)  # Prevent overflow
-        result_data = np.zeros_like(z)
+        return SigmoidFunction.apply(x)
 
-        # Positive values: 1 / (1 + exp(-x))
-        pos_mask = z >= 0
-        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-z[pos_mask]))
-
-        # Negative values: exp(x) / (1 + exp(x))
-        neg_mask = z < 0
-        exp_z = np.exp(z[neg_mask])
-        result_data[neg_mask] = exp_z / (1.0 + exp_z)
-
-        return Tensor(result_data)
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
 ```
 
-Notice that there are two formulas, not one. The textbook form `1 / (1 + exp(-x))` blows up for large negative `x` because `exp(-x)` overflows. The algebraically equivalent `exp(x) / (1 + exp(x))` blows up for large positive `x` for the symmetric reason. Neither is "right"; each is right on one side of zero. The implementation picks the safe branch per element and clips at ±500 as a belt-and-suspenders guard. This is the first time in the course you see a recurring pattern: *the math is one expression, the numerically stable code is a piecewise rewrite of it*.
+Notice how the two branches share the identical bounded term $z = \exp(-\lvert x\rvert)$. Because $-\lvert x\rvert \le 0$ for all $x$, $\exp(-\lvert x\rvert) \in (0, 1]$, making overflow structurally impossible without needing arbitrary hard clipping.
 
 Sigmoid's smooth S-curve makes it natural for binary classification outputs — the value reads directly as a probability. For hidden layers it's a disaster. When $|x|$ grows, the output saturates near 0 or 1 and the gradient collapses toward zero. In a deep network those tiny gradients multiply through the chain rule and vanish exponentially. That's why sigmoid lost the hidden-layer slot to ReLU around 2012 and never got it back.
 
 Tanh is sigmoid's zero-centered cousin, mapping inputs to (-1, 1):
 
 ```python
+class TanhFunction(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        return np.tanh(x)
+
 class Tanh:
+    def parameters(self):
+        return []
+
     def forward(self, x: Tensor) -> Tensor:
         """Apply tanh activation element-wise."""
-        result = np.tanh(x.data)
-        return Tensor(result)
+        return TanhFunction.apply(x)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
 ```
 
 Zero-centering is the only real difference, and it matters more than it sounds. Sigmoid outputs are always positive, which biases the gradient updates of the next layer in one direction; tanh outputs straddle zero, so positive and negative gradients cancel naturally. That's why tanh, not sigmoid, was the activation of choice inside LSTM and GRU cells where the same weights see the same hidden state hundreds of times. Tanh still saturates at the extremes, so deep stacks still vanish — but for bounded, recurrent settings it remains the right pick.
@@ -547,16 +568,32 @@ Zero-centering is the only real difference, and it matters more than it sounds. 
 
 GELU (Gaussian Error Linear Unit) applies a more complex gate than ReLU. Rather than taking the `max(0, x)` threshold, GELU applies a smooth, probabilistic transformation.
 
-The implementation uses the fast sigmoid approximation from your module.
+The implementation in @lst-02-activations-gelu uses the fast sigmoid approximation from your module.
 
 ```{python}
 #| label: lst-02-activations-gelu
 #| lst-cap: "**GELU using the fast sigmoid approximation, reusing the Sigmoid implementation from this module.**"
 #| eval: false
+class GELUFunction(Function):
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        with np.errstate(over="ignore"):
+            sig = SigmoidFunction().forward(1.702 * x)
+        with np.errstate(invalid="ignore"):
+            out = x * sig
+        if np.any(np.isneginf(x)):
+            out = np.where(np.isneginf(x), 0.0, out)
+        return out
+
 class GELU:
+    def parameters(self):
+        return []
+
     def forward(self, x: Tensor) -> Tensor:
         """Apply GELU activation using the fast sigmoid approximation."""
-        return Sigmoid()(x * 1.702) * x
+        return GELUFunction.apply(x)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
 ```
 
 While ReLU remains the default in CNNs and MLPs, GELU has become the standard choice for modern transformers like GPT and BERT.
@@ -571,26 +608,34 @@ The code in @lst-02-activations-softmax makes this concrete.
 
 ```{python}
 #| label: lst-02-activations-softmax
-#| lst-cap: "**Softmax with max-subtraction for numerical stability (the log-sum-exp trick).**"
+#| lst-cap: "**Softmax with max-subtraction and safe masking for numerical stability.**"
 #| eval: false
+class SoftmaxFunction(Function):
+    dim = -1
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        # Subtract maximum per slice for numerical stability
+        x_max = np.max(x, axis=self.dim, keepdims=True)
+        # Handle fully masked rows (e.g., -inf in causal attention)
+        safe_max = np.where(np.isneginf(x_max), 0.0, x_max)
+        with np.errstate(over="ignore"):
+            x_shifted = x - safe_max
+        exp_values = np.exp(x_shifted)
+        exp_sum = np.sum(exp_values, axis=self.dim, keepdims=True)
+        # Protect against division by zero on masked slices
+        safe_sum = np.where(exp_sum == 0, 1.0, exp_sum)
+        return exp_values / safe_sum
+
 class Softmax:
+    def parameters(self):
+        return []
+
     def forward(self, x: Tensor, dim: int = -1) -> Tensor:
         """Apply softmax activation along specified dimension."""
-        # Numerical stability: subtract max to prevent overflow
-        x_max_data = np.max(x.data, axis=dim, keepdims=True)
-        x_max = Tensor(x_max_data, requires_grad=False)
-        x_shifted = x - x_max
+        return SoftmaxFunction.apply(x, dim=dim)
 
-        # Compute exponentials
-        exp_values = Tensor(np.exp(x_shifted.data), requires_grad=x_shifted.requires_grad)
-
-        # Sum along dimension
-        exp_sum_data = np.sum(exp_values.data, axis=dim, keepdims=True)
-        exp_sum = Tensor(exp_sum_data, requires_grad=exp_values.requires_grad)
-
-        # Normalize to get probabilities
-        result = exp_values / exp_sum
-        return result
+    def __call__(self, x: Tensor, dim: int = -1) -> Tensor:
+        return self.forward(x, dim=dim)
 ```
 
 **Why the max subtraction matters — the load-bearing trick of this chapter.**
@@ -680,7 +725,7 @@ Your TinyTorch activations and PyTorch's `torch.nn.functional` activations imple
 |---------|---------------------|---------|
 | **Backend** | NumPy (Python/C) | C++/CUDA kernels |
 | **Speed** | 1× (CPU baseline) | 10-100× faster (GPU) |
-| **Numerical Stability** | ✓ Max subtraction (Softmax), clipping (Sigmoid) | ✓ Same techniques |
+| **Numerical Stability** | ✓ Max subtraction & safe masking (Softmax), nonpositive exp (Sigmoid) | ✓ Same techniques |
 | **Autograd** | Stubs (added later) | Full gradient computation |
 | **Variants** | 5 core activations | 30+ variants (LeakyReLU, PReLU, Mish, etc.) |
 
@@ -799,7 +844,7 @@ Why does softmax subtract the maximum value before computing exponentials? What 
 
 **Without max subtraction**: Computing `softmax([1000, 1001, 1002])` requires `exp(1000)`, which overflows to infinity in float32/float64, producing NaN.
 
-**With max subtraction**: First compute `x_shifted = x - max(x) = [0, 1, 2]`, then compute `exp([0, 1, 2])` which stays within float range.
+**With max subtraction**: First compute `x_shifted = x - max(x) = [1000, 1001, 1002] - 1002 = [-2, -1, 0]`, then compute `exp([-2, -1, 0]) ≈ [0.1353, 0.3679, 1.0]` where all exponents are nonpositive and immune to overflow.
 
 **Why this works mathematically**:
 ```

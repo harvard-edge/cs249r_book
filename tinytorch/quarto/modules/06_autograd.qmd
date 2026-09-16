@@ -353,11 +353,11 @@ This is the conceptually hardest module in the Foundation tier. It is also the o
 
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
-| 1 | `Function` base class | Storing inputs for backward pass |
-| 2 | `AddBackward`, `MulBackward`, `MatmulBackward` | Operation-specific gradient rules |
-| 3 | `backward()` method on Tensor | Reverse-mode differentiation |
-| 4 | `enable_autograd()` enhancement | Monkey-patching operations for gradient tracking |
-| 5 | Integration tests | Multi-layer gradient flow |
+| 1 | `Function` base class | Storing inputs and recording graph history |
+| 2 | `Add.backward`, `Mul.backward`, `MatMul.backward` | Operation-specific gradient rules and broadcasting reduction |
+| 3 | `backward()` method on Tensor | Reverse-mode topological differentiation |
+| 4 | Gradient mode toggles (`no_grad`, `is_grad_enabled`) | Disabling graph construction during evaluation |
+| 5 | Integration tests | Multi-layer gradient flow and numerical gradient verification |
 
 : **Implementation roadmap for the reverse-mode autograd engine.** {#tbl-06-autograd-implementation-roadmap}
 
@@ -388,29 +388,32 @@ This section documents the autograd components you'll build. These integrate wit
 ### Function Base Class
 
 ```python
-Function(*tensors)
+class Function:
+    inputs: Tuple[Any, ...]
+    def forward(self, *args, **kwargs) -> Any: ...
+    def backward(self, grad_output: np.ndarray) -> Tuple[Optional[np.ndarray], ...]: ...
 ```
 
-Base class for all differentiable operations. Every operation (addition, multiplication, etc.) inherits from Function and implements gradient computation rules.
+Base class for all differentiable operations. Every operation (addition, multiplication, etc.) inherits from `Function` and implements forward and backward gradient computation rules.
 
-### Core Function Classes
+### Core Operation Gradient Rules
 
-@tbl-06-autograd-function-classes lists the backward `Function` classes and the gradient rule each one applies.
+@tbl-06-autograd-function-classes lists the core operations and the gradient rule implemented in their `backward()` methods.
 
-| Class | Purpose | Gradient Rule |
-|-------|---------|---------------|
-| `AddBackward` | Addition gradients | ∂(a+b)/∂a = 1, ∂(a+b)/∂b = 1 |
-| `SubBackward` | Subtraction gradients | ∂(a-b)/∂a = 1, ∂(a-b)/∂b = -1 |
-| `MulBackward` | Multiplication gradients | ∂(a*b)/∂a = b, ∂(a*b)/∂b = a |
-| `DivBackward` | Division gradients | ∂(a/b)/∂a = 1/b, ∂(a/b)/∂b = -a/b² |
-| `MatmulBackward` | Matrix multiplication gradients | ∂(A@B)/∂A = grad@B.T, ∂(A@B)/∂B = A.T@grad |
-| `SumBackward` | Reduction gradients | ∂sum(a)/∂a[i] = 1 for all i |
-| `ReshapeBackward` | Shape manipulation | ∂(X.reshape(...))/∂X = grad.reshape(X.shape) |
-| `TransposeBackward` | Transpose gradients | ∂(X.T)/∂X = grad.T |
+| Operation | Gradient Rule | Implementation Notes |
+|-----------|---------------|----------------------|
+| `Add.backward` | $\partial(a+b)/\partial a = 1, \; \partial(a+b)/\partial b = 1$ | Distributes upstream gradient, reduces broadcasted axes |
+| `Sub.backward` | $\partial(a-b)/\partial a = 1, \; \partial(a-b)/\partial b = -1$ | Negates second operand gradient, handles broadcasting |
+| `Mul.backward` | $\partial(a \cdot b)/\partial a = b, \; \partial(a \cdot b)/\partial b = a$ | Scales by opposite operand data, reduces broadcasting |
+| `Div.backward` | $\partial(a/b)/\partial a = 1/b, \; \partial(a/b)/\partial b = -a/b^2$ | Reciprocal and quotient derivatives |
+| `MatMul.backward` | $\partial(A B)/\partial A = G B^T, \; \partial(A B)/\partial B = A^T G$ | 2D/batched matrix transposition and multiplication |
+| `Sum.backward` | $\partial \sum(x)/\partial x_i = 1$ | Broadcasts scalar gradient back to input shape |
+| `Reshape.backward`| $\partial \text{reshape}(x)/\partial x = \text{reshape}(G, x.\text{shape})$ | Reshapes gradient back to original input shape |
+| `Permute.backward`| Inverts permutation axes | Applies inverse transposition to gradient array |
 
-: **Backward Function classes and their gradient rules.** {#tbl-06-autograd-function-classes}
+: **Core differentiable operations and their gradient rules.** {#tbl-06-autograd-function-classes}
 
-**Additional Backward Classes:** The implementation includes backward functions for activations (`ReLUBackward`, `SigmoidBackward`, `SoftmaxBackward`, `GELUBackward`), losses (`MSEBackward`, `BCEBackward`, `CrossEntropyBackward`), and other operations (`PermuteBackward`, `SliceBackward`). These follow the same pattern as the core classes above.
+**Additional Backward Implementations:** The implementation also equips activations (`ReLUFunction`, `SigmoidFunction`, `TanhFunction`, `GELUFunction`, `SoftmaxFunction`), losses (`MSEFunction`, `BinaryCrossEntropyFunction`, `CrossEntropyFunction`, `LogSoftmax`), and tensor operations (`Slice`, `MaskedFill`) with backward methods following the same pattern.
 
 ### Enhanced Tensor Methods
 
@@ -420,20 +423,22 @@ Your implementation adds these methods to the Tensor class:
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `backward` | `backward(gradient=None) -> None` | Compute gradients via backpropagation |
-| `zero_grad` | `zero_grad() -> None` | Reset gradients to None |
+| `backward` | `backward(gradient=None, retain_graph=False) -> None` | Compute gradients via topological backpropagation |
+| `zero_grad` | `zero_grad() -> None` | Reset gradients to None (frees gradient memory) |
 
 : **Methods added to the Tensor class for autograd.** {#tbl-06-autograd-tensor-methods}
 
-### Global Activation
+### Gradient Tracking Modes
 
-@tbl-06-autograd-global-helpers lists the global helpers that toggle gradient tracking.
+@tbl-06-autograd-global-helpers lists the helpers that manage gradient tracking state.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `enable_autograd` | `enable_autograd(quiet=False) -> None` | Activate gradient tracking globally |
+| `no_grad` | `no_grad() -> ContextManager` | Context manager disabling graph tracking during evaluation |
+| `is_grad_enabled` | `is_grad_enabled() -> bool` | Check if autograd recording is currently enabled |
+| `set_grad_enabled` | `set_grad_enabled(mode: bool) -> None` | Explicitly toggle gradient tracking flag |
 
-: **Global helper functions for enabling autograd.** {#tbl-06-autograd-global-helpers}
+: **Helper utilities for gradient tracking modes.** {#tbl-06-autograd-global-helpers}
 
 ## Core Concepts
 
@@ -458,32 +463,37 @@ The code in @lst-06-autograd-add-backward makes this concrete.
 
 ```{python}
 #| label: lst-06-autograd-add-backward
-#| lst-cap: "**`AddBackward` stores inputs and distributes the incoming gradient equally to both addends.**"
+#| lst-cap: "**`Add.backward` retrieves stored inputs and distributes incoming gradients with broadcasting reduction.**"
 #| eval: false
-class AddBackward(Function):
-    """Gradient computation for addition."""
+@method_of(Add)
+def backward(self, grad_output):
+    """Gradient computation for tensor addition."""
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def __init__(self, a, b):
-        """Store inputs needed for backward pass."""
-        self.saved_tensors = (a, b)
+    # Gradient for first input
+    if isinstance(a, Tensor) and a.requires_grad:
+        grad_a = _reduce_broadcast_grad(grad_output, a.data.shape)
 
-    def apply(self, grad_output):
-        """Compute gradients for both inputs."""
-        return grad_output, grad_output  # Addition distributes gradients equally
+    # Gradient for second input
+    if isinstance(b, Tensor) and b.requires_grad:
+        grad_b = _reduce_broadcast_grad(grad_output, b.data.shape)
+
+    return grad_a, grad_b
 ```
 
-When you compute `z = x + y`, your enhanced Tensor class automatically creates an AddBackward instance and attaches it to `z`:
+When you compute `z = x + y`, your enhanced Tensor class automatically creates an `Add` node and attaches it to `z`:
 
 ```python
 result = x.data + y.data
 result_tensor = Tensor(result)
-result_tensor._grad_fn = AddBackward(x, y)  # Track operation
+result_tensor._grad_fn = node  # Track operation node containing inputs (x, y)
 ```
 
 This simple pattern scales elegantly, enabling arbitrarily complex computation graphs. However, this flexibility masks a profound structural cost: the mere act of recording operations fundamentally alters the memory lifecycle of the tensors involved.
 
 :::{.callout-note title="Systems Implication: Activation Pinning"}
-By passing `(x, y)` into `AddBackward(x, y)`, the computation graph captures a hard reference to the input tensors. To the Python interpreter, this means the Garbage Collector cannot free the memory for `x` and `y` until the backward pass is complete and the graph is destroyed. This "Activation Pinning" is the root cause of `CUDA Out of Memory` (OOM) errors during training, as every layer's output is kept alive in VRAM for the entirety of the forward pass. In practice, researchers rely on telemetry tools like `torch.cuda.memory_allocated()` to hunt down subtle computation graph memory leaks and measure the exact overhead of retaining these activations.
+By passing `(x, y)` into `node.inputs`, the computation graph captures a hard reference to the input tensors. To the Python interpreter, this means the Garbage Collector cannot free the memory for `x` and `y` until the backward pass is complete and the graph is destroyed. This "Activation Pinning" is the root cause of `CUDA Out of Memory` (OOM) errors during training, as every layer's output is kept alive in VRAM for the entirety of the forward pass. In practice, researchers rely on telemetry tools like `torch.cuda.memory_allocated()` to hunt down subtle computation graph memory leaks and measure the exact overhead of retaining these activations.
 :::
 
 Because these pinned activations iteratively consume precious VRAM, scaling networks to hundreds of layers requires rigorous strategies—such as gradient checkpointing—to mitigate this memory exhaustion while preserving the integrity of the gradient flow.
@@ -505,35 +515,33 @@ Backward chain rule:
   ∂loss/∂x  = ∂loss/∂z1 * W     (multiplication backward)
 ```
 
-Each backward function does exactly one thing: multiply the incoming gradient by its own local derivative. It knows nothing about the rest of the graph — and it doesn't need to. Here's how `MulBackward` implements this:
+Each backward function does exactly one thing: multiply the incoming gradient by its own local derivative. It knows nothing about the rest of the graph — and it doesn't need to. Here's how `Mul.backward` implements this:
 
 The code in @lst-06-autograd-mul-backward makes this concrete.
 
 ```{python}
 #| label: lst-06-autograd-mul-backward
-#| lst-cap: "**`MulBackward` applies the product rule with NumPy broadcasting instead of explicit loops.**"
+#| lst-cap: "**`Mul.backward` applies the product rule with NumPy broadcasting and reduction.**"
 #| eval: false
-class MulBackward(Function):
-    """Gradient computation for element-wise multiplication."""
+@method_of(Mul)
+def backward(self, grad_output):
+    """
+    For z = a * b:
+    ∂z/∂a = b → grad_a = grad_output * b
+    ∂z/∂b = a → grad_b = grad_output * a
+    """
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def apply(self, grad_output):
-        """
-        For z = a * b:
-        ∂z/∂a = b → grad_a = grad_output * b
-        ∂z/∂b = a → grad_b = grad_output * a
+    if isinstance(a, Tensor) and a.requires_grad:
+        grad_a = grad_output * b.data
+        grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
-        Uses vectorized element-wise multiplication (NumPy broadcasting).
-        """
-        a, b = self.saved_tensors
-        grad_a = grad_b = None
+    if isinstance(b, Tensor) and b.requires_grad:
+        grad_b = grad_output * a.data
+        grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
-        if a.requires_grad:
-            grad_a = grad_output * b.data  # Vectorized element-wise multiplication
-
-        if b.requires_grad:
-            grad_b = grad_output * a.data  # NumPy handles broadcasting automatically
-
-        return grad_a, grad_b
+    return grad_a, grad_b
 ```
 
 Each operation knows only its own derivative; the chain rule does the connecting. NumPy handles the element-wise math in optimized C, so no explicit loops are needed.
@@ -560,24 +568,36 @@ def backward(self, gradient=None, retain_graph=False):
         else:
             raise ValueError("backward() requires gradient for non-scalar tensors")
 
-    # Step 1: topological order — every consumer of a tensor comes before it
-    topo_order, seen = [], set()
+    if isinstance(gradient, Tensor):
+        gradient = gradient.data
+    gradient = np.asarray(gradient)
 
-    def visit(tensor):
+    # Step 1: iterative topological sort via DFS
+    topo_order = []
+    seen = set()
+    stack = [(self, False)]
+    while stack:
+        tensor, expanded = stack.pop()
+        if expanded:
+            topo_order.append(tensor)
+            continue
         if id(tensor) in seen:
-            return
+            continue
+        if getattr(tensor, "_graph_released", False):
+            raise RuntimeError(
+                "Trying to backward through a graph that was released. "
+                "Recompute the forward pass, or use retain_graph=True on the earlier backward()."
+            )
         seen.add(id(tensor))
-        fn = getattr(tensor, '_grad_fn', None)
+        stack.append((tensor, True))
+        fn = tensor._grad_fn
         if fn is not None:
-            for parent in fn.saved_tensors:
-                if isinstance(parent, Tensor):
-                    visit(parent)
-        topo_order.append(tensor)
-
-    visit(self)
+            for parent in fn.inputs:
+                if isinstance(parent, Tensor) and parent.requires_grad:
+                    stack.append((parent, False))
     topo_order.reverse()
 
-    # Step 2: seed the output, then make one pass
+    # Step 2: seed the output, then accumulate in topological order
     pending = {id(self): gradient}
     for tensor in topo_order:
         grad = pending.get(id(tensor))
@@ -586,19 +606,27 @@ def backward(self, gradient=None, retain_graph=False):
 
         if tensor.grad is None:
             tensor.grad = np.zeros_like(tensor.data)
-        tensor.grad += grad                      # accumulate into .grad
+        grad = _reduce_broadcast_grad(grad, tensor.grad.shape)
+        tensor.grad += grad
 
-        fn = getattr(tensor, '_grad_fn', None)
+        fn = tensor._grad_fn
         if fn is None:
             continue
-        for parent, parent_grad in zip(fn.saved_tensors, fn.apply(grad)):
-            if isinstance(parent, Tensor) and parent_grad is not None:
-                pending[id(parent)] = pending.get(id(parent), 0) + parent_grad
+        parent_grads = fn.backward(grad)
+        for parent, parent_grad in zip(fn.inputs, parent_grads):
+            if not isinstance(parent, Tensor) or parent_grad is None or not parent.requires_grad:
+                continue
+            parent_grad = _reduce_broadcast_grad(parent_grad, parent.data.shape)
+            if id(parent) in pending:
+                pending[id(parent)] = pending[id(parent)] + parent_grad
+            else:
+                pending[id(parent)] = parent_grad
 
     # Step 3: release the graph once, after the whole walk
     if not retain_graph:
         for tensor in topo_order:
             tensor._grad_fn = None
+            tensor._graph_released = True
 ```
 
 For a 100-layer network, `loss.backward()` sorts 100 tensors and then visits each exactly once, flowing gradients from output to input. Sorting first is what makes that "exactly once" possible: descending into a tensor's parents the moment you reach it would re-walk any shared subtree once per consumer, which is exponential on a graph with residual connections. The traversal is Python; the math inside each `apply()` is vectorized NumPy. That split is why the system stays both readable and fast.
@@ -683,15 +711,16 @@ Multiply by network depth and you see why memory limits batch size. A 100-layer 
 
 Production frameworks mitigate this with gradient checkpointing: they discard intermediate activations during forward pass and recompute them during backward pass. This trades compute (recomputing activations) for memory (not storing them). Your implementation doesn't do this—it's an advanced optimization—but understanding the trade-off is essential.
 
-The implementation shows this memory overhead clearly in the MatmulBackward class:
+The implementation shows this memory overhead clearly in the MatMul operation:
 
 The code in @lst-06-autograd-matmul-backward makes this concrete.
 
 ```{python}
 #| label: lst-06-autograd-matmul-backward
-#| lst-cap: "**`MatmulBackward` turns one forward matmul into two backward matmuls, the source of the 2x backward-to-forward FLOP ratio.**"
+#| lst-cap: "**`MatMul.backward` turns one forward matmul into two backward matmuls, the source of the 2x backward-to-forward FLOP ratio.**"
 #| eval: false
-class MatmulBackward(Function):
+@method_of(MatMul)
+def backward(self, grad_output):
     """
     Gradient computation for matrix multiplication.
 
@@ -700,22 +729,22 @@ class MatmulBackward(Function):
     - Backward computes: grad_A = grad_Z @ B.T and grad_B = A.T @ grad_Z
     - Uses vectorized NumPy operations (np.matmul, np.swapaxes)
     """
+    a, b = self.inputs
+    grad_a = grad_b = None
 
-    def apply(self, grad_output):
-        a, b = self.saved_tensors  # Retrieved from memory
-        grad_a = grad_b = None
+    if isinstance(a, Tensor) and a.requires_grad:
+        # Vectorized transpose and matmul (no explicit loops)
+        b_T = np.swapaxes(b.data, -2, -1)
+        grad_a = np.matmul(grad_output, b_T)
+        grad_a = _reduce_broadcast_grad(grad_a, a.data.shape)
 
-        if a.requires_grad:
-            # Vectorized transpose and matmul (no explicit loops)
-            b_T = np.swapaxes(b.data, -2, -1)
-            grad_a = np.matmul(grad_output, b_T)
+    if isinstance(b, Tensor) and b.requires_grad:
+        # Vectorized operations for efficiency
+        a_T = np.swapaxes(a.data, -2, -1)
+        grad_b = np.matmul(a_T, grad_output)
+        grad_b = _reduce_broadcast_grad(grad_b, b.data.shape)
 
-        if b.requires_grad:
-            # Vectorized operations for efficiency
-            a_T = np.swapaxes(a.data, -2, -1)
-            grad_b = np.matmul(a_T, grad_output)
-
-        return grad_a, grad_b
+    return grad_a, grad_b
 ```
 
 Notice that both `a` and `b` must be saved during forward pass. For large matrices, this storage cost dominates memory usage. All gradient computations use vectorized NumPy operations, which are implemented in optimized C/Fortran code under the hood—no explicit Python loops are needed.

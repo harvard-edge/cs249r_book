@@ -552,7 +552,7 @@ The code in @lst-07-optimizers-adam-step makes this concrete.
 
 ```{python}
 #| label: lst-07-optimizers-adam-step
-#| lst-cap: "**Full Adam `step()`: first and second moment updates, bias correction, and the per-parameter adaptive step `lr * m_hat / (sqrt(v_hat) + eps)`.**"
+#| lst-cap: "**Full Adam `step()`: moment updates with coupled L2 regularization, per-parameter bias correction, and adaptive updates.**"
 #| eval: false
 def step(self):
     """Perform Adam update step."""
@@ -562,26 +562,25 @@ def step(self):
         if param.grad is None:
             continue
 
-        grad = param.grad
-        if isinstance(grad, Tensor):
-            grad_data = grad.data
-        else:
-            grad_data = grad
+        grad_data = param.grad.data if isinstance(param.grad, Tensor) else param.grad
 
-        # Initialize buffers if needed
+        # Apply L2 weight decay to gradient (coupled regularization)
+        if self.weight_decay != 0:
+            grad_data = grad_data + self.weight_decay * param.data
+
+        # Initialize buffers lazily if needed
         if self.m_buffers[i] is None:
             self.m_buffers[i] = np.zeros_like(param.data)
             self.v_buffers[i] = np.zeros_like(param.data)
 
-        # Update biased first moment estimate
+        # Update biased first and second moment estimates
         self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1 - self.beta1) * grad_data
-
-        # Update biased second moment estimate
         self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
 
-        # Compute bias correction
-        bias_correction1 = 1 - self.beta1 ** self.step_count
-        bias_correction2 = 1 - self.beta2 ** self.step_count
+        # Compute bias correction using each parameter's update age
+        self.update_counts[i] += 1
+        bias_correction1 = 1 - self.beta1 ** self.update_counts[i]
+        bias_correction2 = 1 - self.beta2 ** self.update_counts[i]
 
         # Compute bias-corrected moments
         m_hat = self.m_buffers[i] / bias_correction1
@@ -591,7 +590,7 @@ def step(self):
         param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 ```
 
-The bias correction terms (1 - β^t) are crucial in the first few steps. Without correction, m and v start at zero and take many steps to reach reasonable values, causing the optimizer to take tiny steps initially. The correction divides by increasingly large values: at step 1, divide by 0.1; at step 2, divide by 0.19; eventually the correction approaches 1.0 and has no effect.
+The bias correction terms (1 - β^t) are crucial in the first few steps. Without correction, m and v start at zero and take many steps to reach reasonable values, causing the optimizer to take tiny steps initially. The correction divides by increasingly large values: at step 1, divide by 0.1; at step 2, divide by 0.19; eventually the correction approaches 1.0 and has no effect. Notice also that TinyTorch tracks `self.update_counts[i]` per parameter rather than using a single global counter, so parameters with sparse or conditional updates are corrected according to their true individual update history.
 
 While Adam's adaptive step sizes dramatically accelerate convergence, this mathematical elegance imposes a severe, often debilitating, hardware penalty on large-scale training systems.
 
@@ -603,7 +602,7 @@ Because Adam maintains both a first moment (`m_buffers`) and a second moment (`v
 
 AdamW fixes a real bug in Adam. Standard Adam folds weight decay into the gradient — `grad = grad + λ * param` — and then runs the adaptive update. The decay term then gets divided by `√v` along with everything else, so parameters with large gradients receive *less* regularization and parameters with small gradients receive *more*. That is the opposite of what you want.
 
-AdamW decouples the two: take the normal Adam step using the raw gradient, then separately shrink each parameter by a fixed fraction `lr * weight_decay`. Regularization strength is now constant across the network, independent of gradient magnitude. This is why every modern transformer trains with AdamW, not Adam.
+AdamW decouples the two: decay the old parameter directly by a fixed fraction `(1 - lr * weight_decay)` *before* applying the gradient update, and compute the moments purely from the raw gradient. Regularization strength is now constant across the network, independent of gradient magnitude. This is why every modern transformer trains with AdamW, not Adam.
 
 Here's how your AdamW implementation achieves decoupling:
 
@@ -611,27 +610,28 @@ The code in @lst-07-optimizers-adamw-step makes this concrete.
 
 ```{python}
 #| label: lst-07-optimizers-adamw-step
-#| lst-cap: "**AdamW update: the adaptive Adam step runs on pure gradients, then weight decay shrinks parameters separately by `(1 - lr * weight_decay)`.**"
+#| lst-cap: "**AdamW update: moment updates use pure gradients, decoupled decay shrinks old parameters, and the adaptive step is subtracted independently.**"
 #| eval: false
-# Update moments using pure gradients (NO weight decay mixed in)
+# 1. Update moments using pure gradients (NO weight decay mixed in)
 self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1 - self.beta1) * grad_data
 self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
 
-# Compute bias correction and bias-corrected moments
-bias_correction1 = 1 - self.beta1 ** self.step_count
-bias_correction2 = 1 - self.beta2 ** self.step_count
+# 2. Compute bias correction using this parameter's update age
+self.update_counts[i] += 1
+bias_correction1 = 1 - self.beta1 ** self.update_counts[i]
+bias_correction2 = 1 - self.beta2 ** self.update_counts[i]
 m_hat = self.m_buffers[i] / bias_correction1
 v_hat = self.v_buffers[i] / bias_correction2
 
-# Apply gradient-based update
-param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
-
-# Apply decoupled weight decay (separate from gradient update)
+# 3. Decay the old weight directly (decoupled from gradient and adaptive scaling)
 if self.weight_decay != 0:
     param.data = param.data * (1 - self.lr * self.weight_decay)
+
+# 4. Apply gradient-based update independently of decay
+param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 ```
 
-Notice that weight decay appears only at the end, multiplying parameters by (1 - lr * weight_decay) to shrink them slightly. This shrinkage happens after the gradient update and is completely independent of gradient magnitudes or adaptive scaling.
+Notice the exact update order: weight decay shrinks the existing parameter `param.data` *before* subtracting the adaptive update. This ensures the regularization decays only the accumulated history, not the new gradient step, and prevents the learning rate and second moment from distorting the regularization strength.
 
 ### Learning Rate Selection
 
@@ -710,7 +710,7 @@ The optimizer API, update algorithms, and memory patterns are identical. When yo
 
 Optimizer choice is a memory decision before it is a math decision. Three concrete data points:
 
-- **Large language models (175B parameters)**: Adam's optimizer state alone consumes **1.27 TB** (3x the 651.9 GB of parameters), forcing multi-GPU state sharding (e.g., DeepSpeed ZeRO).
+- **Large language models (175B parameters)**: Adam's optimizer state alone consumes **1.30 TB** ($2\times$ the 651.9 GB of parameters, bringing parameters plus optimizer state to **1.96 TB**), forcing multi-GPU state sharding (e.g., DeepSpeed ZeRO).
 - **Transformer training**: AdamW with `weight_decay=0.01` is the default, typically improving generalization over plain Adam by 2-5% accuracy.
 - **Convergence speed**: Adam reaches target loss in roughly 30-50% fewer steps than SGD on vision and language tasks, paying back its higher per-step cost in wall-clock time.
 

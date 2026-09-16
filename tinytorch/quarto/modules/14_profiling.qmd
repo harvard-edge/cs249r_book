@@ -504,44 +504,38 @@ The code in @lst-14-measure-memory makes this concrete.
 
 ```{python}
 #| label: lst-14-measure-memory
-#| lst-cap: "**measure_memory breakdown**. Uses tracemalloc to capture peak allocation during a forward pass, then separates parameter, activation, and peak footprints."
+#| lst-cap: "**measure_memory breakdown**. Uses tracemalloc to trace allocations during a forward pass, accounting for baseline memory, parameters, and input/output activations."
 #| eval: false
 def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float]:
     """Measure memory usage during forward pass."""
-    # Start memory tracking
-    tracemalloc.start()
+    owns_trace = not tracemalloc.is_tracing()
+    if owns_trace:
+        tracemalloc.start()
+    try:
+        baseline_memory = tracemalloc.get_traced_memory()[0]
+        parameter_memory_mb = self._calculate_parameter_memory(model)
+        dummy_input = self._dummy_input(model, input_shape)
+        output = model.forward(dummy_input)
 
-    # Calculate parameter memory
-    param_count = self.count_parameters(model)
-    parameter_memory_bytes = param_count * BYTES_PER_FLOAT32
-    parameter_memory_mb = parameter_memory_bytes / MB_TO_BYTES
+        # Count actual input and output buffers
+        activation_bytes = dummy_input.data.nbytes
+        if not np.shares_memory(dummy_input.data, output.data):
+            activation_bytes += output.data.nbytes
+        activation_memory_mb = activation_bytes / MB_TO_BYTES
 
-    # Create input and measure activation memory
-    dummy_input = Tensor(np.random.randn(*input_shape))
-    input_memory_bytes = dummy_input.data.nbytes
+        _, peak_memory = tracemalloc.get_traced_memory()
+        peak_memory_mb = parameter_memory_mb + max(0, peak_memory - baseline_memory) / MB_TO_BYTES
+    finally:
+        if owns_trace:
+            tracemalloc.stop()
 
-    # Estimate activation memory (simplified)
-    activation_memory_bytes = input_memory_bytes * 2  # Rough estimate
-    activation_memory_mb = activation_memory_bytes / MB_TO_BYTES
-
-    # Run forward pass to measure peak memory usage
-    _ = model.forward(dummy_input)
-
-    # Get peak memory
-    _current_memory, peak_memory = tracemalloc.get_traced_memory()
-    peak_memory_mb = (peak_memory - _baseline_memory) / MB_TO_BYTES
-
-    tracemalloc.stop()
-
-    # Calculate efficiency metrics
     useful_memory = parameter_memory_mb + activation_memory_mb
-    memory_efficiency = useful_memory / max(peak_memory_mb, 0.001)  # Avoid division by zero
-
+    peak_memory_mb = max(peak_memory_mb, useful_memory)
     return {
         'parameter_memory_mb': parameter_memory_mb,
         'activation_memory_mb': activation_memory_mb,
-        'peak_memory_mb': max(peak_memory_mb, useful_memory),
-        'memory_efficiency': min(memory_efficiency, 1.0)
+        'peak_memory_mb': peak_memory_mb,
+        'memory_efficiency': _calculate_memory_efficiency(useful_memory, peak_memory_mb)
     }
 ```
 
@@ -724,9 +718,15 @@ A model achieves 5 GFLOP/s on hardware with 100 GFLOP/s peak compute. The memory
 
 Computational efficiency: 5 GFLOP/s ÷ 100 GFLOP/s = **5% efficiency**.
 
-That gap is the giveaway: this workload is **memory-bound**. The chip can do 100 GFLOP/s but only manages 5, because most of its time is spent waiting on data transfers.
+According to the **Roofline model**, the hardware ridge point is:
+$$I^* = \frac{\text{Peak Compute}}{\text{Memory Bandwidth}} = \frac{100\text{ GFLOP/s}}{50\text{ GB/s}} = 2.0\text{ FLOP/byte}$$
 
-The right optimization strategy is to cut memory traffic — better cache locality, improved data layout, or kernel fusion. Reducing FLOPs won't help when compute is already idle.
+If the system saturates memory bandwidth at 50 GB/s while executing 5 GFLOP/s, the workload's operational intensity is:
+$$I = \frac{5\text{ GFLOP/s}}{50\text{ GB/s}} = 0.1\text{ FLOP/byte}$$
+
+Because $I = 0.1 \ll I^* = 2.0$, this workload is squarely **memory-bound**. The chip can perform 100 GFLOP/s but is starved for data, spending most cycles stalled on DRAM transfers.
+
+The right optimization strategy is to cut memory traffic — kernel fusion, tiling for cache locality, or quantization. Reducing FLOPs will not improve latency when compute units are already waiting on memory.
 :::
 
 **Q4: Training Memory Estimation**
@@ -819,4 +819,3 @@ You'll cut FP32 weights down to INT8 — a 4$\times$ memory reduction — and us
 
 Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 :::
-e_latency()` validates speedup |

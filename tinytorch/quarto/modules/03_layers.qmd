@@ -336,17 +336,15 @@ The payoff is `parameters()`. Once every layer hands its weights to a single lis
 
 
 
-::: {#fig-03_layers-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**One interface, three subclasses.** Linear, Dropout, and Sequential all inherit `forward()` and `parameters()` from a single `Layer` base — Sequential adds composition by chaining the others into networks." fig-alt="Diagram showing the Layer base class at the top with three subclasses below it: Linear, Sequential, and Dropout."}
+::: {#fig-03_layers-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**A shared layer interface.** Linear and Dropout inherit `forward()` and `parameters()` from `Layer`, while Sequential provides the same interface to chain them into networks." fig-alt="Diagram showing the Layer base class interface shared across Linear, Dropout, and Sequential."}
 
 ![](../assets/images/diagrams/03_layers-diag-1.svg)
 
 :::
 
-
-
 **Implementation roadmap:**
 
-@tbl-03-layers-implementation-roadmap lays out the implementation in order, one part at a time.
+As shown in @fig-03_layers-diag-1, TinyTorch organizes neural network components around a shared `Layer` interface. @tbl-03-layers-implementation-roadmap lays out the implementation in order, one part at a time.
 
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
@@ -463,8 +461,9 @@ Container that chains layers together sequentially. Provides convenient way to c
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `forward` | `forward(x) -> Tensor` | Forward pass through all layers in order |
-| `parameters` | `parameters() -> List[Tensor]` | Collects all parameters from all layers |
+| `forward` | `forward(x, training=True) -> Tensor` | Forward pass through all layers in order, propagating mode |
+| `__call__` | `__call__(x, training=True) -> Tensor` | Allows container to be called like a function |
+| `parameters` | `parameters() -> List[Tensor]` | Collects unique parameters without duplicates |
 
 : **Methods on the Sequential container.** {#tbl-03-layers-sequential-api}
 
@@ -584,31 +583,32 @@ The code in @lst-03-layers-dropout-forward makes this concrete.
 
 ```{python}
 #| label: lst-03-layers-dropout-forward
-#| lst-cap: "**Dropout forward pass with inverted scaling `1/(1-p)` to preserve expected magnitude.**"
+#| lst-cap: "**Dropout implementation with decision logic, inverted scaling mask, and autograd preservation.**"
 #| eval: false
-def forward(self, x, training=True):
-    """Forward pass through dropout layer."""
-    if not training or self.p == DROPOUT_MIN_PROB:
-        # During inference or no dropout, pass through unchanged
-        return x
+class Dropout(Layer):
+    def __init__(self, p=0.5):
+        if not DROPOUT_MIN_PROB <= p <= DROPOUT_MAX_PROB:
+            raise ValueError(f"Invalid dropout probability: {p}")
+        self.p = p
 
-    if self.p == DROPOUT_MAX_PROB:
-        # Drop everything (preserve requires_grad for gradient flow)
-        return Tensor(np.zeros_like(x.data), requires_grad=x.requires_grad)
+    def _should_apply_dropout(self, training):
+        return training and self.p > DROPOUT_MIN_PROB
 
-    # During training, apply dropout
-    keep_prob = 1.0 - self.p
+    def _generate_dropout_mask(self, shape):
+        keep_prob = 1.0 - self.p
+        binary_mask = (rng.random(shape) < keep_prob).astype(np.float32)
+        scale = 1.0 / keep_prob
+        return Tensor(binary_mask * scale)
 
-    # Create random mask: True where we keep elements
-    mask = np.random.random(x.data.shape) < keep_prob
+    def forward(self, x, training=True):
+        if not self._should_apply_dropout(training):
+            return x
 
-    # Apply mask and scale using Tensor operations to preserve gradients
-    mask_tensor = Tensor(mask.astype(np.float32), requires_grad=False)
-    scale = Tensor(np.array(1.0 / keep_prob), requires_grad=False)
+        if self.p == DROPOUT_MAX_PROB:
+            return x * 0.0  # Preserves autograd computational graph
 
-    # Use Tensor operations: x * mask * scale
-    output = x * mask_tensor * scale
-    return output
+        mask = self._generate_dropout_mask(x.data.shape)
+        return x * mask
 ```
 
 The key insight is the scaling factor `1/(1-p)`. If you drop 50% of neurons, the survivors need to be scaled by 2.0 to maintain the same expected value. This ensures that during inference (when no dropout is applied), the output magnitudes match training expectations.
@@ -621,7 +621,7 @@ The code in @lst-03-layers-sequential makes this concrete.
 
 ```{python}
 #| label: lst-03-layers-sequential
-#| lst-cap: "**Sequential container chaining forward passes and flattening per-layer parameters.**"
+#| lst-cap: "**Sequential container chaining forward passes with mode propagation and parameter de-duplication.**"
 #| eval: false
 class Sequential:
     """Container that chains layers together sequentially."""
@@ -633,17 +633,28 @@ class Sequential:
         else:
             self.layers = list(layers)
 
-    def forward(self, x):
-        """Forward pass through all layers sequentially."""
+    def forward(self, x, training=True):
+        """Forward pass through all layers sequentially, propagating mode."""
         for layer in self.layers:
-            x = layer.forward(x)
+            if 'training' in inspect.signature(layer.forward).parameters:
+                x = layer.forward(x, training=training)
+            else:
+                x = layer.forward(x)
         return x
 
+    def __call__(self, x, training=True):
+        """Allow container to be called like a function."""
+        return self.forward(x, training=training)
+
     def parameters(self):
-        """Collect all parameters from all layers."""
+        """Collect each unique parameter once, even when layers share weights."""
         params = []
+        seen = set()
         for layer in self.layers:
-            params.extend(layer.parameters())
+            for param in layer.parameters():
+                if id(param) not in seen:
+                    params.append(param)
+                    seen.add(id(param))
         return params
 ```
 
@@ -693,11 +704,12 @@ The computational cost of the forward pass is dominated by matrix multiplication
 For a 3-layer network (784→256→128→10) with batch size 32:
 
 ```text
-Layer 1: 32 × 784 × 256 = 6,422,528 FLOPs
-Layer 2: 32 × 256 × 128 = 1,048,576 FLOPs
-Layer 3: 32 × 128 ×  10 =    40,960 FLOPs
-Total:                  ≈ 7.5 million FLOPs per forward pass
+Layer 1: 32 × 784 × 256 = 6,422,528 MACs (≈ 12.85M FLOPs)
+Layer 2: 32 × 256 × 128 = 1,048,576 MACs (≈  2.10M FLOPs)
+Layer 3: 32 × 128 ×  10 =    40,960 MACs (≈  0.08M FLOPs)
+Total:                  ≈ 7.5 million MACs (≈ 15.0 million FLOPs per forward pass)
 ```
+*(Convention: 1 multiply-accumulate (MAC) = 2 FLOPs, plus bias additions.)*
 
 The first layer dominates because it has the largest input dimension. Production networks often shrink dimensions early to save computation in deeper layers.
 

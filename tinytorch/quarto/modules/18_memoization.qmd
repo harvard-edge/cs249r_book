@@ -414,20 +414,23 @@ Pre-allocates cache storage for all transformer layers. Each layer gets two tens
 | `get` | `get(layer_idx: int) -> Tuple[Tensor, Tensor]` | Retrieve cached K,V for attention computation |
 | `advance` | `advance() -> None` | Move sequence position forward after processing token |
 | `reset` | `reset() -> None` | Clear cache for new generation sequence |
+| `generation` | `generation() -> Iterator[KVCache]` | Context manager establishing cached inference scope |
 | `get_memory_usage` | `get_memory_usage() -> Dict[str, float]` | Calculate cache memory consumption |
 
 : **Core methods on the KVCache class.** {#tbl-18-memoization-cache-methods}
 
-### Helper Functions
+### Helper Functions and Stand-ins
 
 @tbl-18-memoization-helper-functions lists the methods and helpers you will implement.
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
+| Function / Class | Signature | Description |
+|------------------|-----------|-------------|
 | `enable_kv_cache` | `enable_kv_cache(model) -> KVCache` | Non-invasively add caching to transformer |
 | `disable_kv_cache` | `disable_kv_cache(model) -> None` | Restore original attention behavior |
+| `CachedAttention` | `CachedAttention(attention, cache_obj, layer_idx)` | Stand-in attention layer routing tokens through cache |
+| `_cached_generate` | `_cached_generate(model, prompt_tokens, max_new_tokens, temperature) -> Tensor` | Fast autoregressive generation using KV cache |
 
-: **Helper functions for enabling and disabling the KV cache.** {#tbl-18-memoization-helper-functions}
+: **Helper functions and classes for enabling and using the KV cache.** {#tbl-18-memoization-helper-functions}
 
 ## Core Concepts
 
@@ -449,11 +452,11 @@ The code in @lst-18-memoization-update makes this concrete.
 #| eval: false
 def update(self, layer_idx: int, key: Tensor, value: Tensor) -> None:
     """Update cache with new key-value pairs for given layer."""
-    if layer_idx >= self.num_layers:
-        raise ValueError(f"Layer index {layer_idx} >= num_layers {self.num_layers}")
+    if not isinstance(layer_idx, (int, np.integer)) or not 0 <= layer_idx < self.num_layers:
+        raise ValueError(f"layer_idx {layer_idx} out of range [0, {self.num_layers - 1}]")
 
     if self.seq_pos >= self.max_seq_len:
-        raise ValueError(f"Sequence position {self.seq_pos} >= max_seq_len {self.max_seq_len}")
+        raise ValueError(f"KV cache full: seq_pos {self.seq_pos} >= max_seq_len {self.max_seq_len}")
 
     # Get cache for this layer
     key_cache, value_cache = self.caches[layer_idx]
@@ -556,6 +559,13 @@ Production systems handle more complex invalidation scenarios:
 - **Max length reached**: When the sequence fills the cache, either error out or implement a sliding window
 - **Batch inference**: Each sequence in a batch has independent cache state
 - **Multi-turn conversation**: Some systems maintain cache across turns, others reset per turn
+
+### Scoped Dispatch with CachedAttention
+
+To integrate KV caching into a transformer model without modifying the underlying architecture or breaking training, TinyTorch uses the `CachedAttention` stand-in layer. When `enable_kv_cache(model)` is called, it replaces each block's attention layer with a `CachedAttention` wrapper:
+
+- **Inside `with cache.generation():`**: Single new tokens (`seq_len == 1`) route through `_cached_generation_step`. Only the new token's Q, K, V projections are computed; new K and V are appended to the cache in $O(1)$ time, and attention is evaluated across the accumulated prefix in $O(S)$ time.
+- **Outside the scope**: Full sequence prompts or training passes bypass the cache completely and execute standard multi-head attention.
 
 ### Memory-Compute Trade-offs
 

@@ -415,7 +415,7 @@ High-performance matrix multiplication using optimized BLAS libraries that lever
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `tiled_matmul` | `tiled_matmul(a: Tensor, b: Tensor, tile_size: int) -> Tensor` | Cache-optimized matrix multiplication |
+| `tiled_matmul` | `tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor` | Cache-optimized matrix multiplication |
 
 : **Cache-aware matrix multiplication function.** {#tbl-17-acceleration-cache-aware}
 
@@ -447,6 +447,12 @@ The code in @lst-17-acceleration-vectorized-matmul makes this concrete.
 #| eval: false
 def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     """Matrix multiplication using optimized BLAS libraries."""
+    # Input validation for matrix multiplication: requires 2D+ tensors
+    if len(a.shape) < 2 or len(b.shape) < 2:
+        raise ValueError(
+            f"Matrix multiplication requires 2D+ tensors, got shapes {a.shape} and {b.shape}"
+        )
+
     # Validate shapes - inner dimensions must match
     if a.shape[-1] != b.shape[-2]:
         raise ValueError(
@@ -797,17 +803,29 @@ This high arithmetic intensity — compared to ~0.08 for element-wise ops — is
 
 **Q2: Memory Bandwidth Savings**
 
-Consider an ideal compiled kernel processing 1,000,000 float32 elements. A simplified staged model transfers 16 full arrays, while the fused model transfers two. How much traffic does the model save? This is not the traffic measured by TinyTorch’s grouped NumPy expression.
+Consider an ideal compiled kernel computing GELU on 1,000,000 float32 elements (4 MB per tensor). In an unfused sequential pipeline, each intermediate stage is written to and read back from DRAM. How much memory traffic does kernel fusion save compared to an unfused pipeline?
 
 :::{.callout-tip collapse="true" title="Answer"}
 
-**Unfused**: 7 reads + 7 writes + 1 input read + 1 output write = 16 ops × ~4 MB ≈ **61 MB**
+**Unfused pipeline (8 sequential operations):**
 
-**Fused**: 1 input read + 1 output write = 2 ops × ~4 MB ≈ **8 MB**
+- Step 1: $x^3$ (1 read of $x$, 1 write of $t_1$) = 2 passes
+- Step 2: $c_1 \cdot t_1$ (1 read of $t_1$, 1 write of $t_2$) = 2 passes
+- Step 3: $x + t_2$ (2 reads [$x, t_2$], 1 write of $t_3$) = 3 passes
+- Step 4: $c_2 \cdot t_3$ (1 read of $t_3$, 1 write of $t_4$) = 2 passes
+- Step 5: $\tanh(t_4)$ (1 read of $t_4$, 1 write of $t_5$) = 2 passes
+- Step 6: $1 + t_5$ (1 read of $t_5$, 1 write of $t_6$) = 2 passes
+- Step 7: $x \cdot t_6$ (2 reads [$x, t_6$], 1 write of $t_7$) = 3 passes
+- Step 8: $0.5 \cdot t_7$ (1 read of $t_7$, 1 write of $\text{out}$) = 2 passes
+- **Total unfused traffic**: 10 reads + 8 writes = 18 tensor passes $\times 4\text{ MB} = \mathbf{72\text{ MB}}$
 
-**Savings**: 61 − 8 ≈ **53 MB saved (~87.5% reduction)**
+**Fused kernel:**
 
-The simplified model saves 56,000,000 bytes (about 53.4 MiB). Actual runtime depends on allocation, cache reuse, arithmetic, and the implementation; traffic alone does not establish end-to-end throughput.
+- Keeps intermediate values in on-chip registers: 1 read of $x$ + 1 write of $\text{out}$ = 2 tensor passes $\times 4\text{ MB} = \mathbf{8\text{ MB}}$
+
+**Savings**: $72\text{ MB} - 8\text{ MB} = \mathbf{64\text{ MB}\text{ saved}}$ (a **$9.0\times$ traffic reduction**, or **88.9% less memory traffic**).
+
+This dramatic reduction in DRAM round-trips explains why kernel fusion provides major speedups on memory-bound workloads even when the total FLOP count remains identical.
 :::
 
 **Q3: Cache Tiling**
