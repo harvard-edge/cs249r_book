@@ -177,7 +177,7 @@ and feed it the sequence `[2, 0, 3]` with sinusoidal positions. With $D = 4$ the
 
 The fast pair (dimensions 0 and 1) already differs noticeably between positions 0, 1, and 2; the slow pair (dimensions 2 and 3) has barely moved from $[0, 1]$. That is the clock with two hands, one turning a hundred times faster than the other.
 
-For the backward, take the loss to be the sum of every entry in the output, so the gradient arriving at each of the three output rows is all ones. The scatter-add sends row 0's gradient to $W[2, :]$, row 1's to $W[0, :]$, and row 2's to $W[3, :]$, so `W.grad` has ones in rows 0, 2, and 3 and zeros in row 1, the token that never appeared. Had the sequence been `[2, 0, 2]` instead, row 2 would hold twos and row 3 zeros; that second case is the one `grad_weight[indices] += ...` gets wrong. The script below runs the forward table and both backward cases through the module. The IDs go in as a batch of one sequence, so the output has the matching leading dimension. `EmbeddingLayer` also accepts a one-dimensional sequence and temporarily adds that batch axis itself.
+For the backward pass, take the loss to be the sum of every entry in the output, so the gradient arriving at each of the three output rows is all ones. In the script below, lines 6--15 configure `EmbeddingLayer` with the $4 \times 4$ trace weights. Line 17 feeds the sequence `Tensor([[2, 0, 3]])`, producing output `h` of shape `(1, 3, 4)` verified in lines 18--21 against @tbl-embedding-pe-trace. In line 24, `h.sum().backward()` propagates through the gather. Scatter-add routes row 0's gradient to $W[2, :]$, row 1's to $W[0, :]$, and row 2's to $W[3, :]$. Lines 25--28 confirm that `W_grad` holds ones in rows 0, 2, and 3 and zeros in row 1, while `layer.pos_encoding.grad` is `None` (sinusoidal encodings have no learned parameters). In lines 30--33, clearing gradients and running repeated token sequence `[[2, 0, 2]]` verifies that row 2 accumulates to twos (`[[1]*4, [0]*4, [2]*4, [0]*4]`), which naive in-place addition `grad_weight[indices] += ...` fails to compute correctly.
 
 ```python
 import numpy as np
@@ -220,7 +220,7 @@ assert np.array_equal(
 
 The sinusoidal case has no position gradient. To see the extra route for learned positions, use a two-sequence batch `[[2, 0], [2, 1]]`, width 2, and `start_pos=1`. Give token rows 0, 1, and 2 the values `[1, 2]`, `[3, 4]`, and `[5, 6]`. Position rows 1 and 2 are `[10, 20]` and `[30, 40]`. The first sequence becomes `[[15, 26], [31, 42]]`; the second becomes `[[15, 26], [33, 44]]`.
 
-For the loss `output.sum()`, all four output rows receive `[1, 1]`. The token branch groups these gradients by ID, so token row 2 receives `[2, 2]`, rows 0 and 1 each receive `[1, 1]`, and row 3 stays zero. The position branch groups them by sequence position. Adding the two batch contributions reduces a `(2, 2, 2)` gradient to `(1, 2, 2)` with values `[[[2, 2], [2, 2]]]`. Reshape removes the leading axis, and slice-backward places those two rows into position rows 1 and 2. Position rows 0 and 3 stay zero. The two routes have the same output gradients but different destinations.
+For the loss `output.sum()`, all four output rows receive `[1, 1]`. The token branch groups these gradients by ID, so token row 2 receives `[2, 2]`, rows 0 and 1 each receive `[1, 1]`, and row 3 stays zero. The position branch groups them by sequence position. Adding the two batch contributions reduces a `(2, 2, 2)` gradient to `(1, 2, 2)` with values `[[[2, 2], [2, 2]]]`. Reshape removes the leading axis, and slice-backward places those two rows into position rows 1 and 2. Position rows 0 and 3 stay zero. In the listing below, lines 1--5 initialize both parameter tables. Line 7 executes the forward pass with `start_pos=1`, verified in lines 8--10. In line 11, `output.sum().backward()` routes gradients along both branches simultaneously: line 12 validates `weight.grad` while line 13 validates `positions.grad`.
 
 ```python
 learned = EmbeddingLayer(4, 2, max_seq_len=4, pos_encoding='learned')
@@ -240,7 +240,7 @@ for parameter, original in zip(learned.parameters(), before):
     assert np.array_equal(parameter.data, original)
 ```
 
-The final assertion separates differentiation from learning. Forward read both tables, and backward filled their `.grad` arrays, but neither changed their values. Passing those parameters to an optimizer and calling `step()` is what would change the tables. Clearing gradients before the next training step prevents contributions from unrelated batches from accumulating together.
+The final assertion in lines 14--15 separates differentiation from learning. Forward read both tables, and backward filled their `.grad` arrays, but neither changed their values. Passing those parameters to an optimizer and calling `step()` is what would change the tables. Clearing gradients before the next training step prevents contributions from unrelated batches from accumulating together.
 
 The destinations are compared in @fig-embedding-gradient-routes. Token rows group contributions by identity; position rows group them by the position used in the call.
 

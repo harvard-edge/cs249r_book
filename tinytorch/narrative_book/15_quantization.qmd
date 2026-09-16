@@ -238,7 +238,9 @@ Subtracting the zero points gives the integer operands, $Q_x - Z_x = [159, -96]$
 
 The first output is off by $0.003$, about a third of a percent, and the trace shows where it came from. The reconstructions are $\hat{x} = [0.4988, -0.3012]$ and, for the first row of $W$, $[1.2657, -0.6373]$; using the unrounded grid values in the product gives approximately $0.8233$. Each is within its $S/2$ bound, $0.0016$ for the input and $0.0045$ for the weights, and on this row their errors pushed the same direction. A packed copy of the four weights would take 4 code bytes plus 8 metadata bytes, rather than 16 FP32 bytes. The two-element bias adds its own code bytes and metadata. For the complete tiny layer, `memory_usage()` therefore reports 24 original bytes and 22 modeled bytes, only $1.09\times$ compression. Metadata becomes relatively small for large arrays; `memory_usage` on the 4096 by 4096 layer from The Problem reports 67,125,248 bytes against 16,781,328, a ratio of 4.0.
 
-The class should first agree with the four weights traced by hand. The codes, the scale, and the zero point should match the displayed codes and metadata to the shown precision, and the two forwards should land within a few thousandths of the exact product. Chapter 3's `Linear` stores its weight as inputs by outputs, so $W$ goes in transposed.
+The class should first agree with the four weights traced by hand. In the listing below, line 4 defines the $2 \times 2$ weight matrix, loaded into `Linear(2, 2)` in lines 5--7 (transposed to match input-by-output storage convention). Line 9 wraps it in `layer = QuantizedLinear(linear)`. In lines 10--12, `layer.q_weight.data.T`, `layer.weight_scale`, and `layer.weight_zero_point` print the exact quantized integer codes ($[[127, -85], [14, -128]]$), scale factor ($0.008976$), and zero-point offset ($-14$) derived above.
+
+Line 14 supplies the two-element test vector $x = [0.5, -0.3]$. Line 15 computes the baseline FP32 reference `[[0.8264, 0.4322]]`. In line 16, `layer.forward(x)` executes the dequantize-in-float path, yielding `[[0.82404, 0.43267]]`. In line 17, `int8_forward(layer, x)` executes the pure INT8 integer accumulation path, producing `[[0.8233, 0.4336]]` matching @tbl-int8-quant-trace.
 
 ::: {lst-cap="**Checking the two-output layer**: Weight-only and input-rounded paths produce different results."}
 ```python
@@ -262,7 +264,7 @@ print(int8_forward(layer, x))       # [[0.8233 0.4336]]  integer path: both oper
 ```
 :::
 
-The module's uncalibrated `forward` rounds only the weights, so it lands closer to the exact answer on this example than `int8_forward`, which rounds both operands. The two functions model different inference paths. After `calibrate`, the module also rounds its inputs, but onto the stored grid rather than a grid measured from each new input. Comparisons must state which of these paths they used; otherwise an apparent improvement can come from changing the experiment.
+The module's uncalibrated `forward` (line 16) rounds only the weights, so it lands closer to the exact answer on this example than `int8_forward` (line 17), which rounds both operands. The two functions model different inference paths. After `calibrate`, the module also rounds its inputs, but onto the stored grid rather than a grid measured from each new input. Comparisons must state which of these paths they used; otherwise an apparent improvement can come from changing the experiment.
 
 We can follow the same layer through its calibration state change. The samples `[[0.4, -0.2]]` and `[[0.1, 0.5]]` have a combined range of $[-0.2, 0.5]$. `calibrate` stores $S_x = 0.7/255 \approx 0.0027451$ and $Z_x = -55$. It leaves the weight and bias codes unchanged. The later input `[[2.0, -1.5]]` is outside this recorded range in both coordinates.
 

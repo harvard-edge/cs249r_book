@@ -235,7 +235,7 @@ $$
 
 The zero in $\partial L / \partial \mathbf{x}$ has a plain meaning. Raising $x_0$ by a small amount raises $z_0$ by half that amount and lowers $z_1$ by the same half, and since $L$ is $z_0 + z_1$, the two effects cancel. The gradient with respect to $\mathbf{W}$ matches the finite-difference estimate from The Problem to within its noise, which is the check that matters.
 
-Running the real module on the same inputs reproduces the table (@lst-autograd-network-trace). Importing `tinytorch.core.autograd` is what completes the operation classes with the backward halves above; before that import, `backward()` raises.
+Running the real module on the same inputs reproduces the table (@lst-autograd-network-trace). Importing `tinytorch.core.autograd` in line 3 completes the operation classes with their backward methods; before that import, `backward()` raises. In lines 5--6, `x` and `W` are declared with `requires_grad=True`. Lines 8--10 evaluate the forward sequence $z \to a \to L$, attaching operation nodes inspected in lines 11--12 (`<MatMulBackward>`, `<ReLUBackward>`, `<SumBackward>`). In line 14, `L.backward()` seeds the gradient at 1.0 and traverses the tape in reverse topological order, populating `W.grad` and `x.grad` in lines 15--17 to match the hand-derived matrix products in @tbl-autograd-trace exactly.
 
 ::: {#lst-autograd-network-trace lst-cap="**Tracing a matrix network**: Three recorded operations produce the weight and input gradients."}
 ```python
@@ -259,7 +259,7 @@ print(x.grad)          # [[0.  1.5]]
 ```
 :::
 
-The accumulation rule can be checked with a two-line experiment, and it is worth running because `x + x` is the smallest version of a residual connection, where a tensor is added back to something computed from it. The same tensor is both inputs of one `Add` node, so the walker adds to its `pending` entry twice in @lst-autograd-shared-input.
+The accumulation rule can be checked with a two-line experiment, and it is worth running because `x + x` is the smallest version of a residual connection, where a tensor is added back to something computed from it. In @lst-autograd-shared-input, line 1 creates `x` and line 2 evaluates `(x + x).sum().backward()`. The same tensor occupies both input slots of one `Add` node, so the tape traversal adds to its `pending` entry twice, producing `[[2. 2.]]` in line 3.
 
 ::: {#lst-autograd-shared-input lst-cap="**One tensor in two input positions**: The two additions to the pending gradient must both survive."}
 ```python
@@ -269,7 +269,7 @@ print(x.grad)          # [[2. 2.]]
 ```
 :::
 
-Replace the `+` in the `pending` update inside `backward` with an assignment and this prints `[[1. 1.]]`, with no error to tell us it is wrong. A shared intermediate adds a second obligation: its local rule must propagate the combined gradient once. The trace in @lst-autograd-retained-graph checks accumulation across separate calls that share a forward intermediate.
+Replace the `+` in the `pending` update inside `backward` with an assignment and this prints `[[1. 1.]]`, with no error to tell us it is wrong. A shared intermediate adds a second obligation: its local rule must propagate the combined gradient once. The trace in @lst-autograd-retained-graph checks accumulation across separate calls that share a forward intermediate. In lines 1--3, `h = x * 2` branches into `left` and `right`. Line 4 runs `left.backward(retain_graph=True)`, printing `x.grad = [6.]` in line 5. Line 6 runs `right.backward()`, accumulating an additional 8 to yield `x.grad = [14.]` in line 7. In lines 9--12, attempting to backpropagate through `h` a third time raises a `RuntimeError` because the un-retained backward pass released `h`'s computational graph.
 
 ::: {#lst-autograd-retained-graph lst-cap="**Gradient and graph lifetimes**: Contributions accumulate across calls, but a released intermediate cannot be traversed again."}
 ```python
@@ -288,7 +288,7 @@ except RuntimeError:
 ```
 :::
 
-On the first call, `h` receives three and sends six to `x`. On the second, its fresh `pending` entry receives four and sends eight, even though `h.grad` also retains the earlier three. The second call releases `h`'s producing operation. The third call reaches that marked intermediate during graph validation and stops before changing `x.grad`. Recomputing `h = x * 2` creates a usable graph; clearing `x.grad` alone does not restore the old one.
+On the first call (line 4), `h` receives three and sends six to `x`. On the second (line 6), its fresh `pending` entry receives four and sends eight, even though `h.grad` also retains the earlier three. The second call releases `h`'s producing operation. The third call (line 9) reaches that marked intermediate during graph validation and stops before changing `x.grad`. Recomputing `h = x * 2` creates a usable graph; clearing `x.grad` alone does not restore the old one.
 
 ---
 

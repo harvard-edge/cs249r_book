@@ -227,7 +227,7 @@ The trace has two parts. The first pushes one small weight matrix through two al
 
 ### One matrix, quantized and pruned
 
-Script 1 measures the rounded model's accuracy, but its packed-storage ratio remains an analytical count. A small trace separates the arithmetic of rounding from the representation used to store its result. The comfortable assumption is that it does nothing, since the codes decode back into weights. For this input they decode back into nearby weights, each within half a quantization step of where it started, and the only way to see how wide that step is, and which weights pruning would then discard, is to push a few weights through both rules by hand. Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. Min-max INT8 quantization first widens the range to include zero (it already does), then sets the scale to the range divided by 255 and the zero point to whatever integer maps the minimum onto $-128$.
+Script 1 measures the rounded model's accuracy, but its packed-storage ratio remains an analytical count. A small trace separates the arithmetic of rounding from the representation used to store its result. The comfortable assumption is that it does nothing, since the codes decode back into weights. For this input they decode back into nearby weights, each within half a quantization step of where it started, and the only way to see how wide that step is, and which weights pruning would then discard, is to push a few weights through both rules by hand. Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. In the first listing below, lines 1--8 define asymmetric min-max quantization `quantize_int8(values)`, and lines 9--10 define `dequantize_int8`. Line 12 initializes test weights `w`. Line 13 executes quantization, and line 14 prints scale factor $0.0118$, zero point $-43$, and quantized integer codes `[-128, -43, 127, 0, 84, -86]`. Line 15 dequantizes the codes back into approximate floats.
 
 ```python
 def quantize_int8(values):
@@ -247,7 +247,7 @@ print(round(scale, 4), zp, codes)
 print([round(v, 4) for v in dequantize_int8(codes, scale, zp)])
 ```
 
-The scale is $3 / 255 = 0.011765$ and the zero point is $\text{round}(-128 + 85) = -43$. For this nonconstant, zero-spanning input, the hand function follows Module 15's rule and the module agrees. It is not a replacement for the implementation: a constant input would divide by zero here, while the module handles constant tensors explicitly.
+The scale is $3 / 255 = 0.011765$ and the zero point is $\text{round}(-128 + 85) = -43$. For this nonconstant, zero-spanning input, the hand function follows Module 15's rule and the module agrees. In the second snippet below, line 5 runs the actual package implementation `tinytorch.perf.quantization.quantize_int8` on a Tensor, and line 6 confirms exact numerical agreement with the manual trace.
 
 ```python
 import numpy as np
@@ -279,7 +279,7 @@ A benchmark is more useful when you know what it should print, so the prediction
 
 Napkin math for the rest. A hypothetical packed INT8 format keeps 1 byte per parameter plus a scale and a zero point for each of the four parameter tensors, so about $2{,}410 + 32 = 2{,}442$ bytes, a size ratio just under 4. Pruning half the weights to zero and storing them densely changes nothing, and storing them in the compressed sparse row format of Chapter 16 costs an index per surviving weight, which at 50% sparsity roughly cancels the saving. Both reconstructed quantization and dense pruning leave the matrix shapes and dense arithmetic unchanged. Their latency therefore has to be measured; neither representation claim supplies a speedup.
 
-The ledger below is a separate arithmetic exercise. Its accuracies and equal 0.05 ms latencies are chosen inputs, not observations or expected results from the scripts. The scripts do time all three executable candidates. Here we compare hypothetical storage formats to expose their overhead before writing one. The sparse row combines packed INT8 values with pruning; the script's pruned candidate instead uses dense float32 arrays.
+The ledger in the listing below is a separate arithmetic exercise. In lines 1--6, the analytical storage formulas compute dense FP32 (9,640 bytes), packed INT8 (2,442 bytes), and 50% sparse CSR representation (2,638 bytes). Lines 8--12 populate the candidate dictionary. The loop in lines 14--19 calls `score(base, cand)` to evaluate accuracy retention $R$, size compression ratio $C$, speedup $S$, and event qualification, printing the rows of @tbl-m3-scorecard.
 
 ```python
 params = 64 * 32 + 32 + 32 * 10 + 10           # 2,410
