@@ -9,14 +9,14 @@ Strict compliance with Vol 3 Figure 1.10 standard & tinytorch/palette.md:
 - Max 1 accent node/container per diagram
 - Fonts: TeX Gyre Heros, Helvetica Neue, Arial, sans-serif
 - Uniform stroke weights, crisp geometry, tactile systems intuition.
-- Dual-synchronized to narrative_book/ and quarto/ asset directories.
+- Dual-synchronized to book/ and quarto/ asset directories.
 """
 
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEST_DIRS = [
-    REPO_ROOT / "tinytorch/narrative_book/assets/images/diagrams",
+    REPO_ROOT / "tinytorch/book/assets/images/diagrams",
     REPO_ROOT / "tinytorch/quarto/assets/images/diagrams",
 ]
 

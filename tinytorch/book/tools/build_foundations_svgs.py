@@ -10,13 +10,13 @@ Strict compliance with Vol 3 Figure 1.10 standard & tinytorch/palette.md:
 - Max 1 accent node per diagram
 - Fonts: TeX Gyre Heros, Helvetica Neue, Arial, sans-serif
 - Uniform stroke weights, crisp geometry, tactile systems intuition.
-- Synchronizes output to narrative_book/ and quarto/ asset directories
+- Synchronizes output to book/ and quarto/ asset directories
 """
 
 from pathlib import Path
 
 DEST_DIRS = [
-    Path("tinytorch/narrative_book/assets/images/diagrams"),
+    Path("tinytorch/book/assets/images/diagrams"),
     Path("tinytorch/quarto/assets/images/diagrams"),
 ]
 

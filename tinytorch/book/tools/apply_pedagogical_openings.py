@@ -257,7 +257,7 @@ This final chapter completes the bridge from the educational xv6 kernel of TinyT
 def get_original_fig(filepath: Path) -> str:
     """Extracts original figure block from the introductory section of the file from git HEAD."""
     try:
-        out = subprocess.check_output(['git', 'show', f'HEAD:tinytorch/narrative_book/{filepath.name}'], text=True)
+        out = subprocess.check_output(['git', 'show', f'HEAD:tinytorch/book/{filepath.name}'], text=True)
     except Exception:
         out = filepath.read_text(encoding="utf-8")
         
