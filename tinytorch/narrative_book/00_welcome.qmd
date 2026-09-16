@@ -73,6 +73,21 @@ The roadmap in @tbl-pedagogical-roadmap names what each chapter builds and the q
 
 The roadmap is also a dependency guide. The optimization chapters require a working model and a measurement method; the architecture chapters require tensor operations and a training loop. A milestone tests the handoff between those pieces, rather than introducing another independent abstraction.
 
+### Reading Flows and Evidence of Understanding
+
+The framework develops across six interconnected execution flows. Each flow begins with a concrete computation and finishes with a contract that the next flow can rely upon. @tbl-reading-flows summarizes the path to trace through each flow and the concrete evidence that demonstrates mastery.
+
+| Flow | Modules | Execution path to follow | Evidence of understanding |
+| :--- | :--- | :--- | :--- |
+| **Forward computation** | @sec-tensors through @sec-dataloader | Tensor operation $\to$ activation $\to$ layer $\to$ loss, with batches supplied by a dataset and loader | Trace values and shapes; distinguish parameters from activations and array storage from Tensor wrappers. |
+| **Learning** | @sec-autograd through @sec-training, @sec-milestone-1 | Recorded operation $\to$ backward traversal $\to$ parameter gradients $\to$ optimizer update | Explain broadcast reduction, graph lifetime, gradient accumulation, and normalization by the actual sample count. |
+| **Vision** | @sec-convolutions | Image batch $\to$ convolution $\to$ pooling and normalization $\to$ loss | Trace one window and the contributions to its gradients; explain shared parameters and receptive fields. |
+| **Language** | @sec-tokenization through @sec-transformers, @sec-milestone-2 | Text $\to$ token IDs $\to$ embeddings $\to$ attention $\to$ transformer outputs | Keep token, batch, head, and feature axes distinct; trace a causal attention computation before generation. |
+| **Measurement & optimization** | @sec-profiling through @sec-acceleration | Baseline measurement $\to$ one transformation $\to$ correctness comparison $\to$ measurement | Separate elapsed time from analytical counts; distinguish an algorithmic demonstration from changed physical execution. |
+| **Reuse & evaluation** | @sec-memoization through @sec-extensions, @sec-milestone-3 | Cache update $\to$ cached attention $\to$ controlled comparison $\to$ integrated evaluation | Identify cached state, reset, and capacity behavior; explain remaining context work and verify metrics. |
+
+: **The Six Reading Flows of TinyTorch**: Execution paths to follow and the concrete evidence of understanding expected at each milestone. {#tbl-reading-flows tbl-colwidths="[20,24,28,28]"}
+
 ---
 
 ## What TinyTorch Is
@@ -100,13 +115,45 @@ The modules and the book are organized in four parts, summarized in @tbl-archite
 
 ![**From Operations to an Integrated Framework**: Foundational modules support image and language architectures; optimization experiments then lead to the capstone comparison.](assets/images/diagrams/00_journey-diag-1.svg){#fig-framework-roadmap fig-alt="Module sequence from 01–08 foundations to 09–13 architectures, then 14–19 optimization experiments and the module 20 capstone."}
 
+### Implementation Boundaries to Preserve
+
+TinyTorch serves as an *executable architectural specification* rather than a competitor to multi-million-line production runtimes. To keep the framework inspectable, we maintain deliberate pedagogical firewalls:
+
+- **NumPy storage vs. zero-copy views**: TinyTorch's `Tensor` constructor creates float32 NumPy array storage. A NumPy view inside an operation does not imply that the returned `Tensor` shares that storage without copying.
+- **Synchronous single-thread loading**: The reference `DataLoader` forms batches synchronously. Multiprocess worker queues, asynchronous prefetching, pinned host memory, and non-blocking device transfers belong to the production bridge.
+- **Explicit convolution loops**: Reference convolution exposes sliding-window spatial loops to make weight sharing and receptive fields transparent. Vectorized `im2col` GEMM expansions and Winograd kernels are discussed as systems alternatives.
+- **Simulated INT8 quantization**: Quantization demonstrates integer codes, dynamic scale factors, and zero-point alignment while retaining float32 containers, isolating numerical mechanics before discussing bit-level hardware packing.
+- **Compression and distillation**: Knowledge distillation combines differentiable student loss with frozen teacher logits. Low-rank factorization illustrates parameter efficiency without conflating it with a full LoRA serving harness.
+- **Algorithmic fusion vs. hardware SRAM residency**: NumPy operator fusion experiments demonstrate intermediate memory traffic reductions. They do not claim physical GPU register residency or compiler kernel generation.
+- **Static KV cache allocation**: The Key-Value cache preallocates memory up to a maximum context window and advances a write head. It is not an elastic ring buffer or paged virtual memory manager.
+- **Honest benchmarking**: Measurement discipline separates cold-start JIT overhead from steady-state percentiles. Microbenchmark speedups do not automatically compose into end-to-end workload speedups.
+
 ---
 
 ## How Each Chapter Is Organized
 
-A chapter begins with the computation that the preceding modules make possible and the problem that remains. **The Problem** supplies a failure or constraint. **The Idea** develops a representation that addresses it. **The Code** follows the relevant source path, and **A Worked Trace** gives a small case with intermediate values that can be checked by hand. The production bridge then explains how a different workload or execution environment changes the design.
+Every chapter in TinyTorch follows a deliberate **Hourglass Architecture**:
 
-The chapter's summary establishes what later chapters may rely on. Exercises ask the reader to predict behavior, test an edge case, or alter a mechanism. Milestones combine earlier mechanisms into workloads, making the interfaces between modules part of the lesson. Reading an entire class from top to bottom is not required before tracing the operation that the chapter introduces.
+1. **The Problem (The ML "Why")**: We motivate why the mathematical operation or physical necessity arises in deep learning before writing code.
+2. **The Idea (Systems Invariants)**: We establish representations, data structures, shapes, memory layouts, and correctness contracts.
+3. **The Code and Worked Trace**: At the narrowest point of the hourglass, we inspect the exact source implementation extracted from the repository and trace a small, hand-verifiable numerical example with concrete numbers.
+4. **From TinyTorch to Production**: We expand wide again, examining how production engines (PyTorch ATen, cuDNN, CUTLASS, Triton, vLLM) scale the concept across distributed clusters and specialized silicon.
+
+The chapter summary establishes what later chapters rely on, while exercises ask the reader to predict behavior or test edge cases.
+
+### Navigating the Text: Signposts and Callouts
+
+Because systems engineering relies on progressive disclosure, the margins contain continuous cross-referencing signposts:
+
+- ↩ **`Jump back`**: Directs you back to where a prerequisite concept, memory layout, or invariant was first derived (e.g., @sec-tensors or @sec-autograd).
+- ↪ **`Jump ahead`**: Previews where a baseline component is revisited, optimized, or accelerated in later chapters (e.g., @sec-profiling or @sec-memoization).
+
+Four semantic callout tiers provide specialized engineering perspectives throughout each chapter:
+
+- 📐 **Napkin Math** (`.callout-napkin-math`): Quantitative calculations for memory footprints, FLOP budgets, cache line utilization, and roofline operational intensity.
+- ⚙️ **Systems Perspectives** (`.callout-systems-perspective`): Production insights detailing how real-world frameworks (PyTorch ATen C++, CUDA, cuBLAS) engineer the equivalent subsystem.
+- 🛑 **Checkpoints** (`.callout-checkpoint`): Non-negotiable correctness invariants, common silent bugs (such as accidental gradient accumulation), and edge-case validation.
+- 📜 **War Stories** (`.callout-war-story`): Real-world production incidents, numerical catastrophes (NaN overflows), and architectural lessons from large-scale model deployments.
 
 ---
 
