@@ -1083,6 +1083,107 @@ def gen_02_activation_margin_gelu():
     write_svg("02_activation-margin-gelu.svg", body)
 
 
+def gen_02_activation_margin_relu():
+    h = 120
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="110" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">RELU: PIECEWISE LINEAR HINGE</text>
+
+  <g transform="translate(15, 25)">
+    <line x1="20" y1="65" x2="185" y2="65" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="85" y1="10" x2="85" y2="75" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="185" y="63" font-size="7" font-family="monospace" fill="#9ca3af">x</text>
+    <text x="88" y="12" font-size="7" font-family="monospace" fill="#9ca3af">y</text>
+
+    <!-- Dead zone shading (x < 0) -->
+    <rect x="25" y="48" width="60" height="17" fill="#fef2f2" opacity="0.6"/>
+    <text x="55" y="59" text-anchor="middle" font-size="6.5" font-family="monospace" font-weight="bold" fill="#dc2626">Dead (g = 0)</text>
+
+    <!-- Active zone (x > 0) -->
+    <text x="125" y="45" font-size="6.5" font-family="monospace" font-weight="bold" fill="#16a34a">Active (g = 1)</text>
+
+    <!-- ReLU curve: flat on x<0, linear ramp on x>0 -->
+    <path d="M 25 65 L 85 65 L 155 10" fill="none" stroke="#ff8246" stroke-width="2.0"/>
+    <circle cx="85" cy="65" r="2.5" fill="#c85a17"/>
+    <text x="85" y="77" text-anchor="middle" font-size="7" font-family="monospace" fill="#4b5563">(0, 0) hinge</text>
+    <text x="150" y="24" font-size="7.5" font-weight="700" fill="#ff8246">y = max(0, x)</text>
+  </g>
+</svg>
+"""
+    write_svg("02_activation-margin-relu.svg", body)
+
+
+def gen_02_activation_margin_sigmoid():
+    h = 120
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="110" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">SIGMOID: SQUASHING &amp; SATURATION</text>
+
+  <g transform="translate(15, 25)">
+    <line x1="20" y1="65" x2="185" y2="65" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="85" y1="10" x2="85" y2="75" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="20" y1="20" x2="185" y2="20" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="2,2"/>
+    <text x="185" y="63" font-size="7" font-family="monospace" fill="#9ca3af">x</text>
+    <text x="185" y="19" font-size="6.5" font-family="monospace" fill="#9ca3af">y=1</text>
+    <text x="88" y="12" font-size="7" font-family="monospace" fill="#9ca3af">y</text>
+
+    <!-- Saturation zones -->
+    <rect x="20" y="58" width="40" height="8" fill="#fef2f2" opacity="0.7"/>
+    <text x="40" y="54" text-anchor="middle" font-size="6" font-family="monospace" fill="#dc2626">Sat. (0)</text>
+
+    <rect x="130" y="19" width="45" height="8" fill="#fef2f2" opacity="0.7"/>
+    <text x="152" y="16" text-anchor="middle" font-size="6" font-family="monospace" fill="#dc2626">Sat. (1)</text>
+
+    <!-- Sigmoid S-curve -->
+    <path d="M 25 64 Q 65 64 85 42.5 T 155 21" fill="none" stroke="#ff8246" stroke-width="1.8"/>
+    <circle cx="85" cy="42.5" r="2.5" fill="#c85a17"/>
+    <text x="88" y="44" font-size="6.5" font-family="monospace" font-weight="bold" fill="#c85a17">(0, 0.5)</text>
+
+    <text x="85" y="77" text-anchor="middle" font-size="6.5" font-family="monospace" fill="#16a34a">max g' = 0.25</text>
+  </g>
+</svg>
+"""
+    write_svg("02_activation-margin-sigmoid.svg", body)
+
+
+def gen_02_activation_margin_tanh():
+    h = 120
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="110" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">TANH: ZERO-CENTERED S-CURVE</text>
+
+  <g transform="translate(15, 25)">
+    <line x1="20" y1="45" x2="185" y2="45" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="85" y1="10" x2="85" y2="80" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="20" y1="18" x2="185" y2="18" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="2,2"/>
+    <line x1="20" y1="72" x2="185" y2="72" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="2,2"/>
+    <text x="185" y="43" font-size="7" font-family="monospace" fill="#9ca3af">x</text>
+    <text x="185" y="17" font-size="6.5" font-family="monospace" fill="#9ca3af">+1</text>
+    <text x="185" y="75" font-size="6.5" font-family="monospace" fill="#9ca3af">-1</text>
+    <text x="88" y="12" font-size="7" font-family="monospace" fill="#9ca3af">y</text>
+
+    <!-- Tanh S-curve -->
+    <path d="M 25 71 Q 65 71 85 45 T 155 19" fill="none" stroke="#ff8246" stroke-width="1.8"/>
+    <circle cx="85" cy="45" r="2.5" fill="#c85a17"/>
+    <text x="90" y="44" font-size="6.5" font-family="monospace" font-weight="bold" fill="#c85a17">(0, 0)</text>
+
+    <text x="85" y="60" text-anchor="middle" font-size="6.5" font-family="monospace" fill="#16a34a">Slope g' = 1.0 at x=0</text>
+    <text x="85" y="77" text-anchor="middle" font-size="6.5" font-family="monospace" fill="#4b5563">Range: (-1, +1)</text>
+  </g>
+</svg>
+"""
+    write_svg("02_activation-margin-tanh.svg", body)
+
+
 def gen_03_layers_margin_fanin():
     h = 100
     body = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -1304,6 +1405,9 @@ def main():
     # Part I Margin Micro-Figures
     gen_01_tensor_margin_overhead()
     gen_02_activation_margin_gelu()
+    gen_02_activation_margin_relu()
+    gen_02_activation_margin_sigmoid()
+    gen_02_activation_margin_tanh()
     gen_03_layers_margin_fanin()
     gen_04_losses_margin_overflow()
     gen_05_dataloader_margin_permutation()
