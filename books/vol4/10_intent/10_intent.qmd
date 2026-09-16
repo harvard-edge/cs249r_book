@@ -297,51 +297,26 @@ Evaluating kinematic reachability and static occupancy in $O(1)$ scalar time ($<
 
 A target that lies within the static kinematic workspace\index{Kinematics!workspace} may still be physically unachievable within the operational window. Static reachability establishes only that the mechanism is geometrically long enough to touch the target coordinate if given infinite time. **Dynamic reachability**\index{Dynamic reachability} is the physical condition wherein an end effector can physically transition from its instantaneous initial state $(\mathbf{p}_0, \mathbf{v}_0)$ to a target $SE(3)$\index{SE(3)} pose within the remaining lease validity duration $\tau = t_{\text{exp}} - t_{\text{now}}$, while strictly respecting actuator velocity ceilings ($v_{\max}$), acceleration limits ($a_{\max}$), jerk constraints ($j_{\max}$), and thermal torque envelopes.
 
-For a rest-to-rest displacement $d = \|\mathbf{p}_{\text{target}} - \mathbf{p}_0\|$ under maximum allowable acceleration $a_{\max}$ and cruise velocity $v_{\max}$, the velocity trajectory bifurcates based on whether the mechanism has sufficient travel to reach $v_{\max}$. The critical displacement required to accelerate from rest to $v_{\max}$ and immediately decelerate back to rest at rate $a_{\max}$ is:
+For a rest-to-rest displacement $d = \|\mathbf{p}_{\text{target}} - \mathbf{p}_0\|$ under maximum allowable acceleration $a_{\max}$ and cruise velocity $v_{\max}$, motion bifurcates between two physical regimes based on whether the mechanism has sufficient travel to reach its velocity ceiling:
+
+- **Low-speed moves ($d \le d_{\text{crit}}$) are acceleration-limited**: The mechanism never reaches the velocity ceiling $v_{\max}$. Instead, the actuator accelerates to the midpoint and immediately decelerates back to rest in a triangular velocity profile, yielding un-jerked traversal time $t_{\min} = 2\sqrt{d / a_{\max}}$ (where reachable displacement scales quadratically with available time, $d \propto \tau^2$).
+- **High-speed moves ($d > d_{\text{crit}}$) are velocity-limited**: When displacement exceeds the acceleration runway, motion saturates at cruise velocity $v_{\max}$. The trajectory comprises acceleration, constant-velocity cruise, and deceleration phases in a trapezoidal velocity profile, yielding un-jerked traversal time $t_{\min} = d / v_{\max} + v_{\max} / a_{\max}$ (where displacement scales linearly with available time, $d \propto \tau$).
+
+The physical boundary between these two regimes is governed by the critical displacement:
 
 $$d_{\text{crit}} = \frac{v_{\max}^2}{a_{\max}}$$
 
-The geometry of the resulting velocity profile in the time domain dictates the minimum traversal time $t_{\min}$:
+Commanding instantaneous step changes in acceleration assumes infinite jerk ($j = \|\dot{\mathbf{a}}\| \to \infty$). In physical machines, infinite jerk corresponds to an instantaneous step in motor torque, inducing gearbox backlash shock, exciting structural resonance modes, and generating motor current spikes that risk tripping inverter fault interlocks. Physical AI systems therefore constrain the maximum allowable jerk ($\|\dot{\mathbf{a}}\| \le j_{\max}$), which introduces a finite acceleration ramp-up delay $t_j = a_{\max} / j_{\max}$.
 
-- **Short Displacements ($d \le d_{\text{crit}}$) — Triangular Velocity Profile:**
-  When the commanded displacement is short ($d \le d_{\text{crit}}$), the mechanism never reaches the velocity ceiling $v_{\max}$. Instead, the actuator accelerates at $+a_{\max}$ over distance $d/2$ for duration $t_a = \sqrt{d / a_{\max}}$, reaching peak velocity $v_{\text{peak}} = \sqrt{a_{\max} d} \le v_{\max}$ at the midpoint, and immediately decelerates at $-a_{\max}$ for duration $t_d = \sqrt{d / a_{\max}}$ back to rest. Summing the symmetric acceleration and deceleration phases yields the minimum physical transit time:
-
-$$t_{\min} = 2 \sqrt{\frac{d}{a_{\max}}}$$
-
-- **Long Displacements ($d > d_{\text{crit}}$) — Trapezoidal Velocity Profile:**
-  When displacement exceeds $d_{\text{crit}}$, motion saturates at the velocity ceiling $v_{\max}$. The trajectory comprises an acceleration phase covering distance $v_{\max}^2 / (2 a_{\max})$ in duration $t_a = v_{\max} / a_{\max}$, a constant-velocity cruise phase covering the remaining distance $d - d_{\text{crit}}$ in duration $t_c = (d - d_{\text{crit}}) / v_{\max}$, and a deceleration phase covering $v_{\max}^2 / (2 a_{\max})$ in duration $t_d = v_{\max} / a_{\max}$. Summing these segments yields:
-
-$$t_{\min} = \frac{d}{v_{\max}} + \frac{v_{\max}}{a_{\max}}$$
-
-Commanding instantaneous step changes in acceleration between $0$ and $\pm a_{\max}$ assumes infinite jerk ($j = \|\dot{\mathbf{a}}\| \to \infty$). In physical machines, infinite jerk corresponds to an instantaneous step in motor torque, inducing gearbox backlash shock, exciting structural resonance modes, and generating motor current spikes that risk tripping inverter fault interlocks. Physical AI systems therefore constrain the maximum allowable jerk:
-
-$$\left\| \frac{d\mathbf{a}}{dt} \right\| \le j_{\max}$$
-
-Under a finite jerk limit $j_{\max}$, acceleration cannot jump discontinuously; it ramps linearly between $0$ and $\pm a_{\max}$ over a finite jerk ramp interval:
-
-$$t_j = \frac{a_{\max}}{j_{\max}}$$
-
-This finite ramp rounds the sharp corners of triangular and trapezoidal velocity profiles, transforming them into smooth 7-segment S-curve trajectories ($C^2$-continuous in position). This smoothing imposes an explicit latency and geometric penalty on the reachability envelope:
-
-- **Critical Distance Expansion:** Because the actuator spends duration $t_j$ operating below peak acceleration while ramping, reaching $v_{\max}$ requires additional spatial travel. Under jerk limits, the critical distance expands to:
-
-$$d_{\text{crit}, j} = v_{\max} \left( \frac{v_{\max}}{a_{\max}} + t_j \right) = \frac{v_{\max}^2}{a_{\max}} + \frac{v_{\max} a_{\max}}{j_{\max}}$$
-
-- **Transit Time Latency Penalty:** For trapezoidal velocity profiles ($d > d_{\text{crit}, j}$), finite jerk adds the ramp time $t_j = a_{\max} / j_{\max}$ directly to the transit time:
+This finite ramp rounds the sharp corners of triangular and trapezoidal profiles into smooth S-curves ($C^2$-continuous in position). In practice, this ramp delay acts as an unavoidable latency tax on reachability,[^fn-math-jerk-transit] expanding the minimum physical transit time $t_{\min, j}$. For velocity-limited moves ($d > d_{\text{crit}}$), the jerk-limited transit time is:
 
 $$t_{\min, j} = \frac{d}{v_{\max}} + \frac{v_{\max}}{a_{\max}} + \frac{a_{\max}}{j_{\max}}$$ {#eq-intent-jerk-trapezoidal-transit-time}
 
-For triangular profiles ($d \le d_{\text{crit}, j}$ where peak acceleration $a_{\max}$ is reached), the minimum traversal time similarly expands:
+For acceleration-limited moves ($d \le d_{\text{crit}}$), the transit time expands similarly:
 
 $$t_{\min, j} \approx 2 \sqrt{\frac{d}{a_{\max}}} + \frac{a_{\max}}{j_{\max}}$$ {#eq-intent-jerk-triangular-transit-time}
 
-For micro-displacements where travel is so short that acceleration cannot reach $a_{\max}$ before reversing ($d < 2 a_{\max}^3 / j_{\max}^2$), the acceleration profile itself becomes triangular, peaking at $a_{\text{peak}} = (j_{\max}^2 d / 2)^{1/3}$, and minimum traversal time scales as $t_{\min, j} = 2 (d / j_{\max})^{1/3}$.
-
-Geometrically, the **dynamic reachability envelope** $\mathcal{R}(\tau)$ defines the closed volume of spatial positions $\mathbf{p} \in \mathbb{R}^3$ that can be attained from the current state within the remaining temporal lease $\tau = t_{\text{exp}} - t_{\text{now}}$. Under pure acceleration limits, the maximum reachable distance $d_{\text{reach}}(\tau)$ follows a piecewise boundary:
-
-$$d_{\text{reach}}(\tau) = \begin{cases} \frac{1}{4} a_{\max} \tau^2 & \text{if } \tau \le \frac{2 v_{\max}}{a_{\max}} \quad \text{(triangular regime)} \\ v_{\max} \left( \tau - \frac{v_{\max}}{a_{\max}} \right) & \text{if } \tau > \frac{2 v_{\max}}{a_{\max}} \quad \text{(trapezoidal regime)} \end{cases}$$
-
-In three-dimensional workspace, this forms an anisotropic reachability bubble that expands quadratically as a paraboloid for short lease durations ($\tau \le 2 v_{\max} / a_{\max}$), before transitioning into a cone expanding linearly with velocity $v_{\max}$. Enforcing a finite jerk limit $j_{\max}$ effectively subtracts the ramp latency $t_j = a_{\max} / j_{\max}$ from the available lease window, contracting the reachability boundary inward by $\Delta d_{\text{reach}} \approx v_{\max} t_j$. Any candidate target pose whose distance $d$ requires $t_{\min, j} > \tau$ falls strictly outside $\mathcal{R}(\tau)$.
+Geometrically, the **dynamic reachability envelope** $\mathcal{R}(\tau)$ defines the closed volume of spatial positions $\mathbf{p} \in \mathbb{R}^3$ that can be attained from the current state within the remaining temporal lease $\tau = t_{\text{exp}} - t_{\text{now}}$. In three-dimensional workspace, this forms an anisotropic reachability bubble that expands quadratically as an acceleration-limited paraboloid for short lease durations ($\tau \le 2 v_{\max} / a_{\max}$), before transitioning into a cone expanding linearly with cruise velocity $v_{\max}$. Enforcing a finite jerk limit $j_{\max}$ effectively subtracts the ramp latency $t_j = a_{\max} / j_{\max}$ from the available lease window, contracting the reachability boundary inward by $\Delta d_{\text{reach}} \approx v_{\max} t_j$. (For the full piecewise $d_{\text{reach}}(\tau)$ formulation and 7-segment S-curve profile derivations, see @sec-appendix-control.) Any candidate target pose whose distance $d$ requires $t_{\min, j} > \tau$ falls strictly outside $\mathcal{R}(\tau)$.
 
 In an analytical scenario, consider a manipulator resting at $\mathbf{p}_0$ with limits $v_{\max} = 0.60\text{ m/s}$, $a_{\max} = 2.0\text{ m/s}^2$, and jerk limit $j_{\max} = 20.0\text{ m/s}^3$, yielding critical displacement $d_{\text{crit}} = (0.60)^2 / 2.0 = 0.18\text{ m}$ and jerk ramp time $t_j = 2.0 / 20.0 = 0.100\text{ s} = 100\text{ ms}$.
 First, consider a long displacement $d = 0.30\text{ m}$ with an offered lease $\tau = 450\text{ ms}$. Because $d = 0.30\text{ m} > d_{\text{crit}} = 0.18\text{ m}$, the trajectory falls into the trapezoidal regime. Evaluating @eq-intent-jerk-trapezoidal-transit-time yields $t_{\min, j} = 0.30 / 0.60 + 0.60 / 2.0 + 0.100 = 0.500\text{ s} + 0.300\text{ s} + 0.100\text{ s} = 0.900\text{ s} = 900\text{ ms}$. Because $t_{\min, j} = 900\text{ ms} > \tau = 450\text{ ms}$, the goal suffers a dynamic time shortfall of $450\text{ ms}$.
@@ -531,7 +506,7 @@ Structuring intent as a decaying temporal lease reverses this failure vulnerabil
 * **Dynamic Feasibility Gating Precedes Kinematic Execution:** Building on the actuator constraints established in @sec-body-2-1, a target pose displacement $\Delta x = \|x^* - x_0\|$ requires a minimum kinematic traversal time\index{Kinematics!traversal time}. This is mathematically bounded by $t_{\min} = 2\sqrt{\Delta x / a_{\max}}$ for short, triangular velocity profiles, transitioning to $t_{\min} = \Delta x / v_{\max} + v_{\max}/a_{\max}$ for longer displacements. Intent leases specifying a deadline $\tau_{\text{lease}} < t_{\min}$ demand physically impossible speeds and must be rejected at the admission gate.
 * **Safety Requires Expiring Leases Rather Than Active Abort Messages:** In physical systems, software faults that cause incorrect commands (such as thread deadlocks, memory leaks, or VLM stalls\index{Software Faults!VLM stalls}) often kill the very execution path that would dispatch an abort message. Much like a mechanical dead man's switch on a locomotive, protection must rely on positive temporal leases\index{Temporal lease}—hardware countdown timers that autonomously decelerate actuators to a safe stop whenever renewal pulses cease.
 * **Semantic Ambiguity is Stripped at the Intent Boundary:** Trajectory planners\index{Trajectory Planning} and real-time safety referees evaluate pure geometry, covariance bounds, and dynamic constraints ($x^*, \epsilon, \mathbf{\Sigma}, \tau$)—rigid spatial coordinates, safety tolerance bubbles, and hard time limits—remaining entirely decoupled from the fuzzy statistical probability of natural language tokens, embeddings, or model weights.
-* **SayCan Affordance Gating Prevents Unreachable Commands:** High semantic probability from a large language model (LLM) must be multiplicatively gated by physical affordance value functions\index{Value Functions!affordance} ($P = P_{\text{VLM}} \times V_{\text{affordance}}(s)$) to prevent plausible-sounding but mechanically impossible goals from commanding kinematically singular configurations\index{Singularities!kinematic} (as defined in @sec-body-2-4).
+* **SayCan Affordance Gating Prevents Unreachable Commands:** High semantic probability from an LLM must be multiplicatively gated by physical affordance value functions\index{Value Functions!affordance} ($P = P_{\text{VLM}} \times V_{\text{affordance}}(s)$) to prevent plausible-sounding but mechanically impossible goals from commanding kinematically singular configurations\index{Singularities!kinematic} (as defined in @sec-body-2-4).
 :::
 
 A physical goal is never an immutable logical claim; it is a decaying operational lease granted under explicit dynamic assumptions. When upstream cognitive models encounter inference stalls, out-of-distribution visual prompts, or software faults, relying on an affirmative software cancellation invites momentum runaway. Safety in embodied systems requires positive lease expiration, ensuring that an interruption in deliberation causes the deterministic nervous system to arrest physical momentum before reaching geometric or kinematic limits.
@@ -555,6 +530,8 @@ Where the intent boundary resolves fuzzy semantic ambiguity\index{Semantic Ambig
 [^fn-hw-rpmsg-sram]: **Remote Processor Messaging (RPMSG)**\index{Communication!Remote Processor Messaging (RPMSG)}\index{Remote Processor Messaging}: Modern chips allow the slow reasoning processor and the fast control processor to communicate by writing directly to a shared memory space. This is significantly faster and safer than sending network packets. For memory synchronization details, see @sec-appendix-systems.
 
 [^fn-math-workspace-manifold]: **Workspace Manifold**\index{Workspace Manifold}: The workspace is the continuous set of 3D poses a robot can physically reach. As established in @sec-body-2-4, approaching the boundaries of this manifold or singular configurations requires joint velocities approaching infinity. For the rigorous kinematic equations, see @sec-appendix-control.
+
+[^fn-math-jerk-transit]: **Jerk-Limited Reachability Envelopes**: Finite motor current rise times impose a maximum jerk limit $j_{\max}$. This adds a latency offset $t_j = a_{\max}/j_{\max}$ to acceleration ramps. For the full piecewise velocity profile derivations, see @sec-appendix-control.
 
 [^fn-hw-hmac-intent]: **HMAC SHA-256 Authentication**\index{HMAC SHA-256 Authentication}: Cryptographic signatures ensure that the fast control processor only accepts commands that genuinely came from the reasoning model, preventing corrupted data or hacked software from moving the robot. For security architectures, see @sec-appendix-systems.
 

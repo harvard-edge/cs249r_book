@@ -6,57 +6,97 @@ This appendix provides a brief, first-principles overview of the core concepts i
 
 When deploying ML models on physical hardware, ensuring that the system does not violate safety constraints (such as avoiding collisions or preventing joint over-extension) is paramount. Control Barrier Functions (CBFs) offer a mathematically rigorous way to enforce these constraints as a "safety filter" on top of a nominal controller (like a neural network).
 
-Let the state of the system be $x$ and the control input be $u$. Suppose we have a set of safe states $\mathcal{S}$, defined by a continuously differentiable function $h(x)$ such that:
+Let the state of the system be $x \in \mathcal{X} \subset \mathbb{R}^n$ and the control input be $u \in \mathcal{U} \subset \mathbb{R}^m$. Suppose we have a set of safe states $\mathcal{S}$, defined as the superlevel set of a continuously differentiable function $h(x)$:
+$$ \mathcal{S} = \{ x \in \mathcal{X} \mid h(x) \ge 0 \}, \quad \partial \mathcal{S} = \{ x \in \mathcal{X} \mid h(x) = 0 \} $$
 
-- $h(x) > 0$ when the system is strictly safe.
+- $h(x) > 0$ when the system is strictly safe inside the interior.
 - $h(x) = 0$ at the boundary of the safe set.
 - $h(x) < 0$ when the system is unsafe.
 
-To guarantee that the system remains safe, we must ensure that the derivative of $h(x)$ along the system's trajectory is bounded. A common condition is to require:
-$$ \dot{h}(x) \ge -\gamma h(x) $$
-where $\gamma > 0$ is a tuning parameter. If $h(x)$ approaches zero, $\dot{h}(x)$ is forced to be non-negative, preventing the system from crossing the boundary.
+### Lie derivatives and forward invariance
+To guarantee that the system remains safe for all time ($x(t) \in \mathcal{S}$ for all $t \ge 0$), the set $\mathcal{S}$ must be made *forward invariant*. By Nagumo's viability theorem, forward invariance requires that the derivative of $h(x)$ along system trajectories satisfies:
+$$ \dot{h}(x, u) \ge -\gamma(h(x)) $$
+where $\gamma$ is an extended class-$\mathcal{K}$ function (typically linear, $\gamma(h) = \alpha h$ with $\alpha > 0$). If $h(x)$ approaches zero, $\dot{h}(x)$ is forced to be non-negative, preventing the state trajectory from crossing the boundary.
 
-For a control-affine system with dynamics $\dot{x} = f(x) + g(x)u$, the derivative of $h$ is given by the Lie derivatives:
-$$ \dot{h}(x) = L_f h(x) + L_g h(x) u $$
+For a control-affine system with dynamics $\dot{x} = f(x) + g(x)u$, the time derivative $\dot{h}$ is evaluated via Lie derivatives:
+$$ \dot{h}(x, u) = \frac{\partial h}{\partial x} \dot{x} = \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u = L_f h(x) + L_g h(x) u $$
+where $L_f h(x) \in \mathbb{R}$ represents the natural unforced drift of clearance, and $L_g h(x) \in \mathbb{R}^{1 \times m}$ represents the directional control sensitivity.
 
-We can enforce safety by finding the control input $u$ that is as close as possible to our desired (but potentially unsafe) neural network action $u_{\text{nom}}$, subject to the CBF constraint. This is formulated as a Quadratic Program (QP):
+### Relative degree and high-order barrier functions
+The **relative degree** $r$ of a barrier function $h(x)$ is the number of times it must be differentiated with respect to time before the control input $u$ explicitly appears:
+$$ L_g L_f^k h(x) = 0 \quad \forall k < r - 1, \quad \text{and} \quad L_g L_f^{r-1} h(x) \neq 0 $$
+In second-order physical systems (such as robot manipulators and mobile vehicles governed by $m \ddot{x} = u - d$), actuators command forces or torques ($u$), which produce acceleration. Because acceleration must be integrated once to yield velocity and twice to yield position, a barrier defined purely over geometric distance has relative degree $r = 2$:
+$$ \dot{h}(x) = \frac{\partial h}{\partial x} v \quad (L_g h(x) = 0) $$
+$$ \ddot{h}(x, u) = \frac{\partial \dot{h}}{\partial x} v + \frac{\partial \dot{h}}{\partial v} \left( \frac{u - d}{m} \right) = L_f^2 h(x) + L_g L_f h(x) u \quad (L_g L_f h(x) \neq 0) $$
+Enforcing safety on a relative-degree-2 system requires either formulating a High-Order CBF (HOCBF) with cascaded barrier certificates, or embedding the plant's kinetic stopping distance ($d_{\text{stop}} = v^2 / 2a_{\max}$) directly into an inset barrier certificate:
+$$ h_{\text{kinetic}}(x) = h(x) - \frac{v^2}{2 a_{\max}} $$
+Differentiating $h_{\text{kinetic}}$ immediately yields nonzero control authority on the first time derivative, restoring relative degree $r = 1$.
+
+### Minimal-intervention quadratic program
+Given an unverified nominal policy command $u_{\text{nom}}$ (e.g., from an end-to-end neural network), the enforcer finds the admissible control input $u^*$ that minimally deviates from $u_{\text{nom}}$ while satisfying the linear barrier constraint:
 $$
 \begin{align*}
-u^* &= \text{arg} \min_{u} \frac{1}{2} \| u - u_{\text{nom}} \|^2 \\
-&\text{subject to:} \quad L_f h(x) + L_g h(x) u \ge -\gamma h(x)
+u^* &= \arg\min_{u \in \mathcal{U}} \frac{1}{2} \| u - u_{\text{nom}} \|^2 \\
+&\text{subject to:} \quad L_f h(x) + L_g h(x) u \ge -\alpha h(x), \quad u_{\min} \le u \le u_{\max}
 \end{align*}
 $$
-QPs can be solved highly efficiently in real-time (often in microseconds), making them ideal for high-frequency safety filters in physical systems.
+In standard matrix notation, writing the barrier constraint as $a^\top u \le b$ where $a = -L_g h(x)^\top$ and $b = L_f h(x) + \alpha h(x)$, the single-constraint unconstrained-box projection admits the closed-form solution:
+$$ u^* = u_{\text{nom}} - \lambda^* a, \quad \text{where } \lambda^* = \max\left( 0, \frac{a^\top u_{\text{nom}} - b}{\|a\|^2} \right) $$
+Because this Quadratic Program (QP) is strictly convex, it possesses a unique global minimum that can be solved deterministically within tens of microseconds on embedded microcontrollers.
 
 ## 2. Smooth Trajectories and Bumpless Transfer
 
-Physical systems have inertia; commanding discontinuous velocities or accelerations can damage hardware or cause catastrophic instability.
+Physical systems possess inertia; commanding discontinuous velocities or accelerations induces high-frequency torque spikes, excites structural resonances, and strips mechanical gearboxes.
 
-### Quintic splines
-When generating a path between two points in space or joint angles, systems engineers often use polynomials to ensure smooth transitions. A **quintic spline** is a 5th-degree polynomial of time $t$:
+### Analytical quintic splines
+A quintic (5th-degree) polynomial trajectory segment $\theta(t)$ over time interval $t \in [0, T]$ is defined as:
 $$ \theta(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5 $$
-Why a 5th-degree polynomial? Because it provides exactly 6 coefficients. This allows us to specify 6 boundary conditions for a trajectory segment starting at $t=0$ and ending at $t=T$:
+The six coefficients $[a_0, \dots, a_5]$ are uniquely determined by matching six boundary conditions at $t = 0$ and $t = T$:
+$$ \theta(0) = q_0, \quad \dot{\theta}(0) = \dot{q}_0, \quad \ddot{\theta}(0) = \ddot{q}_0 $$
+$$ \theta(T) = q_1, \quad \dot{\theta}(T) = \dot{q}_1, \quad \ddot{\theta}(T) = \ddot{q}_1 $$
+Solving the resulting linear system yields the exact analytical formulas:
+$$
+\begin{aligned}
+a_0 &= q_0 \\
+a_1 &= \dot{q}_0 \\
+a_2 &= \frac{1}{2}\ddot{q}_0 \\
+a_3 &= \frac{10(q_1 - q_0) - (6\dot{q}_0 + 4\dot{q}_1)T - (3\ddot{q}_0 - \ddot{q}_1)\frac{T^2}{2}}{T^3} \\
+a_4 &= \frac{-15(q_1 - q_0) + (8\dot{q}_0 + 7\dot{q}_1)T + (3\ddot{q}_0 - 2\ddot{q}_1)\frac{T^2}{2}}{T^4} \\
+a_5 &= \frac{6(q_1 - q_0) - 3(\dot{q}_0 + \dot{q}_1)T - (\ddot{q}_0 - \ddot{q}_1)\frac{T^2}{2}}{T^5}
+\end{aligned}
+$$
+Because acceleration $\ddot{\theta}(t)$ is continuous ($C^2$ continuity), the jerk $\dddot{\theta}(t) = 6 a_3 + 24 a_4 t + 60 a_5 t^2$ remains strictly bounded throughout the transition.
 
-1. Initial position: $\theta(0)$
-2. Initial velocity: $\dot{\theta}(0)$
-3. Initial acceleration: $\ddot{\theta}(0)$
-4. Final position: $\theta(T)$
-5. Final velocity: $\dot{\theta}(T)$
-6. Final acceleration: $\ddot{\theta}(T)$
-By setting velocities and accelerations to zero at the start and end of a movement, we guarantee that the robot starts and stops smoothly without jerking.
+### Bumpless transfer and smoothstep blending
+When switching operational control between an automated policy and a human teleoperator or safety fallback, **bumpless transfer** prevents step changes in commanded force or torque. Smooth blending over transition interval $\tau_{\text{blend}}$ uses a normalized $C^2$-smoothstep polynomial $\alpha(\hat{t})$ with $\hat{t} = (t - t_0) / \tau_{\text{blend}} \in [0, 1]$:
+$$ \alpha(\hat{t}) = 6\hat{t}^5 - 15\hat{t}^4 + 10\hat{t}^3 $$
+This polynomial satisfies boundary conditions $\alpha(0) = 0, \alpha(1) = 1$, and $\dot{\alpha}(0) = \dot{\alpha}(1) = \ddot{\alpha}(0) = \ddot{\alpha}(1) = 0$. The blended control command is:
+$$ u(t) = (1 - \alpha(\hat{t})) u_{\text{prior}}(t) + \alpha(\hat{t}) u_{\text{new}}(t) $$
+Differentiating twice to evaluate the induced jerk yields peak normalized angular acceleration at $\hat{t} = 0.5$, producing peak jerk $\max |\dddot{\alpha}(\hat{t})| = 1.875 / \tau_{\text{blend}}$. To guarantee that the induced transition jerk never exceeds allowable mechanical limits $j_{\text{allowable}}$, the minimum blending duration must satisfy:
+$$ \tau_{\text{blend},\min} = \frac{1.875 |\Delta u|}{j_{\text{allowable}}} $$
 
-### Bumpless transfer
-In hybrid systems, the control logic often switches between different modes (e.g., from an automated path-follower to manual teleoperation, or from position control to torque control). **Bumpless transfer** is the practice of ensuring that the control signal $u(t)$ does not experience a massive step change at the moment of switching. This is typically implemented by maintaining an internal offset or using blending filters (like quintic splines) over a short time horizon to smoothly interpolate the control signals between the outgoing and incoming controllers.
+## 3. Kinematic Reachability and Intent Envelopes
 
-## 3. Kinematic Reachability
+Kinematic reachability characterizes the spatial set of configurations or end-effector poses an embodied system can reach over a given planning or intent horizon $\tau$.
 
-**Kinematics** refers to the geometry of motion, ignoring the forces that cause it. For a robot arm, the **Forward Kinematics** function $f(q)$ maps the joint angles $q = [q_1, \dots, q_n]^T$ to the position and orientation $x$ of the end-effector (the tool or hand):
+### Forward kinematics and singularities
+For an $n$-joint articulated arm, the **Forward Kinematics** map $f(q)$ relates joint coordinates $q \in \mathbb{R}^n$ to end-effector Cartesian pose $x \in SE(3)$:
 $$ x = f(q) $$
-
-The derivative of this mapping is the **Jacobian matrix** $J(q)$, which relates joint velocities $\dot{q}$ to end-effector velocities $\dot{x}$:
+The **manipulator Jacobian** $J(q) = \partial f / \partial q \in \mathbb{R}^{6 \times n}$ relates joint velocities $\dot{q}$ to Cartesian linear and angular velocities $\dot{x}$:
 $$ \dot{x} = J(q) \dot{q} $$
+Configurations where $J(q)$ drops below maximum rank ($\det(J(q) J(q)^\top) = 0$) are **kinematic singularities**, where movement along singular directions requires infinite joint velocity ($\dot{q} \to \infty$). Real-time enforcers must maintain a nonzero manipulability index $w(q) = \sqrt{\det(J(q) J(q)^\top)} \ge w_{\min}$.
 
-**Kinematic reachability** describes the set of all poses $x$ the end-effector can achieve given the limits of its joint angles $q$. A critical concept here is **singularities**—configurations where the robot loses one or more degrees of freedom. Mathematically, a singularity occurs when the Jacobian matrix loses rank (i.e., its determinant is zero for a square Jacobian). Near singularities, attempting to move the end-effector in certain directions requires infinite joint velocities, which causes physical hardware to violently halt or error out. System designs must actively avoid or safely handle trajectories that pass near these singular configurations.
+### Trajectory transit time and reachable distance
+Under bounded actuator acceleration $|a| \le a_{\max}$ and velocity $|v| \le v_{\max}$, the distance $d$ reachable within intent horizon $\tau$ divides into two regimes:
+
+1. **Triangular profile (acceleration-limited):** For short horizons where peak velocity $v_{\max}$ is not attained ($d \le d_{\text{crit}} = v_{\max}^2 / a_{\max}$):
+   $$ t_{\min} = 2 \sqrt{\frac{d}{a_{\max}}}, \quad d_{\text{reach}}(\tau) = \frac{1}{4} a_{\max} \tau^2 $$
+2. **Trapezoidal profile (velocity-limited):** For larger horizons ($d > d_{\text{crit}}$):
+   $$ t_{\min} = \frac{d}{v_{\max}} + \frac{v_{\max}}{a_{\max}}, \quad d_{\text{reach}}(\tau) = v_{\max} \left( \tau - \frac{v_{\max}}{a_{\max}} \right) $$
+
+When jerk limits $|\dot{a}| \le j_{\max}$ are incorporated, accelerating from rest requires a finite ramp-up time $t_j = a_{\max} / j_{\max}$, shifting total transit time by an additive offset:
+$$ t_{\min, j} = \frac{d}{v_{\max}} + \frac{v_{\max}}{a_{\max}} + \frac{a_{\max}}{j_{\max}} $$
+This kinematic envelope directly sizes the temporal leases granted to high-level learned planners before physical safety invariants require re-evaluation.
 
 ## 4. Rigid Body Contact Mechanics
 
