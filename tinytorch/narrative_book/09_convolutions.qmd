@@ -56,6 +56,12 @@ Count the parameters. A $3 \times 3$ layer taking 3 channels to 64 filters holds
 
 Look again at the single-output formula. Each output pixel is a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter. That means the entire layer is a matrix multiply in disguise. Write every patch the filter visits as one row of a matrix, with $N \cdot H_{\text{out}} \cdot W_{\text{out}}$ rows of length $C_{\text{in}} K^2$, and write every filter as one column of a second matrix, with $C_{\text{in}} K^2$ rows and $C_{\text{out}}$ columns. Their product has one row per output position and one column per filter, and reshaping it gives the $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ output. Building the patch matrix is called **im2col** ("image to column"), and the four steps are
 
+::: {.column-margin}
+![](assets/images/diagrams/09_convolutions-margin-im2col.svg){width="100%" fig-alt="IM2COL receptive field patch unrolled into a matrix row vector, multiplying memory footprint by 9x."}
+
+*im2col unrolls spatial 2D patches into GEMM matrix rows, expanding memory footprint by $K_h \times K_w = 9\times$.*
+:::
+
 1. unroll every $K \times K \times C_{\text{in}}$ patch into a row of $X_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{in}} K^2]$;
 2. flatten every filter into a column of $W_{\text{col}}$, shape $[C_{\text{in}} K^2,\; C_{\text{out}}]$;
 3. compute $Y_{\text{col}} = X_{\text{col}} W_{\text{col}}$, shape $[N H_{\text{out}} W_{\text{out}},\; C_{\text{out}}]$;
@@ -82,8 +88,8 @@ The input gradient is the mirror image, scattering $G[n, o, h, c] \cdot W[o, \te
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this section are extracted from Module 09 (`src/09_convolutions/09_convolutions.py`) by name when the book is built, so a renamed method in the module fails the build instead of drifting from the chapter. Module 09 computes convolution, max pooling, and average pooling with explicit loops and gives each operation its own backward method; it does not implement im2col, so that section's listing is a model, marked as such, and the worked trace checks it against the module.
+::: {.column-margin}
+**Source Code Mapping**: Every listing in this chapter is extracted directly from Module 09 (`src/09_convolutions/09_convolutions.py`).
 :::
 
 Consider `conv = Conv2d(1, 2, 3, stride=2, padding=1)` applied to an input of shape `(1, 1, 4, 4)`. Calling `conv(x)` enters `Conv2d.__call__`, then `forward`. The layer validates the four axes and computes the spatial output size before calling `Conv2dFunction.apply(x, weight, bias, layer=self)`. The two filters have shape `(2, 1, 3, 3)`, and the result will have shape `(1, 2, 2, 2)`. The batch axis survives; the output-channel axis counts filters; the final two axes count valid window positions.
@@ -178,6 +184,20 @@ def conv2d_im2col(x, weight, bias, stride=1, padding=0):
 :::
 
 The multiplies all happen inside the `@`. Everything around it is copying and reshaping. `patches` holds $N H_{\text{out}} W_{\text{out}} C_{\text{in}} K^2$ numbers where the input held $N C_{\text{in}} H W$, which gives the ninefold storage expansion in the example above. The last line uses NumPy views to arrange the output axes: the product comes out with the output channel as its last axis, and a `reshape` plus a `transpose` present it as $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ without moving a number. This helper supports square filters and scalar stride/padding. It is an array-only comparison model; the module also accepts rectangular kernels, and its tensor operations retain the gradient graph.
+
+::: {#nbk-convolutions-im2col-footprint .callout-notebook title="Napkin Math: im2col memory expansion ratio"}
+
+**Problem**: For a batch of $B=32$ feature maps with $C_{\text{in}}=64$ channels and spatial dimensions $112 \times 112$, what is the memory overhead of lowering a $3 \times 3$ convolution via explicit im2col?
+
+**Input tensor storage**:
+$$\text{Input memory} = 32 \times 64 \times 112 \times 112 \times 4\text{ bytes} \approx 102.8\text{ MB}$$
+
+**Lowered im2col matrix storage**:
+$$\text{im2col matrix} = (32 \times 112 \times 112) \times (64 \times 3 \times 3) \times 4\text{ bytes} \approx 924.8\text{ MB}$$
+
+**Systems insight**: Explicit im2col duplicates input values by $K_h \times K_w = 9.0\times$ in memory. For deep vision models, explicit im2col buffers quickly overwhelm device RAM, motivating production libraries (cuDNN) to use *implicit GEMM* where addresses are computed in hardware registers on the fly without materializing the patch matrix in DRAM.
+
+:::
 
 ::: {.content-visible when-format="pdf"}
 ```{=latex}
@@ -304,7 +324,7 @@ assert np.allclose(X.grad[0, 0], [[0, 1, 0], [0, -1, 1], [0, 0, 0]])
 ```
 :::
 
-In @lst-conv-pool-trace, clearing parameter gradients prevents the two objectives from accumulating into the same buffers. Recomputing `conv(X)` is separately necessary because the earlier `Y.backward(...)` released its operation records. This distinction is the graph-lifetime rule from the autograd chapter in a complete spatial chain. The array-only im2col model can check forward values, but it does not create a TinyTorch graph and cannot replace this training path.
+In @lst-conv-pool-trace, clearing parameter gradients prevents the two objectives from accumulating into the same buffers. Recomputing `conv(X)` is separately necessary because the earlier `Y.backward(...)` released its operation records. This distinction is the graph-lifetime rule from @sec-autograd in a complete spatial chain. The array-only im2col model can check forward values, but it does not create a TinyTorch graph and cannot replace this training path.
 
 ---
 
@@ -320,6 +340,12 @@ A production implementation can preserve the window computation while changing h
 | FFT | Transform work and storage | Transform inputs and filters, multiply, then transform back. |
 
 : **Alternative convolution formulations**: Each preserves the intended convolution while changing its arithmetic or temporary storage. Actual performance depends on the implementation and workload. {#tbl-cudnn-conv-algorithms tbl-colwidths="[24,26,50]"}
+
+::: {#psp-convolutions-cudnn-winograd .callout-perspective title="Production Bridge: cuDNN implicit GEMM and Winograd minimal filtering"}
+Modern deep learning hardware rarely materializes an explicit im2col matrix. NVIDIA cuDNN selects dynamically among four convolution engines based on kernel geometry and available GPU workspace:
+1. **Implicit GEMM**: Computes matrix addresses directly inside CUDA thread indexing formulas, achieving GEMM speed without the $9\times$ memory duplication penalty.
+2. **Winograd $F(2 \times 2, 3 \times 3)$**: Uses polynomial residue transforms to reduce 2D multiplications from $4 \times 9 = 36$ down to $16$, yielding up to $2.25\times$ computational throughput on $3 \times 3$ filters at the expense of slight numerical precision.
+:::
 
 The transform methods require mathematical tools beyond this implementation. Winograd changes the representation of small tiles to reduce multiplication count.[^fn-winograd-conv-algos] FFT methods transform larger arrays before multiplying.[^fn-fft-conv-algos] Neither method is implemented by Module 09; the reference loops provide values against which such alternatives can be checked.
 

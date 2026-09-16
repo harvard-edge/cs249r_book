@@ -1,8 +1,8 @@
 # Byte-Pair Encoding: Compressing Language into Subword Tokens {#sec-tokenization}
 
-A vocabulary that knows `cat` can still lose `cats`: one extra letter can turn a familiar word into an unknown ID. The network cannot recover letters that its input representation has already discarded. After chapter 9, TinyTorch can take a grid of pixels, slide a kernel across it, and hand the result to the same `Linear` layers and training loop it already had. Every input so far has arrived as numbers. Text does not. A sentence is a string of characters, and a network can only multiply and add. The question this chapter answers is the one a practitioner asks the first time they call a language model. What integers does the model actually see when I type a sentence, and who decides where one integer ends and the next begins?
+A vocabulary that knows `cat` can still lose `cats`: one extra letter can turn a familiar word into an unknown ID. The network cannot recover letters that its input representation has already discarded. After @sec-convolutions, TinyTorch can take a grid of pixels, slide a kernel across it, and hand the result to the same `Linear` layers and training loop it already had. Every input so far has arrived as numbers. Text does not. A sentence is a string of characters, and a network can only multiply and add. The question this chapter answers is the one a practitioner asks the first time they call a language model. What integers does the model actually see when I type a sentence, and who decides where one integer ends and the next begins?
 
-A tokenizer assigns those integers. Module 10 implements **Byte-Pair Encoding (BPE)**, which learns a vocabulary by repeatedly merging the most common adjacent pair of symbols. Its learned state is a vocabulary, an ordered merge list, and two lookup dictionaries; no tensor or gradient is involved. We follow one word through that state, then hand its IDs to the embedding table in chapter 11. The distinction between the character alphabet used here and a byte alphabet will determine which text the tokenizer can preserve.
+A tokenizer assigns those integers. Module 10 implements **Byte-Pair Encoding (BPE)**, which learns a vocabulary by repeatedly merging the most common adjacent pair of symbols. Its learned state is a vocabulary, an ordered merge list, and two lookup dictionaries; no tensor or gradient is involved. We follow one word through that state, then hand its IDs to the embedding table in @sec-embeddings. The distinction between the character alphabet used here and a byte alphabet will determine which text the tokenizer can preserve.
 
 ---
 
@@ -10,7 +10,7 @@ A tokenizer assigns those integers. Module 10 implements **Byte-Pair Encoding (B
 
 There are two obvious ways to turn text into integers, and both fail, in opposite directions.
 
-The first is to number the characters. Every observed character gets an ID, but unseen characters remain a problem. A byte tokenizer can instead reserve an ID for each of the 256 byte values and represent any UTF-8 input as bytes. The cost is length. For the text `"the cat sat"`, character tokenization needs eleven IDs, including the spaces; word tokenization needs three. A longer sequence requires more positions to process. In chapter 12, attention will introduce a table with one entry for every pair of token positions, making sequence length especially consequential.
+The first is to number the characters. Every observed character gets an ID, but unseen characters remain a problem. A byte tokenizer can instead reserve an ID for each of the 256 byte values and represent any UTF-8 input as bytes. The cost is length. For the text `"the cat sat"`, character tokenization needs eleven IDs, including the spaces; word tokenization needs three. A longer sequence requires more positions to process. In @sec-attention, attention will introduce a table with one entry for every pair of token positions, making sequence length especially consequential.
 
 The second is to number the words. Split on spaces, give each distinct word an ID, and a 1,000-word essay is 1,000 tokens. Now the vocabulary is the problem. The listing below builds a word vocabulary from one sentence and then encodes three others. Any word the vocabulary has not seen maps to a reserved ID, conventionally written `<unk>` for "unknown".
 
@@ -26,13 +26,18 @@ print(encode_words("the cats sat"))    # [5, 0, 4]   one extra letter and the wo
 print(encode_words("The cat sat."))    # [0, 1, 0]   a capital and a period lose two words
 ```
 
-One plural and the model reads nothing where "cats" was. A capital letter and a period erase two of three words. Real text is full of plurals, capitals, typos, names, code, and words coined last week, so increasing a word vocabulary cannot guarantee that the next word is present. Size has its own cost. The lookup operation in chapter 11 turns each token ID into a row of a lookup table with one entry per vocabulary word and $D$ numbers per row, so, for example, a hypothetical vocabulary of one million words at $D = 4{,}096$ in 32-bit floats is $10^6 \times 4{,}096 \times 4$ bytes, about 16 GB, before the model has read a single word.
+One plural and the model reads nothing where "cats" was. A capital letter and a period erase two of three words. Real text is full of plurals, capitals, typos, names, code, and words coined last week, so increasing a word vocabulary cannot guarantee that the next word is present. Size has its own cost. The lookup operation in @sec-embeddings turns each token ID into a row of a lookup table with one entry per vocabulary word and $D$ numbers per row, so, for example, a hypothetical vocabulary of one million words at $D = 4{,}096$ in 32-bit floats is $10^6 \times 4{,}096 \times 4$ bytes, about 16 GB, before the model has read a single word.
 
 The two extremes trade one cost for the other. Characters give a tiny table and long sequences; words give short sequences and an enormous, leaky table. What we want is in between. Common words should be single tokens, so sequences stay short. Rare words should split into pieces the vocabulary does know, so an unseen word can still retain its known characters. The split itself should be learned from data rather than written by hand, because no one can list the useful pieces of every language.
 
 ---
 
 ## The Idea
+
+::: {.column-margin}
+![](assets/images/diagrams/10_tokenization-margin-bpe.svg){width="100%"}
+*BPE pair frequency decay across merge ranks.*
+:::
 
 BPE began as a compression technique; [Sennrich, Haddow, and Birch applied it to translation](https://aclanthology.org/P16-1162/) to represent rare words through subword units. The compression origin is the right way to think about it. A compressor looks for repeated patterns and gives them short codes. BPE looks for the most repeated adjacent pair of symbols and gives it a new symbol.
 
@@ -52,15 +57,16 @@ Decoding is trivial by comparison. Each ID names a string, so concatenate the st
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this section are extracted from Module 10 (`src/10_tokenization/10_tokenization.py`) by name when the book is built, so a renamed method in the module fails the build instead of drifting from the chapter. Module 10 is character-level: its alphabet is the characters the corpus contains, it marks each word ending with a trailing space, written `</w>` in the diagrams, it splits text into words on whitespace before merging, and it keeps an `<UNK>` ID for characters it never saw. GPT-2's byte-level variant is the production section's subject, and the byte-alphabet exercise asks you to make the conversion.
+::: {.column-margin}
+**Source Code Mapping:**
+The listings in this section are extracted from Module 10 (`src/10_tokenization/10_tokenization.py`) by name when the book is built. Module 10 is character-level: its alphabet is the characters the corpus contains, it marks each word ending with a trailing space, it splits text on whitespace before merging, and it keeps an `<UNK>` ID for characters it never saw.
 :::
 
 The tokenizer is a base class fixing the two-method interface, a character tokenizer that is The Problem's first extreme in code, and the BPE tokenizer, which is where the chapter lives. The BPE class holds a vocabulary in both directions (token to ID and ID to token) and the list of merges in the order they were learned. We call a merge's position in that list its **rank**; rank 0 is the first merge made.
 
 ### The contract, and the character baseline
 
-The language-model input pipeline begins with these integers. In chapter 11, each ID selects a row of a lookup table, and the model's final layer produces one score per ID, so a tokenizer's job is a fixed two-way mapping between strings and IDs that must not change once the model starts training. The base class says only that much: `encode` and `decode`, each of which a subclass must supply.
+The language-model input pipeline begins with these integers. In @sec-embeddings, each ID selects a row of a lookup table, and the model's final layer produces one score per ID, so a tokenizer's job is a fixed two-way mapping between strings and IDs that must not change once the model starts training. The base class says only that much: `encode` and `decode`, each of which a subclass must supply.
 
 {{< include _listings/10_tokenization/Tokenizer.qmd >}}
 
@@ -98,7 +104,7 @@ Notice that `_merge_pair` walks left to right and skips two positions after a ma
 
 ### Training
 
-A language-model workflow normally trains its tokenizer before allocating the model. The requested `vocab_size` is stored as `target_vocab_size`; it is a training limit, not a promise about the resulting table. The read-only `vocab_size` property returns `len(self.vocab)`, the actual count that must size the model afterward. The lookup table in chapter 11 has one row of $D$ numbers per ID, and the output layer has one score per ID, so every entry we add here is a set of weights the model has to learn; at $D = 4{,}096$ in 32-bit floats that is 16 KiB of table per entry, before the output layer. Some base entries are deliberately retained for words absent from the training corpus; larger merged entries earn their storage by shortening sequences.
+A language-model workflow normally trains its tokenizer before allocating the model. The requested `vocab_size` is stored as `target_vocab_size`; it is a training limit, not a promise about the resulting table. The read-only `vocab_size` property returns `len(self.vocab)`, the actual count that must size the model afterward. The lookup table in @sec-embeddings has one row of $D$ numbers per ID, and the output layer has one score per ID, so every entry we add here is a set of weights the model has to learn; at $D = 4{,}096$ in 32-bit floats that is 16 KiB of table per entry, before the output layer. Some base entries are deliberately retained for words absent from the training corpus; larger merged entries earn their storage by shortening sequences.
 
 {{< include _listings/10_tokenization/BPE_train.qmd >}}
 
@@ -118,7 +124,7 @@ The tempting encoder is greedy: at each position, take the longest string that i
 
 `_apply_merges` takes the rules in rank order and, for each one, walks the word with the same skip-two loop as `_merge_pair`. `encode` calls `str.split()`, then `_get_word_tokens` and `_apply_merges` for each word, then maps the resulting strings to IDs. Each helper constructs lists for this call; encoding does not alter the learned vocabulary or merge list. Every returned ID lies between zero and `vocab_size - 1` once the tokenizer has been trained.
 
-Every rule walks the current word whether or not it applies. Four learned rules therefore mean four scans per word, and adding rules increases that work even when a particular word cannot use them. An unseen character falls back to `<UNK>`. A known character in a new position does not: both its internal and word-final forms were reserved during training. The returned Python list has one entry per final token; the dataset and batching machinery of chapter 5 can later collect compatible sequences for a model.
+Every rule walks the current word whether or not it applies. Four learned rules therefore mean four scans per word, and adding rules increases that work even when a particular word cannot use them. An unseen character falls back to `<UNK>`. A known character in a new position does not: both its internal and word-final forms were reserved during training. The returned Python list has one entry per final token; the dataset and batching machinery of @sec-dataloader can later collect compatible sequences for a model.
 
 {{< include _listings/10_tokenization/BPE_decode.qmd >}}
 
@@ -193,7 +199,11 @@ In lines 4--6, `BPETokenizer(vocab_size=25)` trains on the five-word corpus, est
 
 In lines 15--19, encoding `'naïve widest'` separates two cases. As printed by lines 16--18, `a`, `ï`, and `v` never appeared in the corpus, so they are mapped to `<UNK>` (ID 0). The final `e</w>` survives even though no training word ended in `e`, because training reserved both forms of every observed character. Three of the five characters of `naïve` are replaced by `<UNK>`, while its known ending preserves the word boundary. In line 19, `widest` splits as `w i d e st</w>` because `st</w>` was learned but `wid` was not. A tokenizer with a complete byte alphabet can represent the missing characters too, provided decoding reconstructs their bytes before interpreting them as text.
 
-The training target is not the output size. With `BPETokenizer(vocab_size=2)` and corpus `["ab"]`, the five base entries already exceed the target; no merge runs, `vocab_size` is 5, and `encode("ba")` returns `[3, 2]`. Conversely, a target of 100 on the five-word corpus stops at 34 entries after thirteen merges exhaust the available pairs. In both cases, allocate the next chapter's embedding table from the actual `vocab_size`.
+::: {#chk-tokenization-byte-fallback .callout-check title="Sanity Check: Byte-Level Fallback Eliminates OOV"}
+Why do modern LLM tokenizers (such as GPT-2, LLaMA, and TinyGPT) use byte-level BPE instead of raw character vocabularies? A raw character vocabulary must map every unseen character, emoji, or non-ASCII code point to an out-of-vocabulary (`<UNK>`) token. Once an input character collapses into `<UNK>`, all semantic information is permanently lost. By seeding the base vocabulary with all 256 individual byte values ($0\text{x}00$ through $0\text{xFF}$), any UTF-8 encoded string can be losslessly represented as a sequence of base bytes if no learned subword token matches. The vocabulary never encounters an out-of-vocabulary token.
+:::
+
+The training target is not the output size. With `BPETokenizer(vocab_size=2)` and corpus `["ab"]`, the five base entries already exceed the target; no merge runs, `vocab_size` is 5, and `encode("ba")` returns `[3, 2]`. Conversely, a target of 100 on the five-word corpus stops at 34 entries after thirteen merges exhaust the available pairs. In both cases, allocate the embedding table in @sec-embeddings from the actual `vocab_size`.
 
 ---
 
@@ -217,6 +227,10 @@ Hugging Face's [BPE model interface](https://huggingface.co/docs/tokenizers/api/
 
 The comparison suggests where to reduce repeated work. Our encoder does repeated work on repeated words; caching could remove it while leaving the IDs unchanged. A trainer can track which words contain a pair and update affected counts rather than scan every word again. Such changes need tests against the simple reference, because an altered tie-break or preprocessing rule can change the learned vocabulary even when the new loop is faster.
 
+::: {#psp-tokenization-rust-huggingface .callout-production title="Production Bridge: Fast Multi-Threaded Rust Tokenizers"}
+In production systems, tokenizing gigabytes of training data in Python with string loops is a major bottleneck. Modern libraries such as HuggingFace `tokenizers` are implemented in Rust: they memory-map the input text files, use lock-free trie structures or hash tables for fast merge rank lookups, and tokenize across all available CPU cores in parallel via Rayon. During autoregressive inference, the tokenizer also handles incremental streaming decoding without reparsing the entire historical token sequence.
+:::
+
 The invariant that reaches the model is more important than either optimization. ID 22 denotes `low</w>` in our trace; another tokenizer can assign that same number to unrelated text. Keeping all IDs in range prevents an indexing error, but it does not detect a mismatched vocabulary. The alphabet, preprocessing, reserved tokens, ID mappings, and ordered merges must travel together with the model. Likewise, changing the vocabulary requires reconsidering the model's input and output dimensions. A model's context limit counts tokens rather than words, so the same amount of text can occupy different fractions of that limit under different segmentations.
 
 ---
@@ -225,7 +239,7 @@ The invariant that reaches the model is more important than either optimization.
 
 Module 10 turns strings into stable integer sequences without tensors or gradients. `train` splits the corpus into words, counts frequencies, reserves internal and word-final forms of every observed character, and repeatedly merges the most frequent adjacent pair. It mutates the tokenizer's vocabulary and ordered merge list while leaving the caller's text unchanged. The actual `vocab_size` counts the resulting entries, which can be above or below the requested target.
 
-`encode` uses that fixed state: split, mark word endings, replay merges, then look up IDs. `decode` joins their strings and normalizes whitespace. Known characters survive in new words and new word positions; unseen characters become `<UNK>`. The alphabet determines coverage, while the learned rules determine segmentation. A byte alphabet and whitespace-preserving preprocessing address separate limitations of this reference. The next chapter accepts the resulting IDs and builds the missing numerical operation: selecting a learned vector for each ID, then representing where that token occurs in the sequence.
+`encode` uses that fixed state: split, mark word endings, replay merges, then look up IDs. `decode` joins their strings and normalizes whitespace. Known characters survive in new words and new word positions; unseen characters become `<UNK>`. The alphabet determines coverage, while the learned rules determine segmentation. A byte alphabet and whitespace-preserving preprocessing address separate limitations of this reference. @sec-embeddings accepts the resulting IDs and builds the missing numerical operation: selecting a learned vector for each ID, then representing where that token occurs in the sequence.
 
 ---
 

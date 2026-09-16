@@ -8,7 +8,7 @@ The answer is a repeating unit called the transformer block. Layer normalization
 ![](assets/images/diagrams/13_transformers-diag-1.svg)
 :::
 
-Module 13 names this model `GPT`, with `TinyGPT` retained as an alias. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in [Milestone II](milestone_02.qmd#sec-milestone-2) will use that contract.
+Module 13 names this model `GPT`, with `TinyGPT` retained as an alias. Its caller supplies token IDs of shape $(B, S)$ and receives logits of shape $(B, S, V)$, one row of next-token scores per position. The training and sampling loop in @sec-milestone-2 will use that contract.
 
 ---
 
@@ -65,6 +65,11 @@ The seeded experiment ends with an RMS of 83.96 for `plain`, about 76 times its 
 
 ## The Idea
 
+::: {.column-margin}
+![](assets/images/diagrams/13_transformers-margin-pre-ln.svg){width="100%"}
+*Pre-LN residual gradient highway ($I + J_l$).*
+:::
+
 ### The residual stream
 
 A **residual connection** passes a layer's input around the layer and adds it to the layer's output:
@@ -105,6 +110,10 @@ $$x_{l+1} = x_l + f_l(\text{LN}(x_l))$$
 
 In Post-LN, each residual addition feeds a normalization, so even the direct route through a block includes normalization derivatives. A stack of $N$ blocks has two such normalizations per block. In Pre-LN, each branch computes a normalized version of its input while the bypass carries the unnormalized stream to the addition. Only the final LayerNorm, just before the vocabulary projection, normalizes the stream leaving the stack. The reference listings use this Pre-LN arrangement.
 
+::: {#chk-transformers-pre-ln-stability .callout-check title="Sanity Check: Pre-LN Gradient Highways vs Post-LN Vanishing Gradients"}
+Why did the deep learning community migrate universally from original Post-LN transformers (Vaswani et al.) to Pre-LN (GPT-2, LLaMA, TinyGPT)? In Post-LN ($x_{l+1} = \text{LN}(x_l + f_l(x_l))$), the residual connection passes *through* the normalization layer. Computing the gradient requires chaining through $\text{LN}'$ at every single block. For deep networks ($N \ge 24$), this degrades gradient magnitudes, requiring delicate learning rate warmup schedules to prevent divergence. In Pre-LN ($x_{l+1} = x_l + f_l(\text{LN}(x_l))$), the residual bypass is an uninterrupted identity path $I + J_l$, allowing backpropagation gradients to flow from the loss directly to early token embeddings without scaling decay.
+:::
+
 ### The MLP
 
 The second sub-layer supplies the per-token feature transformation missing from attention alone. The **MLP** (multi-layer perceptron, the transformer literature's name for a two-layer feed-forward network) widens each token's vector from $D$ to $4D$, applies GELU from @sec-activations, and projects back to $D$:
@@ -131,8 +140,9 @@ Here $E_{\text{tok}}$ is the $V \times D$ embedding table, $P$ the position vect
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this section are extracted from Module 13 (`src/13_transformers/13_transformers.py`) by name when the book is built, and the build checks that the generated excerpts match their source symbols. Module 13 exposes `LayerNorm` with its operation `LayerNormFunction`, `MLP`, `TransformerBlock`, and `GPT` with `forward`, `generate`, and `parameters`; `generate` and its sampling helper belong to Milestone 2 and are elided here.
+::: {.column-margin}
+**Source Code Mapping:**
+The listings in this section are extracted from Module 13 (`src/13_transformers/13_transformers.py`) by name when the book is built, and the build checks that the generated excerpts match their source symbols. Module 13 exposes `LayerNorm` with its operation `LayerNormFunction`, `MLP`, `TransformerBlock`, and `GPT` (with alias `TinyGPT`); `generate` and its sampling helper belong to @sec-milestone-2 and are elided here.
 :::
 
 A block receives a tensor of shape $(B, S, D)$ and returns the same shape. Its attention layer uses the head split and causal mask from @sec-attention; its feature transformation reuses `Linear` and `GELU`. The missing operation is normalization of one token's row before either branch reads it.
@@ -327,6 +337,10 @@ The [Llama 2 reference](https://github.com/meta-llama/llama/blob/main/llama/mode
 
 The implementations in @tbl-tinygpt-vs-production need not schedule those operations alike. TinyTorch executes separate NumPy operations for centering, squaring, reduction, scaling, and addition; its intermediate arrays occupy ordinary host memory. A production implementation may combine operations into a compiled kernel to avoid some intermediate reads and writes. The code here establishes the arithmetic and data dependencies, not a GPU memory-traffic count or a universal fusion speedup. @Sec-profiling will distinguish operation counts and storage estimates from elapsed measurements.
 
+::: {#psp-transformers-megatron-parallelism .callout-production title="Production Bridge: Megatron-LM Tensor Parallelism"}
+When a transformer exceeds the memory capacity of a single GPU, Megatron-LM splits individual weight matrices across GPUs without requiring pipeline stalls. In the Multi-Head Attention block, $W_q, W_k, W_v$ are column-parallel (split across heads), while $W_o$ is row-parallel, requiring only a single `AllReduce` communication at the block output. Similarly, in the MLP block, $W_1$ is column-parallel ($D \to 4D/K$) and $W_2$ is row-parallel ($4D/K \to D$), requiring exactly one `AllReduce` before the residual addition. This symmetric decomposition minimizes inter-GPU communication to just two collective calls per transformer block.
+:::
+
 Generation adds a separate cost. Module 13 appends one sampled token at a time, but each ordinary forward call recomputes the full prefix. The cache introduced in @sec-memoization will reuse earlier key and value projections; it will still need attention over the available prefix. That optimization changes retained state between calls, whereas the block traced here is a complete computation from its supplied sequence.
 
 ---
@@ -335,7 +349,7 @@ Generation adds a separate cost. Module 13 appends one sampled token at a time, 
 
 A GPT forward call begins with $(B,S)$ token IDs. The embedding layer adds learned position rows, each block normalizes a branch input and adds attention and MLP updates, and the final normalization and head return $(B,S,V)$ logits. The mask prevents every block from reading future positions, while normalization and the MLP act within each position. Together those properties explain why appending a suffix preserves earlier predictions.
 
-Persistent state belongs to the parameter tensors. Forward operations create new activations and, when recording gradients, per-call operation records; they do not overwrite the caller's stream or update weights. `parameters()` exposes the complete ownership tree to the optimizer, and backward follows the recorded residual branches into that tree. The next milestone uses these logits to construct a next-token loss and to sample from the final row. It must supply targets during training and the whole prefix during ordinary generation.
+Persistent state belongs to the parameter tensors. Forward operations create new activations and, when recording gradients, per-call operation records; they do not overwrite the caller's stream or update weights. `parameters()` exposes the complete ownership tree to the optimizer, and backward follows the recorded residual branches into that tree. @sec-milestone-2 uses these logits to construct a next-token loss and to sample from the final row. It must supply targets during training and the whole prefix during ordinary generation.
 
 ---
 

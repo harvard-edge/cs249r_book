@@ -2,13 +2,13 @@
 
 Changing *machine* to *engine* in "the machine crashed because it overheated" does not change the embedding row for *it*. The token ID and position of *it* stay the same, and the lookup from @sec-embeddings cannot read neighboring rows. A useful representation needs that missing interaction. This chapter builds a computation that lets one row select and combine information from other rows.
 
-The mechanism is **scaled dot-product attention**, and the layer that packages it is `MultiHeadAttention`. We build both from the tensor operations already available, trace a two-token example by hand, and identify the contract that lets the next chapter stack these layers. The production bridge then explains how the same arithmetic can avoid storing its largest intermediate.
+The mechanism is **scaled dot-product attention**, and the layer that packages it is `MultiHeadAttention`. We build both from the tensor operations already available, trace a two-token example by hand, and identify the contract that lets @sec-transformers stack these layers. The production bridge then explains how the same arithmetic can avoid storing its largest intermediate.
 
 ---
 
 ## The Problem
 
-After embedding lookup a sequence is a matrix $X$ with one row per token and $D$ columns. The `Linear` and activation layers in a token-wise network process those rows independently. The convolution from chapter 9 mixed neighboring spatial positions through a fixed window, but this sequence computation needs weights that can change with the contents of the entire input.
+After embedding lookup a sequence is a matrix $X$ with one row per token and $D$ columns. The `Linear` and activation layers in a token-wise network process those rows independently. The convolution from @sec-convolutions mixed neighboring spatial positions through a fixed window, but this sequence computation needs weights that can change with the contents of the entire input.
 
 The obvious fix is to let every token see a summary of the whole sequence. The simplest summary is the average of all rows, and it fails immediately.
 
@@ -21,11 +21,16 @@ print([avg for _ in X])
 
 Averaging gives every token the identical vector, so a pronoun receives as much of *because* as of *machine*, and every output receives the same mixture of positional signals. A learned weight for each pair of positions is no better. The noun that *it* refers to can change from sentence to sentence; the right weights depend on what the tokens say, not on where they sit. A fixed table also imposes a maximum sequence length and does not adapt its weights to the input.
 
-The operation we need has three properties. The mixing weights must be computed from the token contents themselves. They must form a proper set of proportions, non-negative and summing to one, so a token can commit most of its attention to one source. The whole computation must also be expressible as matrix arithmetic so that all tokens compute their weights at once instead of one after another. Generation adds a fourth requirement, which we meet in Milestone 2: a token that will be predicted from its predecessors must not be allowed to read from its successors while training.
+The operation we need has three properties. The mixing weights must be computed from the token contents themselves. They must form a proper set of proportions, non-negative and summing to one, so a token can commit most of its attention to one source. The whole computation must also be expressible as matrix arithmetic so that all tokens compute their weights at once instead of one after another. Generation adds a fourth requirement, which we meet in @sec-milestone-2: a token that will be predicted from its predecessors must not be allowed to read from its successors while training.
 
 ---
 
 ## The Idea
+
+::: {.column-margin}
+![](assets/images/diagrams/12_attention-margin-mask.svg){width="100%"}
+*Causal attention mask setting future tokens to $-\infty$.*
+:::
 
 ### Queries, keys, and values
 
@@ -45,7 +50,7 @@ where $V$ is the $S \times d_v$ matrix of values and $M$ is a mathematical mask 
 
 ### Why divide by $\sqrt{d_k}$
 
-Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument Chapter 3 made for a layer's fan-in, the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
+Suppose the entries of $q$ and $k$ are independent with mean zero and variance one. Their dot product is a sum of $d_k$ products, each with mean zero and variance one, so by the same variance argument @sec-layers made for a layer's fan-in, the sum has variance $d_k$ and standard deviation $\sqrt{d_k}$. The spread of the scores grows with the width of the head, and a softmax fed scores spread too far apart collapses toward a nearly one-hot vector with very small derivatives. Dividing every score by $\sqrt{d_k}$ divides the variance by $d_k$ and restores unit variance whatever the head width. The numbers for what goes wrong without it are beside the line of code that does the division.
 
 ### Causal masking
 
@@ -71,8 +76,9 @@ In @fig-attention-engine, $B$ counts sequences in the batch, $H$ counts heads, $
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this section are extracted from named symbols in Module 12 (`src/12_attention/12_attention.py`). The listing-generation check detects changes to registered source excerpts; the surrounding commentary explains how those excerpts compose. Module 12 exposes three helpers, `scaled_dot_product_attention(Q, K, V, mask)`, and a `MultiHeadAttention(embed_dim, num_heads)` class whose methods are shown one at a time below.
+::: {.column-margin}
+**Source Code Mapping:**
+The listings in this section are extracted from named symbols in Module 12 (`src/12_attention/12_attention.py`). The listing-generation check detects changes to registered source excerpts; the surrounding commentary explains how those excerpts compose. Module 12 exposes three helpers, `scaled_dot_product_attention(Q, K, V, mask)`, and a `MultiHeadAttention(embed_dim, num_heads)` class.
 :::
 
 A caller enters through `MultiHeadAttention.forward(x, mask)` with shape `(B, S, D)`. The layer projects the rows, splits their feature axis into heads, calls `scaled_dot_product_attention`, merges the results, and applies its output projection. The inner function has five stages: scores, scale, mask, softmax, and value mixing. The following helpers explain those stages before returning to the outer layer. All differentiable operations come from earlier modules, so the backward rules from @sec-autograd supply the gradients.
@@ -87,7 +93,7 @@ Nested Python loops could compute the same dot products, but a matrix product st
 
 {{< include _listings/12_attention/compute_scores.qmd >}}
 
-The helper contains two operations from chapter 1. `transpose(-2, -1)` swaps the last two axes and preserves the leading axes. For a single head, `(S, d_k)` becomes `(d_k, S)`, making `Q.matmul(K_t)` a product with shape `(S, S)`. For a batch of heads, `(B, H, S, d_k)` becomes `(B, H, d_k, S)`, and the product has shape `(B, H, S, S)`. This batched path uses `np.matmul`. The returned transpose owns its buffer in TinyTorch; it does not expose a shared view of `K`.
+The helper contains two operations from @sec-tensors. `transpose(-2, -1)` swaps the last two axes and preserves the leading axes. For a single head, `(S, d_k)` becomes `(d_k, S)`, making `Q.matmul(K_t)` a product with shape `(S, S)`. For a batch of heads, `(B, H, S, d_k)` becomes `(B, H, d_k, S)`, and the product has shape `(B, H, S, S)`. This batched path uses `np.matmul`. The returned transpose owns its buffer in TinyTorch; it does not expose a shared view of `K`.
 
 ### Softmax by rows
 
@@ -97,13 +103,13 @@ The implementation makes separate NumPy passes to find the maximum, shift the sc
 
 ### The causal mask
 
-Milestone 2 trains a next-token predictor, and the loss at position $t$ scores a prediction of token $t+1$. That only works if position $t$'s output was computed without reading token $t+1$. Chapter 18 leans on the same guarantee from the other side. It generates one token at a time and reuses the keys and values of earlier positions, which is valid only because an earlier position's output never depended on anything after it. The naive way to keep the future out is to run the model once per prefix, $S$ forward passes for a sequence of $S$ tokens, a thousand passes for 1,024 tokens to get what one masked pass gives.
+@sec-milestone-2 trains a next-token predictor, and the loss at position $t$ scores a prediction of token $t+1$. That only works if position $t$'s output was computed without reading token $t+1$. @sec-memoization leans on the same guarantee from the other side. It generates one token at a time and reuses the keys and values of earlier positions, which is valid only because an earlier position's output never depended on anything after it. The naive way to keep the future out is to run the model once per prefix, $S$ forward passes for a sequence of $S$ tokens, a thousand passes for 1,024 tokens to get what one masked pass gives.
 
 Setting a forbidden score to zero does not exclude it. Softmax over `[0.7071, 0.0]` gives approximately `[0.67, 0.33]`, so the forbidden key still receives a third of the weight. Subtracting a large finite constant is also insufficient for an unrestricted score range. A forbidden score of $10^{10}$ remains large after subtracting $10^9$. Replacing the score with negative infinity enforces exclusion independently of its previous finite value.
 
 {{< include _listings/12_attention/apply_mask.qmd >}}
 
-The mask arrives as ones and zeros, with the same convention as `np.tril(np.ones((S, S)))`. `_apply_mask` first rejects nonbinary entries, broadcasts the mask to the score shape, and checks that each query has an allowed key. `scores.masked_fill(allowed == 0, MASK_VALUE)` then returns a new tensor with blocked scores replaced by `float("-inf")`. It preserves the input scores and records the operation for backward. The rule from chapter 6 passes gradients at allowed positions and zeros them at forbidden positions. The mask itself is a fixed choice of connectivity, not a trainable parameter.
+The mask arrives as ones and zeros, with the same convention as `np.tril(np.ones((S, S)))`. `_apply_mask` first rejects nonbinary entries, broadcasts the mask to the score shape, and checks that each query has an allowed key. `scores.masked_fill(allowed == 0, MASK_VALUE)` then returns a new tensor with blocked scores replaced by `float("-inf")`. It preserves the input scores and records the operation for backward. The rule from @sec-autograd passes gradients at allowed positions and zeros them at forbidden positions. The mask itself is a fixed choice of connectivity, not a trainable parameter.
 
 ![**The causal attention engine**: Queries and keys interact via scaled dot products $QK^T / \sqrt{d_k}$ to form an $S \times S$ score matrix. An upper-triangular mask sets future positions to $-\infty$ so row-wise softmax normalizes attention weights exclusively over past and present tokens ($j \le i$), strictly preserving autoregressive causality during value mixing.](assets/images/diagrams/12_causal-attention-engine.svg){#fig-causal-attention-engine fig-alt="Causal attention engine diagram showing multi-head projection split, score matrix computation, upper-triangular -inf masking, softmax normalization, and value matrix mixture."}
 
@@ -125,7 +131,7 @@ The variance argument predicts a score standard deviation of $8$ when $d_k=64$. 
 
 ### The projections
 
-The formula takes $Q$, $K$, and $V$ as given, but the sequence only provides $X$. The naive move is to use $X$ for all three. Then the score between tokens $i$ and $j$ is $x_i \cdot x_j$, which equals $x_j \cdot x_i$, so the raw score in each direction is identical, although row-wise softmax can still assign different weights because its denominators differ, and one vector has to serve as the question, the advertisement, and the content at once. Using the input directly would give this attention calculation no projection parameters of its own. Three learned matrices give the network three different linear views of the same token, and a fourth, $W_o$, mixes the heads back together. That is four $D \times D$ matrices, 2.36 million weights per layer at $D = 768$, the $4D^2$ term in Chapter 13's parameter count, plus four bias vectors that Module 12 gets for free by building each projection as a Chapter 3 `Linear`.
+The formula takes $Q$, $K$, and $V$ as given, but the sequence only provides $X$. The naive move is to use $X$ for all three. Then the score between tokens $i$ and $j$ is $x_i \cdot x_j$, which equals $x_j \cdot x_i$, so the raw score in each direction is identical, although row-wise softmax can still assign different weights because its denominators differ, and one vector has to serve as the question, the advertisement, and the content at once. Using the input directly would give this attention calculation no projection parameters of its own. Three learned matrices give the network three different linear views of the same token, and a fourth, $W_o$, mixes the heads back together. That is four $D \times D$ matrices, 2.36 million weights per layer at $D = 768$, the $4D^2$ term in @sec-transformers's parameter count, plus four bias vectors that Module 12 gets for free by building each projection as a @sec-layers `Linear`.
 
 The projection weights must also begin at a controlled scale. Under the independent unit-variance input model, multiplying by a $D \times D$ matrix of unit-variance weights would give each projected coordinate variance $D$. Module 12 instead inherits `Linear`'s weight standard deviation $1/\sqrt{D_{\text{in}}}$ from @sec-layers. For these square projections, the variance estimate becomes $D \times (1/D)=1$. This explains why the projection initialization and the attention score scaling solve different parts of the same problem; neither replaces the other.
 
@@ -227,7 +233,7 @@ assert np.allclose(w.data.sum(axis=-1), 1.0)
 assert np.allclose(np.triu(w.data, 1), 0.0)
 ```
 
-The same argument will apply block by block in Chapter 13 because its remaining operations act on each token separately. Causality therefore becomes a property of the complete model rather than only of one weight matrix.
+The same argument will apply block by block in @sec-transformers because its remaining operations act on each token separately. Causality therefore becomes a property of the complete model rather than only of one weight matrix.
 
 ---
 
@@ -246,6 +252,10 @@ These counts exclude parameters, gradients, other activations, and intermediate 
 :::
 
 [FlashAttention](https://arxiv.org/abs/2205.14135) changes how attention uses memory. It partitions the calculation into blocks that fit in small, fast on-chip storage, reducing transfers to and from the GPU's larger main memory. For each query it maintains a running maximum and normalization sum, allowing later key blocks to join the same softmax calculation. The output can therefore be accumulated without storing a complete $S \times S$ score matrix. This is exact attention in its mathematical formulation, with possible floating-point differences from a different evaluation order. Tiling reduces intermediate storage and memory traffic; dense attention still scores all allowed query-key pairs.
+
+::: {#psp-attention-flashattention-tiling .callout-production title="Production Bridge: FlashAttention SRAM Tiling and Online Softmax"}
+In modern GPU architectures, memory bandwidth to high-bandwidth memory (HBM) is orders of magnitude slower than on-chip SRAM cache (e.g. ~3 TB/s HBM vs ~19 TB/s SRAM on NVIDIA H100). Standard attention materializes the $S \times S$ score matrix in HBM, reads it back for softmax, writes the probabilities to HBM, and reads them again to multiply by $V$. FlashAttention tiles $Q$, $K$, and $V$ into small SRAM blocks, computes attention using the online softmax algorithm (tracking running max $m_i$ and normalizer $\ell_i$), and accumulates output vectors entirely within SRAM registers without ever writing the quadratic intermediate matrix to DRAM.
+:::
 
 The [PyTorch scaled-dot-product attention interface](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html) can select optimized or math implementations according to the input and available backends. Its boolean mask uses `True` for allowed entries, while a floating-point mask is an additive score bias. TinyTorch instead accepts only a binary allow-mask even though its Tensor storage is float32. PyTorch's function also returns only the mixed output; TinyTorch returns `(output, weights)` to make the mechanism inspectable. These interface differences matter when translating a test. A production causal option specifies the connectivity without requiring the caller to construct a square mask, but it does not by itself guarantee a particular backend.
 
