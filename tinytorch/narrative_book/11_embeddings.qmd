@@ -6,9 +6,15 @@
 *Framework Blueprint: Module 11 projects discrete token integers into dense continuous geometry and encodes sequential ordering.*
 :::
 
-@sec-tokenization left us holding integers. A tokenizer might return `[2, 0, 2]`: the first and third tokens share an identity, but occupy different positions. Feeding those IDs directly into a `Linear` layer would give token 2 twice the weighted contribution of token 1, although their numbers only label vocabulary entries. How can each ID select a learnable vector, and how can the two occurrences of token 2 carry different positions?
 
-The answer is two lookup tables. An `Embedding` is a matrix with one learnable row per token ID; looking up a token means copying its row. A positional encoding is a second matrix with one row per position, added to the token's row, so that the same word at position 0 and position 7 produces two different vectors. The second table can be learned like the first, or filled once by a sine and cosine formula that needs no training at all. The token table and a learned position table are parameters in the sense of @sec-layers. A fixed sinusoidal table is constant state and receives no gradient; the addition still passes a gradient to the token table.
+Discrete token IDs are arbitrary categorical integers with no intrinsic geometric relationship; token 1542 is not mathematically "closer" to token 1543 than to token 50000. Feeding raw integers into linear layers incorrectly imposes ordinal magnitude on categorical labels. To enable semantic reasoning, discrete token IDs must be mapped into continuous, high-dimensional vector spaces where geometric distance reflects semantic similarity, complemented by positional encodings that supply critical sequence order.
+
+From a framework and systems standpoint, an **embedding layer** is functionally a hardware memory gather operation: a sparse lookup into a large weight table of shape $(V, D)$. Implementing embedding layers in an ML runtime introduces distinct architectural considerations:
+1. **Sparse gather vs. one-hot projection**: Looking up embedding rows directly rather than multiplying by massive, sparse one-hot matrices, saving gigabytes of memory.
+2. **Gradient routing via scatter-add**: During the backward pass, gradients for repeated token IDs within a batch must be accumulated into shared embedding rows via atomic scatter-add operations.
+3. **Positional encoding injection**: Adding learned or fixed sinusoidal coordinate vectors to token representations to restore sequence position information destroyed by permutation-invariant architectures.
+
+This chapter constructs TinyTorch's embedding subsystem, converting discrete token sequences into continuous representation tensors $(B, S, D)$ ready for self-attention in @sec-attention.
 
 ![The embedding pipeline. A token ID selects one row of the embedding table; the row for that token's position is added; the sum is the vector the rest of the network sees.](assets/images/diagrams/11_embeddings-diag-1.svg){#fig-embeddings-pipeline}
 

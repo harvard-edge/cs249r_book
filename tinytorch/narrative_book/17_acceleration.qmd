@@ -6,9 +6,15 @@
 *Framework Blueprint: Module 17 eliminates round-trip memory traffic to DRAM by fusing adjacent operators into single-pass kernel loops.*
 :::
 
-For the three inputs `[-1, 0, 1]`, the GELU activation returns approximately `[-0.15881, 0, 0.84119]`. Module 17 computes these values in two ways. One keeps seven intermediate `Tensor` objects until the function returns; the other writes the calculation as one NumPy expression. Both produce the same answer within floating-point tolerance, but they allocate and retain different arrays. After @sec-compression examined weight representation, this chapter follows the temporary data created during a forward computation.
 
-The first mechanism compares those allocation choices. The second, **cache tiling**, partitions a matrix multiplication into small blocks and accumulates their products. Both make execution costs visible without changing the intended mathematical function. Actual timing depends on arithmetic, data movement, and execution overhead. After tracing the NumPy implementations, we introduce **kernel fusion**, a production technique that compiles several operations into one traversal of the data. @Fig-kernel-fusion separates the three execution paths used in the module.
+In modern deep learning execution, arithmetic operations like addition, scaling, and non-linear activations execute on compute units in fractions of a microsecond. However, in eager execution runtimes, chaining separate operations forces intermediate tensors to make round-trip journeys across the slow off-chip memory bus (DRAM/HBM), incurring devastating latency and memory bandwidth overhead.
+
+From a framework and systems standpoint, **operator fusion** is the primary compiler optimization used to break the memory bandwidth wall:
+1. **Eliminating memory round-trips**: Combining sequential elementwise operations (such as linear bias addition followed by GELU activation) into a single compiled kernel execution pass.
+2. **On-chip register reuse**: Retaining intermediate values in ultra-fast on-chip processor registers or SRAM rather than allocating temporary tensors in global DRAM.
+3. **The memory traffic ledger**: Quantifying exact memory traffic reductions, proving how fusing an 8-operation GELU expression slashes DRAM bytes moved by up to $9\times$.
+
+This chapter implements TinyTorch's operator fusion engine, demonstrating how kernel fusion transforms memory-bound operator sequences into peak hardware performance.
 
 ::: {#fig-kernel-fusion fig-env="figure" fig-pos="htb" fig-cap="**Three NumPy execution paths**: Vectorized multiplication delegates to a library, the GELU helpers retain different intermediate arrays, and tiled multiplication explicitly accumulates block products. Every comparison checks values before measuring time." fig-alt="Three boxes labeled vectorized matmul, GELU expressions, and tiled matmul point to a shared output-check and measurement box."}
 ![](assets/images/diagrams/17_acceleration-diag-1.svg)

@@ -6,11 +6,15 @@
 *Framework Blueprint: Module 05 feeds the compute engine by batching, shuffling, and collating samples into contiguous memory.*
 :::
 
-The first batch might contain rows 7, 8, 1, and 5 of a dataset. Each row has two features, so the model needs one $(4, 2)$ input tensor and four matching labels. Fetching those rows separately does not yet produce that tensor. Something must choose the indices, retrieve each feature-label pair, and copy corresponding fields into batches.
 
-After @sec-losses, the layers and losses can consume those batches. A `Dataset` answers "how many samples, and give me sample $i$." A shuffle chooses the visiting order. A `DataLoader` walks that order in groups of $B$ samples, the batch size, and stacks each group. These pieces keep the stored data, the order of visits, and the batching mechanism separate, so a new data source does not require a new training loop.
+Training neural networks with Stochastic Gradient Descent (SGD) requires balancing gradient accuracy with computational tractability. Computing the true gradient across an entire dataset of millions of samples is computationally prohibitive and prone to trapping models in sharp local minima. Conversely, updating parameters on single samples produces high-variance, noisy gradient trajectories. Mini-batching resolves this tension: it yields stable empirical gradient estimates while random shuffling breaks autocorrelation between consecutive training steps.
 
-@Fig-dataloader-pipeline follows the synchronous TinyTorch path. One request for a batch chooses indices, fetches samples, and stacks them before returning to the caller. The training-loop box is the destination that @sec-training will build; this chapter establishes the batches it receives.
+From a systems and framework perspective, the data ingestion pipeline is often the primary bottleneck of modern deep learning. Processors and accelerators spend immense time starved of operands if data loading cannot continuously saturate the memory bus. An ML framework must address three core architectural responsibilities:
+1. **Separation of concerns**: Decouple dataset storage and random-access sample indexing (`Dataset`) from batching, shuffling, and memory collation logic (`DataLoader`).
+2. **Memory packing and tensor collation**: Pack individual scattered samples into contiguous, row-major tensor batches $(B, \dots)$ that modern BLAS and GEMM compute kernels require for high throughput.
+3. **Epoch orchestration**: Generate deterministic random permutation arrays to ensure reproducible shuffling, and handle edge-case boundary conditions such as remainder batches (`drop_last`).
+
+This chapter builds TinyTorch's data loading pipeline, establishing the contiguous batch stream that feeds the forward passes of @sec-layers and powers the end-to-end training loop in @sec-training.
 
 ![TinyTorch's synchronous data path. TensorDataset implements indexed sample access; DataLoader selects indices and its iterator fetches and stacks the corresponding fields. The caller receives one tuple of Tensor batches, and the final batch may be short.](assets/images/diagrams/05_dataloader-diag-1.svg){#fig-dataloader-pipeline fig-alt="Dataset interface and TensorDataset feed DataLoader index selection, followed by synchronous sample retrieval and stacking, then a training loop."}
 

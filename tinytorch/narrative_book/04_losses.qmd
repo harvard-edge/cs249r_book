@@ -6,11 +6,15 @@
 *Framework Blueprint: Module 04 evaluates network predictions against targets while guarding against numerical overflow.*
 :::
 
-@sec-layers ended with a `Sequential` model that turns a batch of inputs into a row of raw, unbounded scores per example, one score per class. Those scores are not yet an answer, and they are not yet something a training loop can act on. The question this chapter answers is the one every practitioner asks the first time a run prints `loss: nan`: how do we turn the model's output and the correct label into a single number that says how wrong the model is, and why does the textbook formula for that number fall apart on real hardware?
 
-The single number is the **loss**. This module averages the errors into one scalar, so the caller has a single objective to minimize. @sec-autograd and @sec-optimizers will explain how derivatives turn that objective into weight updates; computing and checking the objective comes first. This chapter builds three losses. `MSELoss` handles regression, where the target is a number. `CrossEntropyLoss` handles classification, where the target is a class index, and it is the one with the numerical trap. `BinaryCrossEntropyLoss` handles binary targets using probabilities, with a different stability trade-off. Along the way we build `log_softmax`, the helper that defuses the classification trap.
+A neural network produces raw, unbounded scores across possible outputs, but learning requires a scalar objective that quantifies prediction error: how far is the model's prediction from ground truth? Different learning tasks require distinct mathematical loss formulations—mean squared error for continuous regression, binary cross-entropy for probabilities, and categorical cross-entropy for multi-class classification.
 
-The fix starts by subtracting the largest score, called a logit, before exponentiating. The chapter follows that shift through the logarithm, target selection, and mean, including why the order of the final subtractions matters.
+From a framework and systems standpoint, a loss function is a tensor reduction operator: it ingests high-dimensional batch predictions and ground-truth targets and collapses them into a single scalar that drives gradient descent. However, implementing loss functions on physical hardware exposes the harsh reality of IEEE 754 floating-point arithmetic. Textbook mathematical formulas frequently suffer from catastrophic numerical instability:
+1. **Exponential overflow**: Exponentiating large positive raw scores ($e^{1000}$) overflows float32 dynamic range to `+inf`, causing division to produce `nan`.
+2. **Logarithmic underflow**: Taking the logarithm of probabilities near zero ($\log(0)$) underflows to `-inf`.
+3. **Operator fusion for stability**: To prevent numerical breakdown, frameworks must mathematically fuse separate operations—combining LogSoftmax with Negative Log-Likelihood into a single numerically stable kernel using the max-subtraction shift.
+
+This chapter constructs TinyTorch's loss library, defusing the numerical traps of cross-entropy to provide stable scalar objectives that @sec-autograd and @sec-optimizers turn into parameter updates.
 
 @Fig-loss-stability contrasts a direct exponential with the max-shifted path. The worked trace will follow each intermediate value through the implementation.
 

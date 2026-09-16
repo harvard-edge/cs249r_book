@@ -6,11 +6,15 @@
 *Framework Blueprint: Module 09 exploits 2D spatial locality by lowering sliding receptive field convolutions to optimized GEMM matrix multiplication.*
 :::
 
-Milestone I ended with a multi-layer perceptron reading handwritten digits. To feed each $8 \times 8$ image to the first `Linear` layer, we flattened it into a vector of 64 numbers and never told the network which pixels sat next to which. The dense layer can learn from these inputs, but its parameter count grows with the number of pixels, and its weights do not encode their neighborhoods.
 
-A call to `Conv2d` must preserve those neighborhoods while still fitting the layer, autograd, and optimizer contracts from the previous chapters. We follow that call through Module 09’s shape calculation, padding, and sliding-window loops, then follow a gradient back to the image and shared weights. Pooling reduces the resulting feature maps, and batch normalization introduces state that changes between training and evaluation. Once these mechanisms are explicit, a separate NumPy model shows how im2col rearranges convolution into a matrix multiply. That model explains an optimization; the module itself executes the direct loops.
+Visual and spatial data exhibit two fundamental physical properties: spatial locality and translation equivariance. Neighboring pixels share strong local correlations, and a visual feature—such as an edge, corner, or texture—maintains identical semantic meaning regardless of where it appears in an image. Fully connected dense layers completely ignore this spatial structure: flattening an image into a 1D vector requires millions of redundant parameters that overfit and fail to generalize across spatial shifts.
 
-For the image in @fig-conv-topology, the first output is the sum $1+2+3+5+6+7+9+10+11=54$. Moving the same all-ones filter one column right produces 63. The input window changes; the nine filter weights do not.
+From a framework and systems standpoint, convolutional layers solve this by sliding compact, weight-shared receptive field kernels across 2D spatial dimensions. However, implementing 2D sliding convolutions using naive nested loops results in 6-deep nested loops that thrash CPU/GPU caches and run disastrously slowly. The systems architect must resolve key implementation challenges:
+1. **The `im2col` lowering transformation**: Rearranging overlapping 2D image patches into matrix rows or columns, lowering the spatial convolution into a single high-performance BLAS matrix multiplication (GEMM) at the cost of temporary memory duplication.
+2. **Padding and stride geometry**: Calculating exact output spatial feature map dimensions while maintaining boundary information.
+3. **Autograd gradient routing**: Propagating gradients through shared kernel weights and routing spatial derivatives back to input feature maps via transposed convolution routines (`col2im`).
+
+This chapter expands TinyTorch into spatial representation learning, implementing 2D convolutions, max pooling, and the `im2col` engine within our modular autograd framework.
 
 ::: {#fig-conv-topology fig-cap="**One filter, four windows**: The highlighted input patch supplies the first output. Moving the same kernel across the remaining positions produces the other three values." fig-alt="A four-by-four grid containing 1 through 16, a three-by-three all-ones kernel, and a two-by-two output containing 54, 63, 90, and 99. The upper-left input patch and output are highlighted."}
 ![](assets/images/diagrams/09_convolutions-diag-1.svg)

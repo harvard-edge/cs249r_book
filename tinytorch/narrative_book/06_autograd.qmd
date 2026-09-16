@@ -6,16 +6,19 @@
 *Framework Blueprint: Module 06 builds the computation DAG and executes reverse-mode automatic differentiation via topological sort.*
 :::
 
-The loader in @sec-dataloader supplies a batch, the layers turn it into predictions, and the loss reduces the prediction errors to one number. That number does not yet tell the optimizer how to change a weight. Even the small computation `y = x * x; L = y + x` illustrates the missing information. At `x = 3`, the result is `L = 12`; the result alone does not record that `x` contributed twice through the multiply and once through the addition.
 
-A derivative measures how a small input change affects an output. Here replacing $x$ by $3+\delta$ changes $L$ from $12$ to $12+7\delta+\delta^2$. For small $\delta$, the change is approximately seven times the input change, so the derivative at $x=3$ is $7$. For a loss with many weights, the **gradient** collects one such derivative per weight, holding the others fixed. Training needs those derivatives at the current weights after each new forward pass.
+The foundational algorithm of modern deep learning is backpropagation: computing the exact partial derivative of a scalar loss with respect to every trainable weight in a network via the multivariable chain rule. These gradients tell the optimizer precisely how to adjust millions of parameters to decrease error.
 
-Automatic differentiation computes them by keeping a record of each operation as it runs. In @fig-autograd-dag, the addition sends a contribution of $1$ directly to $x$, and the multiply sends two contributions of $3$. Their sum is $7$. The chapter follows those records from `Function.apply` into `Tensor.backward`, first for individual operations and then for a small matrix network. The arithmetic rules supply local derivatives; the engine makes sure every contribution arrives before an intermediate passes its gradient onward.
+From a framework and systems standpoint, calculating derivatives manually or through symbolic algebra does not scale to dynamic neural networks with complex branching and control flow. Numerical finite differences are equally impractical, requiring $O(N)$ forward passes that would make training computationally impossible. A production autograd engine must solve several critical systems challenges:
+1. **Dynamic tape recording**: Record an execution Directed Acyclic Graph (DAG) during the forward pass, capturing operations (`Function.apply`), input-output tensor relationships, and saved intermediate activations.
+2. **Reverse topological traversal**: Walk the recorded computation tape in exact reverse topological order, ensuring every consumer contributes its gradient before an intermediate tensor passes its accumulated derivative upstream.
+3. **Memory lifetime and mutation safety**: Accumulate gradients into leaf parameter buffers (`param.grad += ...`) while promptly freeing intermediate graph nodes to prevent memory leaks, and guard against silent in-place tensor mutations that corrupt saved forward values.
+
+This chapter constructs TinyTorch's reverse-mode automatic differentiation engine, connecting the forward computations of Chapters 01–05 with the backward gradient updates required by @sec-optimizers.
 
 ::: {#fig-autograd-dag fig-env="figure" fig-pos="htb" fig-cap="**Forward records and backward contributions**: The upper row computes y = x × x and L = y + x. In the lower row, addition contributes 1 directly to x; multiplication contributes 3 through each input position. All three contributions are needed for the gradient of 7." fig-alt="Two rows show x=3, y=9, L=12 above a backward seed of 1, an addition step, and multiplication contributions 3+3 with total dx=7."}
 ![](assets/images/diagrams/06_autograd-diag-1.svg)
 :::
-
 
 ---
 

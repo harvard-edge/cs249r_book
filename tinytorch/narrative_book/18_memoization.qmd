@@ -6,9 +6,15 @@
 *Framework Blueprint: Module 18 eliminates O(S²) autoregressive recomputation through static Key-Value cache buffer management.*
 :::
 
-A three-token prefix needs three key projections. Appending a fourth token and forwarding the whole prefix performs those same three projections again, followed by the one new projection the model actually needs. @sec-acceleration examined data movement inside an operator; here the repeated work comes from the loop that calls it. When @sec-milestone-2 generated text, every new token was produced by feeding the entire sequence so far back through the model, and the loop grew slower with each token it added. We need to separate the work that a new token requires from work already completed for earlier tokens.
 
-The answer is a cache of the attention keys and values for the tokens the model has already seen. The mechanism consists of per-layer buffers, a shared write cursor, and an explicit generation scope, and its correctness rests on a single fact about causal attention that we state carefully, since production serving systems are built on the same fact. We build the cache, run it against the full-sequence attention of @sec-attention to check their outputs within a floating-point tolerance, and then examine how a serving engine changes storage when many sequences share memory. The filled prefix in @fig-kv-cache grows even though each step writes only one new position.
+Autoregressive text generation produces output one token at a time: each generated token is appended to the context, and the extended sequence is passed back to the model. In a naive implementation, generating $S$ tokens requires re-running attention across all preceding tokens at every single step, creating an $O(S^2)$ computational disaster where 99% of operations redundantly recompute identical key and value representations.
+
+From a systems and framework perspective, the **Key-Value (KV) cache** is the essential serving optimization that eliminates this recomputation:
+1. **Static buffer pre-allocation**: Pre-allocating persistent tensor memory buffers for attention keys and values up to the maximum sequence length, avoiding costly dynamic reallocations.
+2. **Moving write cursor**: Incrementing a sequential write pointer to store only the new token's key and value projections during each decode step.
+3. **Asymptotic step reduction**: Transforming per-token attention computation from $O(S)$ back down to $O(1)$, unlocking massive serving speedups for long context windows.
+
+This chapter constructs TinyTorch's KV cache subsystem, proving mathematical equivalence with full-prefix attention while demonstrating dramatic reductions in generation latency.
 
 ::: {#fig-kv-cache fig-env="figure" fig-pos="htb" fig-cap="**The KV cache**: Each step writes one new key and value per head and layer, then attends over the growing prefix. Reserved capacity stays fixed while the number of keys read increases." fig-alt="A current-token box points to static per-layer key and value buffers. A row of slots marks earlier positions, a highlighted current position, and unused capacity. Lower boxes show the attention equation and cache memory formula."}
 ![](assets/images/diagrams/18_memoization-diag-1.svg)

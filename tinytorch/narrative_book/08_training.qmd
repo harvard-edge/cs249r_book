@@ -6,9 +6,17 @@
 *Framework Blueprint: Module 08 enforces the canonical training step cycle and coordinates convergence across epochs.*
 :::
 
-A weight starts at $1$, and its gradient is also $1$. With learning rate $0.1$, the optimizer moves it to $0.9$. On the next batch, `backward()` adds the new gradient to the old buffer unless the loop clears it. The optimizer from @sec-optimizers can implement its update rule correctly and still receive the wrong gradient. The training engine must establish which forward and backward computations belong to each update.
 
-`Trainer` assembles the components built so far into one call path. It keeps parameters fixed while a batch produces a loss and gradients, then lets the optimizer update them and clears the gradient buffers. Several batches can contribute to the same update if their contributions are weighted by sample count. The boundaries in @fig-training-pipeline determine where scheduling, clipping, evaluation, and checkpointing attach to this loop.
+Supervised machine learning is the practical execution of empirical risk minimization: repeatedly exposing a parameterized model to training data, evaluating loss, computing gradients, and steering weights toward optimal generalization. However, learning is not a loose script; it is a precisely choreographed state machine where data pipelines, forward models, autograd graphs, and optimizers interact in lockstep.
+
+From a framework and systems standpoint, the training engine coordinates execution lifecycles and memory boundaries across five non-negotiable phases:
+1. **Gradient zeroing (`zero_grad()`)**: Clearing accumulated gradients from prior steps to prevent catastrophic, silent gradient accumulation.
+2. **Forward evaluation**: Pipelining batch inputs through model layers to compute predictions and scalar losses.
+3. **Backward tape execution**: Traversing the autograd DAG to populate parameter `.grad` fields, followed by immediate graph disposal to release gigabytes of intermediate activation memory.
+4. **Gradient clipping and optimization**: Bounding global gradient $L_2$ norms to prevent numerical divergence, followed by in-place optimizer parameter updates.
+5. **Epoch and batch boundary accounting**: Correctly weighting partial remainder batches so update trajectories reflect true sample-weighted empirical risk.
+
+This chapter synthesizes the foundational modules of Chapters 01–07 into the unified `Trainer` engine, establishing the end-to-end execution loop of TinyTorch.
 
 ::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**An accumulation window**: Forward, loss, and backward repeat while parameters stay fixed. At the window boundary, the Trainer averages by actual samples, optionally clips, updates parameters, and clears gradients." fig-alt="Two rows of three boxes. The upper row connects forward pass, scalar batch-mean loss, and sample-weighted backward. The lower row connects gradient averaging, optional clipping, and update followed by clearing. A note includes the final partial window."}
 ![](assets/images/diagrams/08_training-diag-1.svg)

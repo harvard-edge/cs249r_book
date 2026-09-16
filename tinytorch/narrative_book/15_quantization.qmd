@@ -6,11 +6,15 @@
 *Framework Blueprint: Module 15 compresses 32-bit floats into 8-bit integers, quadrupling cache line density while maintaining numerical precision.*
 :::
 
-Casting the weights `[0.0123, -0.0871, 0.0456, -0.0012]` to integers produces four zeros. Each weight could fit in a byte, but the layer would lose every contribution from its input. @sec-profiling gave us a reason to try reducing those bytes: a linear layer processing one input row performs only about two arithmetic operations per weight. When weight traffic limits its speed, a smaller representation can help. The representation must preserve useful differences between weights.
 
-We build `quantize_int8`, `dequantize_int8`, and `QuantizedLinear` by following a weight from its float value to an integer code and back. A scale and zero point describe the grid. TinyTorch simulates that grid inside its existing float32 `Tensor`, so its tests expose rounding and saturation while its memory report calculates the storage a packed INT8 container would need. A separate book-only integer multiply makes the rescaling rule visible. This distinction lets us check the mechanism without mistaking a smaller set of possible values for a smaller allocation.
+Standard neural network training uses 32-bit floating-point (FP32) arithmetic, but serving large models on edge devices and production servers is heavily constrained by memory capacity, memory bandwidth, and power consumption. Post-training quantization (PTQ) addresses these limits by converting 32-bit floating-point weights and activations into compact 8-bit integers (INT8), slashing storage requirements by $4\times$ and drastically accelerating inference while preserving accuracy.
 
-The path in @fig-quantization-geometry separates the numerical mapping from its storage format. There are 256 signed INT8 codes, with 255 steps between the endpoints.
+From a systems and framework perspective, quantization requires mapping continuous real numbers onto discrete integer grids through rigorous affine transformations:
+1. **Affine quantization arithmetic**: Deriving scale ($S$) and zero-point ($Z$) parameters ($q = \text{round}(x/S) + Z$) across symmetric and asymmetric mapping schemes.
+2. **Integer GEMM execution**: Executing matrix multiplications using fast integer arithmetic while accumulating intermediate products in 32-bit integer accumulators to prevent overflow.
+3. **Dequantization and precision calibration**: Scaling accumulated integers back into floating-point representation, balancing numerical dynamic range against quantization noise.
+
+This chapter constructs TinyTorch's quantization engine, demonstrating how to compress weights to INT8 and measure the resulting storage savings and numerical fidelity.
 
 ::: {#fig-quantization-geometry fig-env="figure" fig-pos="htb" fig-cap="**Quantization and storage**: A scale and zero point map floats to integer codes and reconstruct rounded values. Packed storage uses one byte per code; TinyTorch wraps codes in float32 arrays." fig-alt="Three boxes connect floating-point values, affine integer codes from minus 128 through 127, and reconstructed floats. Separate boxes distinguish packed storage from TinyTorch float32 execution."}
 ![](assets/images/diagrams/15_quantization-diag-1.svg)
