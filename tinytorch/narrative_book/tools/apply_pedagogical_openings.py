@@ -70,7 +70,7 @@ From a framework and systems standpoint, calculating derivatives manually or thr
 2. **Reverse topological traversal**: Walk the recorded computation tape in exact reverse topological order, ensuring every consumer contributes its gradient before an intermediate tensor passes its accumulated derivative upstream.
 3. **Memory lifetime and mutation safety**: Accumulate gradients into leaf parameter buffers (`param.grad += ...`) while promptly freeing intermediate graph nodes to prevent memory leaks, and guard against silent in-place tensor mutations that corrupt saved forward values.
 
-This chapter constructs TinyTorch's reverse-mode automatic differentiation engine, connecting the forward computations of Chapters 01–05 with the backward gradient updates required by @sec-optimizers.""",
+This chapter constructs TinyTorch's reverse-mode automatic differentiation engine, connecting the forward computations of @sec-tensors through @sec-dataloader with the backward gradient updates required by @sec-optimizers.""",
 
     "07_optimizers.qmd": r"""Gradient descent is the engine that drives neural learning, but raw gradients alone are often insufficient to train deep models effectively. High-dimensional loss landscapes are characterized by ill-conditioned ravines, saddle points, and extreme curvature variations where gradients are steep in some directions and nearly flat in others. Plain gradient descent oscillates uncontrollably across canyon walls while making glacial progress along the valley floor toward the optimum.
 
@@ -90,7 +90,7 @@ From a framework and systems standpoint, the training engine coordinates executi
 4. **Gradient clipping and optimization**: Bounding global gradient $L_2$ norms to prevent numerical divergence, followed by in-place optimizer parameter updates.
 5. **Epoch and batch boundary accounting**: Correctly weighting partial remainder batches so update trajectories reflect true sample-weighted empirical risk.
 
-This chapter synthesizes the foundational modules of Chapters 01–07 into the unified `Trainer` engine, establishing the end-to-end execution loop of TinyTorch.""",
+This chapter synthesizes the foundational modules of @sec-tensors through @sec-optimizers into the unified `Trainer` engine, establishing the end-to-end execution loop of TinyTorch.""",
 
     "milestone_01.qmd": r"""In 1969, Marvin Minsky and Seymour Papert published their famous proof that single-layer perceptrons cannot learn the non-linear XOR (exclusive or) decision boundary, precipitating the first "AI Winter." The limitation was not in learning algorithms, but in representation: a single linear boundary cannot separate points whose positive labels sit on opposite diagonals. Seventeen years later, Rumelhart, Hinton, and Williams demonstrated that multi-layer perceptrons with hidden units trained via backpropagation can bend representation space, cleanly resolving the XOR crisis.
 
