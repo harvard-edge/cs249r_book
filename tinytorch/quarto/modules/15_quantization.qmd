@@ -1,7 +1,7 @@
 
 # Module 15: Quantization
 
-Quantization does not change the O(MNK) complexity of a matmul. It shrinks the constant factor: 4x less HBM bandwidth per weight, 4x more values per SIMD register (64 INT8 lanes vs 16 FP32 lanes in AVX-512), and a 4x smaller cache footprint that keeps hot weights on-chip. For the memory-bound workloads that dominate autoregressive decoding and on-device inference, that constant-factor win is what makes a 400 MB model fit on a 512 MB IoT device. This module builds asymmetric INT8 quantization, calibration, and a model-level pass that converts every Linear layer in place.
+Quantization maps floating-point values onto a limited set of integer codes. Packed INT8 storage uses one byte per code instead of four for FP32. TinyTorch simulates these codes in float32 Tensor arrays and performs float32 arithmetic; its storage reports model the packed representation rather than the actual NumPy allocation.
 
 :::{.callout-note title="Module Info"}
 
@@ -317,9 +317,7 @@ initSlideViewer('15_quantization', '../assets/slides/15_quantization.pdf');
 ```
 ## Overview
 
-Models have outgrown the devices that need to run them. BERT-base weighs 420 MB, GPT-2 weighs 5.6 GB, and GPT-3 weighs 652 GB — yet a phone has 4–8 GB of RAM total, shared across every app. Every parameter spends 4 bytes on FP32 precision when 8 bits would suffice. Quantization closes that gap: map FP32 weights to INT8 and a model shrinks 4× with typically less than 1% accuracy loss.
-
-In this module you build the INT8 quantization pipeline end-to-end: the core quantize/dequantize functions, a `QuantizedLinear` layer that wraps a trained `Linear`, calibration that fits scale and zero-point to real activation distributions, and a model-level pass that converts every Linear in a `Sequential` in place. By the end, you can take a 400 MB checkpoint and ship a 100 MB version that still works.
+Packed INT8 weights can reduce weight storage relative to FP32, with an accuracy trade-off that must be measured. In this module you build quantize/dequantize functions, calibration, `QuantizedLinear`, and model conversion. Codes remain in float32 arrays, so the implementation teaches quantization without promising a smaller checkpoint or faster integer execution.
 
 The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONNX Runtime use to fit models on phones, IoT boards, and edge hardware without ever touching the cloud.
 
@@ -327,7 +325,7 @@ The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONN
 
 :::{.callout-tip title="By completing this module, you will:"}
 
-- **Implement** asymmetric INT8 quantization: scale, zero-point, and the quantize/dequantize round trip for 4× memory reduction.
+- **Implement** asymmetric INT8 quantization: scale, zero-point, and the quantize/dequantize round trip, distinguishing modeled packed bytes from actual storage.
 - **Build** calibration that fits scale and zero-point to a real activation distribution from sample inputs.
 - **Reason** about quantization error: where it comes from, how it bounds (±scale/2), and why neural networks tolerate it.
 - **Connect** your implementation to TensorFlow Lite, PyTorch Mobile, and ONNX Runtime — same math, different kernels.
@@ -338,7 +336,7 @@ The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONN
 
 
 
-::: {#fig-15_quantization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Quantization System**: Methods for converting models to lower precision." fig-alt="Pipeline diagram: FP32 weights feed into a quantizer block producing INT8 weights with scale and zero-point. A parallel calibration path runs sample activations through an observer to produce input scale and zero-point. Both feed the QuantizedLinear layer."}
+::: {#fig-15_quantization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Integer codes and execution storage.** Floating-point values map to affine integer codes and reconstruct through scale and zero point. Packed storage models one byte per code, but TinyTorch Tensor stores codes as float32 and QuantizedLinear uses float32 arithmetic." fig-alt="Floating-point values map to affine integer codes and reconstruct through scale and zero point. Packed storage models one byte per code, but TinyTorch Tensor stores codes as float32 and QuantizedLinear uses float32 arithmetic."}
 
 ![](../assets/images/diagrams/15_quantization-diag-1.svg)
 
@@ -354,7 +352,7 @@ The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONN
 |------|----------------------|-------------|
 | 1 | `quantize_int8()` | Scale and zero-point calculation, INT8 mapping |
 | 2 | `dequantize_int8()` | FP32 restoration with quantization parameters |
-| 3 | `QuantizedLinear` | Quantized linear layer with compressed weights |
+| 3 | `QuantizedLinear` | Linear layer with simulated quantized weights |
 | 4 | `calibrate()` | Input quantization optimization using sample data |
 | 5 | `quantize_model()` | Full model conversion and memory comparison |
 
@@ -362,9 +360,9 @@ The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONN
 
 **The pattern you'll enable:**
 ```python
-# Compress a 400MB model to 100MB
+# Simulate quantization and model packed storage
 quantize_model(model, calibration_data=sample_inputs)
-# Now model uses 4× less memory with <1% accuracy loss
+# Dense arrays remain float32; measure output error and accuracy
 ```
 
 ### What You're NOT Building (Yet)
@@ -373,10 +371,10 @@ To keep this module focused, you will **not** implement:
 
 - Per-channel quantization (PyTorch supports this for finer-grained precision)
 - Mixed precision strategies (keeping sensitive layers in FP16/FP32)
-- Quantization-aware training (Module 16: Compression introduces this)
+- Quantization-aware training
 - INT8 GEMM kernels (production uses hardware instructions like AVX-512 VNNI)
 
-**You are building per-tensor asymmetric INT8 quantization.** That is enough to compress a real model 4×; the rest is sharper precision and faster kernels.
+**You are building per-tensor asymmetric INT8 quantization.** Packed serialization and integer kernels require additional implementations.
 
 ## API Reference
 
@@ -403,7 +401,7 @@ Restore INT8 tensor to FP32 using quantization parameters.
 | `__init__` | `__init__(linear_layer: Linear)` | Create quantized version of Linear layer |
 | `calibrate` | `calibrate(sample_inputs: List[Tensor])` | Optimize input quantization using sample data |
 | `forward` | `forward(x: Tensor) -> Tensor` | Compute output with quantized weights |
-| `memory_usage` | `memory_usage() -> Dict[str, float]` | Calculate memory savings achieved |
+| `memory_usage` | `memory_usage() -> Dict[str, float]` | Model packed storage savings |
 
 : **Core methods on the QuantizedLinear class.** {#tbl-15-quantization-qlinear-methods}
 
@@ -414,7 +412,7 @@ Restore INT8 tensor to FP32 using quantization parameters.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `quantize_model` | `quantize_model(model, calibration_data=None)` | Quantize all Linear layers in-place |
-| `analyze_model_sizes` | `analyze_model_sizes(original, quantized)` | Measure compression ratio and memory saved |
+| `analyze_model_sizes` | `analyze_model_sizes(original, quantized)` | Compare modeled packed sizes |
 
 : **Model-level quantization helper functions.** {#tbl-15-quantization-model-functions}
 
@@ -447,7 +445,8 @@ INT8 collapses that continuous range to 256 discrete levels (−128 to 127). The
 
 The storage math is unforgiving. One FP32 parameter is 4 bytes; one INT8 parameter is 1 byte. A 100M-parameter model is the difference between 381 MB (FP32) and 95 MB (INT8). The 4× ratio is fixed because the bit-width ratio is fixed: 32 down to 8.
 
-Crucially, quantization does *not* change the asymptotic complexity of matrix multiplication — a dense M×N by N×K matmul is still O(MNK) FLOPs and O(MN + NK + MK) bytes of traffic whether operands are FP32 or INT8. What changes is the *constant factor*: INT8 operands use one quarter of the memory bandwidth and pack 4× more operations into the same SIMD register (64 INT8 lanes vs. 16 FP32 lanes in AVX-512), yielding a 2–4× wall-clock speedup in practice. For memory-bound workloads like embedding lookups and decode-phase attention, that constant-factor win is the difference between fitting on the device and not.
+Quantization preserves the dense matmul arithmetic count. A packed representation reduces bytes per weight, but total memory also includes activations, metadata, and other state. Integer instructions can improve throughput on suitable hardware; lane counts alone do not establish a runtime speedup. TinyTorch uses float32 arithmetic for this simulation.
+
 
 ### Quantization Schemes
 
@@ -457,7 +456,10 @@ Your implementation uses asymmetric quantization for maximum flexibility:
 
 The code in @lst-15-quantize-int8 makes this concrete.
 
-```python
+```{python}
+#| label: lst-15-quantize-int8
+#| lst-cap: "**Asymmetric INT8 quantize function**. Derives scale and zero-point from the tensor's min/max range, then maps FP32 values into `[-128, 127]` with rounding and clipping."
+#| eval: false
 def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     """Quantize FP32 tensor to INT8 using asymmetric quantization."""
     data = tensor.data
@@ -485,8 +487,6 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     return Tensor(quantized_data), scale, zero_point
 ```
 
-: **Listing 15.1 — Asymmetric INT8 quantize function**. Derives scale and zero-point from the tensor's min/max range, then maps FP32 values into `[-128, 127]` with rounding and clipping. {#lst-15-quantize-int8}
-
 The algorithm finds the minimum and maximum values in the tensor, then calculates a scale that maps this range to [-128, 127]. The zero-point determines which INT8 value represents FP32 zero, ensuring minimal quantization error at zero (important for ReLU activations and sparse patterns).
 
 ### Scale and Zero-Point
@@ -512,7 +512,10 @@ Post-training quantization (PTQ) takes a *trained* FP32 model and quantizes it a
 
 The code in @lst-15-quantized-linear-init makes this concrete.
 
-```python
+```{python}
+#| label: lst-15-quantized-linear-init
+#| lst-cap: "**QuantizedLinear constructor**. Wraps a trained Linear layer, quantizes weights and biases immediately, and reserves input quantization parameters for calibration."
+#| eval: false
 class QuantizedLinear:
     """Quantized version of Linear layer using INT8 arithmetic."""
 
@@ -536,13 +539,14 @@ class QuantizedLinear:
         self.input_zero_point = None
 ```
 
-: **Listing 15.2 — QuantizedLinear constructor**. Wraps a trained Linear layer, quantizes weights and biases immediately, and reserves input quantization parameters for calibration. {#lst-15-quantized-linear-init}
-
 During inference, the forward pass dequantizes weights on-the-fly, performs the standard FP32 matrix multiplication, and returns FP32 outputs. While this educational approach clarifies the math, production implementations keep the data in 8-bit format entirely, leveraging specialized INT8 GEMM (general matrix multiply) hardware instructions for maximum speed:
 
 The code in @lst-15-quantized-linear-forward makes this concrete.
 
-```python
+```{python}
+#| label: lst-15-quantized-linear-forward
+#| lst-cap: "**QuantizedLinear forward pass**. Dequantizes weights and bias on the fly for the matmul. Production kernels skip this step and run the matmul directly in INT8."
+#| eval: false
 def forward(self, x: Tensor) -> Tensor:
     """Forward pass with quantized computation."""
     # Dequantize weights
@@ -559,15 +563,16 @@ def forward(self, x: Tensor) -> Tensor:
     return result
 ```
 
-: **Listing 15.3 — QuantizedLinear forward pass**. Dequantizes weights and bias on the fly for the matmul. Production kernels skip this step and run the matmul directly in INT8. {#lst-15-quantized-linear-forward}
-
 ### Calibration Strategy
 
 Weights are easy: their values are fixed, so you can compute scale and zero-point from the tensor itself. Activations are not — their range depends on what data flows through the network. Calibration solves this by running a small batch of representative inputs through the layer and recording the activation distribution, then fitting scale and zero-point to *that*:
 
 The code in @lst-15-calibrate makes this concrete.
 
-```python
+```{python}
+#| label: lst-15-calibrate
+#| lst-cap: "**Activation calibration**. Aggregates sample inputs to fit input scale and zero-point from an empirical activation range before inference."
+#| eval: false
 def calibrate(self, sample_inputs: List[Tensor]):
     """Calibrate input quantization parameters using sample data."""
     # Collect all input values
@@ -590,8 +595,6 @@ def calibrate(self, sample_inputs: List[Tensor]):
         self.input_zero_point = np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE)
 ```
 
-: **Listing 15.4 — Activation calibration**. Aggregates sample inputs to fit input scale and zero-point from an empirical activation range before inference. {#lst-15-calibrate}
-
 Calibration typically requires 100-1000 representative samples. Too few samples might miss important distribution characteristics; too many waste time with diminishing returns. The goal is capturing the typical range of activations the model will see during inference.
 
 ## Production Context
@@ -607,8 +610,8 @@ Your quantizer implements the same arithmetic PyTorch ships in production. The d
 | **Algorithm** | Asymmetric INT8 quantization | Multiple schemes (INT8, INT4, FP16, mixed) |
 | **Calibration** | Min/max statistics | MinMax, histogram, percentile observers |
 | **Backend** | NumPy (FP32 compute) | INT8 GEMM kernels (FBGEMM, QNNPACK) |
-| **Speed** | 1x (baseline) | 2-4× faster with INT8 ops |
-| **Memory** | 4× reduction | 4× reduction (same compression) |
+| **Speed** | Float32 simulation; measure runtime | Depends on integer kernels and workload |
+| **Memory** | Float32 arrays; packed bytes modeled | Packed weights plus metadata and runtime state |
 | **Granularity** | Per-tensor | Per-tensor, per-channel, per-group |
 
 : **Feature comparison between TinyTorch quantizer and PyTorch Quantization.** {#tbl-15-quantization-vs-pytorch}
@@ -634,7 +637,7 @@ calibration_data = [sample_batch1, sample_batch2, ...]
 quantize_model(model, calibration_data)
 
 # Use quantized model
-output = model.forward(x)  # 4× less memory!
+output = model.forward(x)  # Simulated quantization in float32
 ```
 
 ## PyTorch
@@ -657,7 +660,7 @@ for batch in calibration_data:
 model_quantized = quantization.convert(model_prepared)
 
 # Use quantized model
-output = model_quantized(x)  # 4× less memory!
+output = model_quantized(x)  # Backend determines storage and execution
 ```
 :::
 
@@ -676,26 +679,17 @@ The core quantization mathematics: scale calculation, zero-point mapping, INT8 r
 
 ### Why Quantization Matters at Scale
 
-The 4× number sounds modest until you put it next to the device it has to fit on:
-
-:::{.callout-note title="Systems Implication: Escaping the Memory Wall via Reduced Precision"}
-As neural networks scale, they inevitably hit the **memory wall** of the Roofline model. Generating tokens autoregressively is inherently memory-bound because the system must constantly stream gigabytes of weight matrices from HBM to the processing cores for every single token. **Quantization is the ultimate systems hack to bypass this wall.** By compressing FP32 weights down to INT8, we instantly cut the memory footprint and the required memory bandwidth by 4×. Furthermore, modern architectures leverage specific **SIMD** (Single Instruction, Multiple Data) instructions—like AVX-512 VNNI or specialized Tensor Cores—to process these packed 8-bit integers natively. This means we are not just saving RAM; we are quadrupling our cache capacity, slashing the power consumption of data movement, and forcing a memory-bound workload significantly closer to the compute-bound ceiling.
-:::
-
-- **Mobile AI**: Modern smartphones have limited RAM shared across all apps. A quantized BERT (`{python} bert_int8_mb`) fits comfortably; the FP32 version (`{python} bert_mb`) causes severe memory pressure and OS-level cache eviction.
-- **Edge computing**: IoT devices often have 512 MB RAM. Quantization enables on-device inference for privacy-sensitive applications (medical devices, security cameras) by fitting massive computational graphs into tiny SRAM footprints.
-- **Data centers**: Serving 1000 requests/second requires multiple model replicas. With 4× memory reduction, you fit 4× more models per GPU, reducing hardware serving costs by 75% and massively improving aggregate throughput.
-- **Battery life**: Moving data is vastly more expensive than computing it. INT8 memory transfers and operations consume fractions of the energy required for FP32 equivalents, extending battery life and reducing thermal throttling.
+Packed weight bytes are one part of deployment memory. Activations, caches, biases, metadata, and allocator overhead also contribute. A smaller weight representation helps only when it addresses the binding constraint; measure memory, accuracy, and latency separately. TinyTorch’s reports model packed weights, while its Tensor arrays remain float32.
 
 ## Check Your Understanding
 
 :::{.callout-tip title="Check Your Understanding — Quantization"}
 Before moving on, verify you can articulate each of the following:
 
-- [ ] Why INT8 inference breaks the memory wall on weight-dominated and embedding-heavy workloads (4× bandwidth reduction) even though the matmul complexity class is unchanged.
+- [ ] Why packed INT8 weights use fewer bytes while the dense matmul arithmetic count stays unchanged.
 - [ ] How asymmetric quantization picks scale and zero-point from a tensor's min/max, and why that choice bounds the round-trip error by ±scale/2.
 - [ ] Why activation quantization needs calibration data but weight quantization does not.
-- [ ] Why theoretical 4× speedup from 4× SIMD lanes collapses to 2–3× in practice (dequant overhead, memory ceiling, non-GEMM ops).
+- [ ] Why SIMD lane counts alone cannot predict model latency.
 
 If any of these feels fuzzy, revisit the Core Concepts section (especially Scale and Zero-Point and Calibration Strategy) before moving on.
 :::
@@ -704,7 +698,7 @@ Five questions to lock in the trade-offs — memory, precision, calibration, I/O
 
 **Q1: Memory Calculation**
 
-A neural network has three Linear layers: 784→256, 256→128, 128→10. How much memory do the weights consume in FP32 vs INT8? Include bias terms.
+A neural network has three Linear layers: 784→256, 256→128, 128→10. For a hypothetical packed representation that quantizes both weights and biases, compare FP32 and INT8 bytes. Ignore metadata. TinyTorch keeps float32 arrays and retains floating-point biases.
 
 :::{.callout-tip collapse="true" title="Answer"}
 
@@ -782,15 +776,15 @@ A model has 100M parameters. Loading from SSD to RAM at 500 MB/s, how long does 
 - INT8 size: 100M × 1 byte = 95 MB
 - FP32 load time: 381 MB / 500 MB/s = **0.8 seconds**
 - INT8 load time: 95 MB / 500 MB/s = **0.19 seconds**
-- **Speedup: 4× faster loading**
+- **Ideal transfer-only ratio: about 4×**
 
 **User experience impact:**
 
 - Mobile app launch: 0.8 seconds → 0.19 seconds (**0.6s faster startup**)
-- Cloud inference: 0.8 seconds cold-start latency → 0.19 seconds (**4× better cold-start throughput**)
+- Cloud inference: transfer time is one component of cold-start latency; initialization and conversion add work
 - Model updates: 381 MB download → 95 MB download (**75% less data over the wire**)
 
-**Key insight**: the 4× number isn't just about RAM. It applies to disk reads, network transfers, and cold-start latency — every place a byte has to move.
+**Key insight**: packed weights reduce the bytes to transfer. Total loading and cold-start time also include fixed overhead, metadata, and conversion.
 :::
 
 **Q5: Hardware Acceleration**
@@ -803,32 +797,21 @@ Modern CPUs have AVX-512 VNNI instructions that can perform INT8 matrix multiply
 
 - 512-bit register with FP32: 512 / 32 = **16 values**
 - 512-bit register with INT8: 512 / 8 = **64 values**
-- **Theoretical speedup: 64 / 16 = 4×**
+- **Lane-count ratio: 64 / 16 = 4×**
 
-**Why actual speedup is 2–3× (not 4×):**
+This counts values that fit in a register, not completed operations per second. Instruction semantics, accumulation width, conversion overhead, memory traffic, and non-matmul work determine the measured speedup.
 
-1. **Dequantization overhead**: converting INT8 → FP32 for activations costs cycles.
-2. **Memory bandwidth ceiling**: INT8 ops are so fast that DRAM can't feed them.
-3. **Mixed precision**: activations often stay FP32; only weights are quantized.
-4. **Non-GEMM ops**: batch norm, softmax, and friends stay FP32.
 
-**Real-world speedup breakdown:**
-
-- Compute-bound (large matmuls): **3–4× speedup**
-- Memory-bound (small layers): **1.5–2× speedup**
-- Typical mixed models: **2–3× average speedup**
-
-**Key insight**: INT8 wins biggest when matrix multiplications dominate (transformers, large MLPs). For convolutions with tiny kernels, memory bandwidth caps the gains long before compute does.
 :::
 
 ## Key Takeaways
 
-- **4× bandwidth, not 4× FLOPs:** quantization preserves the O(MNK) matmul complexity but shrinks every constant (memory, cache footprint, SIMD width) by 4× — that is why it wins on memory-bound workloads.
+- **Packed bytes differ from runtime bytes:** INT8 codes model one quarter of FP32 weight storage, excluding metadata. TinyTorch stores those codes in float32 arrays.
 - **Scale and zero-point are per-tensor decisions:** a single tensor with a poorly fit scale wastes resolution or clips values; calibration makes this data-driven instead of guessed.
 - **Weights quantize statically, activations quantize with calibration:** weights are fixed after training; activations depend on input distribution and need 100–1000 representative samples.
-- **Hardware lottery applies:** the 4× theoretical speedup becomes 2–3× in practice because dequant overhead, non-GEMM ops, and memory ceilings all tax the gain.
+- **Hardware matters:** integer kernels, conversion overhead, and the workload determine whether quantization improves latency.
 
-**Coming next:** Module 16 attacks a different axis — instead of shrinking each weight, it removes weights entirely via pruning. Composed with quantization, the stack is ~16× smaller than the FP32 original.
+**Coming next:** Module 16 attacks a different axis — instead of shrinking each weight, it removes weights entirely via pruning. Dense masking and simulated quantization do not automatically reduce the allocated bytes.
 
 ## Further Reading
 
@@ -852,12 +835,7 @@ For students who want to understand the academic foundations and production impl
 
 ## What's Next
 
-You just made every weight 4× smaller. The next question is the obvious one: do you need every weight at all? Quantization shrinks values; compression deletes them.
-
-:::{.callout-note title="Coming Up: Module 16 — Compression"}
-
-Module 16 builds **pruning** — first unstructured (zero out individual weights below a threshold) and then structured (remove whole neurons and channels). Pruning attacks a different axis from quantization: it reduces the *count* of operations, not the *cost* of each one. Composed with what you just built, the two techniques multiply: a pruned-then-quantized model is roughly 16× smaller than the FP32 original, and noticeably faster too.
-:::
+You have mapped weights onto a quantization grid. Module 16 changes which weights are active. Its pruning functions zero individual weights or whole channels while preserving dense shapes. Sparse storage or structural compaction is needed before zeros translate into smaller allocations or fewer dense operations.
 
 **How quantization composes with what comes next:**
 
@@ -865,8 +843,8 @@ Module 16 builds **pruning** — first unstructured (zero out individual weights
 
 | Module | What it adds | The stack so far |
 |--------|--------------|------------------|
-| **16: Compression** | Pruning removes redundant weights | `quantize_model(pruned_model)` → ~16× compression |
-| **17: Acceleration** | Kernel fusion eliminates memory traffic | `accelerate(quantized_model)` → ~8× faster inference |
+| **16: Compression** | Pruning removes redundant weights | Compare rounded and masked candidates independently |
+| **17: Acceleration** | Compare dense execution strategies | Benchmark vectorized and tiled matrix multiplication |
 | **20: Capstone** | Deploy the full optimized pipeline | prune → quantize → accelerate → deploy |
 
 : **How quantization stacks with compression, acceleration, and capstone modules.** {#tbl-15-quantization-downstream-usage}
@@ -876,14 +854,6 @@ Module 16 builds **pruning** — first unstructured (zero out individual weights
 :::{.callout-tip title="Interactive Options"}
 
 - **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
-:::
-
-:::{.callout-warning title="Save Your Progress"}
-
-Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
-:::
-tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
 :::
 

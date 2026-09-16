@@ -1,7 +1,7 @@
 
 # Module 17: Acceleration
 
-Most neural networks spend more time waiting on memory than computing. Acceleration is the art of rearranging work so the ALUs never idle: SIMD vectorization, cache tiling, and kernel fusion that keeps intermediates in registers instead of round-tripping through HBM. Here you build the primitives that close the gap between theoretical peak FLOPS and measured throughput on real silicon.
+A Python matrix multiplication can spend much of its runtime interpreting loops. This module compares BLAS-backed multiplication with explicit tiling and compares two NumPy GELU implementations. These experiments expose execution overhead and memory reuse, while production kernel fusion provides a comparison beyond the NumPy implementation.
 
 :::{.callout-note title="Module Info"}
 
@@ -317,11 +317,9 @@ initSlideViewer('17_acceleration', '../assets/slides/17_acceleration.pdf');
 ```
 ## Overview
 
-Neural networks spend 90% of their time multiplying matrices. The same workload that trains in three hours on optimized kernels takes a week of naive Python loops — same math, same hardware, two orders of magnitude apart. The gap is paid for entirely in how the code talks to the processor.
+Matrix multiplication and element-wise activations stress different parts of a processor. Matrix multiplication can reuse each input many times; activations often do little arithmetic per array element.
 
-This module teaches hardware-aware optimization through vectorization and kernel fusion. You'll exploit SIMD lanes, fix memory access patterns, and eliminate the intermediate arrays that quietly burn most of your bandwidth. By the end you'll know why a naive matmul is 100x slower than an optimized one, and you'll have shipped 2–5x speedups against your own baseline.
-
-Acceleration isn't clever algorithms. It's understanding how processors actually work, then writing code that doesn't fight them.
+You will implement vectorized and tiled multiplication, then compare grouped and staged GELU expressions. NumPy still creates intermediate arrays in the grouped expression. Measure each implementation on your hardware; this module does not guarantee a particular speedup.
 
 ## Why Acceleration Before Memoization?
 
@@ -337,7 +335,7 @@ Acceleration comes first because it is general — vectorization and kernel fusi
 :::{.callout-tip title="By completing this module, you will:"}
 
 - **Implement** vectorized matrix multiplication using optimized BLAS libraries for maximum throughput
-- **Master** kernel fusion techniques that eliminate memory bandwidth bottlenecks by combining operations
+- **Distinguish** grouped NumPy expressions from native kernel fusion that can avoid intermediate arrays
 - **Understand** the roofline model and arithmetic intensity to predict performance bottlenecks
 - **Analyze** production acceleration strategies for different deployment scenarios (edge, cloud, GPU)
 :::
@@ -346,7 +344,7 @@ Acceleration comes first because it is general — vectorization and kernel fusi
 
 
 
-::: {#fig-17_acceleration-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Acceleration System**: Vectorized kernels and SIMD optimization." fig-alt="Block diagram of the TinyTorch acceleration stack: tensor inputs flow into BLAS-backed vectorized matmul, cache-aware tiled matmul, and a fused GELU kernel, with SIMD lanes and multi-threaded execution feeding the output."}
+::: {#fig-17_acceleration-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**NumPy acceleration experiments.** Compare a BLAS-backed matrix multiply, explicit tiled multiplication, and staged or grouped GELU expressions. Check numerical agreement before timing; NumPy expressions can allocate temporaries and do not guarantee a single fused kernel." fig-alt="Compare a BLAS-backed matrix multiply, explicit tiled multiplication, and staged or grouped GELU expressions. Check numerical agreement before timing; NumPy expressions can allocate temporaries and do not guarantee a single fused kernel."}
 
 ![](../assets/images/diagrams/17_acceleration-diag-1.svg)
 
@@ -361,7 +359,7 @@ Acceleration comes first because it is general — vectorization and kernel fusi
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
 | 1 | `vectorized_matmul()` | SIMD and BLAS optimization |
-| 2 | `fused_gelu()` | Memory bandwidth reduction |
+| 2 | `fused_gelu()` | Grouped NumPy expression |
 | 3 | `unfused_gelu()` | Comparison baseline |
 | 4 | `tiled_matmul()` | Cache-aware computation |
 | 5 | Performance analysis | Roofline and arithmetic intensity |
@@ -371,10 +369,10 @@ Acceleration comes first because it is general — vectorization and kernel fusi
 **The pattern you'll enable:**
 ```python
 # Fast matrix operations using BLAS
-output = vectorized_matmul(x, weights)  # 10-100x faster than naive loops
+output = vectorized_matmul(x, weights)  # Compare against Python loops
 
-# Memory-efficient activations
-activated = fused_gelu(output)  # 60% less memory bandwidth
+# Grouped activation expression
+activated = fused_gelu(output)  # NumPy still creates temporary arrays
 ```
 
 ### What You're NOT Building (Yet)
@@ -406,10 +404,10 @@ High-performance matrix multiplication using optimized BLAS libraries that lever
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `fused_gelu` | `fused_gelu(x: Tensor) -> Tensor` | GELU activation with all operations in single kernel |
+| `fused_gelu` | `fused_gelu(x: Tensor) -> Tensor` | GELU activation in one NumPy expression; temporaries remain |
 | `unfused_gelu` | `unfused_gelu(x: Tensor) -> Tensor` | Baseline implementation for comparison |
 
-: **Fused and baseline GELU kernel functions.** {#tbl-17-acceleration-fusion-functions}
+: **Grouped and staged NumPy GELU functions.** {#tbl-17-acceleration-fusion-functions}
 
 ### Cache-Aware Operations
 
@@ -443,7 +441,10 @@ Here's how vectorized matrix multiplication works in your implementation:
 
 The code in @lst-17-acceleration-vectorized-matmul makes this concrete.
 
-```python
+```{python}
+#| label: lst-17-acceleration-vectorized-matmul
+#| lst-cap: "**Vectorized matmul delegating to BLAS GEMM**."
+#| eval: false
 def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     """Matrix multiplication using optimized BLAS libraries."""
     # Validate shapes - inner dimensions must match
@@ -462,9 +463,7 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     return Tensor(result_data)
 ```
 
-: **Listing 17.1 — Vectorized matmul delegating to BLAS GEMM**. {#lst-17-acceleration-vectorized-matmul}
-
-The magic happens inside `np.matmul`. NumPy delegates to BLAS (Basic Linear Algebra Subprograms) libraries like OpenBLAS or Intel MKL. These libraries have been optimized over decades to exploit every hardware feature: SIMD instructions, cache hierarchies, and multiple cores. The same Python code that takes 800ms with naive loops completes in 8ms with BLAS.
+The magic happens inside `np.matmul`. NumPy delegates to BLAS (Basic Linear Algebra Subprograms) libraries like OpenBLAS or Intel MKL. These libraries have been optimized over decades to exploit every hardware feature: SIMD instructions, cache hierarchies, and multiple cores. The benefit over Python loops depends on matrix shape, array layout, and the linked BLAS backend.
 
 ### BLAS and LAPACK
 
@@ -489,29 +488,42 @@ for i_tile in range(0, M, tile_size):
     for j_tile in range(0, N, tile_size):
         for k_tile in range(0, K, tile_size):
             # Multiply tile blocks that fit in L1/L2 cache
-            C[i_tile:i_tile+tile_size, j_tile:j_tile+tile_size] +=
+            C[i_tile:i_tile+tile_size, j_tile:j_tile+tile_size] += (
                 A[i_tile:i_tile+tile_size, k_tile:k_tile+tile_size] @
                 B[k_tile:k_tile+tile_size, j_tile:j_tile+tile_size]
+            )
 ```
 
-Your `tiled_matmul` implementation demonstrates this concept, though in practice NumPy's BLAS backend already implements optimal tiling:
+Your `tiled_matmul` explicitly iterates over output and reduction tiles. Each block product uses NumPy. The Python loops expose reuse, but can be slower than a single BLAS call, whose implementation already uses blocking:
 
 The code in @lst-17-acceleration-tiled-matmul makes this concrete.
 
-```python
+```{python}
+#| label: lst-17-acceleration-tiled-matmul
+#| lst-cap: "**Cache-aware tiled matmul API**."
+#| eval: false
 def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
-    """Cache-aware matrix multiplication using tiling."""
-    # Validate shapes
-    if a.shape[-1] != b.shape[-2]:
+    """Multiply 2D matrices using explicit blocks."""
+    if len(a.shape) != 2 or len(b.shape) != 2:
+        raise ValueError("Tiled multiplication requires 2D inputs")
+    if a.shape[1] != b.shape[0]:
         raise ValueError(f"Shape mismatch: {a.shape} @ {b.shape}")
+    if not isinstance(tile_size, (int, np.integer)) or tile_size < 1:
+        raise ValueError("tile_size must be a positive integer")
 
-    # BLAS libraries automatically implement cache-aware tiling
-    # tile_size would control block size in explicit implementation
-    result_data = np.matmul(a.data, b.data)
-    return Tensor(result_data)
+    A, B = a.data, b.data
+    M, K = A.shape
+    N = B.shape[1]
+    C = np.zeros((M, N), dtype=A.dtype)
+    for i0 in range(0, M, tile_size):
+        i1 = min(i0 + tile_size, M)
+        for j0 in range(0, N, tile_size):
+            j1 = min(j0 + tile_size, N)
+            for k0 in range(0, K, tile_size):
+                k1 = min(k0 + tile_size, K)
+                C[i0:i1, j0:j1] += A[i0:i1, k0:k1] @ B[k0:k1, j0:j1]
+    return Tensor(C)
 ```
-
-: **Listing 17.2 — Cache-aware tiled matmul API**. {#lst-17-acceleration-tiled-matmul}
 
 ### Kernel Fusion
 
@@ -525,7 +537,10 @@ A naive implementation creates seven intermediate arrays:
 
 The code in @lst-17-acceleration-unfused-gelu makes this concrete.
 
-```python
+```{python}
+#| label: lst-17-acceleration-unfused-gelu
+#| lst-cap: "**Unfused GELU creating seven intermediate tensors**."
+#| eval: false
 def unfused_gelu(x: Tensor) -> Tensor:
     """Unfused GELU - creates many temporary arrays."""
     sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
@@ -542,20 +557,19 @@ def unfused_gelu(x: Tensor) -> Tensor:
     return result
 ```
 
-: **Listing 17.3 — Unfused GELU creating seven intermediate tensors**. {#lst-17-acceleration-unfused-gelu}
-
-Every temporary writes to memory and the next operation reads it back. For a 4,000,000-element tensor, the unfused version issues 56 million memory operations (7 reads + 7 writes per element). At 50 GB/s — typical desktop CPU bandwidth — moving 214 MB takes 4.48 ms. That's just the memory traffic, before any actual arithmetic.
-
-Kernel fusion combines all operations into a single expression:
+The staged version wraps each intermediate in a Tensor. The grouped version below reduces those explicit Tensor wrappers, but NumPy evaluates its operations separately and still allocates temporary arrays. A single Python expression is not a single native kernel.
 
 The code in @lst-17-acceleration-fused-gelu makes this concrete.
 
-```python
+```{python}
+#| label: lst-17-acceleration-fused-gelu
+#| lst-cap: "**Grouped NumPy GELU expression**."
+#| eval: false
 def fused_gelu(x: Tensor) -> Tensor:
-    """Fused GELU - all operations in single kernel."""
+    """Grouped GELU expression; NumPy temporaries remain."""
     sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
 
-    # Single expression - no intermediate arrays
+    # Single expression - NumPy still creates intermediate arrays
     result_data = 0.5 * x.data * (
         1.0 + np.tanh(sqrt_2_over_pi * (x.data + 0.044715 * x.data**3))
     )
@@ -563,14 +577,12 @@ def fused_gelu(x: Tensor) -> Tensor:
     return Tensor(result_data)
 ```
 
-: **Listing 17.4 — Fused GELU collapsing all ops into a single kernel**. {#lst-17-acceleration-fused-gelu}
+**Production comparison:** a compiled fused kernel can keep intermediate values in registers and write only the final output. That can reduce memory traffic compared with separate array operations. TinyTorch's `fused_gelu` demonstrates expression grouping, so its measured runtime includes NumPy temporaries and allocation overhead.
 
-Now there are only two memory operations: read the input, write the output. For the same `{python} fusion_tensor_elements` element tensor, that's just `{python} fusion_fused_traffic_mb` MB of memory traffic, completing in `{python} fusion_fused_time_ms` milliseconds. The fused version is `{python} fusion_speedup`x faster purely from memory bandwidth reduction, even though both versions perform the exact same arithmetic.
+Both TinyTorch versions perform Θ(N) arithmetic on N elements. A model with k separately materialized stages transfers O(kN) elements, while an ideal fused kernel can transfer O(N). For fixed k, both remain linear in N; the distinction is a constant factor in traffic, not a guaranteed wall-clock speedup.
 
-**Complexity framing:** both versions perform Θ(N) FLOPs on an N-element tensor — the asymptotic compute class is identical. What fusion changes is the *memory complexity*: the unfused chain is Θ(kN) bytes transferred for a k-op pipeline (one read + one write per intermediate), while the fused kernel is Θ(N) bytes (one read of x, one write of the result). Seven intermediates yields roughly 7× the traffic. Since element-wise ops are memory-bound, memory complexity — not FLOP count — is what determines wall-clock time. But bandwidth is only half the story when deploying on parallel hardware.
-
-:::{.callout-note title="Systems Implication: Kernel Fusion and Warp Divergence"}
-On modern GPUs, kernel fusion does more than just save memory bandwidth—it preserves computational harmony. GPUs execute threads in lockstep groups called "warps" (typically 32 threads in NVIDIA architectures). If an unfused series of operations introduces complex branching logic (e.g., the `if x > 0` condition in a ReLU activation), threads within the same warp might evaluate the condition differently, taking divergent execution paths. This causes "warp divergence." When a warp diverges, the GPU cannot execute the branches simultaneously; it must serialize the execution of each branch while masking out inactive threads, severely degrading hardware utilization. Expertly authored fused kernels are designed to minimize divergent branches and keep data continuously in registers, ensuring the entire warp executes the math in perfect, high-throughput unison without stalling for memory or serialized branches.
+:::{.callout-note title="Production Comparison: Fusion and GPU Branches"}
+GPU threads execute in groups. When threads in a group take different branches, some execution may be serialized. Fusion can reduce intermediate traffic, but it does not automatically remove divergent branches and may increase register pressure. These trade-offs require a compiled kernel and hardware measurements; they are outside this NumPy exercise.
 :::
 
 ### Parallel Processing
@@ -579,7 +591,7 @@ Modern CPUs have multiple cores that can execute operations simultaneously. BLAS
 
 However, parallel processing has overhead. Creating threads, synchronizing results, and merging data takes time. For small matrices, this overhead exceeds the benefit. BLAS libraries use heuristics to decide when to parallelize: large matrices get multiple threads, small matrices run on a single core.
 
-This is why real speedups are sublinear. A 4-core system typically lands at 3x rather than 4x:
+This is why real speedups are sublinear. Scaling depends on the workload and backend because of:
 
 - Thread creation and destruction overhead
 - Cache-coherence traffic between cores
@@ -590,9 +602,9 @@ This is why real speedups are sublinear. A 4-core system typically lands at 3x r
 
 This module uses NumPy and BLAS for CPU acceleration. Production frameworks go further with specialized hardware:
 
-**GPUs** have thousands of simple cores optimized for data parallelism. A matrix multiplication that takes 100ms on a CPU can complete in 1ms on a GPU - a 100x speedup. But GPUs require explicit data transfer between CPU and GPU memory, and this transfer can dominate small operations.
+**GPUs** have thousands of simple cores optimized for data parallelism. Their benefit depends on matrix size, precision, and hardware. Data transfer between CPU and GPU memory can dominate small operations.
 
-**TPUs** (Tensor Processing Units) are Google's custom accelerators with systolic array architectures designed specifically for matrix multiplication. A TPU can sustain 100+ TFLOPS on matrix operations.
+**TPUs** (Tensor Processing Units) are Google's custom accelerators with systolic array architectures designed specifically for matrix multiplication. Throughput depends on the device generation, precision, and workload.
 
 The acceleration techniques you implement in this module - vectorization, fusion, and cache awareness - apply to all these platforms. The specific implementations differ, but the principles remain constant.
 
@@ -629,7 +641,7 @@ For N=1024 that's 171 FLOPs/byte — about 2048x more arithmetic per byte than e
 
 : **Arithmetic intensity and optimization strategy by operation.** {#tbl-17-acceleration-arithmetic-intensity}
 
-The roofline model plots achievable performance against arithmetic intensity. Your hardware has a peak memory bandwidth (horizontal line) and peak computational throughput (diagonal line). The minimum of these two lines is your performance ceiling.
+The roofline model plots achievable performance against arithmetic intensity. The bandwidth limit rises diagonally with arithmetic intensity, while peak computational throughput forms a horizontal ceiling. The minimum of these two lines is your performance ceiling.
 
 ## Common Errors
 
@@ -693,7 +705,7 @@ Your acceleration techniques demonstrate the same principles PyTorch uses intern
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
 | **Vectorization** | NumPy BLAS | CUDA/cuBLAS for GPU |
-| **Kernel Fusion** | Manual fusion | Automatic via TorchScript/JIT |
+| **Kernel Fusion** | Grouped NumPy expression; temporaries remain | Compiled kernels can fuse eligible operations |
 | **Backend** | CPU only | CPU, CUDA, Metal, ROCm |
 | **Multi-threading** | Automatic (OpenBLAS) | Configurable thread pools |
 | **Operations** | ~5 accelerated ops | 2000+ optimized ops |
@@ -716,7 +728,7 @@ w = Tensor(np.random.randn(512, 256))
 # Vectorized matrix multiplication
 h = vectorized_matmul(x, w)
 
-# Fused activation
+# Grouped NumPy activation
 output = fused_gelu(h)
 ```
 
@@ -731,7 +743,7 @@ w = torch.randn(512, 256, device='cuda')
 # Vectorized (cuBLAS on GPU)
 h = x @ w
 
-# Fused via JIT compilation
+# Scripted expression; fusion depends on backend and execution
 @torch.jit.script
 def fused_gelu(x):
     return 0.5 * x * (1 + torch.tanh(0.797885 * (x + 0.044715 * x**3)))
@@ -744,9 +756,9 @@ Let's walk through the key differences:
 
 - **Line 1 (Import)**: TinyTorch provides explicit acceleration functions; PyTorch integrates acceleration into the core tensor operations.
 - **Line 4-5 (Device)**: TinyTorch runs on CPU via NumPy; PyTorch supports `device='cuda'` for GPU acceleration.
-- **Line 8 (Matrix multiply)**: Both use optimized BLAS, but PyTorch uses cuBLAS on GPU for 10-100x additional speedup.
-- **Line 11-13 (Fusion)**: TinyTorch requires manual fusion; PyTorch's JIT compiler can automatically fuse operations.
-- **Performance**: For this example, TinyTorch might take 5ms on CPU; PyTorch takes 0.05ms on GPU - a 100x speedup.
+- **Line 8 (Matrix multiply)**: Both use optimized libraries; CPU and GPU runtimes depend on the workload and hardware.
+- **Line 11-13 (Fusion)**: TinyTorch groups a NumPy expression. A production compiler may fuse eligible operations; scripting alone does not guarantee fusion.
+- **Performance**: Benchmark both implementations with warmup and appropriate device synchronization.
 
 :::{.callout-tip title="What's Identical"}
 
@@ -755,21 +767,15 @@ The acceleration principles: vectorization reduces instruction count, fusion red
 
 ### Why Acceleration Matters at Scale
 
-Three numbers explain why every framework team obsesses over kernel performance:
-
-- **GPT-3 training**: 175B parameters × 300B tokens ≈ **10²³ FLOPs**. Naive code: centuries. Optimized TPUs: weeks.
-- **Real-time inference**: 1000 requests/second forces **sub-millisecond latency** per request. Every 2x speedup doubles throughput at the same dollar cost.
-- **Cost efficiency**: cloud GPU time runs $2–10/hour. A 2x speedup saves **$1000–5000/week** on a single production model.
-
-At this scale, the percent improvements you ship in this module compound into millions in savings — and into capabilities that simply weren't reachable on the slow path.
+Kernel performance matters when an operation repeats across layers, batches, and requests. A faster kernel helps end-to-end performance only to the extent that it reduces the workload's total time. Measure that fraction before extrapolating a microbenchmark result to training cost or serving capacity.
 
 ## Check Your Understanding
 
 :::{.callout-tip title="Check Your Understanding — Acceleration"}
 Before moving on, verify you can articulate each of the following:
 
-- [ ] What kernel fusion actually fuses, and how warp divergence on GPUs can erase the memory-bandwidth gain.
-- [ ] Why matrix multiplication sits at ~171 FLOPs/byte (compute-bound) while GELU sits at ~1 FLOPs/byte (memory-bound), and what each regime demands.
+- [ ] Why a grouped NumPy expression differs from native kernel fusion, and what measurements can establish its benefit.
+- [ ] How to estimate arithmetic intensity and compare it with the hardware roofline before classifying an operation’s bottleneck.
 - [ ] How BLAS Level 1/2/3 operations differ in arithmetic intensity, and why every ML framework ultimately routes through GEMM.
 - [ ] Why cache-aware tiling matters once the working set exceeds L2, and how to pick a tile size from the cache budget.
 
@@ -791,7 +797,7 @@ This high arithmetic intensity — compared to ~0.08 for element-wise ops — is
 
 **Q2: Memory Bandwidth Savings**
 
-Your fused GELU processes a tensor with 1,000,000 elements (~4 MB as float32). The unfused version creates 7 intermediate arrays. How much memory bandwidth does fusion save?
+Consider an ideal compiled kernel processing 1,000,000 float32 elements. A simplified staged model transfers 16 full arrays, while the fused model transfers two. How much traffic does the model save? This is not the traffic measured by TinyTorch’s grouped NumPy expression.
 
 :::{.callout-tip collapse="true" title="Answer"}
 
@@ -801,7 +807,7 @@ Your fused GELU processes a tensor with 1,000,000 elements (~4 MB as float32). T
 
 **Savings**: 61 − 8 ≈ **53 MB saved (~87.5% reduction)**
 
-At ~50 GB/s CPU bandwidth that's roughly 1 ms saved per GELU call. A transformer with 96 GELU activations per forward pass recovers ~96 ms — a 10–20% throughput win on inference for free.
+The simplified model saves 56,000,000 bytes (about 53.4 MiB). Actual runtime depends on allocation, cache reuse, arithmetic, and the implementation; traffic alone does not establish end-to-end throughput.
 :::
 
 **Q3: Cache Tiling**
@@ -831,36 +837,28 @@ Your vectorized matmul completes a 1024×1024 multiplication in 10 ms. The opera
 
 GFLOPS = 2,150,000,000 FLOPs / (0.01 s × 1,000,000,000) = **215 GFLOPS**
 
-For reference:
-
-- Modern CPU peak: 500–1000 GFLOPS (AVX-512)
-- Your efficiency: 215 / 500 = **~43% of peak** (typical for real code)
-- GPU equivalent: ~50 TFLOPS (about 230x faster than a single CPU core)
+If the measured device has a peak of 500 GFLOPS at this precision, the achieved fraction is 215 / 500 = **43%**. Use the actual device specification and execution configuration when making this comparison.
 :::
 
 **Q5: Speedup from Fusion**
 
-Unfused GELU takes 8 ms on a 2000×2000 tensor. Fused GELU takes 2.5 ms. What percentage of the unfused time was memory overhead?
+Suppose one GELU implementation takes 8 ms and another takes 2.5 ms on the same input. What is the speedup, and can timing alone identify memory overhead?
 
 :::{.callout-tip collapse="true" title="Answer"}
 
 Speedup = 8 ms / 2.5 ms = **3.2x faster**
 
-Both versions perform the same arithmetic, so the gap is memory bandwidth:
-
-- Memory overhead = (8 − 2.5) / 8 = **68.75%**
-
-Nearly **69% of the unfused version's runtime was spent waiting for memory.** That's typical for element-wise operations with low arithmetic intensity.
+Runtime decreased by (8 − 2.5) / 8 = **68.75%**. Timing alone cannot attribute that difference to memory stalls. Allocation, Tensor wrapping, cache behavior, and arithmetic execution can all contribute.
 :::
 
 ## Key Takeaways
 
 - **Arithmetic intensity decides the ceiling:** FLOPs-per-byte places every operation on the roofline and tells you whether vectorization (compute-bound) or fusion (memory-bound) is the right lever.
-- **Fusion changes memory complexity, not FLOP complexity:** Θ(kN) bytes collapses to Θ(N) bytes when k element-wise ops are fused — identical arithmetic, dramatically less traffic.
-- **GEMM dominates because it is compute-bound:** ~171 FLOPs/byte at N=1024 is why decades of hardware design revolve around matrix multiplication and why BLAS Level-3 is the hot path in every framework.
+- **Native fusion can reduce intermediate traffic:** a compiled kernel can keep intermediate values in registers. TinyTorch’s grouped NumPy expression still creates temporaries, so benchmark it independently.
+- **GEMM enables reuse:** the ideal traffic model gives ~171 FLOPs/byte at N=1024. Whether that reaches the compute ceiling depends on the hardware roofline and actual data movement.
 - **Hardware-aware, not clever:** acceleration rarely needs a new algorithm — it needs code that stops fighting the cache, the SIMD lanes, and the warp scheduler.
 
-**Coming next:** Module 18 closes the loop by eliminating the call entirely — KV caching turns autoregressive generation from O(n²) to O(n) work by memoizing past keys and values.
+**Coming next:** Module 18 caches past keys and values. For a prefix of length n, the new token computes O(n) attention scores per step instead of recomputing O(n²) scores for the full prefix; attention still grows with context length.
 
 ## Further Reading
 
@@ -883,7 +881,7 @@ For students who want to understand the academic foundations and implementation 
 
 ## What's Next
 
-You just made each operation as cheap as the hardware allows. The next move is to skip operations entirely.
+You have compared implementations of the same operations. Next, reuse results to avoid repeated computation.
 
 :::{.callout-note title="Coming Up: Module 18 - Memoization"}
 
@@ -896,7 +894,7 @@ Acceleration shrinks the cost of every call. **Memoization eliminates the call.*
 
 | Module | What It Does | Your Acceleration In Action |
 |--------|--------------|---------------------------|
-| **18: Memoization** | Cache repeated computations | Fused kernels + KV cache minimize memory traffic |
+| **18: Memoization** | Cache repeated computations | Vectorized operations complement KV reuse |
 | **19: Benchmarking** | Systematic performance measurement | `benchmark(vectorized_matmul, sizes=[128, 256, 512])` |
 | **20: Capstone** | Complete optimized model | Acceleration throughout model pipeline |
 

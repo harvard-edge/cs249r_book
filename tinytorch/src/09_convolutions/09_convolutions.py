@@ -1267,7 +1267,8 @@ class MaxPool2dFunction(Function):
             Gradient w.r.t. input
         """
         x, = self.inputs
-        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+        stride_h, stride_w = self.layer.stride
+        padding, kernel_size = self.layer.padding, self.layer.kernel_size
         batch_size, channels, in_height, in_width = x.shape
         _, _, out_height, out_width = self.output.shape
         kernel_h, kernel_w = kernel_size
@@ -1287,23 +1288,29 @@ class MaxPool2dFunction(Function):
             for c in range(channels):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
-                        in_h_start = out_h * stride
-                        in_w_start = out_w * stride
+                        in_h_start = out_h * stride_h
+                        in_w_start = out_w * stride_w
 
                         # Find max position in this window
                         max_val = -np.inf
-                        max_h, max_w = 0, 0
+                        max_h, max_w = None, None
                         for k_h in range(kernel_h):
                             for k_w in range(kernel_w):
                                 in_h = in_h_start + k_h
                                 in_w = in_w_start + k_w
+                                # Padding is not an input candidate, even when
+                                # real values also equal negative infinity.
+                                if not (padding <= in_h < padding + in_height and
+                                        padding <= in_w < padding + in_width):
+                                    continue
                                 val = padded_input[b, c, in_h, in_w]
-                                if val > max_val:
+                                if max_h is None or val > max_val:
                                     max_val = val
                                     max_h, max_w = in_h, in_w
 
                         # Route gradient to max position
-                        grad_input_padded[b, c, max_h, max_w] += grad_output[b, c, out_h, out_w]
+                        if max_h is not None:
+                            grad_input_padded[b, c, max_h, max_w] += grad_output[b, c, out_h, out_w]
 
         # Remove padding
         if padding > 0:
@@ -1325,7 +1332,7 @@ class MaxPool2d:
 
     Args:
         kernel_size: Size of pooling window (int or tuple)
-        stride: Stride of pooling operation (default: same as kernel_size)
+        stride: Integer or (height, width) strides (default: kernel_size)
         padding: Zero-padding added to input (default: 0)
     """
 
@@ -1351,9 +1358,11 @@ class MaxPool2d:
 
         # Default stride equals kernel_size (non-overlapping)
         if stride is None:
-            self.stride = self.kernel_size[0]
+            self.stride = self.kernel_size
+        elif isinstance(stride, int):
+            self.stride = (stride, stride)
         else:
-            self.stride = stride
+            self.stride = tuple(stride)
 
         self.padding = padding
         ### END SOLUTION
@@ -1378,8 +1387,11 @@ class MaxPool2d:
         """
         ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
-        out_height = (in_h + 2 * self.padding - kernel_h) // self.stride + 1
-        out_width = (in_w + 2 * self.padding - kernel_w) // self.stride + 1
+        stride_h, stride_w = self.stride
+        out_height = (in_h + 2 * self.padding - kernel_h) // stride_h + 1
+        out_width = (in_w + 2 * self.padding - kernel_w) // stride_w + 1
+        if out_height <= 0 or out_width <= 0:
+            raise ValueError("Pooling kernel must fit within the padded input")
         return out_height, out_width
         ### END SOLUTION
 
@@ -1407,7 +1419,7 @@ class MaxPool2d:
                         output[b, c, oh, ow] = max_val
 
         HINT: Initialize max_val to -np.inf so any real value is larger.
-        The input position is (oh * stride + k_h, ow * stride + k_w).
+        The input position is (oh * stride_h + k_h, ow * stride_w + k_w).
         """
         ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
@@ -1417,8 +1429,8 @@ class MaxPool2d:
             for c in range(channels):
                 for oh in range(out_h):
                     for ow in range(out_w):
-                        in_h_start = oh * self.stride
-                        in_w_start = ow * self.stride
+                        in_h_start = oh * self.stride[0]
+                        in_w_start = ow * self.stride[1]
 
                         max_val = -np.inf
                         for k_h in range(kernel_h):
@@ -1673,7 +1685,8 @@ class AvgPool2dFunction(Function):
             Gradient w.r.t. input
         """
         x, = self.inputs
-        stride, padding, kernel_size = self.layer.stride, self.layer.padding, self.layer.kernel_size
+        stride_h, stride_w = self.layer.stride
+        padding, kernel_size = self.layer.padding, self.layer.kernel_size
         batch_size, channels, in_height, in_width = x.shape
         _, _, out_height, out_width = self.output.shape
         kernel_h, kernel_w = kernel_size
@@ -1695,8 +1708,8 @@ class AvgPool2dFunction(Function):
             for c in range(channels):
                 for out_h in range(out_height):
                     for out_w in range(out_width):
-                        in_h_start = out_h * stride
-                        in_w_start = out_w * stride
+                        in_h_start = out_h * stride_h
+                        in_w_start = out_w * stride_w
                         share = grad_output[b, c, out_h, out_w] / kernel_area
                         for k_h in range(kernel_h):
                             for k_w in range(kernel_w):
@@ -1722,7 +1735,7 @@ class AvgPool2d:
 
     Args:
         kernel_size: Size of pooling window (int or tuple)
-        stride: Stride of pooling operation (default: same as kernel_size)
+        stride: Integer or (height, width) strides (default: kernel_size)
         padding: Zero-padding added to input (default: 0)
     """
 
@@ -1746,9 +1759,11 @@ class AvgPool2d:
 
         # Default stride equals kernel_size (non-overlapping)
         if stride is None:
-            self.stride = self.kernel_size[0]
+            self.stride = self.kernel_size
+        elif isinstance(stride, int):
+            self.stride = (stride, stride)
         else:
-            self.stride = stride
+            self.stride = tuple(stride)
 
         self.padding = padding
         ### END SOLUTION
@@ -1773,8 +1788,11 @@ class AvgPool2d:
         """
         ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
-        out_height = (in_h + 2 * self.padding - kernel_h) // self.stride + 1
-        out_width = (in_w + 2 * self.padding - kernel_w) // self.stride + 1
+        stride_h, stride_w = self.stride
+        out_height = (in_h + 2 * self.padding - kernel_h) // stride_h + 1
+        out_width = (in_w + 2 * self.padding - kernel_w) // stride_w + 1
+        if out_height <= 0 or out_width <= 0:
+            raise ValueError("Pooling kernel must fit within the padded input")
         return out_height, out_width
         ### END SOLUTION
 
@@ -1803,7 +1821,7 @@ class AvgPool2d:
                         output[b, c, oh, ow] = window_sum / (kernel_h * kernel_w)
 
         HINT: Unlike max pooling, you accumulate a sum and then divide.
-        The input position is (oh * stride + k_h, ow * stride + k_w).
+        The input position is (oh * stride_h + k_h, ow * stride_w + k_w).
         """
         ### BEGIN SOLUTION role="scaffold"
         kernel_h, kernel_w = self.kernel_size
@@ -1813,8 +1831,8 @@ class AvgPool2d:
             for c in range(channels):
                 for oh in range(out_h):
                     for ow in range(out_w):
-                        in_h_start = oh * self.stride
-                        in_w_start = ow * self.stride
+                        in_h_start = oh * self.stride[0]
+                        in_w_start = ow * self.stride[1]
 
                         window_sum = 0.0
                         for k_h in range(kernel_h):
@@ -2130,9 +2148,12 @@ Training:  normalize with THIS BATCH's mean/var,  update the running stats
 Eval:      normalize with the RUNNING mean/var,   update nothing
 ```
 
-That mode switch is the part people get wrong in production. A model left in
-training mode at inference time normalizes a batch of one against itself, which
-produces all zeros before gamma and beta -- confident, stable, and meaningless.
+That mode switch matters at inference time. In training mode, BatchNorm2d uses
+statistics over the batch AND spatial dimensions, so predictions depend on the
+current images and the running statistics keep changing. A batch of one can
+still have nonzero variance across its pixels; only a constant channel becomes
+all zeros before gamma and beta. Eval mode uses the learned running statistics
+for consistent predictions.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "batchnorm2d-class", "solution": true}
@@ -3203,7 +3224,7 @@ def test_module():
     bn1.eval()
     bn2.eval()
 
-    # Run inference with single sample (would fail with batch stats)
+    # Run single-sample inference using frozen running statistics
     single_image = Tensor(rng.standard_normal((1, 3, 32, 32)))
     x = conv1(single_image)
     x = bn1(x)  # Uses running stats, not batch stats

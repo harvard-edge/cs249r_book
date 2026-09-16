@@ -594,7 +594,7 @@ class BenchmarkReport:
         5. Throughput - Samples per second when the whole test batch goes through
            one forward call, timed separately from latency (see Foundations)
         """
-        if X_test.shape[0] == 0:
+        if len(X_test.shape) == 0 or X_test.shape[0] == 0:
             raise ValueError("X_test must contain at least one sample")
         y_test = np.asarray(y_test)
         if y_test.shape != (X_test.shape[0],):
@@ -609,9 +609,19 @@ class BenchmarkReport:
         )
         model_size_mb = self.measure_memory(model)
 
-        # Measure accuracy
+        # Validate classification outputs before argmax: NaN scores can otherwise
+        # silently select class zero and make a diverged model look accurate.
         predictions = model.forward(X_test)
-        pred_labels = np.argmax(predictions.data, axis=1)
+        scores = np.asarray(predictions.data)
+        if scores.ndim != 2 or scores.shape[0] != X_test.shape[0] or scores.shape[1] == 0:
+            raise ValueError("Predictions must have shape (samples, classes) with at least one class")
+        if not np.issubdtype(scores.dtype, np.number) or np.iscomplexobj(scores) or not np.all(np.isfinite(scores)):
+            raise ValueError("Prediction scores must be finite real numbers")
+        if not np.issubdtype(y_test.dtype, np.integer):
+            raise ValueError("y_test must contain integer class indices")
+        if np.any(y_test < 0) or np.any(y_test >= scores.shape[1]):
+            raise ValueError("y_test class indices must be within the prediction classes")
+        pred_labels = np.argmax(scores, axis=1)
         accuracy = np.mean(pred_labels == y_test)
 
         # Latency: untimed warmup, then num_runs single-sample calls timed one by one
@@ -1225,11 +1235,40 @@ def validate_submission_schema(submission: Dict[str, Any]) -> bool:
         for metric in required_metrics:
             assert metric in metrics, f"Missing metric in {section}: {metric}"
             value = metrics[metric]
-            assert isinstance(value, (int, float)) and np.isfinite(value), f"{section}.{metric} must be finite"
+            assert type(value) in (int, float) and np.isfinite(value), f"{section}.{metric} must be finite numeric data"
         assert 0 <= metrics['accuracy'] <= 1, "Accuracy must be in [0, 1]"
-        assert metrics['parameter_count'] > 0, "Parameter count must be positive"
+        assert type(metrics['parameter_count']) is int and metrics['parameter_count'] > 0, "Parameter count must be a positive integer"
         assert metrics['model_size_mb'] > 0, "Model size must be positive"
         assert metrics['latency_ms_mean'] > 0, "Latency must be positive"
+        # Older reports may omit these fields; present values must still obey
+        # the measurement contract because medians drive ranking and speedup.
+        for metric in ('latency_ms_median', 'latency_ms_std', 'throughput_samples_per_sec'):
+            if metric in metrics:
+                value = metrics[metric]
+                assert type(value) in (int, float) and np.isfinite(value), f"{section}.{metric} must be finite numeric data"
+                if metric == 'latency_ms_std':
+                    assert value >= 0, "Latency standard deviation must be nonnegative"
+                else:
+                    assert value > 0, f"{section}.{metric} must be positive"
+
+    # Improvements are optional, but any supplied comparison must agree with
+    # the two reports. Use the same median/mean fallback as generate_submission.
+    if 'improvements' in submission:
+        assert 'optimized' in submission, "Improvements require an optimized report"
+        improvements = submission['improvements']
+        assert isinstance(improvements, dict), "Improvements should be a dict"
+        baseline = submission['baseline']['metrics']
+        optimized = submission['optimized']['metrics']
+        latency_key = 'latency_ms_median' if all('latency_ms_median' in m for m in (baseline, optimized)) else 'latency_ms_mean'
+        expected = {
+            'speedup': baseline[latency_key] / max(optimized[latency_key], 1e-6),
+            'compression_ratio': baseline['model_size_mb'] / max(optimized['model_size_mb'], 1e-9),
+            'accuracy_delta': optimized['accuracy'] - baseline['accuracy'],
+        }
+        for metric, expected_value in expected.items():
+            value = improvements.get(metric)
+            assert type(value) in (int, float) and np.isfinite(value), f"improvements.{metric} must be finite numeric data"
+            assert np.isclose(value, expected_value, rtol=1e-6, atol=1e-12), f"improvements.{metric} disagrees with reported measurements"
 
     # Check system info
     system_info = submission['system_info']

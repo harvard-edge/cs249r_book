@@ -102,7 +102,7 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import Softmax
 
-MASK_VALUE = -1e9  # Large negative value used for attention masking (becomes ~0 after softmax)
+MASK_VALUE = float("-inf")  # Hard exclusion: exp(-inf) is exactly zero
 
 # %% [markdown]
 """
@@ -269,7 +269,7 @@ Step-by-Step Attention Computation:
 
 3. Masking (optional):
    For causal attention: scores[i,j] = -∞ if j > i
-   (in code, a large negative number such as -1e9 stands in for -∞)
+   (masked_fill replaces blocked scores with -infinity while preserving gradients)
 
    Causal Mask (lower triangular):
    [  OK  -∞  -∞  -∞ ]
@@ -415,9 +415,9 @@ if __name__ == "__main__":
 ### Applying the Causal Mask
 
 In autoregressive models (like GPT), each token can only attend to tokens
-that came before it -- not future tokens. We enforce this by adding a very
-large negative number (MASK_VALUE = -1e9, standing in for -infinity) to future
-positions before softmax, which drives their attention weight to zero.
+that came before it -- not future tokens. We enforce this by replacing future scores with negative infinity before
+softmax. Their attention weights are exactly zero, even when a blocked score
+was very large. The masked_fill operation also blocks their gradients.
 
 ```
 Causal Mask (4 tokens):       After masking:
@@ -433,39 +433,39 @@ Causal Mask (4 tokens):       After masking:
 # %% nbgrader={"grade": false, "grade_id": "attn-apply-mask", "solution": true}
 #| export
 def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
-    """Apply causal mask by pushing masked positions toward -infinity.
+    """Apply a binary attention mask by replacing blocked scores with -infinity.
 
-    TODO: Add large negative values to positions where mask is 0
+    TODO: Replace scores with negative infinity where mask is 0
 
     APPROACH:
-    1. Compute additive mask: (1 - mask) * MASK_VALUE
-    2. Add to scores (masked positions drop to ~MASK_VALUE = -1e9, which
-       softmax treats as -inf; unmasked positions are unchanged)
+    1. Broadcast the binary mask to the scores and require an allowed key per query
+    2. Use scores.masked_fill to replace blocked positions with MASK_VALUE
+       (-infinity); unmasked scores and their gradients pass through unchanged
 
     EXAMPLE:
     >>> scores = Tensor(np.ones((1, 3, 3)))
     >>> mask = Tensor(np.tril(np.ones((1, 3, 3))))  # lower triangle
     >>> masked = _apply_mask(scores, mask)
-    >>> print(masked.data[0, 0, 1])  # -1e9 (future position masked)
+    >>> print(masked.data[0, 0, 1])  # -inf (future position masked)
 
     HINT: mask=0 means "block this position", mask=1 means "allow"
     """
     ### BEGIN SOLUTION role="scaffold"
     if np.any((mask.data != 0) & (mask.data != 1)):
         raise ValueError("Attention mask must contain only 0 (blocked) or 1 (allowed)")
-    if np.any(np.sum(mask.data, axis=-1) == 0):
+    allowed = np.broadcast_to(mask.data, scores.shape)
+    if np.any(np.sum(allowed, axis=-1) == 0):
         raise ValueError("Each query must have at least one allowed key")
-    adder = (Tensor(np.ones_like(mask.data)) - mask) * MASK_VALUE
-    return scores + adder
+    return scores.masked_fill(allowed == 0, MASK_VALUE)
     ### END SOLUTION
 
 # %% [markdown]
 """
 ### 🧪 Unit Test: Causal Masking
 
-**What we're testing**: Future positions get set to large negative values
+**What we're testing**: Future positions get set to negative infinity
 **Why it matters**: Without masking, GPT could "cheat" by looking at future tokens
-**Expected**: Masked positions ~ -1e9, unmasked positions unchanged
+**Expected**: Masked positions are -infinity, unmasked positions unchanged
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-attn-mask", "locked": true, "points": 5}
@@ -475,8 +475,8 @@ def test_unit_apply_mask():
     scores = Tensor(np.ones((1, 3, 3)))
     mask = Tensor(np.tril(np.ones((1, 3, 3))))
     masked = _apply_mask(scores, mask)
-    # Future positions should be large negative
-    assert masked.data[0, 0, 1] < -1e8, "Future position not masked"
+    # Future positions must be excluded even for very large scores
+    assert np.isneginf(masked.data[0, 0, 1]), "Future position not masked"
     # Past positions should be unchanged
     assert np.allclose(masked.data[0, 0, 0], 1.0), "Past position was modified"
     print("✅ Causal masking works correctly!")
@@ -538,7 +538,7 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional
     SUB-PROBLEMS (you already implemented these):
     - _compute_attention_scores: Q @ K^T similarity matrix
     - _scale_scores: divide by sqrt(d_k) for stable softmax
-    - _apply_mask: block future positions with MASK_VALUE (~ -inf)
+    - _apply_mask: block future positions with MASK_VALUE (-inf)
 
     Args:
         Q: Query tensor of shape (..., seq_len, d_k)
@@ -1427,7 +1427,7 @@ Answer these to deepen your understanding of attention operations and their syst
 
 **Consider**:
 - A typical transformer has attention + FFN layers
-- FFN parameters scale as O(n x d^2) where d is embed_dim
+- FFN parameters scale as O(d^2), compute as O(n x d^2), and activations as O(n x d) for a fixed expansion ratio, where d is embed_dim
 - Attention activations scale as O(n^2)
 - For short sequences (n << d): Which dominates? _____
 - For long sequences (n >> d): Which dominates? _____
@@ -1463,7 +1463,7 @@ Answer these to deepen your understanding of attention operations and their syst
 - You set masked positions to -infinity before softmax
 - In a seq_len=n causal mask, roughly n^2/2 positions are masked (upper triangle)
 - Does your implementation skip computation for masked positions? _____
-- Does setting scores to -1e9 before softmax save compute? _____
+- Does replacing scores with -infinity before softmax save compute? _____
 
 **Think about**:
 - What would you need to change to actually skip masked computation?

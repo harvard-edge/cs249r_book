@@ -665,7 +665,17 @@ class Benchmark:
         ### BEGIN SOLUTION role="scaffold"
         if warmup_runs < 0 or measurement_runs <= 0:
             raise ValueError("warmup_runs must be nonnegative and measurement_runs positive")
-        self.models = models
+        self.models = list(models)
+        # Keep display names when possible, but never let copied names overwrite results.
+        self.model_names = []
+        for i, model in enumerate(self.models):
+            stem = str(getattr(model, 'name', None) or f'model_{i}')
+            name = stem
+            suffix = 1
+            while name in self.model_names:
+                name = f'{stem}_{suffix}'
+                suffix += 1
+            self.model_names.append(name)
         self.datasets = datasets
         self.warmup_runs = warmup_runs
         self.measurement_runs = measurement_runs
@@ -764,7 +774,7 @@ def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28,
     results = {}
 
     for i, model in enumerate(self.models):
-        model_name = getattr(model, 'name', f'model_{i}')
+        model_name = self.model_names[i]
 
         # Create input tensor for profiling
         input_tensor = Tensor(rng.standard_normal(input_shape).astype(np.float32))
@@ -1006,7 +1016,7 @@ def benchmark_run_accuracy_benchmark(self, simulate: bool = False) -> Dict[str, 
     results = {}
 
     for i, model in enumerate(self.models):
-        model_name = getattr(model, 'name', f'model_{i}')
+        model_name = self.model_names[i]
         accuracies = []
         simulated = False
 
@@ -1117,7 +1127,7 @@ def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 
     results = {}
 
     for i, model in enumerate(self.models):
-        model_name = getattr(model, 'name', f'model_{i}')
+        model_name = self.model_names[i]
         memory_usages = []
 
         for run in range(self.measurement_runs):
@@ -1455,9 +1465,12 @@ Models ──> Latency Benchmark ──┐
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-run", "solution": true}
 #| exporti
-def benchsuite_run_full_benchmark(self, simulate: bool = False) -> Dict[str, Dict[str, BenchmarkResult]]:
+def benchsuite_run_full_benchmark(self, simulate: bool = False,
+                                 input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, Dict[str, BenchmarkResult]]:
     """
-    Run all benchmark categories.
+    Run all benchmark categories using input_shape for latency and memory.
+
+    Choose the shape of a representative inference batch for your model.
 
     TODO: Orchestrate latency, accuracy, memory, and energy benchmarks
 
@@ -1477,13 +1490,13 @@ def benchsuite_run_full_benchmark(self, simulate: bool = False) -> Dict[str, Dic
 
     # Run all benchmark types
     print("  📊 Measuring latency...")
-    self.results['latency'] = self.benchmark.run_latency_benchmark()
+    self.results['latency'] = self.benchmark.run_latency_benchmark(input_shape=input_shape)
 
     print("  🎯 Measuring accuracy...")
     self.results['accuracy'] = self.benchmark.run_accuracy_benchmark(simulate=simulate)
 
     print("  💾 Measuring memory usage...")
-    self.results['memory'] = self.benchmark.run_memory_benchmark()
+    self.results['memory'] = self.benchmark.run_memory_benchmark(input_shape=input_shape)
 
     # Simulate energy benchmark (would require specialized hardware)
     print("  ⚡ Estimating energy efficiency...")
@@ -1574,7 +1587,7 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
     energy_results = {}
 
     for i, model in enumerate(self.models):
-        model_name = getattr(model, 'name', f'model_{i}')
+        model_name = self.benchmark.model_names[i]
 
         # Energy roughly correlates with latency * memory usage
         if 'latency' in self.results and 'memory' in self.results:
@@ -1703,7 +1716,10 @@ def benchsuite_plot_results(self, save_plots: bool = True):
                 stds.append(result.std)
 
             bars = ax.bar(model_names, means, yerr=stds, capsize=5, alpha=0.7)
-            ax.set_title(f'{metric.capitalize()} Comparison')
+            ax.set_title(f'{metric.capitalize()} Comparison' +
+                         (' (estimated)' if metric == 'energy' else
+                          ' (synthetic probe)' if any(r.metadata.get('simulated', False)
+                          for r in self.results[metric].values()) else ''))
             ax.set_ylabel(f'{metric.capitalize()} ({unit})')
             ax.tick_params(axis='x', rotation=45)
 
@@ -1898,7 +1914,10 @@ def _benchsuite_format_results_summary(self) -> List[str]:
     lines.append("")
 
     for metric_type, results in self.results.items():
-        lines.append(f"### {metric_type.capitalize()} Results")
+        qualifier = " (estimated)" if any(r.metadata.get('estimated', False) for r in results.values()) else ""
+        if any(r.metadata.get('simulated', False) for r in results.values()):
+            qualifier += " (synthetic probe)"
+        lines.append(f"### {metric_type.capitalize()} Results{qualifier}")
         lines.append("")
 
         # Find best performer
@@ -2617,32 +2636,40 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
       model for calling itself 'efficient' measures marketing, not the model
     """
     ### BEGIN SOLUTION role="scaffold"
+    binary = benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']
+    num_classes = 2 if binary else 10
+    if num_runs <= 0 or len(predictions) != num_runs:
+        raise ValueError("Accuracy needs one prediction per test input")
     rng = np.random.default_rng(self.random_seed)
-    if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']:
-        # Binary classification
-        true_labels = np.asarray(labels) if labels is not None else rng.integers(0, 2, num_runs)
-        predicted_labels = []
-        for pred in predictions:
-            pred_array = _extract_pred_array(pred)
-            if len(pred_array) >= 2:
-                predicted_labels.append(1 if pred_array[1] > pred_array[0] else 0)
-            else:
-                predicted_labels.append(1 if pred_array[0] > 0.5 else 0)
-    else:
-        # Multi-class classification (image_classification only)
-        num_classes = 10
-        true_labels = np.asarray(labels) if labels is not None else rng.integers(0, num_classes, num_runs)
-        predicted_labels = []
-        for pred in predictions:
-            pred_array = _extract_pred_array(pred)
-            predicted_labels.append(np.argmax(pred_array) % num_classes)
+    true_labels = np.asarray(labels) if labels is not None else rng.integers(0, num_classes, num_runs)
+    if (true_labels.shape != (num_runs,)
+            or not np.issubdtype(true_labels.dtype, np.integer)
+            or np.any(true_labels < 0) or np.any(true_labels >= num_classes)):
+        raise ValueError("labels must contain one integer class index in the task's range per input")
 
-    # Calculate accuracy: agreement between predictions and the reference labels.
-    # No bonus, no adjustment, no smoothing. The number is what it is.
-    correct_predictions = sum(1 for true, pred in zip(true_labels, predicted_labels) if true == pred)
-    accuracy = correct_predictions / num_runs
+    predicted_labels = []
+    for pred in predictions:
+        raw = np.asarray(pred.data if isinstance(pred, Tensor) else pred)
+        # Each timed input represents one example: accept a score vector or a
+        # singleton batch, never flatten several examples into one prediction.
+        if raw.ndim == 2 and raw.shape[0] == 1:
+            raw = raw[0]
+        if raw.ndim == 0 and binary:
+            raw = raw.reshape(1)
+        allowed_widths = (1, 2) if binary else (10,)
+        if raw.ndim != 1 or raw.size not in allowed_widths:
+            raise ValueError(f"Prediction must contain {allowed_widths} class scores for one example")
+        if not np.issubdtype(raw.dtype, np.number) or np.iscomplexobj(raw) or not np.all(np.isfinite(raw)):
+            raise ValueError("Prediction class scores must be finite real numbers")
+        raw = _extract_pred_array(raw)
+        if binary and raw.size == 1:
+            if not 0 <= raw[0] <= 1:
+                raise ValueError("A single binary score must be a probability in [0, 1]")
+            predicted_labels.append(int(raw[0] > 0.5))
+        else:
+            predicted_labels.append(int(np.argmax(raw)))
 
-    return accuracy
+    return float(np.mean(true_labels == predicted_labels))
     ### END SOLUTION
 
 MLPerf._run_accuracy_test = _mlperf_run_accuracy_test
@@ -3394,8 +3421,11 @@ def _collect_base_metrics(base_name: str, benchmark_results: Dict) -> Dict[str, 
     ### BEGIN SOLUTION role="scaffold"
     base_metrics = {}
     for metric_type, results in benchmark_results.items():
+        if base_name in results:
+            base_metrics[metric_type] = results[base_name].mean
+            continue
         for model_name, result in results.items():
-            if model_name == base_name or model_name.startswith(base_name + "_"):
+            if model_name.startswith(base_name + "_"):
                 base_metrics[metric_type] = result.mean
                 break
     return base_metrics
@@ -3677,7 +3707,8 @@ analyze_optimization_techniques Pipeline:
 # %% nbgrader={"grade": false, "grade_id": "benchmark-comparison", "solution": true}
 #| export
 def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any],
-                                  datasets: List[Any], simulate: bool = False) -> Dict[str, Any]:
+                                  datasets: List[Any], simulate: bool = False,
+                                  input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, Any]:
     """
     Compare base model against various optimization techniques.
 
@@ -3694,6 +3725,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
         base_model: Baseline model (unoptimized)
         optimized_models: List of models with different optimizations applied
         datasets: List of datasets for evaluation
+        input_shape: Representative inference batch shape for latency and memory
 
     Returns:
         Dictionary with 'base_metrics', 'optimized_results', 'improvements', 'recommendations'
@@ -3707,10 +3739,10 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
     suite = BenchmarkSuite(all_models, datasets)
 
     print("🧪 Running optimization comparison benchmark...")
-    benchmark_results = suite.run_full_benchmark(simulate=simulate)
+    benchmark_results = suite.run_full_benchmark(simulate=simulate, input_shape=input_shape)
 
     # Extract base model performance using helper
-    base_name = getattr(base_model, 'name', 'model_0')
+    base_name = suite.benchmark.model_names[0]
     base_metrics = _collect_base_metrics(base_name, benchmark_results)
 
     # Initialize comparison results
@@ -3723,14 +3755,14 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
         'recommendations': {}
     }
 
-    for opt_model in optimized_models:
-        opt_name = getattr(opt_model, 'name', f'optimized_model_{len(comparison_results["optimized_results"])}')
+    for opt_index, opt_model in enumerate(optimized_models, start=1):
+        opt_name = suite.benchmark.model_names[opt_index]
 
         # Find results for this optimized model
         opt_metrics = {}
         for metric_type, results in benchmark_results.items():
             for model_name, result in results.items():
-                if model_name == opt_name or model_name.startswith(opt_name + "_"):
+                if model_name == opt_name:
                     opt_metrics[metric_type] = result.mean
                     break
 
@@ -3899,14 +3931,13 @@ def analyze_optimization_tradeoffs():
     pruned = magnitude_prune(copy.deepcopy(base), sparsity=0.7)
 
     def stored_mb(model):
-        """Bytes a deployment would store: INT8 for the quantized layer, nonzeros for the pruned one."""
+        """Modeled packed INT8 bytes; actual dense parameter bytes otherwise."""
         if isinstance(model, QuantizedLinear):
             return model.memory_usage()['quantized_bytes'] / (1024 * 1024)
-        nonzero = sum(int(np.count_nonzero(p.data)) for p in model.parameters())
-        return nonzero * 4 / (1024 * 1024)
+        return sum(p.data.nbytes for p in model.parameters()) / (1024 * 1024)
 
     print("\nMeasured on one Linear(512, 256) layer:\n")
-    print(f"{'Technique':<20} {'Latency (ms)':<14} {'Stored (MB)':<13} {'Output error'}")
+    print(f"{'Technique':<20} {'Latency (ms)':<14} {'Payload (MB)':<13} {'Output error'}")
     print("-" * 60)
 
     for name, model in [('Baseline', base), ('Quantization (INT8)', quantized), ('Pruning (70%)', pruned)]:
@@ -3916,8 +3947,9 @@ def analyze_optimization_tradeoffs():
         print(f"{name:<20} {latency:<14.3f} {stored_mb(model):<13.3f} {rel_error:.2e}")
 
     print("\n💡 Key Insights:")
-    print("   • Memory savings are real; the latency column is not: NumPy has no INT8 kernels")
-    print("     and does not skip zeros, so those wins need hardware support (Modules 15-17)")
+    print("   • Baseline/pruned payloads count actual dense parameter bytes; zeros still occupy storage")
+    print("   • INT8 payload is a modeled packed representation, not current Tensor storage")
+    print("   • Latency is measured here; NumPy neither uses INT8 kernels nor skips pruned zeros")
     print("   • Output error is the price; accuracy on a task is what you must measure next")
     print("   • No single optimization dominates: pick by the deployment constraint that binds")
 
@@ -4120,7 +4152,10 @@ def test_module():
     # Test 4: MLPerf compliance
     print("  Testing MLPerf compliance...")
     perf = MLPerf(random_seed=42)
-    perf_results = perf.run_standard_benchmark(models[0], 'keyword_spotting', num_runs=5)
+    class BinaryClassifier:
+        def forward(self, x):
+            return Tensor([[0.25, 0.75]])
+    perf_results = perf.run_standard_benchmark(BinaryClassifier(), 'keyword_spotting', num_runs=5)
 
     required_keys = ['accuracy', 'mean_latency_ms', 'compliant', 'target_accuracy']
     assert all(key in perf_results for key in required_keys)

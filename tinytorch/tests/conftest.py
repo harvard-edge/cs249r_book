@@ -140,9 +140,8 @@ def _validate_package_exported(through: Optional[int] = None):
     ``through`` scopes the check to one point in the progression. `tito module
     complete NN` and `tito module test NN` set TINYTORCH_EXPORT_CHECK_THROUGH=NN,
     so only required modules numbered NN or lower are hard failures; later
-    ones are reported as not yet exported. 2026-09-15: without the scope,
-    completing modules 01-03 always tripped the 01-04 requirement, tito read
-    the trip as "no tests", and their progressive tests never ran (#2117).
+    ones are reported as not yet exported, allowing each module's tests to
+    run before the student has exported the later modules.
 
     This prevents the silent-pass bug where tinytorch/__init__.py
     catches ImportError and sets symbols to None, causing tests to

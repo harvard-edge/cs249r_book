@@ -19,10 +19,11 @@ def test_cached_attention_matches_full_causal_attention():
     expected = attention(inputs, create_causal_mask(4)).data
     cache = KVCache(1, 4, 1, 2, 8)
     cached = CachedAttention(attention, cache, 0)
-    for position in range(4):
-        actual = cached(inputs[:, position:position + 1])
-        np.testing.assert_allclose(actual.data, expected[:, position:position + 1], atol=1e-5)
-        cache.advance()
+    with cache.generation():
+        for position in range(4):
+            actual = cached(inputs[:, position:position + 1])
+            np.testing.assert_allclose(actual.data, expected[:, position:position + 1], atol=1e-5)
+            cache.advance()
     assert cache.seq_pos == 4
     cache.reset()
     assert cache.get(0)[0].shape == (1, 2, 0, 8)

@@ -302,18 +302,18 @@ Dataset Access:
 
 ```
 # Computer Vision
-images = Tensor(shape=(50000, 32, 32, 3))  # CIFAR-10 images
-labels = Tensor(shape=(50000,))            # Class labels 0-9
+images = Tensor(np.zeros((50000, 32, 32, 3), dtype=np.float32))  # CIFAR-10 images
+labels = Tensor(np.zeros(50000))            # Class labels 0-9
 dataset = TensorDataset(images, labels)
 
 # Natural Language Processing
-token_ids = Tensor(shape=(10000, 512))     # Tokenized sentences
-labels = Tensor(shape=(10000,))            # Sentiment labels
+token_ids = Tensor(np.zeros((10000, 512)))     # Tokenized sentences
+labels = Tensor(np.zeros(10000))            # Sentiment labels
 dataset = TensorDataset(token_ids, labels)
 
 # Time Series
-sequences = Tensor(shape=(1000, 100, 5))   # 100 timesteps, 5 features
-targets = Tensor(shape=(1000, 10))         # 10-step ahead prediction
+sequences = Tensor(np.zeros((1000, 100, 5)))   # 100 timesteps, 5 features
+targets = Tensor(np.zeros((1000, 10)))         # 10-step ahead prediction
 dataset = TensorDataset(sequences, targets)
 ```
 
@@ -553,7 +553,7 @@ Without Shuffling (epoch 2):          With Shuffling (epoch 2):
   Batch 2: [sample 2, sample 3]  ✗      Batch 2: [sample 0, sample 5]  ✓
   Batch 3: [sample 4, sample 5]  ✗      Batch 3: [sample 2, sample 3]  ✓
 
-  (Same every epoch = overfitting!)     (Different combinations = better learning!)
+  (Fixed order can introduce bias)     (Different combinations = better learning!)
 ```
 
 ### DataLoader as a Systems Component
@@ -824,9 +824,12 @@ class RandomHorizontalFlip:
 
     Args:
         p: Probability of flipping (default: 0.5)
+        layout: HW, CHW, or HWC. None retains legacy inference: a 3D input
+            with first dimension <= 4 is CHW, otherwise HWC. Set explicitly
+            for short HWC images or CHW images with more than four channels.
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p=0.5, layout=None):
         """
         Initialize RandomHorizontalFlip.
 
@@ -834,7 +837,7 @@ class RandomHorizontalFlip:
 
         APPROACH:
         1. Validate probability is in range [0, 1]
-        2. Store p as instance variable
+        2. Store p and optional explicit layout as instance variables
 
         EXAMPLE:
         >>> flip = RandomHorizontalFlip(p=0.5)  # 50% chance to flip
@@ -849,7 +852,15 @@ class RandomHorizontalFlip:
                 f"  💡 p is the probability of flipping the image horizontally (p=0.5 means 50% chance)\n"
                 f"  🔧 Common values: p=0.0 (never flip), p=0.5 (standard), p=1.0 (always flip)"
             )
+        if layout not in (None, "HW", "CHW", "HWC"):
+            raise ValueError(
+                f"Invalid image layout: {layout}\n"
+                f"  ❌ layout must be HW, CHW, HWC, or None\n"
+                f"  💡 HW is grayscale, CHW is channels-first, and HWC is channels-last\n"
+                f"  🔧 Set layout='HWC' for channels-last images or layout='CHW' for channels-first images"
+            )
         self.p = p
+        self.layout = layout
         ### END SOLUTION
 
     def __call__(self, x):
@@ -864,8 +875,8 @@ class RandomHorizontalFlip:
         3. Otherwise, return unchanged
 
         Args:
-            x: Input array with shape (..., H, W) or (..., H, W, C)
-               Flips along the last-1 axis (width dimension)
+            x: Input array or Tensor in HW, CHW, or HWC layout.
+               The width axis is selected using the layout argument.
 
         Returns:
             Flipped or unchanged array (same shape as input)
@@ -878,31 +889,23 @@ class RandomHorizontalFlip:
         HINT: Find the width axis first; it differs for HW, CHW, and HWC layouts
         """
         ### BEGIN SOLUTION role="scaffold"
-        if rng.random() < self.p:
-            is_tensor = isinstance(x, Tensor)
-            data = x.data if is_tensor else x
-
-            # Determine width axis for HW/CHW/HWC.
-            # Convention (matching _pad_image and RandomCrop): check shape[0]
-            # for channels-first (C, H, W) where C <= 4. This is the standard
-            # TinyTorch/PyTorch NCHW convention for 3D image tensors.
+        is_tensor = isinstance(x, Tensor)
+        data = x.data if is_tensor else x
+        layout = self.layout
+        if layout is None:
             if data.ndim == 2:
-                # (H, W)
-                axis = -1
+                layout = "HW"
             elif data.ndim == 3:
-                if data.shape[0] <= 4:
-                    # Channels-first: (C, H, W) — flip width (last axis)
-                    axis = -1
-                else:
-                    # Channels-last: (H, W, C) — flip width (second-to-last)
-                    axis = -2
-            else:
-                raise ValueError(
-                    f"RandomHorizontalFlip requires at least 2D input\n"
-                    f"  ❌ Got {data.ndim}D input with shape {data.shape}\n"
-                    f"  💡 Images need at least height and width dimensions (H, W) to flip horizontally\n"
-                    f"  🔧 Reshape your data: x.reshape(height, width) or x.reshape(1, height, width)"
-                )
+                layout = "CHW" if data.shape[0] <= 4 else "HWC"
+        if layout is None or data.ndim != (2 if layout == "HW" else 3):
+            raise ValueError(
+                f"RandomHorizontalFlip input dimensions do not match image layout\n"
+                f"  ❌ Got {data.ndim}D input with shape {data.shape} and layout={self.layout!r}\n"
+                f"  💡 HW requires 2 dimensions; CHW and HWC require 3 dimensions\n"
+                f"  🔧 Pass a single image and set layout='HW', 'CHW', or 'HWC' to match its axes"
+            )
+        if rng.random() < self.p:
+            axis = -2 if layout == "HWC" else -1
 
             flipped = np.flip(data, axis=axis).copy()
             return Tensor(flipped) if is_tensor else flipped
@@ -934,16 +937,19 @@ We must pad ONLY spatial dimensions, never the channel dimension.
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-pad-image", "solution": true}
 #| export
-def _pad_image(data, padding):
+def _pad_image(data, padding, layout=None):
     """
-    Detect image format and apply zero-padding to spatial dimensions only.
+    Apply zero-padding to spatial dimensions only.
+
+    layout: HW, CHW, or HWC. None uses the legacy first-dimension heuristic;
+    pass HWC explicitly for images with height <= 4, or CHW for > 4 channels.
 
     TODO: Pad the image with zeros on all spatial sides
 
     APPROACH:
     1. Check dimensionality: 2D (H,W), 3D (C,H,W or H,W,C), else error
     2. For 2D: pad uniformly on all sides
-    3. For 3D: determine channel axis (first dim <= 4 → channels-first)
+    3. For 3D: use explicit layout, or legacy inference (first dim <= 4 → CHW)
     4. Pad only H and W dimensions, leave channels untouched
 
     EXAMPLE:
@@ -957,11 +963,25 @@ def _pad_image(data, padding):
     - Use (padding, padding) for axes you DO want to pad (H, W)
     """
     ### BEGIN SOLUTION role="scaffold"
+    if layout not in (None, "HW", "CHW", "HWC"):
+        raise ValueError(
+            f"Invalid image layout: {layout}\n"
+            f"  ❌ layout must be HW, CHW, HWC, or None\n"
+            f"  💡 HW is grayscale, CHW is channels-first, and HWC is channels-last\n"
+            f"  🔧 Set layout='HWC' for channels-last images or layout='CHW' for channels-first images"
+        )
+    if layout is not None and data.ndim != (2 if layout == "HW" else 3):
+        raise ValueError(
+            f"RandomCrop input dimensions do not match image layout\n"
+            f"  ❌ Got {data.ndim}D input with shape {data.shape} and layout={layout!r}\n"
+            f"  💡 HW requires 2 dimensions; CHW and HWC require 3 dimensions\n"
+            f"  🔧 Pass a single image and set layout='HW', 'CHW', or 'HWC' to match its axes"
+        )
     if data.ndim == 2:
         # (H, W) format — pad both axes
         return np.pad(data, padding, mode='constant', constant_values=0)
     elif data.ndim == 3:
-        if data.shape[0] <= 4:
+        if layout == "CHW" or (layout is None and data.shape[0] <= 4):
             # Channels-first: (C, H, W) — pad only H and W
             return np.pad(data,
                           ((0, 0), (padding, padding), (padding, padding)),
@@ -1158,9 +1178,11 @@ class RandomCrop:
     Args:
         size: Output crop size (int for square, or tuple (H, W))
         padding: Pixels to pad on each side before cropping (default: 4)
+        layout: HW, CHW, or HWC. None uses legacy inference (first dimension
+            <= 4 means CHW). Specify HWC for short images or CHW for > 4 channels.
     """
 
-    def __init__(self, size, padding=4):
+    def __init__(self, size, padding=4, layout=None):
         """
         Initialize RandomCrop.
 
@@ -1168,7 +1190,7 @@ class RandomCrop:
 
         APPROACH:
         1. Convert size to tuple if it's an int (for square crops)
-        2. Store size and padding as instance variables
+        2. Store size, padding, and optional explicit layout as instance variables
 
         EXAMPLE:
         >>> crop = RandomCrop(32, padding=4)  # CIFAR-10 standard
@@ -1181,6 +1203,14 @@ class RandomCrop:
             self.size = (size, size)
         else:
             self.size = size
+        if layout not in (None, "HW", "CHW", "HWC"):
+            raise ValueError(
+                f"Invalid image layout: {layout}\n"
+                f"  ❌ layout must be HW, CHW, HWC, or None\n"
+                f"  💡 HW is grayscale, CHW is channels-first, and HWC is channels-last\n"
+                f"  🔧 Set layout='HWC' for channels-last images or layout='CHW' for channels-first images"
+            )
+        self.layout = layout
         self.padding = padding
         ### END SOLUTION
 
@@ -1221,14 +1251,14 @@ class RandomCrop:
         target_h, target_w = self.size
 
         # Step 1: Pad the image (handles format detection internally)
-        padded = _pad_image(data, self.padding)
+        padded = _pad_image(data, self.padding, self.layout)
 
         # Step 2: Determine padded spatial dims and sample crop position
         if data.ndim == 2:
             padded_h, padded_w = padded.shape
             top, left = _random_crop_region(padded_h, padded_w, target_h, target_w)
             cropped = padded[top:top + target_h, left:left + target_w]
-        elif data.shape[0] <= 4:
+        elif self.layout == "CHW" or (self.layout is None and data.shape[0] <= 4):
             # Channels-first: (C, H, W)
             padded_h, padded_w = padded.shape[1], padded.shape[2]
             top, left = _random_crop_region(padded_h, padded_w, target_h, target_w)
@@ -1248,7 +1278,7 @@ class RandomCrop:
 
 Augmentations are rarely used alone. `Compose` takes a list of transforms and
 applies them in order, passing each output to the next, so a pipeline such as
-"flip, then crop" becomes one callable the DataLoader can apply per sample.
+"flip, then crop" becomes one callable a Dataset can apply in `__getitem__` each time it serves a sample.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "compose", "solution": false}
@@ -1630,7 +1660,7 @@ train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 ```
-**Why it matters:** Without shuffling, your model sees the same batch combinations every epoch, leading to overfitting to batch-specific patterns rather than general patterns.
+**Why it matters:** Without shuffling, your model sees the same batch combinations every epoch, which can introduce ordering effects. Shuffling does not by itself prevent overfitting.
 
 **2. Batch Size Too Large (Out of Memory)**
 ```python
@@ -1647,14 +1677,14 @@ loader = DataLoader(dataset, batch_size=32)    # Safe starting point
 ```python
 # ❌ WRONG - Validation data leaking into training
 all_data = dataset
-train_loader = DataLoader(all_data, shuffle=True)  # No split!
+train_loader = DataLoader(all_data, batch_size=32, shuffle=True)  # No split!
 
 # ✅ CORRECT - Separate train and validation
 train_size = int(0.8 * len(dataset))
 train_data = TensorDataset(images[:train_size], labels[:train_size])
 val_data = TensorDataset(images[train_size:], labels[train_size:])
-train_loader = DataLoader(train_data, shuffle=True)
-val_loader = DataLoader(val_data, shuffle=False)
+train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
+val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
 ```
 **Why it matters:** Using the same data for training and validation gives falsely optimistic performance metrics.
 
@@ -1851,10 +1881,12 @@ Shuffle Operation Breakdown:
 3. Sample Access:       O(1) per sample - dataset[shuffled_idx]
 
 Memory Impact:
-- No Shuffle: 0 extra memory (sequential access)
-- With Shuffle: 8 bytes × dataset_size (store indices)
+- Both modes allocate list(range(n)): O(n) index storage
+- On typical 64-bit CPython: ~8 bytes per pointer + ~28 bytes per integer
+- Shuffle mutates this list in place; it does not allocate a second index list
 
-For 50,000 samples: 8 × 50,000 = 400KB extra memory
+For 50,000 samples: approximately 36 × 50,000 = 1.8MB for indices
+Exact object sizes depend on the Python runtime.
 ```
 
 The key insight: shuffling overhead is typically negligible compared to the actual data loading and tensor operations.
@@ -2087,10 +2119,15 @@ def test_module():
     images = rng.standard_normal((100, 3, 8, 8))
     labels = rng.integers(0, 10, 100)
 
-    # Apply augmentation manually (how you'd use in practice)
-    augmented_images = np.array([train_transforms(img) for img in images])
+    # Transform on every access, so each epoch can see fresh random views.
+    class AugmentedDataset(Dataset):
+        def __len__(self):
+            return len(images)
 
-    dataset = TensorDataset(Tensor(augmented_images), Tensor(labels))
+        def __getitem__(self, idx):
+            return Tensor(train_transforms(images[idx])), Tensor(labels[idx])
+
+    dataset = AugmentedDataset()
     loader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     batch_count = 0
@@ -2270,9 +2307,12 @@ def __iter__(self):
 
 **Memory usage:**
 - Bad shuffle: 50GB (all samples in memory)
-- Your shuffle: 400MB (50M indices × 8 bytes each)
+- Your shuffle: approximately 1.8GB (50M Python list entries × ~36 bytes each)
 
-**Why this matters:** You can shuffle 100 million samples using just 800MB of RAM!
+**Why this matters:** Indices are smaller than images, but not free: 100 million
+Python list entries require approximately 3.6GB on typical 64-bit CPython.
+A NumPy int64 index array would use 800MB; our implementation uses a Python list.
+The list is allocated even when `shuffle=False`.
 
 **Systems insight**: Shuffle indices, not data. This is a classic systems pattern-operate on lightweight proxies (indices) rather than expensive objects (actual data).
 
@@ -2311,7 +2351,7 @@ These patterns are why PyTorch's DataLoader scales from 1,000 samples (your lapt
 
 **Why it matters:** Your DataLoader transforms scattered data into organized learning batches.
 Every neural network training loop uses this exact pattern to feed data efficiently to the model.
-The fact that it handles shuffling, batching, and iteration means you've built something production-ready.
+Its batching and iteration interface follows the same pattern used by production frameworks.
 
 Your DataLoader is ready to power neural network training!
 """
@@ -2361,7 +2401,7 @@ Congratulations! You've built a complete data loading pipeline for ML training!
 
 ### Systems Insights Discovered
 - **Batch size directly impacts memory usage and training throughput**
-- **Shuffling adds minimal overhead but prevents overfitting patterns**
+- **Shuffling changes batch composition and reduces ordering effects**
 - **Data loading can become a bottleneck without proper optimization**
 - **Memory usage scales linearly with batch size and feature dimensions**
 

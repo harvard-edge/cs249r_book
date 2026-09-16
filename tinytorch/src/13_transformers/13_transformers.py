@@ -1375,8 +1375,8 @@ class GPT:
 
         APPROACH:
         1. Reject negative/nonfinite temperatures; zero chooses the largest logit
-        2. Scale logits by positive temperature (higher = more random)
-        3. Apply softmax to get probabilities (subtract max for numerical stability)
+        2. Subtract the largest logit, then divide by positive temperature
+        3. Apply softmax to get probabilities (higher temperature = more random)
         4. Sample one token index from the probability distribution
 
         EXAMPLE:
@@ -1392,10 +1392,15 @@ class GPT:
             raise ValueError("temperature must be finite and nonnegative")
         if temperature == 0:
             return int(np.argmax(logits[0]))
-        scaled_logits = logits / temperature
+        # Center in float64 before division so tiny temperatures cannot turn
+        # the largest logit into infinity. Negative overflow means zero mass.
+        centered_logits = np.asarray(logits, dtype=np.float64)
+        centered_logits = centered_logits - np.max(centered_logits, axis=-1, keepdims=True)
+        with np.errstate(over="ignore", under="ignore"):
+            scaled_logits = centered_logits / temperature
+            exp_logits = np.exp(scaled_logits)
 
         # Convert to probabilities (softmax with numerical stability)
-        exp_logits = np.exp(scaled_logits - np.max(scaled_logits, axis=-1, keepdims=True))
         probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
 
         # Sample next token from probability distribution
@@ -1563,27 +1568,26 @@ def test_unit_sample_next_token():
     assert isinstance(token, (int, np.integer)), f"Expected int, got {type(token)}"
     assert 0 <= token < 5, f"Token {token} out of range [0, 5)"
 
-    # Test 2: Very low temperature should almost always pick the highest logit
-    rng = np.random.default_rng(7)
-    high_logit_idx = 4  # logits[4] = 5.0 is highest
-    low_temp_tokens = [model._sample_next_token(logits, temperature=0.01) for _ in range(20)]
-    assert all(t == high_logit_idx for t in low_temp_tokens), (
-        f"Low temperature should consistently pick token {high_logit_idx}, got {low_temp_tokens}"
-    )
+    # Inspect the distribution passed to the sampler instead of asserting
+    # that random draws never select a rare but valid token.
+    from unittest.mock import Mock, patch
+    sampler = Mock()
+    sampler.choice.return_value = 4
+    with patch.dict(model._sample_next_token.__globals__, {"rng": sampler}):
+        for temperature in (0.01, 1.0, 2.0):
+            assert model._sample_next_token(logits, temperature) == 4
+            probabilities = sampler.choice.call_args.kwargs["p"]
+            expected = np.exp((logits[0] - logits.max()) / temperature)
+            expected /= expected.sum()
+            np.testing.assert_allclose(probabilities, expected)
+            assert sampler.choice.call_args.args == (model.vocab_size,)
 
-    # Test 3: Verify softmax math internally (temperature=1.0)
-    # With logits [0, 0, 0, 0, 10], softmax should heavily favor index 4
-    extreme_logits = np.array([[0.0, 0.0, 0.0, 0.0, 10.0]])
-    extreme_tokens = [model._sample_next_token(extreme_logits, temperature=1.0) for _ in range(20)]
-    assert all(t == 4 for t in extreme_tokens), (
-        f"Extreme logits should always pick token 4, got {extreme_tokens}"
-    )
+        uniform_logits = np.ones((1, 5))
+        model._sample_next_token(uniform_logits, temperature=2.0)
+        np.testing.assert_allclose(sampler.choice.call_args.kwargs["p"], np.full(5, 0.2))
 
-    # Test 4: High temperature produces more varied tokens
-    rng = np.random.default_rng(7)
-    uniform_logits = np.array([[1.0, 1.0, 1.0, 1.0, 1.0]])
-    high_temp_tokens = set(model._sample_next_token(uniform_logits, temperature=2.0) for _ in range(50))
-    assert len(high_temp_tokens) > 1, "High temperature with uniform logits should produce varied tokens"
+    # Zero temperature is genuinely deterministic greedy decoding.
+    assert model._sample_next_token(logits, temperature=0) == 4
 
     print("✅ Token sampling works correctly!")
 

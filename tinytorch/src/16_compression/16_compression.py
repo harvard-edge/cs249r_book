@@ -311,12 +311,12 @@ SVD Decomposition:
 
 Parameter Reduction:
     Original: m × n parameters
-    Compressed (Σ folded into U or V): (m × k) + (k × n) = k(m + n) parameters
+    Compressed: (m × k) + k + (k × n) = k(m + n + 1) parameters
 
-    Compression achieved when: k < mn/(m+n)
+    Compression achieved when: k < mn/(m+n+1)
 
-    This module counts low-rank parameters this way everywhere: the k singular
-    values fold into one factor, so storing them separately costs nothing.
+    This module returns three factors: U, the k singular values S, and V^T.
+    Store S as a vector; construct diag(S) only when reconstructing the matrix.
 
 Reconstruction Error:
     ||W - W_approx||_F = √(Σᵢ₌ₖ₊₁ʳ σᵢ²)
@@ -709,8 +709,15 @@ def structured_prune(model, prune_ratio=0.5):
     # Prune the hidden Linear layers. The last Linear is the head: its output
     # channels are the classes, so zeroing them removes classes, not neurons.
     # A model with a single Linear has nothing else to prune and is pruned as is.
-    layers = model.layers if hasattr(model, 'layers') else [model]
-    linears = [layer for layer in layers if isinstance(layer, Linear)]
+    def collect_linears(layer):
+        # Sequential containers may contain other Sequential containers. Walk
+        # their execution order so the terminal classifier is identified once.
+        if isinstance(layer, Linear):
+            return [layer]
+        return [linear for child in getattr(layer, 'layers', [])
+                for linear in collect_linears(child)]
+
+    linears = collect_linears(model)
     hidden = linears[:-1] if len(linears) > 1 else linears
 
     for layer in hidden:
@@ -804,23 +811,18 @@ Imagine you're storing a massive spreadsheet where many columns are highly corre
 ```
 Low-Rank Decomposition Visualization:
 
-Original Matrix W (large):           Factorized Form (smaller):
-┌─────────────────────────┐         ┌──────┐    ┌──────────────┐
-│ 2.1  1.3  0.8  1.9  2.4 │         │ 1.1  │    │ 1.9  1.2  0.7│
-│ 1.5  2.8  1.2  0.9  1.6 │    ≈    │ 2.4  │ @  │ 0.6  1.2  0.5│
-│ 0.6  1.7  2.5  1.1  0.8 │         │ 0.8  │    │ 1.4  2.1  0.9│
-│ 1.9  1.0  1.6  2.3  1.8 │         │ 1.6  │    │ 0.5  0.6  1.1│
-└─────────────────────────┘         └──────┘    └──────────────┘
-    W (4×5) = 20 params           U (4×2)=8  +  V (2×5)=10  = 18 params
+Three stored factors for rank k = 2:
+    W (4×5) ≈ U (4×2) @ diag(S (2,)) @ V^T (2×5)
 
 Parameter Reduction:
 - Original: 4 × 5 = 20 parameters
-- Compressed: (4 × 2) + (2 × 5) = 18 parameters
-- Compression ratio: 18/20 = 0.9 (10% savings)
+- Compressed: (4 × 2) + 2 + (2 × 5) = 20 parameters
+- Size ratio: 20/20 = 1.0 (no savings for this small example)
 
 For larger matrices, savings become dramatic:
-- W (1000×1000): 1M parameters → U (1000×100) + V (100×1000): 200K parameters
-- Compression ratio: 0.2 (80% savings)
+- W (1000×1000): 1M parameters
+- U (1000×100) + S (100,) + V^T (100×1000): 200,100 parameters
+- Size ratio: 0.2001 (79.99% savings)
 ```
 
 ### SVD: The Mathematical Foundation
@@ -881,12 +883,13 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     >>> weight = rng.standard_normal((100, 50))
     >>> U, S, V = low_rank_approximate(weight, rank_ratio=0.3)
     >>> # Original: 100*50 = 5000 params
-    >>> # Compressed: 100*15 + 15*50 = 2250 params (55% reduction)
+    >>> # Compressed: 100*15 + 15 + 15*50 = 2265 params (54.7% reduction)
 
     HINTS:
     - Use np.linalg.svd() for decomposition
     - Choose k = int(rank_ratio * min(m, n))
-    - Return U[:,:k], S[:k], V[:k,:] for reconstruction
+    - Return copies of U[:,:k], S[:k], V[:k,:] for reconstruction
+    - Copies free the full SVD buffers after this function returns
     """
     ### BEGIN SOLUTION role="scaffold"
     if not np.isfinite(rank_ratio) or not 0 < rank_ratio <= 1:
@@ -900,10 +903,11 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     max_rank = min(m, n)
     target_rank = max(1, int(rank_ratio * max_rank))
 
-    # Truncate to target rank
-    U_truncated = U[:, :target_rank]
-    S_truncated = S[:target_rank]
-    V_truncated = V[:target_rank, :]
+    # Copy the slices so they release the full SVD backing arrays. Views
+    # would keep the uncompressed factors alive despite their smaller shapes.
+    U_truncated = U[:, :target_rank].copy()
+    S_truncated = S[:target_rank].copy()
+    V_truncated = V[:target_rank, :].copy()
 
     return U_truncated, S_truncated, V_truncated
     ### END SOLUTION
@@ -1586,7 +1590,7 @@ def explore_compression_with_profiler():
 
     print("\n💡 Key Insight:")
     print(f"   Magnitude pruning removes {sparsity_gain:.0f}% of parameters")
-    print(f"   With sparse storage formats, this means {reduction_ratio:.1f}x less memory!")
+    print(f"   Ideal value-only storage ratio: {reduction_ratio:.1f}x; sparse indices add overhead.")
     print(f"   Critical for: edge devices, mobile apps, energy efficiency")
     print("\n✅ This is the power of compression: remove what doesn't matter!")
 
@@ -1842,9 +1846,9 @@ Answer these to deepen your understanding of compression techniques and their sy
 **Calculate**:
 - Compression ratio: _____x
 - If teacher inference takes 100ms, student takes 15ms, what's the speedup? _____x
-- Why is the speedup greater than the compression ratio?
+- Why is the speedup smaller than the compression ratio?
 
-**Real-world context**: Smaller models often have better cache locality and fewer memory bottlenecks.
+**Real-world context**: Fixed inference overhead and different compute or memory bottlenecks keep latency from scaling directly with parameter count.
 
 ---
 
@@ -1874,15 +1878,17 @@ Answer these to deepen your understanding of compression techniques and their sy
 
 # %% [markdown]
 """
-## ⭐ Aha Moment: Pruning Removes Unimportant Weights
+## ⭐ Aha Moment: Pruning Creates Sparsity
 
 **What you built:** Pruning that zeros out small weights, creating sparse models.
 
-**Why it matters:** Most neural network weights are close to zero—and removing them barely
-affects accuracy! At 50% sparsity, half your weights are gone, but the model still works.
-This is how you make models faster and smaller without retraining.
+**Why it matters:** At 50% sparsity, half the weights are zero. This demo measures
+that change on a freshly initialized layer; its dense storage and computation
+shape stay the same. Memory savings require a sparse representation, and speed
+gains require suitable kernels or rebuilding smaller layers.
 
-Combined with quantization, pruning can shrink models 8× or more.
+Accuracy preservation depends on the trained model and data and may require
+fine-tuning. Milestone 06 measures accuracy before and after pruning on real digits.
 """
 
 # %%
@@ -1896,6 +1902,7 @@ def demo_compression():
 
     original_nonzero = np.count_nonzero(layer.weight.data)
     original_total = layer.weight.data.size
+    original_bytes = layer.weight.data.nbytes
 
     # Apply 50% pruning
     magnitude_prune(layer, sparsity=0.5)
@@ -1908,7 +1915,8 @@ def demo_compression():
     print(f"\nActual sparsity: {sparsity:.1%}")
     print(f"Half the weights are now zero!")
 
-    print("\n✨ Smaller weights removed—model still works!")
+    print(f"Dense weight storage: {original_bytes:,} → {layer.weight.data.nbytes:,} bytes")
+    print("\n✨ Sparsity increased; accuracy and latency still need measurement.")
 
 # %%
 if __name__ == "__main__":

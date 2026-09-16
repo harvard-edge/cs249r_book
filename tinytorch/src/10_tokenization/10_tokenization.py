@@ -249,7 +249,7 @@ Word:      ['tokenization']                                   → 1 token, vocab
 BPE:       ['token','ization']                               → 2 tokens, vocab 10-50K
 ```
 
-The sweet spot for most applications is BPE with 10K-50K vocabulary size.
+BPE trades a larger vocabulary for shorter sequences. The appropriate size depends on the corpus and the model.
 """
 
 # %% [markdown]
@@ -315,7 +315,9 @@ class Tokenizer:
 
     # Predefined symbolic tokens for common use cases
     TOK_UNKNOWN = '<UNK>'   # UNKNOWN
-    TOK_EOW = '</w>'        # END OF WORD
+    # Words come from str.split(), so a space cannot collide with word content.
+    # Diagrams write this boundary as </w> to make the otherwise invisible suffix clear.
+    TOK_EOW = ' '           # END OF WORD
 
     def encode(self, text: str) -> List[int]:
         """
@@ -410,7 +412,7 @@ if __name__ == "__main__":
 """
 ## 🏗️ Character-Level Tokenizer
 
-The simplest tokenization approach: each character becomes a token. This gives us perfect coverage of any text but produces long sequences.
+The simplest tokenization approach: each character becomes a token. This covers characters seen in the training corpus but produces long sequences.
 
 ```
 Character Tokenization Process:
@@ -572,7 +574,7 @@ class CharTokenizer(Tokenizer):
 This test validates our character tokenizer works correctly with vocabulary building, encoding, and decoding.
 
 **What we're testing**: Character-level tokenization with vocabulary management
-**Why it matters**: Foundation for text processing with perfect coverage
+**Why it matters**: Foundation for text processing with known-character coverage
 **Expected**: Correct encoding/decoding, unknown character handling, vocabulary building
 """
 
@@ -633,6 +635,15 @@ Character tokenization provides a simple, robust foundation for text processing.
 ## 🏗️ Byte Pair Encoding (BPE) Tokenizer
 
 BPE is the tokenizer behind the GPT family and Llama (BERT uses WordPiece, a close cousin that picks merges by a different score). It learns to merge frequent character pairs, creating subword units that balance vocabulary size with sequence length.
+
+In the diagrams, `</w>` is visible notation for the actual space suffix stored
+in `Tokenizer.TOK_EOW`. Because words are split on whitespace first, this
+boundary cannot collide with literal text such as `</w>`. The starting
+vocabulary also includes both forms of every seen character, even when a
+particular word position did not occur in training.
+
+The vocabulary rows below show the symbols used by these training words;
+the additional character forms retained for unseen words are omitted for space.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
@@ -999,18 +1010,27 @@ class BPETokenizer(Tokenizer):
 
         EXAMPLE:
         >>> tokenizer = BPETokenizer(vocab_size=1000)
-        >>> tokenizer.vocab_size
+        >>> tokenizer.target_vocab_size
         1000
+        >>> tokenizer.vocab_size
+        0  # No learned vocabulary until train() runs
 
         HINT: Initialize vocab and merges as empty lists, mappings as empty dicts
         """
         ### BEGIN SOLUTION role="scaffold"
-        self.vocab_size = vocab_size
+        if isinstance(vocab_size, bool) or not isinstance(vocab_size, int) or vocab_size < 1:
+            raise ValueError("vocab_size must be a positive integer")
+        self.target_vocab_size = vocab_size
         self.vocab = []
         self.merges = []  # List of (pair, new_token) merges
         self.token_to_id = {}
         self.id_to_token = {}
         ### END SOLUTION
+
+    @property
+    def vocab_size(self) -> int:
+        """Actual vocabulary size, suitable for allocating an embedding table."""
+        return len(self.vocab)
 
     def _get_word_tokens(self, word: str) -> List[str]:
         """
@@ -1020,7 +1040,7 @@ class BPETokenizer(Tokenizer):
 
         APPROACH:
         1. Split word into characters
-        2. Add </w> marker to last character
+        2. Add a space boundary to the last character (shown as </w> in diagrams)
         3. Return list of tokens
 
         EXAMPLE:
@@ -1073,7 +1093,10 @@ class BPETokenizer(Tokenizer):
         The corpus is a list of texts. Each text is split on whitespace, exactly
         as encode() does, so the symbols the trainer merges (with </w> marking
         each word's last character) are the symbols encode() will later look up.
-        Merges never straddle a word boundary.
+        Merges never straddle a word boundary. Every observed character gets
+        both an internal and word-final form. This minimum alphabet is retained
+        even when it exceeds target_vocab_size; vocab_size always reports the
+        actual count. Training can also stop below the target when no pairs remain.
 
         TODO: Implement BPE training using the greedy merge loop
 
@@ -1097,8 +1120,10 @@ class BPETokenizer(Tokenizer):
         - Don't forget to call _build_mappings() at the end
         """
         ### BEGIN SOLUTION role="scaffold"
-        if vocab_size:
-            self.vocab_size = vocab_size
+        if vocab_size is not None:
+            if isinstance(vocab_size, bool) or not isinstance(vocab_size, int) or vocab_size < 1:
+                raise ValueError("vocab_size must be a positive integer")
+            self.target_vocab_size = vocab_size
 
         # Count word frequencies and initialize character vocabulary.
         # Split each text on whitespace exactly as encode() does, so that the
@@ -1111,7 +1136,10 @@ class BPETokenizer(Tokenizer):
         for word in word_freq:
             tokens = self._get_word_tokens(word)
             word_tokens[word] = tokens
-            vocab.update(tokens)
+            # Every seen character must work both inside and at the end of a word.
+            # Keeping both forms lets unseen words reuse the known alphabet.
+            vocab.update(word)
+            vocab.update(char + Tokenizer.TOK_EOW for char in word)
 
         self.vocab = sorted(vocab)
         if Tokenizer.TOK_UNKNOWN not in vocab:
@@ -1120,14 +1148,15 @@ class BPETokenizer(Tokenizer):
         # Greedy merge loop: count pairs, merge best, repeat
         self.merges = []
 
-        while len(self.vocab) < self.vocab_size:
+        while len(self.vocab) < self.target_vocab_size:
             pair_counts = _count_byte_pairs(word_tokens, word_freq)
             if not pair_counts:
                 break
 
             best_pair = pair_counts.most_common(1)[0][0]
             merged_token = _merge_pair(word_tokens, best_pair)
-            self.vocab.append(merged_token)
+            if merged_token not in self.vocab:
+                self.vocab.append(merged_token)
             self.merges.append(best_pair)
 
         self._build_mappings()
@@ -1245,7 +1274,8 @@ class BPETokenizer(Tokenizer):
         HINTS:
         - Use id_to_token dictionary with Tokenizer.TOK_UNKNOWN as default
         - Join all tokens into single string with ''.join()
-        - Replace Tokenizer.TOK_EOW markers with spaces for word boundaries
+        - Word-final tokens already contain a space boundary
+        - Normalize whitespace without replacing any literal marker text
         """
         ### BEGIN SOLUTION role="scaffold"
         if not self.id_to_token:
@@ -1260,9 +1290,7 @@ class BPETokenizer(Tokenizer):
         # Join and clean up
         text = ''.join(token_strings)
 
-        # Replace end-of-word markers with spaces
-        text = text.replace(Tokenizer.TOK_EOW, ' ')
-
+        # Boundaries already are spaces, so literal text such as </w> stays intact.
         # Clean up extra spaces
         text = ' '.join(text.split())
 
@@ -1315,8 +1343,7 @@ def test_unit_bpe_tokenizer():
     for word in corpus:
         tokens = tokenizer.encode(word)
         decoded = tokenizer.decode(tokens)
-        # Allow some flexibility due to BPE merging
-        assert len(decoded.strip()) > 0
+        assert decoded == word, "Known words must round-trip exactly"
 
     print("✅ BPE tokenizer works correctly!")
 
@@ -1488,7 +1515,7 @@ def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, fl
 
     stats = {
         'vocab_size': tokenizer.vocab_size,
-        'avg_sequence_length': np.mean(tokenized_lengths),
+        'avg_sequence_length': float(np.mean(tokenized_lengths)) if tokenized_lengths else 0.0,
         'max_sequence_length': max(tokenized_lengths) if tokenized_lengths else 0,
         'total_tokens': len(all_tokens),
         'compression_ratio': total_chars / len(all_tokens) if all_tokens else 0,
@@ -1586,7 +1613,7 @@ def analyze_tokenization_strategies():
               f"{stats['unique_tokens']:<10}")
 
     print("\n💡 KEY INSIGHTS:")
-    print("   1. Character tokenization: Small vocab, long sequences, perfect coverage")
+    print("   1. Character tokenization: Small vocab, long sequences, covers seen characters")
     print("   2. BPE: Larger vocab trades off with shorter sequences")
     print("   3. Higher compression ratio = more characters per token = efficiency")
 
@@ -1660,7 +1687,7 @@ def analyze_tokenization_memory():
     print("\n💡 Key Insights:")
     print("- Character tokenizer: Minimal memory (small vocab ~100 tokens)")
     print("- BPE tokenizer: More memory (larger vocab + merge rules storage)")
-    print("- Memory scales with vocabulary size, NOT corpus size")
+    print("- Stored tokenizer memory scales with vocabulary and merge rules; training also stores corpus words")
     print("- BPE merge rules add overhead (list of tuples)")
     print("\n🚀 Production: Use memory-mapped vocabularies for 50K+ token models")
 
@@ -1781,7 +1808,7 @@ def analyze_bpe_scaling():
     print("\n💡 Key Insights:")
     print("- BPE training cost is about (number of merges) x (corpus size)")
     print("- Each merge iteration rescans every word to count all pairs")
-    print("- Memory usage grows linearly with vocabulary size")
+    print("- Training memory includes vocabulary, merge rules, and unique corpus words")
     print("- Large corpora (millions of docs) need optimized implementations")
     print("\n🚀 Production strategies:")
     print("   - Sample representative subset for training (~1M sentences)")
@@ -1805,11 +1832,11 @@ vocab: ~100    →   vocab: ~1K    →   vocab: ~50K   →   vocab: ~100K+
 seq: very long →   seq: long     →   seq: medium   →   seq: short
 memory: low    →   memory: med   →   memory: high  →   memory: very high
 compute: high  →   compute: med  →   compute: low  →   compute: very low
-coverage: 100% →   coverage: 99% →   coverage: 95% →   coverage: <80%
+coverage: seen characters (character/BPE); seen words (word-level)
 ```
 
 **Character tokenization (vocab ~100)**:
-- Pro: Universal coverage, simple implementation, small embedding table
+- Pro: Coverage of seen characters, simple implementation, small embedding table
 - Con: Long sequences (high compute), limited semantic units
 - Use case: Morphologically rich languages, robust preprocessing
 
@@ -1894,10 +1921,10 @@ def test_module():
     char_decoded = char_tokenizer.decode(char_tokens)
     assert char_decoded == test_text, "Character round-trip failed"
 
-    # Test BPE tokenization (may not be exact due to subword splits)
+    # BPE subword splits preserve text when its characters are known
     bpe_tokens = bpe_tokenizer.encode(test_text)
     bpe_decoded = bpe_tokenizer.decode(bpe_tokens)
-    assert len(bpe_decoded.strip()) > 0, "BPE decoding failed"
+    assert bpe_decoded == test_text, "BPE round-trip failed"
 
     # Test dataset processing
     test_dataset = ["hello world", "tokenize this", "neural networks"]
@@ -2047,7 +2074,7 @@ if __name__ == "__main__":
 Congratulations! You've built a complete tokenization system for converting text to numerical representations!
 
 ### Key Accomplishments
-- **Built a character-level tokenizer** with perfect text coverage and simple implementation
+- **Built a character-level tokenizer** with coverage of seen characters and simple implementation
 - **Implemented BPE tokenizer** that learns efficient subword representations from data
 - **Created vocabulary management** with encoding/decoding and unknown token handling
 - **Discovered the vocabulary size vs sequence length trade-off** through systems analysis

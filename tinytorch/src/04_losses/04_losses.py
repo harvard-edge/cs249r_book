@@ -831,23 +831,21 @@ Specialized for 2 classes        General for N classes
 ### Loss Landscape Visualization
 
 ```
-Binary Cross-Entropy Loss Surface:
+Binary Cross-Entropy for Target = 1:
 
-     Loss
+     Loss = -log(p)
       ^
-   10 |*                    *     ← Wrong confident predictions
-      ||
-    5 | *                 *
-      |  \\               /
-    2 |   *             *          ← Uncertain predictions
-      |    \\           /
-    0 |_____*_______*_____> Prediction
-      0    0.2     0.8    1.0
+    5 |*
+      | *
+    3 |  *
+      |    *
+    1 |        *
+      |              *
+    0 |____________________*> Prediction p
+      0        0.5         1.0
 
-      Target = 1.0 (positive class)
-
-Message: "Be confident about positive class, uncertain is okay,
-         but don't be confident about wrong class!"
+Increasing the probability of the positive class lowers its loss.
+The implementation clips probabilities near 0 and 1 to keep logs finite.
 ```
 """
 
@@ -879,6 +877,9 @@ class BinaryCrossEntropyFunction(Function):
 
         HINTS:
         - Use np.clip(predictions, 1e-7, 1-1e-7) to prevent log(0)
+        - Clipping makes the loss constant outside that interval. Module 06
+          will give those regions zero prediction gradient; at each clipping
+          boundary it will choose the derivative from inside the interval.
         - Binary cross-entropy: -(targets * log(preds) + (1-targets) * log(1-preds))
         - Use np.mean() to average over all samples
         """
@@ -1082,7 +1083,7 @@ def analyze_loss_sensitivity():
 
     # Create a range of prediction errors for analysis
     true_value = 1.0
-    predictions = np.linspace(0.1, 1.9, 50)  # From 0.1 to 1.9
+    predictions = np.linspace(0.1, 1.9, 181)  # From 0.1 to 1.9
 
     # Initialize loss functions
     mse_loss = MSELoss()
@@ -1090,6 +1091,7 @@ def analyze_loss_sensitivity():
 
     mse_losses = []
     bce_losses = []
+    probabilities = np.linspace(0.01, 1.0, 100)
 
     for pred in predictions:
         # MSE analysis
@@ -1098,9 +1100,9 @@ def analyze_loss_sensitivity():
         mse = mse_loss.forward(pred_tensor, target_tensor)
         mse_losses.append(mse.data)
 
-        # BCE analysis (clamp prediction to valid probability range)
-        clamped_pred = max(0.01, min(0.99, pred))
-        bce_pred_tensor = Tensor([clamped_pred])
+    # BCE accepts probabilities, so analyze its own valid input range.
+    for probability in probabilities:
+        bce_pred_tensor = Tensor([probability])
         bce_target_tensor = Tensor([1.0])  # Target is "positive class"
         bce = bce_loss.forward(bce_pred_tensor, bce_target_tensor)
         bce_losses.append(bce.data)
@@ -1110,6 +1112,8 @@ def analyze_loss_sensitivity():
     min_bce_idx = np.argmin(bce_losses)
 
     idx_05 = np.argmin(np.abs(predictions - 0.5))
+    bce_idx_05 = np.argmin(np.abs(probabilities - 0.5))
+    bce_idx_01 = np.argmin(np.abs(probabilities - 0.1))
 
     print(f"MSE Loss:")
     print(f"  Minimum at prediction = {predictions[min_mse_idx]:.2f}, loss = {mse_losses[min_mse_idx]:.4f}")
@@ -1117,9 +1121,9 @@ def analyze_loss_sensitivity():
     print(f"  At prediction = 0.1: loss = {mse_losses[0]:.4f}")
 
     print(f"\nBinary Cross-Entropy Loss:")
-    print(f"  Minimum at prediction = {predictions[min_bce_idx]:.2f}, loss = {bce_losses[min_bce_idx]:.4f}")
-    print(f"  At prediction = 0.5: loss = {bce_losses[idx_05]:.4f}")
-    print(f"  At prediction = 0.1: loss = {bce_losses[0]:.4f}")
+    print(f"  Minimum at prediction = {probabilities[min_bce_idx]:.2f}, loss = {bce_losses[min_bce_idx]:.4f}")
+    print(f"  At prediction = 0.5: loss = {bce_losses[bce_idx_05]:.4f}")
+    print(f"  At prediction = 0.1: loss = {bce_losses[bce_idx_01]:.4f}")
 
     print(f"\n💡 Sensitivity Insights:")
     print("   - MSE grows quadratically with error distance")
@@ -1165,8 +1169,10 @@ CrossEntropyLoss:
 │ Total          │ O(B*C)         │
 └────────────────┴────────────────┘
 
-Cross-entropy is C times more expensive than MSE!
-For ImageNet (C=1000), CE is 1000x more expensive than MSE.
+For one regression output per sample, MSE processes B values while
+cross-entropy processes B*C logits. With C=1000, that is 1000 times as
+many input values, not a measured runtime ratio. MSE over C outputs
+also has O(B*C) work; actual timings depend on operations and hardware.
 ```
 
 ### Memory Layout and Access Patterns
@@ -1682,11 +1688,14 @@ Memory = Model_Params + Batch_Size × (Intermediate_Results)
 - 32 samples: 0.5ms
 - 128 samples: 2.0ms
 
-**Loss value**: **SAME** (we take mean over batch)
+**Loss value**: Averaging keeps the loss on a comparable scale as batch size
+changes. Different samples can produce different means. For independent samples
+from the same distribution, both batch means estimate the same expected loss;
+the larger batch has lower sampling variance.
 ```python
-# Both compute the same thing:
-batch_32_loss = np.mean(losses[:32])   # Mean of 32 samples
-batch_128_loss = np.mean(losses[:128]) # Mean of 128 samples
+losses = np.concatenate([np.zeros(32), np.ones(96)])
+batch_32_loss = np.mean(losses[:32])   # 0.0
+batch_128_loss = np.mean(losses[:128]) # 0.75: the added samples have higher loss
 ```
 
 **Error signal quality**: **BETTER** - larger batch = more stable estimate of the true loss
@@ -1769,7 +1778,7 @@ Congratulations! You've built the measurement system that enables all machine le
 ### Systems Insights Discovered
 - **Memory scaling**: CrossEntropy memory grows as B x C (batch x classes)
 - **Numerical stability**: Log-sum-exp trick prevents overflow with large logits
-- **Computational cost**: CE is C times more expensive than MSE due to softmax
+- **Computational cost**: CE processes B x C logits; MSE scales with the number of predicted values
 - **Production patterns**: Hierarchical softmax and sampled softmax for large vocabularies
 
 ### Ready for Next Steps

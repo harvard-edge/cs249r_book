@@ -317,7 +317,7 @@ initSlideViewer('18_memoization', '../assets/slides/18_kvcache.pdf');
 
 When ChatGPT writes a 100-word response, the naive transformer would recompute the keys and values for every previous token at every step, doing 5,050 K,V projections to produce 100 tokens. Almost all of that work is duplicate. Memoize it once and the cost collapses to 100.
 
-That single change is what makes real-time chat affordable. KV caching stores the key and value matrices from past tokens so each new token only computes its own — turning generation from O(n²) into O(n) and unlocking the 10–15x speedup every deployed LLM relies on.
+KV caching stores the key and value matrices from past tokens so each new token only computes its own. Across n token positions, this reduces K,V projection work from O(n²) to O(n). Attention still reads the growing history: its work per new token is O(n), and total attention work remains O(n²). End-to-end speedup depends on the workload and implementation.
 
 In this module you build that cache. By the end you will have a `KVCache` class with O(1) updates, a non-invasive hook that retrofits caching onto an existing transformer, and a quantitative grasp of the memory-versus-compute trade you just bought.
 
@@ -325,15 +325,15 @@ In this module you build that cache. By the end you will have a `KVCache` class 
 
 Acceleration (Module 17) made *any* computation faster — vectorization, cache locality, kernel fusion. Those tricks apply to matmul, convolution, attention, everything.
 
-Memoization is the opposite move: a single, narrow optimization that targets one structural property of autoregressive generation — that past keys and values never change. You spend O(n) memory to skip O(n²) work. It only helps decoder transformers, but on those it is the difference between economically viable and not.
+Memoization is the opposite move: a single, narrow optimization that targets one structural property of autoregressive generation — that past keys and values never change. You spend O(n) memory to avoid repeated K,V projections. The cache is valid when earlier tokens retain the same causal context and model parameters; changing either requires a reset.
 
 ## Learning Objectives
 
 :::{.callout-tip title="By completing this module, you will:"}
 
 - **Implement** a KVCache class with efficient memory management and O(1) update operations
-- **Master** the memory-compute trade-off: accepting O(n) memory overhead for O(n²) to O(n) speedup
-- **Understand** why memoization transforms generation complexity from quadratic to linear
+- **Measure** the memory-compute trade-off: accepting O(n) cache storage to reduce K,V projection work from O(n²) to O(n)
+- **Understand** why attention still reads a growing history after K,V projections are cached
 - **Connect** your implementation to production systems like ChatGPT and Claude that rely on KV caching
 :::
 
@@ -341,7 +341,7 @@ Memoization is the opposite move: a single, narrow optimization that targets one
 
 
 
-::: {#fig-18_memoization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch KV Caching**: Reusing previous computations to speed up text generation." fig-alt="Diagram of the TinyTorch KV cache: each transformer layer holds pre-allocated key and value tensors, new token projections append at the current sequence position, and cached K and V are retrieved together for attention computation during autoregressive generation."}
+::: {#fig-18_memoization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Reuse projections, attend over the prefix.** One token appends K and V to preallocated per-layer buffers. Its query attends over positions 1 through t, so attention work grows with the active prefix. Cache capacity reserves storage for both K and V." fig-alt="One token appends K and V to preallocated per-layer buffers. Its query attends over positions 1 through t, so attention work grows with the active prefix. Cache capacity reserves storage for both K and V."}
 
 ![](../assets/images/diagrams/18_memoization-diag-1.svg)
 
@@ -356,8 +356,8 @@ Memoization is the opposite move: a single, narrow optimization that targets one
 | Step | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
 | 1 | `KVCache.__init__()` | Pre-allocated cache storage per layer |
-| 2 | `KVCache.update()` | O(1) cache append without copying |
-| 3 | `KVCache.get()` | O(1) retrieval of cached values |
+| 2 | `KVCache.update()` | Append one token without copying the existing prefix |
+| 3 | `KVCache.get()` | Retrieve the valid prefix; Tensor construction copies it |
 | 4 | `enable_kv_cache()` | Non-invasive model enhancement |
 | 5 | Performance analysis | Measure speedup and memory usage |
 
@@ -365,10 +365,12 @@ Memoization is the opposite move: a single, narrow optimization that targets one
 
 **The pattern you'll enable:**
 ```python
-# Enable caching for dramatic speedup
+from tinytorch.perf.memoization import enable_kv_cache, _cached_generate
+
 cache = enable_kv_cache(model)
-# Generate with 10-15x faster inference
-output = model.generate(prompt, max_length=100)
+# The teaching helper resets the cache and opens its generation context.
+output = _cached_generate(model, prompt_tokens, max_new_tokens=100,
+                          temperature=0.0, cache=cache)
 ```
 
 ### What You're NOT Building (Yet)
@@ -433,7 +435,7 @@ This section covers the fundamental ideas you need to understand memoization in 
 
 ### Caching Computation
 
-Memoization trades memory for speed by storing computation results for reuse. When a function is called with the same inputs repeatedly, computing the result once and caching it eliminates redundant work. This trade-off makes sense when memory is cheaper than computation, which is almost always true for inference.
+Memoization trades memory for speed by storing computation results for reuse. When a function is called with the same inputs repeatedly, computing the result once and caching it eliminates redundant work. This trade-off helps when the saved computation outweighs cache access costs and the cache fits the memory budget.
 
 In transformers, attention is the perfect target for memoization. During autoregressive generation, each new token requires attention over all previous tokens. The naive approach recomputes key and value projections for every previous token at every step, leading to quadratic complexity. But these projections never change once computed, making them ideal candidates for caching.
 
@@ -441,7 +443,10 @@ Here's the core insight in your implementation:
 
 The code in @lst-18-memoization-update makes this concrete.
 
-```python
+```{python}
+#| label: lst-18-memoization-update
+#| lst-cap: "**O(1) KV cache append into pre-allocated per-layer storage**."
+#| eval: false
 def update(self, layer_idx: int, key: Tensor, value: Tensor) -> None:
     """Update cache with new key-value pairs for given layer."""
     if layer_idx >= self.num_layers:
@@ -458,9 +463,7 @@ def update(self, layer_idx: int, key: Tensor, value: Tensor) -> None:
     value_cache.data[:, :, self.seq_pos:self.seq_pos+1, :] = value.data
 ```
 
-: **Listing 18.1 — O(1) KV cache append into pre-allocated per-layer storage**. {#lst-18-memoization-update}
-
-This O(1) update operation writes directly to a pre-allocated position in the cache. No array resizing, no data copying, just an indexed assignment. The use of `.data` accesses the underlying NumPy array directly, avoiding gradient tracking overhead since caching is inference-only.
+This update writes one token into pre-allocated storage. Its cost is constant in sequence length for fixed batch size, head count, and head dimension. It copies the new K,V values without resizing or copying the existing prefix. The use of `.data` accesses the underlying NumPy array directly, avoiding gradient tracking overhead since caching is inference-only.
 
 The computational savings compound across generation steps. For a 100-token sequence:
 
@@ -503,7 +506,7 @@ Step 3: Compute K₃, V₃ → Append to cache
 Each step now computes only one new K,V pair instead of recomputing all previous pairs. This algorithmic optimization dramatically accelerates single-batch inference, but scaling this to thousands of concurrent users introduces a formidable systems engineering challenge.
 
 :::{.callout-note title="Systems Implication: KV-Cache Memory Fragmentation and PagedAttention"}
-While KV caching transforms computational time complexity from O(n²) to O(n), it creates a severe systems bottleneck: memory fragmentation. Because the final length of an autoregressively generated sequence is unknown ahead of time, naive inference engines must statically pre-allocate maximum-length, contiguous memory blocks for every request's cache. If a request finishes early, the remaining allocated memory is wasted, leading to massive internal fragmentation. Modern production engines like vLLM solve this with **PagedAttention**. Inspired by operating system virtual memory, PagedAttention divides the KV-cache into fixed-size, non-contiguous "pages." By dynamically allocating pages on demand and mapping them to a virtual sequence space, this approach nearly eliminates internal fragmentation, allowing a single GPU to serve exponentially larger batch sizes and drastically reducing the cost per token.
+While KV caching reduces repeated projection work, its storage can create a memory bottleneck. Because the final length of an autoregressively generated sequence is unknown ahead of time, naive inference engines must statically pre-allocate maximum-length, contiguous memory blocks for every request's cache. If a request finishes early, the remaining allocated memory is wasted, leading to massive internal fragmentation. Modern production engines like vLLM solve this with **PagedAttention**. Inspired by operating system virtual memory, PagedAttention divides the KV-cache into fixed-size, non-contiguous "pages." By dynamically allocating pages on demand and mapping them to a virtual sequence space, this approach nearly eliminates internal fragmentation, allowing more requests to fit in the same memory budget. Paging does not remove the storage required for each live token.
 :::
 
 ### Gradient Checkpointing
@@ -531,7 +534,10 @@ Here's how your implementation handles cache lifecycle:
 
 The code in @lst-18-memoization-reset makes this concrete.
 
-```python
+```{python}
+#| label: lst-18-memoization-reset
+#| lst-cap: "**Cache reset clearing per-layer K and V storage between sequences**."
+#| eval: false
 def reset(self) -> None:
     """Reset cache for new generation sequence."""
     self.seq_pos = 0
@@ -542,8 +548,6 @@ def reset(self) -> None:
         key_cache.data.fill(0.0)
         value_cache.data.fill(0.0)
 ```
-
-: **Listing 18.2 — Cache reset clearing per-layer K and V storage between sequences**. {#lst-18-memoization-reset}
 
 The reset operation returns the sequence position to zero and clears the cache data. This is called when starting to generate a new sequence, ensuring no stale data from previous generations affects the current one.
 
@@ -564,10 +568,10 @@ Memory = 2 × L × H × S × D × 4 bytes
 
 Example (GPT-2 Small):
   L = 12 layers, H = 12 heads, S = 1024 tokens, D = 64 dims
-  Memory = 2 × 12 × 12 × 1024 × 64 × 4 = 75,497,472 bytes ≈ 72 MB
+  Memory = 2 × 12 × 12 × 1024 × 64 × 4 = 75,497,472 bytes ≈ 72 MiB
 ```
 
-For a 125M-parameter model (500 MB of weights), that cache adds 14% memory overhead — modest, until you weigh it against the compute it saves.
+For a 125M-parameter model (500 MB of weights), that cache adds about 15% memory overhead — modest, until you weigh it against the compute it saves.
 
 Without caching, generating a sequence of length N requires computing K,V for:
 
@@ -589,16 +593,16 @@ For N = 100 tokens, caching gives a 50x reduction in K,V computation. At N = 100
 
 @tbl-18-memoization-cache-scaling shows how KV-cache savings scale with sequence length.
 
-| Sequence Length | Cache Memory | Compute Reduction | Effective Speedup |
+| Sequence Length | Allocated Cache | K,V Projection Reduction | End-to-End Speedup |
 |-----------------|--------------|-------------------|-------------------|
-| 10 tokens | 72 MB | 5.5x | 3-5x |
-| 50 tokens | 72 MB | 25.5x | 8-12x |
-| 100 tokens | 72 MB | 50.5x | 10-15x |
-| 500 tokens | 72 MB | 250.5x | 12-20x |
+| 10 tokens | 72 MiB | 5.5x | Measure on target workload |
+| 50 tokens | 72 MiB | 25.5x | Measure on target workload |
+| 100 tokens | 72 MiB | 50.5x | Measure on target workload |
+| 500 tokens | 72 MiB | 250.5x | Measure on target workload |
 
 : **KV-cache memory and compute savings as sequence length grows.** {#tbl-18-memoization-cache-scaling}
 
-The effective speedup is lower than the theoretical compute reduction because attention includes other operations beyond K,V projection, but the benefit is still dramatic.
+The table assumes one sequence, the float32 architecture above, and pre-allocation for 1024 tokens. Projection counts describe a growing prefix of lengths 1 through N. They are not timing predictions: attention, prefix copies, Python overhead, and sampling also contribute to runtime. Small NumPy workloads can run slower with caching.
 
 ## Common Errors
 
@@ -628,7 +632,7 @@ cache = KVCache(batch_size=1, max_seq_len=2048,  # Increased from 128
 
 **Cause**: Forgetting to call `cache.advance()` after updating all layers for a token.
 
-**Fix**: Always advance the cache position after processing a complete token through all layers:
+**Fix**: Always advance the cache position after processing a complete token through all layers. Manual model forwards must also run inside `with cache.generation():` and pass `start_pos=cache.seq_pos`; reset before starting a new prompt:
 
 ```python
 for layer_idx in range(num_layers):
@@ -668,14 +672,11 @@ cache.update(layer_idx, wrong_key, wrong_value)  # This will fail!
 **Fix**: Always reset the cache before generating a new sequence:
 
 ```python
-# Generate first sequence
-output1 = model.generate(prompt1)
+# The helper resets and opens the cache context for each independent prompt.
+output1 = _cached_generate(model, prompt1, 20, 0.0, cache)
+output2 = _cached_generate(model, prompt2, 20, 0.0, cache)
 
-# Reset cache before second sequence
-model._kv_cache.reset()
-
-# Generate second sequence (independent of first)
-output2 = model.generate(prompt2)
+# For manual forwards, call cache.reset() before entering cache.generation().
 ```
 
 ## Production Context
@@ -703,20 +704,25 @@ The following comparison shows how KV caching is used in TinyTorch versus produc
 ::: {.panel-tabset}
 ## Your TinyTorch
 ```python
+import numpy as np
+from tinytorch.core.tensor import Tensor
 from tinytorch.perf.memoization import enable_kv_cache
 
 # Enable caching
 cache = enable_kv_cache(model)
 
-# Generate with caching (10-15x faster)
-for _ in range(100):
-    logits = model.forward(input_token)
-    next_token = sample(logits)
-    # Cache automatically used and updated
-    input_token = next_token
-
-# Reset for new sequence
+# Trace a prompt token by token; prompt_tokens is a nonempty list of IDs.
 cache.reset()
+with cache.generation():
+    for token_id in prompt_tokens:
+        input_token = Tensor(np.array([[token_id]]))
+        logits = model.forward(input_token, start_pos=cache.seq_pos)
+        cache.advance()  # Advance once after all layers process this token.
+
+    # Greedy next token; continue the same pattern to decode more tokens.
+    next_token = int(np.argmax(logits.data[0, -1, :]))
+
+# Ordinary forwards outside the context do not read cached history.
 ```
 
 ## PyTorch
@@ -753,27 +759,18 @@ The fundamental algorithm: compute K,V once, append to cache, retrieve for atten
 
 ### Why Memoization Matters at Scale
 
-To appreciate the production impact of KV caching, consider the economics of language model serving:
+KV caching avoids projecting previous tokens again, but each request retains its own K,V history. Longer contexts and larger batches therefore increase memory demand. Production serving systems balance that storage against latency and throughput requirements.
 
-- **ChatGPT** serves millions of requests per day. Without KV caching, serving costs would be roughly 10x higher — enough to break the pricing model.
-- **GitHub Copilot** generates completions in real time. Without caching, latency would jump from ~100 ms to 1–2 seconds, killing the inline-completion experience.
-- **API serving**: a single V100 hosting GPT-2 handles 50–100 concurrent users with caching, but only 5–10 without it. That 10x gap is what determines whether a deployment is profitable.
-
-The memory cost is modest compared to the benefit. For a GPT-2 model:
-
-- Model parameters: 500 MB (loaded once, shared across all users)
-- KV cache per user: 75 MB
-- 10 concurrent users: 750 MB cache + 500 MB model = 1.25 GB total
-- Fits comfortably on a 16 GB GPU while delivering 10x throughput
+Measure both time and memory on the target workload. TinyTorch exposes the mechanism on NumPy arrays; its timings do not establish the cost, latency, or user capacity of a production service.
 
 ## Check Your Understanding
 
 :::{.callout-tip title="Check Your Understanding — Memoization"}
 Before moving on, verify you can articulate each of the following:
 
-- [ ] Why the KV cache dominates inference memory at long context, and how PagedAttention fragments it to reclaim wasted capacity.
+- [ ] Why the KV cache dominates inference memory at long context, and how PagedAttention allocates it in blocks to reduce wasted capacity.
 - [ ] How caching transforms autoregressive generation from O(n²) to O(n) K,V projections, and why the savings compound with sequence length.
-- [ ] The memory-compute trade-off: when trading O(n) memory for an O(n²)→O(n) compute reduction is a good deal (almost always, for inference).
+- [ ] The memory-compute trade-off: when trading O(n) memory for reduced projection work improves measured inference performance.
 - [ ] How cache lifecycle (update, advance, reset) interacts with batched and multi-turn serving.
 
 If any of these feels fuzzy, revisit the Core Concepts section (especially KV Cache in Transformers and Memory-Compute Trade-offs) before moving on.
@@ -795,7 +792,7 @@ Each layer has 2 tensors (K and V): 2 × 2,097,152 = 4,194,304 elements per laye
 
 Total across 12 layers: 12 × 4,194,304 = 50,331,648 elements
 
-Memory: 50,331,648 × 4 bytes = 201,326,592 bytes ≈ **192 MB**
+Memory: 50,331,648 × 4 bytes = 201,326,592 bytes ≈ **192 MiB**
 
 This is why production systems carefully tune batch size and sequence length.
 :::
@@ -812,7 +809,7 @@ Without caching, generating 200 tokens requires how many K,V computations? With 
 
 **Reduction**: 20,100 / 200 = **100.5x fewer K,V computations**
 
-This is why the speedup grows with sequence length.
+This is the reduction in K,V projection work; measured generation speedup also depends on attention and cache overhead.
 :::
 
 **Q3: Memory-Compute Trade-off**
@@ -825,15 +822,7 @@ A model uses 2 GB for parameters. Adding KV cache uses 300 MB. Is this trade-off
 
 **Speedup**: 12x faster generation
 
-**Analysis**:
-
-- Cost: 15% more memory
-- Benefit: 12x more throughput (or 12x lower latency)
-- Result: You can serve 12x more users with 1.15x the memory
-
-**Verdict**: Absolutely worthwhile. Memory is cheap; compute is expensive.
-
-In production, this enables serving 120 users per GPU instead of 10, dramatically reducing infrastructure costs.
+**Analysis**: A measured 12x latency improvement with 15% extra memory can be worthwhile if that memory fits the deployment budget. It does not imply 12x more concurrent users: each additional sequence needs its own cache, and throughput also depends on batching and hardware utilization.
 :::
 
 **Q4: Cache Hit Rate**
@@ -855,7 +844,7 @@ As generation continues:
 - Token 100: 99/100 = 99% hit rate
 - Token 500: 499/500 = 99.8% hit rate
 
-The cache hit rate approaches 100% for long sequences, explaining why speedup increases with length.
+The fraction of reused K,V pairs approaches 100% for long sequences. Attention still reads those pairs, so this fraction alone does not predict runtime.
 :::
 
 **Q5: Batch Inference Scaling**
@@ -885,11 +874,11 @@ Production systems balance batch size against latency requirements and memory co
 ## Key Takeaways
 
 - **Memoization exploits invariance:** past keys and values never change during autoregressive decoding, so computing them once instead of n² times is pure arbitrage.
-- **O(n) memory buys an O(n²) → O(n) compute reduction:** at n = 100 tokens that's a 50× reduction in K,V work; at n = 1000 it's 500×.
+- **O(n) cache storage reduces K,V projection work from O(n²) to O(n):** at n = 100 tokens that's a 50× reduction in K,V work; at n = 1000 it's 500×.
 - **Memory fragmentation is the production bottleneck:** naive pre-allocation wastes capacity on short requests; PagedAttention-style virtual memory is what makes long-context serving economically viable.
-- **The trade-off is domain-specific:** KV caching only helps autoregressive decoders — apply it where the structural invariance holds, not as a generic optimization.
+- **The trade-off depends on invariance:** reuse cached projections only while their inputs and model parameters remain unchanged.
 
-**Coming next:** Module 19 builds the statistical machinery that tells you whether the 10–15× speedup you just claimed is real — or just noise wearing a confidence interval.
+**Coming next:** Module 19 measures whether saved projection work produces an end-to-end speedup on the chosen workload.
 
 ## Further Reading
 
@@ -913,7 +902,7 @@ For students who want to understand the academic foundations and production impl
 
 ## What's Next
 
-You've claimed a 10–15x speedup. The honest question is: how do you know? "Generation feels faster" is not an answer a systems engineer can defend. To put a real number on what you just built — and to compare it against the other optimizations in this tier — you need disciplined measurement.
+You have eliminated repeated K,V projections. Measuring total generation time will establish whether those savings outweigh cache overhead. To put a real number on what you just built — and to compare it against the other optimizations in this tier — you need disciplined measurement.
 
 :::{.callout-note title="Coming Up: Module 19 - Benchmarking"}
 
@@ -926,8 +915,8 @@ Module 19 builds the measurement infrastructure that lets you say "this optimiza
 
 | Module | What It Does | Works with Memoization |
 |--------|--------------|------------------------|
-| **15: Quantization** | Reduce precision to save memory | `KVCache with int8 keys/values → 4x memory reduction` |
-| **17: Acceleration** | Optimize computation kernels | `Fused attention + KV cache → minimal memory traffic` |
+| **15: Quantization** | Reduce precision to save memory | Lower-precision caches are an extension; this cache stores float32 |
+| **17: Acceleration** | Optimize computation kernels | Compare kernel improvements with saved projection work |
 | **19: Benchmarking** | Measure end-to-end performance | `Profile cache hit rates and speedup gains` |
 
 : **How memoization stacks with quantization, acceleration, and benchmarking.** {#tbl-18-memoization-downstream-usage}

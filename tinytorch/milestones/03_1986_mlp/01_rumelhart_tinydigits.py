@@ -53,7 +53,7 @@ can
     └────────────────────────────────────────────────────────────────────┘
 
 📊 DATASET: TinyDigits (8×8 Handwritten Digits)
-  - 150 training + 47 test samples (curated for fast learning)
+  - 1,000 training + 200 test samples (curated for fast learning)
   - 8×8 grayscale images (64 features)
   - 10 classes (digits 0-9)
   - Ships with TinyTorch (~310 KB, no download!)
@@ -214,14 +214,14 @@ def load_digit_dataset():
     # Load training data
     with open(train_path, 'rb') as f:
         train_data = pickle.load(f)
-    train_images_np = train_data['images']  # (150, 8, 8)
-    train_labels_np = train_data['labels']  # (150,)
+    train_images_np = train_data['images']  # (N_train, 8, 8)
+    train_labels_np = train_data['labels']  # (N_train,)
 
     # Load test data
     with open(test_path, 'rb') as f:
         test_data = pickle.load(f)
-    test_images_np = test_data['images']  # (47, 8, 8)
-    test_labels_np = test_data['labels']  # (47,)
+    test_images_np = test_data['images']  # (N_test, 8, 8)
+    test_labels_np = test_data['labels']  # (N_test,)
 
     console.print(f"✓ TinyDigits loaded ({train_images_np.shape[0] + test_images_np.shape[0]} total samples)")
     console.print(f"✓ Image shape: {train_images_np[0].shape}")

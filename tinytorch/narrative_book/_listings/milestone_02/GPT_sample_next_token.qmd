@@ -9,10 +9,15 @@ def _sample_next_token(self, logits, temperature=1.0):
         raise ValueError("temperature must be finite and nonnegative")
     if temperature == 0:
         return int(np.argmax(logits[0]))
-    scaled_logits = logits / temperature
+    # Center in float64 before division so tiny temperatures cannot turn
+    # the largest logit into infinity. Negative overflow means zero mass.
+    centered_logits = np.asarray(logits, dtype=np.float64)
+    centered_logits = centered_logits - np.max(centered_logits, axis=-1, keepdims=True)
+    with np.errstate(over="ignore", under="ignore"):
+        scaled_logits = centered_logits / temperature
+        exp_logits = np.exp(scaled_logits)
 
     # Convert to probabilities (softmax with numerical stability)
-    exp_logits = np.exp(scaled_logits - np.max(scaled_logits, axis=-1, keepdims=True))
     probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
 
     # Sample next token from probability distribution

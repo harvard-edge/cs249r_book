@@ -685,7 +685,7 @@ class PositionalEncoding:
         APPROACH:
         1. Store max_seq_len and embed_dim
         2. Create position_embeddings matrix of shape (max_seq_len, embed_dim)
-        3. Use smaller initialization than token embeddings (they're additive)
+        3. Initialize positions with uniform bounds ±sqrt(2 / embed_dim)
 
         HINT: limit = sqrt(2.0 / embed_dim), then uniform(-limit, limit)
         """
@@ -694,7 +694,9 @@ class PositionalEncoding:
         self.embed_dim = embed_dim
 
         # Initialize position embedding matrix
-        # Smaller initialization than token embeddings since these are additive
+        # This scale depends on embed_dim, not vocabulary size. For large
+        # vocabularies it can exceed the token initialization scale; optional
+        # token scaling in EmbeddingLayer changes their relative magnitudes.
         # Learned positions are returned by parameters(), so the optimizer will
         # try to update them -- they have to carry gradients for that to mean
         # anything. (Sinusoidal encodings are the opposite: fixed by design.)
@@ -940,7 +942,7 @@ Mathematical position encoding that creates unique signatures for each position 
 │ └───────────────────────────────────────────────────────────────────┘ │
 │                                                                       │
 │ KEY ADVANTAGES:                                                       │
-│ • Zero parameters (no memory overhead)                                │
+│ • No trainable parameters; stored table uses memory                                │
 │ • Infinite sequence length (can extrapolate)                          │
 │ • Smooth transitions (nearby positions are similar)                   │
 │ • Mathematical elegance (interpretable patterns)                      │
@@ -1186,9 +1188,8 @@ Now let's build the complete embedding system that combines token and positional
 ```
 Complete Embedding Pipeline:
 
-1. Token Lookup → 2. Position Encoding → 3. Combination → 4. Ready for Attention
-     ↓                     ↓                   ↓                  ↓
-  sparse IDs         position info       dense vectors      context-aware
+Token Lookup → Optional Token Scaling → Add Positions → Ready for Attention
+  token IDs          multiply by √D       position-aware      dense vectors
 ```
 """
 
@@ -1199,64 +1200,64 @@ Complete Embedding Pipeline:
 The production embedding layer that powers modern transformers combines multiple components into an efficient, flexible pipeline.
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│ COMPLETE EMBEDDING SYSTEM: Token + Position → Position-Aware Vectors      │
-├───────────────────────────────────────────────────────────────────────────┤
-│                                                                           │
-│ INPUT: Token IDs [1, 42, 7, 99]                                           │
-│         │                                                                 │
-│         ├─ STEP 1: TOKEN EMBEDDING LOOKUP                                 │
-│         │  ┌─────────────────────────────────────────────────────────┐    │
-│         │  │   Token Embedding Table (vocab_size × embed_dim)        │    │
-│         │  │                                                         │    │
-│         │  │   ID 1  → [0.1,  0.4, -0.2, ...]  (semantic features)   │    │
-│         │  │   ID 42 → [0.7, -0.2,  0.1, ...]  (learned meaning)     │    │
-│         │  │   ID 7  → [-0.3, 0.1,  0.5, ...]  (dense vector)        │    │
-│         │  │   ID 99 → [0.9, -0.1,  0.3, ...]  (context-free)        │    │
-│         │  └─────────────────────────────────────────────────────────┘    │
-│         │                                                                 │
-│         ├─ STEP 2: POSITIONAL ENCODING (Choose Strategy)                  │
-│         │  ┌─────────────────────────────────────────────────────────┐    │
-│         │  │ Strategy A: Learned PE                                  │    │
-│         │  │   pos 0 → [trainable vector] (learns patterns)          │    │
-│         │  │   pos 1 → [trainable vector] (task-specific)            │    │
-│         │  │   pos 2 → [trainable vector] (fixed max length)         │    │
-│         │  │                                                         │    │
-│         │  │ Strategy B: Sinusoidal PE                               │    │
-│         │  │   pos 0 → [sin/cos pattern] (mathematical)              │    │
-│         │  │   pos 1 → [sin/cos pattern] (no parameters)             │    │
-│         │  │   pos 2 → [sin/cos pattern] (infinite length)           │    │
-│         │  │                                                         │    │
-│         │  │ Strategy C: No PE                                       │    │
-│         │  │   positions ignored (order-agnostic)                    │    │
-│         │  └─────────────────────────────────────────────────────────┘    │
-│         │                                                                 │
-│         ├─ STEP 3: ELEMENT-WISE ADDITION                                  │
-│         │  ┌─────────────────────────────────────────────────────────┐    │
-│         │  │ Token + Position = Position-Aware Representation        │    │
-│         │  │                                                         │    │
-│         │  │ [0.1, 0.4, -0.2] + [pos0] = [0.1+p0, 0.4+p0, ...]       │    │
-│         │  │ [0.7, -0.2, 0.1] + [pos1] = [0.7+p1, -0.2+p1, ...]      │    │
-│         │  │ [-0.3, 0.1, 0.5] + [pos2] = [-0.3+p2, 0.1+p2, ...]      │    │
-│         │  │ [0.9, -0.1, 0.3] + [pos3] = [0.9+p3, -0.1+p3, ...]      │    │
-│         │  └─────────────────────────────────────────────────────────┘    │
-│         │                                                                 │
-│         ├─ STEP 4: OPTIONAL SCALING (Transformer Convention)              │
-│         │  ┌─────────────────────────────────────────────────────────┐    │
-│         │  │ Scale by √embed_dim for gradient stability              │    │
-│         │  │ Helps balance token and position magnitudes             │    │
-│         │  └─────────────────────────────────────────────────────────┘    │
-│         │                                                                 │
-│         └─ OUTPUT: Position-Aware Dense Vectors                           │
-│            Ready for attention mechanisms and transformers!               │
-│                                                                           │
-│ INTEGRATION FEATURES:                                                     │
-│ • Flexible position encoding (learned/sinusoidal/none)                    │
-│ • Efficient batch processing with variable sequence lengths               │
-│ • Memory optimization (shared position encodings)                         │
-│ • Production patterns (matches PyTorch/HuggingFace)                       │
-│                                                                           │
-└───────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ COMPLETE EMBEDDING SYSTEM: Token + Position → Position-Aware Vectors          │
+├───────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│ INPUT: Token IDs [1, 42, 7, 99]                                               │
+│         │                                                                     │
+│         ├─ STEP 1: TOKEN EMBEDDING LOOKUP                                     │
+│         │  ┌─────────────────────────────────────────────────────────┐        │
+│         │  │   Token Embedding Table (vocab_size × embed_dim)        │        │
+│         │  │                                                         │        │
+│         │  │   ID 1  → [0.1,  0.4, -0.2, ...]  (semantic features)   │        │
+│         │  │   ID 42 → [0.7, -0.2,  0.1, ...]  (learned meaning)     │        │
+│         │  │   ID 7  → [-0.3, 0.1,  0.5, ...]  (dense vector)        │        │
+│         │  │   ID 99 → [0.9, -0.1,  0.3, ...]  (context-free)        │        │
+│         │  └─────────────────────────────────────────────────────────┘        │
+│         │                                                                     │
+│         ├─ STEP 2: OPTIONAL SCALING (Transformer Convention)                  │
+│         │  ┌─────────────────────────────────────────────────────────┐        │
+│         │  │ Scale token vectors only by √embed_dim                  │        │
+│         │  │ Helps balance token and position magnitudes             │        │
+│         │  └─────────────────────────────────────────────────────────┘        │
+│         │                                                                     │
+│         ├─ STEP 3: POSITIONAL ENCODING (Choose Strategy)                      │
+│         │  ┌─────────────────────────────────────────────────────────┐        │
+│         │  │ Strategy A: Learned PE                                  │        │
+│         │  │   pos 0 → [trainable vector] (learns patterns)          │        │
+│         │  │   pos 1 → [trainable vector] (task-specific)            │        │
+│         │  │   pos 2 → [trainable vector] (fixed max length)         │        │
+│         │  │                                                         │        │
+│         │  │ Strategy B: Sinusoidal PE                               │        │
+│         │  │   pos 0 → [sin/cos pattern] (mathematical)              │        │
+│         │  │   pos 1 → [sin/cos pattern] (no parameters)             │        │
+│         │  │   pos 2 → [sin/cos pattern] (extendable table)          │        │
+│         │  │                                                         │        │
+│         │  │ Strategy C: No PE                                       │        │
+│         │  │   positions ignored (order-agnostic)                    │        │
+│         │  └─────────────────────────────────────────────────────────┘        │
+│         │                                                                     │
+│         ├─ STEP 4: ELEMENT-WISE ADDITION                                      │
+│         │  ┌─────────────────────────────────────────────────────────┐        │
+│         │  │ Scaled token + position (s = √D, or 1 if unscaled)      │        │
+│         │  │                                                         │        │
+│         │  │ s * token[1]  + position[0] → output[0]                 │        │
+│         │  │ s * token[42] + position[1] → output[1]                 │        │
+│         │  │ s * token[7]  + position[2] → output[2]                 │        │
+│         │  │ s * token[99] + position[3] → output[3]                 │        │
+│         │  └─────────────────────────────────────────────────────────┘        │
+│         │                                                                     │
+│         └─ OUTPUT: Position-Aware Dense Vectors                               │
+│            Ready for attention mechanisms and transformers!                   │
+│                                                                               │
+│ INTEGRATION FEATURES:                                                         │
+│ • Flexible position encoding (learned/sinusoidal/none)                        │
+│ • Efficient batch processing with variable sequence lengths                   │
+│ • Memory optimization (shared position encodings)                             │
+│ • Production patterns (matches PyTorch/HuggingFace)                           │
+│                                                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Why this architecture works**: By separating token semantics from positional information, the model can learn meaning and order independently, then combine them optimally for the specific task.
@@ -1669,7 +1670,7 @@ def analyze_embedding_memory_scaling():
     print("\n🚀 Production Implications:")
     print("• GPT-3's embedding table: ~2.4GB (50K vocab × 12K dims)")
     print("• Learned PE adds memory but may improve task-specific performance")
-    print("• Sinusoidal PE saves memory and allows longer sequences")
+    print("• Sinusoidal PE avoids gradient/optimizer storage; extend its table for longer sequences")
 
 if __name__ == "__main__":
     analyze_embedding_memory_scaling()
@@ -1918,19 +1919,19 @@ def test_module():
 
     print("✅ All positional encoding variants work!")
 
-    # Integration Test 4: Memory efficiency check
-    print("🧪 Integration Test: Memory Efficiency...")
+    # Integration Test 4: Repeated forward passes
+    print("🧪 Integration Test: Repeated Forward Passes...")
 
-    # Test that we're not creating unnecessary copies
+    # Check output shapes stay consistent across repeated calls
     large_embed = EmbeddingLayer(vocab_size=10000, embed_dim=512)
     test_batch = Tensor(rng.integers(0, 10000, (32, 128)))
 
-    # Multiple forward passes should not accumulate memory (in production)
+    # This smoke test checks shape consistency, not memory allocation or retention.
     for _ in range(5):
         output = large_embed.forward(test_batch)
         assert output.shape == (32, 128, 512), "Large batch processing failed"
 
-    print("✅ Memory efficiency check passed!")
+    print("✅ Repeated forward passes preserve output shape!")
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
