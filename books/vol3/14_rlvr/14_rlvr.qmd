@@ -141,6 +141,12 @@ $$\hat{V}(s_t) = \frac{1}{K} \sum_{k=1}^K R\big(\text{Rollout}_k(s_t)\big)$$
 
 This provides dense, grounded credit assignment without exposing the policy to learned verifier hacking.
 
+This pathology and its resolution via counterfactual rollout branching are formalized in @fig-vol3-rlvr-credit-assignment. As shown in panel (a), a trajectory may execute sound diagnostic steps across initial turns before suffering a catastrophic value collapse ($V(s_3) = 0.88 \to V(s_4) = 0.00$) when emitting an AB-BA lock inversion. Under a naive terminal outcome reward model (panel b), the failure penalty is diluted uniformly across all forty turns ($\hat{A}_t = -0.71$), actively suppressing the policy's valid diagnostic reasoning. By leveraging radix prefix caching in GPU memory (@sec-vol3-virtual-memory), the runtime forks counterfactual branches at the pivotal state $s_3$ (panel c), isolating the penalty strictly to the faulty action $a_4$ while reinforcing the corrected alternative $a_4^*$.
+
+::: {#fig-vol3-rlvr-credit-assignment fig-env="figure" fig-pos="htb" fig-cap="**Temporal Credit Assignment Dilution and Counterfactual Value Estimation**: (a) Latent value collapse across a 40-turn trajectory, identifying the pivotal inflection point $\\Delta_3 = -0.88$ where a concurrency deadlock bug is introduced. (b) Uniform credit dilution under terminal outcome reward models (ORMs), which incorrectly penalize sound exploratory diagnostic turns $t_1..t_3$. (c) Counterfactual advantage estimation via radix prefix sharing, isolating penalties to the faulty transition while protecting valid reasoning." fig-alt="Systems diagram illustrating trajectory latent value collapse, uniform ORM credit dilution table, and counterfactual advantage estimation via radix tree prefix sharing."}
+![](images/svg/credit_assignment.svg){width="100%"}
+:::
+
 ## Group Relative Policy Optimization {#sec-vol3-rlvr-ppo-grpo}
 
 In classical reinforcement learning for language models, **Proximal Policy Optimization (PPO)** [@schulman2017proximal] serves as the standard training algorithm. However, deploying PPO for multi-turn agent trajectories across large foundation models introduces an unsustainable accelerator memory bottleneck.
@@ -233,6 +239,16 @@ The policy compiler suppresses runaway verbosity by introducing a **Calibrated L
 $$R_{\text{calibrated}} = R_{\text{oracle}} - \lambda_{\text{len}} \cdot \max\left(0, \frac{T_{\text{consumed}} - T_{\text{target}}}{T_{\max}}\right)^2$$
 
 By penalizing token volume quadratically once it exceeds an optimal target horizon ($T_{\text{target}}$), the runtime incentivizes concise, high-density reasoning, forcing the policy to distill its deliberative search into efficient procedural actions.
+
+### Emergent deliberation and structured backtracking {#sec-vol3-rlvr-backtracking}
+
+When calibrated length penalties prevent runaway verbosity, dense verifier pressure cultivates an authentic internal state machine of deliberative self-correction. As illustrated in @fig-vol3-rlvr-emergent-backtracking, the policy acquires an emergent finite-state machine (FSM) during autoregressive decoding. Rather than committing blindly to the first generated hypothesis, the model uses cross-attention to evaluate proposed tokens against formal invariant specifications ($S_{\text{mon}}$).
+
+Upon detecting a potential invariant violation (such as an AB-BA lock acquisition hierarchy hazard), the policy emits a reversal boundary token ($\kappa_{\text{rev}}$, e.g., *"Wait, lock hierarchy..."*). Crucially, the attention mechanism dynamically re-weights its context window: attention to the invalidated reasoning branch is suppressed ($\alpha(B_2 \to B_1) \approx 0.02$), while attention anchors on the reversal token and shifts to the invariant specification ($\alpha(B_2 \to I_{\text{spec}}) = 0.54$). This allows the model to synthesize a repaired, sound strategy ($a_{\text{perm}}$) before committing any irreversible mutation to external tool sandboxes.
+
+::: {#fig-vol3-rlvr-emergent-backtracking fig-env="figure" fig-pos="htb" fig-cap="**Emergent Deliberation and Autonomous Backtracking in RLVR**: Under verifiable reward pressure, the policy $\\pi_\\theta$ acquires an internal finite-state machine for self-correction without explicit tree-search algorithms. (a) State transitions from candidate hypothesis generation ($S_{\\text{hyp}}$) through invariant monitoring ($S_{\\text{mon}}$) and reversal token emission ($S_{\\text{back}}$) to tool actuation ($S_{\\text{act}}$) and oracle evaluation ($S_{\\text{oracle}}$). (b) Attention re-weighting across reversal boundaries: the policy suppresses attention to invalidated reasoning branches while anchoring on reversal tokens and invariant specifications." fig-alt="Systems diagram illustrating emergent deliberation finite state machine and token-level attention re-weighting across backtracking boundaries in RLVR."}
+![](images/svg/rlvr_emergent_backtracking.svg){width="100%"}
+:::
 
 ## Disaggregated Rollout Infrastructure {#sec-vol3-rlvr-infrastructure}
 
