@@ -2,8 +2,8 @@
 """
 apply_pedagogical_openings.py
 
-Systematically updates the introductory prose across all 23 chapters and milestones
-in TinyTorch: The xv6 of Machine Learning Systems.
+Transforms raw/stub introductions into the publication-grade 5-beat Hourglass opening
+in TinyTorch: From Tensors to Transformers.
 
 Implements the two-part pedagogical progression on page 1 of every chapter:
 1. The Deep Learning Connection ("As an ML person, I know this"):

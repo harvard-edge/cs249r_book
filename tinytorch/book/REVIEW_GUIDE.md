@@ -1,6 +1,7 @@
 # Reviewer & Practitioner Guide: TinyTorch
 
-**TinyTorch: The xv6 of Machine Learning Systems**
+**TinyTorch: From Tensors to Transformers**
+*Engineering Deep Learning Systems from Scratch*
 
 Prof. Vijay Janapa Reddi — Harvard University
 
