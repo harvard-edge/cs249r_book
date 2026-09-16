@@ -1251,13 +1251,18 @@ class Profiler:
         current_shape = input_shape
         for layer in model.layers:
             total_flops += self.count_flops(layer, current_shape)
-            if layer.__class__.__name__ == 'Conv2d':
+            if layer.__class__.__name__ in ('Conv2d', 'MaxPool2d', 'AvgPool2d'):
                 kernel = layer.kernel_size
                 kh, kw = (kernel, kernel) if isinstance(kernel, int) else kernel
+                stride = layer.stride
+                sh, sw = (stride, stride) if isinstance(stride, int) else stride
+                padding = layer.padding
+                ph, pw = (padding, padding) if isinstance(padding, int) else padding
                 h, w = current_shape[-2:]
-                current_shape = (current_shape[0], layer.out_channels,
-                                 (h + 2 * layer.padding - kh) // layer.stride + 1,
-                                 (w + 2 * layer.padding - kw) // layer.stride + 1)
+                channels = getattr(layer, 'out_channels', current_shape[1])
+                current_shape = (current_shape[0], channels,
+                                 (h + 2 * ph - kh) // sh + 1,
+                                 (w + 2 * pw - kw) // sw + 1)
             elif hasattr(layer, 'weight') and layer.weight.ndim == 2:
                 current_shape = current_shape[:-1] + (layer.weight.shape[1],)
         return total_flops
@@ -1267,9 +1272,10 @@ class Profiler:
         """
         Count per-sample FLOPs for one forward pass.
 
-        Exact rules cover Linear, Conv2d, flat Sequential chains, and GPT. Other
-        layers use a one-operation-per-element estimate; custom shape-changing
-        layers need their own counting rule.
+        Rules cover Linear, Conv2d, flat Sequential chains, and GPT. Pooling
+        propagates its output shape but uses the same one-operation-per-input
+        estimate as other fallback layers. Custom shape-changing layers need
+        their own counting rule.
 
         TODO: Implement FLOP counting by dispatching to per-layer-type helpers
 
@@ -1392,17 +1398,24 @@ class Profiler:
             baseline_memory = tracemalloc.get_traced_memory()[0]
             parameter_memory_mb = self._calculate_parameter_memory(model)
             dummy_input = self._dummy_input(model, input_shape)
-            # Rough activation estimate: input plus a similarly sized output.
-            activation_memory_mb = (dummy_input.data.nbytes * 2) / MB_TO_BYTES
-            _ = model.forward(dummy_input)
+            output = model.forward(dummy_input)
+            # Count the actual input and output buffers, not two input-sized
+            # buffers. A view or identity output does not allocate another one.
+            activation_bytes = dummy_input.data.nbytes
+            if not np.shares_memory(dummy_input.data, output.data):
+                activation_bytes += output.data.nbytes
+            activation_memory_mb = activation_bytes / MB_TO_BYTES
             _, peak_memory = tracemalloc.get_traced_memory()
-            peak_memory_mb = max(0, peak_memory - baseline_memory) / MB_TO_BYTES
+            # Parameters were already live at baseline. Add them to the NEW
+            # allocations, even when they were tracked by a caller's session:
+            # baseline subtraction removes those existing bytes first.
+            peak_memory_mb = parameter_memory_mb + max(0, peak_memory - baseline_memory) / MB_TO_BYTES
         finally:
             if owns_trace:
                 tracemalloc.stop()
 
         useful_memory = parameter_memory_mb + activation_memory_mb
-        # tracemalloc only sees allocations made after start(); never report a peak below what we know is live
+        # Keep a lower bound from known live buffers even if tracing misses one.
         peak_memory_mb = max(peak_memory_mb, useful_memory)
         return {
             'parameter_memory_mb': parameter_memory_mb,
@@ -1693,6 +1706,9 @@ def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
     elif hasattr(model, 'weight'):
         weights.extend(model.weight.data.flatten().tolist())
     else:
+        return {'error': 'No weights found'}
+
+    if not weights:
         return {'error': 'No weights found'}
 
     weights = np.array(weights)

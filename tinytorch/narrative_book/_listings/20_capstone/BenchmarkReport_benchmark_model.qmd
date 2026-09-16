@@ -4,7 +4,7 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
     """
     Benchmark model performance comprehensively.
     """
-    if X_test.shape[0] == 0:
+    if len(X_test.shape) == 0 or X_test.shape[0] == 0:
         raise ValueError("X_test must contain at least one sample")
     y_test = np.asarray(y_test)
     if y_test.shape != (X_test.shape[0],):
@@ -19,9 +19,19 @@ def benchmark_model(self, model, X_test, y_test, num_runs=100):
     )
     model_size_mb = self.measure_memory(model)
 
-    # Measure accuracy
+    # Validate classification outputs before argmax: NaN scores can otherwise
+    # silently select class zero and make a diverged model look accurate.
     predictions = model.forward(X_test)
-    pred_labels = np.argmax(predictions.data, axis=1)
+    scores = np.asarray(predictions.data)
+    if scores.ndim != 2 or scores.shape[0] != X_test.shape[0] or scores.shape[1] == 0:
+        raise ValueError("Predictions must have shape (samples, classes) with at least one class")
+    if not np.issubdtype(scores.dtype, np.number) or np.iscomplexobj(scores) or not np.all(np.isfinite(scores)):
+        raise ValueError("Prediction scores must be finite real numbers")
+    if not np.issubdtype(y_test.dtype, np.integer):
+        raise ValueError("y_test must contain integer class indices")
+    if np.any(y_test < 0) or np.any(y_test >= scores.shape[1]):
+        raise ValueError("y_test class indices must be within the prediction classes")
+    pred_labels = np.argmax(scores, axis=1)
     accuracy = np.mean(pred_labels == y_test)
 
     # Latency: untimed warmup, then num_runs single-sample calls timed one by one

@@ -66,6 +66,7 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache
 - `numpy` (for array operations and numerical computing)
 - `time` (for performance measurement)
 - `typing` (for type hints)
+- `contextlib` (for an exception-safe generation scope)
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor` (Tensor class from Module 01)
@@ -88,7 +89,8 @@ that makes production LLM serving economically viable.
 import numpy as np
 rng = np.random.default_rng(7)
 import time
-from typing import Tuple, Optional, Dict, List
+from typing import Tuple, Optional, Dict, List, Iterator
+from contextlib import contextmanager
 
 # Import TinyTorch components from previous modules
 from tinytorch.core.tensor import Tensor
@@ -466,6 +468,7 @@ class KVCache:
 
         # Current sequence position (how many tokens are cached)
         self.seq_pos = 0
+        self._generation_active = False
 
         # Cache storage: list of (key_cache, value_cache) tuples per layer
         self.caches = []
@@ -629,6 +632,21 @@ class KVCache:
 
         return cached_keys, cached_values
         ### END SOLUTION
+
+    @contextmanager
+    def generation(self) -> Iterator["KVCache"]:
+        """Use cached attention only inside this inference scope.
+
+        Reset before a new sequence and advance after each token's layers.
+        Ordinary model forwards outside the scope never consume cached history.
+        Nested scopes restore the previous state, including after exceptions.
+        """
+        previous = self._generation_active
+        self._generation_active = True
+        try:
+            yield self
+        finally:
+            self._generation_active = previous
 
     def advance(self) -> None:
         """
@@ -794,11 +812,12 @@ for each new token:
 
 With Cache (New):
 cache = enable_kv_cache(model)
-for each new token:
-    input_token = [just new token]          # Length always 1
-    logits = model.forward(input_token)     # Uses cache automatically!
-    next_token = sample(logits[-1])
-    append next_token
+with cache.generation():
+    for each prompt or generated token:
+        input_token = [just new token]      # Length always 1
+        logits = model.forward(input_token, start_pos=cache.seq_pos)
+        cache.advance()                     # All layers have written their K,V
+        next_token = sample(logits[-1])
 ```
 
 **Key Difference**: Input changes from growing sequence to single token, with cache providing history.
@@ -832,8 +851,9 @@ To use KV caching in your transformer generation:
 3. Verify memory usage is acceptable
 
 **During Generation:**
-1. For the first token (prompt), process normally and populate cache
-2. For subsequent tokens:
+1. Enter `with cache.generation():` (the `_cached_generate` helper does this for you)
+2. Process prompt tokens at `start_pos=cache.seq_pos` and populate the cache
+3. For subsequent tokens:
    - Only process the NEW token (not entire sequence)
    - Cache is automatically updated with new K,V pairs
    - Cached values are automatically used in attention
@@ -888,7 +908,7 @@ Why? Longer sequences = more redundant computation without cache.
 
 # %% nbgrader={"grade": false, "grade_id": "cached-generation-step", "solution": false}
 #| export
-def _cached_generation_step(x, attention, cache_obj, layer_idx):
+def _cached_generation_step(x, attention, cache_obj, layer_idx, mask=None):
     """
     Execute a single cached generation step for one new token.
 
@@ -902,6 +922,7 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
         attention: Attention layer with q_proj, k_proj, v_proj, out_proj
         cache_obj: KVCache instance holding previous K,V pairs
         layer_idx: Which transformer layer (for cache indexing)
+        mask: Optional binary mask broadcastable to (batch, heads, 1, prefix_length)
 
     Returns:
         Output tensor, shape (batch, 1, embed_dim)
@@ -944,6 +965,19 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     # Using .data (numpy) for inference-only operation (no gradients needed)
     K_transposed = np.transpose(K_all.data, (0, 1, 3, 2))
     scores = np.matmul(Q_heads.data, K_transposed) / np.sqrt(head_dim)
+
+    # A single query can still mask cached keys (for example, padding).
+    # Match Module 12: binary masks, with at least one allowed key per query.
+    if mask is not None:
+        allowed = mask.data
+        if np.any((allowed != 0) & (allowed != 1)):
+            raise ValueError("Attention mask must contain only 0 (blocked) or 1 (allowed)")
+        if allowed.ndim == 3:
+            allowed = allowed[:, None, :, :]
+        allowed = np.broadcast_to(allowed, scores.shape)
+        if np.any(~np.any(allowed != 0, axis=-1)):
+            raise ValueError("Attention mask must allow at least one key per query")
+        scores = np.where(allowed != 0, scores, -np.inf)
 
     # Stable softmax
     scores_max = np.max(scores, axis=-1, keepdims=True)
@@ -1135,16 +1169,16 @@ each call takes. Keeping the DECISION here and the COMPUTATION in
 ```
 Input x arrives at the stand-in:
 
-  x.shape[1] > 1?  ──YES──→ FULL SEQUENCE
+  Cached scope AND one token? ──NO──→ ORIGINAL PATH
        │                     Forward to the original attention (mask, gradients, training)
-       NO
+       YES
        │
        └──→ ONE NEW TOKEN
             _cached_generation_step(): project K,V once, write them into the
             cache, attend over everything cached so far (O(n), not O(n²))
 ```
 
-The first token of a prompt takes the single-token path too. The cache is empty,
+Inside `cache.generation()`, the first prompt token takes the cached path too. The cache is empty,
 so it attends only to itself, and its K,V are written for every later token to
 use. The position each token needs comes from the model: `_cached_generate` calls
 `model.forward(token, start_pos=cache.seq_pos)`, which is why Module 13's
@@ -1177,24 +1211,25 @@ class CachedAttention:
         TODO: Implement the two-path dispatch
 
         APPROACH:
-        1. If x holds more than one position (x.shape[1] > 1), this is a full
-           sequence: return self.attention.forward(x, mask) unchanged
-        2. Otherwise x is one new token: return
-           _cached_generation_step(x, self.attention, self.cache, self.layer_idx)
+        1. Outside cache.generation(), or for a full sequence, return
+           self.attention.forward(x, mask) unchanged
+        2. Inside that scope, route one new token through
+           _cached_generation_step, including its optional attention mask
 
         EXAMPLE:
         >>> stand_in = CachedAttention(block.attention, cache, layer_idx=0)
         >>> stand_in.forward(x_train)   # (1, 10, D): original attention, cache untouched
-        >>> stand_in.forward(x_token)   # (1, 1, D): cached step, cache updated
+        >>> with cache.generation():
+        ...     stand_in.forward(x_token)  # (1, 1, D): cached step, cache updated
 
         HINTS:
         - x.shape[1] is the sequence length
         - The cached step handles an empty cache itself (the first token attends to itself)
         """
         ### BEGIN SOLUTION role="scaffold"
-        if x.shape[1] > 1:
+        if not self.cache._generation_active or x.shape[1] > 1:
             return self.attention.forward(x, mask)
-        return _cached_generation_step(x, self.attention, self.cache, self.layer_idx)
+        return _cached_generation_step(x, self.attention, self.cache, self.layer_idx, mask)
         ### END SOLUTION
 
     def __call__(self, x, mask=None):
@@ -1204,7 +1239,7 @@ class CachedAttention:
 """
 ### 🧪 Unit Test: CachedAttention
 
-**What we're testing**: The stand-in routes full sequences to the original attention and single tokens through the cache, and the cached path reproduces uncached causal attention
+**What we're testing**: The stand-in routes ordinary forwards to the original attention and explicitly scoped single tokens through the cache, and the cached path reproduces uncached causal attention
 **Why it matters**: Wrong routing causes silent correctness bugs (training reads the cache, or generation ignores it), and a cache that changes the numbers is not an optimization
 **Expected**: Full-sequence output identical to the original layer with the cache untouched; token-by-token outputs match the causal attention output at every position
 """
@@ -1230,13 +1265,18 @@ def test_unit_cached_attention():
     assert cache.seq_pos == 0, "A full-sequence call must not touch the cache"
 
     # Path 2: one token at a time through the cache reproduces the causal result
-    for t in range(seq_len):
-        out_t = stand_in.forward(x[:, t:t+1, :])
-        cache.advance()
-        assert out_t.shape == (1, 1, embed_dim), "One token in, one token out"
-        assert np.allclose(out_t.data[0, 0], full.data[0, t], atol=1e-5), \
-            f"Cached output at position {t} differs from uncached causal attention"
+    with cache.generation():
+        for t in range(seq_len):
+            out_t = stand_in.forward(x[:, t:t+1, :])
+            cache.advance()
+            assert out_t.shape == (1, 1, embed_dim), "One token in, one token out"
+            assert np.allclose(out_t.data[0, 0], full.data[0, t], atol=1e-5), \
+                f"Cached output at position {t} differs from uncached causal attention"
     assert cache.seq_pos == seq_len, "Each advance() should cache one more token"
+    # Leaving the scope restores ordinary forwards, even for a single token.
+    ordinary = stand_in.forward(x[:, :1, :])
+    assert np.allclose(ordinary.data, attention.forward(x[:, :1, :]).data), \
+        "An ordinary single-token forward must not consume cached history"
 
     print("   Full sequence: routed to the original attention, cache untouched")
     print(f"   {seq_len} single tokens: cached path matches causal attention at every position")
@@ -1298,7 +1338,7 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
        token because no later prediction needs its logits
 
     EXAMPLE:
-    >>> generated = _cached_generate(model, prompt=[0, 1, 2],
+    >>> generated = _cached_generate(model, prompt_tokens=[0, 1, 2],
     ...                               max_new_tokens=5, temperature=1.0,
     ...                               cache=cache)
     >>> len(generated)  # 5 new tokens
@@ -1338,39 +1378,40 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
     if max_new_tokens == 0:
         return generated
 
-    # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
-    # Each token goes through the CachedAttention stand-ins, which write its
-    # K,V into the cache. start_pos=cache.seq_pos gives the token its true
-    # position, so a single-token forward computes exactly what the full
-    # sequence would have computed for that position.
-    for token in prompt_tokens:
-        token_tensor = Tensor(np.array([[token]]))  # (1, 1)
-        logits = model.forward(token_tensor, start_pos=cache.seq_pos)
-        cache.advance()
+    with cache.generation():
+        # Phase 1: PREFILL - process prompt tokens one at a time to populate cache
+        # Each token goes through the CachedAttention stand-ins, which write its
+        # K,V into the cache. start_pos=cache.seq_pos gives the token its true
+        # position, so a single-token forward computes exactly what the full
+        # sequence would have computed for that position.
+        for token in prompt_tokens:
+            token_tensor = Tensor(np.array([[token]]))  # (1, 1)
+            logits = model.forward(token_tensor, start_pos=cache.seq_pos)
+            cache.advance()
 
-    # Get logits for last prompt token (predicts next token)
-    last_logits = logits.data[0, -1, :]  # (vocab_size,)
+        # Get logits for last prompt token (predicts next token)
+        last_logits = logits.data[0, -1, :]  # (vocab_size,)
 
-    # Phase 2: GENERATE - one token at a time using cache
-    for step in range(max_new_tokens):
-        # Zero temperature means greedy decoding, including tied logits.
-        if temperature == 0:
-            next_token = int(np.argmax(last_logits))
-        else:
-            scaled_logits = last_logits / temperature
-            exp_logits = np.exp(scaled_logits - np.max(scaled_logits))
-            probs = exp_logits / np.sum(exp_logits)
-            next_token = int(rng.choice(len(probs), p=probs))
-        generated.append(next_token)
-        if step == max_new_tokens - 1:
-            break
+        # Phase 2: GENERATE - one token at a time using cache
+        for step in range(max_new_tokens):
+            # Zero temperature means greedy decoding, including tied logits.
+            if temperature == 0:
+                next_token = int(np.argmax(last_logits))
+            else:
+                scaled_logits = last_logits / temperature
+                exp_logits = np.exp(scaled_logits - np.max(scaled_logits))
+                probs = exp_logits / np.sum(exp_logits)
+                next_token = int(rng.choice(len(probs), p=probs))
+            generated.append(next_token)
+            if step == max_new_tokens - 1:
+                break
 
-        # Feed single token through model (cache handles history)
-        token_tensor = Tensor(np.array([[next_token]]))  # (1, 1)
-        logits = model.forward(token_tensor, start_pos=cache.seq_pos)  # (1, 1, vocab_size)
-        cache.advance()
+            # Feed single token through model (cache handles history)
+            token_tensor = Tensor(np.array([[next_token]]))  # (1, 1)
+            logits = model.forward(token_tensor, start_pos=cache.seq_pos)  # (1, 1, vocab_size)
+            cache.advance()
 
-        last_logits = logits.data[0, -1, :]
+            last_logits = logits.data[0, -1, :]
 
     return generated
     ### END SOLUTION
@@ -1740,8 +1781,8 @@ def analyze_kvcache_speedup():
 
     for gen_length in [10, 25, 50, 100]:
         # Without cache: model.generate() re-runs the whole sequence for every token.
-        # CachedAttention only changes single-token forwards, so the full-sequence
-        # path below is the plain Module 13 attention.
+        # CachedAttention only changes forwards inside cache.generation(), so
+        # the path below is the plain Module 13 attention.
         start = time.perf_counter()
         model.generate(prompt_tensor, max_new_tokens=gen_length, temperature=1.0)
         time_without = (time.perf_counter() - start) * 1000

@@ -12,17 +12,24 @@ def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float
         baseline_memory = tracemalloc.get_traced_memory()[0]
         parameter_memory_mb = self._calculate_parameter_memory(model)
         dummy_input = self._dummy_input(model, input_shape)
-        # Rough activation estimate: input plus a similarly sized output.
-        activation_memory_mb = (dummy_input.data.nbytes * 2) / MB_TO_BYTES
-        _ = model.forward(dummy_input)
+        output = model.forward(dummy_input)
+        # Count the actual input and output buffers, not two input-sized
+        # buffers. A view or identity output does not allocate another one.
+        activation_bytes = dummy_input.data.nbytes
+        if not np.shares_memory(dummy_input.data, output.data):
+            activation_bytes += output.data.nbytes
+        activation_memory_mb = activation_bytes / MB_TO_BYTES
         _, peak_memory = tracemalloc.get_traced_memory()
-        peak_memory_mb = max(0, peak_memory - baseline_memory) / MB_TO_BYTES
+        # Parameters were already live at baseline. Add them to the NEW
+        # allocations, even when they were tracked by a caller's session:
+        # baseline subtraction removes those existing bytes first.
+        peak_memory_mb = parameter_memory_mb + max(0, peak_memory - baseline_memory) / MB_TO_BYTES
     finally:
         if owns_trace:
             tracemalloc.stop()
 
     useful_memory = parameter_memory_mb + activation_memory_mb
-    # tracemalloc only sees allocations made after start(); never report a peak below what we know is live
+    # Keep a lower bound from known live buffers even if tracing misses one.
     peak_memory_mb = max(peak_memory_mb, useful_memory)
     return {
         'parameter_memory_mb': parameter_memory_mb,

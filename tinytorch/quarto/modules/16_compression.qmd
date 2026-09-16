@@ -318,7 +318,7 @@ initSlideViewer('16_compression', '../assets/slides/16_compression.pdf');
 
 A modern language model takes 100GB of storage. A phone gives you less than 1GB. A microcontroller gives you under 100KB. The model that wins the benchmark and the model that ships are not the same artifact — and the gap between them is what compression closes.
 
-The trick is that trained networks are mostly dead weight. Studies routinely find that 80–90% of a model's parameters can be removed or approximated with negligible loss in accuracy. In this module you implement four techniques that exploit that redundancy: magnitude pruning zeroes the smallest weights, structured pruning drops entire channels so the hardware can actually skip them, knowledge distillation trains a small student to mimic a large teacher, and low-rank approximation factors weight matrices through SVD. By the end you can take a working model and produce a smaller one, while reasoning about where the accuracy went.
+Compression techniques test whether a model can represent the task with fewer active weights or a smaller architecture. You implement magnitude and structured pruning, distillation, and low-rank approximation. TinyTorch pruning zeros weights without shrinking dense arrays; SVD savings require retaining and executing the factors. Measure accuracy after each change.
 
 ## Learning Objectives
 
@@ -326,7 +326,7 @@ The trick is that trained networks are mostly dead weight. Studies routinely fin
 
 - **Implement** magnitude-based pruning to remove 80-90% of small weights while preserving accuracy
 - **Master** structured pruning that creates hardware-friendly sparsity patterns by removing entire channels
-- **Build** knowledge distillation systems that compress models 10x through teacher-student training
+- **Build** knowledge distillation systems and measure the student’s size and accuracy
 - **Understand** compression trade-offs between sparsity ratio, inference speed, memory footprint, and accuracy preservation
 - **Analyze** when to apply different compression techniques based on deployment constraints and performance requirements
 :::
@@ -335,7 +335,7 @@ The trick is that trained networks are mostly dead weight. Studies routinely fin
 
 
 
-::: {#fig-16_compression-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Compression System**: Reducing model size via pruning and distillation." fig-alt="Block diagram of the TinyTorch compression pipeline: input model flows through magnitude pruning, structured channel pruning, knowledge distillation from a teacher to a smaller student, and low-rank SVD approximation, producing a compressed output model."}
+::: {#fig-16_compression-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Three compression mechanisms.** Magnitude and structured pruning zero selected weights or channels without changing dense shapes. Low-rank approximation returns truncated SVD factors; savings require retaining and executing those factors." fig-alt="Magnitude and structured pruning zero selected weights or channels without changing dense shapes. Low-rank approximation returns truncated SVD factors; savings require retaining and executing those factors."}
 
 ![](../assets/images/diagrams/16_compression-diag-1.svg)
 
@@ -373,7 +373,7 @@ To keep the module focused, you will **not** implement:
 - Dynamic pruning during training via hooks and callbacks
 - Joint quantization + pruning pipelines
 
-You are building the **algorithms** that decide which weights to remove and how. Squeezing real wall-clock speedup out of the resulting sparsity is the job of the kernels in the next module.
+You are building the **algorithms** that decide which weights to remove and how. Sparse execution or structural compaction requires additional implementation. Module 17 compares dense vectorization and tiling; it does not provide sparse kernels.
 
 ## API Reference
 
@@ -443,15 +443,16 @@ This section covers the fundamental ideas you need to understand model compressi
 
 ### Pruning Fundamentals
 
-Trained networks are over-parameterized: 50–90% of their weights contribute almost nothing to predictions. Pruning exploits that slack by zeroing the deadweight, leaving a sparse network that computes nearly the same function with a fraction of the parameters.
+Magnitude pruning ranks weights by absolute value and zeros selected entries. Whether that preserves predictions depends on the model and pruning ratio. The dense parameter count and allocation remain unchanged.
 
-The signal you key off is magnitude. When you compute `y = W @ x`, a weight of 0.001 barely moves the output compared to one of magnitude 2.0 or 3.0. Find the small ones, zero them, and most of the network's behavior survives.
-
-Here's how your magnitude pruning implementation works:
+The following example illustrates weight selection:
 
 The code in @lst-16-compression-magnitude-prune makes this concrete.
 
-```python
+```{python}
+#| label: lst-16-compression-magnitude-prune
+#| lst-cap: "**Magnitude pruning via a global percentile threshold**."
+#| eval: false
 def magnitude_prune(model, sparsity=0.9):
     """Remove weights with smallest magnitudes to achieve target sparsity."""
     # Collect all weights from model (excluding biases)
@@ -475,8 +476,6 @@ def magnitude_prune(model, sparsity=0.9):
     return model
 ```
 
-: **Listing 16.1 — Magnitude pruning via a global percentile threshold**. {#lst-16-compression-magnitude-prune}
-
 The elegance is in the percentile-based threshold. Setting `sparsity=0.9` means "remove the bottom 90% of weights by magnitude." NumPy's `percentile` function finds the exact value that splits the distribution, and then a binary mask zeros out everything below that threshold.
 
 To understand why this works, consider a typical weight distribution after training:
@@ -492,11 +491,7 @@ Threshold mask: magnitude >= 0.087
 Result: Keep only weights >= 0.087 (top 10%)
 ```
 
-The critical insight is that weight distributions in trained networks are heavily skewed toward zero. Most weights contribute minimally, so removing them preserves the essential computation while dramatically reducing storage and compute.
-
-The memory impact is immediate. A model with 10 million parameters at 90% sparsity has only 1 million active weights. With sparse storage formats (like scipy's CSR matrix), that translates to a 90% memory reduction. The compute savings come from skipping zero multiplications, but cashing them in requires sparse-computation libraries — which is exactly why structured pruning exists.
-
-**Complexity of pruning itself:** finding the global magnitude threshold is O(N log N) for a sort (or O(N) with quickselect / `np.partition`) across N total weights — a one-shot cost that dominates nothing. The *compression ratio* as a function of sparsity level s (fraction removed) is simply 1/(1-s): at s=0.5 you halve the storage, at s=0.9 you get 10$\times$ compression, at s=0.99 you get 100$\times$. But the *compute* ratio only tracks this if the sparse kernel can actually skip the zeros — and on dense accelerators it cannot, which motivates the structured/unstructured distinction below.
+Small magnitude is a selection heuristic, not a guarantee that a weight is unimportant. Evaluate accuracy after masking. At zero fraction s, the ideal ratio of original values to retained nonzero values is 1/(1-s). That is not the dense byte ratio: sparse formats need indices, while TinyTorch retains every dense entry. Dense multiplication still processes zeros.
 
 ### Structured vs Unstructured Pruning
 
@@ -524,7 +519,10 @@ Structured pruning requires deciding which channels to remove. Your implementati
 
 The code in @lst-16-compression-structured-prune makes this concrete.
 
-```python
+```{python}
+#| label: lst-16-compression-structured-prune
+#| lst-cap: "**Structured pruning by L2 norm of output channels**."
+#| eval: false
 def structured_prune(model, prune_ratio=0.5):
     """Remove entire channels based on L2 norm importance."""
     for layer in model.layers:
@@ -552,32 +550,17 @@ def structured_prune(model, prune_ratio=0.5):
     return model
 ```
 
-: **Listing 16.2 — Structured pruning by L2 norm of output channels**. {#lst-16-compression-structured-prune}
-
 The L2 norm `||W[:,i]||_2 = sqrt(sum(w_j^2))` measures the total magnitude of a channel. Channels with small norms contribute less to the output, so dropping them costs the least. Removing whole channels also creates *block* sparsity, which hardware can vectorize over the channels that remain.
 
-The key insight in structured pruning is that you remove entire computational units, not scattered weights. When you zero out channel `i` in layer `l`, you're eliminating:
-- All connections from that channel to the next layer (forward propagation)
-- All gradient computation for that channel (backward propagation)
-- The entire channel's activation storage (memory footprint reduction)
+TinyTorch zeros whole output channels and their biases, preserving layer shapes. This does not remove their activation storage or dense arithmetic. A production compaction pass could remove those channels and adjust downstream dimensions to create smaller dense operations; that pass is not implemented here.
 
-At first glance, structured pruning might seem inferior because it achieves lower overall compression than magnitude pruning. However, the theoretical parameter reduction of unstructured sparsity rarely translates to actual inference speedups on modern hardware.
-
-:::{.callout-note title="Systems Implication: The Hardware Lottery"}
-Why accept lower sparsity ratios with structured pruning? It comes down to the "Hardware Lottery." Modern AI accelerators—whether NVIDIA GPUs, Google TPUs, or edge NPUs—are fundamentally designed for dense matrix multiplication. They rely on contiguous memory accesses and highly parallel vector engines. These architectures cannot efficiently skip scattered zeros without incurring complex, slow indexing overhead that destroys performance. Structured pruning, by removing entire channels, creates smaller but perfectly dense matrices. Instead of forcing the hardware to adapt to an irregular algorithm, you are adapting the algorithm to win the hardware lottery, ensuring the underlying silicon executes the remaining work at peak efficiency.
+:::{.callout-note title="Production Comparison: Structured Compaction"}
+Removing channels structurally can preserve regular dense layouts. Masking channels only sets their values to zero. Keep this distinction when reporting sparsity, allocated bytes, and latency. Hardware speedup must be measured after an implementation actually removes work.
 :::
-
-Because structured pruning preserves dense computation, it directly enables:
-1. **Memory Coalescing**: Hardware can fetch the remaining dense channels sequentially, maximizing memory bandwidth utilization.
-2. **SIMD Vectorization**: CPUs and GPUs can process multiple channels in perfect parallel lockstep.
-3. **Zero Indexing Overhead**: Execution does not require specialized sparse matrix formats (like CSR) to track non-zero locations.
-4. **Cache Spatial Locality**: Sequential memory access perfectly aligns with L1/L2 cache line prefetching.
-
-The ultimate trade-off is clear: structured pruning achieves lower sparsity (typically 30-50%) than magnitude pruning (80-90%), but the block sparsity it yields translates directly to proportional hardware acceleration. On dense accelerators, structured sparsity routinely provides 2-3x end-to-end speedups, whereas unstructured sparsity often results in zero acceleration—or even slowdowns—without bespoke sparse computational kernels.
 
 ### Knowledge Distillation
 
-Pruning and SVD shrink an existing model in place. Distillation does something stranger: it builds a brand-new, smaller model and trains it to imitate the bigger one. The large "teacher" never ships — it only exists to supervise the compact "student" that does.
+Pruning changes active weights, while SVD returns factors of a weight matrix. Distillation does something stranger: it builds a brand-new, smaller model and trains it to imitate the bigger one. The large "teacher" never ships — it only exists to supervise the compact "student" that does.
 
 The trick is the *kind* of supervision. Standard training uses one-hot labels — for a cat image, `[0, 0, 1, 0]` (100% cat). The teacher's predictions are softer: `[0.02, 0.05, 0.85, 0.08]` (85% cat, with some mass on visually similar classes). Those off-diagonal probabilities are the teacher's tacit knowledge about class similarity, and they teach the student more per gradient step than a hard label ever could.
 
@@ -585,7 +568,10 @@ Temperature scaling controls how soft the distributions become:
 
 The code in @lst-16-compression-distillation-loss makes this concrete.
 
-```python
+```{python}
+#| label: lst-16-compression-distillation-loss
+#| lst-cap: "**Temperature-scaled distillation loss combining soft and hard targets**."
+#| eval: false
 def _softmax(self, logits):
     """Compute softmax with numerical stability."""
     exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
@@ -610,11 +596,9 @@ def distillation_loss(self, student_logits, teacher_logits, true_labels):
     return total_loss
 ```
 
-: **Listing 16.3 — Temperature-scaled distillation loss combining soft and hard targets**. {#lst-16-compression-distillation-loss}
-
 Dividing logits by temperature before softmax spreads probability mass across classes. At `temperature=1` you get the usual peaked softmax. At `temperature=3` the distribution flattens, exposing the teacher's relative uncertainty between classes. The student learns both what the teacher picks *and* what it almost picked.
 
-The combined loss balances two pressures. The soft loss (weighted `alpha=0.7`) pushes the student to imitate the teacher's reasoning. The hard loss (weighted `1-alpha=0.3`) keeps it anchored to the ground truth. With this recipe, students routinely match teachers at 10x compression with 2–5% accuracy loss.
+The combined loss balances two pressures. The soft loss (weighted `alpha=0.7`) pushes the student to imitate the teacher's reasoning. The hard loss (weighted `1-alpha=0.3`) keeps it anchored to the ground truth. Student size and accuracy depend on the chosen architecture, data, and training; measure both.
 
 ### Low-Rank Approximation Theory
 
@@ -624,7 +608,10 @@ The mechanism is matrix factorization. Instead of storing a full (512, 256) weig
 
 The code in @lst-16-compression-low-rank makes this concrete.
 
-```python
+```{python}
+#| label: lst-16-compression-low-rank
+#| lst-cap: "**Low-rank approximation via truncated SVD**."
+#| eval: false
 def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     """Approximate weight matrix using SVD-based low-rank decomposition."""
     m, n = weight_matrix.shape
@@ -643,8 +630,6 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
 
     return U_truncated, S_truncated, V_truncated
 ```
-
-: **Listing 16.4 — Low-rank approximation via truncated SVD**. {#lst-16-compression-low-rank}
 
 SVD identifies the principal "directions" in the weight matrix through singular values. Larger singular values capture more variance, so keeping the top k preserves most of the matrix's information at a fraction of the parameter cost.
 
@@ -668,16 +653,18 @@ Every compression technique trades accuracy for efficiency, but different techni
 
 @tbl-16-compression-tradeoffs compares compression, accuracy, and speedup trade-offs across techniques.
 
-| Technique | Compression Ratio | Accuracy Loss | Hardware Speedup | Training Required |
-|-----------|-------------------|---------------|------------------|-------------------|
-| **Magnitude Pruning** | 5-10x | 1-3% | Minimal (needs sparse libs) | No (prune pretrained) |
-| **Structured Pruning** | 2-3x | 2-5% | 2-3x (hardware-friendly) | No (prune pretrained) |
-| **Knowledge Distillation** | 10-50x | 5-10% | Proportional to size | Yes (train student) |
-| **Low-Rank Approximation** | 2-5x | 3-7% | Minimal (depends on impl) | No (SVD decomposition) |
+| Technique | Storage requirement | Accuracy | Runtime requirement |
+|-----------|---------------------|----------|---------------------|
+| **Magnitude Pruning** | Dense allocation unchanged | Measure after masking | Sparse execution needed to skip zeros |
+| **Structured Pruning** | Dense allocation unchanged | Measure after masking | Structural compaction needed to remove channels |
+| **Knowledge Distillation** | Determined by student architecture | Measure after training | Benchmark student |
+| **Low-Rank Approximation** | Retain factors to save bytes | Measure reconstruction and task error | Execute factors without reconstruction |
+
 
 : **Compression, accuracy, and speedup trade-offs across compression techniques.** {#tbl-16-compression-tradeoffs}
 
-The systems insight is that compression ratio alone does not determine deployment success. A 10x compressed model from magnitude pruning can run *slower* than a 3x compressed model from structured pruning, because the hardware cannot accelerate scattered zeros. Distillation buys the best size-for-accuracy ratio, but only if you have the training budget to retrain a student. Pick the technique that matches the bottleneck — memory, latency, or training time — not the one with the prettiest sparsity number.
+A sparsity ratio does not determine deployment success. Compare actual storage, accuracy, and measured runtime. Distillation adds a training budget; low-rank factors save work only when the execution path uses them.
+
 
 ## Production Context
 
@@ -759,15 +746,7 @@ The core algorithms for magnitude thresholding, L2 norm channel ranking, and kno
 
 ### Why Compression Matters at Scale
 
-The deployment constraints make the case for compression more bluntly than any benchmark:
-
-- **Mobile apps** — models must fit under ~10MB for download and ~50MB for runtime memory
-- **Edge devices** — a Raspberry Pi 4 has 4GB total RAM, shared with the OS and every other process
-- **Cloud cost** — GPT-class inference costs millions per month at scale; 10x compression is 10x cheaper
-- **Latency targets** — self-driving stacks need <100ms end-to-end; compression buys most of that budget
-- **Energy** — phone batteries are ~3000mAh, and bigger models drain them faster
-
-A 100 MB model pruned to 90% sparsity becomes 10 MB with sparse storage, which fits the mobile budget. Distilled down to a 1 MB student, it also runs 10x faster, which fits the latency budget. These aren't projections — they're the entry conditions for shipping at all.
+Deployment budgets include weights, activations, runtime state, latency, and accuracy. A zero fraction alone does not establish any of these costs. Measure the executable representation on the target device before claiming a deployment benefit.
 
 ## Check Your Understanding
 
@@ -830,9 +809,9 @@ What's the compression ratio and speedup?
 
 **Accuracy loss**: 95% − 92% = **3% degradation**
 
-Why speedup matches compression: the student has 10x fewer parameters, so roughly 10x fewer ops. Linear scaling.
+The two ratios happen to match in this example. Parameter count alone does not establish latency; operation shapes and hardware utilization also matter.
 
-Is this a good trade? **Yes** — 10x compression for 3% accuracy loss is the sweet spot for mobile deployment.
+Whether this is acceptable depends on the application’s accuracy floor and deployment budget.
 :::
 
 **Q4: Low-Rank Decomposition Math**
@@ -862,25 +841,17 @@ For mobile deployment with tight latency constraints, would you choose magnitude
 
 :::{.callout-tip collapse="true" title="Answer"}
 
-**Choose structured pruning (30% sparsity)** despite lower compression.
-
-Reasoning:
-1. **Hardware acceleration**: Mobile CPUs/GPUs can execute dense channels 2-3x faster than sparse patterns
-2. **Latency guarantee**: Structured sparsity gives predictable speedup; magnitude sparsity needs sparse libraries (often unavailable on mobile)
-3. **Real speedup**: 30% structured = ~1.5x actual speedup; 90% magnitude = no speedup without custom kernels
-4. **Memory**: Both save memory, but latency requirement dominates
-
-**Production insight**: High sparsity ≠ high speedup. Hardware capabilities matter more than compression ratio for latency-critical applications.
+Compare measured candidates under the actual latency and accuracy budgets. Structurally removing channels can produce smaller dense operations, but TinyTorch’s structured pruning only masks channels. Both pruning functions retain dense allocations and arithmetic. A sparse backend or a compaction pass is needed before testing whether sparsity yields a runtime benefit.
 :::
 
 ## Key Takeaways
 
-- **Compression ratio is 1/(1 − sparsity):** the arithmetic is trivial; the engineering question is whether the underlying kernel can actually skip zeros.
-- **Structured > unstructured on dense hardware:** 30–50% structured sparsity beats 90% unstructured sparsity in wall-clock time, because modern accelerators execute dense tiles and pay indexing overhead for scattered zeros.
+- **The ideal nonzero-value ratio is 1/(1 − sparsity):** actual storage includes representation overhead, and dense arrays keep their allocation.
+- **Masking differs from compaction:** zero channels preserve dense shapes. Removing channels structurally requires updating connected layers before benchmarking smaller operations.
 - **Distillation compresses by transferring knowledge, not zeroing weights:** the student is a new, smaller network trained on the teacher's soft outputs — worth the extra training budget when size-for-accuracy is the goal.
 - **SVD pays off for wide, low-rank matrices:** pick the rank ratio from the singular-value spectrum, not by guessing.
 
-**Coming next:** Module 17 answers the question every pruning pass begs — why isn't the model 10$\times$ faster? — by building the vectorized kernels, cache-aware tiling, and kernel fusion that turn structured sparsity into measurable wall-clock speedup.
+**Coming next:** Module 17 compares dense vectorization, explicit tiling, and grouped NumPy expressions. It does not turn masked zeros into sparse execution.
 
 ## Further Reading
 
@@ -904,12 +875,7 @@ For students who want to understand the academic foundations and explore compres
 
 ## What's Next
 
-You now have a model that is 10x smaller on paper. Module 17 answers the question that follows immediately: *why isn't it 10x faster?* Sparsity and low rank only show up in wall-clock time when the underlying kernels know how to skip zeros and reuse memory. Without that, your pruned weights are still being multiplied — by zero, but multiplied.
-
-:::{.callout-note title="Coming Up: Module 17 — Acceleration"}
-
-Implement hardware-aware optimizations: vectorized matrix kernels, operator fusion, and cache-friendly tiling. You'll fuse multiple ops into single passes to cut memory-bandwidth pressure and turn the structured sparsity from this module into measurable speedup.
-:::
+You have measured sparsity and explored smaller representations. Module 17 examines dense execution costs through vectorization, tiling, and grouped expressions. Your pruned weights retain their dense shape and still participate in multiplication.
 
 **Preview — how your compression gets used in future modules:**
 
@@ -917,8 +883,8 @@ Implement hardware-aware optimizations: vectorized matrix kernels, operator fusi
 
 | Module | What It Does | Your Compression In Action |
 |--------|--------------|---------------------------|
-| **17: Acceleration** | Optimize computation kernels | Structured sparsity enables vectorized operations |
-| **18: Memoization** | Cache repeated computations | `compress_model()` before caching for memory efficiency |
+| **17: Acceleration** | Optimize computation kernels | Compare dense implementations; masked zeros still execute |
+| **18: Memoization** | Cache repeated computations | Measure model allocations separately from cache bytes |
 | **19: Benchmarking** | Measure end-to-end performance | Compare dense vs sparse model throughput |
 
 : **How compression feeds into acceleration, memoization, and benchmarking.** {#tbl-16-compression-downstream-usage}

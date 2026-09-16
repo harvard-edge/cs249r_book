@@ -100,21 +100,31 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
   <tbody>
     <tr>
       <td>✅ All 20 modules implemented</td>
-      <td>🔧 Documentation polish</td>
-      <td>📅 NBGrader integration</td>
+      <td>🔧 Community leaderboard</td>
+      <td>📅 Hosted cloud GPU environments</td>
     </tr>
     <tr>
-      <td>✅ Module, CLI, integration, and milestone tests</td>
-      <td>🔧 Edge case handling</td>
-      <td>📅 Community leaderboard</td>
+      <td>✅ 1,400+ unit, CLI, integration, & milestone tests</td>
+      <td>🔧 Binder / WebAssembly preview</td>
+      <td>📅 Video walkthrough lectures</td>
     </tr>
     <tr>
-      <td>✅ <code>tito</code> CLI for workflows</td>
-      <td>🔧 Instructor resources</td>
-      <td>📅 Binder/Colab support</td>
+      <td>✅ <code>tito</code> CLI workflow & progress tracking</td>
+      <td></td>
+      <td></td>
     </tr>
     <tr>
-      <td>✅ Historical milestone scripts</td>
+      <td>✅ Historical milestones (1958 Perceptron to 2018 MLPerf)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>✅ NBGrader 3-tier classroom autograding</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>✅ Instructor guides & classroom resources</td>
       <td></td>
       <td></td>
     </tr>

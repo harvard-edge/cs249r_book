@@ -101,7 +101,7 @@ rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU
-from tinytorch.core.losses import MSELoss, CrossEntropyLoss
+from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
 from tinytorch.core.optimizers import SGD, AdamW
 
 # Enable autograd for gradient tracking (required for training)
@@ -851,7 +851,9 @@ def _trainer_optimizer_update(self, sample_count=1):
     ### BEGIN SOLUTION role="scaffold"
     if sample_count <= 0:
         raise ValueError("An optimizer update needs a positive sample count")
-    params = self.model.parameters()
+    # Reuse the same parameters for normalization and clipping, even when
+    # parameters() returns a generator.
+    params = list(self.model.parameters())
     for param in params:
         if param.grad is not None:
             param.grad /= sample_count
@@ -1163,7 +1165,11 @@ def trainer_evaluate(self, dataloader):
         dataloader: Iterable yielding (inputs, targets) batches
 
     Returns:
-        Tuple of (sample-weighted average loss, accuracy)
+        Tuple of (sample-weighted average loss, accuracy). CrossEntropyLoss
+        uses argmax class accuracy. BinaryCrossEntropyLoss uses element-wise
+        binary accuracy, thresholding probabilities and targets at >= 0.5
+        (including multilabel outputs). Regression and custom losses return
+        0.0 as an unused accuracy placeholder, regardless of output shape.
 
     TODO: Implement evaluation loop (forward pass only, no gradient updates)
 
@@ -1171,7 +1177,8 @@ def trainer_evaluate(self, dataloader):
     1. Set model.training = False and self.training_mode = False
     2. For each batch: forward pass only through self._forward (flag off, so Dropout is the identity),
        inside no_grad() so no graph is recorded; accumulate loss times sample count
-    3. For classification: compute accuracy from argmax predictions
+    3. Choose accuracy by loss type: argmax for cross-entropy, threshold for BCE;
+       other losses leave accuracy at its unused 0.0 placeholder
     4. Record average loss in self.history['eval_loss']
     5. Return (avg_loss, accuracy)
 
@@ -1181,7 +1188,7 @@ def trainer_evaluate(self, dataloader):
 
     HINTS:
     - For multi-class: predictions = np.argmax(outputs.data, axis=1)
-    - Handle both integer targets and one-hot targets
+    - CrossEntropyLoss expects integer targets; BCE compares each binary label
     - accuracy = correct / total if total > 0 else 0.0
     """
     ### BEGIN SOLUTION role="scaffold"
@@ -1203,17 +1210,15 @@ def trainer_evaluate(self, dataloader):
         total_loss += float(loss.data) * batch_size
         total_samples += batch_size
 
-        # Calculate accuracy (for classification only).
-        # outputs.data.shape[-1] > 1 distinguishes true multi-class (C logits)
-        # from regression with a single output neuron (shape (N,1)), which would
-        # otherwise enter this branch and produce argmax=0 for every sample.
-        if len(outputs.data.shape) > 1 and outputs.data.shape[-1] > 1:  # Multi-class
+        # The loss defines the task: multiple outputs can also be regression.
+        if isinstance(self.loss_fn, CrossEntropyLoss):
             predictions = np.argmax(outputs.data, axis=1)
-            if len(targets.data.shape) == 1:  # Integer targets
-                correct += np.sum(predictions == targets.data)
-            else:  # One-hot targets
-                correct += np.sum(predictions == np.argmax(targets.data, axis=1))
-            total += len(predictions)
+            correct += np.sum(predictions == targets.data)
+            total += predictions.size
+        elif isinstance(self.loss_fn, BinaryCrossEntropyLoss):
+            predictions = outputs.data >= 0.5
+            correct += np.sum(predictions == (targets.data >= 0.5))
+            total += predictions.size
 
     avg_loss = total_loss / total_samples if total_samples > 0 else 0.0
     accuracy = correct / total if total > 0 else 0.0
@@ -1239,7 +1244,7 @@ def test_unit_trainer_evaluate():
     """🧪 Test Trainer.evaluate implementation."""
     print("🧪 Unit Test: Trainer.evaluate...")
 
-    # --- Regression case: output shape (N, 1) must NOT enter the accuracy branch ---
+    # --- Regression case: MSE has no classification accuracy ---
     class RegressionModel:
         def __init__(self):
             self.layer = Linear(2, 1)
@@ -1264,7 +1269,7 @@ def test_unit_trainer_evaluate():
     # Regression: accuracy must be 0.0 (no classification branch entered)
     assert accuracy == 0.0, (
         f"Regression evaluate() returned accuracy={accuracy:.4f} instead of 0.0. "
-        "Shape (N,1) outputs must not enter the argmax classification branch."
+        "MSE outputs must not enter the argmax classification branch."
     )
 
     assert reg_trainer.training_mode is False, "Should be in eval mode after evaluate()"
@@ -1272,7 +1277,7 @@ def test_unit_trainer_evaluate():
     assert len(reg_trainer.history['eval_loss']) == 1, "Should have 1 eval loss recorded"
     assert np.isfinite(eval_loss), f"Eval loss should be finite, got {eval_loss}"
 
-    # --- Classification case: output shape (N, C) with C > 1 must compute accuracy ---
+    # --- Classification case: cross-entropy computes argmax accuracy ---
     class ClassificationModel:
         def __init__(self):
             self.layer = Linear(2, 3)  # 3-class output
@@ -1338,7 +1343,7 @@ def trainer_save_checkpoint(self, path: str):
 
     APPROACH:
     1. Build a checkpoint dict with keys: epoch, step, model_state,
-       optimizer_state, scheduler_state, history, training_mode
+       optimizer_state, scheduler_state, history, training_mode, grad_clip_norm
     2. Use self._get_model_state(), self._get_optimizer_state(),
        self._get_scheduler_state() to extract component states
     3. Create parent directory if needed: Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -1368,7 +1373,8 @@ def trainer_save_checkpoint(self, path: str):
         'optimizer_state': self._get_optimizer_state(),
         'scheduler_state': self._get_scheduler_state(),
         'history': self.history,
-        'training_mode': self.training_mode
+        'training_mode': self.training_mode,
+        'grad_clip_norm': self.grad_clip_norm
     }
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -1485,7 +1491,8 @@ def trainer_load_checkpoint(self, path: str):
 
     APPROACH:
     1. Open and unpickle the checkpoint file
-    2. Restore self.epoch, self.step, self.history, self.training_mode
+    2. Restore self.epoch, self.step, self.history, self.training_mode, grad_clip_norm
+       (older checkpoints retain the current clipping configuration)
     3. Call self._set_model_state() if 'model_state' in checkpoint
     4. Call self._set_optimizer_state() if 'optimizer_state' in checkpoint
     5. Call self._set_scheduler_state() if 'scheduler_state' in checkpoint
@@ -1506,6 +1513,7 @@ def trainer_load_checkpoint(self, path: str):
     self.step = checkpoint['step']
     self.history = checkpoint['history']
     self.training_mode = checkpoint['training_mode']
+    self.grad_clip_norm = checkpoint.get('grad_clip_norm', self.grad_clip_norm)
     self.model.training = self.training_mode
 
     # Restore states
@@ -1693,8 +1701,8 @@ def demonstrate_complete_training_pipeline():
     print(f"\n✓ Checkpoint saved: {checkpoint_path}")
 
     # Step 9: Evaluate
-    eval_loss, accuracy = trainer.evaluate(train_data)
-    print(f"✓ Evaluation - Loss: {eval_loss:.6f}, Accuracy: {accuracy:.6f}")
+    eval_loss, _ = trainer.evaluate(train_data)
+    print(f"✓ Regression evaluation - MSE loss: {eval_loss:.6f}")
 
     # Clean up
     if os.path.exists(checkpoint_path):

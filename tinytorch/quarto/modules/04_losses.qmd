@@ -337,7 +337,7 @@ By the end, you'll know not just *how* to compute each loss, but *why* the choic
 
 
 
-::: {#fig-04_losses-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Loss Functions**: MSE for regression, and Cross-Entropy for classification tasks." fig-alt="Diagram showing log_softmax providing stability for CrossEntropyLoss, along with MSE and BCE losses."}
+::: {#fig-04_losses-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Stable cross-entropy on large logits.** For logits [1000, 1002, 1001] and target class 1, direct float32 exponentiation overflows. Shifting by the maximum gives [-2, 0, -1], and log-sum-exp yields a finite scalar loss of approximately 0.4076." fig-alt="Two calculation paths share logits of shape (1, 3) and a target of shape (1,). The naive path produces infinite exponentials and NaN. The stable path shifts by 1002, sums exponentials to 1.5032, and obtains scalar loss 0.4076. Displayed decimals are rounded."}
 
 ![](../assets/images/diagrams/04_losses-diag-1.svg)
 
@@ -456,7 +456,10 @@ Here's the complete implementation from your module:
 
 The code in @lst-04-losses-mse makes this concrete.
 
-```python
+```{python}
+#| label: lst-04-losses-mse
+#| lst-cap: "**Mean squared error forward pass: subtract, square, average.**"
+#| eval: false
 def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
     """Compute mean squared error between predictions and targets."""
     # Step 1: Compute element-wise difference
@@ -471,8 +474,6 @@ def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
     return Tensor(mse)
 ```
 
-: **Listing 4.1 — Mean squared error forward pass: subtract, square, average.** {#lst-04-losses-mse}
-
 Three operations: subtract, square, average. Yet squaring creates a quadratic error landscape: an error of 10 contributes 100 to the loss; an error of 20 contributes 400. The optimizer sees the worst-predicted samples as four times more important than samples half as wrong, so it spends most of its capacity fixing the largest errors first.
 
 Back to house prices. An error of $5,000 squares to 25M. An error of $50,000 squares to 2.5B — one hundred times the penalty for ten times the error. That asymmetry is MSE's defining feature: it aggressively corrects outliers, but it also lets noisy labels dominate the gradient. If your dataset has bad labels, MSE will chase them.
@@ -485,7 +486,10 @@ The formula reduces to a single number: the negative log-probability the model a
 
 The code in @lst-04-losses-cross-entropy makes this concrete.
 
-```python
+```{python}
+#| label: lst-04-losses-cross-entropy
+#| lst-cap: "**CrossEntropyLoss forward pass fusing log-softmax with target-class selection.**"
+#| eval: false
 def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
     """Compute cross-entropy loss between logits and target class indices."""
     # Step 1: Compute log-softmax for numerical stability
@@ -504,8 +508,6 @@ def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
     return Tensor(cross_entropy)
 ```
 
-: **Listing 4.2 — CrossEntropyLoss forward pass fusing log-softmax with target-class selection.** {#lst-04-losses-cross-entropy}
-
 The critical detail is calling `log_softmax` directly instead of `log(softmax(...))`. The two are mathematically identical but computationally worlds apart: a logit of 100 makes `exp(100) ≈ 2.7×10^43`, which overflows float32 to `inf`, which becomes `nan` after division. The fused log-softmax never materializes the dangerous exponentials — see the next subsection for the trick.
 
 Cross-entropy's gradient pressure is asymmetric on purpose. Predict 0.99 for the correct class and the loss is `-log(0.99) ≈ 0.01`; predict 0.01 and the loss is `-log(0.01) ≈ 4.6` — 460× larger for the same gap in probability. The further the model is from "confident and right," the harder cross-entropy pulls — which is exactly the dynamic you want for classification.
@@ -520,7 +522,10 @@ Watch what happens without the trick. Naive softmax computes `exp(x) / sum(exp(x
 
 The code in @lst-04-losses-log-softmax makes this concrete.
 
-```python
+```{python}
+#| label: lst-04-losses-log-softmax
+#| lst-cap: "**Numerically stable log-softmax via the log-sum-exp shift.**"
+#| eval: false
 def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
     """Compute log-softmax with numerical stability."""
     # Step 1: Find max along dimension for numerical stability
@@ -537,8 +542,6 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 
     return Tensor(result)
 ```
-
-: **Listing 4.3 — Numerically stable log-softmax via the log-sum-exp shift.** {#lst-04-losses-log-softmax}
 
 After subtracting the max (300), the shifted logits become `[-200, -100, 0]`. The largest exponent is now `exp(0) = 1.0` — always safe. The smallest, `exp(-200)`, underflows to 0, but those terms were going to round to nothing in the sum anyway, so the loss is exact in the regime we care about.
 

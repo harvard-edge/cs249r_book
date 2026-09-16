@@ -648,8 +648,8 @@ class GELUFunction(Function):
 
         APPROACH:
         1. Use approximation: x * sigmoid(1.702 * x)
-        2. Compute sigmoid part: 1 / (1 + exp(-1.702 * x))
-        3. Multiply by x element-wise
+        2. Reuse the stable SigmoidFunction; scaled extreme inputs may saturate to infinity
+        3. Multiply by x element-wise; define the negative-infinity limit as zero
         4. Return result as a NumPy array
 
         EXAMPLE:
@@ -662,7 +662,9 @@ class GELUFunction(Function):
         HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
         ### BEGIN SOLUTION role="scaffold"
-        sig = SigmoidFunction().forward(1.702 * x)
+        # Overflow in the scaled gate means saturation, which sigmoid handles.
+        with np.errstate(over="ignore"):
+            sig = SigmoidFunction().forward(1.702 * x)
         with np.errstate(invalid="ignore"):
             out = x * sig
         if np.any(np.isneginf(x)):
@@ -741,7 +743,7 @@ if __name__ == "__main__":
 """
 ### Softmax: The Probability Distributor
 
-Softmax converts any vector into a valid probability distribution. All outputs are positive and sum to exactly 1.0, making it essential for multi-class classification.
+Softmax converts finite scores into a probability distribution whose outputs sum to one (up to floating-point rounding). Very small probabilities can round to zero. A score of `-inf` masks an entry out; a fully masked slice returns all zeros, representing no available choices rather than a probability distribution. Module 12 will use this convention for attention masks.
 
 ### Mathematical Definition
 ```
@@ -765,7 +767,7 @@ Raw scores: [1, 2, 3, 4]
           [0.03, 0.09, 0.24, 0.64]  ← Sum = 1.0
 ```
 
-**Why Softmax matters**: In multi-class classification, we need outputs that represent probabilities for each class. Softmax guarantees valid probabilities.
+**Why Softmax matters**: In multi-class classification, we need outputs that represent probabilities for each class. Softmax normalizes each slice with at least one finite score; a fully masked slice stays zero.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "softmax-impl", "solution": true}
@@ -783,11 +785,11 @@ class SoftmaxFunction(Function):
         TODO: Implement numerically stable softmax
 
         APPROACH:
-        1. Subtract max for numerical stability: x - max(x)
-        2. Compute exponentials: exp(x - max(x))
-        3. Sum along dimension: sum(exp_values)
-        4. Divide: exp_values / sum
-        5. Return result as a NumPy array
+        1. Find the maximum along the chosen dimension, keeping dimensions
+        2. Replace an all-negative-infinity maximum with zero before subtracting
+        3. Compute exponentials and their sum along the same dimension
+        4. Replace a zero sum with one, so fully masked slices remain zero
+        5. Divide by the safe sum and return the NumPy array
 
         EXAMPLE:
         >>> softmax = Softmax()
@@ -800,12 +802,16 @@ class SoftmaxFunction(Function):
         - Use np.max(x, axis=self.dim, keepdims=True) for max
         - Use np.sum(exp_values, axis=self.dim, keepdims=True) for sum
         - The max subtraction prevents overflow in exponentials
+        - A fully masked slice contains only -inf and must return zeros
+        - An extreme finite difference may become -inf; exp(-inf) correctly gives zero
         """
         ### BEGIN SOLUTION
         # Numerical stability: subtract max to prevent overflow
         x_max = np.max(x, axis=self.dim, keepdims=True)
         safe_max = np.where(np.isneginf(x_max), 0.0, x_max)
-        x_shifted = x - safe_max
+        # An extreme negative difference may overflow to -inf, whose exp is zero.
+        with np.errstate(over="ignore"):
+            x_shifted = x - safe_max
 
         # Compute exponentials
         exp_values = np.exp(x_shifted)
@@ -824,8 +830,9 @@ class Softmax:
     """
     Softmax activation: f(x_i) = e^(x_i) / Σ(e^(x_j))
 
-    Converts any vector to a probability distribution.
-    Sum of all outputs equals 1.0.
+    Finite scores normalize to a probability distribution along the chosen axis.
+    Negative infinity masks entries out. Fully masked slices return all zeros.
+    Positive infinity and NaN scores are outside this contract.
     """
 
     def parameters(self):
@@ -846,9 +853,9 @@ class Softmax:
 
 This test validates softmax activation behavior.
 
-**What we're testing**: Softmax creates valid probability distributions
+**What we're testing**: Softmax normalizes scores and handles masked entries
 **Why it matters**: Essential for multi-class classification outputs
-**Expected**: Outputs sum to 1.0, all values in (0, 1), largest input gets highest probability
+**Expected**: Nonnegative outputs sum to one for unmasked slices; fully masked slices are zero; the largest finite input gets the highest probability
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-softmax", "locked": true, "points": 10}
@@ -890,6 +897,12 @@ def test_unit_softmax():
     # Each row should sum to 1
     row_sums = np.sum(result.data, axis=-1)
     assert np.allclose(row_sums, [1.0, 1.0]), "Each row should sum to 1"
+
+    # Fully masked rows have no available choice; partial masks still normalize.
+    x = Tensor([[-np.inf, -np.inf], [0.0, -np.inf]])
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result = softmax(x)
+    np.testing.assert_array_equal(result.data, [[0.0, 0.0], [1.0, 0.0]])
 
     print("✅ Softmax works correctly!")
 

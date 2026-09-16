@@ -186,11 +186,11 @@ class TestPoolingLayers:
 
         # Simple 4x4 input with known values
         x = Tensor(np.array([[
-            [[1], [2], [5], [6]],
-            [[3], [4], [7], [8]],
-            [[9], [10], [13], [14]],
-            [[11], [12], [15], [16]]
-        ]]))  # (1, 4, 4, 1)
+            [1, 2, 5, 6],
+            [3, 4, 7, 8],
+            [9, 10, 13, 14],
+            [11, 12, 15, 16]
+        ]]).reshape(1, 1, 4, 4))  # batch, channel, height, width
 
         output = pool(x)
 
@@ -198,14 +198,9 @@ class TestPoolingLayers:
         # Top-left: max(1,2,3,4) = 4
         # Top-right: max(5,6,7,8) = 8
         # etc.
-        expected = np.array([[[[4], [8]], [[12], [16]]]])
-
-        if output.shape == (1, 2, 2, 1):
-            assert np.array_equal(output.data, expected), (
-                f"MaxPool values wrong.\n"
-                f"  Expected: {expected.squeeze()}\n"
-                f"  Got: {output.data.squeeze()}"
-            )
+        expected = np.array([[[[4, 8], [12, 16]]]])
+        assert output.shape == (1, 1, 2, 2)
+        np.testing.assert_array_equal(output.data, expected)
 
     def test_avgpool2d_forward(self):
         """
@@ -221,14 +216,10 @@ class TestPoolingLayers:
         pool = AvgPool2d(kernel_size=2, stride=2)
 
         # All-ones input - average should be 1
-        x = Tensor(np.ones((1, 4, 4, 1)))
+        x = Tensor(np.ones((1, 1, 4, 4)))
         output = pool(x)
-
-        if output.shape == (1, 2, 2, 1):
-            assert np.allclose(output.data, 1.0), (
-                f"AvgPool of all-ones should be 1.0\n"
-                f"  Got: {output.data[0,0,0,0]}"
-            )
+        assert output.shape == (1, 1, 2, 2)
+        np.testing.assert_allclose(output.data, 1.0)
 
 
 class TestConvOutputShapes:

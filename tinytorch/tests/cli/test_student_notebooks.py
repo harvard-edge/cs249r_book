@@ -221,18 +221,30 @@ def test_unit_tests_never_fall_back_to_reference_source(tmp_path, monkeypatch):
 
 
 def test_unit_tests_fail_when_notebook_crashes_after_passing_tests(tmp_path, monkeypatch):
+    source = tmp_path / "src" / "01_tensor" / "01_tensor.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "#| default_exp core.tensor\n"
+        "def test_unit_tensor():\n    pass\n"
+        "def test_module():\n    test_unit_tensor()\n",
+        encoding="utf-8",
+    )
     _write_notebook(
         tmp_path / "modules" / "01_tensor" / "tensor.ipynb",
         [
-            'print("✅ Tensor creation works correctly!")\n',
-            "raise NotImplementedError()\n",
+            "#| default_exp core.tensor\n",
+            'def test_unit_tensor():\n    print("✅ Tensor creation works correctly!")\n',
+            "def test_module():\n    test_unit_tensor()\n    raise NotImplementedError()\n",
+            "test_module()\n",
         ],
     )
     monkeypatch.chdir(tmp_path)
 
     result = _workflow(tmp_path)._run_inline_unit_tests("01_tensor", verbose=False)
 
+    assert result["passed"] == 1
     assert result["failed"] >= 1
+    assert "NotImplementedError" in str(result)
 
 
 def test_integration_tests_scope_export_gate_and_fail_when_it_trips(tmp_path, monkeypatch):

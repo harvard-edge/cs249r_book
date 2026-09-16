@@ -335,7 +335,7 @@ You'll build three: SGD with momentum (the foundation), Adam with adaptive per-p
 
 
 
-::: {#fig-07_optimizers-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Optimizer Hierarchy**: From basic SGD to advanced adaptive algorithms." fig-alt="Diagram showing the Optimizer base class and its descendants: SGD, Adam, and AdamW."}
+::: {#fig-07_optimizers-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Optimizer state and weight decay.** SGD uses coupled weight decay and optional momentum. Adam forms bias-corrected moments from the gradient plus coupled decay. AdamW forms moments from the gradient and applies weight decay separately." fig-alt="SGD uses coupled weight decay and optional momentum. Adam forms bias-corrected moments from the gradient plus coupled decay. AdamW forms moments from the gradient and applies weight decay separately."}
 
 ![](../assets/images/diagrams/07_optimizers-diag-1.svg)
 
@@ -477,7 +477,10 @@ Here's how your SGD implementation handles the basic case without momentum:
 
 The code in @lst-07-optimizers-sgd-step makes this concrete.
 
-```python
+```{python}
+#| label: lst-07-optimizers-sgd-step
+#| lst-cap: "**Plain SGD `step()`: the one-line update `param = param - lr * grad` wrapped in parameter iteration and optional weight decay.**"
+#| eval: false
 def step(self):
     """Perform SGD update step with momentum."""
     for i, param in enumerate(self.params):
@@ -501,8 +504,6 @@ def step(self):
     self.step_count += 1
 ```
 
-: **Listing 7.1 — Plain SGD `step()`: the one-line update `param = param - lr * grad` wrapped in parameter iteration and optional weight decay.** {#lst-07-optimizers-sgd-step}
-
 The code reveals the simplicity of basic SGD: subtract learning rate times gradient from each parameter. But this simplicity comes with a cost: plain SGD can oscillate wildly in narrow valleys of the loss landscape.
 
 **Complexity:** SGD's update is O(P) compute and O(P) memory per step, where P is the parameter count; adding momentum costs an additional O(P) memory for the velocity buffer. Adam is also O(P) compute per step but pays O(2P) extra memory for the first and second moment buffers (`m` and `v`). The asymptotic cost of every optimizer in this chapter scales *linearly* with parameter count — what differs is the constant factor in memory.
@@ -517,7 +518,10 @@ Here's how your SGD implementation adds momentum:
 
 The code in @lst-07-optimizers-sgd-momentum makes this concrete.
 
-```python
+```{python}
+#| label: lst-07-optimizers-sgd-momentum
+#| lst-cap: "**SGD momentum block: lazy buffer initialisation plus the exponential-moving-average update `v = beta * v + grad`.**"
+#| eval: false
 # Update momentum buffer
 if self.momentum != 0:
     if self.momentum_buffers[i] is None:
@@ -531,8 +535,6 @@ if self.momentum != 0:
 # Update parameter: param = param - lr * grad
 param.data = param.data - self.lr * grad_data
 ```
-
-: **Listing 7.2 — SGD momentum block: lazy buffer initialisation plus the exponential-moving-average update `v = beta * v + grad`.** {#lst-07-optimizers-sgd-momentum}
 
 The momentum buffer is initialized lazily (only when first needed) to save memory for optimizers without momentum. Once initialized, each step accumulates 90% of the previous velocity plus the current gradient, creating a smoothed update direction that's less susceptible to noise and oscillation.
 
@@ -548,7 +550,10 @@ Here's the complete Adam update from your implementation:
 
 The code in @lst-07-optimizers-adam-step makes this concrete.
 
-```python
+```{python}
+#| label: lst-07-optimizers-adam-step
+#| lst-cap: "**Full Adam `step()`: first and second moment updates, bias correction, and the per-parameter adaptive step `lr * m_hat / (sqrt(v_hat) + eps)`.**"
+#| eval: false
 def step(self):
     """Perform Adam update step."""
     self.step_count += 1
@@ -586,8 +591,6 @@ def step(self):
         param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 ```
 
-: **Listing 7.3 — Full Adam `step()`: first and second moment updates, bias correction, and the per-parameter adaptive step `lr * m_hat / (sqrt(v_hat) + eps)`.** {#lst-07-optimizers-adam-step}
-
 The bias correction terms (1 - β^t) are crucial in the first few steps. Without correction, m and v start at zero and take many steps to reach reasonable values, causing the optimizer to take tiny steps initially. The correction divides by increasingly large values: at step 1, divide by 0.1; at step 2, divide by 0.19; eventually the correction approaches 1.0 and has no effect.
 
 While Adam's adaptive step sizes dramatically accelerate convergence, this mathematical elegance imposes a severe, often debilitating, hardware penalty on large-scale training systems.
@@ -606,7 +609,10 @@ Here's how your AdamW implementation achieves decoupling:
 
 The code in @lst-07-optimizers-adamw-step makes this concrete.
 
-```python
+```{python}
+#| label: lst-07-optimizers-adamw-step
+#| lst-cap: "**AdamW update: the adaptive Adam step runs on pure gradients, then weight decay shrinks parameters separately by `(1 - lr * weight_decay)`.**"
+#| eval: false
 # Update moments using pure gradients (NO weight decay mixed in)
 self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1 - self.beta1) * grad_data
 self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
@@ -624,8 +630,6 @@ param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 if self.weight_decay != 0:
     param.data = param.data * (1 - self.lr * self.weight_decay)
 ```
-
-: **Listing 7.4 — AdamW update: the adaptive Adam step runs on pure gradients, then weight decay shrinks parameters separately by `(1 - lr * weight_decay)`.** {#lst-07-optimizers-adamw-step}
 
 Notice that weight decay appears only at the end, multiplying parameters by (1 - lr * weight_decay) to shrink them slightly. This shrinkage happens after the gradient update and is completely independent of gradient magnitudes or adaptive scaling.
 
