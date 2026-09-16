@@ -1,50 +1,72 @@
 # Control Theory and Dynamics {#sec-appendix-control}
 
-This appendix provides a brief, first-principles overview of the core concepts in control theory and dynamics used throughout this book. Our goal here is not to provide exhaustive mathematical proofs, but rather to distill the fundamental equations and intuition that systems engineers and computer scientists need to implement robust robotic and physical AI systems.
+This appendix provides a first-principles reference for the control-theoretic and dynamical foundations used throughout this book. Our goal is to distill the core mathematical models, physical invariants, and interface contracts that systems engineers and computer scientists need to design deterministic safety filters, size action horizons, and evaluate hardware constraints under learned policies.
 
-## Safety and control barrier functions
+## How to use this appendix
 
-When deploying ML models on physical hardware, ensuring that the system does not violate safety constraints (such as avoiding collisions or preventing joint over-extension) is paramount. Control Barrier Functions (CBFs) offer a mathematically rigorous way to enforce these constraints as a "safety filter" on top of a nominal controller (like a neural network).
+Consult this appendix when encountering specific physical systems bottlenecks, control interface boundaries, or design sizing decisions across chapters in this book:
 
-Let the state of the system be $x \in \mathcal{X} \subset \mathbb{R}^n$ and the control input be $u \in \mathcal{U} \subset \mathbb{R}^m$. Suppose we have a set of safe states $\mathcal{S}$, defined as the superlevel set of a continuously differentiable function $h(x)$:
+| When you encounter this systems symptom                                                      | Consult                            | For this quantitative tool                                                       |
+|----------------------------------------------------------------------------------------------|------------------------------------|----------------------------------------------------------------------------------|
+| A learned policy commands unsafe actions near physical obstacles or joint limits             | @sec-appendix-control-cbf          | Control Barrier Function (CBF-QP) safety filters and kinetic stopping insets     |
+| Mode switching (policy handover, human intervention, or fallback) causes torque spikes       | @sec-appendix-control-splines      | $C^2$ quintic splines and bumpless transfer blending duration bounds             |
+| Sizing the validity horizon, spatial lease, or watchdog timeout for an action chunk          | @sec-appendix-control-reachability | Triangular, trapezoidal, and jerk-limited kinematic reachability envelopes       |
+| An articulated manipulator stalls, exceeds joint velocity limits, or loses control authority | @sec-appendix-control-kinematics   | Manipulator Jacobian singularities and Yoshikawa manipulability index            |
+| Spatial sensor offsets or IMU-camera lever arms corrupt state estimation under rotation      | @sec-appendix-control-spatial      | Spatial coordinate transforms ($SE(3)$) and lever-arm acceleration propagation   |
+| Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties            |
+| Physics simulation diverges or sim-to-real transfer fails during mechanical contact          | @sec-appendix-control-contact      | Linear Complementarity Problem (LCP) formulation and non-smooth impact mechanics |
+
+## Safety and control barrier functions {#sec-appendix-control-cbf}
+
+When deploying machine learning models on physical hardware, ensuring that the system never breaches physical constraints (such as colliding with obstacles, exceeding structural limits, or over-torquing gearboxes) is paramount. Control Barrier Functions (CBFs) provide an optimization-based safety filter that sits between an unverified nominal policy (such as a neural network) and the low-level actuator drive stage.
+
+Let the system state be $x \in \mathcal{X} \subset \mathbb{R}^n$ and the control input be $u \in \mathcal{U} \subset \mathbb{R}^m$. Suppose we define a safe operating set $\mathcal{S}$ as the superlevel set of a continuously differentiable scalar function $h(x)$:
 $$ \mathcal{S} = \{ x \in \mathcal{X} \mid h(x) \ge 0 \}, \quad \partial \mathcal{S} = \{ x \in \mathcal{X} \mid h(x) = 0 \} $$
 
-- $h(x) > 0$ when the system is strictly safe inside the interior.
-- $h(x) = 0$ at the boundary of the safe set.
-- $h(x) < 0$ when the system is unsafe.
+- $h(x) > 0$ when the system is strictly inside the safe interior.
+- $h(x) = 0$ on the boundary of the safe set.
+- $h(x) < 0$ when the system violates safety.
 
 ### Lie derivatives and forward invariance
-To guarantee that the system remains safe for all time ($x(t) \in \mathcal{S}$ for all $t \ge 0$), the set $\mathcal{S}$ must be made *forward invariant*. By Nagumo's viability theorem, forward invariance requires that the derivative of $h(x)$ along system trajectories satisfies:
-$$ \dot{h}(x, u) \ge -\gamma(h(x)) $$
-where $\gamma$ is an extended class-$\mathcal{K}$ function (typically linear, $\gamma(h) = \alpha h$ with $\alpha > 0$). If $h(x)$ approaches zero, $\dot{h}(x)$ is forced to be non-negative, preventing the state trajectory from crossing the boundary.
+To guarantee that the machine remains safe for all time ($x(t) \in \mathcal{S}$ for all $t \ge 0$), the safe set $\mathcal{S}$ must be made *forward invariant*: any trajectory starting inside $\mathcal{S}$ must never exit $\mathcal{S}$.
 
-For a control-affine system with dynamics $\dot{x} = f(x) + g(x)u$, the time derivative $\dot{h}$ is evaluated via Lie derivatives:
+In control theory (grounded in Nagumo's viability theorem), this boundary invariance is enforced by requiring the time derivative of clearance, $\dot{h}$, to satisfy:
+$$ \dot{h}(x, u) \ge -\alpha h(x) $$
+where $\alpha > 0$ represents the allowable convergence rate or braking bandwidth (with units of $\text{s}^{-1}$).
+
+The physical systems intuition is direct: when clearance is large ($h(x) \gg 0$), clearance is permitted to decrease rapidly ($\dot{h} < 0$). However, as the machine nears the boundary ($h(x) \to 0$), the allowable rate of approach is throttled down proportionally to the remaining margin. In the limit as $h(x) \to 0$, $\dot{h}$ is constrained to be non-negative, enforcing exponential asymptotic deceleration rather than a hard boundary collision.
+
+For a control-affine dynamical system $\dot{x} = f(x) + g(x)u$, the time derivative $\dot{h}$ is evaluated via chain-rule directional derivatives (Lie derivatives):
 $$ \dot{h}(x, u) = \frac{\partial h}{\partial x} \dot{x} = \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u = L_f h(x) + L_g h(x) u $$
-where $L_f h(x) \in \mathbb{R}$ represents the natural unforced drift of clearance, and $L_g h(x) \in \mathbb{R}^{1 \times m}$ represents the directional control sensitivity.
+where $L_f h(x) \in \mathbb{R}$ represents the unforced drift of clearance (momentum, gravity), and $L_g h(x) \in \mathbb{R}^{1 \times m}$ represents the directional control effectiveness matrix.
 
-### Relative degree and high-order barrier functions
+### Relative degree and kinetic stopping insets
 The **relative degree** $r$ of a barrier function $h(x)$ is the number of times it must be differentiated with respect to time before the control input $u$ explicitly appears:
 $$ L_g L_f^k h(x) = 0 \quad \forall k < r - 1, \quad \text{and} \quad L_g L_f^{r-1} h(x) \neq 0 $$
-In second-order physical systems (such as robot manipulators and mobile vehicles governed by $m \ddot{x} = u - d$), actuators command forces or torques ($u$), which produce acceleration. Because acceleration must be integrated once to yield velocity and twice to yield position, a barrier defined purely over geometric distance has relative degree $r = 2$:
+In second-order mechanical systems governed by Newton's second law ($m \ddot{x} = u - d$), actuators command forces or torques ($u$), which produce acceleration. Because acceleration must be integrated once to yield velocity and twice to yield position, a barrier defined purely over geometric distance has relative degree $r = 2$:
 $$ \dot{h}(x) = \frac{\partial h}{\partial x} v \quad (L_g h(x) = 0) $$
 $$ \ddot{h}(x, u) = \frac{\partial \dot{h}}{\partial x} v + \frac{\partial \dot{h}}{\partial v} \left( \frac{u - d}{m} \right) = L_f^2 h(x) + L_g L_f h(x) u \quad (L_g L_f h(x) \neq 0) $$
-Enforcing safety on a relative-degree-2 system requires either formulating a High-Order CBF (HOCBF) with cascaded barrier certificates, or embedding the plant's kinetic stopping distance ($d_{\text{stop}} = v^2 / 2a_{\max}$) directly into an inset barrier certificate:
+Enforcing safety on a relative-degree-2 system requires either formulating cascaded barrier certificates or embedding the plant's kinetic stopping distance ($d_{\text{stop}} = v^2 / 2a_{\max}$) directly into an inset barrier:
 $$ h_{\text{kinetic}}(x) = h(x) - \frac{v^2}{2 a_{\max}} $$
-Differentiating $h_{\text{kinetic}}$ immediately yields nonzero control authority on the first time derivative, restoring relative degree $r = 1$.
+Differentiating $h_{\text{kinetic}}$ immediately yields nonzero control authority on the first time derivative, restoring relative degree $r = 1$ and allowing direct acceleration filtering.
 
-### Minimal-intervention quadratic program
-Given an unverified nominal policy command $u_{\text{nom}}$ (e.g., from an end-to-end neural network), the enforcer finds the admissible control input $u^*$ that minimally deviates from $u_{\text{nom}}$ while satisfying the linear barrier constraint:
+### Minimal-intervention quadratic program {#sec-appendix-control-cbf-qp}
+Given an unverified nominal policy command $u_{\text{nom}}$ (e.g., from an end-to-end neural network), the safety enforcer solves for the admissible control command $u^*$ that minimally deviates from $u_{\text{nom}}$ while satisfying the linear barrier half-space:
 $$
 \begin{align*}
 u^* &= \arg\min_{u \in \mathcal{U}} \frac{1}{2} \| u - u_{\text{nom}} \|^2 \\
 &\text{subject to:} \quad L_f h(x) + L_g h(x) u \ge -\alpha h(x), \quad u_{\min} \le u \le u_{\max}
 \end{align*}
 $$
-In standard matrix notation, writing the barrier constraint as $a^\top u \le b$ where $a = -L_g h(x)^\top$ and $b = L_f h(x) + \alpha h(x)$, the single-constraint unconstrained-box projection admits the closed-form solution:
+In standard matrix notation, writing the barrier constraint as $a^\top u \le b$ where $a = -L_g h(x)^\top$ and $b = L_f h(x) + \alpha h(x)$, the single-constraint unconstrained projection admits the analytical closed-form solution:
 $$ u^* = u_{\text{nom}} - \lambda^* a, \quad \text{where } \lambda^* = \max\left( 0, \frac{a^\top u_{\text{nom}} - b}{\|a\|^2} \right) $$
-Because this Quadratic Program (QP) is strictly convex, it possesses a unique global minimum that can be solved deterministically within tens of microseconds on embedded microcontrollers.
+Because this Quadratic Program (QP) is strictly convex, active-set solvers compute the unique global optimum deterministically in tens of microseconds on embedded microcontrollers.
 
-## Smooth trajectories and bumpless transfer
+> [!WARNING]
+> **Actuator Saturation Destroys Safety Invariance**
+> The closed-form projection above provides an exact global minimum only when the control input is unconstrained by actuator box bounds ($u_{\min} \le u \le u_{\max}$). If the required safety override $u^*$ exceeds physical actuator limits ($u^* > u_{\max}$), simply clamping the command post-optimization violates the barrier constraint $a^\top u \le b$. On physical hardware, safety filters cannot command torque that motors cannot deliver: if the machine enters a state where the required deceleration exceeds maximum physical actuator torque, the QP becomes infeasible and a collision is physically inevitable. Embedded architectures must enforce this boundary upstream by expanding stopping envelopes within the planning and intent layers before actuator saturation occurs.
+
+## Smooth trajectories and bumpless transfer {#sec-appendix-control-splines}
 
 Physical systems possess inertia; commanding discontinuous velocities or accelerations induces high-frequency torque spikes, excites structural resonances, and strips mechanical gearboxes.
 
@@ -68,18 +90,32 @@ $$
 Because acceleration $\ddot{\theta}(t)$ is continuous ($C^2$ continuity), the jerk $\dddot{\theta}(t) = 6 a_3 + 24 a_4 t + 60 a_5 t^2$ remains strictly bounded throughout the transition.
 
 ### Bumpless transfer and smoothstep blending
-When switching operational control between an automated policy and a human teleoperator or safety fallback, **bumpless transfer** prevents step changes in commanded force or torque. Smooth blending over transition interval $\tau_{\text{blend}}$ uses a normalized $C^2$-smoothstep polynomial $\alpha(\hat{t})$ with $\hat{t} = (t - t_0) / \tau_{\text{blend}} \in [0, 1]$:
+When switching operational control between an automated policy and a human teleoperator or safety fallback, **bumpless transfer** prevents step changes in commanded force, torque, or acceleration. Smooth blending over transition interval $\tau_{\text{blend}}$ uses a normalized $C^2$-smoothstep polynomial $\alpha(\hat{t})$ with normalized time $\hat{t} = (t - t_0) / \tau_{\text{blend}} \in [0, 1]$:
 $$ \alpha(\hat{t}) = 6\hat{t}^5 - 15\hat{t}^4 + 10\hat{t}^3 $$
 This polynomial satisfies boundary conditions $\alpha(0) = 0, \alpha(1) = 1$, and $\dot{\alpha}(0) = \dot{\alpha}(1) = \ddot{\alpha}(0) = \ddot{\alpha}(1) = 0$. The blended control command is:
 $$ u(t) = (1 - \alpha(\hat{t})) u_{\text{prior}}(t) + \alpha(\hat{t}) u_{\text{new}}(t) $$
-Differentiating twice to evaluate the induced jerk yields peak normalized angular acceleration at $\hat{t} = 0.5$, producing peak jerk $\max |\dddot{\alpha}(\hat{t})| = 1.875 / \tau_{\text{blend}}$. To guarantee that the induced transition jerk never exceeds allowable mechanical limits $j_{\text{allowable}}$, the minimum blending duration must satisfy:
+Assuming the commanded control variable $u(t)$ represents actuator acceleration (or motor torque per unit inertia), the transition rate of change (jerk) $j(t) = \dot{u}(t)$ is obtained by differentiating once with respect to physical time:
+$$ j(t) = \frac{du}{dt} = \frac{\Delta u}{\tau_{\text{blend}}} \dot{\alpha}(\hat{t}) $$
+Differentiating the smoothstep polynomial with respect to $\hat{t}$ yields $\dot{\alpha}(\hat{t}) = 30\hat{t}^4 - 60\hat{t}^3 + 30\hat{t}^2 = 30\hat{t}^2(1 - \hat{t})^2$. The peak rate occurs at transition midpoint $\hat{t} = 0.5$, evaluating to $\dot{\alpha}(0.5) = 30(0.25)^2 = 1.875$. Therefore, peak mechanical jerk during handover is:
+$$ \max |j(t)| = \frac{1.875 |\Delta u|}{\tau_{\text{blend}}} $$
+To guarantee that the induced transition jerk never exceeds allowable mechanical limits $j_{\text{allowable}}$, the minimum blending duration must satisfy:
 $$ \tau_{\text{blend},\min} = \frac{1.875 |\Delta u|}{j_{\text{allowable}}} $$
 
-## Kinematic reachability and intent envelopes
+### Discrete-time sampling and zero-order hold (ZOH) phase lag {#sec-appendix-control-zoh}
+
+Real-time digital controllers run periodically at sampling period $T_s = 1 / f_s$. Actuator drivers hold commanded setpoints constant between clock ticks using a **Zero-Order Hold (ZOH)**.
+
+In the frequency domain, holding a command constant for duration $T_s$ introduces an effective transport delay equal to half the sample period:
+$$ \tau_{\text{ZOH}} = \frac{T_s}{2} $$
+For a closed-loop control system operating at crossover frequency $\omega_c$, this transport delay erodes the system's phase margin $\Phi_m$ by:
+$$ \Delta \Phi = \omega_c \frac{T_s}{2} \quad \text{(radians)} \approx 28.65^\circ \cdot \left(\frac{\omega_c}{f_s}\right) $$
+When compute latency $\tau_{\text{comp}}$ and fieldbus communication latency $\tau_{\text{bus}}$ are added, total phase lag expands to $\Delta \Phi_{\text{total}} = \omega_c (\tau_{\text{comp}} + \tau_{\text{bus}} + T_s / 2)$. If cumulative phase erosion exceeds the uncompensated phase margin, the closed-loop system experiences limit-cycle chatter, structural resonance, or dynamic instability upon stiff physical contact.
+
+## Kinematic reachability and intent envelopes {#sec-appendix-control-reachability}
 
 Kinematic reachability characterizes the spatial set of configurations or end-effector poses an embodied system can reach over a given planning or intent horizon $\tau$.
 
-### Forward kinematics and singularities
+### Forward kinematics and singularities {#sec-appendix-control-kinematics}
 For an $n$-joint articulated arm, the **Forward Kinematics** map $f(q)$ relates joint coordinates $q \in \mathbb{R}^n$ to end-effector Cartesian pose $x \in SE(3)$:
 $$ x = f(q) $$
 The **manipulator Jacobian** $J(q) = \partial f / \partial q \in \mathbb{R}^{6 \times n}$ relates joint velocities $\dot{q}$ to Cartesian linear and angular velocities $\dot{x}$:
@@ -98,7 +134,18 @@ When jerk limits $|\dot{a}| \le j_{\max}$ are incorporated, accelerating from re
 $$ t_{\min, j} = \frac{d}{v_{\max}} + \frac{v_{\max}}{a_{\max}} + \frac{a_{\max}}{j_{\max}} $$
 This kinematic envelope directly sizes the temporal leases granted to high-level learned planners before physical safety invariants require re-evaluation.
 
-## Rigid body contact mechanics
+### Spatial coordinate frames and lever-arm kinematics {#sec-appendix-control-spatial}
+
+Rigid-body pose in three-dimensional space is parameterized by the Special Euclidean group $SE(3)$. A rigid transform from frame $B$ to frame $A$ is represented by the homogeneous transformation matrix $\mathbf{T}_{A B} \in SE(3)$:
+$$
+\mathbf{T}_{A B} = \begin{bmatrix} \mathbf{R}_{A B} & \mathbf{p}_{A B} \\ \mathbf{0}^\top & 1 \end{bmatrix}, \quad \mathbf{R}_{A B} \in SO(3), \quad \mathbf{p}_{A B} \in \mathbb{R}^3
+$$
+When sensors (such as IMUs or cameras) are displaced from the body center of rotation by lever arm $\mathbf{r}_{P/O}$, rotational motion induces apparent velocities and accelerations at the sensor location $P$. The linear velocity $\mathbf{v}_P$ and linear acceleration $\mathbf{a}_P$ satisfy:
+$$ \mathbf{v}_P = \mathbf{v}_O + \boldsymbol{\omega} \times \mathbf{r}_{P/O} $$
+$$ \mathbf{a}_P = \mathbf{a}_O + \boldsymbol{\alpha} \times \mathbf{r}_{P/O} + \boldsymbol{\omega} \times (\boldsymbol{\omega} \times \mathbf{r}_{P/O}) $$
+where $\boldsymbol{\omega}$ is the body angular velocity, $\boldsymbol{\alpha} = \dot{\boldsymbol{\omega}}$ is the angular acceleration, $\boldsymbol{\alpha} \times \mathbf{r}$ is the tangential acceleration, and $\boldsymbol{\omega} \times (\boldsymbol{\omega} \times \mathbf{r})$ is the centripetal acceleration. State estimation and perception pipelines must compensate for these kinematic lever-arm terms when synchronizing multi-camera extrinsics and fusing IMU data.
+
+## Rigid body contact mechanics {#sec-appendix-control-contact}
 
 Simulation and control of physical interaction (like walking or grasping) require modeling contacts. The fundamental mathematical challenge of contact is that it is discontinuous: forces only exist when objects are touching.
 
