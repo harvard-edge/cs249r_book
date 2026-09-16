@@ -133,7 +133,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
-**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](quarto/getting-started.qmd).
+**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](guide/getting-started.qmd).
 
 ---
 
@@ -263,7 +263,7 @@ model.fit(X, y)  # Magic happens
   <tbody>
     <tr>
       <td><b>Students</b></td>
-      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="quarto/getting-started.qmd">Getting Started</a></td>
+      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="guide/getting-started.qmd">Getting Started</a></td>
     </tr>
     <tr>
       <td><b>Instructors</b></td>
@@ -286,7 +286,7 @@ TinyTorch/
 │   ├── 01_tensor/              # Module 01: Tensor operations from scratch
 │   │   ├── 01_tensor.py        # Python source (version controlled)
 │   │   └── module.yaml         # Module metadata
-│   │   # Chapter content lives in tinytorch/quarto/modules/01_tensor.qmd
+│   │   # Chapter content lives in tinytorch/guide/modules/01_tensor.qmd
 │   ├── 02_activations/         # Module 02: ReLU, Softmax activations
 │   ├── 03_layers/              # Module 03: Linear layers, Module system
 │   ├── 04_losses/              # Module 04: MSE, CrossEntropy losses
@@ -314,7 +314,7 @@ TinyTorch/
 │   │   └── tensor.py           # Your implementation
 │   └── ...                     # (20 module directories)
 │
-├── quarto/                     # 🌐 Course website & documentation (Quarto)
+├── guide/                      # 🌐 Course website & lab guide (Quarto)
 │   ├── index.qmd               # Landing page
 │   ├── _quarto.yml             # Site navigation & configuration
 │   ├── install.sh              # One-line installer (served at mlsysbook.ai/tinytorch/install.sh)

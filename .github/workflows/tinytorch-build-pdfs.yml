@@ -9,7 +9,7 @@ name: '🔥 TinyTorch · 🔨 Build PDFs'
 # into the site during deployment (not committed to repo).
 #
 # The Guide PDF is produced by the Quarto book project at
-# tinytorch/quarto/pdf/, which reuses the website's .qmd chapter
+# tinytorch/guide/pdf/, which reuses the website's .qmd chapter
 # sources (one directory up) and emits TinyTorch-Guide.pdf. The
 # Research Paper build is independent (from tinytorch/paper/).
 #
@@ -49,6 +49,9 @@ on:
       guide_built:
         description: "Whether the guide PDF was built successfully"
         value: ${{ jobs.build-pdf-guide.result == 'success' }}
+      book_built:
+        description: "Whether the textbook PDF was built successfully"
+        value: ${{ jobs.build-pdf-book.result == 'success' }}
       paper_built:
         description: "Whether the paper PDF was built successfully"
         value: ${{ jobs.build-pdf-paper.result == 'success' }}
@@ -85,9 +88,9 @@ jobs:
 
       - name: 📦 Install build dependencies (apt + TeX)
         # Single-source deps: make install-deps reads
-        # tinytorch/quarto/pdf/apt-requirements.txt and tex-requirements.txt
+        # tinytorch/guide/pdf/apt-requirements.txt and tex-requirements.txt
         # and installs everything. Same command works locally.
-        working-directory: tinytorch/quarto
+        working-directory: tinytorch/guide
         run: make install-deps
 
       - name: 📚 Render Guide PDF (make pdf → Quarto + XeLaTeX)
@@ -99,7 +102,7 @@ jobs:
         # outside the project root.
         #
         # Canonical output: pdf/_build/TinyTorch-Guide.pdf
-        working-directory: tinytorch/quarto
+        working-directory: tinytorch/guide
         # The Makefile itself handles the benign post-render cleanup error
         # (see pdf/_build/ self-heal logic). CI just needs to verify the
         # artifact exists and bail loudly if it doesn't.
@@ -115,7 +118,54 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: TinyTorch-Guide
-          path: tinytorch/quarto/pdf/_build/TinyTorch-Guide.pdf
+          path: tinytorch/guide/pdf/_build/TinyTorch-Guide.pdf
+          retention-days: 90
+
+  build-pdf-book:
+    name: '📘 Build Textbook'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: 📝 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📚 Setup TinyTeX
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          tinytex: true
+
+      - name: 🟢 Setup Node.js (for Mermaid)
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ vars.NODE_VERSION || '20' }}
+
+      - name: 📦 Install Mermaid CLI
+        run: npm install -g @mermaid-js/mermaid-cli
+
+      - name: 📦 Install build dependencies (apt + TeX)
+        working-directory: tinytorch/guide
+        run: make install-deps
+
+      - name: 📘 Render Textbook PDF (Quarto + XeLaTeX)
+        working-directory: tinytorch/book
+        run: |
+          quarto render
+          test -f _build/TinyTorch-Book.pdf || {
+            echo "::error::_build/TinyTorch-Book.pdf was not produced"
+            exit 1
+          }
+          echo "PDF produced at _build/TinyTorch-Book.pdf ($(du -h _build/TinyTorch-Book.pdf | cut -f1))"
+
+      - name: 📤 Upload PDF Book
+        uses: actions/upload-artifact@v7
+        with:
+          name: TinyTorch-Book
+          path: tinytorch/book/_build/TinyTorch-Book.pdf
           retention-days: 90
 
   build-pdf-paper:
@@ -145,7 +195,7 @@ jobs:
   summary:
     name: '📊 Build Summary'
     runs-on: ubuntu-latest
-    needs: [build-pdf-guide, build-pdf-paper]
+    needs: [build-pdf-guide, build-pdf-book, build-pdf-paper]
     if: always()
 
     steps:
@@ -155,6 +205,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| PDF | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📘 Textbook | ${{ needs.build-pdf-book.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📚 Lab Guide | ${{ needs.build-pdf-guide.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📑 Research Paper | ${{ needs.build-pdf-paper.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

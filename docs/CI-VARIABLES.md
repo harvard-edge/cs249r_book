@@ -75,7 +75,7 @@ changing them before `main` has these workflows breaks `main`'s publishes.**
 | `STAFFML_ROOT` | `interviews/staffml` | `staffml/app` |
 | `VAULT_DIR` | `interviews/vault` | `staffml/vault` |
 | `VAULT_CLI_DIR` | `interviews/vault-cli` | `staffml/vault-cli` |
-| `TINYTORCH_ROOT`, `TINYTORCH_SITE`, `TINYTORCH_SRC`, `TINYTORCH_TESTS` | `tinytorch`, `tinytorch/quarto`, `tinytorch/src`, `tinytorch/tests` | same |
+| `TINYTORCH_ROOT`, `TINYTORCH_SITE`, `TINYTORCH_SRC`, `TINYTORCH_TESTS` | `tinytorch`, `tinytorch/guide`, `tinytorch/src`, `tinytorch/tests` | same |
 | `MLSYSIM_ROOT`, `MLSYSIM_DOCS` | `mlsysim`, `mlsysim/docs` | same |
 | `SLIDES_ROOT`, `INSTRUCTORS_ROOT` | `slides`, `instructors` | same |
 | `KITS_ROOT`, `KITS_DOCS`, `LABS_ROOT`, `LABS_DOCS` | `kits`, `kits`, `labs`, `labs` | same |
