@@ -13,7 +13,20 @@ for the canonical list.
 
 ## [Unreleased]
 
-## [0.1.10] — 2026-04 (planned)
+## [0.1.13] — 2026-09-16
+
+### Added
+- **Full End-to-End Pedagogical Certification**: Automated student journey simulation executing all 20 modules progressively from scratch, certified through 35 pre-release release gates.
+- **Enhanced NBGrader 3-Tier Staging**: Student (41 core archetypes), Challenge (236 full blocks), and Instructor (full solutions) release tiers with automated solution stripping and nbgrader schema validation.
+- **Three-Phase Educational Test Runner**: `tito module test` with inline notebook assertions, educational pytest explanations, and cumulative cross-module integration tests.
+- **Narrative Book Code Synchronization**: Real-time listing quotation from source modules into textbook chapters via `tools/listings.py`.
+- **Hardware Extensions Track**: Optional hardware optimization modules (`tinytorch.extensions`) for AVX2/NEON SIMD, Apple Silicon Metal (MPS), and OpenAI Triton kernels.
+
+### Changed
+- Refined student notebook generation from `src/` to prevent solution leakage while retaining pedagogical scaffolding.
+- Hardened `tito module start`, `view`, `complete`, and `reset` lifecycle workflows with atomic file staging and clear prerequisite feedback.
+
+## [0.1.10] — 2026-04
 
 The first release tracked under `vX.Y.0` (rather than `v0.1.x`) to reflect
 the package's maturity heading into the Volume II launch. This is *not* a
