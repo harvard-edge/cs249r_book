@@ -786,6 +786,503 @@ def gen_milestone_01_kernel_trace():
     write_svg("milestone_01_kernel-trace.svg", body)
 
 
+
+# -----------------------------------------------------------------------------
+# Upgraded Central Diagrams (Vol 3 / CMOS Standard)
+# -----------------------------------------------------------------------------
+
+def gen_05_dataloader_diag_1():
+    h = 240
+    body = f"""{HEADER.format(height=h)}
+  <!-- Stage 1: Dataset in RAM -->
+  <rect x="25" y="20" width="190" height="175" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="25" y="20" width="190" height="24" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="35" y="36" font-size="9.5" font-weight="700" fill="#1f2937">1. DATASET INTERFACE</text>
+  <g transform="translate(35, 54)">
+    <rect x="0" y="0" width="170" height="35" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">TensorDataset(X, y)</text>
+    <text x="85" y="28" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#6b7280">__len__() → N samples</text>
+    <text x="0" y="55" font-size="8" fill="#1f2937">• Holds tensors in memory</text>
+    <text x="0" y="70" font-size="8" fill="#1f2937">• __getitem__(i) extracts row i</text>
+    <text x="0" y="85" font-size="8" font-family="monospace" fill="#6b7280">returns (x_i, y_i) tuple</text>
+  </g>
+
+  <!-- Arrow 1 to 2 -->
+  <path d="M215 105 H240" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
+
+  <!-- Stage 2: Index Permutation & Sampler -->
+  <rect x="245" y="20" width="190" height="175" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="245" y="20" width="190" height="24" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="255" y="36" font-size="9.5" font-weight="700" fill="#1f2937">2. INDEX PERMUTATION</text>
+  <g transform="translate(255, 54)">
+    <rect x="0" y="0" width="170" height="35" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">random.shuffle(indices)</text>
+    <text x="85" y="28" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#6b7280">perm = [7, 8, 1, 5, ...]</text>
+    <text x="0" y="55" font-size="8" fill="#1f2937">• Shuffles index array</text>
+    <text x="0" y="70" font-size="8" fill="#1f2937">• Chunks into slices of size B</text>
+    <text x="0" y="85" font-size="8" font-family="monospace" fill="#6b7280">drop_last drops remainder</text>
+  </g>
+
+  <!-- Arrow 2 to 3 -->
+  <path d="M435 105 H460" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+
+  <!-- Stage 3: Collation & Batch Constructor (ACCENT) -->
+  <rect x="465" y="20" width="190" height="175" rx="2" fill="#ffffff" stroke="#ff8246" stroke-width="1.2"/>
+  <rect x="465" y="20" width="190" height="24" rx="2" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+  <text x="475" y="36" font-size="9.5" font-weight="700" fill="#c85a17">3. BATCH STACK &amp; COLLATION</text>
+  <g transform="translate(475, 54)">
+    <rect x="0" y="0" width="170" height="35" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="85" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#c85a17">np.stack([s.data for s in b])</text>
+    <text x="85" y="28" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#1f2937">Tensor(batch, requires_grad)</text>
+    <text x="0" y="55" font-size="8" fill="#1f2937">• Gathers B sample tensors</text>
+    <text x="0" y="70" font-size="8" font-weight="bold" fill="#c85a17">• Copies into contiguous RAM</text>
+    <text x="0" y="85" font-size="8" fill="#1f2937">• Emits batch tuple to trainer</text>
+  </g>
+
+  <!-- Bottom Annotation -->
+  <text x="340" y="218" text-anchor="middle" font-size="9" fill="#6b7280">The synchronous DataLoader isolates dataset storage from index permutation and memory collation.</text>
+{FOOTER}"""
+    write_svg("05_dataloader-diag-1.svg", body)
+
+
+def gen_06_autograd_diag_1():
+    h = 240
+    body = f"""{HEADER.format(height=h)}
+  <!-- Container 1: Forward Tape Evaluation -->
+  <rect x="25" y="20" width="630" height="85" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="25" y="20" width="630" height="24" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="35" y="36" font-size="9.5" font-weight="700" fill="#1f2937">1. FORWARD EVALUATION &amp; DYNAMIC TAPE RECORDING: y = x · x; L = y + x (AT x = 3.0)</text>
+
+  <g transform="translate(45, 54)">
+    <!-- Leaf x -->
+    <rect x="0" y="0" width="110" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="55" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="#1f2937">Leaf x</text>
+    <text x="55" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">data: 3.0</text>
+
+    <path d="M110 19 H150" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
+
+    <!-- Multiply Node -->
+    <rect x="150" y="0" width="140" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="220" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="#1f2937">y = Mul(x, x)</text>
+    <text x="220" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">y.data: 9.0</text>
+
+    <path d="M290 19 H330" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
+
+    <!-- Add Node -->
+    <rect x="330" y="0" width="140" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="400" y="16" text-anchor="middle" font-size="9" font-weight="700" fill="#1f2937">L = Add(y, x)</text>
+    <text x="400" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">L.data: 12.0</text>
+
+    <!-- Direct arc from x to Add -->
+    <path d="M55 0 V-10 H400 V0" stroke="#9ca3af" stroke-width="1" stroke-dasharray="2,2" fill="none"/>
+  </g>
+
+  <!-- Container 2: Reverse Topological Propagation (ACCENT) -->
+  <rect x="25" y="115" width="630" height="85" rx="2" fill="#ffffff" stroke="#ff8246" stroke-width="1.2"/>
+  <rect x="25" y="115" width="630" height="24" rx="2" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+  <text x="35" y="131" font-size="9.5" font-weight="700" fill="#c85a17">2. REVERSE TOPOLOGICAL SWEEP: GRADIENT ACCUMULATION (dL/dL = 1.0)</text>
+
+  <g transform="translate(45, 149)">
+    <!-- Step 1: AddBackward -->
+    <rect x="0" y="0" width="170" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">1. AddBackward</text>
+    <text x="85" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#1f2937">dL/dy = 1.0, dL/dx₁ = 1.0</text>
+
+    <path d="M170 19 H210" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+
+    <!-- Step 2: MulBackward -->
+    <rect x="210" y="0" width="180" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="300" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">2. MulBackward</text>
+    <text x="300" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#1f2937">dL/dx₂ = x + x = 6.0</text>
+
+    <path d="M390 19 H430" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+
+    <!-- Step 3: Leaf Accumulation (ACCENT) -->
+    <rect x="430" y="0" width="160" height="38" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="510" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#c85a17">3. Leaf x Accumulation</text>
+    <text x="510" y="30" text-anchor="middle" font-size="8" font-family="monospace" font-weight="bold" fill="#c85a17">dx = 1.0 + 6.0 = 7.0 ✓</text>
+  </g>
+
+  <!-- Bottom Annotation -->
+  <text x="340" y="222" text-anchor="middle" font-size="9" fill="#6b7280">Dynamic autograd visits operations in reverse topological order, correctly accumulating multivariable gradients.</text>
+{FOOTER}"""
+    write_svg("06_autograd-diag-1.svg", body)
+
+
+def gen_07_optimizers_diag_1():
+    h = 240
+    body = f"""{HEADER.format(height=h)}
+  <!-- Column 1: SGD & Momentum -->
+  <rect x="25" y="20" width="190" height="180" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="25" y="20" width="190" height="24" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="35" y="36" font-size="9.5" font-weight="700" fill="#1f2937">1. SGD &amp; MOMENTUM</text>
+  <g transform="translate(35, 54)">
+    <rect x="0" y="0" width="170" height="35" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="#1f2937">Coupled Weight Decay</text>
+    <text x="85" y="28" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#6b7280">g′ = g + λθ</text>
+
+    <path d="M85 35 V48" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
+
+    <rect x="0" y="48" width="170" height="48" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="64" text-anchor="middle" font-size="8" font-weight="700" fill="#1f2937">Velocity Recurrence</text>
+    <text x="85" y="76" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#1f2937">v ← βv + g′</text>
+    <text x="85" y="88" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#1f2937">θ ← θ − ηv</text>
+  </g>
+
+  <!-- Column 2: Adam (Coupled) -->
+  <rect x="245" y="20" width="190" height="180" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="245" y="20" width="190" height="24" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="255" y="36" font-size="9.5" font-weight="700" fill="#1f2937">2. ADAM (COUPLED)</text>
+  <g transform="translate(255, 54)">
+    <rect x="0" y="0" width="170" height="35" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="#1f2937">Coupled Weight Decay</text>
+    <text x="85" y="28" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#6b7280">g′ = g + λθ</text>
+
+    <path d="M85 35 V48" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
+
+    <rect x="0" y="48" width="170" height="48" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="64" text-anchor="middle" font-size="8" font-weight="700" fill="#1f2937">Coupled Moments</text>
+    <text x="85" y="76" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#1f2937">m, v estimated from g′</text>
+    <text x="85" y="88" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#1f2937">θ ← θ − η m̂ / (√v̂ + ε)</text>
+  </g>
+
+  <!-- Column 3: AdamW (Decoupled - ACCENT) -->
+  <rect x="465" y="20" width="190" height="180" rx="2" fill="#ffffff" stroke="#ff8246" stroke-width="1.2"/>
+  <rect x="465" y="20" width="190" height="24" rx="2" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+  <text x="475" y="36" font-size="9.5" font-weight="700" fill="#c85a17">3. ADAMW (DECOUPLED)</text>
+  <g transform="translate(475, 54)">
+    <rect x="0" y="0" width="170" height="35" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="85" y="16" text-anchor="middle" font-size="8" font-weight="700" fill="#1f2937">Pure Gradient Moments</text>
+    <text x="85" y="28" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#1f2937">m, v from g (no decay)</text>
+
+    <path d="M85 35 V48" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+
+    <rect x="0" y="48" width="170" height="48" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="85" y="64" text-anchor="middle" font-size="8" font-weight="700" fill="#c85a17">Decoupled Decay Step</text>
+    <text x="85" y="76" text-anchor="middle" font-size="7.5" font-family="monospace" font-weight="bold" fill="#c85a17">θ ← (1 − ηλ)θ</text>
+    <text x="85" y="88" text-anchor="middle" font-size="7.5" font-family="monospace" fill="#1f2937">θ ← θ − η m̂ / (√v̂ + ε)</text>
+  </g>
+
+  <!-- Bottom Annotation -->
+  <text x="340" y="222" text-anchor="middle" font-size="9" fill="#6b7280">AdamW decouples weight shrinkage from moment estimation, preserving proper regularization scale.</text>
+{FOOTER}"""
+    write_svg("07_optimizers-diag-1.svg", body)
+
+
+def gen_08_training_diag_1():
+    h = 240
+    body = f"""{HEADER.format(height=h)}
+  <!-- Container 1: Forward & Backward Loop -->
+  <rect x="25" y="20" width="630" height="85" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="25" y="20" width="630" height="24" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="35" y="36" font-size="9.5" font-weight="700" fill="#1f2937">1. ACCUMULATION WINDOW: INNER REPEATING MICROBATCHES</text>
+
+  <g transform="translate(45, 54)">
+    <rect x="0" y="0" width="165" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="82" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">Forward Pass</text>
+    <text x="82" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">outputs = model(x)</text>
+
+    <path d="M165 19 H205" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
+
+    <rect x="205" y="0" width="165" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="287" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">Mean Batch Loss</text>
+    <text x="287" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">loss = loss_fn(y, t)</text>
+
+    <path d="M370 19 H410" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow-gray)"/>
+
+    <rect x="410" y="0" width="175" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="497" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">Sample-Weighted Backward</text>
+    <text x="497" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#1f2937">loss.backward(seed=B_micro)</text>
+  </g>
+
+  <!-- Container 2: Window Boundary Update (ACCENT) -->
+  <rect x="25" y="115" width="630" height="85" rx="2" fill="#ffffff" stroke="#ff8246" stroke-width="1.2"/>
+  <rect x="25" y="115" width="630" height="24" rx="2" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+  <text x="35" y="131" font-size="9.5" font-weight="700" fill="#c85a17">2. WINDOW BOUNDARY: NORMALIZATION, CLIPPING &amp; IN-PLACE UPDATE</text>
+
+  <g transform="translate(45, 149)">
+    <rect x="0" y="0" width="165" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="82" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">Sample Normalization</text>
+    <text x="82" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#1f2937">grad /= total_samples</text>
+
+    <path d="M165 19 H205" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+
+    <rect x="205" y="0" width="165" height="38" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="287" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1f2937">Global Norm Clip</text>
+    <text x="287" y="30" text-anchor="middle" font-size="8" font-family="monospace" fill="#1f2937">clip_grad_norm_(max_norm)</text>
+
+    <path d="M370 19 H410" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+
+    <rect x="410" y="0" width="175" height="38" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="497" y="16" text-anchor="middle" font-size="8.5" font-weight="700" fill="#c85a17">Step &amp; Zero Grad</text>
+    <text x="497" y="30" text-anchor="middle" font-size="8" font-family="monospace" font-weight="bold" fill="#c85a17">opt.step(); opt.zero_grad()</text>
+  </g>
+
+  <!-- Bottom Annotation -->
+  <text x="340" y="222" text-anchor="middle" font-size="9" fill="#6b7280">Normalizing by exact accumulated samples guarantees mathematical equivalence to full-batch optimization.</text>
+{FOOTER}"""
+    write_svg("08_training-diag-1.svg", body)
+
+
+# -----------------------------------------------------------------------------
+# Part I Margin Micro-Figures (viewBox 0 0 220 {h})
+# -----------------------------------------------------------------------------
+
+def gen_01_tensor_margin_overhead():
+    h = 95
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="85" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">STORAGE: 3×3 FLOAT MATRIX</text>
+
+  <g transform="translate(15, 33)">
+    <rect x="0" y="0" width="180" height="20" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <rect x="0" y="0" width="156" height="20" rx="1" fill="#e2e8f0" stroke="#9ca3af" stroke-width="1"/>
+    <text x="8" y="14" font-size="8" font-weight="700" fill="#1f2937">Nested Lists: 280 B</text>
+    <text x="175" y="14" text-anchor="end" font-size="7.5" font-family="monospace" fill="#6b7280">7.8×</text>
+
+    <rect x="0" y="26" width="180" height="20" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <rect x="0" y="26" width="28" height="20" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="34" y="40" font-size="8" font-weight="700" fill="#c85a17">Float32 Buffer: 36 B</text>
+    <text x="175" y="40" text-anchor="end" font-size="7.5" font-family="monospace" font-weight="bold" fill="#c85a17">1.0×</text>
+  </g>
+</svg>
+"""
+    write_svg("01_tensor-margin-overhead.svg", body)
+
+
+def gen_02_activation_margin_gelu():
+    h = 120
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="110" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">GELU VS RELU CURVATURE</text>
+
+  <g transform="translate(15, 25)">
+    <line x1="20" y1="65" x2="185" y2="65" stroke="#cbd5e1" stroke-width="1"/>
+    <line x1="85" y1="10" x2="85" y2="75" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="185" y="63" font-size="7" font-family="monospace" fill="#9ca3af">x</text>
+    <text x="88" y="12" font-size="7" font-family="monospace" fill="#9ca3af">y</text>
+
+    <!-- ReLU line -->
+    <path d="M 25 65 L 85 65 L 155 10" fill="none" stroke="#9ca3af" stroke-width="1.2" stroke-dasharray="2,2"/>
+    <text x="145" y="24" font-size="7" fill="#6b7280">ReLU</text>
+
+    <!-- GELU curve with recovery dip -->
+    <path d="M 25 65 Q 55 65 67 71 T 85 65 Q 110 48 155 10" fill="none" stroke="#ff8246" stroke-width="1.8"/>
+    <circle cx="67" cy="71" r="2.5" fill="#c85a17"/>
+    <text x="67" y="83" text-anchor="middle" font-size="7" font-family="monospace" font-weight="bold" fill="#c85a17">-0.17 well</text>
+    <text x="125" y="38" font-size="7.5" font-weight="700" fill="#ff8246">GELU</text>
+  </g>
+</svg>
+"""
+    write_svg("02_activation-margin-gelu.svg", body)
+
+
+def gen_03_layers_margin_fanin():
+    h = 100
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="90" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">KAIMING SCALE: σ = √(2 / Din)</text>
+
+  <g transform="translate(15, 33)">
+    <rect x="0" y="0" width="130" height="15" rx="1" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1"/>
+    <text x="6" y="11" font-size="7.5" font-weight="700" fill="#1f2937">Din = 64</text>
+    <text x="180" y="11" text-anchor="end" font-size="7.5" font-family="monospace" fill="#1f2937">σ = 0.177</text>
+
+    <rect x="0" y="20" width="70" height="15" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="6" y="31" font-size="7.5" font-weight="700" fill="#1f2937">Din = 256</text>
+    <text x="180" y="31" text-anchor="end" font-size="7.5" font-family="monospace" fill="#1f2937">σ = 0.088</text>
+
+    <rect x="0" y="40" width="52" height="15" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="6" y="51" font-size="7.5" font-weight="700" fill="#c85a17">Din = 1024</text>
+    <text x="180" y="51" text-anchor="end" font-size="7.5" font-family="monospace" font-weight="bold" fill="#c85a17">σ = 0.044</text>
+  </g>
+</svg>
+"""
+    write_svg("03_layers-margin-fanin.svg", body)
+
+
+def gen_04_losses_margin_overflow():
+    h = 105
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="95" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">FLOAT32 EXP RANGE CLIFF</text>
+
+  <g transform="translate(15, 33)">
+    <rect x="0" y="0" width="180" height="18" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <rect x="0" y="0" width="135" height="18" rx="1" fill="#e2e8f0" stroke="#9ca3af" stroke-width="1"/>
+    <rect x="135" y="0" width="45" height="18" rx="1" fill="#fee2e2" stroke="#ef4444" stroke-width="1"/>
+    <text x="8" y="12" font-size="7.5" fill="#1f2937">Safe (x &lt; 88)</text>
+    <text x="157" y="12" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#b91c1c">NaN</text>
+
+    <line x1="135" y1="-3" x2="135" y2="30" stroke="#b91c1c" stroke-width="1.2" stroke-dasharray="2,2"/>
+    <text x="135" y="42" text-anchor="middle" font-size="7.5" font-family="monospace" font-weight="bold" fill="#b91c1c">x = 88.72</text>
+    <text x="135" y="52" text-anchor="middle" font-size="7" fill="#6b7280">(e^x &gt; 3.4×10^38 overflow)</text>
+  </g>
+</svg>
+"""
+    write_svg("04_losses-margin-overflow.svg", body)
+
+
+def gen_05_dataloader_margin_permutation():
+    h = 95
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="85" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">SHUFFLE PERMUTATION CHUNKING</text>
+
+  <g transform="translate(15, 35)">
+    <rect x="0" y="0" width="80" height="22" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="40" y="14" text-anchor="middle" font-size="8" font-family="monospace" font-weight="bold" fill="#c85a17">7  8  1  5</text>
+    <text x="40" y="34" text-anchor="middle" font-size="7" fill="#c85a17">Batch 0 (B=4)</text>
+
+    <rect x="85" y="0" width="80" height="22" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="125" y="14" text-anchor="middle" font-size="8" font-family="monospace" fill="#1f2937">0  3  2  4</text>
+    <text x="125" y="34" text-anchor="middle" font-size="7" fill="#6b7280">Batch 1 (B=4)</text>
+
+    <rect x="170" y="0" width="20" height="22" rx="1" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1"/>
+    <text x="180" y="14" text-anchor="middle" font-size="8" font-family="monospace" fill="#6b7280">6</text>
+    <text x="180" y="34" text-anchor="middle" font-size="7" fill="#6b7280">drop</text>
+  </g>
+</svg>
+"""
+    write_svg("05_dataloader-margin-permutation.svg", body)
+
+
+def gen_06_autograd_margin_diamond():
+    h = 125
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="115" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">DIAMOND DAG GRADIENT ACCUM</text>
+
+  <g transform="translate(20, 28)">
+    <rect x="75" y="2" width="40" height="16" rx="1" fill="#f1f5f9" stroke="#1f2937" stroke-width="1"/>
+    <text x="95" y="13" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#1f2937">Loss L</text>
+
+    <path d="M 85 18 L 45 32" stroke="#9ca3af" stroke-width="1" marker-end="url(#arrow-gray)"/>
+    <path d="M 105 18 L 145 32" stroke="#9ca3af" stroke-width="1" marker-end="url(#arrow-gray)"/>
+
+    <rect x="30" y="32" width="30" height="16" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="45" y="43" text-anchor="middle" font-size="7.5" fill="#1f2937">h₁</text>
+    <rect x="130" y="32" width="30" height="16" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <text x="145" y="43" text-anchor="middle" font-size="7.5" fill="#1f2937">h₂</text>
+
+    <path d="M 45 48 L 85 58" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+    <path d="M 145 48 L 105 58" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+
+    <rect x="75" y="58" width="40" height="16" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="95" y="69" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#c85a17">Leaf x</text>
+
+    <text x="95" y="85" text-anchor="middle" font-size="7" font-family="monospace" font-weight="bold" fill="#c85a17">grad = g₁ + g₂ (+=)</text>
+  </g>
+</svg>
+"""
+    write_svg("06_autograd-margin-diamond.svg", body)
+
+
+def gen_07_optimizers_margin_memory():
+    h = 95
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="85" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">ADAMW STATE: 16 B / PARAMETER</text>
+
+  <g transform="translate(15, 33)">
+    <rect x="0" y="0" width="46" height="22" rx="1" fill="#eff6ff" stroke="#2563eb" stroke-width="1"/>
+    <text x="23" y="14" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#1d4ed8">W: 4B</text>
+
+    <rect x="48" y="0" width="46" height="22" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <text x="71" y="14" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#c85a17">∇W: 4B</text>
+
+    <rect x="96" y="0" width="46" height="22" rx="1" fill="#f8fafc" stroke="#64748b" stroke-width="1"/>
+    <text x="119" y="14" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#334155">m: 4B</text>
+
+    <rect x="144" y="0" width="46" height="22" rx="1" fill="#f1f5f9" stroke="#1f2937" stroke-width="1"/>
+    <text x="167" y="14" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#0f172a">v: 4B</text>
+
+    <text x="95" y="38" text-anchor="middle" font-size="7.5" font-weight="bold" fill="#c85a17">Total = 16 Bytes (4× Multiplier)</text>
+  </g>
+</svg>
+"""
+    write_svg("07_optimizers-margin-memory.svg", body)
+
+
+def gen_08_training_margin_timeline():
+    h = 100
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="90" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">ACTIVATION LIFECYCLE TIMELINE</text>
+
+  <g transform="translate(15, 28)">
+    <path d="M 10 45 L 75 12 L 140 45 L 180 45" fill="none" stroke="#ff8246" stroke-width="1.8"/>
+    <circle cx="75" cy="12" r="2.5" fill="#c85a17"/>
+    <text x="75" y="8" text-anchor="middle" font-size="7" font-weight="bold" fill="#c85a17">Peak Activations</text>
+
+    <line x1="75" y1="15" x2="75" y2="48" stroke="#cbd5e1" stroke-width="0.8" stroke-dasharray="2,2"/>
+    <line x1="140" y1="15" x2="140" y2="48" stroke="#cbd5e1" stroke-width="0.8" stroke-dasharray="2,2"/>
+
+    <text x="40" y="56" text-anchor="middle" font-size="7" fill="#6b7280">Forward</text>
+    <text x="105" y="56" text-anchor="middle" font-size="7" fill="#6b7280">Backward</text>
+    <text x="160" y="56" text-anchor="middle" font-size="7" font-weight="bold" fill="#1f2937">Step</text>
+  </g>
+</svg>
+"""
+    write_svg("08_training-margin-timeline.svg", body)
+
+
+def gen_milestone_01_margin_xor():
+    h = 110
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="{h}" viewBox="0 0 220 {h}" font-family="'TeX Gyre Heros', 'Helvetica Neue', Arial, sans-serif">
+<rect width="220" height="{h}" fill="#ffffff"/>
+  <rect x="5" y="5" width="210" height="100" rx="2" fill="#ffffff" stroke="#9ca3af" stroke-width="1.2"/>
+  <rect x="5" y="5" width="210" height="20" rx="2" fill="#f1f5f9" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="12" y="19" font-size="8.5" font-weight="700" fill="#1f2937">XOR SPACE FOLDING VIA RELU</text>
+
+  <g transform="translate(15, 28)">
+    <rect x="5" y="5" width="65" height="55" rx="1" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+    <circle cx="15" cy="50" r="3" fill="#64748b"/>
+    <circle cx="60" cy="15" r="3" fill="#64748b"/>
+    <circle cx="15" cy="15" r="3" fill="#ff8246"/>
+    <circle cx="60" cy="50" r="3" fill="#ff8246"/>
+    <text x="37" y="69" text-anchor="middle" font-size="6.5" fill="#6b7280">2D Input (Insep.)</text>
+
+    <path d="M 76 32 H 98" stroke="#ff8246" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+    <text x="87" y="27" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#ff8246">ReLU</text>
+
+    <rect x="106" y="5" width="75" height="55" rx="1" fill="#fff1e8" stroke="#ff8246" stroke-width="1.2"/>
+    <circle cx="118" cy="50" r="3" fill="#64748b"/>
+    <circle cx="168" cy="50" r="3" fill="#64748b"/>
+    <circle cx="143" cy="18" r="3" fill="#ff8246"/>
+    <line x1="112" y1="34" x2="174" y2="34" stroke="#c85a17" stroke-width="1.2" stroke-dasharray="2,2"/>
+    <text x="143" y="69" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#c85a17">Separable Space</text>
+  </g>
+</svg>
+"""
+    write_svg("milestone_01-margin-xor.svg", body)
+
+
 def main():
     gen_00_physical_stack()
     gen_01_stride_zero_broadcast()
@@ -797,7 +1294,24 @@ def main():
     gen_07_ravine_optimization()
     gen_08_microbatch_memory_timeline()
     gen_milestone_01_kernel_trace()
-    print("Tier 1 generation complete.")
+
+    # Upgraded Central Diagrams
+    gen_05_dataloader_diag_1()
+    gen_06_autograd_diag_1()
+    gen_07_optimizers_diag_1()
+    gen_08_training_diag_1()
+
+    # Part I Margin Micro-Figures
+    gen_01_tensor_margin_overhead()
+    gen_02_activation_margin_gelu()
+    gen_03_layers_margin_fanin()
+    gen_04_losses_margin_overflow()
+    gen_05_dataloader_margin_permutation()
+    gen_06_autograd_margin_diamond()
+    gen_07_optimizers_margin_memory()
+    gen_08_training_margin_timeline()
+    gen_milestone_01_margin_xor()
+    print("Tier 1 generation & margin figures complete.")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ Automatic differentiation computes them by keeping a record of each operation as
 
 ## The Problem
 
-Gradient descent, which chapter 7 turns into a real optimizer, needs one number per weight: the partial derivative of the loss with respect to that weight. For $N$ weights, the gradient contains $N$ values. Each parameter tensor stores its part in an array of the same shape, so a $2 \times 2$ weight matrix needs a $2 \times 2$ gradient.
+Gradient descent, which @sec-optimizers turns into a real optimizer, needs one number per weight: the partial derivative of the loss with respect to that weight. For $N$ weights, the gradient contains $N$ values. Each parameter tensor stores its part in an array of the same shape, so a $2 \times 2$ weight matrix needs a $2 \times 2$ gradient.
 
 The obvious way to get a derivative is to nudge a weight and see what happens to the loss. For the small network the rest of the chapter uses (a $1 \times 2$ input, a $2 \times 2$ weight matrix, a ReLU, and a sum), @lst-autograd-finite-difference computes one estimate per weight.
 
@@ -80,6 +80,12 @@ The order matters. A tensor's backward rule turns the gradient at that tensor in
 
 ### Used twice means add
 
+::: {.column-margin}
+![](assets/images/diagrams/06_autograd-margin-diamond.svg){width="100%" fig-alt="Diamond DAG topology showing forward split and backward gradient accumulation at leaf x."}
+
+*Diamond DAGs require gradient accumulation: $\nabla_x = \nabla_{y_1} \frac{\partial y_1}{\partial x} + \nabla_{y_2} \frac{\partial y_2}{\partial x}$.*
+:::
+
 When a tensor feeds two operations, the loss depends on it along two paths, and the multivariable chain rule says the total derivative is the sum over paths:
 
 $$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac{\partial y_k}{\partial x},$$
@@ -92,19 +98,33 @@ The multiply in the opening example needs the forward value $x=3$ to produce its
 
 The reference keeps all inputs even when a particular rule only needs a shape. After backward releases the links, intermediates with no other references can be reclaimed; any tensors still held by the caller remain alive. During prediction, `no_grad()` prevents these graph links from being retained. The difference is about object lifetime, not a promise that inference always needs exactly one layer's memory.
 
+::: {#nbk-autograd-activation-memory .callout-notebook title="Napkin Math: Autograd activation memory scaling"}
+
+**Problem**: For a 12-layer TinyGPT model with batch size $B=16$, sequence length $S=1024$, and hidden dimension $D=768$, what is the activation memory retained on the forward tape?
+
+**Per-layer activation footprint**:
+$$\text{Layer activations} \approx 4 \times (B \times S \times D) \times 4\text{ bytes} \approx 4 \times (16 \times 1024 \times 768) \times 4 \approx 192\text{ MB}$$
+
+**Total tape footprint**:
+$$\text{Total activation memory} \approx 12\text{ layers} \times 192\text{ MB} \approx 2.30\text{ GB}$$
+
+**Systems insight**: While model parameters for this configuration occupy only $\sim 340\text{ MB}$, forward activation memory on the autograd tape exceeds parameter memory by nearly $7\times$, making activation management the primary bottleneck during training.
+
+:::
+
 ---
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this chapter are extracted from Module 06 (`src/06_autograd/06_autograd.py`), and the `Function` class from Module 01 (`src/01_tensor/01_tensor.py`), by the book's build. The extraction removes student scaffolding, including TODO and HINT blocks and grading markers. These excerpts show the reference operations and traversal used by `loss.backward()`.
+::: {.column-margin}
+**Source Code Mapping**: Every listing in this chapter is extracted directly from Module 06 (`src/06_autograd/06_autograd.py`), with `Function` from Module 01 (`src/01_tensor/01_tensor.py`).
 :::
 
-The tensor implementation in chapter 1 left three fields on every `Tensor` with nothing to do: `requires_grad`, `grad`, and `_grad_fn`. It also routed every operation through one method, `Function.apply`, which computed a result and forgot how. This chapter is where all four earn their keep.
+The tensor implementation in @sec-tensors left three fields on every `Tensor` with nothing to do: `requires_grad`, `grad`, and `_grad_fn`. It also routed every operation through one method, `Function.apply`, which computed a result and forgot how. This chapter is where all four earn their keep.
 
 ### An operation that remembers its inputs
 
-Consider the entry point for the opening multiply. `x * x` calls `Tensor.__mul__`, which delegates to `Mul.apply(x, x)`. Chapter 1 supplied `Function.apply` as the common path for every operation. It constructs a fresh `Mul` node whose `inputs` tuple contains two references to the same tensor. Calling `forward` with the inputs' NumPy arrays produces the value $9$.
+Consider the entry point for the opening multiply. `x * x` calls `Tensor.__mul__`, which delegates to `Mul.apply(x, x)`. @sec-tensors supplied `Function.apply` as the common path for every operation. It constructs a fresh `Mul` node whose `inputs` tuple contains two references to the same tensor. Calling `forward` with the inputs' NumPy arrays produces the value $9$.
 
 If the framework kept only that result, it would lose both the operation and its two input positions. A per-call node preserves them without requiring a separate backward function for the whole model. Its class supplies the rule, while its instance supplies the values from this particular call.
 
@@ -116,11 +136,17 @@ Read `apply` again with this chapter's question in mind. It builds a node that h
 
 The output is a new `Tensor` wrapping the array returned by `forward`. The node keeps this tensor as `node.output`, because some derivative rules reuse the output value. If tracking is enabled and any input requires a gradient, `apply` sets `out.requires_grad = True` and stores the node as `out._grad_fn`. For `x * x`, following that link reaches a `Mul` whose two input entries both refer to `x`. Another operation can extend the chain without knowing how the earlier result was computed.
 
+::: {#chk-autograd-inplace-versioning .callout-check title="Sanity Check: In-place mutation corrupts forward activation recordings"}
+When a tensor is mutated in place (e.g., `x += 1` or `x.data[0] = 5`), the numerical values saved during forward execution are destroyed. If `backward()` runs later, operations like `Mul` or `ReLU` read the modified values rather than the activations present when the graph was recorded, silently producing corrupt gradients.
+
+Always ensure parameter updates and buffer overwrites occur *after* `loss.backward()` has finished traversing the graph, or isolate mutations inside explicit `no_grad()` contexts.
+:::
+
 The `if` line controls whether this record survives the call. A prediction using trainable weights still records operations unless tracking is disabled. Inside `no_grad()`, the output has `requires_grad=False` and no `_grad_fn`; leaving the context restores the previous tracking state. Setting a layer to evaluation mode is a separate decision about behavior such as dropout, and does not disable autograd.
 
 A tensor constructed directly, such as `x` or a weight, has no producing operation. Such a tensor is a **leaf** of this record structure. Backward stops there after accumulating its gradient. TinyTorch also stores `.grad` on visited intermediates, which makes the trace inspectable; the production bridge distinguishes that choice from PyTorch's default.
 
-What each node needs in order to send a gradient back to its inputs is the other half of the operation, the `backward` that chapter 1 left raising `NotImplementedError`. The rest of this section writes those halves, one class at a time, on the same classes that already implement `forward`.
+What each node needs in order to send a gradient back to its inputs is the other half of the operation, the `backward` that @sec-tensors left raising `NotImplementedError`. The rest of this section writes those halves, one class at a time, on the same classes that already implement `forward`.
 
 ### The broadcast obligation: reducing gradients
 
@@ -142,7 +168,7 @@ The rule itself is one line per input, `grad_a = grad_output`, because $\partial
 
 ### Matrix multiplication, ReLU, and sum
 
-Matrix multiplication is where the weights are. Chapter 3's `Linear` layer is `x @ W` plus a bias, so every weight matrix in an MLP, and later every projection in chapter 12's attention, receives its gradient through the matmul rule. It is also the rule where the naive approach is most obviously unaffordable. In the general case, an operation that maps a vector of length $n$ to a vector of length $m$ has an $m \times n$ matrix of local derivatives called the Jacobian,[^fn-jacobian-vjp] and the textbook way to apply the chain rule is to build it and multiply. For a linear layer with batch 256 and width 4096, the output has about a million entries and $W$ has nearly seventeen million, so $\partial Y / \partial W$ has roughly $1.8 \times 10^{13}$ entries, about 70 TB in float32, for one layer of one training step.
+Matrix multiplication is where the weights are. @sec-layers's `Linear` layer is `x @ W` plus a bias, so every weight matrix in an MLP, and later every projection in @sec-attention's attention, receives its gradient through the matmul rule. It is also the rule where the naive approach is most obviously unaffordable. In the general case, an operation that maps a vector of length $n$ to a vector of length $m$ has an $m \times n$ matrix of local derivatives called the Jacobian,[^fn-jacobian-vjp] and the textbook way to apply the chain rule is to build it and multiply. For a linear layer with batch 256 and width 4096, the output has about a million entries and $W$ has nearly seventeen million, so $\partial Y / \partial W$ has roughly $1.8 \times 10^{13}$ entries, about 70 TB in float32, for one layer of one training step.
 
 [^fn-jacobian-vjp]: **Jacobian**: the matrix of all partial derivatives $\partial y_i / \partial x_j$ of a vector-valued function. For a layer with 1024 inputs and 1024 outputs it has a million entries per example, which is why autograd computes gradient-times-Jacobian products instead of the Jacobian itself.
 
@@ -150,7 +176,7 @@ The reference never constructs this array. The matmul rule from The Idea compute
 
 {{< include _listings/06_autograd/MatMul_backward.qmd >}}
 
-The two-dimensional case is the two-line formula from The Idea, and the shapes work out for the same reason. The branches around it are there because the real module has to serve chapter 12, where attention multiplies batches of matrices at once; `np.swapaxes` transposes only the last two axes so the batch axis is left alone, and vector operands are temporarily promoted to row or column matrices. Removing those added axes afterward lets the same matrix rule cover vector and batched cases without flattening a batch into one outer product.
+The two-dimensional case is the two-line formula from The Idea, and the shapes work out for the same reason. The branches around it are there because the real module has to serve @sec-attention, where attention multiplies batches of matrices at once; `np.swapaxes` transposes only the last two axes so the batch axis is left alone, and vector operands are temporarily promoted to row or column matrices. Removing those added axes afterward lets the same matrix rule cover vector and batched cases without flattening a batch into one outer product.
 
 ReLU and sum are simpler, and they are here because the worked trace needs them. ReLU supplies a nonlinear step, and sum produces a scalar whose backward seed can default to one. Notice what each rule reads from its node, because that is exactly what has to stay in memory until backward runs: matmul read both operands, ReLU reads its input, and sum uses its input to recover the shape and gradient requirement. The node nevertheless retains the full input tensor.
 
@@ -160,11 +186,11 @@ ReLU and sum are simpler, and they are here because the worked trace needs them.
 
 The ReLU mask is the derivative of $\max(0, z)$ evaluated at the forward input. Sum broadcasts its scalar gradient back to the shape it reduced, and `expand_dims` restores an axis removed by `sum(axis=1)` so each row receives its own incoming gradient. A sum of a `(2, 3)` tensor along axis 1 has shape `(2,)`; an incoming `[2, 5]` becomes `[[2], [5]]`, then broadcasts to `[[2, 2, 2], [5, 5, 5]]`.
 
-The same requirement applies to the loss rules from chapter 4. For example, binary cross-entropy clips a probability into $[10^{-7}, 1-10^{-7}]$ before taking logarithms. Outside that interval its implemented forward value is constant, so the prediction gradient is zero; inside it, the rule differentiates the logarithmic expression. At the two clip boundaries the implementation chooses the derivative from the interior. A backward rule must match the implemented forward function, including such numerical choices.
+The same requirement applies to the loss rules from @sec-losses. For example, binary cross-entropy clips a probability into $[10^{-7}, 1-10^{-7}]$ before taking logarithms. Outside that interval its implemented forward value is constant, so the prediction gradient is zero; inside it, the rule differentiates the logarithmic expression. At the two clip boundaries the implementation chooses the derivative from the interior. A backward rule must match the implemented forward function, including such numerical choices.
 
 ### Walking the graph backward
 
-The records are in place. What is left is the call the training loop of chapter 8 will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
+The records are in place. What is left is the call the training loop of @sec-training will make once per step, `loss.backward()`, which has to visit every record and leave every leaf holding its gradient.
 
 A tempting walk combines recursion with a visited set. Start at the loss, run its rule, and immediately recurse into each unvisited input. On the straight chain in the worked trace below that gives the right answer, which is what makes it dangerous. For `x = 2`, let `h = x * 2` and `L = h * 3 + h * 4`. The two branches contribute $3$ and $4$ at `h`; its multiply must send $(3+4) \times 2 = 14$ to `x`. If a recursive walk reaches `h` through the first branch and immediately runs its rule, it sends only $3 \times 2 = 6$. When the second branch arrives, the visited set suppresses another traversal of `h`, losing the remaining $8$. Dropping the visited set while propagating the total `.grad` causes a different error: the later traversal also resends the first contribution. No error, a wrong number, and a model that trains a little worse than it should.
 
@@ -269,6 +295,10 @@ print(x.grad)          # [[2. 2.]]
 ```
 :::
 
+::: {#ws-autograd-inplace-residual .callout-warning title="Warning: The silent overwrite trap in residual connections"}
+Residual connections ($y = x + F(x)$) feed a single activation tensor into multiple downstream consumers. If an autograd engine used assignment (`pending[parent] = incoming`) rather than accumulation (`pending[parent] += incoming`), the gradient from the skip connection would overwrite the gradient flowing through the residual sub-block, silently zeroing out feature updates in deep networks.
+:::
+
 Replace the `+` in the `pending` update inside `backward` with an assignment and this prints `[[1. 1.]]`, with no error to tell us it is wrong. A shared intermediate adds a second obligation: its local rule must propagate the combined gradient once. The trace in @lst-autograd-retained-graph checks accumulation across separate calls that share a forward intermediate. In lines 1--3, `h = x * 2` branches into `left` and `right`. Line 4 runs `left.backward(retain_graph=True)`, printing `x.grad = [6.]` in line 5. Line 6 runs `right.backward()`, accumulating an additional 8 to yield `x.grad = [14.]` in line 7. In lines 9--12, attempting to backpropagate through `h` a third time raises a `RuntimeError` because the un-retained backward pass released `h`'s computational graph.
 
 ::: {#lst-autograd-retained-graph lst-cap="**Gradient and graph lifetimes**: Contributions accumulate across calls, but a released intermediate cannot be traversed again."}
@@ -295,6 +325,13 @@ On the first call (line 4), `h` receives three and sends six to `x`. On the seco
 ## From TinyTorch to Production
 
 PyTorch also records executed operations and exposes a result's producing node through `grad_fn`. Its backward engine applies local derivative rules to saved forward values. A production implementation can save only the values a rule needs; TinyTorch keeps every input and its output to make the record easy to inspect. PyTorch also checks version counters to detect changes to saved tensors. [PyTorch autograd mechanics](https://docs.pytorch.org/docs/2.14/notes/autograd.html).
+
+::: {#psp-autograd-cpp-engine .callout-perspective title="Production Bridge: PyTorch's C++ autograd engine and version counters"}
+In PyTorch's native C++ core (`torch/csrc/autograd`), every `Tensor` maintains an internal `_version` counter incremented on every in-place mutation. When a backward rule requires saved forward activations (via `ctx.save_for_backward`), it records their version. If any saved tensor's version increments before backward executes, PyTorch immediately raises:
+`RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation`.
+
+PyTorch also executes the reverse traversal using a ready-queue worker thread pool, executing vector-Jacobian products in C++ without Python interpreter or GIL overhead.
+:::
 
 That mutation check marks a boundary of this reference. TinyTorch nodes hold references to mutable tensors, not immutable snapshots. If `x` is `[3]` when `y = x * x` runs, changing `x.data` to `[4]` before backward makes the multiply read $4$ and return a gradient of $8$ for a forward calculation performed at $3$. TinyTorch does not detect that mismatch. Parameter updates must follow the backward passes that need the old values; `no_grad()` disables recording but does not make an early mutation safe.
 

@@ -1,6 +1,6 @@
 # Milestone I: From Perceptrons to Rumelhart's MLP {#sec-milestone-1 .unnumbered}
 
-Chapter 8 closed the loop. A four-row XOR dataset now tests whether the eight mechanisms work together: tensors, activations, layers, losses, a data loader, an autograd tape, optimizers, and the five-step loop that orders them. The earlier chapters checked local rules and small training traces. This milestone checks whether those rules compose across two trainable layers and continue to work over repeated updates.
+@sec-training closed the loop. A four-row XOR dataset now tests whether the eight mechanisms work together: tensors, activations, layers, losses, a data loader, an autograd tape, optimizers, and the five-step loop that orders them. The earlier chapters checked local rules and small training traces. This milestone checks whether those rules compose across two trainable layers and continue to work over repeated updates.
 
 A single affine classifier cannot label all four XOR corners correctly, regardless of its training procedure. A hidden layer can transform those corners into values the output layer can separate. Training that hidden layer tests whether gradients cross layer boundaries and reach the original parameters. The second experiment, TinyDigits, adds image batches and a multiclass loss. Learning either task provides an integration check; it does not prove every backward rule correct. The small traces from earlier chapters remain necessary because a training run can improve despite a numerically incorrect gradient.
 
@@ -70,23 +70,29 @@ The escape is to stop classifying the raw inputs and classify a transformed vers
 
 $$h_1 = \text{ReLU}(s), \qquad h_2 = \text{ReLU}(s - 1), \qquad y = h_1 - 2h_2$$
 
+::: {.column-margin}
+![](assets/images/diagrams/milestone_01-margin-xor.svg){width="100%" fig-alt="XOR 2D input space folded into hidden space via ReLU, making the decision boundary linearly separable."}
+
+*A hidden layer folds the 2D plane: ReLU projects non-separable XOR vertices into a separable 3-point geometry.*
+:::
+
 Unit $h_1$ switches on as soon as at least one input is on. Unit $h_2$ switches on only when both are. The output neuron rewards $h_1$ and punishes $h_2$ hard enough that the two cancel exactly when both inputs are on. Follow the four corners into the hidden plane and the fold appears. Corner $(0,0)$ lands at $(0, 0)$, both positive corners land on the same point $(1, 0)$, and corner $(1,1)$ lands at $(2, 1)$. The two positive rows, which no line could isolate in the input square, are now a single point with the negatives on either side of it along the $h_1$ axis, and the line $h_1 - 2h_2 = 0.5$ separates them. ReLU did the work. A layer without it would compose two linear maps into one linear map, and the plane would stay flat.
 
 ### How the hidden weights receive a learning signal
 
-The hand-built weights establish that a solution exists. Training must find a solution using only the targets at the output. A hidden neuron has no label of its own, but its effect on the loss passes through the output layer. Chapter 6 supplies the mechanism: the tape records the hidden `Linear`, the ReLU, and the output `Linear` as ordinary operations. `loss.backward()` applies the chain rule along that path until every participating hidden weight has a gradient. The worked trace below follows one such gradient before relying on a full training run.
+The hand-built weights establish that a solution exists. Training must find a solution using only the targets at the output. A hidden neuron has no label of its own, but its effect on the loss passes through the output layer. @sec-autograd supplies the mechanism: the tape records the hidden `Linear`, the ReLU, and the output `Linear` as ordinary operations. `loss.backward()` applies the chain rule along that path until every participating hidden weight has a gradient. The worked trace below follows one such gradient before relying on a full training run.
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-Milestone I is three scripts: `milestones/02_1969_xor/01_xor_crisis.py`, `milestones/02_1969_xor/02_xor_solved.py`, and `milestones/03_1986_mlp/01_rumelhart_tinydigits.py`. They import the NumPy-backed modules 01 through 08 that students build in the TinyTorch course (`src/01_tensor` through `src/08_training`), so they run only inside a TinyTorch checkout after those modules have been exported into the `tinytorch` package. The listings adapt those scripts into short experiments, omitting terminal decoration and, where stated, simplifying their return values. They require the exported TinyTorch package and should run in order from the `tinytorch/` project directory. The framework classes themselves are the implementations studied in Chapters 1 through 8.
+::: {.column-margin}
+**Source Code Mapping**: Every listing in this milestone is extracted directly from the milestone reference scripts (`milestones/02_1969_xor/` and `milestones/03_1986_mlp/`).
 :::
 
 ### The XOR network and its data
 
 The XOR truth table itself is a complete finite task, so fitting its four rows is a valid first integration check. The solved script adds a second demand: nearby inputs should receive the same labels. It draws twenty-five samples around each corner with Gaussian noise of standard deviation 0.1, giving one hundred points, then shuffles them. These samples encourage the decision boundary to hold over a neighborhood. Testing the exact corners checks the intended truth table, while a separate draw of noisy inputs would test generalization within the chosen noise model.
 
-The model is the two-layer shape from The Idea with two changes from what I could build by hand. The hidden layer has four units rather than two. Two suffice when I choose the weights, but additional units give gradient descent more possible active paths from a random start; the next subsection shows what happens when the slack runs out. The hidden units use ReLU rather than the sigmoid of the 1986 paper, because Chapter 2 showed that a sigmoid passes at most a quarter of the gradient through and ReLU passes the gradient unchanged on its positive branch and blocks it on its negative branch. After the output layer comes a sigmoid, and the reason is the loss. Binary cross-entropy, the two-class form of Chapter 4's cross-entropy, scores a probability against a 0 or 1 target, and a `Linear` layer emits any real number, so the sigmoid is what turns the score into something the loss can read.
+The model is the two-layer shape from The Idea with two changes from what I could build by hand. The hidden layer has four units rather than two. Two suffice when I choose the weights, but additional units give gradient descent more possible active paths from a random start; the next subsection shows what happens when the slack runs out. The hidden units use ReLU rather than the sigmoid of the 1986 paper, because @sec-activations showed that a sigmoid passes at most a quarter of the gradient through and ReLU passes the gradient unchanged on its positive branch and blocks it on its negative branch. After the output layer comes a sigmoid, and the reason is the loss. Binary cross-entropy, the two-class form of @sec-losses's cross-entropy, scores a probability against a 0 or 1 target, and a `Linear` layer emits any real number, so the sigmoid is what turns the score into something the loss can read.
 
 ```python
 # milestones/02_1969_xor/02_xor_solved.py (excerpt)
@@ -119,11 +125,11 @@ class XORNetwork:
         return self.hidden.parameters() + self.output.parameters()
 ```
 
-The model is seventeen numbers: a 2 by 4 weight matrix and 4 biases in the hidden layer, a 4 by 1 weight matrix and 1 bias in the output layer. Notice `parameters()`. `XORNetwork` is a plain Python class, not a Chapter 3 `Layer`, so nothing walks its attributes for it; it has to hand the optimizer the concatenation of the two layers' lists itself. That list is all the optimizer ever learns about the model's structure, A production container can discover these tensors automatically; the optimizer still receives parameter references, not a description of the forward computation.
+The model is seventeen numbers: a 2 by 4 weight matrix and 4 biases in the hidden layer, a 4 by 1 weight matrix and 1 bias in the output layer. Notice `parameters()`. `XORNetwork` is a plain Python class, not a @sec-layers `Layer`, so nothing walks its attributes for it; it has to hand the optimizer the concatenation of the two layers' lists itself. That list is all the optimizer ever learns about the model's structure, A production container can discover these tensors automatically; the optimizer still receives parameter references, not a description of the forward computation.
 
 ### The loop
 
-The first call inside the loop is `model(X)`, but recording has already been enabled by constructing `SGD(model.parameters(), lr=lr)`. The optimizer holds the four original parameter tensors and marks them `requires_grad=True` before the model runs. Forward, loss, backward, step, and clear then follow the cycle from Chapter 8. The step that is easiest to drop is the clear. Chapter 6's `backward()` adds into `.grad` rather than assigning to it, so if the gradients are not cleared between one backward pass and the next, the next update uses accumulated gradients from different parameter values. That changes the update direction as well as its magnitude. Nothing needs to raise an error, so comparing one controlled update is a better diagnostic than waiting for the loss to fail.
+The first call inside the loop is `model(X)`, but recording has already been enabled by constructing `SGD(model.parameters(), lr=lr)`. The optimizer holds the four original parameter tensors and marks them `requires_grad=True` before the model runs. Forward, loss, backward, step, and clear then follow the cycle from @sec-training. The step that is easiest to drop is the clear. @sec-autograd's `backward()` adds into `.grad` rather than assigning to it, so if the gradients are not cleared between one backward pass and the next, the next update uses accumulated gradients from different parameter values. That changes the update direction as well as its magnitude. Nothing needs to raise an error, so comparing one controlled update is a better diagnostic than waiting for the loss to fail.
 
 The training function below writes that cycle directly. It returns the model for the next experiment; the full milestone script returns a history dictionary for its display. The XOR class exposes `__call__`, which this loop uses. `Trainer._forward` instead calls a model's `forward` method, so handing this exact class to `Trainer` would require providing that method. The manual loop makes this interface boundary visible.
 
@@ -151,6 +157,12 @@ model = train_network(XORNetwork(hidden_size=4), X, y)
 
 The trailing `zero_grad()` is valid here because the freshly constructed parameters begin with `grad=None`, and every iteration clears after its update. Calling this function on a model with existing gradients would require clearing before the first forward pass as well. The printed predictions and loss belong to the forward pass before the update; measuring the updated model would require another forward pass. The script also reseeds the random number generator that `Linear` uses for its initial weights.[^fn-seed-xor-init] Initialization determines which ReLU paths are initially active. With only four hidden units, some random starts put a unit permanently on the dead side of its ReLU, and a run can settle at 75 percent accuracy with one corner near probability 0.5. Inspecting hidden pre-activations and gradients distinguishes the dying ReLU failure from a broken backward path. The seed 1986 is a start I checked; the script tells you to rerun with another if you land on the plateau.
 
+::: {#chk-symmetry-breaking-initialization .callout-check title="Sanity Check: Symmetry breaking in hidden layer initialization"}
+If all weights in a hidden layer are initialized to identical values (such as all zeros or all ones), every hidden unit computes the exact same forward pre-activation and receives the exact same gradient during `backward()`. The units update identically and remain clones forever, effectively reducing an $N$-unit hidden layer to a single unit.
+
+Non-zero randomized initialization (such as He/Kaiming normal) is required to break permutation symmetry across neurons.
+:::
+
 [^fn-seed-xor-init]: **Seed**: the starting value of a pseudo-random number generator. Two runs with the same seed draw the same sequence of "random" numbers, which makes a training run reproducible; two runs with different seeds start from different initial weights and can end in different places.
 
 With that seed, the excerpt starts at loss 0.7357 and 50 percent accuracy, reaches 100 percent accuracy by epoch 100 at loss 0.0755, and ends after 500 epochs at loss 0.0053. Fed the four exact corners, the trained network answers 0.002, 0.998, 0.998, and 0.003. These values check that the seeded training path reaches a solution; the hand-built trace below explains why such a solution exists.
@@ -161,7 +173,7 @@ With that seed, the excerpt starts at loss 0.7357 and 50 percent accuracy, reach
 
 The third script moves from a truth table to images, and three things have to change for the same two-layer shape to cope. TinyDigits ships with the repository as two pickled arrays: 1,000 training images and 200 test images in the bundled split used here, each 8 by 8 pixels with values normalized to the interval from 0 to 1, labeled 0 through 9. An 8 by 8 image flattens to a 64-vector, the hidden layer has 32 units, and the output has 10, one per digit.
 
-The first change is the output. A digit classifier has ten answers, not two, and the two-class trick of one sigmoid and one probability does not stretch to cover it; ten separate sigmoids would give ten probabilities that need not sum to one and ten losses with nothing tying them together. Chapter 4's `CrossEntropyLoss` takes the ten raw scores and an integer label and does the softmax and the logarithm inside, with the max shift that keeps a score of 100 from overflowing float32. The model therefore emits ten raw scores, there is no sigmoid, and the prediction is the index of the largest score.
+The first change is the output. A digit classifier has ten answers, not two, and the two-class trick of one sigmoid and one probability does not stretch to cover it; ten separate sigmoids would give ten probabilities that need not sum to one and ten losses with nothing tying them together. @sec-losses's `CrossEntropyLoss` takes the ten raw scores and an integer label and does the softmax and the logarithm inside, with the max shift that keeps a score of 100 from overflowing float32. The model therefore emits ten raw scores, there is no sigmoid, and the prediction is the index of the largest score.
 
 The second change is how the data arrives. XOR feeds all one hundred points through the network at once, giving one gradient step per epoch. With 1,000 digit images, `DataLoader` batches of 32 produce 32 steps per epoch: 31 full batches and a final batch of eight. Each `CrossEntropyLoss` averages over the current batch, including that shorter final batch. Twenty epochs therefore make 640 updates. The loader changes how often parameters move without changing the model's forward interface.
 
@@ -318,18 +330,24 @@ for epoch in range(500):
 
 The loss comparison in @tbl-milestone1-production-bridge combines the sigmoid and binary cross-entropy algebra so that it can operate directly on the score. TinyTorch's separate sigmoid and probability loss clip values away from zero and one to keep logarithms finite. Beyond the clip interval, the reference loss is constant with respect to its probability input, and its derivative is zero. A fused score-based loss avoids that plateau caused by probability clipping, using the stable combination described in the [PyTorch loss documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.modules.loss.BCEWithLogitsLoss.html). The important comparison is the objective and derivative at extreme scores, not only whether both APIs return a finite scalar.
 
+::: {#psp-universal-approximation-mlp .callout-perspective title="Production Bridge: The Universal Approximation Theorem in practice"}
+Cybenko (1989) and Hornik (1991) proved that a feedforward network with a single hidden layer and non-linear activations can approximate any continuous function on compact subsets of $\mathbb{R}^n$ to arbitrary precision.
+
+However, the theorem guarantees *representational existence*, not *efficient learnability*. An MLP might require exponentially many hidden neurons ($O(2^n)$) to approximate functions that deep, structured architectures (such as CNNs and Transformers) learn with polynomial parameter counts using gradient descent.
+:::
+
 The training contract remains recognizable: the forward pass reads parameters, backward fills their gradients, and the optimizer updates those same tensors. Production implementations may change batching, execution, or storage while preserving that relationship. Larger workloads can justify parallel data loading or accelerator execution, but this small experiment makes no universal timing claim. Those alternatives require measured comparisons, which Part III develops.
 
 A suspicious plateau should prompt a controlled check before changing the model. Inspect one hidden unit's pre-activation, verify the gradient path with the preceding one-example trace, and then compare initialization seeds. A different seed can change optimization behavior without repairing an implementation defect. Keep training and held-out measurements separate throughout that investigation.
 
 ## Summary
 
-Eight modules now participate in one learning computation. The XOR proof separates a model's inability to represent a task from an optimizer's difficulty finding weights. The hand-built hidden layer establishes a representable solution, and the one-example backward trace follows the loss gradient through an output weight, a ReLU, and a hidden weight. Both layers update because `parameters()` exposes the tensors that the forward pass uses. The digits experiment preserves that contract while changing input shapes, loss, and batch boundaries. Chapter 9 keeps the same learning mechanism and replaces the flattened image with a representation that preserves pixel neighborhoods.
+Eight modules now participate in one learning computation. The XOR proof separates a model's inability to represent a task from an optimizer's difficulty finding weights. The hand-built hidden layer establishes a representable solution, and the one-example backward trace follows the loss gradient through an output weight, a ReLU, and a hidden weight. Both layers update because `parameters()` exposes the tensors that the forward pass uses. The digits experiment preserves that contract while changing input shapes, loss, and batch boundaries. @sec-convolutions keeps the same learning mechanism and replaces the flattened image with a representation that preserves pixel neighborhoods.
 
 ## Exercises
 
-1. **The plateau.** Remove the `layers.rng` reseed from the XOR script and run it ten times with `hidden_size=4`, then ten times with `hidden_size=8`. Count the runs that end at 75%. Explain, using the dying ReLU argument from Chapter 2, whether the wider network gets stuck less often in this experiment; check the hidden pre-activations before attributing a plateau to dead units.
+1. **The plateau.** Remove the `layers.rng` reseed from the XOR script and run it ten times with `hidden_size=4`, then ten times with `hidden_size=8`. Count the runs that end at 75%. Explain, using the dying ReLU argument from @sec-activations, whether the wider network gets stuck less often in this experiment; check the hidden pre-activations before attributing a plateau to dead units.
 
-2. **Sigmoid hidden units.** Replace the hidden `ReLU` with `Sigmoid`, as the 1986 paper did, and train XOR again with the same learning rate and epochs. Report the loss at epochs 100 and 500 and account for the difference using the gradient magnitudes Chapter 2 gives for the two activations.
+2. **Sigmoid hidden units.** Replace the hidden `ReLU` with `Sigmoid`, as the 1986 paper did, and train XOR again with the same learning rate and epochs. Report the loss at epochs 100 and 500 and account for the difference using the gradient magnitudes @sec-activations gives for the two activations.
 
 3. **Updates per epoch.** With 1,000 training images and `batch_size=32`, the digits loop makes 32 optimizer steps per epoch. Predict how many steps twenty epochs make at batch sizes 16, 64, and 256, then run all three and record the test accuracy at epoch 5 for each. Compute both updates and samples seen, and explain why neither quantity alone guarantees equal accuracy when batch size changes.

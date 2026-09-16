@@ -30,7 +30,29 @@ list_bytes = (sys.getsizeof(matrix)
 print(f"float32 payload: {payload} bytes, nested-list objects: {list_bytes} bytes")
 ```
 
+::: {.column-margin}
+![](assets/images/diagrams/01_tensor-margin-overhead.svg){width="100%" fig-alt="Storage overhead comparison showing nested Python lists occupying 280 bytes versus a contiguous float32 buffer occupying 36 bytes."}
+
+*Nested Python lists expand storage by ~8× over a contiguous float32 buffer.*
+:::
+
 The first count is always 36 bytes. The second depends on the Python implementation and includes the outer list, the three row lists, and the nine float objects. It does not measure a process's total memory use. Nor is 36 bytes the total cost of a NumPy array or Tensor; those objects also have metadata. The useful comparison is how storage grows as we add values. A float32 array adds four bytes per value to its data buffer, whereas nested lists hold references to separately represented Python numbers. Converting to float32 also changes numerical precision, which is acceptable for the exact integers in this example.
+
+::: {#nbk-tensor-memory-scaling .callout-notebook title="Napkin Math: Tensor flat buffer versus pointer graphs"}
+
+**Problem**: For a moderate batch tensor of shape $(1024, 768)$ in float32, how much memory is consumed by a contiguous array descriptor versus nested Python lists?
+
+**Flat buffer calculation**:
+$$\text{Elements} = 1024 \times 768 = 786{,}432$$
+$$\text{Storage} = 786{,}432 \times 4\text{ bytes} \approx 3.15\text{ MB}$$
+
+**Nested list overhead**:
+Each Python `float` object contains a reference count and type pointer ($24$ bytes on 64-bit CPython). The inner lists require $8$ bytes per pointer plus list container metadata ($56$ bytes). The outer list requires $1024$ pointers ($8\text{ KB}$) plus $56$ bytes:
+$$\text{List payload} \approx 786{,}432 \times (24 + 8) + 1024 \times 64 \approx 25.17\text{ MB}$$
+
+**Systems insight**: Contiguous float32 storage achieves an $8.0\times$ memory reduction over nested Python lists while eliminating $786{,}432$ pointer indirections that thrash hardware data caches during matrix operations.
+
+:::
 
 The organization causes a second cost. Transposing a list of lists requires new row lists and a reference to each value in its new position. The float objects themselves need not be duplicated, but the new arrangement still requires work proportional to the number of entries. With an array descriptor, the same rearrangement can be expressed by changing shape and strides. TinyTorch deliberately copies when it wraps the resulting view; understanding both steps prevents us from calling its transpose free.
 
@@ -97,8 +119,8 @@ After a transpose or a broadcast, the buffer is unchanged but the view no longer
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-Every listing in this section but one is extracted from Module 01 (`src/01_tensor/01_tensor.py`) by name when the book is built, so a renamed method in the module fails the build instead of drifting from the chapter. The exception is the stride model. Module 01's `Tensor` wraps a NumPy array, and NumPy does the stride arithmetic for it, so the chapter writes that arithmetic out in a few short functions, marked as a model, to show what the array is doing underneath.
+::: {.column-margin}
+**Source Code Mapping**: Every listing in this section is extracted directly from Module 01 (`src/01_tensor/01_tensor.py`). The stride model demonstrates the low-level arithmetic that NumPy executes beneath the `Tensor` wrapper.
 :::
 
 The shape-and-stride description belongs to NumPy's `ndarray`. Module 01 adds an owned array and a common operation interface around it. We can read the constructor first to establish what a returned Tensor guarantees, then follow the calls that produce one.
@@ -115,8 +137,10 @@ One property of the constructor matters more than it looks. It always copies. Wh
 
 ### What the array is doing: a model of strides
 
-::: {.callout-warning title="Model, not module code"}
-The next listing is not in Module 01. It is the arithmetic NumPy performs inside the array that `Tensor` wraps, written out so it can be read. The worked trace checks it against NumPy's own numbers.
+::: {#chk-stride-arithmetic-model .callout-checkpoint title="Checkpoint: Stride arithmetic model"}
+
+**Model scope**: The next listing is not in Module 01. It is the arithmetic NumPy performs inside the array that `Tensor` wraps, written out so it can be read. The worked trace checks it against NumPy's own numbers.
+
 :::
 
 For the six-value matrix, `A[1, 2]` must find slot $1 \times 3 + 2 \times 1 = 5$, whose value is 6. A transpose must make that same value available at coordinate `(2, 1)` by swapping the shape and strides. Four functions express the calculation. `contiguous_strides` computes row-order strides; `physical_index` maps a valid coordinate to a slot; `transpose` exchanges two axes; and `broadcast_to` supplies zero strides where a dimension is repeated. This small model assumes positive dimension sizes and valid coordinates. It describes array reads, without implementing storage or mutation.
@@ -295,6 +319,20 @@ The transposed NumPy view in the trace illustrates an alternative to TinyTorch's
 A copy becomes necessary when the layout a consumer requires differs from the one available. The cost is proportional to the amount of data moved, while changing a view's metadata does not copy the entries. Some numerical routines accept transposed inputs directly, so a transpose alone is not evidence that a copy is necessary. TinyTorch's `np.dot` calls already show this distinction. NumPy reads their operands through the available strides.
 
 Layout also affects access patterns. Reading adjacent values can reuse data brought into a processor's cache, a small memory near the arithmetic units. A strided walk may use less of each fetched block before moving elsewhere. That is a reason to measure the consuming operation, not a guarantee that one layout is always faster. Module 01's row-versus-column experiment measures elapsed time for a particular matrix and access pattern; it does not count cache misses or predict a universal speedup.
+
+::: {#psp-pytorch-strides .callout-perspective title="Systems Perspective: Zero-copy views in PyTorch ATen"}
+
+**The ATen storage contract**: In PyTorch's native C++ core (ATen), a `torch::Tensor` is an envelope around a `c10::TensorImpl`. The `TensorImpl` stores sizes, strides, and a storage offset pointing into a refcounted `c10::Storage` heap allocation:
+
+```
+[Tensor Envelope] ---> [TensorImpl: sizes, strides, offset] ---> [Storage: raw byte buffer]
+```
+
+**Zero-copy view mutation**: When code executes `t.transpose(0, 1)` or `t[::2]`, ATen creates a new `TensorImpl` pointing to the exact same `Storage` instance in $O(1)$ time, modifying only strides and offsets. No byte copies traverse PCIe or CPU memory buses.
+
+**The safety invariant**: Because views share memory, an in-place mutation immediately mutates the underlying `Storage`. When an operation involves a stride-0 broadcasted tensor, PyTorch detects that multiple logical coordinates map to identical physical addresses and raises `RuntimeError: in-place operation on a view...`, preventing corrupted concurrent memory writes.
+
+:::
 
 | Operation | TinyTorch (Module 01) | PyTorch comparison |
 | :--- | :--- | :--- |

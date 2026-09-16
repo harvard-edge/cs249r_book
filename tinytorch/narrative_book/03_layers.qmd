@@ -44,7 +44,7 @@ layer 15: variance of z = 8.50e+40
 
 Every layer multiplies the spread of the signal by about 500. By layer 15 the pre-activations are around $10^{20}$ in size, and at that rate they pass the largest number float32 can hold ($3.4 \times 10^{38}$) near layer 29 and turn into `inf`, then `NaN`. Shrink the weights instead, say `randn * 0.001`, and the same table runs the other way, toward zero. There is a correct scale, it depends on the layer's width, and a bare tensor does not know it.
 
-Second, bookkeeping. When you hand the network to an optimizer (Chapter 7) it needs every trainable tensor and nothing else. With six loose variables you pass a list by hand. With sixty you forget one, and that layer silently never learns.
+Second, bookkeeping. When you hand the network to an optimizer (@sec-optimizers) it needs every trainable tensor and nothing else. With six loose variables you pass a list by hand. With sixty you forget one, and that layer silently never learns.
 
 Third, mode. Some layers do one thing while training and another when the trained network is used. If that switch is a global flag you set by hand, you will forget it, and the deployed model will behave like a noisy training run.
 
@@ -74,9 +74,15 @@ With $\text{Var}(w) = 1$ and $D_{\text{in}} = 1024$, the first linear operation 
 
 To hold the variance steady, set $D_{\text{in}} \cdot \text{Var}(w) = 1$, or $\text{Var}(w) = 1 / D_{\text{in}}$. This is LeCun's rule and it is what the TinyTorch course module uses. Kaiming initialization accounts for the ReLU halving by doubling the weight variance:
 
+::: {.column-margin}
+![](assets/images/diagrams/03_layers-margin-fanin.svg){width="100%" fig-alt="Kaiming weight standard deviation ladder showing scale decreasing from 0.250 at fan-in 32 down to 0.044 at fan-in 1024."}
+
+*Kaiming weight $\sigma = \sqrt{2/D_{\text{in}}}$ scales inversely with the square root of fan-in.*
+:::
+
 $$\text{Var}(w) = \frac{2}{D_{\text{in}}}, \qquad \sigma_w = \sqrt{\frac{2}{D_{\text{in}}}}.$$
 
-Here we call the multiplier on weight *variance* the **gain**, matching the first exercise; a gain on standard deviation would be its square root. The appropriate multiplier depends on the activation and its input distribution. Gain 1 preserves the linear case and is the module's default, rather than a universal prescription for tanh. Xavier Glorot's earlier rule, $\text{Var}(w) = 2 / (D_{\text{in}} + D_{\text{out}})$, splits the difference between keeping the forward signal steady (which wants $1/D_{\text{in}}$) and keeping the backward gradient steady (which wants $1/D_{\text{out}}$; chapter 6 will introduce that backward computation). Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
+Here we call the multiplier on weight *variance* the **gain**, matching the first exercise; a gain on standard deviation would be its square root. The appropriate multiplier depends on the activation and its input distribution. Gain 1 preserves the linear case and is the module's default, rather than a universal prescription for tanh. Xavier Glorot's earlier rule, $\text{Var}(w) = 2 / (D_{\text{in}} + D_{\text{out}})$, splits the difference between keeping the forward signal steady (which wants $1/D_{\text{in}}$) and keeping the backward gradient steady (which wants $1/D_{\text{out}}$; @sec-autograd will introduce that backward computation). Any of these rules can be realized with a normal distribution of the right standard deviation or a uniform one on $[-a, a]$, whose variance is $a^2/3$. For a fixed ratio of input to output width, each rule in @tbl-init-schemes reduces the standard deviation as the inverse square root of width. The activation determines the appropriate constant.
 
 | Scheme | Meant for | Weight variance | Uniform bound $a$ |
 | :--- | :--- | :---: | :---: |
@@ -111,23 +117,31 @@ $$y_{\text{train}} = \frac{x \cdot m}{1 - p}, \quad m \in \{0, 1\} \text{ with }
 
 For $0 \leq p < 1$, the expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path is the identity. The price is that `Dropout` must know which of the two it is doing, and that is the `training` argument it is called with.
 
+::: {#chk-dropout-inference-mode .callout-checkpoint title="Checkpoint: The dropout evaluation trap"}
+
+**Mechanism**: Inverted dropout scales activations by $\frac{1}{1-p}$ during training. At test time, dropout must be turned off ($y_{\text{eval}} = x$) so predictions remain deterministic.
+
+**Failure mode**: If evaluation runs with `training=True`, inferences become stochastic and activations are scaled up by $\frac{1}{1-p}$ (e.g., $2\times$ when $p=0.5$). Conversely, if training runs with `training=False`, the regularization effect vanishes and downstream weights overfit without gradient noise.
+
+:::
+
 ---
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this section are extracted from Module 03 (`src/03_layers/03_layers.py`) by name when the book is built, so a renamed class in the module fails the build instead of drifting from the chapter. The extraction shortens docstrings, removes assignment scaffolding, and elides `__repr__` bodies; the computational methods remain source-derived.
+::: {.column-margin}
+**Source Code Mapping**: Every listing in this section is extracted directly from Module 03 (`src/03_layers/03_layers.py`). `Linear` owns parameters, `Dropout` alters behavior via `training`, and `Sequential` composes modules and unifies parameter discovery.
 :::
 
-Module 03 builds on the `Tensor` operators from chapter 1 and the callable activations from chapter 2. `Linear.forward` performs its arithmetic through `matmul` and `+`; `Dropout.forward` multiplies tensors after drawing a mask with NumPy. It reads `x.data.shape` only to size that mask. Chapter 6 will teach the tensor operations to record the information needed for gradients, allowing these layer forward methods to remain unchanged.
+Module 03 builds on the `Tensor` operators from @sec-tensors and the callable activations from @sec-activations. `Linear.forward` performs its arithmetic through `matmul` and `+`; `Dropout.forward` multiplies tensors after drawing a mask with NumPy. It reads `x.data.shape` only to size that mask. @sec-autograd will teach the tensor operations to record the information needed for gradients, allowing these layer forward methods to remain unchanged.
 
 ### The base class
 
-A caller needs two independent operations on a model. `model(x)` computes an output from the current parameter values; `model.parameters()` returns the tensors available for learning. Chapter 7's optimizer will take that list and enable gradient tracking on its entries, while chapter 8 will use it for training and checkpoints. `Layer` defines the common call and parameter methods without allocating weights itself.
+A caller needs two independent operations on a model. `model(x)` computes an output from the current parameter values; `model.parameters()` returns the tensors available for learning. @sec-optimizers's optimizer will take that list and enable gradient tracking on its entries, while @sec-training will use it for training and checkpoints. `Layer` defines the common call and parameter methods without allocating weights itself.
 
 {{< include _listings/03_layers/Layer.qmd >}}
 
-`forward` is abstract, `__call__` turns a layer into something you can call and passes any extra arguments through, and `parameters()` returns an empty list until a subclass says otherwise. Notice what is not here. There is no registry of parameters and no mode flag. Module 03 takes the direct route on both. Each layer that owns trainable tensors lists them in its own `parameters()`, right next to the code that allocated them, and a container collects its children's lists and removes repeated tensor references. Milestone I's XOR network does exactly this; its `parameters()` returns `self.hidden.parameters() + self.output.parameters()`. The list lives where the tensors live, so it stays short and readable, and the price is that a forgotten entry fails silently: the layer keeps its random weights, the loss may still fall because other layers change, and nothing raises. That silence is the reason PyTorch automates the registration, and the production section shows how. The mode question, which layers need to know whether the network is training, is answered the same direct way: the caller passes `training` as an argument, and `__call__` forwards it.
+`forward` is abstract, `__call__` turns a layer into something you can call and passes any extra arguments through, and `parameters()` returns an empty list until a subclass says otherwise. Notice what is not here. There is no registry of parameters and no mode flag. Module 03 takes the direct route on both. Each layer that owns trainable tensors lists them in its own `parameters()`, right next to the code that allocated them, and a container collects its children's lists and removes repeated tensor references. [Milestone I](milestone_01.qmd#sec-milestone-1)'s XOR network does exactly this; its `parameters()` returns `self.hidden.parameters() + self.output.parameters()`. The list lives where the tensors live, so it stays short and readable, and the price is that a forgotten entry fails silently: the layer keeps its random weights, the loss may still fall because other layers change, and nothing raises. That silence is the reason PyTorch automates the registration, and the production section shows how. The mode question, which layers need to know whether the network is training, is answered the same direct way: the caller passes `training` as an argument, and `__call__` forwards it.
 
 ### Linear
 
@@ -137,9 +151,9 @@ The constructor derives the initialization scale from its own width. Module 03 u
 
 {{< include _listings/03_layers/Linear.qmd >}}
 
-Notice that `scale` comes from `in_features` alone. With a ReLU after every layer, LeCun's scale lets the next pre-activation variance shrink rather than hold steady, which is the gap Kaiming's gain of 2 closes. The module implements one simple default; the first exercise changes the gain and measures its effect instead of assuming that one initializer suits every network. PyTorch's `nn.Linear` stores the weight the other way around, as `(out_features, in_features)`, and uses a different default distribution; the bridge section takes up both. Notice also that the weights are created without `requires_grad`. The `training` argument controls behavior such as dropout; gradient tracking is a separate concern. Parameters initially have `requires_grad=False`. Chapter 7's optimizer enables it when the parameters are supplied for learning.
+Notice that `scale` comes from `in_features` alone. With a ReLU after every layer, LeCun's scale lets the next pre-activation variance shrink rather than hold steady, which is the gap Kaiming's gain of 2 closes. The module implements one simple default; the first exercise changes the gain and measures its effect instead of assuming that one initializer suits every network. PyTorch's `nn.Linear` stores the weight the other way around, as `(out_features, in_features)`, and uses a different default distribution; the bridge section takes up both. Notice also that the weights are created without `requires_grad`. The `training` argument controls behavior such as dropout; gradient tracking is a separate concern. Parameters initially have `requires_grad=False`. @sec-optimizers's optimizer enables it when the parameters are supplied for learning.
 
-The forward pass is two tensor operations, `matmul` and `+`, and that choice is doing quiet work. Each returns a fresh `Tensor`. Once chapter 6 adds gradient recording to tensor operations, the same forward code can connect the result to `weight` and `bias`. The addition of `self.bias` relies on the broadcasting from Chapter 1: the bias has shape `(out_features,)`, the product has shape `(B, out_features)`, and NumPy reads the same bias values for all $B$ rows without allocating a repeated bias matrix. The addition still allocates its output, and the Tensor constructor copies the returned array into its own storage. That forward efficiency creates an obligation for Chapter 6. Because the bias influenced every row in the batch, the backward engine will have to sum those gradients across the batch to keep the parameter's shape.
+The forward pass is two tensor operations, `matmul` and `+`, and that choice is doing quiet work. Each returns a fresh `Tensor`. Once @sec-autograd adds gradient recording to tensor operations, the same forward code can connect the result to `weight` and `bias`. The addition of `self.bias` relies on the broadcasting from @sec-tensors: the bias has shape `(out_features,)`, the product has shape `(B, out_features)`, and NumPy reads the same bias values for all $B$ rows without allocating a repeated bias matrix. The addition still allocates its output, and the Tensor constructor copies the returned array into its own storage. That forward efficiency creates an obligation for @sec-autograd. Because the bias influenced every row in the batch, the backward engine will have to sum those gradients across the batch to keep the parameter's shape.
 
 ### Dropout
 
@@ -149,7 +163,7 @@ The constructor validates `p` before storing it. The forward method then delegat
 
 {{< include _listings/03_layers/Dropout.qmd >}}
 
-The return paths have different ownership behavior. Evaluation and `p=0` return `x` itself, so the output is the same object and no random state is consumed. Training with `p=1` returns `x * 0.0`, which gives a new all-zero tensor for finite inputs and avoids dividing by zero. For `0<p<1`, the method returns `x * mask`, also a new tensor. None of these branches overwrites the input. The multiplication in both training branches will let chapter 6 propagate zero gradients for dropped elements; replacing it with an unrelated zero tensor would sever that connection.
+The return paths have different ownership behavior. Evaluation and `p=0` return `x` itself, so the output is the same object and no random state is consumed. Training with `p=1` returns `x * 0.0`, which gives a new all-zero tensor for finite inputs and avoids dividing by zero. For `0<p<1`, the method returns `x * mask`, also a new tensor. None of these branches overwrites the input. The multiplication in both training branches will let @sec-autograd propagate zero gradients for dropped elements; replacing it with an unrelated zero tensor would sever that connection.
 
 ### Sequential
 
@@ -172,7 +186,7 @@ print([p.shape for p in model.parameters()])
 [(4, 3), (3,), (3, 2), (2,)]
 ```
 
-Four parameter tensors came back, weight before bias within each layer and layer order within the container, and `Dropout` contributed none. In practice a `ReLU` from Chapter 2 sits between the two `Linear` layers; it is left out here so the trace below stays short, and Milestone I builds the full version.
+Four parameter tensors came back, weight before bias within each layer and layer order within the container, and `Dropout` contributed none. In practice a `ReLU` from @sec-activations sits between the two `Linear` layers; it is left out here so the trace below stays short, and [Milestone I](milestone_01.qmd#sec-milestone-1) builds the full version.
 
 Parameter collection follows `self.layers` in that same order, but its `seen` set records `id(param)` before appending. For `shared = Linear(2, 2)` and `Sequential(shared, Sequential(shared))`, the forward pass applies `shared` twice, while `parameters()` returns only `[shared.weight, shared.bias]`. An optimizer should update those tensors once per step. Returning them twice would confuse reuse in the forward computation with ownership of two independent parameters.
 
@@ -281,6 +295,14 @@ This is a storage and operation count, not a timing measurement. `Linear(4096, 4
 The matrix product contains $16 \times 4096 \times 4096 = 268{,}435{,}456$ multiply-accumulate terms. Counting one multiply and one add per term gives approximately $537$ million floating-point operations; adding the bias requires another $65{,}536$ additions. Increasing batch size increases arithmetic and output storage while leaving parameter storage unchanged. Whether the measured call is limited by computation or memory movement depends on the backend and its reuse of those weights. The storage count alone cannot decide that.
 :::
 
+::: {#psp-kaiming-fp16-underflow .callout-perspective title="Systems Perspective: Initialization in mixed-precision FP16/BF16"}
+
+**The dynamic range cliff**: In standard IEEE 754 single-precision (`float32`), numbers down to $\sim 1.4 \times 10^{-45}$ are representable. In half-precision (`float16`), the minimum positive subnormal is $5.96 \times 10^{-8}$ and minimum normal is $6.10 \times 10^{-5}$.
+
+**Initialization hazards**: For wide layers (e.g., $D_{\text{in}} = 16384$), Kaiming standard deviation is $\sigma = \sqrt{2/16384} \approx 0.011$. If small initialization is combined with low precision, products can underflow directly to zero during forward execution, effectively pruning random pathways before training begins. Modern distributed training frameworks (like Megatron-LM or DeepSpeed) initialize weights in FP32 before casting to BF16 (which shares FP32's 8-bit exponent) to preserve the dynamic range of small variance weights.
+
+:::
+
 The comparison suggests concrete debugging checks. If a parameter never changes, verify that the model returns the exact tensor read by its forward pass. If the first outputs are too large or too small, inspect the initializer and measure intermediate values before blaming training. If repeated evaluation calls differ, inspect the argument reaching each dropout layer. Each check follows state already visible in the reference.
 
 ---
@@ -289,7 +311,7 @@ The comparison suggests concrete debugging checks. If a parameter never changes,
 
 A `Linear` constructor allocates weight and optional bias once; `forward` reads those tensors and returns a new result. Its fan-in controls the initial weight scale. `Sequential` executes every child in order but returns each distinct parameter only once. Its `training` argument reaches nested containers and dropout without becoming stored mode state. `Dropout` preserves the input object during evaluation and creates a masked result during training; for $p<1$, its scaling preserves each input element in expectation.
 
-Those contracts are enough to reconstruct the worked path from `(1, 4)` to `(1, 3)` to `(1, 2)`, identify the 23 stored parameter values, and explain why one training output differs from evaluation. Chapter 4 takes the next step. A final linear layer supplies one raw score per class; a loss function must combine those scores with the correct label into a scalar that measures the prediction error.
+Those contracts are enough to reconstruct the worked path from `(1, 4)` to `(1, 3)` to `(1, 2)`, identify the 23 stored parameter values, and explain why one training output differs from evaluation. @sec-losses takes the next step. A final linear layer supplies one raw score per class; a loss function must combine those scores with the correct label into a scalar that measures the prediction error.
 
 ---
 

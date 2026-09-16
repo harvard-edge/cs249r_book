@@ -80,6 +80,12 @@ with $\epsilon$ a tiny constant, $10^{-8}$ by default, that prevents division by
 
 The thing to see in that formula is the ratio. For a parameter whose gradient is steady, $\hat{m} \approx g$ and $\sqrt{\hat{v}} \approx |g|$, so the ratio is about $\pm 1$ and the parameter moves by about $\eta$ per step regardless of how large its gradient is. On the ravine, this normalization makes the first movements of $x$ and $y$ nearly equal despite their different gradient magnitudes. Later movements depend on the histories stored in both averages. The price is two extra numbers per parameter, $m$ and $v$, kept alive between steps.
 
+::: {.column-margin}
+![](assets/images/diagrams/07_optimizers-margin-memory.svg){width="100%" fig-alt="AdamW 16-byte parameter memory breakdown showing 4 bytes each for weights, gradients, first moments, and second moments."}
+
+*AdamW quadruples parameter memory footprint: 16 bytes per scalar weight in FP32.*
+:::
+
 ![**Optimization trajectories in an ill-conditioned ravine**: On an anisotropic loss surface ($100x^2 + y^2$), plain SGD oscillates violently across the steep walls while making negligible progress along the gentle valley floor. Momentum damps perpendicular oscillations and accelerates along the consistent direction. AdamW computes coordinate-wise adaptive step sizes from first and second gradient moments, driving directly toward the global minimum.](assets/images/diagrams/07_ravine-optimization.svg){#fig-ravine-optimization fig-alt="Contour plot of an elongated loss ravine comparing three optimization trajectories: SGD zig-zagging between steep walls, Momentum accelerating along the ravine axis, and AdamW taking an efficient direct path to the center."}
 
 ### Weight decay and adaptive scaling
@@ -104,13 +110,17 @@ For the weight above, an adaptive update of $0.1$ therefore gives $0.999-0.1=0.8
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings are extracted by symbol name from Module 07 (`src/07_optimizers/07_optimizers.py`); the listing checker detects drift from that source. Adam and AdamW define their moment-update and step methods in separate exercise cells. The `@method_of(AdamW)` decorator attaches a function to the named class, as Module 06 does for backward methods. The excerpts below follow those cells in execution order. SGD's checkpoint helpers are omitted from its listing.
+::: {.column-margin}
+**Source Code Mapping**: Every listing in this chapter is extracted directly from Module 07 (`src/07_optimizers/07_optimizers.py`).
 :::
 
 ### The base class, and why `zero_grad()` sets `None`
 
 An optimizer separates the update rule from the loop that obtains gradients. The loop clears old gradients with `zero_grad()`, computes the next loss, calls `backward()`, and then calls `step()`. It can change optimizer classes without changing this sequence. The base class owns a list of parameter references and supplies gradient clearing; each subclass supplies the update rule.
+
+::: {#chk-optimizer-zero-grad-subtle-bug .callout-check title="Sanity Check: The silent accumulation trap of missing zero_grad()"}
+Because `backward()` accumulates gradients via `+=`, omitting `optimizer.zero_grad()` before backward causes gradients to sum continuously across consecutive mini-batches. Step 1 computes $\nabla L_1$; step 2 updates with $\nabla L_1 + \nabla L_2$; step $k$ updates with $\sum_{i=1}^k \nabla L_i$. The model diverges exponentially without raising any runtime errors.
+:::
 
 Clearing must remove the previous objective's gradient without removing the optimizer's history. The `backward()` traversal from @sec-autograd accumulates into `.grad`, so a second batch otherwise adds to the previous batch's gradient. Assigning `None` releases the parameter's reference to its gradient array instead of filling it with zeros. TinyTorch's backward traversal allocates a zero buffer when it first reaches the parameter, then adds the incoming contribution. The avoided work is the explicit clearing pass; the next backward pass still initializes storage.
 
@@ -254,11 +264,34 @@ Gradient clearing carries the same semantic distinction. PyTorch's [`zero_grad()
 
 Memory provides a reason to change execution while retaining the equations. Count one float32 weight, its gradient, and two float32 moments: $4+4+4+4=16$ bytes per scalar weight. The moments alone account for 8 bytes. This is an array-storage model for a point in training when all gradients and moments exist, not a universal training-memory requirement. Activations, temporary expressions, counters, and Python objects add storage; clearing gradients removes one of the counted arrays until backward recreates it.
 
-::: {#nbk-optimizers-adamw-16byte-law .callout-notebook title="Sixteen bytes per parameter"}
-For $7\times10^9$ scalar weights, the four-array float32 model gives $7\times10^9\times16=112\text{ GB}$. Weights alone occupy 28 GB, gradients another 28 GB, and the two moments 56 GB. These are calculated storage totals, not measured peak memory. A different precision or a scheme that distributes arrays across devices changes the accounting and must be stated explicitly.
+::: {#nbk-optimizers-adamw-16byte-law .callout-notebook title="Napkin Math: The 16-byte optimizer memory law"}
+
+**Problem**: For a 7-billion parameter language model ($N = 7 \times 10^9$) trained with AdamW in FP32, what is the static memory required for model parameters, gradients, and optimizer state?
+
+**Per-parameter memory ledger**:
+$$\begin{aligned}
+\text{Weights } (\theta) &: 1 \times 4\text{ bytes} = 4\text{ bytes} \\
+\text{Gradients } (g) &: 1 \times 4\text{ bytes} = 4\text{ bytes} \\
+\text{First moment } (m) &: 1 \times 4\text{ bytes} = 4\text{ bytes} \\
+\text{Second moment } (v) &: 1 \times 4\text{ bytes} = 4\text{ bytes} \\
+\hline
+\textbf{Total static footprint} &: \mathbf{16\text{ bytes per parameter}}
+\end{aligned}$$
+
+**Total model footprint**:
+$$\text{Memory} = 7 \times 10^9 \times 16\text{ bytes} = 112\text{ GB}$$
+
+**Systems insight**: Weights and gradients require $28\text{ GB} + 28\text{ GB} = 56\text{ GB}$, but AdamW's momentum buffers double that requirement to $112\text{ GB}$. A single 80 GB NVIDIA A100 cannot even hold the static training state of a 7B model without optimizer offloading or ZeRO state sharding.
+
 :::
 
 NumPy evaluates the update as several array expressions, with temporary arrays between operations. Production implementations can combine work across tensors or fuse several operations into one device program, reducing intermediate storage and launch overhead. PyTorch exposes `foreach` and `fused` implementations in its [AdamW interface](https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html). Their performance depends on the workload and device; neither changes the intended update equation. @Sec-acceleration will examine how execution choices affect repeated array operations.
+
+::: {#psp-fused-adamw-kernel .callout-perspective title="Production Bridge: Fused AdamW GPU kernels and multi-tensor launches"}
+In standard PyTorch, an unfused optimizer executes up to 10 discrete CUDA kernels per parameter (scaling, decay, momentum updates, square root, division). For a 70-layer model with hundreds of weight matrices, launching thousands of small kernels saturates the CPU-GPU command queue.
+
+Production systems use `torch.optim.AdamW(..., fused=True)`, which compiles the entire weight update into a single fused GPU kernel per parameter group. This reduces DRAM memory round-trips by $4\times$ and eliminates kernel launch latency entirely.
+:::
 
 The mapping in @tbl-optimizers-production separates the mathematical state from the implementation that holds it.
 
