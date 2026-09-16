@@ -1,20 +1,16 @@
 # The Modern Stack: Compilers, Triton, and Custom Silicon {#sec-extensions}
 
-A four-element vector passes through a bias add, GELU, and a scale. The result needs four output values, yet an eager implementation also writes two intermediate vectors. Chapter 17 exposed this gap between the arithmetic and the arrays that execute it. Milestone III established the evidence needed to call an alternative better: compare the actual candidate with a fixed baseline, check quality, count the stated storage format, and measure elapsed time. This chapter carries that discipline beyond TinyTorch. We will follow a small program through a grouping pass and a fused executor, then trace a matrix product through an ideal hardware array.
+A four-element vector passes through a bias add, GELU, and a scale. The result needs four output values, yet an eager implementation also writes two intermediate vectors. @sec-acceleration exposed this gap between the arithmetic and the arrays that execute it. @sec-milestone-3 established the evidence needed to call an alternative better: compare the actual candidate with a fixed baseline, check quality, count the stated storage format, and measure elapsed time. This chapter carries that discipline beyond TinyTorch. We will follow a small program through a grouping pass and a fused executor, then trace a matrix product through an ideal hardware array.
 
 The production bridge introduces three mechanisms. Graph capture makes operations and their dependencies available to a compiler. Kernel generation turns a supported group of operations into executable code; a kernel is a routine that processes some part of the input. Specialized matrix hardware arranges the movement of operands around the multiply-adds that use them. None changes the intended computation, but each can change its execution costs and floating-point rounding. The task remains the one established by the benchmark chapters: preserve the required result and measure the resulting program.
 
 The four layers in @fig-modern-stack locate these mechanisms. TinyTorch supplies the framework program and executes its NumPy operations on a CPU. Graph capture and kernel generation are optional additions between those endpoints. The Python models below expose their central decisions without adding GPU programming to the prerequisites of the reference framework.
 
-::: {.callout-note title="Source Code Mapping"}
-There is no Module 21. TinyTorch stops at Module 20, and this chapter has no NumPy-backed implementation behind it. The listings here are small pure-Python models of a graph compiler and a systolic array, written to show every step, plus one illustrative Triton kernel that needs a compatible GPU to run. Read the eager executor, grouping pass, and fused executor as the core extension. The Triton and hardware sections are optional production bridges, not prerequisites for completing TinyTorch. None of them is TinyTorch code, and the chapter says so wherever a listing could be mistaken for it.
-:::
-
 ![**Execution layers**: Graph capture and kernel generation form an optional production bridge between framework code and execution hardware.](assets/images/diagrams/21_extensions-diag-1.svg){#fig-modern-stack fig-alt="Framework program above optional graph capture and kernel generation, followed by execution hardware. TinyTorch uses eager NumPy on CPU."}
 
 ## The Problem
 
-Chapter 17's compact GELU expression avoids retaining intermediate Tensor wrappers, but NumPy still executes array operations and creates temporary arrays. A compiled fused kernel could instead keep each element's intermediate values local until it writes the result. To see the difference independently of NumPy's implementation, consider three pointwise operations on a four-element vector. A pointwise operation computes output element $i$ using the corresponding input elements, without consulting other positions.
+@sec-acceleration's compact GELU expression avoids retaining intermediate Tensor wrappers, but NumPy still executes array operations and creates temporary arrays. A compiled fused kernel could instead keep each element's intermediate values local until it writes the result. To see the difference independently of NumPy's implementation, consider three pointwise operations on a four-element vector. A pointwise operation computes output element $i$ using the corresponding input elements, without consulting other positions.
 
 ```python
 import math
@@ -38,11 +34,11 @@ Each function reads a whole list and writes a whole list. The lists `z` and `y` 
 
 A hand-written fused loop solves this one chain. Adding another activation or changing the order would require another implementation. A compiler makes the chain available as data so that a reusable transformation can identify the same opportunity in many programs. It must also establish that the transformation is legal: an intermediate needed by another consumer cannot simply disappear.
 
-A matrix product offers a different reuse opportunity. For $C = AB$, each element of $A$ contributes to several columns of $C$, and each element of $B$ contributes to several rows. A plain triple loop for square matrices performs $2n^3$ source-level operand accesses for $n^3$ multiply-adds. That count is not a count of reads from main memory: caches, register reuse, and the tiling of Chapter 17 can serve many accesses locally. The hardware model later in this chapter makes another form of local reuse visible by passing operands directly between neighboring cells.
+A matrix product offers a different reuse opportunity. For $C = AB$, each element of $A$ contributes to several columns of $C$, and each element of $B$ contributes to several rows. A plain triple loop for square matrices performs $2n^3$ source-level operand accesses for $n^3$ multiply-adds. That count is not a count of reads from main memory: caches, register reuse, and the tiling of @sec-acceleration can serve many accesses locally. The hardware model later in this chapter makes another form of local reuse visible by passing operands directly between neighboring cells.
 
 ## The Idea
 
-The three mechanisms change different parts of the execution. Graph capture exposes dependencies, fusion removes eligible intermediate arrays, and an array of arithmetic cells reuses operands locally. The roofline model from Chapter 14 helps distinguish cases where less data movement matters from cases limited by arithmetic or overhead.
+The three mechanisms change different parts of the execution. Graph capture exposes dependencies, fusion removes eligible intermediate arrays, and an array of arithmetic cells reuses operands locally. The roofline model from @sec-profiling helps distinguish cases where less data movement matters from cases limited by arithmetic or overhead.
 
 ### Capture the program as a graph
 
@@ -72,6 +68,11 @@ Generating an element loop for this group is a separate step from identifying th
 
 ### Match the hardware to the matrix multiply
 
+::: {.column-margin}
+<img src="assets/images/diagrams/21_extensions-margin-systolic.svg" width="100%"/>
+*2D systolic array: wavefront dataflow through multiply-accumulate cells.*
+:::
+
 The last idea leaves software entirely. A **systolic array** is a grid of small multiply-accumulate cells wired to their neighbors, whose operands move from cell to cell at each clock tick in our ideal model. In the output-stationary form, cell $(i, j)$ holds the running sum for one output $C_{ij}$ and never moves it. Row $i$ of $A$ streams in from the left, one value per cycle; column $j$ of $B$ streams in from the top. When $a_{ik}$ and $b_{kj}$ meet at cell $(i, j)$, the cell multiplies them, adds the product to its sum, and passes both values along to the next cell. At cycle $t$ each cell computes
 
 $$C_{ij} \leftarrow C_{ij} + a_{ik} \, b_{kj}, \qquad k = t - i - j,$$
@@ -80,9 +81,22 @@ where the offset $i + j$ is the delay before the first product reaches that cell
 
 $$T = M + N + K - 2 \text{ cycles},$$
 
-with the first tick numbered zero in the code. Thus the final tick has index $T-1$. The cells fill and drain at different times; short products may never have every cell active simultaneously. Each output accumulator remains in its cell until completion. Real arrays have fixed dimensions, so larger products require tiling, buffering, and additional transfers. The specialization also has a limit: multiply-accumulate cells do not by themselves compute operations such as exponentiation or softmax.
+(\ref{nbk-extensions-systolic-array-latency}) with the first tick numbered zero in the code. Thus the final tick has index $T-1$. The cells fill and drain at different times; short products may never have every cell active simultaneously. Each output accumulator remains in its cell until completion. Real arrays have fixed dimensions, so larger products require tiling, buffering, and additional transfers. The specialization also has a limit: multiply-accumulate cells do not by themselves compute operations such as exponentiation or softmax.
+
+::: {#nbk-extensions-systolic-array-latency .callout-napkin-math title="Napkin math: systolic array cycle count and throughput scaling"}
+For an $M \times K \times N$ matrix multiplication executed on an ideal $M \times N$ output-stationary 2D systolic array:
+
+- **Latency Formula**: The total execution latency is $T = M + N + K - 2$ cycles. For square matrices where $M = N = K$, this simplifies to $T = 3N - 2 \approx 3N$ cycles.
+- **Propagation Wavefront**: The first product $a_{00} b_{00}$ arrives at cell $(0,0)$ at cycle $t=0$. The final product $a_{(M-1)(K-1)} b_{(K-1)(N-1)}$ reaches the bottom-right cell $(M-1, N-1)$ at cycle $T-1$, incurring an input delay of $(M-1) + (N-1)$ cycles plus $K$ computation steps.
+- **Arithmetic Throughput**: The array performs $2MNK$ arithmetic operations (or $MNK$ multiply-accumulate ops) in $M + N + K - 2$ cycles. As $K \to \infty$ with continuous streaming, the peak throughput reaches $MN$ MACs per cycle—100% compute unit utilization across all cells.
+:::
 
 ## The Code
+
+::: {.column-margin}
+**Source Code Mapping:**
+There is no Module 21. TinyTorch stops at Module 20, and this chapter has no NumPy-backed implementation behind it. The listings here are small pure-Python models of a graph compiler and a systolic array, written to show every step, plus one illustrative Triton kernel that needs a compatible GPU to run. Read the eager executor, grouping pass, and fused executor as the core extension.
+:::
 
 There is no TinyTorch module to walk in this extension. The following pure-Python models implement eager execution, grouping, fused execution, and an ideal array schedule. They run on a CPU and expose state explicitly. The separate Triton listing is an optional GPU comparison; its dependencies are not needed for these models.
 
@@ -258,7 +272,15 @@ The toy pass begins with an explicit program. A production framework first has t
 
 TorchInductor can generate Triton for GPU execution or C++ for CPU execution, with the selected path depending on the backend and operators. It can also use existing operator implementations; not every operation becomes a newly generated kernel. Its decisions include legality, scheduling, and memory use beyond our adjacency rule. The [Dynamo overview](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_dynamo_overview.html) describes the capture-to-backend boundary.
 
-The hardware comparison is similarly specific. Google's documented TPU designs include matrix units organized as systolic arrays alongside other execution units. Array dimensions differ across generations; a particular grid size is not the definition of a TPU. The [TPU architecture documentation](https://docs.cloud.google.com/tpu/docs/system-architecture-tpu-vm) describes the matrix units and surrounding storage. Our simulation models an ideal arrival schedule, not those devices' complete arithmetic formats, instruction sets, or memory systems.
+The hardware comparison is similarly specific. Google's documented TPU designs include matrix units organized as systolic arrays alongside other execution units. Array dimensions differ across generations; a particular grid size is not the definition of a TPU. The [TPU architecture documentation](https://docs.cloud.google.com/tpu/docs/system-architecture-tpu-vm) describes the matrix units and surrounding storage. Our simulation models an ideal arrival schedule (\ref{psp-extensions-tpu-vs-tensor-cores}), not those devices' complete arithmetic formats, instruction sets, or memory systems.
+
+::: {#psp-extensions-tpu-vs-tensor-cores .callout-production-bridge title="Production bridge: Google TPU matrix units vs. NVIDIA Tensor Cores"}
+Industrial AI acceleration balances hardware specialization, memory bandwidth, and programming flexibility across competing architectural philosophies:
+
+- **Google TPU (Matrix Multiply Unit / MXU)**: A dedicated 2D systolic array (e.g., $128 \times 128$ in TPU v4/v5p, capable of 16,384 MACs per cycle in BF16). Weights or outputs remain stationary on-chip while activation data streams across neighbor-to-neighbor interconnects without reading/writing intermediate results back to registers or SRAM caches.
+- **NVIDIA Tensor Cores (Warp-Level Matrix Engine)**: Rather than an autonomous systolic grid, Tensor Cores operate as synchronous warp instructions (e.g., `mma.sync`, `wgmma`) tightly coupled to streaming multiprocessor (SM) register files and shared memory. Threads cooperatively load tile fragments, compute small matrix products ($16 \times 8 \times 16$ or $64 \times 128 \times 16$), and accumulate into registers.
+- **Architectural Trade-Off**: Systolic arrays achieve superior energy efficiency and silicon density for large, dense, statically shaped GEMMs by eliminating register file read/write power. Tensor Cores offer higher flexibility for irregular shapes, dynamic control flow, fused activations, and sparse or unstructured workloads.
+:::
 
 | Layer | TinyTorch | Production alternative | Constraint that motivates it |
 | :--- | :--- | :--- | :--- |
