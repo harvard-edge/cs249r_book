@@ -2,7 +2,7 @@
 
 A `Linear(3, 2)` layer holds eight parameters: six weights and two biases. Passing four rows through it still uses those same eight parameters, but the matrix product performs forty-eight floating-point operations instead of twelve. Storage stayed fixed while work grew. Elapsed time is a third quantity, and neither count determines it on its own.
 
-Milestone II assembled a language model that predicts the next token from a prefix. The next task is to understand the cost of that prediction before changing the implementation. A **profiler** combines counts from shapes with measurements from execution. This chapter builds that combination and introduces the **roofline model**, which compares the cost of arithmetic with the cost of moving data.
+@sec-milestone-2 assembled a language model that predicts the next token from a prefix. The next task is to understand the cost of that prediction before changing the implementation. A **profiler** combines counts from shapes with measurements from execution. This chapter builds that combination and introduces the **roofline model**, which compares the cost of arithmetic with the cost of moving data.
 
 The distinction matters throughout the optimization chapters. Smaller integer representations can reduce stored bytes; combining operations can avoid intermediate arrays; caching can reuse earlier results. Each change needs a correctness check and a timing comparison. The profiler supplies those comparisons, while the roofline supplies a hypothesis about the limiting resource. A hypothesis becomes a diagnosis only when its byte counts and hardware assumptions describe the computation being measured.
 
@@ -65,6 +65,11 @@ An operation with high intensity does a lot of work on each byte it fetches; an 
 
 $$\frac{F}{T} \;\le\; \min\!\left(P_{\text{peak}},\; I \times B_{\text{peak}}\right)$$
 
+::: {.column-margin}
+<img src="assets/images/diagrams/14_profiling-margin-roofline.svg" width="100%"/>
+*The Roofline model: operational intensity separates the memory-bound bandwidth slope from the compute-bound peak ceiling.*
+:::
+
 Plotted against $I$, as in @fig-roofline-model, the right-hand side is a slanted line that rises with intensity until it hits a flat ceiling at $P_{\text{peak}}$. The corner is the **ridge point**, the intensity at which the two ceilings meet:
 
 $$I_{\text{ridge}} = \frac{P_{\text{peak}}}{B_{\text{peak}}}$$
@@ -81,9 +86,23 @@ $$I \;\approx\; \frac{2Rnm}{4nm} \;=\; \frac{R}{2}$$
 
 Under this traffic model, a Linear layer's intensity is roughly half its row count. The approximation assumes float32 weights, one transfer of each weight, and small input and output arrays relative to the weight matrix. One row gives about 0.5 FLOPs per byte; sixty-four rows give about 32. Rows can come from several examples in a batch or several positions in a sequence.
 
-This explains why the generation algorithm matters. Module 13's ordinary `GPT.generate` recomputes the supplied prefix, so a prefix of length $S$ sends $S$ rows through each projection. Processing only the newest position requires the cache introduced in chapter 18, and even then attention must read earlier keys and values. An `S = 1` forward pass here is a one-token input, not a cached decoding step with a long history.
+This explains why the generation algorithm matters. @sec-transformers's ordinary `GPT.generate` recomputes the supplied prefix, so a prefix of length $S$ sends $S$ rows through each projection. Processing only the newest position requires the cache introduced in @sec-memoization, and even then attention must read earlier keys and values. An `S = 1` forward pass here is a one-token input, not a cached decoding step with a long history.
 
 ![**Weight streaming and operational intensity across batch sizes**: At batch size $B=1$ (single-token inference), weights are streamed from DRAM over the memory bus and touched only once, resulting in low arithmetic intensity ($I \approx 0.5$ FLOPs/byte) and severe memory bandwidth starvation. At batch size $B=64$, loaded weights are reused across all 64 tokens in fast on-chip cache, boosting arithmetic intensity ($I \approx 32$ FLOPs/byte) and saturating compute execution units.](assets/images/diagrams/14_weight-streaming-reuse.svg){#fig-weight-streaming-reuse fig-alt="Diagram contrasting memory bandwidth starvation at batch size 1 with compute-bound weight reuse at batch size 64."}
+
+::: {#nbk-profiling-tinygpt-intensity .callout-notebook title="Napkin math: TinyGPT operational intensity across prefill and decode"}
+Consider the reference `TinyGPT` configuration ($d_{\text{model}}=128$, $n_{\text{layers}}=4$, context $S$, vocabulary $V=1000$). Each Transformer block contains $4 d^2$ projection parameters in attention ($W_Q, W_K, W_V, W_O$) and $8 d^2$ parameters in the two-layer MLP ($W_1, W_2$).
+
+Across $L=4$ layers, parameter weights total approximately $12 L d^2 \approx 786\text{ KB}$ in FP32 ($196,608$ floats $\times 4$ bytes), dominating activation traffic when batch size is 1:
+
+- **Autoregressive Decode ($S=1$)**: A single new token processes each weight matrix once. Arithmetic is $2 \times 1 \times 196,608 \approx 3.93 \times 10^5$ FLOPs. Memory traffic is dominated by reading the $786\text{ KB}$ of weights.
+  $$I_{\text{decode}} \approx \frac{3.93 \times 10^5\text{ FLOPs}}{7.86 \times 10^5\text{ Bytes}} \approx 0.50\text{ FLOP/B}$$
+  At $0.50\text{ FLOP/B}$, execution sits deeply in the memory-bound slope of the roofline.
+
+- **Prompt Prefill ($S=16$)**: The entire prompt of 16 tokens passes through simultaneously. Arithmetic scales linearly to $2 \times 16 \times 196,608 \approx 6.29 \times 10^6$ FLOPs, while weight reads remain $786\text{ KB}$:
+  $$I_{\text{prefill}} \approx \frac{6.29 \times 10^6\text{ FLOPs}}{7.86 \times 10^5\text{ Bytes}} \approx 8.0\text{ FLOP/B}$$
+  Arithmetic intensity increases $16\times$, pushing execution toward or past the ridge point of typical desktop processors.
+:::
 
 ### Measuring instead of assuming
 
@@ -95,7 +114,8 @@ A timer supplies elapsed time $T$, from which $F/T$ is an achieved compute rate.
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
+::: {.column-margin}
+**Source Code Mapping**
 The listings in this chapter are extracted from Module 14 (`src/14_profiling/14_profiling.py`), exported as `tinytorch.perf.profiling`. `Profiler` counts parameters and FLOPs, estimates live storage with allocation tracing, and times repeated forward calls. Its bottleneck label is a heuristic computed from those results. The short `Roofline` class later in this section is book-only code; it applies explicitly supplied compute and bandwidth assumptions.
 :::
 
@@ -113,7 +133,7 @@ A model with `parameters()` takes the first branch, which sums the sizes of the 
 
 {{< include _listings/14_profiling/Profiler_calculate_parameter_memory.qmd >}}
 
-The byte calculation assumes float32 storage and multiplies the element count by `BYTES_PER_FLOAT32`, which is four. That remains the physical dtype of TinyTorch's simulated quantized tensors in chapter 15; their separate analytical INT8 report describes a proposed packed representation. A container that really stores several dtypes would instead sum each array's `nbytes`. The module divides by `MB_TO_BYTES = 1024 * 1024`, so its `memory_mb` fields use binary scaling: TinyGPT's 4,328,448 parameter bytes print as 4.13. Parameter storage can approximate traffic for a dense layer whose weights must all be fetched, but it does not count how many times a pass reads each byte or whether a cache serves those reads.
+The byte calculation assumes float32 storage and multiplies the element count by `BYTES_PER_FLOAT32`, which is four. That remains the physical dtype of TinyTorch's simulated quantized tensors in @sec-quantization; their separate analytical INT8 report describes a proposed packed representation. A container that really stores several dtypes would instead sum each array's `nbytes`. The module divides by `MB_TO_BYTES = 1024 * 1024`, so its `memory_mb` fields use binary scaling: TinyGPT's 4,328,448 parameter bytes print as 4.13. Parameter storage can approximate traffic for a dense layer whose weights must all be fetched, but it does not count how many times a pass reads each byte or whether a cache serves those reads.
 
 ### Counting FLOPs
 
@@ -125,7 +145,7 @@ The module counts per sample, with the outer batch dimension excluded. For Linea
 
 {{< include _listings/14_profiling/count_linear_flops.qmd >}}
 
-The input width comes from the input shape and the output width from the weight, which is stored as `[in, out]` since chapter 3. `count_flops` dispatches on what it is handed.
+The input width comes from the input shape and the output width from the weight, which is stored as `[in, out]` since @sec-layers. `count_flops` dispatches on what it is handed.
 
 {{< include _listings/14_profiling/Profiler_count_flops.qmd >}}
 
@@ -207,7 +227,7 @@ The trace first checks deterministic counts against TinyGPT. It then times an is
 
 ### Counting TinyGPT
 
-Take the `TinyGPT` that Milestone II trained, which is Module 13's NumPy `GPT` under the name the milestone gave it, at `GPT(vocab_size=1000, embed_dim=128, num_layers=4, num_heads=4, max_seq_len=256)`. Its parameters live in two lookup tables, four identical blocks, a final LayerNorm, and the head, and each entry is a product of shapes plus a bias where the layer has one.
+Take the `TinyGPT` that @sec-milestone-2 trained, which is @sec-transformers's NumPy `GPT` under the name the milestone gave it, at `GPT(vocab_size=1000, embed_dim=128, num_layers=4, num_heads=4, max_seq_len=256)`. Its parameters live in two lookup tables, four identical blocks, a final LayerNorm, and the head, and each entry is a product of shapes plus a bias where the layer has one.
 
 | Component | Shape arithmetic | Parameters |
 | :--- | :--- | ---: |
@@ -221,7 +241,7 @@ Take the `TinyGPT` that Milestone II trained, which is Module 13's NumPy `GPT` u
 | Output head | $128 \times 1000$, no bias | 128,000 |
 | **Total** | | **1,082,112** |
 
-: Parameter count of a four-block TinyGPT with $D = 128$, a 1,000-token vocabulary, and a 256-position table, counted as Module 13 builds it, with a learned position table, biases on the four projections, and none on the head. {#tbl-tinygpt-params tbl-colwidths="[34,44,22]"}
+: Parameter count of a four-block TinyGPT with $D = 128$, a 1,000-token vocabulary, and a 256-position table, counted as @sec-transformers builds it, with a learned position table, biases on the four projections, and none on the head. {#tbl-tinygpt-params tbl-colwidths="[34,44,22]"}
 
 At four bytes per parameter that is 4,328,448 bytes, which the profiler reports as 4.13 MB. This is storage, not $Q$: a lookup need not read its whole table, while temporary activations can be read and written several times.
 
@@ -373,11 +393,19 @@ The assertions pin down what can be predicted from shapes and the report's own c
 
 TinyTorch exposes the accounting in ordinary Python. Production profiling adds finer observation points so that a slow forward pass can be traced to particular operations. PyTorch's `torch.profiler` can record CPU and accelerator activities, input shapes, and tensor allocation information. Its optional FLOP estimate uses formulas for selected operations, including matrix multiplication and two-dimensional convolution; even a production report requires checking which operations it counts. These capabilities are described in the [PyTorch profiler documentation](https://docs.pytorch.org/docs/stable/profiler.html).
 
-Timing requires another distinction on a GPU. The CPU can queue an operation and return before the GPU finishes it. Timing only that call measures submission, not completion. An accurate device measurement uses timing events on the GPU or waits for queued work to finish before reading the host clock. PyTorch documents both methods in its [CUDA timing guidance](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution). TinyTorch's NumPy timer measures the synchronous CPU forward call used in this chapter.
+Timing requires another distinction on a GPU. The CPU can queue an operation and return before the GPU finishes it. Timing only that call measures submission, not completion. An accurate device measurement uses timing events on the GPU or waits for queued work to finish before reading the host clock. PyTorch documents both methods in its [CUDA timing guidance](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution). TinyTorch's NumPy timer measures the synchronous CPU forward call used in this module.
 
 Allocation tracking still does not reveal memory traffic. NVIDIA's Nsight Compute collects hardware metrics for GPU kernels, the individual device computations, and offers roofline analysis using compute and memory information. Its [profiling guide](https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#roofline-charts) distinguishes traffic at different cache and memory levels. A weight read served from cache does not have the same cost as fetching that weight from main memory. The chosen memory boundary therefore belongs in the definition of $Q$.
 
 The comparison in @tbl-profiler-comparison separates the three kinds of evidence. A framework trace locates operations; an allocation report describes storage lifetime; hardware traffic metrics test transfer assumptions. These tools answer related questions, but their byte fields are not interchangeable.
+
+::: {#psp-profiling-nsight-profiler .callout-production title="Production bridge: PyTorch Profiler and NVIDIA Nsight Systems"}
+TinyTorch uses analytical FLOP accounting and Python's `time.perf_counter` to estimate compute rates and memory bottlenecks on the host CPU. In production GPU environments, profiling requires visibility into hardware execution pipelines:
+
+1. **PyTorch Profiler (`torch.profiler`)**: Records operator execution timelines, CPU-to-GPU kernel dispatch latency, memory allocation/free events (`record_shapes=True`, `profile_memory=True`), and exports execution traces viewable in Chrome (`chrome://tracing`) or Perfetto.
+2. **NVIDIA Nsight Systems (`nsys`)**: Traces system-wide execution, correlating host CPU threads, CUDA runtime calls, PCIe memory transfers, and GPU kernel execution on a unified microsecond timeline to detect CPU starvation and pipeline bubbles.
+3. **NVIDIA Nsight Compute (`ncu`)**: Profiles individual CUDA kernels at the hardware instruction level, measuring streaming multiprocessor (SM) occupancy, warp stall reasons, Tensor Core utilization, and cache hit rates against hardware roofline limits.
+:::
 
 | Quantity | TinyTorch `Profiler` | Production observation |
 | :--- | :--- | :--- |
@@ -389,7 +417,7 @@ The comparison in @tbl-profiler-comparison separates the three kinds of evidence
 
 : Measurement sources in the reference profiler and production tools. Storage, traffic, and time remain separate quantities. {#tbl-profiler-comparison tbl-colwidths="[16,40,44]"}
 
-The transferable habit is to make each optimization claim match its evidence. Reducing parameter bytes establishes a storage change. Reducing modeled transfers establishes a prediction under stated assumptions. A repeatable timing improvement on the same workload establishes an execution result. The next chapters need all three distinctions because a numerically faithful simulation of a smaller representation can still allocate and execute in float32.
+The transferable habit is to make each optimization claim match its evidence. Reducing parameter bytes establishes a storage change. Reducing modeled transfers establishes a prediction under stated assumptions. A repeatable timing improvement on the same workload establishes an execution result. Subsequent chapters need all three distinctions because a numerically faithful simulation of a smaller representation can still allocate and execute in float32.
 
 ---
 
@@ -397,7 +425,7 @@ The transferable habit is to make each optimization claim match its evidence. Re
 
 `profile_forward_pass` joins shape-based counts, a separate memory probe, and repeated timed calls. Its central accounting invariant is that FLOPs per sample must be multiplied by batch size before division by whole-batch time. Its memory probe adds existing parameters to new traced allocations, preserves a caller's tracing session, and reports a footprint estimate. Neither that footprint nor the heuristic bottleneck label measures memory traffic.
 
-The roofline adds an explicit model of transferred bytes and machine ceilings. Its bound, $T \ge \max(F/P_{\text{peak}}, Q/B_{\text{peak}})$, explains why more arithmetic need not increase time proportionally. For a float32 Linear layer with few rows and one transfer per weight, intensity is approximately half the row count. That gives a reason to investigate weight traffic, while the timer determines whether a proposed change helps the actual workload. The next chapter follows one such proposal: represent weights with integer codes, check reconstruction error, and distinguish modeled packed storage from the NumPy arrays that execute the reference.
+The roofline adds an explicit model of transferred bytes and machine ceilings. Its bound, $T \ge \max(F/P_{\text{peak}}, Q/B_{\text{peak}})$, explains why more arithmetic need not increase time proportionally. For a float32 Linear layer with few rows and one transfer per weight, intensity is approximately half the row count. That gives a reason to investigate weight traffic, while the timer determines whether a proposed change helps the actual workload. @sec-quantization follows one such proposal: represent weights with integer codes, check reconstruction error, and distinguish modeled packed storage from the NumPy arrays that execute the reference.
 
 ---
 

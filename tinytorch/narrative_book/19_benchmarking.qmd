@@ -1,6 +1,6 @@
 # Benchmarking: Measuring a Speedup You Can Trust {#sec-benchmarking}
 
-Chapter 18 removed repeated projections with a KV cache, but each decode step still reads a growing prefix. A speedup therefore needs a stated prompt length and generation length. Chapters 15 through 17 also distinguished measured behavior from modeled savings in storage or execution cost. A ratio of two timings is easy to compute. Establishing that it measures the same workload before and after the change requires more care. This chapter follows that evidence from individual clock readings to a comparison another reader can check.
+@sec-memoization removed repeated projections with a KV cache, but each decode step still reads a growing prefix. A speedup therefore needs a stated prompt length and generation length. @sec-quantization through @sec-acceleration also distinguished measured behavior from modeled savings in storage or execution cost. A ratio of two timings is easy to compute. Establishing that it measures the same workload before and after the change requires more care. This chapter follows that evidence from individual clock readings to a comparison another reader can check.
 
 A useful comparison follows a small measurement discipline. Run the model a few times before you start the clock, because the first run may pay for setup that later runs do not. Run it many times after, because one timing is one draw from a noisy distribution. Report the distribution rather than a single number, because the users who notice latency are the ones who hit the slow runs. And attach an accuracy check, because any accuracy loss must stay within the comparison's stated tolerance. The protocol in @fig-benchmarking-pipeline organizes those habits. TinyTorch's benchmark classes implement the measurement and scoring paths, and the chapter closes with a pass/fail check modeled on the industry benchmark that turned the same habits into rules.
 
@@ -56,6 +56,11 @@ For a sustained inference comparison, the distribution of interest is steady sta
 
 ### Repetition and the shape of the distribution
 
+::: {.column-margin}
+<img src="assets/images/diagrams/19_benchmarking-margin-latency.svg" width="100%"/>
+*Latency distribution anatomy: tail percentiles $P_{95}$ and $P_{99}$ capture system stalls that the mean obscures.*
+:::
+
 After warmup, run the model $N$ times and keep every timing $t_1, \dots, t_N$. Two summaries are familiar. The **mean** $\bar{t}$ is the sum divided by $N$, and the **standard deviation** $s$ measures how far a typical timing sits from the mean:
 
 $$\bar{t} = \frac{1}{N} \sum_{i=1}^N t_i, \qquad s = \sqrt{\frac{1}{N - 1} \sum_{i=1}^N (t_i - \bar{t})^2}$$
@@ -75,7 +80,7 @@ When $p$ percent of the way through the list falls between two entries, TinyTorc
 
 ### How many runs
 
-A percentile is only as trustworthy as the number of samples behind it. $P_{99}$ describes an event that happens once per hundred runs, so twenty runs can easily miss that upper tail entirely. An interpolated percentile still exists, but provides little evidence about a rare event. The box below turns that intuition into a number.
+A percentile is only as trustworthy as the number of samples behind it. $P_{99}$ describes an event that happens once per hundred runs, so twenty runs can easily miss that upper tail entirely. An interpolated percentile still exists, but provides little evidence about a rare event. The napkin math in \ref{nbk-benchmarking-sample-size-tail-latencies} turns that intuition into a concrete sample count.
 
 ::: {#nbk-benchmarking-sample-size-tail-latencies .callout-notebook title="How many runs does a P99 need?"}
 A run exceeds the true 99th percentile with probability $p = 0.01$. The chance that $N$ runs contain no such event is $(1 - p)^N$, so the chance of seeing at least one is $1 - (1 - p)^N$. Asking for a 95 percent chance of catching at least one tail event gives
@@ -101,8 +106,9 @@ One more rule follows from the same model. A comparison is fair only when both s
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this chapter are extracted from Module 19 (`src/19_benchmarking/19_benchmarking.py`), which the package exports as `tinytorch.perf.benchmarking`. `BenchmarkResult` is the container, `Benchmark` with its `run_latency_benchmark` method is the harness (the method is written as a function and attached to the class, as Chapter 8's `Trainer` methods were), `precise_timer` is the clock, and the `MLPerf` class's `_run_latency_test` and `run_standard_benchmark` turn a result into a verdict. Three short functions are book code and are labeled as such: a `percentile` written out by hand so the interpolation is visible, and a `check_compliance` and `compare` that put the module's two bars on a `BenchmarkResult` and add the relative rule.
+::: {.column-margin}
+**Source Code Mapping**:
+The listings in this chapter are extracted from Module 19 (`src/19_benchmarking/19_benchmarking.py`), which the package exports as `tinytorch.perf.benchmarking`. `BenchmarkResult` is the container, `Benchmark` with its `run_latency_benchmark` method is the harness (the method is written as a function and attached to the class, as @sec-training's `Trainer` methods were), `precise_timer` is the clock, and the `MLPerf` class's `_run_latency_test` and `run_standard_benchmark` turn a result into a verdict. Three short functions are book code and are labeled as such: a `percentile` written out by hand so the interpolation is visible, and a `check_compliance` and `compare` that put the module's two bars on a `BenchmarkResult` and add the relative rule.
 :::
 
 Read the core path first: `Benchmark.run_latency_benchmark` produces a list of durations, and `BenchmarkResult` summarizes that list. Compare one unchanged baseline with one candidate before introducing multiple candidates or a statistical test. The module's suite combines several metrics and plots comparisons; it cannot repair mismatched workloads or establish statistical significance from a plot.
@@ -129,9 +135,9 @@ Notice that `pos` runs from 0 to `len(s) - 1`, so $P_0$ is the minimum and $P_{1
 
 ### The result container
 
-Chapter 20 measures a baseline and an optimized model and asks how the median moved and how the tail moved. Both answers come from the same list of timings, and so does the verdict at the end of this chapter. A report that someone else will read has to be able to show that list.
+@sec-capstone measures a baseline and an optimized model and asks how the median moved and how the tail moved. Both answers come from the same list of timings, and so does the verdict at the end of this chapter. A report that someone else will read has to be able to show that list.
 
-Chapter 14's `Profiler.measure_latency` returns the median of its internal timings. That compact result answers a typical-cost question, but it cannot recover a tail percentile afterward. Module 19 therefore calls the profiler with one measured iteration at a time and retains those individual results. Seven durations, including a stall, remain seven observations rather than one median. `BenchmarkResult` keeps that raw list and computes summaries from it.
+@sec-profiling's `Profiler.measure_latency` returns the median of its internal timings. That compact result answers a typical-cost question, but it cannot recover a tail percentile afterward. Module 19 therefore calls the profiler with one measured iteration at a time and retains those individual results. Seven durations, including a stall, remain seven observations rather than one median. `BenchmarkResult` keeps that raw list and computes summaries from it.
 
 {{< include _listings/19_benchmarking/BenchmarkResult.qmd >}}
 
@@ -141,7 +147,7 @@ The confidence interval uses $1.96\,s/\sqrt{N}$ on either side of the mean. Unde
 
 ### The harness
 
-The harness supplies the repeated observations needed to compare models. For a Chapter 18 decoder, its usefulness depends on the caller holding the prefix and generation lengths fixed. It automates repetition; the caller still decides which workload to repeat and how many observations the claim needs.
+The harness supplies the repeated observations needed to compare models. For a @sec-memoization decoder, its usefulness depends on the caller holding the prefix and generation lengths fixed. It automates repetition; the caller still decides which workload to repeat and how many observations the claim needs.
 
 The cold timing in the opening included 40 ms of setup. `Benchmark` separates setup from the measurements it returns. Its constructor defaults to five warmup runs and ten measured runs; the example below explicitly requests ten and one hundred. No fixed warmup count guarantees stabilization, and ten timings provide little evidence about rare stalls. The constructor records those counts, the model references, and basic platform metadata.
 
@@ -151,13 +157,13 @@ Task accuracy requires a model-provided `evaluate(dataset)` result. Synthetic ac
 
 The suite assigns each model a unique result key once. Unnamed models become `model_0`, `model_1`, and so forth; colliding names receive suffixes. Every metric reuses those keys, so a copied name cannot overwrite another model's measurement. `BenchmarkSuite.run_full_benchmark(input_shape=...)` and `analyze_optimization_techniques(..., input_shape=...)` pass the same requested shape to latency and memory measurement. For `Linear(10, 2)`, a representative batch might have shape `(2, 10)`; the default `(1, 28, 28)` is not inferred from the dataset and will not fit that layer.
 
-The `system_info` is the beginning of the reproducibility habit the bridge insists on; it travels with every result as metadata. The measuring loop reuses Chapter 14's timer for the warmup and then times every run on its own.
+The `system_info` is the beginning of the reproducibility habit the bridge insists on; it travels with every result as metadata. The measuring loop reuses @sec-profiling's timer for the warmup and then times every run on its own.
 
 {{< include _listings/19_benchmarking/benchmark_run_latency_benchmark.qmd >}}
 
 Follow one model through the loop. It creates one random input tensor outside the timed region, then calls the profiler with the requested warmup count and one additional measured iteration. That duration is discarded too. Each following profiler call uses zero warmup and one iteration, so the returned list contains exactly `measurement_runs` durations in milliseconds. With five warmups and ten retained measurements, the model receives sixteen forwards: five warmups, one discarded timing, and ten retained timings.
 
-The input is reused within that model's measurements, but a new random tensor is drawn for the next model. Equal shapes therefore do not guarantee identical values across candidates. The harness also retains the model objects: a forward that updates a counter or cache keeps that state into the next call. It neither resets a KV cache nor selects evaluation mode for the caller. Set the desired mode and define the state boundary first. Repeated cached decoding must reproduce the same prefix and generation lengths, using Chapter 18's cache lifetime rules; otherwise later timings measure progressively longer requests.
+The input is reused within that model's measurements, but a new random tensor is drawn for the next model. Equal shapes therefore do not guarantee identical values across candidates. The harness also retains the model objects: a forward that updates a counter or cache keeps that state into the next call. It neither resets a KV cache nor selects evaluation mode for the caller. Set the desired mode and define the state boundary first. Repeated cached decoding must reproduce the same prefix and generation lengths, using @sec-memoization's cache lifetime rules; otherwise later timings measure progressively longer requests.
 
 The toy makes that state visible through `calls`. Run the following example to inspect actual durations on your machine.
 
@@ -176,7 +182,7 @@ The toy receives 111 calls: ten warmups, one discarded timing, and one hundred r
 
 ### The verdict
 
-A benchmark ends in a decision, and Chapter 20 needs two kinds. The first is absolute. A model going into a service is asked to meet a latency bound, and the bound is about the slow requests, so it is a bound on $P_{99}$. The second is relative. Quantization in Chapter 15, pruning in Chapter 16, and fusion in Chapter 17 each change the numbers a model produces, some by rounding and some by removing weights outright, and a speedup is worth reporting only if the model still works afterward.
+A benchmark ends in a decision, and @sec-capstone needs two kinds. The first is absolute. A model going into a service is asked to meet a latency bound, and the bound is about the slow requests, so it is a bound on $P_{99}$. The second is relative. Quantization in @sec-quantization, pruning in @sec-compression, and fusion in @sec-acceleration each change the numbers a model produces, some by rounding and some by removing weights outright, and a speedup is worth reporting only if the model still works afterward.
 
 The naive verdict compares means and never asks about accuracy. It passes a model that averages 5 ms and stalls to 30 ms on every hundredth request, which is the request the user remembers. And it declares an INT8 model twice as fast without asking whether the rounding cost it accuracy, which would make it a different model rather than a faster one. The fix is two bars that both have to clear, latency and accuracy, and a fixed protocol around them so that two submissions can be compared. The module's classroom `MLPerf` class holds four task configurations inspired by MLPerf Tiny, each with an input shape, an accuracy target, and a latency bound. Passing this local check is not an official MLPerf result. Its timing loop uses a context manager that reads the clock on the way in and the way out.
 
@@ -310,11 +316,51 @@ This checks scoring and orchestration on a known rule, not keyword-spotting qual
 
 ## From TinyTorch to Production
 
-A CUDA operation can return control to the CPU while its work is still queued on the GPU. To time completed computation with a CPU clock, synchronize before the start reading and after the model call, before the end reading. Alternatively, record CUDA events[^fn-cuda-event-gpu-timer] around the device work and wait for completion before reading elapsed time. These are different timing boundaries from TinyTorch's completed CPU forwards. PyTorch's [CUDA semantics documentation](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution) explains this distinction; its [benchmark timer](https://docs.pytorch.org/docs/stable/benchmark_utils.html) supplies warmups, replication, and accelerator synchronization.
+A CUDA operation can return control to the CPU while its work is still queued on the GPU. To time completed computation with a CPU clock, synchronize before the start reading and after the model call, before the end reading. Alternatively, record CUDA events[^fn-cuda-event-gpu-timer] around the device work and wait for completion before reading elapsed time, as highlighted in \ref{chk-benchmarking-cuda-synchronize}. These are different timing boundaries from TinyTorch's completed CPU forwards. PyTorch's [CUDA semantics documentation](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution) explains this distinction; its [benchmark timer](https://docs.pytorch.org/docs/stable/benchmark_utils.html) supplies warmups, replication, and accelerator synchronization.
+
+::: {#chk-benchmarking-cuda-synchronize .callout-warning title="Sanity check: the asynchronous CUDA execution timing pitfall"}
+A common benchmarking trap occurs when measuring accelerator code using standard CPU timers:
+
+```python
+# FAULTY BENCHMARK: Measures CPU kernel launch dispatch, NOT GPU execution!
+t0 = time.perf_counter()
+output = model(inputs)  # Enqueues kernels asynchronously to device stream
+t1 = time.perf_counter()
+print(f"Latency: {(t1 - t0) * 1000:.2f} ms")  # Phantom speedup: reports 0.05 ms!
+```
+
+Because device driver kernel launches return asynchronously to the host, `t1` records when the command was enqueued, not when computation completed.
+
+**The Fix**:
+Synchronize host execution before and after the timed region:
+```python
+# CORRECT BENCHMARK:
+torch.cuda.synchronize()
+t0 = time.perf_counter()
+output = model(inputs)
+torch.cuda.synchronize()
+t1 = time.perf_counter()
+```
+Or record timestamps directly on device streams via `torch.cuda.Event(enable_timing=True)`.
+:::
 
 [^fn-cuda-event-gpu-timer]: **CUDA event**: a marker recorded in a GPU stream, the ordered queue of device work. With timing enabled, two completed events provide elapsed time between their positions in that stream. Work from other streams or gaps between submitted operations can still affect the interval.
 
-A more complete experiment also varies and records its conditions. Repeating the same setup at different times can reveal interference that one long run hides. Interleaving baseline and candidate measurements can reduce the effect of a slow change in machine load. Neither a warmup nor a fixed random seed guarantees a stable machine, so preserve the raw observations and report the comparison procedure.
+A more complete experiment also varies and records its conditions. Repeating the same setup at different times can reveal interference that one long run hides. Interleaving baseline and candidate measurements can reduce the effect of a slow change in machine load. Neither a warmup nor a fixed random seed guarantees a stable machine, as detailed in \ref{psp-benchmarking-environment-noise}, so preserve the raw observations and report the comparison procedure.
+
+::: {#psp-benchmarking-environment-noise .callout-production-bridge title="Production bridge: environmental isolation and hardware governor controls"}
+In real production and edge benchmarking environments, unpredictable performance jitter often stems from dynamic OS and power management rather than algorithmic code:
+
+- **CPU Frequency Scaling**: Dynamic voltage and frequency scaling (DVFS) governors like Linux `powersave` or `ondemand` ramp clock frequencies dynamically. Rigorous server benchmarking pins governors to constant frequencies:
+  ```bash
+  sudo cpupower frequency-set --governor performance
+  ```
+- **Thermal Throttling**: Sustained compute heats processor silicon, causing hardware safety governors to throttle clock multipliers midway through benchmark loops. Monitor die temperature and allow inter-run cooling pauses.
+- **Core Pinning and Thread Affinity**: Preemptive OS scheduler migrations move threads across cores, invalidating L1/L2 caches. Pin benchmark processes to isolated cores using `taskset` or `numactl`:
+  ```bash
+  taskset -c 0-3 python3 benchmark_inference.py
+  ```
+:::
 
 More samples support uncertainty analysis. A bootstrap[^fn-bootstrap-confidence-interval] can show how a statistic varies across resampled observations, but it cannot invent rare stalls absent from the measured list. The statistic itself must match the question. Python's [`timeit` documentation](https://docs.python.org/3/library/timeit.html#timeit.Timer.repeat) recommends considering the minimum as a lower bound on small-snippet execution cost under interference. An application latency claim instead needs the delays its users experience, including the tail.
 
@@ -345,7 +391,7 @@ The comparison in @tbl-bench-bridge preserves the chapter's central contract: a 
 
 The latency harness creates an input, warms the model, discards one additional timing, and retains one duration per measured forward. `BenchmarkResult` keeps those observations and computes summaries; the mean describes average cost, the median describes typical cost, and a tail percentile describes a high position in the sorted sample. A small sample can demonstrate that arithmetic without establishing a rare-event guarantee.
 
-The MLPerf-style path adds predictions and labels to the timing loop. It validates their shapes and values, counts agreements, and checks both accuracy and $P_{99}$ against local thresholds. Synthetic labels cannot pass that local check, and supplied labels still need independent provenance. Chapter 20 uses these measurement habits to compare combinations of optimizations under its own event policy. Preserve the baseline, control input shape and model state, check quality on the same data, and compare the same named statistic before combining another mechanism.
+The MLPerf-style path adds predictions and labels to the timing loop. It validates their shapes and values, counts agreements, and checks both accuracy and $P_{99}$ against local thresholds. Synthetic labels cannot pass that local check, and supplied labels still need independent provenance. @sec-capstone uses these measurement habits to compare combinations of optimizations under its own event policy. Preserve the baseline, control input shape and model state, check quality on the same data, and compare the same named statistic before combining another mechanism.
 
 ---
 

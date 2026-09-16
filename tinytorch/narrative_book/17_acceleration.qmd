@@ -1,6 +1,6 @@
 # Acceleration: Kernel Fusion and Cache Tiling {#sec-acceleration}
 
-For the three inputs `[-1, 0, 1]`, the GELU activation returns approximately `[-0.15881, 0, 0.84119]`. Module 17 computes these values in two ways. One keeps seven intermediate `Tensor` objects until the function returns; the other writes the calculation as one NumPy expression. Both produce the same answer within floating-point tolerance, but they allocate and retain different arrays. After chapter 16 examined weight representation, this chapter follows the temporary data created during a forward computation.
+For the three inputs `[-1, 0, 1]`, the GELU activation returns approximately `[-0.15881, 0, 0.84119]`. Module 17 computes these values in two ways. One keeps seven intermediate `Tensor` objects until the function returns; the other writes the calculation as one NumPy expression. Both produce the same answer within floating-point tolerance, but they allocate and retain different arrays. After @sec-compression examined weight representation, this chapter follows the temporary data created during a forward computation.
 
 The first mechanism compares those allocation choices. The second, **cache tiling**, partitions a matrix multiplication into small blocks and accumulates their products. Both make execution costs visible without changing the intended mathematical function. Actual timing depends on arithmetic, data movement, and execution overhead. After tracing the NumPy implementations, we introduce **kernel fusion**, a production technique that compiles several operations into one traversal of the data. @Fig-kernel-fusion separates the three execution paths used in the module.
 
@@ -48,7 +48,7 @@ The script reports timings for the machine running it; neither traversal has a f
 
 A cache stores recently accessed data near the processor. Main memory transfers chunks called cache lines, so adjacent floats can share one transfer. For example, a hypothetical 64-byte line holds sixteen float32 values. A row walk can use all sixteen; a column walk may use only one before moving to another line. Whether a later access reuses that line depends on the array size and cache behavior. The stride explains a possible cost; it does not measure transferred bytes.
 
-Now look at what a framework does when you write a GELU. Chapter 2 introduced the tanh form,
+Now look at what a framework does when you write a GELU. @sec-activation-functions introduced the tanh form,
 
 $$\text{GELU}(x) \approx 0.5\,x\left(1 + \tanh\!\left(\sqrt{2/\pi}\,\left(x + 0.044715\,x^3\right)\right)\right),$$
 
@@ -72,9 +72,14 @@ Consider a tile product that repeatedly uses the same small blocks. Keeping thos
 
 : The memory levels relevant to allocation and reuse. NumPy code chooses arrays and operations; hardware manages which cache lines remain resident. {#tbl-memory-hierarchy tbl-colwidths="[20,35,45]"}
 
-Our model counts requested data separately from measured time. A logical read of an array is an operation's need for its values; it may be served from a cache. An allocated array occupies storage, but allocation alone does not tell us how many bytes crossed a hardware boundary. Chapter 14's arithmetic intensity divides floating-point work by a stated byte count. Here every such count needs its assumptions attached.
+Our model counts requested data separately from measured time. A logical read of an array is an operation's need for its values; it may be served from a cache. An allocated array occupies storage, but allocation alone does not tell us how many bytes crossed a hardware boundary. @sec-profiling's arithmetic intensity divides floating-point work by a stated byte count. Here every such count needs its assumptions attached.
 
 ### Intermediate arrays and their lifetime
+
+::: {.column-margin}
+<img src="assets/images/diagrams/17_acceleration-margin-fusion.svg" width="100%"/>
+*Kernel fusion memory ledger: 8 unfused DRAM round-trips ($360\text{ B}$) collapse into 1 streaming fused pass ($40\text{ B}$).*
+:::
 
 At $x=1$, the first three GELU steps produce $1$, $0.044715$, and $1.044715$. In `unfused_gelu`, each value occupies the corresponding position in a different array. Naming `temp1`, `temp2`, and `temp3` keeps their `Tensor` objects reachable even after the next step has consumed their values. `Tensor` construction copies the incoming NumPy array, so these are separate owned buffers.
 
@@ -100,8 +105,9 @@ For a hypothetical cache budget of 32,768 bytes, the inequality gives $T \le 52$
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this chapter are extracted from Module 17 (`src/17_acceleration/17_acceleration.py`), which the package exports as `tinytorch.perf.acceleration`: `unfused_gelu`, `fused_gelu`, and `tiled_matmul`, all of which take and return the chapter 1 `Tensor`. The module also exports `vectorized_matmul`, a shape-checked call to NumPy's `matmul`, which exists to show what the BLAS library underneath delivers and which the text uses as the reference the tiled version is measured against.
+::: {.column-margin}
+**Source Code Mapping**:
+The listings in this chapter are extracted from Module 17 (`src/17_acceleration/17_acceleration.py`), which the package exports as `tinytorch.perf.acceleration`: `unfused_gelu`, `fused_gelu`, and `tiled_matmul`, all of which take and return the @sec-tensor `Tensor`. The module also exports `vectorized_matmul`, a shape-checked call to NumPy's `matmul`, which exists to show what the BLAS library underneath delivers and which the text uses as the reference the tiled version is measured against.
 :::
 
 ### The two GELUs
@@ -114,7 +120,7 @@ The local names keep seven intermediate `Tensor` buffers alive while the output 
 
 {{< include _listings/17_acceleration/fused_gelu.qmd >}}
 
-The constant `sqrt_2_over_pi` sets the coefficient in the tanh approximation. The expression computes the same formula without wrapping each intermediate in a `Tensor`; only the final `Tensor(result_data)` makes the returned object. NumPy still creates temporary arrays while evaluating the expression. Both functions preserve the input, and neither records the differentiable operations from chapter 6.
+The constant `sqrt_2_over_pi` sets the coefficient in the tanh approximation. The expression computes the same formula without wrapping each intermediate in a `Tensor`; only the final `Tensor(result_data)` makes the returned object. NumPy still creates temporary arrays while evaluating the expression. Both functions preserve the input, and neither records the differentiable operations from @sec-autograd.
 
 ::: {#lst-acceleration-gelu-timing lst-pos="H" lst-cap="**GELU timing comparison**: Compare the two allocation strategies on the same input."}
 ```python
@@ -141,7 +147,7 @@ assert np.allclose(unfused_gelu(x).data, fused_gelu(x).data, atol=1e-6)
 
 In @lst-acceleration-gelu-timing, the names `fused_gelu` and `unfused_gelu` describe how the computation is expressed, not a promise about this timing result. The first constructs one output `Tensor`; the second constructs eight and retains its named intermediates until the function returns. Both evaluate NumPy array operations eagerly, and both can allocate internal temporaries. Their measured difference includes allocation and object-lifetime effects. The operation ledger below separates these measurements from a compiled-kernel model.
 
-There is also a boundary with chapter 6. Both helpers read `x.data` and wrap the NumPy result in a fresh `Tensor`, so neither records a backward path to `x`. `tiled_matmul` below has the same boundary. They are forward-computation experiments, not drop-in replacements for differentiable operations in a training model. A training implementation would need a `Function` with a backward rule as well as an efficient forward kernel.
+There is also a boundary with @sec-autograd. Both helpers read `x.data` and wrap the NumPy result in a fresh `Tensor`, so neither records a backward path to `x`. `tiled_matmul` below has the same boundary. They are forward-computation experiments, not drop-in replacements for differentiable operations in a training model. A training implementation would need a `Function` with a backward rule as well as an efficient forward kernel.
 
 ### Tiled matrix multiply
 
@@ -195,7 +201,31 @@ Run the unfused GELU on five inputs, $x = [-2, -1, 0, 1, 2]$, and record every i
 
 : Intermediate values for three of the five inputs. The last row gives a hypothetical compiled single-pass baseline; neither TinyTorch helper implements that baseline. {#tbl-fusion-trace tbl-colwidths="[8,26,14,14,14,12,12]"}
 
-At $x=1$, the result is approximately $0.84119$, matching the tanh GELU computation. @Tbl-fusion-trace accounts for eighteen logical array passes, or 360 bytes, before Tensor copies. A hypothetical implementation that reads each input once and writes each output once accounts for 40 bytes. The ratio of nine compares two models, not the measured traffic of the two NumPy helpers. @Lst-acceleration-gelu-ledger reproduces the values and checks the output against `fused_gelu`. In lines 1--3, constants and the 5-element test vector `x` are declared. Lines 5--12 step through the 8 operations sequentially, recording intermediate arrays and tracking logical array reads and writes. Lines 14--15 print each stage's values corresponding to @tbl-fusion-trace. In lines 17--21, total memory traffic is computed (360 bytes unfused vs. 40 bytes ideal compiled). Line 22 asserts the theoretical $9.0\times$ traffic reduction, and line 23 confirms bitwise agreement between the step-by-step trace `y` and `fused_gelu(Tensor(x)).data`.
+At $x=1$, the result is approximately $0.84119$, matching the tanh GELU computation. @Tbl-fusion-trace accounts for eighteen logical array passes, or 360 bytes, before Tensor copies. A hypothetical implementation that reads each input once and writes each output once accounts for 40 bytes. The ratio of nine compares two models, not the measured traffic of the two NumPy helpers, as analyzed in \ref{nbk-acceleration-dram-traffic-ledger}.
+
+::: {#nbk-acceleration-dram-traffic-ledger .callout-notebook title="Napkin math: DRAM byte traffic ledger for unfused vs. fused operations"}
+Track the byte traffic for an elementwise sequence over an $N$-element float32 array ($N = 10^6$, array footprint $4\text{ MB}$):
+
+- **Unfused Sequence (8 distinct operations)**:
+  - Step 1: $x^3 \implies 1\text{ read} + 1\text{ write} = 8\text{ MB}$
+  - Step 2: $0.044715 \cdot t_1 \implies 1\text{ read} + 1\text{ write} = 8\text{ MB}$
+  - Step 3: $x + t_2 \implies 2\text{ reads} + 1\text{ write} = 12\text{ MB}$
+  - Step 4: $\sqrt{2/\pi} \cdot t_3 \implies 1\text{ read} + 1\text{ write} = 8\text{ MB}$
+  - Step 5: $\tanh(t_4) \implies 1\text{ read} + 1\text{ write} = 8\text{ MB}$
+  - Step 6: $1 + t_5 \implies 1\text{ read} + 1\text{ write} = 8\text{ MB}$
+  - Step 7: $x \cdot t_6 \implies 2\text{ reads} + 1\text{ write} = 12\text{ MB}$
+  - Step 8: $0.5 \cdot t_7 \implies 1\text{ read} + 1\text{ write} = 8\text{ MB}$
+  - Total unfused DRAM traffic: $10\text{ reads} + 8\text{ writes} = 18\text{ passes} \times 4\text{ MB} = 72\text{ MB}$.
+- **Fused Kernel (1 streaming pass)**:
+  - Load $x_i$ once from memory into an on-chip register file ($1\text{ read} = 4\text{ MB}$).
+  - Evaluate all intermediate powers, products, and tanh within local register banks (zero DRAM traffic).
+  - Write final output $y_i$ once back to main memory ($1\text{ write} = 4\text{ MB}$).
+  - Total fused DRAM traffic: $1\text{ read} + 1\text{ write} = 2\text{ passes} \times 4\text{ MB} = 8\text{ MB}$.
+
+The reduction in physical memory bus traffic is exactly $72\text{ MB} / 8\text{ MB} = 9.0\times$. For memory-bandwidth-bound operators, this $9\times$ byte reduction translates directly into an order-of-magnitude wall-clock speedup.
+:::
+
+@Lst-acceleration-gelu-ledger reproduces the values and checks the output against `fused_gelu`. In lines 1--3, constants and the 5-element test vector `x` are declared. Lines 5--12 step through the 8 operations sequentially, recording intermediate arrays and tracking logical array reads and writes. Lines 14--15 print each stage's values corresponding to @tbl-fusion-trace. In lines 17--21, total memory traffic is computed (360 bytes unfused vs. 40 bytes ideal compiled). Line 22 asserts the theoretical $9.0\times$ traffic reduction, and line 23 confirms bitwise agreement between the step-by-step trace `y` and `fused_gelu(Tensor(x)).data`.
 
 ::: {#lst-acceleration-gelu-ledger lst-pos="H" lst-cap="**GELU intermediate ledger**: Record values and modeled reads and writes."}
 ```python
@@ -279,7 +309,18 @@ At $n=1024$ and $T=64$, this model counts 2,147,483,648 scalar input requests ag
 
 A compiled fused kernel can compute all eight GELU steps on one element before advancing to the next. A kernel is a compiled numerical routine; fusion combines operations that would otherwise run separately. Registers can hold the scalar intermediates, so those intermediates need not become full arrays. This is the hypothetical two-pass baseline in the worked trace, whereas the TinyTorch helpers remain eager NumPy computations.
 
-PyTorch's performance guide describes combining pointwise operations through TorchInductor and `torch.compile`. Such a compiler examines a computation larger than one individual array operation, which lets it choose where to retain intermediates. Whether it fuses a particular chain depends on the supported operations and backend. [PyTorch performance tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html).
+PyTorch's performance guide describes combining pointwise operations through TorchInductor and `torch.compile`. Such a compiler examines a computation larger than one individual array operation, which lets it choose where to retain intermediates. Whether it fuses a particular chain depends on the supported operations and backend, as examined in \ref{psp-acceleration-torch-compile-inductor}. [PyTorch performance tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html).
+
+::: {#psp-acceleration-torch-compile-inductor .callout-production-bridge title="Production bridge: PyTorch 2.0 TorchInductor and Triton kernel fusion"}
+In standard eager execution (both PyTorch eager mode and TinyTorch), each operator dispatches an isolated C++ or CUDA kernel. Intermediate tensors are written to high-bandwidth device memory (HBM/DRAM) and immediately read back by the next kernel, consuming memory bandwidth and incurring kernel launch overhead.
+
+PyTorch 2.0 addresses this with `torch.compile` and **TorchInductor**:
+
+- **Graph Tracing**: TorchDynamo captures Python bytecode and extracts a clean computational graph of PyTorch operations without user code modification.
+- **Pattern Matching and Fusion**: TorchInductor inspects operator chains (such as linear + bias + GELU, or multi-step elementwise activations) and fuses them into a single loop nest.
+- **Code Generation**: Inductor generates C++ OpenMP kernels (with SIMD vectorization for CPU) or OpenAI **Triton** kernels (for GPU).
+- **Register Storage**: Intermediate results ($x^3$, intermediate products, hyperbolic tangents) are preserved entirely within processor registers and L1 cache lines, eliminating DRAM memory bus traffic completely.
+:::
 
 | | TinyTorch helpers | Compiled fused alternative |
 | :--- | :--- | :--- |
@@ -302,7 +343,7 @@ Tiling and fusion also consume resources. Larger blocks require more working sto
 
 `tiled_matmul` allocates a zero accumulator and adds one block product per shared-dimension tile. Before each inner iteration, the accumulator contains every earlier contribution; after the final iteration, it contains the complete product. Partial tiles change slice sizes, not that invariant. The returned Tensor owns a copy of the accumulator. Timing this mechanism against one `vectorized_matmul` call exposes the cost of Python blocking around library arithmetic.
 
-Chapter 18 moves from data reused inside one operation to results reused across calls. During text generation, earlier keys and values can remain valid when one new token arrives. A cache makes that lifetime explicit and introduces a new obligation: reuse only state that belongs to the current generation.
+@sec-memoization moves from data reused inside one operation to results reused across calls. During text generation, earlier keys and values can remain valid when one new token arrives. A cache makes that lifetime explicit and introduces a new obligation: reuse only state that belongs to the current generation.
 
 ---
 

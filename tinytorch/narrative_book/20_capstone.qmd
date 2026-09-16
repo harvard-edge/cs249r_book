@@ -1,6 +1,6 @@
 # The Capstone: From an Optimization to a Checkable Report {#sec-capstone}
 
-A candidate model returns its answer twice as fast, but changes one correct prediction into an error. Another candidate zeros half its weights, yet its arrays occupy exactly as many bytes as before. Neither a speedup nor a sparsity percentage tells us whether to keep the change. Chapter 19 supplied the timing and scoring mechanisms. This chapter follows their results through Module 20's report, comparison, validation, and classroom eligibility checks.
+A candidate model returns its answer twice as fast, but changes one correct prediction into an error. Another candidate zeros half its weights, yet its arrays occupy exactly as many bytes as before. Neither a speedup nor a sparsity percentage tells us whether to keep the change. @sec-benchmarking supplied the timing and scoring mechanisms. This chapter follows their results through Module 20's report, comparison, validation, and classroom eligibility checks.
 
 The central experiment preserves a baseline, transforms a copy, and evaluates both on the same inputs. A small classifier makes every prediction and stored byte visible. A separate cost model then explains why the speedups of several transformations cannot usually be multiplied, and a cached transformer experiment tests the same reporting discipline when the workload has persistent state. The model predicts costs; the executable comparisons supply evidence about the artifact that actually runs.
 
@@ -26,15 +26,20 @@ The product can also underestimate a combination. Suppose a 100-millisecond task
 
 ### Three terms in a decode step
 
-Chapter 14 bounded the time of one operation by the larger of two costs, the bytes it must move divided by memory bandwidth and the arithmetic it must do divided by peak throughput. It then noted a third floor for small operations. A separate operation also incurs dispatch overhead: the work of invoking the routine, preparing its arguments, and returning control. The size of that overhead depends on the runtime. Many small operations can spend more time in dispatch than in moving operands or computing results. Those three costs are the cost model of this chapter:
+@sec-profiling bounded the time of one operation by the larger of two costs, the bytes it must move divided by memory bandwidth and the arithmetic it must do divided by peak throughput. It then noted a third floor for small operations. A separate operation also incurs dispatch overhead: the work of invoking the routine, preparing its arguments, and returning control. The size of that overhead depends on the runtime. Many small operations can spend more time in dispatch than in moving operands or computing results. Those three costs are the cost model of this chapter:
 
 $$T_{\text{step}} = \max\!\left(\frac{Q}{B_{\text{peak}}},\; \frac{F}{P_{\text{peak}}}\right) + n_{\text{ops}} \cdot c$$
 
-Here $Q$ is the bytes streamed in the step, $F$ the arithmetic operations, $B_{\text{peak}}$ and $P_{\text{peak}}$ the machine's two ceilings from Chapter 14, $n_{\text{ops}}$ the number of separate operations the step launches, and $c$ the fixed cost of one launch. The maximum is Chapter 14's roofline; the added term is the launch floor. For this estimate we add a fixed dispatch cost to a roofline bound. That is a modeling assumption, not an execution law: asynchronous host dispatch can overlap device work, and a real trace may require per-operation costs rather than one aggregate maximum.
+Here $Q$ is the bytes streamed in the step, $F$ the arithmetic operations, $B_{\text{peak}}$ and $P_{\text{peak}}$ the machine's two ceilings from @sec-profiling, $n_{\text{ops}}$ the number of separate operations the step launches, and $c$ the fixed cost of one launch. The maximum is @sec-profiling's roofline; the added term is the launch floor. For this estimate we add a fixed dispatch cost to a roofline bound. That is a modeling assumption, not an execution law: asynchronous host dispatch can overlap device work, and a real trace may require per-operation costs rather than one aggregate maximum.
 
-Each of the four levers acts on one of the three quantities, and that is the whole reason the model has three terms rather than one. INT8 quantization (Chapter 15) shrinks $Q$, low-rank factorization (Chapter 16) shrinks matrix storage and arithmetic but adds intermediate arrays and products, kernel fusion (Chapter 17) shrinks $n_{\text{ops}}$ here, although a fused implementation can also reduce intermediate-memory traffic, and the KV cache (Chapter 18) changes how $F$ grows with the number of tokens already generated. The Code says how much, lever by lever, next to the line that implements each one.
+Each of the four levers acts on one of the three quantities, and that is the whole reason the model has three terms rather than one. INT8 quantization (@sec-quantization) shrinks $Q$, low-rank factorization (@sec-compression) shrinks matrix storage and arithmetic but adds intermediate arrays and products, kernel fusion (@sec-acceleration) shrinks $n_{\text{ops}}$ here, although a fused implementation can also reduce intermediate-memory traffic, and the KV cache (@sec-memoization) changes how $F$ grows with the number of tokens already generated. The Code says how much, lever by lever, next to the line that implements each one.
 
 ### When speedups multiply, and when they do not
+
+::: {.column-margin}
+<img src="assets/images/diagrams/20_capstone-margin-pareto.svg" width="100%"/>
+*Optimization Pareto frontier: balancing speedup, compression ratio, and accuracy retention.*
+:::
 
 Ratios measured along a sequence always multiply. If baseline time is 100 milliseconds, the first candidate takes 70, and the second takes 40, then $(100/70)(70/40) = 100/40$. The intermediate time cancels. These are marginal ratios, each comparing a candidate with the immediately preceding configuration.
 
@@ -48,7 +53,8 @@ That last observation is the practical content of the chapter. The marginal spee
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
+::: {.column-margin}
+**Source Code Mapping**:
 Module 20 (`src/20_capstone/20_capstone.py`) is the NumPy-backed benchmarking and submission workflow students build at the end of the TinyTorch course. It provides a `BenchmarkReport` that measures a model's parameter count, size, accuracy, and latency, and a `generate_submission` that compares a baseline report against an optimized one and records the speedup, compression ratio, and accuracy change in a JSON file. Those two pieces are quoted from the module below. It also owns `OlympicEvent` and `qualifies_event`, which apply classroom eligibility rules to measured report fields. The cost model is separate book code and runs without `Tensor` or `GPT`. Its switches do not transform a TinyTorch model. The classifier trace uses the actual submission path; the generation trace uses workload-specific metrics because classification accuracy does not describe logit equivalence.
 :::
 
@@ -62,7 +68,7 @@ For inputs of shape `(N, features)`, a classifier must return finite real scores
 
 After accuracy, `measure_latency` selects the first sample, warms up with up to five untimed calls, and collects `num_runs` durations, 100 by default. The method then times full-batch forwards in a separate loop. The median batch duration determines throughput; the mean, standard deviation, and median of single-sample durations describe latency. Only after these measurements succeed does it replace `self.metrics` with seven Python numeric values and return that same dictionary. The caller controls model mode and mutable state; the harness does not reset a cache or disable training behavior automatically.
 
-The two timing boundaries answer different questions. A faster batch does not establish lower single-request latency, and the first sample alone does not represent every possible input length. The report also discards the raw durations. A study that needs a latency distribution retains observations with chapter 19's `BenchmarkResult` rather than inferring a tail percentile from this report's three summaries.
+The two timing boundaries answer different questions. A faster batch does not establish lower single-request latency, and the first sample alone does not represent every possible input length. The report also discards the raw durations. A study that needs a latency distribution retains observations with @sec-benchmarking's `BenchmarkResult` rather than inferring a tail percentile from this report's three summaries.
 
 {{< include _listings/20_capstone/generate_submission.qmd >}}
 
@@ -79,7 +85,7 @@ Event eligibility is another explicit check. `qualifies_event(report.metrics, Ol
 
 A report establishes what happened to one candidate. To choose the next candidate, we can estimate which part of a forward pass consumes the most work. Four on/off transformations give sixteen combinations; a small analytical model lets us inspect their interactions before implementing them. Its result remains a hypothesis to test on the chosen workload.
 
-The machine below assumes 200 GB/s of bandwidth, 1000 GFLOP/s of arithmetic throughput, and 5 microseconds of dispatch per modeled operation. These are illustrative inputs, not measurements of this run or promises about NumPy. The model dimensions match the transformer used in chapter 14. The four switches represent hypothetical packed weights, factorized matrices, grouped operations, and reused keys and values.
+The machine below assumes 200 GB/s of bandwidth, 1000 GFLOP/s of arithmetic throughput, and 5 microseconds of dispatch per modeled operation. These are illustrative inputs, not measurements of this run or promises about NumPy. The model dimensions match the transformer used in @sec-profiling. The four switches represent hypothetical packed weights, factorized matrices, grouped operations, and reused keys and values.
 
 ::: {#lst-capstone-model-config lst-pos="H" lst-cap="**Analytical inputs**: Separate stored parameters from the dimensions of a forward call."}
 ```python
@@ -116,7 +122,7 @@ def stored_params(cfg):
 ```
 :::
 
-`mlp_params` applies chapter 16's factorization count to both MLP matrices. At rank $D/4$, their combined count falls from $8D^2$ to $2.5D^2$. `stored_params` adds the whole token embedding table because every row occupies storage. Traffic is different. A forward over `rows` token positions selects only `rows * D` embedding entries, while the dense projections read their weight matrices. The estimate below charges each matrix once per forward, assuming its weights are reused across the rows in that call. Biases, normalization parameters, and position vectors are outside this matrix subtotal; @tbl-tinygpt-params gives the fuller stored count.
+`mlp_params` applies @sec-compression's factorization count to both MLP matrices. At rank $D/4$, their combined count falls from $8D^2$ to $2.5D^2$. `stored_params` adds the whole token embedding table because every row occupies storage. Traffic is different. A forward over `rows` token positions selects only `rows * D` embedding entries, while the dense projections read their weight matrices. The estimate below charges each matrix once per forward, assuming its weights are reused across the rows in that call. Biases, normalization parameters, and position vectors are outside this matrix subtotal; @tbl-tinygpt-params gives the fuller stored count.
 
 ### The cost of one decode step
 
@@ -180,7 +186,7 @@ def generation_ms(cfg, m, n_tokens):
 ```
 :::
 
-The cache branch removes a factor of $n$ from projection arithmetic and a factor of $n$ from attention arithmetic. It also reduces embedding and linear activation traffic to one row. In exchange it adds $8nDL$ bytes of cache reads and $8DL$ bytes of cache writes to $Q$. That is the trade Chapter 18 made, arithmetic for bandwidth, and it only pays once $n$ is large enough that the recomputation was the dominant term. `generation_ms` sums the steps, so a generation of 128 tokens is 128 calls with $t$ running from 0 to 127. A profiler on a real serving engine reports the same three terms under the names memory-bound, compute-bound, and launch-bound, and the bridge comes back to that vocabulary.
+The cache branch removes a factor of $n$ from projection arithmetic and a factor of $n$ from attention arithmetic. It also reduces embedding and linear activation traffic to one row. In exchange it adds $8nDL$ bytes of cache reads and $8DL$ bytes of cache writes to $Q$. That is the trade @sec-memoization made, arithmetic for bandwidth, and it only pays once $n$ is large enough that the recomputation was the dominant term. `generation_ms` sums the steps, so a generation of 128 tokens is 128 calls with $t$ running from 0 to 127. A profiler on a real serving engine reports the same three terms under the names memory-bound, compute-bound, and launch-bound, and the bridge comes back to that vocabulary.
 
 ### The levers and the waterfall
 
@@ -294,7 +300,32 @@ Running `waterfall(Config(), Machine(), 128)` produces @tbl-capstone-waterfall. 
 
 Most of the initial estimate is the assumed dispatch term. Reducing weight bytes alone barely changes it. Fusion lowers that term, which makes the remaining row-dependent work more consequential. Caching then removes repeated projections and reduces the linear activation traffic to one row, while adding context-dependent reads of stored keys and values.
 
-The order exposes a cost that a parameter count would miss. Reversing `LEVERS` gives marginal factors of 1.10x for caching, 4.93x for fusion, 0.87x for factorization, and 1.03x for INT8, with the same final 30.63 milliseconds. Factorization is a slowdown at that point: its extra products cost dispatch time even though its matrices are smaller. Because the configuration edits commute, the final configuration and total agree in both orders. A real pair of transformations may change one another's weights or supported execution path, so this equality is a property of the model, not a general guarantee.
+The order exposes a cost that a parameter count would miss. Reversing `LEVERS` gives marginal factors of 1.10x for caching, 4.93x for fusion, 0.87x for factorization, and 1.03x for INT8, with the same final 30.63 milliseconds. Factorization is a slowdown at that point: its extra products cost dispatch time even though its matrices are smaller. Because the configuration edits commute, the final configuration and total agree in both orders, as summarized in \ref{nbk-capstone-total-speedup-scorecard}. A real pair of transformations may change one another's weights or supported execution path, so this equality is a property of the model, not a general guarantee.
+
+::: {#nbk-capstone-total-speedup-scorecard .callout-notebook title="Napkin math: multi-optimization compounding scorecard"}
+Track the compounding gains and theoretical limits of stacking all four optimization levers on TinyGPT ($L=4, D=128, V=1000$ for $S=128$ tokens):
+
+- **Baseline (FP32, Dense, Unfused, Uncached)**:
+  - Memory footprint: $4.1\text{ MB}$ parameters.
+  - Latency ledger: $149.8\text{ ms}$ ($O(S^2)$ projections + 208 kernel launches/step).
+- **+ INT8 Quantization**:
+  - Parameter memory: $4.1\text{ MB} \to 1.05\text{ MB}$ ($3.9\times$ compression).
+  - Execution speedup: Marginal $1.00\times$ (memory traffic drops, but dispatch dominates).
+- **+ Low-Rank SVD Factorization (rank 32)**:
+  - Parameter memory: $1.05\text{ MB} \to 0.72\text{ MB}$ ($5.7\times$ total compression).
+  - Matrix arithmetic: Reduces MLP FLOPs by $68\%$, marginal speedup $1.01\times$.
+- **+ Kernel Fusion (pointwise + LayerNorm)**:
+  - Launch overhead: 49 ops/block $\to$ 9 ops/block ($5.4\times$ launch reduction).
+  - Latency: Drops from $148.8\text{ ms} \to 40.7\text{ ms}$ (marginal $3.66\times$ speedup).
+- **+ KV Caching**:
+  - Projection scaling: $O(S^2) \to O(S)$ token evaluation.
+  - Latency: Drops from $40.7\text{ ms} \to 30.6\text{ ms}$ (marginal $1.33\times$ speedup).
+- **Compounded Total**:
+  - Combined speedup: $149.8\text{ ms} / 30.6\text{ ms} = 4.89\times$.
+  - Footprint reduction: $4.1\text{ MB} \to 0.72\text{ MB}$ ($5.7\times$ reduction).
+
+Notice the discrepancy: multiplying solo speedups predicts $1.00 \times 1.01 \times 3.60 \times 1.10 = 4.00\times$, whereas sequential compounding achieves $4.89\times$ because fusion uncovers memory bandwidth savings that were previously masked by launch latency.
+:::
 
 ### Measuring one lever
 
@@ -371,7 +402,7 @@ The `cache.generation()` scope activates cached attention only for the loop and 
 
 The report deliberately names `max_logit_error` rather than filling an `accuracy` field with 1.0. Agreement with the reference tests the cache transformation, not whether this untrained model predicts useful text. A task-quality report needs held-out targets and a specified metric. `generate_submission` expects classification accuracy, so this generation experiment reports its own metrics rather than manufacturing an accuracy value to fit that schema.
 
-Timing begins only after the equivalence checks pass. Its ratio describes 64 fixed prefixes, including the same output collection on both paths; it is neither per-token service latency nor sampled generation throughput. The cache reserves 1,048,576 bytes for this model and still allocates temporary prefixes, as Chapter 18 showed. A complete footprint report should separate these reserved buffers from parameter storage and transient allocations. Repeat the experiment across lengths before extrapolating the speedup to a longer response. Fifteen runs provide an initial median comparison, not a reliable service-tail estimate.
+Timing begins only after the equivalence checks pass. Its ratio describes 64 fixed prefixes, including the same output collection on both paths; it is neither per-token service latency nor sampled generation throughput. The cache reserves 1,048,576 bytes for this model and still allocates temporary prefixes, as @sec-memoization showed. A complete footprint report should separate these reserved buffers from parameter storage and transient allocations. Repeat the experiment across lengths before extrapolating the speedup to a longer response. Fifteen runs provide an initial median comparison, not a reliable service-tail estimate.
 
 ---
 
@@ -381,9 +412,16 @@ A production comparison must establish the combined execution path and its costs
 
 A production runtime can change the execution path behind the same mathematical model. Fusion groups operations so intermediate values need not pass through separate arrays. Graph replay records a fixed dependency structure and reuses it, reducing repeated work in dispatch.[^fn-cuda-graphs-bridge] Packed weight formats can reduce stored bytes and transfers, but dequantization and kernel support determine the resulting time. None of those benefits follows merely from changing `bytes_per_weight` or `fused` in our model. The executable candidate and its workload must establish the gain.
 
-[^fn-cuda-graphs-bridge]: A [CUDA graph](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html) records GPU operations and their dependencies for later replay. Replay can reduce repeated host dispatch work; it does not eliminate the recorded computation or guarantee that every decode workload has a fixed replayable shape.
+::: {#psp-capstone-production-pipeline .callout-production-bridge title="Production bridge: industrial inference serving with TensorRT and Triton"}
+Moving from classroom Python evaluation to industrial production deployment requires automated optimization graphs and specialized inference engines:
 
-What carries over unchanged is the arithmetic of stacking. Time is a sum of terms, each lever shrinks one, and the stack's speedup is what the sum says, not the product of solo measurements. Production engineers speak of a workload being launch-bound, memory-bound, or compute-bound, and each of those words names which term is largest at the moment and therefore which lever is worth applying next. That vocabulary is this chapter's cost model with the numbers filled in by a profiler.
+- **Compilation Graphs (TensorRT / OpenVINO)**: Convert PyTorch models into static computation graphs. TensorRT performs vertical fusion (Conv + Bias + ReLU), horizontal fusion (combining parallel Multi-Head Attention projections), and INT8 calibration with hardware Tensor Core kernels.
+- **Inference Serving (Triton Inference Server)**: Coordinates multi-model orchestration, dynamic batching (accumulating concurrent incoming requests into mini-batches on the fly), and concurrent model execution across multiple GPUs.
+- **CUDA Graphs Integration**: Captures the entire forward execution sequence into an immutable graph launch, reducing per-token CPU-to-GPU dispatch overhead from $10\text{--}20\,\mu\text{s}$ down to sub-microsecond driver triggers.
+- **Deployment CI Quality Gates**: Enforces strict regression suites: a candidate container must verify bitwise equivalence, bounded perplexity delta ($\Delta \text{PPL} \le 0.1$), and strict P99 latency SLAs before traffic routing.
+:::
+
+Production serving stacks automate this optimization progression (\ref{psp-capstone-production-pipeline}). What carries over unchanged is the arithmetic of stacking. Time is a sum of terms, each lever shrinks one, and the stack's speedup is what the sum says, not the product of solo measurements. Production engineers speak of a workload being launch-bound, memory-bound, or compute-bound, and each of those words names which term is largest at the moment and therefore which lever is worth applying next. That vocabulary is this chapter's cost model with the numbers filled in by a profiler.
 
 The model suggests a transformation by identifying the largest estimated term. After implementing that transformation, the profiler and correctness checks determine whether the expected work disappeared and whether another cost became dominant. The final report records the actual stack, its order, input dimensions, timing statistic, and quality result. Those conditions let a reader distinguish a different workload from a failed reproduction.
 
@@ -393,7 +431,7 @@ The model suggests a transformation by identifying the largest estimated term. A
 
 Module 20 turns model execution into a comparison that another reader can check. It validates class scores and labels, measures accuracy, single-sample latency, batch throughput, and stored parameter bytes, then places the resulting values in a report. A submission compares two reports using the same latency statistic, a storage ratio, and an accuracy delta. Validation checks the record's consistency; event eligibility applies a separate rule. The four-row trace passes the first check and fails the second because the candidate loses half its correct predictions.
 
-The analytical model explains why an optimization's marginal gain depends on the work that remains. Its byte ledger distinguishes stored embedding capacity from selected rows and distinguishes uncached prefix rows from a cached single row. The cache experiment then tests real outputs and request state before timing either path. Milestone III carries this discipline to a trained model and a held-out workload. The artifact to preserve is the baseline, candidate, workload, and evidence together; a speedup detached from those cannot explain what improved.
+The analytical model explains why an optimization's marginal gain depends on the work that remains. Its byte ledger distinguishes stored embedding capacity from selected rows and distinguishes uncached prefix rows from a cached single row. The cache experiment then tests real outputs and request state before timing either path. @sec-milestone-3 carries this discipline to a trained model and a held-out workload. The artifact to preserve is the baseline, candidate, workload, and evidence together; a speedup detached from those cannot explain what improved.
 
 ---
 

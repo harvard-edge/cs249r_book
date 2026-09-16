@@ -1,8 +1,8 @@
 # The KV Cache: Remembering Keys and Values During Generation {#sec-memoization}
 
-A three-token prefix needs three key projections. Appending a fourth token and forwarding the whole prefix performs those same three projections again, followed by the one new projection the model actually needs. Chapter 17 examined data movement inside an operator; here the repeated work comes from the loop that calls it. When Milestone II generated text, every new token was produced by feeding the entire sequence so far back through the model, and the loop grew slower with each token it added. We need to separate the work that a new token requires from work already completed for earlier tokens.
+A three-token prefix needs three key projections. Appending a fourth token and forwarding the whole prefix performs those same three projections again, followed by the one new projection the model actually needs. @sec-acceleration examined data movement inside an operator; here the repeated work comes from the loop that calls it. When @sec-milestone-2 generated text, every new token was produced by feeding the entire sequence so far back through the model, and the loop grew slower with each token it added. We need to separate the work that a new token requires from work already completed for earlier tokens.
 
-The answer is a cache of the attention keys and values for the tokens the model has already seen. The mechanism consists of per-layer buffers, a shared write cursor, and an explicit generation scope, and its correctness rests on a single fact about causal attention that we state carefully, since production serving systems are built on the same fact. We build the cache, run it against the full-sequence attention of chapter 12 to check their outputs within a floating-point tolerance, and then examine how a serving engine changes storage when many sequences share memory. The filled prefix in @fig-kv-cache grows even though each step writes only one new position.
+The answer is a cache of the attention keys and values for the tokens the model has already seen. The mechanism consists of per-layer buffers, a shared write cursor, and an explicit generation scope, and its correctness rests on a single fact about causal attention that we state carefully, since production serving systems are built on the same fact. We build the cache, run it against the full-sequence attention of @sec-attention to check their outputs within a floating-point tolerance, and then examine how a serving engine changes storage when many sequences share memory. The filled prefix in @fig-kv-cache grows even though each step writes only one new position.
 
 ::: {#fig-kv-cache fig-env="figure" fig-pos="htb" fig-cap="**The KV cache**: Each step writes one new key and value per head and layer, then attends over the growing prefix. Reserved capacity stays fixed while the number of keys read increases." fig-alt="A current-token box points to static per-layer key and value buffers. A row of slots marks earlier positions, a highlighted current position, and unused capacity. Lower boxes show the attention equation and cache memory formula."}
 ![](assets/images/diagrams/18_memoization-diag-1.svg)
@@ -12,7 +12,7 @@ The answer is a cache of the attention keys and values for the tokens the model 
 
 ## The Problem
 
-Milestone II's generation loop keeps a growing list of token ids. At each step it hands the whole list to `model.forward`, reads the logits at the last position, samples one token, appends it, and goes around again. Nothing in that loop remembers the previous step. Inside every attention layer, the forward pass projects all $t$ tokens into queries, keys, and values, forms the $t \times t$ score matrix, and produces $t$ output rows, of which the loop uses exactly one.
+@sec-milestone-2's generation loop keeps a growing list of token ids. At each step it hands the whole list to `model.forward`, reads the logits at the last position, samples one token, appends it, and goes around again. Nothing in that loop remembers the previous step. Inside every attention layer, the forward pass projects all $t$ tokens into queries, keys, and values, forms the $t \times t$ score matrix, and produces $t$ output rows, of which the loop uses exactly one.
 
 Counting rows makes the waste concrete. Token $x_1$ is pushed through $W_K$ and $W_V$ at step 1, again at step 2, and again at every step after that. Across $S$ successive prefixes of lengths 1 through $S$, the number of rows projected is $1 + 2 + \dots + S = S(S+1)/2$, when $S$ would have been enough. @Lst-kv-projection-count checks the triangle by counting each prefix.
 
@@ -35,7 +35,7 @@ for S in (10, 100, 500):
 ```
 :::
 
-Attention adds a second source of repeated work. The score matrix at step $t$ has $t^2$ entries, so summed over a generation it grows as $S^3$, and the $t-1$ output rows that get discarded each step were each a full pass through the value matrix. Step 500 does roughly 500 times the projection work of step 1 and 250,000 times the score work, which is the recomputation Milestone II counted. Every step also allocates fresh tensors one row larger than the last, so the allocator is busy exactly when the arithmetic is busiest.
+Attention adds a second source of repeated work. The score matrix at step $t$ has $t^2$ entries, so summed over a generation it grows as $S^3$, and the $t-1$ output rows that get discarded each step were each a full pass through the value matrix. Step 500 does roughly 500 times the projection work of step 1 and 250,000 times the score work, which is the recomputation @sec-milestone-2 counted. Every step also allocates fresh tensors one row larger than the last, so the allocator is busy exactly when the arithmetic is busiest.
 
 The remedy is the oldest trick in programming. If a computation is repeated with the same inputs, store the result and look it up. The name for that trick is **memoization**, and the only question is which results are safe to store.
 
@@ -57,7 +57,7 @@ The loop reads the logits at the last position and discards the rest, so the onl
 
 $$\mathbf{o}_t = \text{softmax}\!\left(\frac{\mathbf{q}_t K_{\le t}^T}{\sqrt{d_k}}\right) V_{\le t},$$
 
-where $\mathbf{q}_t = \mathbf{x}_t W_Q$ is the new token's query, $K_{\le t}$ and $V_{\le t}$ are the $t \times d_k$ matrices whose rows are the cached keys and values plus the new one, and $d_k$ is the key width as in chapter 12. No causal mask is needed because the row only contains keys at positions up to $t$; there is nothing in the future to hide. A separate mask can still exclude an earlier key, for example a padding position. The cached implementation honors such masks. This is chapter 12's formula restricted to one query row, and it is a vector-matrix product rather than a matrix-matrix product.
+where $\mathbf{q}_t = \mathbf{x}_t W_Q$ is the new token's query, $K_{\le t}$ and $V_{\le t}$ are the $t \times d_k$ matrices whose rows are the cached keys and values plus the new one, and $d_k$ is the key width as in @sec-attention. No causal mask is needed because the row only contains keys at positions up to $t$; there is nothing in the future to hide. A separate mask can still exclude an earlier key, for example a padding position. The cached implementation honors such masks. This is @sec-attention's formula restricted to one query row, and it is a vector-matrix product rather than a matrix-matrix product.
 
 ### The per-step recurrence
 
@@ -72,6 +72,11 @@ Nothing in steps 1 through 4 touches an old key or value except to read it. The 
 
 ### What it costs and what it buys
 
+::: {.column-margin}
+<img src="assets/images/diagrams/18_memoization-margin-kvcache.svg" width="100%"/>
+*KV cache memory footprint: $2 \times 2 \times L \times S \times D \times \text{bytes}$ grows linearly with sequence length.*
+:::
+
 Per step, the projection work drops from $t$ rows to one and the score work from $t^2$ entries to $t$. Summed over a generation of $S$ tokens, the projections go from $O(S^2)$ to $O(S)$ and the scores from $O(S^3)$ to $O(S^2)$. The step still grows with $t$ through the score row, so caching does not make decode constant-time. The two columns of @tbl-kv-complexity count work for the same final output row. How much of the step this growing read consumes depends on the context length and model width.
 
 | Per-step quantity | Naive loop | With the cache |
@@ -83,14 +88,30 @@ Per step, the projection work drops from $t$ rows to one and the score work from
 
 : **Per-step work**: Work at generation step $t$ for one attention layer, with and without the cache. {#tbl-kv-complexity tbl-colwidths="[40,30,30]"}
 
-The price is memory. Every token adds one key row and one value row per head per layer, and they stay for the life of the sequence. For a hypothetical model with 32 layers, 32 heads of width 128, and 16-bit values, one token costs $2 \times 32 \times 32 \times 128 \times 2$ bytes, which is 524,288 bytes per token. A 4,096-token context costs 2,147,483,648 bytes, about 2.15 GB, per sequence before the weights are counted. Serve 64 such sequences at once and the cache alone requires about 137 GB. Memory has been traded for compute, and whether the trade pays depends on the recomputation avoided, the bandwidth available, and the cache capacity. The cache saves repeated projections while retaining keys and values that each later query must read, which is the thread the production bridge picks up.
+The price is memory. Every token adds one key row and one value row per head per layer, and they stay for the life of the sequence. For a hypothetical model with 32 layers, 32 heads of width 128, and 16-bit values, one token costs $2 \times 32 \times 32 \times 128 \times 2$ bytes, which is 524,288 bytes per token. A 4,096-token context costs 2,147,483,648 bytes, about 2.15 GB, per sequence before the weights are counted. Serve 64 such sequences at once and the cache alone requires about 137 GB. Memory has been traded for compute, and whether the trade pays depends on the recomputation avoided, the bandwidth available, and the cache capacity, as budgeted in \ref{nbk-memoization-kvcache-scaling}. The cache saves repeated projections while retaining keys and values that each later query must read, which is the thread the production bridge picks up.
+
+::: {#nbk-memoization-kvcache-scaling .callout-notebook title="Napkin math: KV cache memory footprint and throughput scaling"}
+For autoregressive generation, calculate the KV cache memory footprint across context lengths and concurrency:
+
+- **Per-Token Buffer Formula**:
+  $$\text{Memory per token} = 2 \times (\text{Key} + \text{Value}) \times L \times D \times b$$
+  where $L$ is the number of transformer layers, $D$ is model embedding dimension ($H \times d_k$), and $b$ is byte width per float.
+- **TinyGPT ($L=4, D=64, \text{FP32 } b=4$)**:
+  $$2 \times 4 \times 64 \times 4\text{ B} = 2{,}048\text{ bytes per token} = 2\text{ KB/token}.$$
+  For $S = 512$ sequence length: $512 \times 2\text{ KB} = 1.0\text{ MB}$ per sequence.
+- **Production LLaMA-3-8B ($L=32, H_{kv}=8, d_k=128, D_{kv}=1024, \text{BF16 } b=2$)**:
+  $$2 \times 32 \times 1024 \times 2\text{ B} = 131{,}072\text{ bytes per token} = 128\text{ KB/token}.$$
+  For $S = 8{,}192$ context length: $8{,}192 \times 128\text{ KB} = 1.05\text{ GB}$ per sequence.
+  Serving a batch of 64 concurrent requests requires $64 \times 1.05\text{ GB} = 67.2\text{ GB}$ dedicated exclusively to the KV cache, far exceeding the model weights ($16\text{ GB}$).
+:::
 
 ---
 
 ## The Code
 
-::: {.callout-note title="Source Code Mapping"}
-The listings in this chapter are extracted from Module 18 (`src/18_memoization/18_memoization.py`), which the package exports as `tinytorch.perf.memoization`. `KVCache` is the buffer, `_cached_generation_step` is one token through one attention layer, `CachedAttention` is the stand-in that routes a block's attention calls to it, and `enable_kv_cache`, `_cached_generate`, and `disable_kv_cache` attach the cache to a finished `GPT`, generate with it, and take it off again. The extracted functions run on chapter 13's model. The worked examples set small weights and inputs so their behavior can be checked independently.
+::: {.column-margin}
+**Source Code Mapping**:
+The listings in this chapter are extracted from Module 18 (`src/18_memoization/18_memoization.py`), which the package exports as `tinytorch.perf.memoization`. `KVCache` is the buffer, `_cached_generation_step` is one token through one attention layer, `CachedAttention` is the stand-in that routes a block's attention calls to it, and `enable_kv_cache`, `_cached_generate`, and `disable_kv_cache` attach the cache to a finished `GPT`, generate with it, and take it off again. The extracted functions run on @sec-transformers's model. The worked examples set small weights and inputs so their behavior can be checked independently.
 :::
 
 ### A buffer sized up front, with one cursor
@@ -99,7 +120,7 @@ Every attention layer in TinyGPT needs somewhere to keep the keys and values of 
 
 The obvious container is a list that grows, or in NumPy a `concatenate` of the old rows with the new one. Concatenate copies. At step $t$ it allocates a fresh $t$-row array, copies the $t-1$ rows already there, and frees the array from the step before. Over a generation of $S$ tokens the copying alone moves $S(S+1)/2$ rows, the same triangle we counted in The Problem, only now it is bytes moved instead of rows projected, and the allocator runs once per layer per step, exactly when the arithmetic is busiest. We would have removed the recomputation and kept its shape.
 
-A write can cost the same at step 500 as at step 1 if the maximum sequence length is known before allocation. Allocate `max_seq_len` rows per layer once, keep one integer that says how many are filled, and make each step a single write at that cursor. The write copies one new row into its reserved slot. Reading the history starts with a NumPy slice up to the cursor, but `get` wraps that slice in a new `Tensor`. Chapter 1's constructor copies its input, so this implementation copies the prefix on read. Preallocation fixes persistent storage; it does not eliminate all temporary allocations.
+A write can cost the same at step 500 as at step 1 if the maximum sequence length is known before allocation. Allocate `max_seq_len` rows per layer once, keep one integer that says how many are filled, and make each step a single write at that cursor. The write copies one new row into its reserved slot. Reading the history starts with a NumPy slice up to the cursor, but `get` wraps that slice in a new `Tensor`. @sec-tensor's constructor copies its input, so this implementation copies the prefix on read. Preallocation fixes persistent storage; it does not eliminate all temporary allocations.
 
 {{< include _listings/18_memoization/KVCache.qmd >}}
 
@@ -113,13 +134,13 @@ For batch size one, four layers of four heads of width 32 over 256 positions res
 
 ### One query row against the cached keys
 
-At every step the generation loop reads one row of logits, the last one, and throws the rest away. Chapter 12's `MultiHeadAttention.forward` does not know that. Hand it the $t$ tokens seen so far and it projects all $t$ of them, forms the $t \times t$ score matrix, masks the upper triangle, and returns $t$ output rows. At step 500 that is 1,500 row projections, 250,000 scores, and 499 output rows computed and thrown away so that one row can be read.
+At every step the generation loop reads one row of logits, the last one, and throws the rest away. @sec-attention's `MultiHeadAttention.forward` does not know that. Hand it the $t$ tokens seen so far and it projects all $t$ of them, forms the $t \times t$ score matrix, masks the upper triangle, and returns $t$ output rows. At step 500 that is 1,500 row projections, 250,000 scores, and 499 output rows computed and thrown away so that one row can be read.
 
 The Idea showed that the one row we keep depends only on $\mathbf{q}_t$ and the cached $K_{\le t}$ and $V_{\le t}$. The cached step projects one row instead of $t$, writes its key and value into the cache, reads the history back, and scores that single query against the $t$ keys. The score matrix collapses to a score row, the $t$ softmaxes to one softmax over $t$ numbers, and causal masking becomes unnecessary because every key in the prefix sits at or before position $t$. An explicit mask can still remove keys from that prefix. The function takes the block's own attention layer, so it uses the layer's projections and head count and owns no weights of its own.
 
 {{< include _listings/18_memoization/_cached_generation_step.qmd >}}
 
-Read the six steps against the recurrence in The Idea. Step 1 projects the one new token through the layer's three projections, the vector-matrix shape chapter 14 showed is memory bound. Step 2 splits the row across heads, so that every head has its own $1 \times d_k$ query, key, and value. Steps 3 and 4 are the exchange with the cache: write the new key and value at the cursor, read the history, and append the new row to it, so `K_all` holds tokens $1$ through $t$ with the newest last. Step 5 computes scores of shape `(batch, heads, 1, t)`, applies an optional binary mask, and normalizes along the last axis. A mask value of zero excludes a key; a query with no allowed key raises an error because its softmax would be undefined. The helper uses raw NumPy arrays for this inference-only calculation, so the cache does not preserve attention gradients. The surrounding model can still record other operations unless the caller enters `no_grad()`. Step 6 stitches the heads back together and applies the output projection, exactly as the full layer would.
+Read the six steps against the recurrence in The Idea. Step 1 projects the one new token through the layer's three projections, the vector-matrix shape @sec-profiling showed is memory bound. Step 2 splits the row across heads, so that every head has its own $1 \times d_k$ query, key, and value. Steps 3 and 4 are the exchange with the cache: write the new key and value at the cursor, read the history, and append the new row to it, so `K_all` holds tokens $1$ through $t$ with the newest last. Step 5 computes scores of shape `(batch, heads, 1, t)`, applies an optional binary mask, and normalizes along the last axis. A mask value of zero excludes a key; a query with no allowed key raises an error because its softmax would be undefined. The helper uses raw NumPy arrays for this inference-only calculation, so the cache does not preserve attention gradients. The surrounding model can still record other operations unless the caller enters `no_grad()`. Step 6 stitches the heads back together and applies the output projection, exactly as the full layer would.
 
 The ordering of steps 3 and 4 is where this code goes wrong when written from scratch. The boundary is `seq_pos`: `get` excludes the current slot until `advance`. Forgetting the concatenation therefore removes self-attention; advancing before the concatenation includes the new row twice. Reading the history before the write would still work if the new row were appended explicitly. The invariant is which positions appear exactly once, rather than write-before-read alone.
 
@@ -133,9 +154,9 @@ The scope changes one flag, `_generation_active`. Entering it saves the flag's p
 
 ### Prefill and decode through the same step
 
-A request arrives as a prompt of $P$ tokens, and only then does the model produce one token at a time. Milestone II named the two phases prefill and decode. The cache is what makes decode cheap, but prefill has to fill it first, and the request after this one must not see this one's tokens.
+A request arrives as a prompt of $P$ tokens, and only then does the model produce one token at a time. @sec-milestone-2 named the two phases prefill and decode. The cache is what makes decode cheap, but prefill has to fill it first, and the request after this one must not see this one's tokens.
 
-The tempting way to build that is two paths, the full-sequence attention of chapter 12 for the prompt and the cached step for decode, with the keys and values handed from one to the other. Two paths means two places for the ordering bug to hide and a hand-off that has to agree about where the cursor is. The failure here is quiet. Forget to reset between requests and the new prompt's first token attends over the old prompt's keys, and no exception reports it; the model simply answers a question nobody asked.
+The tempting way to build that is two paths, the full-sequence attention of @sec-attention for the prompt and the cached step for decode, with the keys and values handed from one to the other. Two paths means two places for the ordering bug to hide and a hand-off that has to agree about where the cursor is. The failure here is quiet. Forget to reset between requests and the new prompt's first token attends over the old prompt's keys, and no exception reports it; the model simply answers a question nobody asked.
 
 The module therefore runs both phases inside one generation scope, with one token per call, `advance` once per token, and `reset` once at the top. Attaching the cache is a loop over the blocks.
 
@@ -145,7 +166,7 @@ The helper it calls first, `_create_cache_storage`, checks that the model has th
 
 {{< include _listings/18_memoization/_cached_generate.qmd >}}
 
-The loop owns the request lifetime. `reset` first clears the previous request, and `with cache.generation():` activates cached routing until the loop exits. Two further details keep the positions consistent. Every call feeds exactly one token, with `start_pos=cache.seq_pos`, which is the argument chapter 11 gave the position table and chapter 13 threaded through `GPT.forward` so that a single token knows where in the sequence it sits; without it every cached step would be embedded at position zero. The caller invokes `advance` exactly once per token, after the whole stack of blocks has processed it, so every layer writes the same slot.
+The loop owns the request lifetime. `reset` first clears the previous request, and `with cache.generation():` activates cached routing until the loop exits. Two further details keep the positions consistent. Every call feeds exactly one token, with `start_pos=cache.seq_pos`, which is the argument @sec-embeddings gave the position table and @sec-transformers threaded through `GPT.forward` so that a single token knows where in the sequence it sits; without it every cached step would be embedded at position zero. The caller invokes `advance` exactly once per token, after the whole stack of blocks has processed it, so every layer writes the same slot.
 
 For a nonempty prompt, the final prefill logits predict the first generated token. The loop then samples that token and processes it to obtain the next logits. The final requested token is returned without another forward pass because its logits would be unused. For prompt length $P$ and positive output length $N$, the cursor ends at $P+N-1$. The generation check nevertheless requires the returned sequence length $P+N$ to be no greater than `max_seq_len`, matching `GPT.generate`'s limit on the returned sequence length. These are different counts: the last returned token occupies the output list but has no cached key or value. A zero-token request returns an empty list after resetting the cache. Prefilling one token at a time costs $P$ sequential steps; the bridge shows what production does instead. After the scope exits, ordinary forwards stop reading the cache even though its buffers remain attached. Taking the wrappers off entirely is the loop in reverse.
 
@@ -251,7 +272,7 @@ with no_grad():
 
 Zero temperature chooses the largest logit and makes the comparison independent of sampling randomness. Repeating the request checks that `reset` begins again at slot 0. The ordinary forward between requests checks a different boundary: leaving the scope restores ordinary routing without erasing the cache. In a manual replay, the caller must supply both `with cache.generation():` and `start_pos=cache.seq_pos`, then advance once after the complete model call. Resetting a cursor without entering the scope would compute each token independently and would fail the equivalence check.
 
-Correctness and timing need separate evidence. The generation-speedup script in Milestone 06 replays a fixed sequence through both paths, compares the logits at every position, then measures repeated replays after warmup. Holding the token sequence fixed avoids timing two different sampled workloads. No numerical speedup follows from the three-row trace alone. Longer prefixes increase the work saved, but prefix copies, matrix multiplication overhead, and the model's remaining layers determine the elapsed-time ratio. Chapter 19 develops the measurement method.
+Correctness and timing need separate evidence. The generation-speedup script in @sec-milestone-3 replays a fixed sequence through both paths, compares the logits at every position, then measures repeated replays after warmup. Holding the token sequence fixed avoids timing two different sampled workloads. No numerical speedup follows from the three-row trace alone. Longer prefixes increase the work saved, but prefix copies, matrix multiplication overhead, and the model's remaining layers determine the elapsed-time ratio. @sec-benchmarking develops the measurement method.
 
 ---
 
@@ -263,7 +284,21 @@ A production implementation can also prefill several prompt positions together. 
 
 The memory budget follows directly from the reference layout. For $L$ layers, $H$ key/value heads, head width $d_k$, and $b$ bytes per value, each cached position requires $2LHd_kb$ bytes per sequence. Grouped-query attention lets multiple query heads share a key/value head, reducing $H$ in this expression. Quantized caches reduce $b$ by approximating stored values. A sliding window instead limits how many positions remain visible. TinyTorch implements none of these storage changes; its cache retains float32 rows up to its fixed capacity and raises an error when full.
 
-A different allocation strategy can preserve all the rows while reserving less unused space. [PagedAttention](https://arxiv.org/abs/2309.06180), introduced by Kwon and colleagues, divides a request's keys and values into blocks that need not be contiguous in physical memory.[^fn-virtual-memory-paged-kv] A block table maps a logical position to its allocated block. New blocks arrive as the sequence grows, and completed requests release blocks for reuse. This changes where attention finds the keys, rather than which keys the query can see. Prefix sharing can additionally reuse blocks containing identical earlier context.
+A different allocation strategy can preserve all the rows while reserving less unused space. [PagedAttention](https://arxiv.org/abs/2309.06180), introduced by Kwon and colleagues, divides a request's keys and values into blocks that need not be contiguous in physical memory.[^fn-virtual-memory-paged-kv] A block table maps a logical position to its allocated block. New blocks arrive as the sequence grows, and completed requests release blocks for reuse. This changes where attention finds the keys, rather than which keys the query can see, as analyzed in \ref{psp-memoization-paged-attention-vllm}. Prefix sharing can additionally reuse blocks containing identical earlier context.
+
+::: {#psp-memoization-paged-attention-vllm .callout-production-bridge title="Production bridge: vLLM and PagedAttention memory management"}
+In naive serving engines, allocating contiguous memory buffers for `max_seq_len` up front wastes up to 60–80% of high-bandwidth GPU memory due to three forms of fragmentation:
+
+- **Internal Fragmentation**: Unused reserved slots when requests finish before reaching `max_seq_len`.
+- **External Fragmentation**: Memory gaps between requests of varying length.
+- **Reservation Fragmentation**: Reserving peak sequence capacity before tokens are generated.
+
+The **PagedAttention** algorithm (Kwon et al., 2023, powering **vLLM**) adopts operating system virtual memory principles:
+- **Non-Contiguous KV Blocks**: Keys and values are partitioned into fixed-size physical blocks (typically 16 or 32 tokens).
+- **Block Tables**: A dynamic page table maps logical token positions $(0 \dots t)$ to non-contiguous physical GPU memory pages.
+- **Zero-Waste Allocation**: Memory blocks are allocated on demand as tokens are generated, reducing memory waste to under 4%.
+- **Copy-on-Write Prefix Sharing**: Parallel beams in beam search or shared system prompts reference the same physical KV blocks, enabling instantaneous prefix reuse.
+:::
 
 @Tbl-kv-bridge separates these alternatives from the reference. Paging can preserve the full-context computation, subject to the same floating-point tolerance. Quantization introduces approximation, and a sliding window changes the attended context; each requires its own quality check. Increased latency at long context is a reason to measure growing cache reads, not proof that they are the only bottleneck. The invariant remains that every required position occurs once, belongs to this request, and carries the same key and value that an uncached causal forward would compute.
 
@@ -285,7 +320,7 @@ A different allocation strategy can preserve all the rows while reserving less u
 
 A cached step projects one new token, writes its key and value at `seq_pos`, joins the copied history with the current row, and computes one attention output. Every layer uses the same slot before the model-level caller advances once. The causal dependency of earlier rows makes their keys and values reusable, while the growing score row keeps attention work proportional to context length.
 
-The lifetime has two boundaries. `reset` starts a new sequence; `cache.generation()` selects cached execution and restores ordinary forwards when its block exits. `_cached_generate` owns both boundaries, including the position offset and the decision not to forward the last sampled token. The trace verifies all cached outputs against the full causal computation, then checks that a later ordinary request sees no stale history. Chapter 19 takes this correctness check as the starting point for measuring elapsed time with warmups, repeated samples, and reported variation.
+The lifetime has two boundaries. `reset` starts a new sequence; `cache.generation()` selects cached execution and restores ordinary forwards when its block exits. `_cached_generate` owns both boundaries, including the position offset and the decision not to forward the last sampled token. The trace verifies all cached outputs against the full causal computation, then checks that a later ordinary request sees no stale history. @sec-benchmarking takes this correctness check as the starting point for measuring elapsed time with warmups, repeated samples, and reported variation.
 
 ---
 
