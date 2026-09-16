@@ -29,6 +29,14 @@ on:
   issue_comment:
     types: [created, edited]
 
+# Every run commits to a project's .all-contributorsrc and pushes to dev, so two
+# credits posted close together race on the same file and one silently loses its
+# update. Serialize them. Never cancel in progress: a cancelled run drops that
+# contributor's credit entirely, which is worse than waiting.
+concurrency:
+  group: all-contributors-add-${{ github.ref }}
+  cancel-in-progress: false
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -378,7 +386,30 @@ jobs:
             while ((m = tokenRe.exec(stripped)) !== null) {
               if (validTypes.includes(m[1])) regexTypes.add(m[1]);
             }
-            if (regexTypes.size > 0) {
+            // An explicit "for <types>" clause is the author stating exactly what
+            // they mean, so it wins outright instead of being unioned with the LLM.
+            // Observed 2026-09-16: four of four "... for bug in <project>" comments
+            // came back from the LLM as ["bug","code"], and the union credited code
+            // to reporters who wrote none. Scanning the whole tail after "for" is
+            // safe because no project key is also a contribution-type keyword.
+            const forIdx = stripped.search(/\bfor\b/);
+            const explicitTypes = new Set();
+            if (forIdx !== -1) {
+              const tail = stripped.slice(forIdx + 3);
+              const tailRe = /\b(bug|code|doc|design|ideas|review|test|tool)\b/g;
+              let t;
+              while ((t = tailRe.exec(tail)) !== null) {
+                if (validTypes.includes(t[1])) explicitTypes.add(t[1]);
+              }
+            }
+
+            if (explicitTypes.size > 0) {
+              const before = JSON.stringify(types);
+              types = [...explicitTypes];
+              console.log(`Explicit "for" clause is authoritative — LLM=${before} -> ${JSON.stringify(types)}`);
+            } else if (regexTypes.size > 0) {
+              // Freeform comment: the LLM is doing the real work here and the regex
+              // is only a safety net, so union rather than replace.
               const merged = new Set([...types, ...regexTypes]);
               const before = JSON.stringify(types);
               types = [...merged];
