@@ -3,7 +3,6 @@
 # =============================================================================
 # Two Quarto projects share this directory:
 #   • the website (this directory's _quarto.yml, project type "website")
-#   • the lab guide PDF (pdf/_quarto.yml, project type "book")
 #
 # Both consume the same chapter qmd files in modules/. Hand-authored SVG
 # diagrams in assets/images/diagrams/ are the source-of-truth artifacts —
@@ -15,8 +14,7 @@
 # keeps serving SVGs while the PDF embeds the pre-converted vector PDFs.
 #
 # Common entry points:
-#   make            — alias for `make pdf`
-#   make pdf        — convert SVGs to PDFs + render the lab guide
+#   make            — alias for `make site`
 #   make site       — render the website (HTML)
 #   make figures    — only convert SVGs to PDFs (no render)
 #   make clean      — remove caches + generated diagram PDFs
@@ -58,34 +56,7 @@ QUARTO := quarto
 # Treat every target below as phony except the actual file recipes.
 .PHONY: all pdf site figures clean distclean help check-tools
 
-all: pdf
-
-install-deps: ## Install system + LaTeX packages needed to build the PDF.
-	@# apt packages (requires sudo on CI / Linux; no-op elsewhere)
-	@if [ -f pdf/apt-requirements.txt ] && command -v apt-get >/dev/null 2>&1; then \
-	  echo "  installing apt packages from pdf/apt-requirements.txt"; \
-	  sudo apt-get update -y; \
-	  grep -v '^#' pdf/apt-requirements.txt | grep -v '^$$' | xargs -r sudo apt-get install -y; \
-	fi
-	@# TinyTeX / LaTeX packages (tlmgr from the Quarto TinyTeX install)
-	@if [ -f pdf/tex-requirements.txt ]; then \
-	  TLMGR="$$(command -v tlmgr 2>/dev/null || true)"; \
-	  if [ -z "$$TLMGR" ]; then \
-	    for dir in "$$HOME/bin" "$$HOME/.TinyTeX" "$$HOME/Library/TinyTeX" "$${APPDATA:-}/TinyTeX"; do \
-	      [ -d "$$dir" ] || continue; \
-	      TLMGR="$$(find "$$dir" \( -name tlmgr -o -name tlmgr.bat \) -type f 2>/dev/null | head -n 1)"; \
-	      [ -n "$$TLMGR" ] && break; \
-	    done; \
-	  fi; \
-	  if [ -n "$$TLMGR" ]; then \
-	    echo "  installing TeX packages from pdf/tex-requirements.txt using $$TLMGR"; \
-	    "$$TLMGR" update --self || true; \
-	    grep -v '^#' pdf/tex-requirements.txt | grep -v '^$$' | xargs -r "$$TLMGR" install; \
-	  else \
-	    echo "  tlmgr not found; skipping TeX package install"; \
-	  fi; \
-	fi
-	@echo "  dependencies installed"
+all: site
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "Targets:\n"} \
@@ -105,7 +76,8 @@ figures: $(PDFS) ## Convert all SVG diagrams to PDF (for LaTeX embedding).
 # ── Render targets ────────────────────────────────────────────────────
 # `make pdf` is the canonical "rebuild the lab guide" command. It
 # converts every SVG to PDF, then runs Quarto. The Lua filter in
-# pdf/_quarto.yml rewrites .svg → .pdf for the PDF format only.
+# The book (../book) borrows guide/tools/diagrams/svg-to-pdf.lua, which rewrites
+# .svg → .pdf for the PDF format only, so the sibling PDFs are still needed.
 #
 # Quarto's post-render cleanup step exits non-zero because the book
 # project reads chapters at `../modules/...` — outside its own project
@@ -115,60 +87,20 @@ figures: $(PDFS) ## Convert all SVG diagrams to PDF (for LaTeX embedding).
 # run Quarto, capture its exit code, then *verify the PDF exists* and
 # treat the cleanup error as benign only if it does. If the PDF is
 # missing, fail loudly — that's a real build failure.
-# Quarto writes the rendered book into pdf/_build/ (see `output-dir: _build`
-# in pdf/_quarto.yml) — this matches every other Quarto project in the repo
-# (kits, slides, site, labs, etc. all emit under _build/). CI workflows
-# (tinytorch-build-pdfs.yml, tinytorch-update-pdfs.yml) upload the artifact
-# directly from pdf/_build/TinyTorch-Guide.pdf. Local dev should also use
-# the _build/ path; there is no duplicate copy.
-PDF_OUT := pdf/_build/TinyTorch-Guide.pdf
 
 # Single canonical PDF output — the ONLY shippable file.
-# pre-build: rm any stray top-level pdf/TinyTorch-Guide.pdf from a
-#            past build (don't confuse the author).
-# post-build: self-heal if Quarto's cleanup error leaves the PDF at
-#             pdf/ top level instead of pdf/_build/.
 #             Verify no duplicate copies exist.
-pdf: figures ## Build the TinyTorch Lab Guide PDF — ONE file at pdf/_build/TinyTorch-Guide.pdf.
-	@rm -f pdf/TinyTorch-Guide.pdf
-	@set +e; \
-	  cd pdf && $(QUARTO) render; \
-	  quarto_exit=$$?; \
-	  cd ..; \
-	  if [ ! -f "$(PDF_OUT)" ] && [ -f "pdf/TinyTorch-Guide.pdf" ]; then \
-	    mkdir -p pdf/_build; \
-	    mv pdf/TinyTorch-Guide.pdf "$(PDF_OUT)"; \
-	  fi; \
-	  if [ ! -f "$(PDF_OUT)" ]; then \
-	    echo "ERROR: $(PDF_OUT) was not produced (quarto exit=$$quarto_exit)"; \
-	    exit 1; \
-	  fi; \
-	  if [ -f "pdf/TinyTorch-Guide.pdf" ]; then \
-	    rm -f pdf/TinyTorch-Guide.pdf; \
-	    echo "  (removed stray top-level pdf/TinyTorch-Guide.pdf)"; \
-	  fi; \
-	  if [ $$quarto_exit -ne 0 ]; then \
-	    echo "  note: quarto exited $$quarto_exit on post-render cleanup (benign — see Makefile)"; \
-	  fi; \
-	  size=$$(du -h "$(PDF_OUT)" | cut -f1); \
-	  echo ""; \
-	  echo "  ┌────────────────────────────────────────────────────────────┐"; \
-	  echo "  │  FINAL PDF (the only shippable file):                      │"; \
-	  echo "  │  $(PDF_OUT)  ($$size)"; \
-	  echo "  └────────────────────────────────────────────────────────────┘"
-
 site: ## Build the website (HTML).
 	@$(QUARTO) render
 
 # ── Maintenance ───────────────────────────────────────────────────────
 clean: ## Remove Quarto caches + generated diagram PDFs + any stray top-level PDF.
-	@rm -rf _tmp pdf/_build pdf/index_files modules/*_files pdf/.quarto
+	@rm -rf _tmp modules/*_files
 	@rm -rf *_files
 	@rm -f $(DIAGRAM_DIR)/*.pdf
-	@rm -f pdf/TinyTorch-Guide.pdf pdf/index.tex pdf/index.log pdf/index.aux pdf/index.toc pdf/index.out
 	@echo "  cleaned caches, generated diagram PDFs, stray *_files dirs, and stray PDF copies"
 
-distclean: clean ## Also remove website output. (clean already removes pdf/_build/.)
+distclean: clean ## Also remove website output.
 	@rm -rf _site
 	@echo "  removed rendered outputs"
 
