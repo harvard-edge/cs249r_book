@@ -194,7 +194,7 @@ The processor core then samples concrete token $y_t \sim \mathbf{p}_t$ according
 A critical systems distinction in the Stochastic Computer is the difference between a **single forward step** and a **complete response generation**:
 
 1. **A Single Step:** A single forward pass through the network evaluates attention over existing state and emits next-token logit scores $\mathbf{z}_t$. It is an atomic numerical transform.
-2. **A Complete Response:** Response generation is an iterative control loop executed by the model serving harness. It repeatedly invokes the step transform, samples $y_t$, appends $(k_t, v_t)$ to serving memory, checks termination predicates (such as emitting an `<|eot_id|>` token, reaching an explicit stop string, or hitting $N_{\text{max\_tokens}}$), and loops until halted.
+2. **A Complete Response:** Response generation is an iterative control loop executed by the model serving harness. It repeatedly invokes the step transform, samples $y_t$, appends $(k_t, v_t)$ to serving memory, checks termination predicates (such as emitting an `<|eot_id|>` token, reaching an explicit stop string, or hitting $K_{\max}$), and loops until halted.
 
 ::: {#fig-autoregressive-loop fig-env="figure" fig-pos="htb" fig-cap="**Autoregressive Serialization Loop**: The causal execution loop of autoregressive token generation. Each generated token requires a discrete accelerator forward pass, memory state update, and non-deterministic sampling before the subsequent step can initiate." fig-alt="Flowchart illustrating the causal loop of autoregressive decoding, showing forward pass, KV cache mutation, and serial dependency."}
 ```mermaid
@@ -370,8 +370,8 @@ To prevent unvalidated byte streams from corrupting host state, a dependable hos
 
 | Status Class          | Physical Trigger Condition                                                                                         | Payload Invariants                                                          | Mandatory Runtime Recovery Policy                                                                          |
 |:----------------------|:-------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
-| **Completed**         | Token $w_t \in \mathcal{S}_{\text{stop}}$ emitted with $N_{\text{out}} < K_{\max}$ and $T_{\text{rpc}} < T_{\max}$ | Syntax structurally complete; terminal delimiter present; schema unverified | Route payload to syntax parser and permission gate; proceed to tool evaluation.                            |
-| **Incomplete**        | Decode reaches $N_{\text{out}} = K_{\max}$ or socket deadline $T_{\max}$ expires                                   | Partial token buffer; dangling delimiters; unparseable syntax tree          | Check latency budget $T_{\text{remain}}$; if sufficient, roll context forward; otherwise abort trajectory. |
+| **Completed**         | Token $w_t \in \mathcal{S}_{\text{stop}}$ emitted with $K < K_{\max}$ and $T_{\text{rpc}} < T_{\max}$ | Syntax structurally complete; terminal delimiter present; schema unverified | Route payload to syntax parser and permission gate; proceed to tool evaluation.                            |
+| **Incomplete**        | Decode reaches $K = K_{\max}$ or socket deadline $T_{\max}$ expires                                   | Partial token buffer; dangling delimiters; unparseable syntax tree          | Check latency budget $T_{\text{remain}}$; if sufficient, roll context forward; otherwise abort trajectory. |
 | **Refusal**           | Safety classifier trigger or alignment policy refusal intercept                                                    | Task payload null; diagnostic policy message present                        | Log policy code; escalate to supervisory planner or human operator; do not retry identical prompt.         |
 | **Transport Failure** | Network timeout ($T_{\text{rpc}} \ge T_{\max}$), HTTP 5xx, or remote KV cache allocation panic                     | Payload null or socket stream severed prematurely                           | Execute exponential backoff with full jitter; on exhausted retries, fail over to secondary pinned replica. |
 
@@ -381,9 +381,9 @@ To prevent unvalidated byte streams from corrupting host state, a dependable hos
 
 When an invocation returns `Incomplete`, the runtime must evaluate the trade-off between a *context roll-forward* and an *abort*. In a context roll-forward, the runtime appends the truncated prefix directly to the conversation history as an assistant turn and dispatches an immediate follow-up invocation instructing the model to resume generation from the exact point of interruption.
 
-However, continuation is governed by latency and compute economics. Because the subsequent prefill must process the expanded input length $N_{\text{in}}' = N_{\text{in}} + K_{\max}$, prefill latency increases. If the remaining trajectory latency budget $T_{\text{remain}}$ cannot accommodate the minimum required compute:
+However, continuation is governed by latency and compute economics. Because the subsequent prefill must process the expanded input length $M' = M + K_{\max}$, prefill latency increases. If the remaining trajectory latency budget $T_{\text{remain}}$ cannot accommodate the minimum required compute:
 
-$$T_{\text{remain}} < T_{\text{prefill}}(N_{\text{in}} + K_{\max}) + T_{\text{decode}}(K_{\min})$$
+$$T_{\text{remain}} < T_{\text{prefill}}(M + K_{\max}) + T_{\text{decode}}(K_{\min})$$
 
 where $K_{\min}$ is the minimum token budget required to close open syntax blocks, the runtime must reject roll-forward and abort the task branch immediately.
 
@@ -491,9 +491,9 @@ The performance divergence between prefill and decode is governed by the hardwar
 
 $$I = \frac{\text{Floating-Point Operations (FLOPs)}}{\text{Memory Traffic (Bytes Transferred)}}$$ {#eq-vol3-arithmetic-intensity}
 
-During the prompt prefill phase, the processor ingests all $N_{\text{in}}$ tokens concurrently. The causal attention projection and feed-forward network layers evaluate across the entire input sequence simultaneously as dense General Matrix-Matrix Multiplications (GEMMs). Because the accelerator reuses parameter weight matrices across all $N_{\text{in}}$ tokens within registers and on-chip SRAM, arithmetic intensity scales directly with sequence length:
+During the prompt prefill phase, the processor ingests all $M$ prompt tokens concurrently. The causal attention projection and feed-forward network layers evaluate across the entire input sequence simultaneously as dense General Matrix-Matrix Multiplications (GEMMs). Because the accelerator reuses parameter weight matrices across all $M$ tokens within registers and on-chip SRAM, arithmetic intensity scales directly with sequence length:
 
-$$I_{\text{prefill}} \propto \min(N_{\text{in}}, B_{\text{max}})$$
+$$I_{\text{prefill}} \propto \min(M, B_{\max})$$
 
 For prompt contexts exceeding several thousand tokens, arithmetic intensity readily surpasses $100\text{ FLOP/byte}$, pushing execution well past the machine balance knee of accelerator hardware (for instance, an NVIDIA H100 SXM offering $3.35\text{ TB/s}$ of HBM3 bandwidth alongside nearly $2\text{,}000\text{ TFLOP/s}$ of 16-bit tensor compute). Consequently, prefill is strictly compute-bound. Accelerator tensor units operate near thermal saturation, and execution latency scales with parameter count and context length.
 
@@ -513,9 +513,9 @@ On an NVIDIA H100 SXM accelerator (delivering nearly $2\text{,}000\text{ TFLOP/s
 
 ### Latency Regimes and State Growth
 
-The interaction between prompt length $N_{\text{in}}$ and generation length $N_{\text{out}}$ partitions model invocations into four distinct operational regimes. @tbl-vol3-latency-regimes outlines how resource bottlenecks shift across typical agent interaction patterns.
+The interaction between prompt length $M$ and generation length $K$ partitions model invocations into four distinct operational regimes. @tbl-vol3-latency-regimes outlines how resource bottlenecks shift across typical agent interaction patterns.
 
-| Regime                | Context ($N_{\text{in}}$) | Output ($N_{\text{out}}$) | Dominant Latency Phase                    | Hardware Bottleneck                             | Representative Agent Workload                               |
+| Regime                | Context ($M$)             | Output ($K$)              | Dominant Latency Phase                    | Hardware Bottleneck                             | Representative Agent Workload                               |
 |:----------------------|:--------------------------|:--------------------------|:------------------------------------------|:------------------------------------------------|:------------------------------------------------------------|
 | **Ingestion-Heavy**   | High ($\ge 32\text{k}$)   | Low ($\le 100$)           | $T_{\text{prefill}}$ (TTFT)               | Tensor Core compute (GEMM)                      | Repository inspection, log classification, tool selection   |
 | **Generation-Heavy**  | Low ($\le 1\text{k}$)     | High ($\ge 1\text{k}$)    | $\sum T_{\text{decode}, t}$               | Memory bandwidth (GEMV)                         | Patch synthesis, technical report drafting, code generation |
@@ -525,13 +525,13 @@ The interaction between prompt length $N_{\text{in}}$ and generation length $N_{
 
 Beyond arithmetic execution time, each active request incurs a physical state cost: the Key-Value (KV) cache. To prevent recomputing historical key and value projections at every decode step, the serving system retains past activations in high-bandwidth device memory. For a model with $L$ transformer layers, hidden dimension $d_{\text{model}}$, and $H_{\text{kv}}$ key-value heads of dimension $d_{\text{head}}$, each token consumes:
 
-$$M_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P \quad \text{bytes}$$ {#eq-vol3-kv-cache-size}
+$$\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P \quad \text{bytes}$$ {#eq-vol3-kv-cache-size}
 
 For a 70-billion parameter model utilizing Grouped-Query Attention ($L=80$, $H_{\text{kv}}=8$, $d_{\text{head}}=128$, $P=2$), each active token retains approximately $320\text{ KB}$ of state. A single $40\text{,}000$-token repository trace consumes over $12.8\text{ GB}$ of dedicated accelerator SRAM/HBM merely to preserve context across decode steps. If the serving cluster hosts multiple concurrent agent loops, aggregate KV cache allocation rapidly exhausts device memory, triggering request queueing ($T_{\text{queue}}$) or preemptive context swapping.
 
 ### Amdahl's Law and the Return on Prefix Reuse
 
-This physical reality dictates where systems optimization effort must be directed. Techniques engineered solely to accelerate generation throughput—such as speculative decoding, draft-model verification, and continuous output streaming—provide negligible reductions in total agent step latency when $N_{\text{in}} \gg N_{\text{out}}$.
+This physical reality dictates where systems optimization effort must be directed. Techniques engineered solely to accelerate generation throughput—such as speculative decoding, draft-model verification, and continuous output streaming—provide negligible reductions in total agent step latency when $M \gg K$.
 
 Consider an agent step where prefill constitutes 85 percent of execution time ($f_{\text{prefill}} = 0.85$) and decode constitutes 15 percent ($f_{\text{decode}} = 0.15$). Applying Amdahl's Law, even doubling generation throughput (a $2\times$ speedup on decode) yields an end-to-end system speedup of:
 
@@ -615,7 +615,7 @@ Grammar-constrained decoding techniques (such as FSM logit masking) guarantee sy
 
 **Pitfall 2**: *Collapsing incomplete, refusal, and transport failure into a generic retry.*
 
-When a model call fails to deliver a usable payload, naive client architectures lump all error codes into an undifferentiated retry loop. This conflates three orthogonal failure mechanisms with opposing recovery semantics. A *transport failure* (such as a TCP drop or HTTP 503) represents transient infrastructure exhaustion properly remediated by exponential backoff. An *incomplete response* indicates that the generation exceeded its token budget ($K = N_{\text{max}}$); retrying the identical prompt will deterministically exhaust the budget again, requiring instead prompt compaction or continuation decoding. A *refusal* indicates that the model's safety classifiers or alignment boundaries rejected the context; repeated retries waste inference compute and risk upstream account suspension. Reliable runtimes must classify status envelopes explicitly and route failures to specialized semantic mitigation routines.
+When a model call fails to deliver a usable payload, naive client architectures lump all error codes into an undifferentiated retry loop. This conflates three orthogonal failure mechanisms with opposing recovery semantics. A *transport failure* (such as a TCP drop or HTTP 503) represents transient infrastructure exhaustion properly remediated by exponential backoff. An *incomplete response* indicates that the generation exceeded its token budget ($K = K_{\max}$); retrying the identical prompt will deterministically exhaust the budget again, requiring instead prompt compaction or continuation decoding. A *refusal* indicates that the model's safety classifiers or alignment boundaries rejected the context; repeated retries waste inference compute and risk upstream account suspension. Reliable runtimes must classify status envelopes explicitly and route failures to specialized semantic mitigation routines.
 
 :::
 
