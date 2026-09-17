@@ -601,11 +601,55 @@ class NBGraderCommand(BaseCommand):
 
     def _release(self, args: Namespace) -> int:
         if args.all:
-            return self._batch_operation("release", "generate_assignment", self.source_dir)
-        if args.assignment:
-            return self._single_operation("release", "generate_assignment", args.assignment)
-        self.console.print("[red]Must specify either --all or an assignment name[/red]")
-        return 1
+            result = self._batch_operation("release", "generate_assignment", self.source_dir)
+        elif args.assignment:
+            result = self._single_operation("release", "generate_assignment", args.assignment)
+        else:
+            self.console.print("[red]Must specify either --all or an assignment name[/red]")
+            return 1
+        if result != 0:
+            return result
+        # assignments/release/ is what students receive. Nothing checked it, and
+        # three separate paths have shipped the reference solution by accident
+        # (Binder's postBuild, --tier challenge, and generate writing the student
+        # path). Verify the artifact itself rather than trusting the pipeline.
+        return self._verify_release_has_no_solutions()
+
+    def _verify_release_has_no_solutions(self) -> int:
+        """Fail if any released notebook still contains a solution region."""
+        import json as _json
+
+        if not self.release_dir.exists():
+            return 0
+        leaked = []
+        for nb_path in sorted(self.release_dir.rglob("*.ipynb")):
+            try:
+                nb = _json.loads(nb_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            source = "\n".join(
+                "".join(cell.get("source", []))
+                for cell in nb.get("cells", [])
+            )
+            if SOLUTION_BEGIN_MARKER in source:
+                leaked.append(nb_path.relative_to(self.project_root).as_posix())
+
+        if leaked:
+            self.console.print(
+                "[red]Refusing to leave these released notebooks in place: they still "
+                "contain solution regions.[/red]"
+            )
+            for path in leaked:
+                self.console.print(f"[red]  • {path}[/red]")
+            self.console.print(
+                "[yellow]A released notebook must carry nbgrader stubs, not the "
+                "reference. Re-run `tito nbgrader generate` for these modules and "
+                "check the tier you passed.[/yellow]"
+            )
+            return 1
+
+        self.console.print("[green]Verified: no released notebook contains a solution region.[/green]")
+        return 0
 
     def _collect(self, args: Namespace) -> int:
         if args.all:
