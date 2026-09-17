@@ -67,6 +67,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    // Nothing to pop up on a page with no timeline, and appending the overlay
+    // anyway put a full-viewport element on 52 of the 62 pages.
+    const timelineCards = document.querySelectorAll('.ml-timeline-content');
+    if (timelineCards.length === 0) return;
+
     // Create popup element
     let popup = document.getElementById('ml-timeline-popup');
     if (!popup) {
@@ -78,7 +83,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Handle clicks on timeline items
-    document.querySelectorAll('.ml-timeline-content').forEach(card => {
+    timelineCards.forEach(card => {
         card.style.cursor = 'pointer';
         card.addEventListener('click', function() {
             const item = this.closest('.ml-timeline-item');
