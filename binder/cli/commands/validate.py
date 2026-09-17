@@ -10429,8 +10429,9 @@ class ValidateCommand:
             parts.append(f"{total_errors} error(s)")
         if total_warnings:
             parts.append(f"{total_warnings} warning(s)")
-        label = " and ".join(parts)
-        console.print(f"[red]Validation failed with {label}.[/red]")
+        if parts:
+            label = " and ".join(parts)
+            console.print(f"[red]Validation failed with {label}.[/red]")
 
     def _emit(self, as_json: bool, payload: Dict[str, Any], failed: bool) -> None:
         """Print a status payload as JSON, or print its message in red or green."""
