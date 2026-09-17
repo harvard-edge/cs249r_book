@@ -63,7 +63,7 @@ This first-principles result explains why pure BC often struggles in long-horizo
 
 ## 6. Zero-Failure Testing and the Astronomical Exposure Bound
 
-Certifying high-integrity safety claims (such as IEC 61508 SIL 3 / SIL 4 or ISO 26262 ASIL D) requires establishing an upper bound on the catastrophic failure rate $p$ per operating hour at a specified statistical confidence level $1 - \alpha$ (typically $95\%$, giving significance $\alpha = 0.05$).
+Certifying high-integrity safety claims (such as IEC 61508 SIL 3 / SIL 4 or ISO 26262 ASIL D) requires establishing an upper bound on the catastrophic failure rate $p$ per operating hour at a specified statistical confidence level $1 - \alpha$ (typically 95 percent, giving significance $\alpha = 0.05$).
 
 When validating a policy through empirical fleet testing where zero failures are observed across $n$ independent exposure hours, the probability of zero failures occurring under a binomial trial model is:
 $$ P(\text{zero failures}) = (1 - p)^n \le e^{-p n} $$
@@ -77,7 +77,7 @@ $$ n \ln(1 - p) \le \ln \alpha $$
 For rare events where $p \ll 1$, we use the Taylor expansion $\ln(1 - p) \approx -p$, giving:
 $$ -n p \le \ln \alpha \implies n \ge \frac{-\ln \alpha}{p} = \frac{\ln(1/\alpha)}{p} $$
 
-For standard $95\%$ confidence ($\alpha = 0.05$):
+For standard 95 percent confidence ($\alpha = 0.05$):
 $$ n \ge \frac{-\ln(0.05)}{p} = \frac{2.99573}{p} \approx \frac{3}{p} $$
 This result is known as the **Rule of Three** in reliability engineering and biostatistics.
 
@@ -87,11 +87,93 @@ $$ n \ge \frac{2.99573}{10^{-9}} \approx 3.00 \times 10^9\text{ hours} \approx 3
 
 This non-linear scaling creates the **astronomical exposure wall**: because required failure-free hours scale inversely with $p$ ($O(1/p)$), no physical fleet can collect sufficient hours within the commercial lifecycle of a software release. Furthermore, any modification to neural network weights, sensor calibration matrices, or control firmware constitutes a distinct statistical distribution, resetting the trial counter $n$ to zero. Consequently, black-box empirical fleet sampling is mathematically incapable of certifying open-world safety in the absence of deterministic architectural containment.
 
+## 7. Sequential Probability Ratio Test (SPRT) {#sec-appendix-ml-sprt}
+
+Evaluating embodied physical policies on physical hardware is expensive and induces mechanical wear. Fixed-sample-size testing requires pre-specifying sample count $N$ and executing all $N$ physical trials even if the system fails catastrophically on early runs or achieves overwhelming evidence of safety. Conversely, naive early stopping (halting testing as soon as a nominal threshold is breached) introduces optional stopping bias, drastically inflating Type I error (declaring an unsafe policy safe).
+
+Abraham Wald's **Sequential Probability Ratio Test (SPRT)** [@wald1945sequential] resolves this dilemma by continuously updating a likelihood ratio after each physical rollout and testing against mathematically certified boundary thresholds.
+
+### Log-likelihood ratio and bernoulli updates
+Let $x_1, x_2, \dots, x_m$ denote independent trial outcomes from consecutive physical rollouts. Consider two competing operational hypotheses:
+
+- Null hypothesis $H_0$: The system failure probability is unacceptable ($p = p_0$).
+- Alternative hypothesis $H_1$: The system failure probability meets the safety target ($p = p_1 < p_0$).
+
+After observing $m$ trials, the cumulative log-likelihood ratio $\Lambda_m$ is:
+$$
+\Lambda_m = \sum_{i=1}^m \ln \frac{P(x_i \mid H_1)}{P(x_i \mid H_0)}
+$$
+For discrete Bernoulli trials where $x_i \in \{0, 1\}$ (with $x_i = 1$ denoting task failure and $x_i = 0$ denoting task success), let $k = \sum_{i=1}^m x_i$ be the cumulative failure count across $m$ runs. The log-likelihood ratio simplifies to the exact closed-form evaluation:
+$$
+\Lambda_m = k \ln \left(\frac{p_1}{p_0}\right) + (m - k) \ln \left(\frac{1 - p_1}{1 - p_0}\right)
+$$
+
+### Wald stopping boundaries and decision rules
+Given declared Type I error rate $\alpha$ (the maximum allowable probability of falsely accepting $H_1$ when $H_0$ is true) and Type II error rate $\beta$ (the maximum allowable probability of falsely rejecting $H_1$ when $H_1$ is true), testing proceeds according to Wald's stopping rule:
+$$
+B < \Lambda_m < A
+$$
+where the analytical boundary thresholds are:
+$$
+A = \ln \left(\frac{1 - \beta}{\alpha}\right), \quad B = \ln \left(\frac{\beta}{1 - \alpha}\right)
+$$
+At each evaluation step $m$:
+
+1. If $\Lambda_m \ge A$: Halt testing and accept $H_1$ (certifying that the physical policy meets the required reliability target).
+2. If $\Lambda_m \le B$: Halt testing, reject $H_1$, and accept $H_0$ (declaring the policy unsafe and terminating the evaluation to prevent further testbed wear).
+3. If $B < \Lambda_m < A$: The accumulated evidence remains inconclusive; execute rollout $m+1$.
+
+### Average sample number (ASN) optimality
+Wald proved that SPRT is mathematically optimal: among all statistical tests with equivalent error bounds $(\alpha, \beta)$, SPRT minimizes the expected number of trials (the Average Sample Number, ASN). In physical robotics benchmarking, SPRT reduces total robot execution hours and mechanical wear by 30 to 50 percent compared to fixed-horizon testing while guaranteeing statistical rigor.
+
+## 8. Extreme Value Theory and Tail Risk {#sec-appendix-ml-evt}
+
+The Central Limit Theorem (CLT) governs the sum and average of independent random variables, proving that central tendencies converge toward Gaussian distributions. However, cyber-physical safety is not governed by average behavior; it is a weakest-link problem dictated by the single worst-case operational disturbance:
+$$
+M_n = \max\{X_1, X_2, \dots, X_n\}
+$$
+Because Gaussian distributions exhibit light, exponential tail decay ($e^{-x^2/2}$), modeling physical disturbances (such as joint collision shocks, ground impact spikes, or bus transport latencies) with Gaussian assumptions predicts that 5-sigma or 6-sigma excursions are statistically impossible over cosmological timescales. In physical reality, discontinuous contact mechanics, structural backlash, and network contention produce heavy-tailed distributions where catastrophic excursions occur regularly.
+
+### The fisher-tippett-gnedenko theorem (block maxima)
+Just as the CLT establishes the Gaussian distribution as the universal limit for sums, the Fisher-Tippett-Gnedenko theorem [@coles2001introduction] proves that the normalized maximum of independent, identically distributed continuous random variables can converge asymptotically only to the **Generalized Extreme Value (GEV)** distribution family:
+$$
+G(z) = \exp\left( -\left[ 1 + \xi \left(\frac{z - \mu}{\sigma}\right) \right]^{-1/\xi} \right)
+$$
+defined on $\{z : 1 + \xi(z - \mu)/\sigma > 0\}$, where $\mu \in \mathbb{R}$ is the location parameter, $\sigma > 0$ is the scale parameter, and $\xi \in \mathbb{R}$ is the shape parameter. The shape parameter $\xi$ partitions operational tail risks into three distinct physical regimes:
+
+1. **Gumbel (Type I, $\xi = 0$):** Light exponential tails, governing unconstrained thermal drift, analog clock jitter, and nominal sensor noise:
+   $$
+   G(z) = \exp\left( -\exp\left(-\frac{z - \mu}{\sigma}\right) \right)
+   $$
+2. **Fréchet (Type II, $\xi > 0$, with tail index $\alpha = 1/\xi$):** Heavy, power-law tails ($P(X > x) \sim x^{-\alpha}$), governing mechanical impact forces during rigid collisions, structural stress shockwaves, and unmodeled contact mode switches:
+   $$
+   G(z) = \exp\left( -\left(\frac{z - \mu}{\sigma}\right)^{-\alpha} \right) \quad (z > \mu)
+   $$
+3. **Weibull (Type III, $\xi < 0$):** Bounded upper tails, governing systems constrained by rigid physical stops, maximum kinematic linkage lengths, or saturated electrical voltage rails.
+
+### Peaks-over-threshold and generalized Pareto distribution (GPD)
+When monitoring continuous real-time telemetry, grouping data into arbitrary blocks discards critical secondary peaks. Under the **Pickands-Balkema-de Haan theorem**, the distribution of excess excursions $Y = X - u$ above a sufficiently high physical threshold $u$, conditioned on $X > u$, converges asymptotically to the **Generalized Pareto Distribution (GPD)**:
+$$
+H(y) = 1 - \left( 1 + \frac{\xi y}{\tilde{\sigma}} \right)^{-1/\xi}
+$$
+where $\tilde{\sigma} = \sigma + \xi(u - \mu)$.
+
+### Hardware margin and quantile sizing
+To size safety buffers (such as mechanical clearance insets or actuator torque clamping thresholds) against extreme disturbances for an allowable exceedance probability $\epsilon$, systems engineers invert the extreme tail model to obtain the high-quantile estimate:
+$$
+z_{\epsilon} = u + \frac{\tilde{\sigma}}{\xi} \left( \left(\frac{n}{N_u} \epsilon\right)^{-\xi} - 1 \right)
+$$
+where $N_u$ is the count of threshold exceedances observed across $n$ cycles.
+
+Because software policies cannot suppress the physics of heavy-tailed mechanical disturbances, systems architectures must defend against extreme values through hardware means: series-elastic elements, crushable physical zones, and fast ($1\text{ kHz}$) deterministic hardware clamps sized to extreme-value tail quantiles rather than nominal Gaussian standard deviations.
+
 ## Further Reading
 
 For a deeper dive into these foundational concepts, we recommend the following standard textbooks:
 
 - **Bishop, C. M. (2006).** *Pattern Recognition and Machine Learning.* Springer. (Excellent for probability, entropy, and Bayesian methods).
+- **Coles, S. (2001).** *An Introduction to Statistical Modeling of Extreme Values.* Springer. (The canonical foundational text for GEV, GPD, and environmental/physical tail risks).
 - **Goodfellow, I., Bengio, Y., & Courville, A. (2016).** *Deep Learning.* MIT Press. (Comprehensive resource on neural network fundamentals, including Lipschitz continuity and optimization).
 - **Murphy, K. P. (2012).** *Machine Learning: A Probabilistic Perspective.* MIT Press. (A rigorous probabilistic view covering everything from basic entropy to complex graphical models).
 - **Thrun, S., Burgard, W., & Fox, D. (2005).** *Probabilistic Robotics.* MIT Press. (Essential for state estimation, SE(3) transforms, and robotic foundations).
+- **Wald, A. (1947).** *Sequential Analysis.* John Wiley & Sons. (The classic definitive treatise establishing the Sequential Probability Ratio Test).
