@@ -346,11 +346,11 @@ The system collapsed because the caller assumed environmental invariance across 
 | Parameter                 | Type         | Systems Purpose                                         | Invariant Constraint                                                                         |
 |:--------------------------|:-------------|:--------------------------------------------------------|:---------------------------------------------------------------------------------------------|
 | `model_id`                | String       | Identifies immutable model weights and tokenizer        | Must specify an immutable snapshot; floating aliases (`latest`, `default`) forbidden         |
-| `context`                 | List[Frame]  | Encapsulates prompt, message history, and tool schemas  | Total token count must not exceed budget: $\lvert \mathbf{x} \rvert \le L_{\max} - K_{\max}$ |
+| `context`                 | List[Frame]  | Encapsulates prompt, message history, and tool schemas  | Total prompt token count must not exceed budget: $M \le S_{\max} - K_{\max}$                 |
 | `temperature` ($\tau$)    | Float        | Modulates logit entropy and sampling dispersion         | Bound to range $[0.0, 2.0]$; set to $\tau = 0.0$ for deterministic paths                     |
 | `top_p` ($p$)             | Float        | Truncates sampling to smallest set with mass $\ge p$    | Bound to range $(0.0, 1.0]$; default $1.0$ (disabled)                                        |
 | `stop_tokens`             | List[String] | Halts decode loop when delimiter is encountered         | Must include application-level message and block boundary tokens                             |
-| `max_tokens` ($K_{\max}$) | Integer      | Imposes upper limit on autoregressive decode iterations | Strict ceiling: $K_{\max} \le B_{\text{token}}$; prevents runaway allocation loops           |
+| `max_tokens` ($K_{\max}$) | Integer      | Imposes upper limit on autoregressive decode iterations | Strict ceiling: $K_{\max} \le S_{\max} - M$; prevents runaway allocation loops              |
 | `timeout_ms` ($T_{\max}$) | Integer      | Absolute socket deadline for RPC completion             | Enforced by client-side socket deadline; aborts via cancellation signal                      |
 
 : **Remote Invocation Contract Specification**: Formal parameter taxonomy, types, and operational bounds for stochastic processor RPCs. {#tbl-invocation-contract-spec}
@@ -509,7 +509,7 @@ For standard 16-bit floating-point weights ($P=2$), $I_{\text{decode}} \approx 1
 
 $$I_{\text{sat}} = \frac{\text{Peak Compute Throughput (FLOP/s)}}{\text{Peak Memory Bandwidth (Bytes/s)}}$$
 
-On an NVIDIA H100 SXM accelerator (delivering nearly $2\text{,}000\text{ TFLOP/s}$ of dense FP16 Tensor Core compute alongside $3.35\text{ TB/s}$ of HBM3 bandwidth), the machine balance is $I_{\text{sat}} \approx 597\text{ FLOP/byte}$. Because $I_{\text{decode}} \approx 1\text{ FLOP/byte} \ll I_{\text{sat}}$, autoregressive decoding operates more than two orders of magnitude below the machine balance knee. As visualized in @fig-vol3-processor-prefill-decode, tensor compute units sit idle for the vast majority of clock cycles, throttled on memory bus bandwidth while streaming model weights and fetching the growing Key-Value (KV) cache.
+On an NVIDIA H100 SXM accelerator (delivering $989\text{ TFLOP/s}$ of dense 16-bit Tensor Core compute—or nearly $2\text{,}000\text{ TFLOP/s}$ with structured 2:4 sparsity—alongside $3.35\text{ TB/s}$ of HBM3 bandwidth), the dense machine balance knee is $I_{\text{sat}} = 989 / 3.35 \approx 295.2\text{ FLOP/byte}$ (reaching $590.7\text{ FLOP/byte}$ under sparsity). Because $I_{\text{decode}} \approx 1\text{ FLOP/byte} \ll I_{\text{sat}}$, autoregressive decoding operates more than two orders of magnitude below the machine balance knee. As visualized in @fig-vol3-processor-prefill-decode, tensor compute units sit idle for the vast majority of clock cycles, throttled on memory bus bandwidth while streaming model weights and fetching the growing Key-Value (KV) cache.
 
 ### Latency Regimes and State Growth
 
