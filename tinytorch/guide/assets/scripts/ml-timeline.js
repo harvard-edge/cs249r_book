@@ -61,8 +61,8 @@ document.addEventListener('DOMContentLoaded', function() {
             achievement: "Production-ready optimization",
             architecture: "Profile → Compress → Accelerate",
             whatYouBuild: ["Performance profiling and bottleneck analysis", "Model compression (quantization + pruning)", "Inference acceleration (KV-cache + batching)"],
-            systemsInsights: ["Memory: 4-16× compression through quantization/pruning", "Speed: 12-40× faster generation with KV-cache + batching", "Workflow: Systematic 'measure → optimize → validate' methodology"],
-            modules: "After Modules 14-18", expectedResults: "8-16× smaller models, 12-40× faster inference",
+            systemsInsights: ["Memory: quantization packs weights up to 4× smaller; pruning zeroes weights without shrinking the array", "Speed: KV-cache and batching can speed generation up, and a small workload can get slower", "Workflow: Systematic 'measure → optimize → validate' methodology"],
+            modules: "After Modules 14-19", expectedResults: "Whatever you measure; no ratio is guaranteed",
             commands: ["tito milestone run mlperf"]
         }
     };

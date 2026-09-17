@@ -347,6 +347,33 @@ class NBGraderCommand(BaseCommand):
             return 1
 
         release_tier = getattr(args, "tier", "student")
+
+        # The challenge tier strips only regions marked role="challenge"
+        # (solutions.py::solution_role_action, matching NBGRADER_RELEASE_TIERS.md).
+        # No module carries that annotation yet, so today the tier is a no-op and
+        # its output is byte-identical to --tier instructor: a complete reference
+        # solution. Refuse rather than hand an instructor a "challenge" assignment
+        # that is fully solved.
+        if release_tier == "challenge":
+            unannotated = [m for m in modules_to_process
+                           if not self._module_has_challenge_regions(m)]
+            if unannotated:
+                console.print(
+                    "[red]Refusing to stage --tier challenge: no solution region in "
+                    f"{', '.join(unannotated)} is marked role=\"challenge\".[/red]"
+                )
+                console.print(
+                    "[yellow]The challenge tier strips only role=\"challenge\" regions, "
+                    "so the output would be identical to --tier instructor, i.e. the "
+                    "full reference solution.[/yellow]"
+                )
+                console.print(
+                    "Annotate the regions students should build unaided with "
+                    '[cyan]### BEGIN SOLUTION role="challenge"[/cyan], '
+                    "or use [cyan]--tier student[/cyan]."
+                )
+                return 1
+
         console.print(f"Staging nbgrader source assignments: {', '.join(modules_to_process)}")
 
         for module_name in modules_to_process:
@@ -355,6 +382,18 @@ class NBGraderCommand(BaseCommand):
 
         console.print("[green]All requested source assignments staged successfully.[/green]")
         return 0
+
+    def _module_has_challenge_regions(self, module_name: str) -> bool:
+        """True when the module's source marks at least one role="challenge" region."""
+        source = self.project_root / "src" / module_name / f"{module_name}.py"
+        if not source.exists():
+            return False
+        text = source.read_text(encoding="utf-8", errors="replace")
+        return any(
+            solution_role(line) == "challenge"
+            for line in text.splitlines()
+            if SOLUTION_BEGIN_MARKER in line
+        )
 
     def _generate_single_module(self, module_name: str, *, release_tier: str = "student") -> bool:
         """Stage one module notebook under assignments/source."""
