@@ -451,14 +451,21 @@ class NBGraderCommand(BaseCommand):
         if notebook_up_to_date:
             return notebook_file
 
-        if notebook_file.exists():
-            staged_file = self.staging_dir / module_name / f"{self._short_name(module_name)}.ipynb"
-            reason = "Student notebook exists; staging nbgrader source separately"
-            target = staged_file
-        else:
-            notebook_file.parent.mkdir(parents=True, exist_ok=True)
-            reason = "Generated notebook missing"
-            target = notebook_file
+        # Always stage into the private nbgrader cache, never into the student
+        # path. This branch used to write the raw conversion to notebook_file
+        # when it was missing, which is the normal state of a fresh clone:
+        # modules/ is gitignored, and `tito nbgrader generate` is the first
+        # command INSTRUCTOR.md tells an instructor to run. That planted the
+        # full reference at modules/<name>/<short>.ipynb, and `tito module
+        # start` only creates the notebook when it is absent
+        # (module/workflow.py), so it then opened the answer key and never
+        # re-stripped it. The docstring's "must never overwrite" guard covered
+        # the wrong case: not overwriting, but creating, was the leak.
+        staged_file = self.staging_dir / module_name / f"{self._short_name(module_name)}.ipynb"
+        reason = ("Student notebook exists; staging nbgrader source separately"
+                  if notebook_file.exists() else
+                  "Staging nbgrader source; student notebook left for `tito module start`")
+        target = staged_file
 
         target.parent.mkdir(parents=True, exist_ok=True)
         self.console.print(
