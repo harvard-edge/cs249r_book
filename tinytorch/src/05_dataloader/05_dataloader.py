@@ -2292,18 +2292,11 @@ def __iter__(self):
 
 **For a 50GB dataset, this requires 50GB RAM just to shuffle!**
 
-**Your implementation is smarter:**
-```python
-def __iter__(self):
-    # ✅ Only shuffle INDICES (tiny memory footprint)
-    indices = list(range(len(self.dataset)))  # Just integers!
-    random.shuffle(indices)  # Shuffles integers, not data
-
-    for i in range(0, len(indices), self.batch_size):
-        batch_indices = indices[i:i + self.batch_size]
-        batch = [self.dataset[idx] for idx in batch_indices]  # Load only batch
-        yield self._collate_batch(batch)
-```
+**Your implementation is smarter:** it never shuffles the data at all. It
+shuffles a list of *integer indices*, then walks that list a batch at a time,
+fetching only the samples in the current batch from the dataset. The 50 GB
+never has to be resident; only `batch_size` samples are, plus a list of
+integers whose size is independent of how large each sample is.
 
 **Memory usage:**
 - Bad shuffle: 50GB (all samples in memory)
