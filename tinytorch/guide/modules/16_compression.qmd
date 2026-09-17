@@ -324,7 +324,7 @@ Compression techniques test whether a model can represent the task with fewer ac
 
 :::{.callout-tip title="By completing this module, you will:"}
 
-- **Implement** magnitude-based pruning to remove 80-90% of small weights while preserving accuracy
+- **Implement** magnitude-based pruning to zero 80-90% of small weights, then measure what it cost in accuracy
 - **Master** structured pruning that creates hardware-friendly sparsity patterns by removing entire channels
 - **Build** knowledge distillation systems and measure the student’s size and accuracy
 - **Understand** compression trade-offs between sparsity ratio, inference speed, memory footprint, and accuracy preservation
@@ -524,27 +524,31 @@ The code in @lst-16-compression-structured-prune makes this concrete.
 #| eval: false
 def structured_prune(model, prune_ratio=0.5):
     """Remove entire channels based on L2 norm importance."""
-    for layer in model.layers:
-        if isinstance(layer, Linear):
-            weight = layer.weight.data
+    # Collect Linear layers in execution order, then skip the last one: its
+    # output channels are the classes, so zeroing them removes classes rather
+    # than neurons.
+    linears = collect_linears(model)
 
-            # Calculate L2 norm for each output channel (column)
-            channel_norms = np.linalg.norm(weight, axis=0)
+    for layer in linears[:-1]:
+        weight = layer.weight.data
 
-            # Find channels to prune (lowest importance)
-            num_channels = weight.shape[1]
-            num_to_prune = int(num_channels * prune_ratio)
+        # Calculate L2 norm for each output channel (column)
+        channel_norms = np.linalg.norm(weight, axis=0)
 
-            if num_to_prune > 0:
-                # Get indices of smallest channels
-                prune_indices = np.argpartition(channel_norms, num_to_prune)[:num_to_prune]
+        # Find channels to prune (lowest importance)
+        num_channels = weight.shape[1]
+        num_to_prune = int(num_channels * prune_ratio)
 
-                # Zero out entire channels
-                weight[:, prune_indices] = 0
+        if num_to_prune > 0:
+            # Get indices of smallest channels
+            prune_indices = np.argsort(channel_norms, kind="stable")[:num_to_prune]
 
-                # Also zero corresponding bias elements
-                if layer.bias is not None:
-                    layer.bias.data[prune_indices] = 0
+            # Zero out entire channels
+            weight[:, prune_indices] = 0
+
+            # Also zero corresponding bias elements
+            if layer.bias is not None:
+                layer.bias.data[prune_indices] = 0
 
     return model
 ```
@@ -777,7 +781,7 @@ After 80% pruning: 20% remain active = 131,072 × 0.2 = **26,214 active weights*
 
 Zeroed weights: 131,072 × 0.8 = **104,857 zeros**
 
-This is why sparsity creates memory savings — 80% of the parameters are literally zero.
+The parameters are zero, but the arrays are the same size: sparsity only becomes a memory saving once a format or a shape change exploits it.
 :::
 
 **Q2: Compression Ratio Analysis**
