@@ -133,6 +133,32 @@ For the forward pass, the contract is simple: compatible dimensions either agree
 
 After a transpose or a broadcast, the buffer is unchanged but the view no longer walks it in plain row order. Our transposed matrix has shape $(3, 2)$ and strides $(1, 3)$, whereas row-major strides for that new shape would be $(2, 1)$. The broadcast view repeats locations because its row stride is zero. For arrays whose dimensions all exceed one, matching the formula for the array's own shape establishes C-contiguity. A dimension of length one is an exception because we never step along it; its stride does not affect the traversal. Empty arrays are another special case. NumPy's [array flags documentation](https://numpy.org/doc/stable/reference/generated/numpy.ndarray.flags.html) describes these cases, so `C_CONTIGUOUS` is the authoritative check. NumPy can read these layouts through their strides. Writes need more care: a broadcast view can map several coordinates to one location, and `np.broadcast_to` returns a read-only view. TinyTorch avoids sharing the returned tensor with its input by copying at construction. Its `contiguous()` method additionally requests row-major layout, which is a separate property from owning the buffer.
 
+### Reductions remove an axis
+
+Broadcasting adds an axis by walking it with stride zero. A reduction does the
+opposite: it collapses one, combining every entry along that axis into a single
+value. `Sum`, `Mean`, and `Max` are the three the module builds, and they share
+one parameter that decides the output's shape.
+
+For a matrix of shape $(R, C)$, `axis=0` collapses the rows and leaves one value
+per column, shape $(C,)$. `axis=1` collapses the columns and leaves one value per
+row, shape $(R,)$. `axis=None`, the default, collapses everything to a scalar.
+The axis you name is the axis that disappears.
+
+That disappearance is the source of a shape error that recurs in later chapters.
+A loss reduces a batch of predictions to one number, and the gradient flowing
+back must broadcast against the original shape. If the reduced axis is gone, the
+broadcast has nothing to align against. `keepdims=True` retains the collapsed
+axis with length one, so $(R, C)$ reduces to $(R, 1)$ rather than $(R,)$ and the
+result still broadcasts against the input. @sec-losses relies on this when it
+subtracts a per-row maximum from a matrix of logits.
+
+The arithmetic cost is linear in the entries read, since every element is touched
+once whichever axis is named. What changes is the access pattern: collapsing the
+last axis of a row-major array walks contiguous memory, while collapsing the
+first walks with a stride, reading one element per row. Same arithmetic, a
+different number of cache lines.
+
 ---
 
 ## The Code
@@ -374,6 +400,12 @@ The distinction in @tbl-tinytorch-vs-pytorch explains why similarly named method
 Module 01 gives later code two contracts. A `Tensor` holds float32 data with a definite shape, and each operation reaches NumPy through `Function.apply`. NumPy's strides explain how transpose and broadcast views read existing storage; the wrapper explains why TinyTorch's returned tensors generally own fresh storage instead. The worked trace separates those questions with `data.strides` and `np.shares_memory`. This distinction lets us reason about a result's values, layout, and copying independently. The next step in @sec-activations uses the same operation boundary to transform each value without changing its shape.
 
 ---
+
+## Further reading
+
+- Harris et al. (2020), [Array programming with NumPy](https://doi.org/10.1038/s41586-020-2649-2), *Nature*. The design behind the strides, views, and broadcasting this chapter rests on.
+- Lawson et al. (1979), [Basic Linear Algebra Subprograms for Fortran usage](https://doi.org/10.1145/355841.355847), *ACM TOMS*. The Level 1/2/3 split that explains why matrix multiplication is the operation the whole stack is tuned around.
+- Baydin et al. (2018), [Automatic differentiation in machine learning: a survey](https://www.jmlr.org/papers/v18/17-468.html), *JMLR*. Background for @sec-autograd, including why reverse mode makes memory the binding constraint.
 
 ## Exercises
 
