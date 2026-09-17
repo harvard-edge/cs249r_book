@@ -43,77 +43,91 @@ An agentic system repeatedly invokes a foundation model to propose what to say o
 :::
 
 ## A Model Call in the Stochastic Computer {#sec-vol3-processor-role}
+[]{#sec-tripartite-separation}
 
-Chapter 1 established that an autonomous agent operates as an extended closed-loop machine, coordinating memory, tools, and execution runtimes to carry an operational task from intent to verifiable completion. Yet beneath all multi-turn planning, memory paging, and peripheral execution lies a single atomic event: **one invocation of a foundation model**.
+In the stochastic computer, the foundation model supplies learned computation. Given the context staged for a call, it scores possible next tokens; an inference service uses those scores to produce a candidate response. The agent runtime chooses what context to supply and what to do with the result. We call the model the processor because of the functional role it plays in the system, not because it executes physical machine instructions.
 
-Whenever an agent takes a step—whether diagnosing an anomaly, selecting a debugging tool, interpreting a compiler trace, or proposing a code modification—the host runtime freezes a slice of active state and dispatches it to the model core. Understanding the mechanics, guarantees, and physical costs of this single invocation is the foundation of agent systems engineering. Part I of this book focuses on this learned engine: the **Stochastic Processor**.
+### The Three Boundaries of Model Computation
 
-### The Anatomy of an Invocation
+To reason clearly about how an agent executes work, the system architecture distinguishes three separate layers of operational ownership:
 
-In classical computer systems, an instruction decoded by a microprocessor is an instruction executed. The hardware guarantees cycle-accurate state transitions, isolates address spaces through page tables, and traps illegal memory accesses directly at the silicon boundary.
+1. **The Learned Model:** Parameterized neural network weights that evaluate conditional distributions over a discrete vocabulary given a sequence of input tokens. The model computes next-token score distributions; it holds no network sockets, allocates no operating system memory pages, and possesses no awareness of physical time.
+2. **The Inference Service:** The serving infrastructure (such as vLLM or SGLang) that manages accelerator memory, schedules batches, maintains the Key-Value (KV) attention cache, and drives the autoregressive decode loop until reaching a stopping condition. The service translates raw model logits into a candidate token sequence and packages it into an execution envelope.
+3. **The Agent Runtime:** The host program that orchestrates the overall task across multiple turns. The runtime selects which observations and instructions enter the context window, enforces resource budgets and deadlines, interprets returned candidates, and determines what external actions to authorize.
 
-A foundation model invocation possesses none of these properties. The model core is not an autonomous central processing unit with ambient system authority; it is a statistical sequence-continuation engine. It has no physical clock, holds no open operating system file descriptors, and produces no direct side effects in the host environment. Its sole operation is to evaluate a conditioned probability distribution over a discrete vocabulary of tokens and emit a candidate sequence.
+The model is the learned decision-making core of the machine. In an agentic architecture, it is not merely emitting decorative text; it evaluates observed evidence to diagnose faults, formulates subgoals, and selects tool invocations. However, while the model proposes what should happen next, it possesses zero ambient authority to execute those proposals directly.
 
-Every model invocation follows a four-stage lifecycle across the boundary separating the host runtime from the model serving core:
+### A Guided Tour of One Invocation
 
-1. **Context Staging:** The host runtime assembles task instructions, relevant environment observations, tool schemas, and recent conversation history into a formatted prompt buffer. The caller defines explicit operational constraints: model snapshot version, decoding temperature, maximum output tokens ($K_{\max}$), stop delimiters, and socket deadlines ($T_{\max}$).
-2. **Epistemic Evaluation:** The serving core ingests the input tokens, evaluates causal self-attention across the sequence, and autoregressively samples continuation tokens in complete isolation. The core has no ambient knowledge of external state, real-world time, or concurrent filesystem mutations outside the staged buffer.
-3. **Envelope Packaging:** When generation terminates—via an end-of-sequence token, an explicit stop delimiter, or token exhaustion—the serving infrastructure packages the output into an invocation response envelope. This envelope returns the emitted candidate tokens alongside caller-visible status flags (`Completed`, `Incomplete`, `Refusal`, `Transport Failure`) and resource telemetry (prompt tokens, decode tokens, and latency breakdowns).
-4. **Runtime Mediation:** The host runtime unmarshals the response envelope, parses its structure against expected schemas, validates access permissions, and decides whether the candidate proposal should be permitted to execute against sandboxed tools.
+Every step in an agent's trajectory proceeds through a four-stage invocation lifecycle (@fig-stochastic-processor-core):
+
+1. **Context Staging and Budgeting:** The agent runtime selects the relevant task instructions, system invariants, environmental observations, tool schemas, and recent history, serializing them into a formatted prompt buffer. The caller defines explicit operational boundaries: an immutable model snapshot identifier, decoding parameters (such as temperature $\tau$), an output token ceiling ($K_{\max}$), application stop delimiters, and a socket deadline ($T_{\max}$).
+2. **Scoring and Candidate Generation:** The inference service ingests the staged tokens, computes prompt prefill activations, and executes the autoregressive decode loop. At each step, the learned model scores possible next tokens across the vocabulary simplex, and the serving engine samples a continuation token, updates the attention KV cache, and checks termination conditions.
+3. **Response Packaging:** When generation terminates—whether by emitting an end-of-sequence delimiter, reaching the token ceiling $K_{\max}$, or triggering an external deadline—the inference service packages the output into a structured response envelope. This envelope separates three distinct payloads:
+   - **Candidate Content:** The proposed text or structured tool call.
+   - **Termination Status:** The normalized outcome of the call (`Completed`, `Incomplete`, `Refusal`, or `Transport Failure`).
+   - **Usage Accounting:** Verified prompt token count, decode token count, and execution latency breakdowns.
+4. **Interpretation and Action Dispatch:** The agent runtime inspects the returned envelope. It verifies structural validity, evaluates whether the proposed candidate satisfies task invariants, and determines the next system action.
+
+::: {#fig-stochastic-processor-core}
+```{mermaid}
+%%| fig-cap: "The four-stage lifecycle of a single foundation-model invocation. The agent runtime stages context and budgets; the inference service evaluates the learned model across prefill and decode; the service returns a candidate payload with status and resource usage; and the runtime interprets the proposal to decide the next action."
+sequenceDiagram
+    autonumber
+    participant Runtime as Agent Runtime (Caller)
+    participant Service as Inference Service (Serving)
+    participant Model as Learned Model (Core)
+
+    Note over Runtime: 1. Context Staging & Budgeting
+    Runtime->>Service: Dispatch Request(Context, K_max, T_max, Model_ID)
+
+    activate Service
+    Note over Service,Model: 2. Scoring & Candidate Generation
+    Service->>Model: Forward Pass(Prefill Staged Tokens)
+    Model-->>Service: Initial Next-Token Logits
+    loop Autoregressive Decode Loop (until stop condition)
+        Service->>Service: Sample Token y_t & Update KV Cache
+        Service->>Model: Forward Step(y_t)
+        Model-->>Service: Logits z_{t+1}
+    end
+
+    Note over Service: 3. Response Packaging
+    Service-->>Runtime: Response Envelope(Candidate, Status, Token Usage, Latency)
+    deactivate Service
+
+    Note over Runtime: 4. Interpretation & Action Dispatch
+    Runtime->>Runtime: Validate Schema & Permissions
+    Runtime->>Runtime: Decide Next Step (Execute Tool, Reprompt, or Terminate)
+```
+:::
 
 ### The Unprivileged Proposal: A Concrete Systems Hook
 
-To see why this lifecycle boundary is mandatory, consider the distributed cache debugging scenario introduced in Chapter 1. Under heavy concurrency, read operations intermittently return stale data following network partition events. An autonomous repair agent is dispatched to inspect the service repository and resolve the failing regression test.
+To understand why this boundary is essential, consider a concrete debugging task: an autonomous agent inspecting an inconsistent distributed key-value cache. Under high client concurrency, read operations intermittently return stale data following network partition events. The agent is assigned to isolate the root cause and propose a repair.
 
-The host runtime stages the repository context—the failing test trace, the cache lease manager, and the configuration parser—along with a schema for file editing tools. The model's forward pass evaluates the context and samples the following candidate continuation:
+The host runtime stages the repository context—the failing regression test trace, the cache lease manager, and the configuration parser—alongside schemas for file inspection and editing tools. The model evaluates the staged evidence, diagnoses that fractional timeout strings (`"2.5s"`) are truncated to integer milliseconds, and proposes an edit:
 
 ```python
 edit_file(path="parser.py", search="int(seconds) * 1000", replace="int(seconds * 1000)")
 ```
 
-The stochastic processor core did not edit `parser.py`. It did not allocate a file descriptor, acquire an operating system lock, or modify a single byte on disk. It emitted an unprivileged string of token identifiers into a network socket buffer. 
+The stochastic processor core did not edit `parser.py`. It did not allocate a file descriptor, acquire a filesystem lock, or modify a single byte on disk. It emitted an unprivileged candidate continuation into a network buffer.
 
-The emitted payload is an algorithmic hypothesis. Whether `parser.py` exists, whether the agent possesses write authorization within the container, whether the proposed replacement introduces a syntax error, and whether this edit resolves the regression are questions the processor core cannot answer. The model proposes; the surrounding runtime harness interprets, authorizes, and mediates.
-
-### Complete Mediation and Tripartite Execution {#sec-tripartite-separation}
-
-Because candidate token sequences are sampled probabilistically from open distributions, unconstrained outputs frequently contain hallucinated parameters, syntactically malformed commands, or destructive side effects (such as proposing `rm -rf /` under high sampling entropy). Treating a model proposal as an executed instruction is the fundamental architectural flaw of naive agent designs.
-
-To ensure system reliability, the Stochastic Computer operationalizes the classical security principle of **complete mediation**, formulated by Saltzer and Schroeder [-@saltzer1975]: *every access to every resource must be validated against an independent authorization mechanism, and no unvalidated assertion from an untrusted principal may bypass inspection.* In our architectural model, the foundation model core is an untrusted principal.
-
-The runtime formalizes complete mediation through a strict tripartite execution separation:
-
-$$\text{Staged Context } c_t \xrightarrow[\text{Inference}]{\text{Model Core}} a_{\text{prop}} \xrightarrow[\text{Mediation}]{\text{Runtime Guard}} a_{\text{perm}} \xrightarrow[\text{Dispatch}]{\text{Sandbox/OS}} e_{\text{commit}}$$
-
-1. **Model Proposal ($a_{\text{prop}}$):** The raw, unverified token sequence emitted by the neural core during decode. Whether structured as natural language or JSON tool calls, $a_{\text{prop}}$ carries zero authority to mutate host state.
-2. **Permitted Action ($a_{\text{perm}}$):** The validated, strongly typed execution payload produced after $a_{\text{prop}}$ passes through deterministic verification gates: schema conformance checks, capability validation, and security sandbox policies.
-3. **Committed Effect ($e_{\text{commit}}$):** The observable state mutation realized in the external environment (such as a filesystem write or network packet dispatch) following sandboxed execution of $a_{\text{perm}}$.
-
-::: {#fig-stochastic-processor-core fig-env="figure" fig-pos="htb" fig-cap="**The Stochastic Processor Core Boundary and Complete Mediation**: The host runtime mediates all interactions between the unprivileged foundation model and the external environment. Staged context triggers candidate generation ($a_{\\text{prop}}$), which is intercepted by the complete mediation policy gate to produce a permitted action ($a_{\\text{perm}}$) before any environmental mutation ($e_{\\text{commit}}$) can be committed." fig-alt="Sequence diagram showing the stochastic processor emitting unprivileged proposals mediated by runtime policy checks before committing effects."}
-![](images/svg/stochastic_processor_core_v2.svg){width=100%}
-:::
-
-As illustrated in @fig-stochastic-processor-core, conflating $a_{\text{prop}}$ with $e_{\text{commit}}$ breaches the core safety boundary of autonomous systems. By maintaining this tripartite separation, the host runtime guarantees invariant closure: regardless of model sampling noise, prompt injection, or hallucinations, no unvalidated action touches the external environment.
-
-### Epistemic Isolation and Staged Context
-
-The necessity of complete mediation is compounded by the core's epistemic isolation. A physical microprocessor interfaces directly with hardware clocks, interrupt controllers, and bus transceivers. In contrast, a stochastic core observes the universe solely through the sequence of token IDs staged into its input buffer prior to the forward pass. The model has no internal sense of elapsed wall-clock time, no awareness of pending background network transfers, and no visibility into whether a previously inspected file has been concurrently modified on disk.
-
-If the host runtime stages an incomplete log snippet or a stale file excerpt, the model core generates candidate proposals conditioned strictly on that obsolete view. Furthermore, because external state mutations occur asynchronously while the model is decoding tokens, the operational preconditions assumed by $a_{\text{prop}}$ during the forward pass may invalidate before decoding finishes. The host runtime must therefore treat the context window not as ground truth, but as a point-in-time observational cache whose validity must be checked before $a_{\text{perm}}$ is dispatched.
+A proposed edit does not edit the file. The proposal is an algorithmic hypothesis. Whether `parser.py` exists, whether the agent holds write capabilities within the execution container, and whether the change resolves the regression are questions the processor core cannot answer. The runtime determines whether that proposal has an effect. (The formal mechanisms of authorization, capability tokens, and sandboxed actuation are developed in Chapter 7.)
 
 ### Roadmap of the Stochastic Processor Core
 
-Operating this execution boundary reliably requires opening the model call and examining its mechanics from the symbolic interface down to the physical silicon:
+Operating this invocation lifecycle reliably requires opening each stage and examining its mechanics from the symbolic boundary down to physical hardware:
 
-* **Section 2.2 (Tokens as the Interface):** We examine the discrete currency crossing the boundary—subword tokens—and analyze why character counts and AST syntax trees diverge from token economics.
+* **Section 2.2 (Tokens as the Processor Interface):** We examine the discrete currency crossing the boundary—subword tokens—and analyze why character counts and AST syntax trees diverge from token budgeting.
 * **Section 2.3 (Next-Token Computation):** We trace the autoregressive factorization loop, deriving why generation introduces an irreducible serial latency floor.
-* **Section 2.4 (Candidate Sequences vs. Valid Conclusions):** We confront the epistemic reality of sampling, proving why statistical likelihood does not equal truth and how causal attention induces context poisoning.
+* **Section 2.4 (Candidate Sequences Versus Valid Conclusions):** We confront the epistemic reality of sampling, explaining why statistical likelihood does not equal truth and how causal attention induces context poisoning.
 * **Section 2.5 (The Invocation Contract):** We define the formal caller contract, standardizing request schemas, resource deadlines, and four normalized return status classes.
 * **Section 2.6 (Constraining the Output Surface):** We explore grammar-constrained decoding via finite state automata and logit masks, establishing the strict boundary between syntax guarantees and semantic validity.
 * **Section 2.7 (The Cost of an Invocation):** We model the physical hardware costs of a call, decomposing latency via the Roofline model into compute-bound GEMM prefill and memory-bandwidth-bound GEMV decode.
 * **Section 2.8 (Processor Interface Evaluation):** We benchmark candidate interface designs on a suite of 50 fault-repair tasks, measuring the trade-offs between schema rigidity, tail latency, and end-to-end task completion.
 
-With this operational roadmap established, we begin at the physical boundary: the subword tokens through which the caller and the core communicate.
+With this operational roadmap established, we begin at the interface boundary: the subword tokens through which the caller and the core communicate.
 
 ## Tokens as the Processor Interface {#sec-vol3-processor-tokenization}
 
