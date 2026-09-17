@@ -666,6 +666,7 @@ class NBGraderCommand(BaseCommand):
                 "autograde",
                 "autograde",
                 self.submitted_dir,
+                student_first=True,
                 student=args.student,
                 extra_args=extra_args,
             )
@@ -682,7 +683,8 @@ class NBGraderCommand(BaseCommand):
 
     def _feedback(self, args: Namespace) -> int:
         if args.all:
-            return self._batch_operation("feedback", "generate_feedback", self.autograded_dir, student=args.student)
+            return self._batch_operation("feedback", "generate_feedback", self.autograded_dir,
+                                         student=args.student, student_first=True)
         if args.assignment:
             return self._single_operation("feedback", "generate_feedback", args.assignment, student=args.student)
         self.console.print("[red]Must specify either --all or an assignment name[/red]")
@@ -726,13 +728,29 @@ class NBGraderCommand(BaseCommand):
         *,
         student: Optional[str] = None,
         extra_args: Optional[List[str]] = None,
+        student_first: bool = False,
     ) -> int:
-        """Perform a batch nbgrader operation."""
+        """Perform a batch nbgrader operation.
+
+        ``student_first`` describes the directory being enumerated. nbgrader's
+        layout is ``{nbgrader_step}/{student_id}/{assignment_id}`` (see
+        nbgrader.coursedir), so ``source/`` and ``release/`` list assignments
+        while ``submitted/`` and ``autograded/`` list *students*. Enumerating
+        the latter as if they were assignments fed student IDs to nbgrader as
+        assignment names.
+        """
         if not source_dir.exists():
             self.console.print(f"[red]No {action} source directory found: {source_dir.relative_to(self.project_root)}[/red]")
             return 1
 
-        assignments = sorted(d.name for d in source_dir.iterdir() if d.is_dir())
+        if student_first:
+            assignments = sorted({
+                assignment.name
+                for student_dir in source_dir.iterdir() if student_dir.is_dir()
+                for assignment in student_dir.iterdir() if assignment.is_dir()
+            })
+        else:
+            assignments = sorted(d.name for d in source_dir.iterdir() if d.is_dir())
         if not assignments:
             self.console.print(f"[red]No assignments found for {action}[/red]")
             return 1
