@@ -1,4 +1,4 @@
-# Multi-Agent Consensus {#sec-vol3-multiagent}
+# Multi-Agent Fleets and Coordination {#sec-vol3-multiagent}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -9,482 +9,843 @@
 
 ::: {.content-visible when-format="pdf"}
 \noindent
-![](images/png/cover_multi_agent_blueprint_labeled_print.png){fig-alt="Isometric blueprint showing multi-agent topologies and distributed consensus: autonomous specialized agent nodes, proposal transmission ring, shared blackboard memory repository, lock-free atomic read-write channels, state synchronization update bus, and distributed consensus arbitration ring."}
+![](images/png/cover_multi_agent_blueprint_labeled_print.png){fig-alt="Blueprint for Multi-Agent Fleets and Coordination."}
 :::
 
 ::: {.content-visible unless-format="pdf"}
-![](images/webp/cover_multi_agent_blueprint_labeled.webp){fig-alt="Isometric blueprint showing multi-agent topologies and distributed consensus: autonomous specialized agent nodes, proposal transmission ring, shared blackboard memory repository, lock-free atomic read-write channels, state synchronization update bus, and distributed consensus arbitration ring."}
+![](images/webp/cover_multi_agent_blueprint_labeled.webp){fig-alt="Blueprint for Multi-Agent Fleets and Coordination."}
 :::
 
 :::
 
 ## Purpose {.unnumbered .unlisted}
 
-::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\mlagentstack{10}{10}{10}{10}{10}{95}
+\mlagentstack{95}{10}{10}{10}{10}{10}
 \end{marginfigure}
-:::
 
-_When does dividing a task among agents improve the result, and how do we design interfaces, state ownership, and concurrency control so their work fits together robustly?_
+_*When does decomposing a task across multiple agents actually improve the outcome, and when does it merely multiply communication overhead?*_
 
-In Parts I through V, we formulated the architecture of a single-agent Stochastic Computer: its neural processing core (@sec-vol3-processor), deliberative search mechanics (@sec-vol3-deliberation), virtualized memory hierarchy (@sec-vol3-working-sets, @sec-vol3-virtual-memory), execution sandboxes (@sec-vol3-virtualization), checkpoint control plane (@sec-vol3-checkpointing), and policy compilation loops (@sec-vol3-data-flywheel, @sec-vol3-sft, @sec-vol3-rlvr).
-
-However, complex enterprise engineering problems frequently exceed the context capacity, latency boundaries, and specialization scope of any single agent. A software engineering task that requires reviewing a multi-million-line codebase, validating thousands of database migration scripts, or diagnosing distributed microservice outages cannot be resolved by feeding the entire operational universe into a single model's prompt. To tackle tasks of this scale, systems engineers decompose workloads across distributed fleets of coordinated agents.
-
-Yet multi-agent delegation is not an architectural panacea. Dividing execution across multiple stochastic actors introduces severe coordination overhead: duplicated prompt contexts, serialized inter-agent messaging, state synchronization races, and correlated failure modes. When multiple agents share the same pretraining biases, peer consensus does not prove correctness—it often amplifies hallucinated errors.
-
-This chapter establishes the systems engineering foundation for multi-agent fleets and coordination. We evaluate the core delegation trade-off against single-agent baselines, classify coordination topologies across supervisor-worker trees and pipelines, engineer typed task handoff envelopes that eliminate conversational drift, enforce optimistic concurrency control across shared workspaces, uncover the mathematical failure of quorum voting under correlated neural errors, propagate hierarchical cancellation cascades, design cryptographically attenuated capability tokens, and benchmark multi-agent systems using Amdahl speedup accounting.
-
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
+When a single agent encounters a large, highly complex task—such as migrating an enterprise codebase from Java to Rust or auditing an entire corporate security infrastructure—it inevitably hits single-context capacity limits, token budget walls, and reasoning saturation. The natural systems impulse is to decompose the monolithic problem across a swarm of specialized, cooperating agents: researchers, architects, coders, testers, and reviewers. Yet in distributed systems, concurrency is never free. Naive multi-agent frameworks introduce an immense coordination tax: agents exchange endless conversational chatter, duplicate each other's work, misinterpret shared state, and enter catastrophic communication cascades that rapidly consume millions of tokens without producing working output. Like any distributed computing architecture, a multi-agent system requires formal models of concurrency control, task decomposition, state ownership, and communication topologies. Coordinating multi-agent systems requires establishing clear principles of fleet organization: modeling communication and coordination overheads, designing execution topologies, formalizing shared state ownership, and preventing multi-agent cascade failures.
 
 ::: {.callout-learning-objectives}
-- **Quantify** the multi-agent delegation trade-off, contrasting parallel exploration gains against context duplication, serialization latency, and reconciliation overhead.
-- **Architect** formal task dependency graphs (DAGs) choosing between supervisor-worker hierarchies, sequential pipelines, and decentralized blackboard topologies.
-- **Specify** typed task envelopes carrying immutable artifact references, cryptographic capabilities, and deterministic completion schemas.
-- **Implement** optimistic concurrency control (OCC) using private git worktrees and copy-on-write container layers to prevent conflicting workspace mutations.
-- **Analyze** the breakdown of Condorcet jury consensus and Byzantine fault tolerance when neural agents share correlated pretraining distributions.
-- **Construct** hierarchical cancellation trees that propagate abort signals across worker fleets, eliminating orphaned GPU compute.
-- **Enforce** monotonic capability attenuation using macaroon tokens to prevent privilege escalation during subagent delegation.
-- **Benchmark** multi-agent fleets against optimized single-agent deliberation baselines using modified Amdahl speedup equations.
+
+- Formulate Amdahl's Law and the Universal Scalability Law for multi-agent systems, quantifying the coordination overhead and communication taxes that limit parallel speedup.
+- Compare multi-agent coordination topologies (hierarchical supervisor-worker, peer-to-peer message passing, shared blackboard architectures), identifying appropriate use cases and failure modes.
+- Architect explicit communication protocols (typed RPCs, event buses) that eliminate natural-language conversational babble and bound inter-agent message volume.
+- Implement distributed state ownership and concurrency control patterns, using distributed locking and software transactional memory to prevent conflicting environment mutations.
+- Design consensus protocols for stochastic agents, evaluating majority voting, weighted confidence aggregation, and adversarial debate against empirical verification baselines.
+- Construct multi-agent supervisory guards that detect circular delegation loops, communication storms, and runaway token expenditure across distributed fleets.
+
 :::
 
+<!-- SECTION_START: 15.1 (#sec-vol3-multiagent-need) -->
 ## The Delegation Trade-Off {#sec-vol3-multiagent-need}
 
-The central design decision in distributed agent systems is whether to delegate a task across multiple agents or resolve it through deep deliberation within a single agent (@sec-vol3-deliberation). Multi-agent architectures are frequently justified with an intuitive appeal to human organizations: just as large software systems require teams of architects, developers, testers, and reviewers, complex agentic workloads seem to demand specialized swarms of stochastic actors.
+<!-- OUTLINE_SPEC:
 
-In practice, naive multi-agent delegation often introduces catastrophic performance degradation. Consider a real-world systems deployment: an engineering team refactored a single-agent coding pipeline into a 5-agent collaborative swarm consisting of an Architect, Coder, Tester, Reviewer, and Documenter. Rather than improving throughput, total task completion latency surged from $45\text{ s}$ to $11\text{ min}$, token expenditures jumped $7\times$, and end-to-end task completion accuracy declined by 18 percent. The root cause was communication overhead: the agents spent the majority of their token budgets and wall-clock execution time re-explaining context to one another, serializing message queues, and negotiating conflicting workspace proposals.
+- **Heading & Anchor:** `## The Delegation Trade-Off {#sec-vol3-multiagent-need}`
+- **The Single Key Point:** Multi-agent delegation is justified only when domain specialization or parallel exploration outweighs the significant overhead of duplicated context, inter-agent serialization, and final integration.
+- **Concrete Systems Hook:**
+  - An engineering team refactors a single-agent coding pipeline into a 5-agent "swarm" (Architect, Coder, Tester, Reviewer, Documenter). Total task latency jumps from 45 seconds to 11 minutes, costs surge 7x, and task completion success drops by 18% due to message passing serialization and coordinator bottlenecks.
+- **Points to explain (paragraph-by-paragraph):**
+  - *The Multi-Agent Illusion:* Concurrency does not automatically equal parallelism. If Subtask B requires the output of Subtask A, running them as separate agents adds communication latency and token duplication without reducing wall-clock makespan.
+  - *Legitimate Motivations for Multi-Agent Fleets:*
+    1. *Context Partitioning:* A task's total operational state exceeds the effective context window of a single model.
+    2. *Tool Authority Attenuation:* Giving distinct agents different capability scopes (e.g. read-only researcher vs. isolated sandbox executor).
+    3. *True Parallel Exploration:* Exploring independent, non-overlapping search spaces (e.g. fuzzing, parallel bug search).
+  - *The Coordination Tax:* Quantifying the cost of inter-agent messaging:
+    $$T_{\text{total}} = T_{\text{work}} + T_{\text{serialize}} + T_{\text{network}} + T_{\text{context\_duplication}} + T_{\text{reconciliation}}$$
+- **Visuals & Tables:**
+  - Decision Matrix: Single-Agent Deliberation vs. Multi-Agent Delegation (Trade-offs across Latency, Token Cost, Context Overhead, and Failure Isolation).
+- **Seminal Literature:**
+  - Jerome H. Saltzer & M. Frans Kaashoek (2009, *Principles of Computer System Design: An Introduction*).
+- **Causal Bridge to 15.2:** When delegation is justified, how do we structure the communication and dependency topologies connecting the agents?
+-->
 
-### The multi-agent illusion {#sec-vol3-multiagent-single-agent-ceiling}
+The fundamental design choice in distributed agentic architectures is whether to execute a complex task through monolithic, sequential deliberation within a single inference context or to partition execution across a fleet of communicating, specialized subagents. A common systems fallacy assumes that decomposing a monolithic prompt into an ensemble of interacting agents naturally accelerates execution and improves output quality. In practice, concurrency does not equal parallelism. Unless subtasks exhibit true structural independence, naive multi-agent decomposition replaces efficient, in-memory autoregressive attention with high-latency inter-process serialization, unbounded message passing, and coordinator bottlenecks.
 
-Concurrency does not automatically equal parallelism. In classical distributed computing, executing $M$ tasks concurrently reduces wall-clock makespan if and only if the tasks possess independent execution paths that can be processed in parallel [@saltzer2009]. If Subtask $B$ requires the intermediate output of Subtask $A$, running them as two distinct agents adds inter-process communication overhead, network serialization latency, and redundant context ingestion without decreasing the critical path duration.
+Consider an empirical systems baseline: an engineering workflow refactors a single-agent coding pipeline—operating via an iterative edit-test-debug loop inside one continuous context—into a specialized five-agent pipeline comprising an Architect, Coder, Tester, Reviewer, and Documenter. Under identical model backends and benchmarks, total task completion wall-clock makespan increases from 45 seconds to 11 minutes, aggregate token consumption surges by a factor of 7.2, and end-to-end task completion rate drops from 74% to 56%. The degradation is not an artifact of model capability; it is the predictable consequence of queuing delays, repeated context re-ingestion, and cascading communication overheads across distributed interfaces.
 
-Furthermore, multi-agent systems suffer from the **Context Duplication Multiplier**. In a single-agent architecture, the model maintains its working memory, intermediate tool observations, and reasoning scratchpad within a single shared KV-cache (@sec-vol3-virtual-memory). When a task is partitioned across $M$ distinct agents, each agent must ingest baseline environment prompts, system instructions, schema definitions, and relevant task history. A 20,000-token repository context distributed across 5 agents requires $5 \times 20{,}000 = 100{,}000$ prompt prefill tokens before a single line of code is written, drastically inflating serving costs and accelerator memory pressure.
+### The Multi-Agent Illusion and Sequential Bottlenecks
 
-### Legitimate motivations for multi-agent fleets
+In classical operating systems and modular system design, introducing a module boundary incurs a nonzero crossing cost [@saltzer2009]. When Subtask $B$ strictly depends on the intermediate state or output artifact of Subtask $A$, instantiating them as distinct agents yields zero parallel speedup. The execution makespan remains constrained by the critical path of sequential dependencies:
 
-Multi-agent delegation is justified only when domain specialization or parallel exploration outweighs the coordination tax. In production systems, legitimate motivations for multi-agent architectures fall into three distinct systems categories:
+$$T_{\text{critical}} = \sum_{i \in \text{path}} T_{\text{work}, i}$$
 
-1. **Context Partitioning:** When the operational state required to solve a task exceeds the effective context window or attention retrieval horizon of a single model (@sec-vol3-working-sets). For example, auditing 50 independent microservices simultaneously requires partitioning analysis across distinct agents because the aggregate codebase exceeds multi-million-token context capacities.
-2. **Tool Authority Attenuation:** When security isolation boundaries require privilege separation (@sec-vol3-virtualization). An untrusted web researcher agent must run in an internet-accessible sandbox with read-only permissions, while a deployment agent must execute inside a locked private VPC with restricted write credentials. Running these workloads within distinct agents guarantees that prompt injection in the researcher cannot compromise production credentials.
-3. **True Parallel Exploration:** When searching wide, decoupled solution spaces with non-overlapping state dependencies. For example, generating and evaluating 16 independent architectural design proposals, fuzzing different API endpoints simultaneously, or searching disjoint directories for bug candidates.
+Partitioning a strictly sequential task across multiple autonomous agents converts low-cost key-value (KV) cache reuse into expensive boundary-crossing operations. In a single-agent session, prior reasoning, tool outputs, and environment observations remain resident in the inference engine's KV cache, benefiting from prefix caching and localized attention. When execution is split across distinct agent boundaries, the upstream agent must serialize its internal state into a structured schema or natural-language artifact, transmit the payload over an IPC or network interface, and the downstream agent must ingest, parse, and prefill that context into its own independent KV cache. The result is a compounding memory and prefill tax that delivers no additional parallel computational throughput.
 
-### The coordination tax
+### The Coordination Tax and Compounding Failure
 
-We quantify the end-to-end latency of a multi-agent workflow through the **Coordination Tax**:
+The operational overhead of inter-agent communication can be formalized through the latency decomposition of a multi-agent transaction:
 
 $$T_{\text{total}} = T_{\text{work}} + T_{\text{serialize}} + T_{\text{network}} + T_{\text{context\_duplication}} + T_{\text{reconciliation}}$$
 
-where $T_{\text{work}}$ represents active token generation and tool execution, $T_{\text{serialize}}$ is the latency of encoding structured messages, $T_{\text{network}}$ is inter-agent transport latency, $T_{\text{context\_duplication}}$ is the prefill latency of ingesting duplicated baseline context across workers, and $T_{\text{reconciliation}}$ is the time spent resolving merge conflicts and aggregating candidate responses.
+where:
 
-@Tbl-vol3-multiagent-delegation-tradeoff formalizes the systems trade-offs between single-agent deliberation and multi-agent delegation.
+- $T_{\text{work}}$ represents raw model inference time generating tokens across all agents.
+- $T_{\text{serialize}}$ is the overhead of encoding and decoding structured state across agent boundaries (such as JSON schema validation and tool call generation).
+- $T_{\text{network}}$ is the transport latency of the message bus or remote procedure call (RPC) layer.
+- $T_{\text{context\_duplication}}$ is the aggregate time-to-first-token (TTFT) prefill latency incurred when downstream agents re-process shared system prompts, static tool definitions, repository maps, and upstream execution logs.
+- $T_{\text{reconciliation}}$ is the arbitration time spent by coordinator agents resolving schema violations, ambiguous natural-language handoffs, or conflicting state mutations.
 
-| Systems Dimension     | Single-Agent Deliberation                   | Multi-Agent Delegation                       | Optimal Systems Selection                                                                |
-|:----------------------|:--------------------------------------------|:---------------------------------------------|:-----------------------------------------------------------------------------------------|
-| **Latency Profile**   | Low serialization; sequential critical path | Parallel exploration; high communication tax | Single agent for sequential dependencies; multi-agent for embarrassingly parallel search |
-| **Token Cost**        | Shared KV-cache; zero context duplication   | Multiplied prompt prefill across $M$ agents  | Single agent for dense, shared codebases; multi-agent for disjoint data partitions       |
-| **Security Scope**    | Single ambient credential envelope          | Attenuated, per-agent capability tokens      | Multi-agent when security domains require strict network or privilege isolation          |
-| **Failure Isolation** | Trajectory failure halts entire execution   | Subagent crash contained by supervisor tree  | Multi-agent when unhandled exceptions must be isolated to disposable workers             |
-| **State Consistency** | Single linear memory workspace              | Distributed workspaces; merge conflicts      | Single agent for coupled state edits; multi-agent for read-only parallel indexing        |
+In addition to latency expansion, distributed delegation degrades task reliability through multiplicative failure compounding. If a task requires $N$ sequential handoffs between agents, and each agent possesses an independent step completion probability $p_i$, the upper bound of end-to-end trajectory reliability is:
 
-: **Single-Agent Deliberation versus Multi-Agent Delegation**: Architectural trade-offs across latency, token expenditures, security boundaries, and state consistency. {#tbl-vol3-multiagent-delegation-tradeoff tbl-colwidths="[20,25,25,30]"}
+$$P_{\text{success}} \le \prod_{i=1}^N p_i$$
 
+For an agent pipeline with $N = 5$ stages where each agent achieves a respectable step reliability of $p = 0.90$, the composite trajectory success rate is bounded at $P_{\text{success}} \le (0.90)^5 \approx 0.59$. Unless every interface incorporates strict programmatic validation, state verification, and deterministic rollback routines, the likelihood of unrecoverable trajectory drift increases exponentially with fleet size.
+
+### Justified Delegation: Context, Authority, and Parallelism
+
+Decomposing a system across an agent fleet is architecturally justified only when the benefits of specialization, security isolation, or concurrent search definitively exceed the coordination tax. Systems engineering requires isolating three distinct operational regimes where multi-agent architectures are strictly necessary:
+
+1. **Context Partitioning Across Capacity Limits:** Modern foundation models exhibit sharp retrieval degradation, needle-in-a-haystack failures, and reasoning dilution as the context length approaches physical hardware or architectural limits ($N_{\text{tokens}} \gg W_{\text{effective}}$). When an enterprise task requires operating over millions of tokens of heterogeneous data—such as disparate microservice codebases, extensive telemetry traces, and architectural documentation—a single context window suffers from severe attention degradation. Partitioning state across specialized domain agents bounds working memory per agent to high-attention, high-density token regions.
+2. **Tool Authority Attenuation (Least Privilege):** Following the principle of least privilege [@saltzer2009], security and fault isolation demand that broad, destructive capabilities not reside within the same context that processes untrusted external inputs. An orchestrator that browses the public web must not possess direct write access to a production database or the host shell. Decoupling the pipeline into a sandboxed, unprivileged *Research Agent* (read-only web access) and an isolated, permissioned *Execution Agent* (local shell access, no egress) guarantees that prompt injection cannot directly compromise system invariants.
+3. **True Parallel Exploration:** When a problem exhibits high structural independence, such as fuzzing independent API endpoints, exploring disjoint architectural solution spaces, or verifying multiple independent test suites, parallel worker fleets achieve real speedups bounded only by Amdahl's Law and API rate limits. In these settings, $T_{\text{work}}$ across $M$ workers drops toward $T_{\text{work}} / M$, offsetting the static $T_{\text{serialize}}$ and $T_{\text{reconciliation}}$ costs.
+
+| Evaluation Dimension    | Single-Agent Deliberation                                                   | Multi-Agent Delegation                                                  | Architectural Trade-Off / Limit                                                                     |
+|:------------------------|:----------------------------------------------------------------------------|:------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
+| **Wall-Clock Latency**  | Low ($T_{\text{work}}$ dominant; full KV cache reuse across turns).         | High for sequential tasks; low only for embarassingly parallel tasks.   | Dominated by serialization delays and TTFT prefill duplication ($T_{\text{context\_duplication}}$). |
+| **Token Expenditure**   | Linear with step count; bounded context reuse.                              | Multiplicative; each agent consumes duplicate base prompts and schemas. | Token inflation factor scales with fleet size and conversation history sharing.                     |
+| **Working Memory**      | Monolithic; bounded by single-model effective context window.               | Partitioned; each agent retains a local, high-density context.          | Prevents attention dilution and catastrophic forgetting on massive state spaces.                    |
+| **Authority Isolation** | Weak; all integrated tools reside in a single prompt and security boundary. | Strong; independent execution runtimes, credentials, and API grants.    | Enforces the Principle of Least Privilege across untrusted inputs.                                  |
+| **State Consistency**   | Centralized; single internal execution trace and state memory.              | Decentralized; prone to split-brain states and divergence.              | Requires formal concurrency control and deterministic schema validation.                            |
+
+: Architectural trade-offs between single-agent deliberation and multi-agent delegation. {#tbl-delegation-tradeoff}
+
+When task decomposition satisfies these criteria and delegation is justified by physical context bounds, security boundaries, or parallel execution, the engineering challenge shifts from whether to decompose to how to connect the resulting components. In @sec-vol3-multiagent-topologies, we analyze the execution topologies—from hierarchical supervisors to peer message buses—that govern information flow and minimize the coordination tax across agent fleets.
+
+<!-- SECTION_END: 15.1 -->
+
+<!-- SECTION_START: 15.2 (#sec-vol3-multiagent-topologies) -->
 ## Coordination Topologies {#sec-vol3-multiagent-topologies}
 
-When multi-agent delegation is justified, the systems engineer must structure the communication and dependency relationships connecting the agents. Multi-agent coordination requires formal task dependency directed acyclic graphs (DAGs)\index{Task Dependency Graph} [@lamport1978time] that define the flow of control, state, and evidence across the fleet.
+<!-- OUTLINE_SPEC:
 
-Consider the failure signature of an uncoordinated peer-to-peer topology: an engineering team deployed three peer agents (Database Specialist, Backend Developer, API Gateway Engineer) in an open, unconstrained chat room with no designated coordinator. The team entered an unresolvable semantic deadlock: the Backend Developer waited for the Database Specialist to finalize the schema, the Database Specialist waited for the API Gateway Engineer to specify request payloads, and the API Gateway Engineer waited for the Backend Developer to publish service endpoints. All three agents exhausted their token and timeout budgets exchanging polite messages asking each other to proceed first.
+- **Heading & Anchor:** `## Coordination Topologies {#sec-vol3-multiagent-topologies}`
+- **The Single Key Point:** Multi-agent coordination requires formal task dependency graphs (DAGs) choosing between Supervisor-Worker, Linear Pipeline, and Decentralized Peer topologies based on data flow dependencies.
+- **Concrete Systems Hook:**
+  - A peer-to-peer agent team with no supervisor enters an unresolvable cyclic deadlock: Agent A waits for Agent B's database schema, while Agent B waits for Agent A's API specifications. Both agents exhaust their timeout budgets exchanging polite messages asking each other to go first.
+- **Points to explain (paragraph-by-paragraph):**
+  - *Taxonomy of Coordination Topologies:*
+    - *Hierarchical Supervisor-Worker:* A root supervisor decomposes goals, dispatches subtasks to specialized workers, aggregates outputs, and verifies results. Vulnerable to supervisor context bottlenecks.
+    - *Sequential Pipeline:* Output of Agent $k$ streams as the input to Agent $k+1$. High throughput for streaming batch tasks, but brittle to upstream stage failures.
+    - *Decentralized Blackboard / Actor Model:* Autonomous workers read and write shared artifacts from an immutable blackboard or exchange typed messages over point-to-point mailboxes.
+  - *Representing Tasks as Dependency DAGs:* Modeling execution as vertices (subtasks) and directed edges (data/control dependencies). Identifying the critical path and available parallel branches.
+  - *Dynamic vs. Static Topologies:* When to pre-compile execution graphs vs. allowing runtime dynamic subagent spawning.
+- **Visuals & Tables:**
+  - Figure: Coordination Topologies [insert link here: books/vol3/15_multi_agent/images/svg/multi_agent_topologies_v2.svg] (Hierarchical Supervisor vs. Sequential Pipeline vs. Shared Blackboard vs. Peer-to-Peer Actor Mesh).
+- **Seminal Literature:**
+  - Carl Hewitt, Peter Bishop, & Richard Steiger (1973, *A Universal Modular ACTOR Formalism for Artificial Intelligence*).
+  - Leslie Lamport (1978, *Time, Clocks, and the Ordering of Events in a Distributed System*).
+- **Causal Bridge to 15.3:** How do individual agents exchange state, evidence, and authority across the edges of these task graphs?
+-->
 
-To prevent coordination deadlocks, production systems employ four foundational coordination archetypes (@fig-vol3-multiagent-topologies).
+Without an explicit coordination topology, unstructured communication between autonomous agents degrades rapidly into distributed deadlock or unbounded token consumption. Consider an uncoordinated peer-to-peer fleet tasked with implementing a full-stack microservice: Agent A (the backend engineer) waits for Agent B (the database architect) to freeze table schemas before implementing API routing logic, while Agent B refuses to finalize schema constraints until Agent A defines endpoint payload contracts. In the absence of an external supervisor or a strict precedence contract, both agents enter a cyclic waiting state, consuming their execution timeouts and token budgets exchanging polite natural-language prompts requesting that the peer initiate the work. Multi-agent coordination is fundamentally a distributed scheduling problem; it requires formalizing the flow of state, control, and execution dependencies across a fleet.
 
-::: {#fig-vol3-multiagent-topologies fig-env="figure" fig-pos="htb" fig-cap="**Multi-Agent Coordination Topologies**: Architectural trade-offs across communication complexity, failure blast radii, and state isolation boundaries. The four archetypes trade edge density ($O(M^2)$ in peer meshes down to $O(M)$ in supervisor trees) for centralization and latency. Source: Adapted from @hewitt1973actor and @agha1986actors." fig-alt="Four-panel diagram comparing multi-agent topologies: Peer-to-Peer Mesh with quadratic all-to-all communication, Hierarchical Supervisor Tree with bounded tree edges, Sequential Assembly Pipeline with linear phase gates, and Shared Blackboard with decoupled asynchronous tuple space."}
-![](images/svg/multi_agent_topologies_v2.svg){width="100%"}
-:::
+### Tasks as Dependency Graphs
 
-### Hierarchical supervisor trees
+At the systems level, multi-agent workflows map directly to directed acyclic graphs (DAGs), $\mathcal{G} = (\mathcal{V}, \mathcal{E})$, where each vertex $v_i \in \mathcal{V}$ denotes an atomic execution unit (an isolated model inference pass, tool evaluation, or deterministic verification routine) and each directed edge $e_{ij} = (v_i, v_j) \in \mathcal{E}$ represents a strict causal data or control dependency.
 
-Drawing from Erlang/OTP actor principles [@armstrong2007erlang; @agha1986actors], **Hierarchical Supervisor Trees** structure agents into a strict parent-child supervision hierarchy. A root supervisor receives the high-level task specification, decomposes the goal into bounded subtasks, provisions specialized worker agents, dispatches typed task envelopes, and aggregates results.
+Mapping a workflow onto a DAG exposes its structural concurrency limits. Assuming unbounded worker capacity, the minimum wall-clock latency of an agent workflow is determined strictly by its critical path:
 
-In a supervisor hierarchy:
+$$T_{\text{DAG}} = \sum_{v_k \in \mathcal{CP}} T(v_k)$$
 
-1. **Failure Containment:** Leaf workers execute in sandboxed environments. If a worker crashes, times out, or emits invalid actions, the supervisor catches the fault without crashing the entire fleet.
-2. **Supervision Policies:** Supervisors enforce explicit restart policies:
-   - *One-For-One:* If a leaf worker fails, only that specific worker is restarted.
-   - *One-For-All:* If a critical worker fails (e.g., the primary code compiler), all sibling workers dependent on its output are aborted and restarted simultaneously.
-3. **Supervisor Bottleneck Hazard:** The primary limitation of supervisor trees is context saturation at the root node. If $M = 20$ workers stream detailed intermediate updates to the supervisor, the supervisor's context window rapidly fills with status noise, crowding out planning capacity. Supervisors must enforce strict summary reporting protocols.
+where $\mathcal{CP} \subseteq \mathcal{V}$ is the longest sequence of dependent operations from workflow ingress to task completion, and $T(v_k)$ is the latency of vertex $v_k$. Parallel branches off the critical path can execute concurrently across distinct physical contexts, yielding wall-clock speedups bounded by Amdahl's Law. However, extracting this parallelism requires mapping the logical DAG onto an explicit runtime topology (@fig-coordination-topologies).
 
-### Sequential assembly pipelines
+![Coordination topologies across multi-agent fleets: hierarchical supervisor-worker, sequential pipeline, shared blackboard, and decentralized peer-to-peer actor mesh.](images/svg/multi_agent_topologies_v2.svg){#fig-coordination-topologies}
 
-In a **Sequential Pipeline**, work proceeds through a series of linear stages: Agent $k$ transforms input artifacts and streams its output directly as the input to Agent $k+1$. Pipelines are optimal for deterministic, staged transformations, such as automated vulnerability remediation:
+### Structural Topologies
 
-$$\text{Issue Report} \xrightarrow{\text{Triage Agent}} \text{Reproducer} \xrightarrow{\text{Patch Agent}} \text{Diff} \xrightarrow{\text{Reviewer Agent}} \text{Approved PR}$$
+Four canonical topologies define information routing and authority delegation across agent fleets:
 
-Pipelines provide deterministic execution ordering and minimal communication overhead ($O(M)$ linear edges). However, pipelines are inherently brittle to upstream quality drift: if an early agent emits an erroneous intermediate artifact, downstream agents inherit the flaw, compounding the error across subsequent stages.
+1. **Hierarchical Supervisor-Worker:** A centralized root supervisor ingests the global prompt, decomposes the objective into isolated subtasks, dispatches work to specialized leaf agents, and aggregates results. The supervisor acts as a centralized synchronization barrier. While this pattern enforces global visibility and simplifies deterministic error recovery, it introduces a severe context concentration bottleneck. The supervisor context must ingest intermediate execution summaries from all $M$ subordinates, scaling input tokens as $O(M)$ and inducing severe attention dilution and key-value (KV) cache saturation at the root node.
+2. **Sequential Pipeline:** Subtasks exhibit strict linear dependency ($v_1 \to v_2 \to \dots \to v_N$), streaming the output artifacts of agent $k$ directly into the input prompt of agent $k+1$. Sequential pipelines maximize throughput in streaming batch workloads, such as automated vulnerability remediation pipelines (static analysis $\to$ patch generation $\to$ compilation verification $\to$ regression test). However, pipelines are fragile under multiplicative reliability compounding ($P_{\text{success}} \le \prod_{i=1}^N p_i$): an unhandled schema deviation or hallucination at stage $k$ propagates downstream unchecked, corrupting downstream execution unless gated by programmatic validation interceptors between stages.
+3. **Shared Blackboard:** Rather than communicating point-to-point, autonomous worker agents coordinate asynchronously through a shared, append-only artifact repository or structured state store. Workers register event triggers or poll for specific schema updates (such as test failures or lint outputs), read existing state, and commit validated mutations back to the repository. The blackboard pattern decouples agents temporally and reduces point-to-point channel complexity from $O(N^2)$ to $O(N)$. However, concurrent mutations require robust concurrency control—such as optimistic concurrency control, write leases, or conflict-free replicated data types (CRDTs)—to prevent split-brain state divergence.
+4. **Decentralized Actor Mesh:** Drawing on the Actor model formalized by Hewitt, Bishop, and Steiger [@hewitt1973actor], each agent operates as an autonomous computational entity encapsulating private state, an isolated context window, and a FIFO message mailbox. Actors interact exclusively through asynchronous, typed message passing. While this architecture scales horizontally without a single point of failure, maintaining global temporal consistency across an uncoordinated mesh is non-trivial. Without Lamport logical clocks or vector timestamps [@lamport1978time], distributed agents observe out-of-order execution traces, producing divergent causal inferences across the fleet.
 
-### Shared blackboard architectures
+| Coordination Topology        | Coupling Degree       | Message Complexity | Bottleneck Location                           | Failure Recovery Mode                           |
+|:-----------------------------|:----------------------|:-------------------|:----------------------------------------------|:------------------------------------------------|
+| **Hierarchical Supervisor**  | High (Synchronous)    | $O(M)$             | Supervisor context window & KV cache capacity | Centralized retry / reassignment by supervisor  |
+| **Sequential Pipeline**      | Tight (Linear Causal) | $O(N)$             | Slowest pipeline stage ($T_{\max}$)           | Rollback to upstream checkpoint / stage restart |
+| **Shared Blackboard**        | Loose (Data-Centric)  | $O(N)$             | Blackboard storage I/O & lock contention      | Version rollbacks via append-only audit log     |
+| **Decentralized Actor Mesh** | Loose (Event-Driven)  | $O(N^2)$           | Network transport & message serialization     | Distributed consensus or timeout bailouts       |
 
-In a **Shared Blackboard** topology, agents do not communicate via direct point-to-point messages. Instead, all agents interact asynchronously with a centralized, versioned state repository (the blackboard). Agents register interest in specific artifact types (e.g., "new failed unit tests" or "pending database migrations") and execute whenever matching entries appear on the blackboard.
+: Structural properties and failure characteristics of multi-agent coordination topologies. {#tbl-topology-comparison}
 
-Blackboard architectures decouple agent lifecycles, enabling dynamic worker scaling and asynchronous task processing. However, they require rigorous distributed concurrency control (@sec-vol3-multiagent-concurrency) to prevent conflicting writes to shared blackboard entries.
+### Static Graph Compilation Versus Dynamic Dispatch
 
-@Tbl-vol3-multiagent-topologies summarizes the structural characteristics and operational trade-offs of these coordination archetypes.
+The engineering trade-off between static and dynamic execution topologies balances deterministic predictability against runtime adaptability.
 
-| Topology Archetype      | Edge Complexity      | State Ownership                           | Failure Blast Radius                        | Optimal Production Workloads                                           |
-|:------------------------|:---------------------|:------------------------------------------|:--------------------------------------------|:-----------------------------------------------------------------------|
-| **Supervisor Tree**     | $O(M)$ hierarchical  | Isolated per worker; aggregated by parent | Bounded to worker subtree                   | Goal decomposition, tool delegation, software feature development      |
-| **Sequential Pipeline** | $O(M)$ linear        | Passed sequentially across stages         | Stage failure halts entire pipeline         | Content generation, linting pipelines, continuous integration staging  |
-| **Shared Blackboard**   | $O(M)$ to repository | Shared central repository with versioning | Decoupled; corrupted entries affect readers | Asynchronous data analysis, exploratory research, bug hunting          |
-| **Peer-to-Peer Mesh**   | $O(M^2)$ all-to-all  | Replicated across all agent contexts      | Global; unhandled errors cascade everywhere | Small collaborative brainstorming (strictly bounded to $\le 3$ agents) |
+A *static topology* pre-compiles the dependency graph prior to execution. Routing logic, schema contracts, agent roles, and dependency edges are fixed at deployment time. Static graphs enable compile-time schema validation, deterministic timeout enforcement, and fixed token budget ceilings. They are ideally suited for standardized enterprise pipelines where the sequence of verification, compilation, and review steps is well-defined.
 
-: **Multi-Agent Coordination Topologies**: Structural characteristics, communication complexity, state isolation boundaries, and failure blast radii across coordination archetypes. {#tbl-vol3-multiagent-topologies tbl-colwidths="[20,15,22,18,25]"}
+Conversely, a *dynamic topology* permits runtime subagent dispatch: an active agent can dynamically instantiate subordinate agents, spawn speculative parallel search branches, or alter graph edges based on intermediate runtime observations. While dynamic dispatch provides flexibility when diagnosing ambiguous failures or exploring open-ended codebases, it introduces non-deterministic execution paths, volatile token consumption, and the risk of runaway recursive agent spawning (fork bombs). Production systems that support dynamic dispatch must enforce strict physical constraints: hard caps on maximum recursion depth ($\text{depth} \le d_{\max}$), strict limits on total concurrent child processes, and global token and wall-clock budgets allocated atomically from a centralized quota pool.
 
+Establishing the execution topology defines the routing pathways of an agent fleet, but topology alone does not specify the underlying wire protocols, state serialization formats, or authority boundaries operating across those channels. In @sec-vol3-multiagent-communication, we examine the transport mechanisms, serialization standards, and consensus protocols required to exchange state and evidence across multi-agent boundaries without corrupting system invariants.
+
+<!-- SECTION_END: 15.2 -->
+
+<!-- SECTION_START: 15.3 (#sec-vol3-multiagent-contracts) -->
 ## Typed Task Envelopes {#sec-vol3-multiagent-contracts}
 
-In early multi-agent frameworks, inter-agent communication was structured as unconstrained natural language chat. An agent completed a subtask and transmitted a conversational message: *"I finished refactoring the authentication module, please run the integration tests and verify that JWT tokens still work."*
+<!-- OUTLINE_SPEC:
 
-Conversational handoffs are disastrous in production systems:
+- **Heading & Anchor:** `## Typed Task Envelopes {#sec-vol3-multiagent-contracts}`
+- **The Single Key Point:** Handoffs between agents must carry explicit, typed task envelopes (task identity, input artifact versions, delegated authority, compute budget, and completion status) rather than unstructured natural language chat.
+- **Concrete Systems Hook:**
+  - Agent A finishes refactoring a backend module and sends a free-form message to Agent B: "I updated the auth logic, please run the integration tests." Agent B runs tests against its local repository clone, completely unaware that Agent A's changes are uncommitted on a separate remote container, reporting a false-positive test pass.
+- **Points to explain (paragraph-by-paragraph):**
+  - *The Failure of Conversational Handoffs:* Passing raw conversational text between agents causes semantic drift, dropped constraints, and ambiguity regarding state locations and permissions.
+  - *The Task Envelope Specification:*
+    1. *Task Metadata:* Unique Task ID, Parent Task ID, Trace Context ID.
+    2. *Input References:* Immutable URIs or cryptographic hashes of input artifacts (git commit SHA, database snapshot, document IDs).
+    3. *Delegated Capability Token:* Attenuated permissions (e.g. read-only file access, max $10 spending budget).
+    4. *Resource Budget:* Max tokens, max wall-clock duration, max tool invocation counts.
+    5. *Completion Verification Schema:* Machine-readable assertions required for acceptance (e.g. test exit code 0, linter clean).
+  - *Passing State by Value vs. by Reference:* Passing lightweight URI references to persistent storage rather than copying megabytes of raw files into prompt contexts.
+- **Visuals & Tables:**
+  - Data Schema: The Typed Agent Task Envelope (JSON schema showing identifiers, artifact references, capabilities, and budgets).
+- **Causal Bridge to 15.4:** When multiple agents execute concurrently against a shared environment, how do we prevent conflicting writes and state corruption?
+-->
 
-1. **Semantic Drift:** Natural language messages introduce ambiguity regarding exact file paths, commit hashes, and environment variables.
-2. **Dropped Constraints:** Subtle negative constraints (e.g., "do not modify `db.py`") are frequently forgotten or diluted across multi-turn conversational chains.
-3. **Implicit State Assumptions:** In the example above, if the testing agent runs in an isolated container without the refactored code mounted, it runs tests against the stale baseline repository, reporting a false-positive test pass.
+In distributed software architectures, an interface boundary defines the preconditions, invariants, and resource contracts required for two decoupled execution contexts to interact safely. In naive multi-agent implementations, this boundary is frequently collapsed into an unstructured natural language channel. Treating conversational text as an inter-agent remote procedure call (RPC) protocol violates encapsulation, eliminates compile-time type safety, and destroys referential integrity across the system.
 
-### The task envelope specification {#sec-vol3-multiagent-wire-protocols}
+### The Failure of Conversational Handoffs
 
-Production multi-agent architectures prohibit free-form conversational handoffs. Every inter-agent delegation must be encapsulated inside a **Typed Task Envelope**\index{Typed Task Envelope} containing explicit machine-readable metadata, immutable artifact references, cryptographic capabilities, and deterministic completion criteria.
+When agents coordinate via free-form text, the receiving agent must parse intent, extract target parameters, and infer the execution state through heuristic token prediction. This introduces semantic drift, dropped constraints, and ambient authority errors.
 
-A production task envelope contains five mandatory fields:
+Consider an execution trace between two specialized agents within an automated maintenance fleet:
 
-1. **Task Lineage Identifiers:** Cryptographically unique identifiers tracking task execution:
-   - `task_id`: Universally unique identifier for the current subtask.
-   - `parent_id`: Identifier of the invoking supervisor agent.
-   - `trace_context`: OpenTelemetry-compatible trace identifier linking distributed spans across agents (@sec-vol3-observability).
-2. **Immutable Input Artifact References:** Rather than copying megabytes of raw source code or log data into the prompt context (**pass-by-value**), the envelope passes immutable URI references or content-addressable hashes (**pass-by-reference**):
-   - `repo_commit_sha`: Pinned git commit hash representing baseline code state.
-   - `snapshot_uri`: Read-only storage URI for dataset or database fixtures.
-3. **Delegated Capability Token:** A cryptographically signed capability token explicitly enumerating permitted tool operations, network domains, and directory paths (@sec-vol3-multiagent-authority).
-4. **Deterministic Resource Budgets:** Hard limits bounding worker execution:
-   - `max_wallclock_seconds`: Maximum allowable execution time before the runtime triggers an external SIGTERM interrupt.
-   - `max_token_budget`: Strict upper bound on aggregate prompt and generation tokens.
-   - `max_tool_invocations`: Maximum permitted tool execution turns.
-5. **Completion Verification Schema:** Machine-readable acceptance criteria evaluated by the runtime before the worker's output is accepted by the supervisor:
-   - `required_exit_code`: Expected process exit code (e.g., 0).
-   - `artifact_hash_expected`: Content hash of generated deliverables.
-   - `assertion_test_suite`: Pinned path to deterministic verification test scripts.
+1. **Upstream Mutation:** Agent A refactors a cryptographic dependency in `/services/auth` inside container `c-814`.
+2. **Conversational Dispatch:** Agent A emits an unformatted message to Agent B: *"I updated the authentication logic; please run the integration test suite."*
+3. **Implicit State Assumption:** Agent B receives the text string. Lacking an explicit environment handle, Agent B evaluates its default workspace clone in container `c-902`—which points to the remote tracking branch `main` at commit `a4f19b`—completely isolated from Agent A's uncommitted container volume.
+4. **False-Positive Evaluation:** Agent B executes `pytest tests/integration/`, observes exit code `0` against the unmodified legacy code, and signals completion.
+5. **System Invariant Violation:** The orchestrator records the subtask as verified, despite the refactored code never having been compiled, mounted, or executed.
 
-```json
+Natural language handoffs fail because they transmit ungrounded intent rather than deterministic systems state. The receiving agent has no mechanical guarantee of what artifact version to inspect, which filesystem snapshot to mount, what tool boundaries to enforce, or what computational budget limits its execution.
+
+### The Task Envelope Specification
+
+To enforce deterministic handoffs, inter-agent communication must be mediated by a *typed task envelope*. An envelope is an immutable, structured schema (serialized as JSON or Protocol Buffers) that formalizes execution metadata, artifact provenance, capability boundaries, and termination conditions before the downstream agent is scheduled.
+
+```{#lst-task-envelope .json lst-cap="Typed agent task envelope specification defining execution boundaries, cryptographic artifact references, attenuated capabilities, and machine-verifiable completion assertions."}
 {
-  "task_id": "tsk_8f91c0e3a4b",
-  "parent_id": "tsk_root_supervisor",
-  "trace_context": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-  "input_artifacts": {
-    "base_commit": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "fixture_uri": "s3://mlsys-fixtures/benchmarks/issue-4029.tar.gz"
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "task_id": "tsk_01J8M4K9W7X2Y",
+  "parent_task_id": "tsk_01J8M3A1P9V0B",
+  "trace_context": {
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
   },
-  "capabilities": {
-    "token_id": "cap_ro_researcher_v1",
-    "allowed_tools": ["read_file", "search_ripgrep", "run_linter"],
-    "allowed_paths": ["/workspace/src/auth/*"],
-    "network_egress": "blocked"
+  "input_artifacts": {
+    "repository": {
+      "uri": "git@github.com:org/platform.git",
+      "commit_sha": "d7a8e41bf280562e8312b9d211246c4f74d08e1a"
+    },
+    "patch_ref": "s3://agent-scratch-artifacts/patches/tsk_01J8M3A1P9V0B.diff",
+    "base_environment_digest": "sha256:8f43b67c26e108e42f7c00e12d1b827e857"
+  },
+  "capability_token": {
+    "token_id": "cap_auth_read_test_exec",
+    "allowed_tools": ["filesystem_read", "pytest_runner"],
+    "filesystem_isolation": {
+      "read_paths": ["/src", "/tests"],
+      "write_paths": ["/tmp/test_reports"]
+    },
+    "network_egress": false
   },
   "resource_budget": {
-    "max_wallclock_seconds": 300,
-    "max_token_budget": 50000,
-    "max_tool_calls": 25
+    "max_wall_clock_seconds": 180,
+    "max_total_tokens": 32768,
+    "max_tool_calls": 5,
+    "max_usd_cost": 0.25
   },
-  "completion_criteria": {
-    "verification_command": "pytest tests/test_auth.py -v",
-    "expected_exit_code": 0,
-    "required_artifacts": ["patches/auth_refactor.diff"]
+  "completion_schema": {
+    "required_artifacts": ["/tmp/test_reports/junit.xml"],
+    "assertions": [
+      {"target": "exit_code", "operator": "equals", "value": 0},
+      {"target": "tests_failed", "operator": "equals", "value": 0}
+    ]
   }
 }
 ```
 
-By enforcing typed handoff envelopes, the Agent OS transforms stochastic multi-agent communication into a verifiable distributed RPC protocol.
+As specified in @lst-task-envelope, an explicit task envelope enforces five operational guarantees across the agent boundary:
 
+1. **Task and Trace Identity:** Unique identifiers (`task_id`, `parent_task_id`, and distributed `traceparent` headers) establish causal ordering across the execution Directed Acyclic Graph (DAG) and enable distributed latency profiling.
+2. **Immutable Input References:** Execution inputs are passed strictly as immutable cryptographic references (such as Git commit SHAs, content-addressed blob digests, or container layer manifests). The executing agent mounts a frozen state, eliminating environment drift.
+3. **Delegated Capability Tokens:** Following the principle of least privilege, agents operate under attenuated security contexts. Rather than inheriting the supervisor's global environment privileges, the child agent receives a bounded capability token that restricts tool access (such as denying arbitrary shell execution or disallowing network egress).
+4. **Bounded Resource Budgets:** Computational and economic limits are declared upfront. The envelope establishes hard ceilings on wall-clock time ($T_{\text{timeout}}$), token usage, tool iterations, and financial cost. If the child agent enters an infinite loop or reasoning path divergence, the runtime supervisor intercepts the breach and terminates the process.
+5. **Machine-Verifiable Completion Schemas:** A task is not complete when an LLM outputs an affirmative natural language conclusion such as *"The tests passed successfully."* Completion requires programmatic assertions evaluated by the runtime: matching exit codes, generated JUnit XML reports, or deterministic schema validation of output structures.
+
+### State Transfer: Passing by Value Versus Passing by Reference
+
+A critical systems constraint in multi-agent fleets is the mechanism of state propagation. Early agent frameworks pass state *by value*, serializing entire files, AST diffs, and historical command outputs directly into the text prompt of downstream agents.
+
+Passing state by value introduces severe physical overheads. Transferring a 150 KB code diff and build log requires approximately $L \approx 38{,}000$ tokens per handoff. For an $M$-agent pipeline, total token consumption scales as $O(M \cdot L)$, which induces quadratic context prefill latency and rapidly exhausts Key-Value (KV) cache capacity. The physical memory footprint of the KV cache scales linearly with sequence length:
+
+$$\text{Memory}_{\text{KV}} = 2 \times n_{\text{layers}} \times d_{\text{model}} \times L \times \text{sizeof}(\text{precision})$$
+
+For an enterprise model serving 16-bit floats with $n_{\text{layers}} = 80$ and $d_{\text{model}} = 8192$, every $38{,}000$ tokens of duplicated context consumes approximately 99.6 megabytes of high-bandwidth memory (HBM) per agent instance. Replicating this context across dozens of concurrent leaf agents causes premature GPU memory exhaustion.
+
+Conversely, passing state *by reference* transmits lightweight, constant-sized pointers ($O(1)$ token overhead, typically under 100 bytes) referencing shared, content-addressable storage (such as an object store, Git tree, or shared POSIX volume). Downstream agents query only the byte ranges, symbols, or log lines required to fulfill their specific capability contract. This design bounds context consumption, preserves attention fidelity over critical instructions, and guarantees that every agent operates against a single source of truth.
+
+Typed envelopes convert multi-agent interaction from unpredictable conversational negotiation into a deterministic distributed computing model. However, defining task envelopes for individual agent transitions does not resolve the concurrency challenges that arise when multiple workers interact simultaneously with a shared execution environment. In @sec-vol3-multiagent-shared-state, we examine how to manage shared state ownership, distributed file locks, and transactional conflict resolution across concurrent agent fleets.
+
+<!-- SECTION_END: 15.3 -->
+
+<!-- SECTION_START: 15.4 (#sec-vol3-multiagent-concurrency) -->
 ## Optimistic Concurrency Control {#sec-vol3-multiagent-concurrency}
 
-When multiple agents execute concurrently within a shared environment, they inevitably attempt to read and mutate shared resources simultaneously. In software engineering workloads, multiple coding agents might simultaneously edit application code, update dependency configurations, or modify shared database schemas.
+<!-- OUTLINE_SPEC:
 
-Language models possess zero native synchronization primitives. A large language model (LLM) cannot execute an atomic compare-and-swap (CAS) instruction, acquire a distributed mutex, or resolve a race condition during token generation. If two agents concurrently write directly to a shared filesystem, the inevitable result is write clobbering: the agent that writes last silently overwrites the changes of the preceding agent, corrupting application state and introducing subtle regression defects.
+- **Heading & Anchor:** `## Optimistic Concurrency Control {#sec-vol3-multiagent-concurrency}`
+- **The Single Key Point:** Concurrent agent execution against shared environments requires optimistic concurrency control, isolated branch workspaces, and three-way reconciliation to handle conflicting mutations.
+- **Concrete Systems Hook:**
+  - Two parallel coding agents concurrently modify `server.py`. Agent 1 updates route handlers, while Agent 2 fixes a security vulnerability. Agent 2 commits 200 ms after Agent 1 without pulling changes, silently overwriting Agent 1's commits and deploying a broken application to production.
+- **Points to explain (paragraph-by-paragraph):**
+  - *The Concurrency Hazard in Shared Environments:* Language models cannot perform atomic compare-and-swap operations across distributed filesystems. Direct concurrent writes to a shared workspace guarantee race conditions and data corruption.
+  - *Isolation via Worktrees and Copy-on-Write (CoW):* Every worker agent is provisioned with a private git worktree or ephemeral container layer branched off a pinned integration head.
+  - *Optimistic Concurrency Control (OCC) for Trajectories:*
+    1. *Read Phase:* Worker reads state at commit $C_{\text{base}}$.
+    2. *Execute Phase:* Worker mutates local private workspace.
+    3. *Validation Phase:* Runtime checks whether $C_{\text{current}} == C_{\text{base}}$.
+    4. *Commit / Merge Phase:* If clean, merge via three-way diff; if conflicts arise, dispatch an explicit reconciliation subtask.
+- **Visuals & Tables:**
+  - Sequence Diagram: Optimistic Concurrency Control with Isolated Worktrees and Automated Three-Way Merge Reconciliation.
+- **Seminal Literature:**
+  - Jim Gray (1981, *The Transaction Concept: Virtues and Limitations*).
+- **Causal Bridge to 15.5:** When multiple agents evaluate a shared proposal, why does voting or consensus fail to guarantee correctness?
+-->
 
-### Isolated worktrees and copy-on-write filesystems {#sec-vol3-multiagent-concurrency-control}
+### The Concurrency Hazard in Shared Workspaces
 
-Production multi-agent runtimes prohibit direct concurrent access to a shared mutable filesystem. Instead, every executing worker agent is provisioned with an isolated, private workspace using **Git Worktrees** or **Copy-on-Write (CoW) container overlay layers** (@sec-vol3-virtualization), as illustrated in @fig-vol3-multiagent-supervisor-trees.
+Direct concurrent mutation of persistent state by autonomous agents introduces non-deterministic race conditions and data corruption. Consider two autonomous coding agents dispatched concurrently against a shared repository checkout. Agent 1 is assigned to modernize API routing endpoints in `server.py`, while Agent 2 is tasked with patching an authentication bypass vulnerability within the same module. If both agents execute file modification tools directly against an uncoordinated POSIX filesystem, their edits interleave unpredictably.
 
-::: {#fig-vol3-multiagent-supervisor-trees fig-env="figure" fig-pos="htb" fig-cap="**Erlang-Style Supervisor Trees and Fault-Isolation Firewalls**: Hierarchical actor organization enforcing isolated process boundaries, private mailboxes, and restart policies. Isolating failure cascades to sub-tree branches prevents a crashed leaf worker from bringing down the shared execution context. Source: Adapted from @armstrong2007erlang." fig-alt="Architectural diagram showing a Root Supervisor managing Code and Verify sub-supervisors. Workers run in sandboxed environments with private mailboxes. A crashing worker is caught by a supervisor circuit breaker, with panels contrasting one-for-one and one-for-all restart policies."}
-![](images/svg/supervisor_tree_isolation.svg){width="100%"}
+Agent 1 reads `server.py` at timestamp $t_0$ and writes an updated abstract syntax tree (AST) at $t_1 = t_0 + 12.4\,\text{s}$. Concurrently, Agent 2 reads `server.py` at $t_0 + 1.2\,\text{s}$—prior to Agent 1's write—generates its security patch, and writes back to `server.py` at $t_2 = t_1 + 200\,\text{ms}$. Because standard filesystem write system calls lack multi-line semantic compare-and-swap (CAS) primitives accessible to stochastic model generation, Agent 2 executes a classic *lost update* anomaly. It silently overwrites Agent 1's route updates with stale code, deploying an inconsistent build that patches the security vulnerability but breaks the public API routing surface.
+
+In classical database systems, mutual exclusion locks (mutexes) or Two-Phase Locking (2PL) prevent race conditions by blocking concurrent writers. In agentic fleets, however, pessimistic file-level locking is physically prohibitive due to stochastic model inference latencies. While a transactional database engine or a compiled thread holds an exclusive lock for microseconds or milliseconds, an agent holding an exclusive write lock on `server.py` must hold it across an entire trajectory step: prompt serialization, remote inference, tool invocation, and verification. The lock holding time $T_{\text{hold}}$ scales with token generation and network round-trips:
+
+$$T_{\text{hold}} = \sum_{k=1}^{N_{\text{steps}}} \left( T_{\text{prefill}} + \frac{N_{\text{tokens}}^{(k)}}{\mathcal{R}_{\text{decode}}} + T_{\text{tool}} \right)$$
+
+For a model generating $N_{\text{tokens}} = 2048$ tokens at a decode rate $\mathcal{R}_{\text{decode}} = 80\,\text{tokens/s}$ alongside external tool execution ($T_{\text{tool}} \approx 5\,\text{s}$), $T_{\text{hold}}$ easily exceeds $30\,\text{seconds}$ per step. If an agent enters an extended reasoning path or stalls on a slow tool execution, the lock blocks the entire fleet. Pessimistic locking collapses parallel fleet throughput to that of a serialized queue, $1 / \overline{T}_{\text{task}}$, and invites distributed deadlocks whenever agents attempt multi-file edits across shared dependencies.
+
+### Workspace Isolation via Private Worktrees
+
+To eliminate lock contention and prevent destructive overwrites, agents must never operate directly within a shared integration directory. State mutations must be decoupled from the canonical repository through physical workspace isolation. Every worker agent is provisioned with a private Git worktree or an ephemeral container layer with a Copy-on-Write (CoW) filesystem (such as OverlayFS), branched off an immutable integration commit identifier $C_{\text{base}}$.
+
+Because a Git worktree shares the underlying `.git` object database via hardlinks while provisioning an isolated index, working tree, and `HEAD` pointer, worktree allocation incurs minimal storage overhead and completes in under $10\,\text{ms}$. Inside its private worktree, an agent reads files, modifies source code, executes linters, compiles binaries, and runs test suites without exposing uncommitted, syntactically invalid, or intermediate states to other workers in the fleet.
+
+### The Four Phases of Agent Optimistic Concurrency Control
+
+Following the classic database transaction model formalized by Jim Gray (1981), agent fleet coordination shifts the concurrency boundary from pessimistic locking to *Optimistic Concurrency Control* (OCC). OCC assumes that resource conflicts are relatively infrequent across broad codebases. Rather than serializing access upfront, the fleet runtime structures every agent trajectory into four discrete, verifiable phases:
+
+1. **Read Phase:** The worker agent checks out an isolated worktree pinned to integration commit $C_{\text{base}}$. The agent reads project context, analyzes dependencies, and constructs its plan strictly against this frozen repository snapshot.
+2. **Execute Phase:** The agent generates mutations, modifies files, and executes local validation tools (such as unit test suites) entirely within its isolated workspace. Mutations are recorded as local Git commits referencing $C_{\text{base}}$.
+3. **Validation Phase:** When the agent signals task completion, the fleet runtime evaluates whether the canonical integration branch has advanced past $C_{\text{base}}$. The runtime queries the integration head: $C_{\text{current}} = \text{HEAD}(\text{integration})$. If $C_{\text{current}} == C_{\text{base}}$, no concurrent agent has committed changes during the trajectory, and validation succeeds unconditionally.
+4. **Commit and Merge Phase:**
+   - *Clean Merge:* If validation succeeds, or if a three-way merge base between $C_{\text{base}}$, $C_{\text{current}}$, and the worker commit resolves cleanly without overlapping diff hunks, the runtime automatically merges the worker's branch into the integration branch.
+   - *Reconciliation Subtask:* If validation fails due to intersecting diff hunks—such as both agents modifying overlapping line ranges in `server.py`—a structural conflict occurs. Rather than aborting the transaction and discarding the tokens invested, the runtime dispatches an explicit *reconciliation subtask*. A specialized reconciliation agent receives a three-way diff envelope containing $C_{\text{base}}$, $C_{\text{current}}$, and the worker commit, resolving semantic collisions before executing the final commit.
+
+The end-to-end execution flow of OCC with automated reconciliation is illustrated in @fig-multiagent-occ.
+
+::: {#fig-multiagent-occ}
+```{mermaid}
+sequenceDiagram
+    autonumber
+    participant M as Integration Branch (Main)
+    participant R as Fleet Runtime Supervisor
+    participant A1 as Worker Agent 1 (Route Modernization)
+    participant A2 as Worker Agent 2 (Security Patch)
+    participant Rec as Reconciliation Agent
+
+    Note over M,A2: Pinned Base State: Commit C_base
+    R->>A1: Provision Worktree 1 (branched at C_base)
+    R->>A2: Provision Worktree 2 (branched at C_base)
+
+    Note over A1,A2: Phase 1 & 2: Concurrent Read & Execute
+    A1->>A1: Mutate route handlers; verify with pytest
+    A2->>A2: Patch auth bypass; verify with pytest
+
+    Note over A1,M: Phase 3 & 4: Validation & Fast-Forward (Agent 1)
+    A1->>R: Submit Task Completion (Commit C_1)
+    R->>M: Validate HEAD == C_base (True)
+    R->>M: Fast-Forward Commit C_1 (HEAD is now C_1)
+
+    Note over A2,M: Phase 3 & 4: Validation & Conflict (Agent 2)
+    A2->>R: Submit Task Completion (Commit C_2)
+    R->>M: Validate HEAD == C_base (False: HEAD is C_1)
+    R->>R: Execute Three-Way Merge (Base: C_base, Ours: C_1, Theirs: C_2)
+    Note over R: Conflict Detected: Intersecting hunks in server.py
+
+    Note over R,Rec: Conflict Escalation: Dispatch Reconciliation Subtask
+    R->>Rec: Provision Worktree with 3-Way Diff Envelope (C_base, C_1, C_2)
+    Rec->>Rec: Reconcile AST; preserve routes AND security patch
+    Rec->>Rec: Run test suite across unified server.py
+    Rec->>R: Submit Reconciled Patch (Commit C_3)
+    R->>M: Merge Commit C_3 (HEAD is now C_3)
+```
+Optimistic concurrency control workflow across concurrent agents using isolated Git worktrees, validation checks against the integration branch, and automated three-way merge reconciliation.
 :::
 
-Each worker operates exclusively inside its private workspace:
+### Latency and Conflict Economics
 
-- Worker 1 executes in `/tmp/workspaces/worker-1` branched from base commit $C_0$.
-- Worker 2 executes in `/tmp/workspaces/worker-2` branched from base commit $C_0$.
+In traditional database systems, aborting a 5-millisecond transaction and rolling back a log pointer incurs negligible computational penalty. In agentic systems, however, aborting a trajectory discards millions of tokens of inference and tens of minutes of compute time. The expected wall-clock completion time of an agent task under OCC is governed by the probability of commit conflict $P_{\text{conflict}}$:
 
-Neither worker observes the other's uncommitted intermediate file mutations, completely eliminating dirty reads and concurrent write locks.
+$$T_{\text{task}} = T_{\text{exec}} + T_{\text{validate}} + P_{\text{conflict}} \cdot T_{\text{reconcile}}$$
 
-### Optimistic concurrency control for agent trajectories {#sec-vol3-multiagent-deadlocks}
+where $T_{\text{exec}}$ is the trajectory execution latency, $T_{\text{validate}}$ is the runtime validation check overhead ($T_{\text{validate}} \ll 1\,\text{s}$), and $T_{\text{reconcile}}$ is the latency of the downstream reconciliation agent.
 
-To merge completed work from private worktrees back into the integration branch, the Agent OS implements **Optimistic Concurrency Control (OCC)** [@gray1981transaction]. OCC operates under the assumption that resource conflicts are relatively infrequent across well-decomposed tasks, postponing synchronization until the point of commit.
+If the fleet scheduler assigns overlapping semantic envelopes to concurrent workers—such as dispatching two agents to refactor the same internal interface simultaneously—$P_{\text{conflict}}$ approaches 1. Under high contention, the coordination tax of constant reconciliation exceeds the cost of serialized execution. Consequently, the fleet scheduler must partition tasks along modular subsystem boundaries to maintain $P_{\text{conflict}} \ll 1$, reserving OCC reconciliation for rare, unavoidable boundary collisions.
 
-The OCC lifecycle proceeds through four formal phases:
+Optimistic concurrency control resolves structural and syntactic collisions when merging concrete artifacts into shared environments. However, systems integrity requires more than syntactic non-interference; it demands semantic correctness. When multiple autonomous agents in a fleet evaluate proposals, audit security vulnerabilities, or generate strategic plans, how do we verify that the integrated result is valid? While distributed systems often rely on quorum consensus or majority voting, applying naive voting protocols to stochastic models introduces severe failure modes. In @sec-vol3-multiagent-consensus, we examine why agent voting mechanisms fail to guarantee correctness and how to construct formal verification pipelines that supersede subjective fleet consensus.
 
-1. **Read Phase:** The worker records the integration head commit SHA ($C_{\text{base}}$) upon task dispatch and checks out an ephemeral worktree at that exact version.
-2. **Execution Phase:** The worker executes autonomously, editing files, running local debuggers, and compiling code within its private worktree.
-3. **Validation Phase:** When the worker emits a `submit_patch` request, the runtime acquires a lock on the integration branch and compares the current integration head ($C_{\text{current}}$) against the worker's base commit ($C_{\text{base}}$).
-4. **Commit or Reconcile Phase:**
-   - *Clean Commit ($C_{\text{current}} == C_{\text{base}}$):* No other worker has committed changes to the integration branch. The runtime merges the worker's patch, advances the integration branch head, and releases the lock.
-   - *Three-Way Merge ($C_{\text{current}} \ne C_{\text{base}}$):* Another worker committed changes during the execution phase. The runtime performs an automated three-way merge (`git merge-tree`). If the edits touch non-overlapping files or independent hunks without syntax collisions, the commit succeeds cleanly.
-   - *Conflict Rejection:* If conflicting edits collide on identical code lines, the commit fails with a structured `StaleStateConflict` exception. The runtime discards the commit and dispatches an explicit **Reconciliation Subtask** to a dedicated Resolver Agent, providing both patches and the base version to resolve the collision.
+<!-- SECTION_END: 15.4 -->
 
-@Tbl-vol3-multiagent-concurrency-primitives compares the primary workspace isolation mechanisms used in concurrent agent systems.
-
-| Isolation Mechanism         | Resource Boundary           | Provisioning Latency             | Storage Footprint                               | Conflict Resolution Protocol                              |
-|:----------------------------|:----------------------------|:---------------------------------|:------------------------------------------------|:----------------------------------------------------------|
-| **Git Worktrees**           | Local filesystem branch     | $50\text{ ms -- }200\text{ ms}$  | Shared `.git` object store; negligible overhead | Automated three-way merge; AST reconciliation on conflict |
-| **CoW MicroVM Overlays**    | Kernel, network, storage    | $100\text{ ms -- }500\text{ ms}$ | Ephemeral block diff layer ($< 100\text{ MB}$)  | Diff extraction; clean merge into baseline storage volume |
-| **Shared Read-Only Volume** | Mounted read-only storage   | $< 10\text{ ms}$                 | Zero duplication (shared inode tree)            | N/A (writes strictly prohibited by filesystem mount)      |
-| **Blackboard Tuple Space**  | Distributed key-value store | $1\text{ ms -- }5\text{ ms}$     | In-memory key-value state                       | Optimistic version checks (`ETag` / CAS version matching) |
-
-: **Workspace Concurrency Control and Isolation Primitives**: Architectural mechanisms, governed resource scopes, operational latency taxes, storage footprints, and recovery protocols for concurrent agent execution environments. {#tbl-vol3-multiagent-concurrency-primitives tbl-colwidths="[20,20,18,18,24]"}
-
+<!-- SECTION_START: 15.5 (#sec-vol3-multiagent-consensus) -->
 ## Correlated Ensemble Failures {#sec-vol3-multiagent-consensus}
 
-A widespread architectural pattern in multi-agent frameworks is **Consensus Voting** (also termed Quorum Ensembles or Multi-Agent Debate): multiple independent agents are presented with the same task, and the final solution is selected via majority vote or peer review. The intuitive justification rests on the **Condorcet Jury Theorem**: if each independent voter has a probability $p > 0.5$ of choosing the correct answer, the probability that a majority vote of $N$ voters arrives at the correct answer approaches $1.0$ as $N \to \infty$.
+<!-- OUTLINE_SPEC:
 
-In distributed systems powered by foundation models, this statistical assumption is profoundly false. Condorcet's theorem relies strictly on the mathematical assumption that individual errors are **statistically independent**. In neural agent fleets, voter errors are heavily **correlated**.
+- **Heading & Anchor:** `## Correlated Ensemble Failures {#sec-vol3-multiagent-consensus}`
+- **The Single Key Point:** Multi-agent consensus (majority voting, peer review) does not prove semantic correctness; when agents share the same base model or training data, their failure modes are strongly correlated.
+- **Concrete Systems Hook:**
+  - A multi-agent consensus panel of 7 LLM reviewers votes 7–0 to approve a proposed cryptographic hashing function. When audited by human security experts, the function contains an elementary modulo bias that breaks encryption. All 7 agents approved it with high confidence because they share the same underlying base model pretraining weights that memorized the buggy snippet.
+- **Points to explain (paragraph-by-paragraph):**
+  - *The Fallacy of the Wisdom of Crowds in AI:* The Condorcet Jury Theorem assumes individual voters have statistically independent errors. In LLM ensembles, models share the same training corpora, tokenizers, and inductive biases, making errors highly correlated.
+  - *Consensus vs. Invariant Verification:*
+    - *Consensus:* Measures inter-agent agreement about metadata or opinions.
+    - *Invariant Verification:* Measures execution against physical, deterministic checks (compilers, formal solvers, unit tests).
+  - *The Byzantine Threat in Autonomous Fleets:* An agent suffering from prompt injection, context poisoning, or hallucinations behaves as a Byzantine node—emitting plausible, well-formatted lies that can deceive peer agents.
+- **Visuals & Tables:**
+  - Graph: Error Correlation vs. Ensemble Size (Independent statistical errors vs. Correlated LLM failure modes).
+- **Seminal Literature:**
+  - Leslie Lamport, Robert Shostak, & Marshall Pease (1982, *The Byzantine Generals Problem*).
+- **Causal Bridge to 15.6:** When an agent in a distributed team fails, times out, or is cancelled, how does the runtime coordinate cancellation across the fleet?
+-->
 
-### The breakdown of condorcet under correlated errors {#sec-vol3-multiagent-bft-breakdown}
+Distributed agent architectures frequently attempt to substitute deterministic validation with ensemble voting protocols, such as multi-agent review panels, majority voting, or weighted consensus scoring. This architectural pattern assumes that aggregating outputs across multiple model instances filters out hallucinations and improves output reliability. In practice, stochastic voting mechanisms fail to guarantee semantic correctness.
 
-Consider a real-world enterprise security failure: an organization deployed a consensus panel of 7 LLM reviewers to audit a critical cryptographic hashing implementation. All 7 agents evaluated the code independently and voted 7--0 to approve the implementation with high confidence. When audited by human security experts, the function was discovered to contain an elementary modulo bias that broke cryptographic randomness. All 7 agents approved the flawed code because they shared the same base model pretraining corpus, which contained thousands of copies of the identical buggy snippet scraped from public code repositories.
+Consider an automated security review pipeline evaluating a pull request that introduces a pseudorandom bucket selection routine for session token routing:
 
-When agents share the same pretraining weights, tokenizers, and alignment algorithms, their failure distributions are tightly coupled. Let $\rho_{\text{shared}} \in [0, 1]$ represent the error correlation among agents. The collective failure probability of an $N$-agent quorum does not decay to zero; instead, it is strictly bounded from below:
+```json
+// Proposed Token Generator (Reviewed by Fleet)
+uint32_t generate_session_bucket(uint32_t entropy, uint32_t bucket_count) {
+    // Evaluated by 7-agent LLM review panel
+    return entropy % bucket_count;
+}
+```
 
-$$\lim_{N \to \infty} P(\text{Consensus Error} \mid N) = \rho_{\text{shared}} \cdot P(\text{Error}) > 0$$
+When dispatched to a panel of seven autonomous reviewer agents, the ensemble votes 7–0 to approve the implementation. Each reviewer emits a structured audit schema with an approval flag and an estimated confidence score exceeding 0.95, citing correct syntax, bounds safety, and idiomatic C style. Yet the implementation contains a critical defect: an elementary modulo bias that skews output distribution whenever `bucket_count` is not a power of two, creating predictable token collisions. The 7–0 quorum fails not because the agents lack domain knowledge, but because every agent in the fleet shares an identical pretraining corpus in which the modulo idiom was memorized as standard practice. The fleet achieves unanimous consensus on an insecure implementation.
 
-If $\rho_{\text{shared}} = 0.20$ and individual base error is 25 percent, no ensemble size—whether 7, 70, or 7,000 agents—can reduce the error rate below $0.20 \times 0.25 = 5\text{ percent}$. Adding more agents to a consensus panel burns compute without eliminating correlated hallucinations.
+### The Fallacy of the Wisdom of Crowds in AI
 
-### The breakdown of byzantine fault tolerance
+The application of voting ensembles to language models relies on an invalid assumption derived from the Condorcet Jury Theorem. Condorcet establishes that if an ensemble consists of $N$ voters, each independently deciding correctly with probability $p > 0.5$, the probability of a faulty majority vote, $P_{\text{error}}$, approaches zero as $N$ increases:
 
-In classical distributed systems, **Byzantine Fault Tolerance (BFT)** algorithms [@lamport1982byzantine; @castro2002byzantine] guarantee system safety in the presence of arbitrary or malicious nodes, provided that fewer than one-third of the nodes are compromised:
+$$P_{\text{error}}(N) = \sum_{k=\lceil N/2 \rceil}^{N} \binom{N}{k} (1 - p)^k p^{N - k}$$
 
-$$N \ge 3f + 1$$
+Condorcet's formulation strictly requires that voter errors be statistically independent: the covariance between the error events of any two agents $i$ and $j$ must satisfy $\text{Cov}(e_i, e_j) = 0$.
 
-where $f$ is the number of Byzantine nodes. Classical BFT assumes that benign nodes compute deterministic state machines correctly, while faulty nodes fail independently or maliciously.
+In multi-agent fleets, this independence assumption is physically false. Agents derived from the same base model family, fine-tuned on overlapping corpora, or prompted with identical system schemas share identical tokenizers, representational geometries, and inductive biases. When agents share a nonzero pairwise error correlation $\rho \in (0, 1]$, the effective number of independent evaluations $N_{\text{eff}}$ does not scale linearly with fleet size $N$. Instead, it collapses according to the classical variance inflation relation:
 
-In multi-agent stochastic fleets, BFT breaks down completely because an agent suffering from prompt injection, context poisoning, or hallucinated reasoning acts as a **Correlated Byzantine Node**:
+$$N_{\text{eff}} = \frac{N}{1 + (N - 1)\rho}$$
 
-1. **Plausible Deception:** A compromised or hallucinating agent does not crash (Fail-Stop); it emits syntactically valid, persuasive natural language and plausible-looking code (Fail-Plausible).
-2. **Debate Sycophancy:** In open peer-to-peer debate rooms, benign agents frequently conform to the confident assertions of hallucinating peers, propagating errors through informational cascades.
-3. **Consensus on Malicious Proposals:** If multiple agents are exposed to the same indirect prompt injection payload in a web search snippet, all affected agents concurrently vote to execute the adversary's malicious instructions, easily overwhelming the $3f + 1$ quorum requirement.
+As $N \to \infty$, the effective sample size saturates at an asymptotic bound:
 
-### The architectural law of verification {#sec-vol3-multiagent-law-of-verification}
+$$\lim_{N \to \infty} N_{\text{eff}} = \frac{1}{\rho}$$
 
-To prevent consensus failures, systems engineers must separate **Metadata Consensus** from **Semantic Verification**:
+If the pairwise error correlation across agents is $\rho = 0.35$—a modest value when agents share underlying base weights—$N_{\text{eff}}$ cannot exceed $2.86$, regardless of whether the fleet provisions 5, 20, or 100 agents. Beyond three agents, adding voters yields negligible marginal reliability while incurring a linear $O(N)$ penalty in inference latency and token expenditure. As illustrated in @fig-correlated-consensus-decay, correlated voting ensembles rapidly plateau at an irreducible error floor.
 
-- *Metadata Consensus:* Using algorithms like Raft [@ongaro2014search] to agree on operational state (which agent owns Task 102, whether Worker 3 has timed out). Classical consensus excels at operational metadata coordination.
-- *Semantic Verification:* Determining whether an agent's proposed code, mathematical proof, or SQL query is functionally correct. Neural consensus voting is strictly unsuited for semantic verification.
-
-This distinction establishes the **Architectural Law of Verification**:
-
-::: {.callout-important title="The architectural law of verification"}
-*Never use a neural voting ensemble to verify what can be evaluated by a deterministic execution oracle.*
+::: {#fig-correlated-consensus-decay}
+```{mermaid}
+xychart-beta
+    title "Majority Error Probability vs. Ensemble Size"
+    x-axis "Number of Agents (N)" [1, 3, 5, 7, 9, 11, 15]
+    y-axis "Majority Error Rate P_error" 0.0 --> 0.4
+    line [0.35, 0.22, 0.14, 0.09, 0.06, 0.04, 0.01]
+    line [0.35, 0.30, 0.28, 0.27, 0.26, 0.26, 0.25]
+```
+Comparison of ensemble majority error rates between statistically independent voters ($\rho = 0.00$, lower curve) and correlated agent voters ($\rho = 0.35$, upper curve) with individual error rate $p = 0.35$. Independent ensembles decay exponentially toward zero, whereas correlated model fleets encounter an irreducible error floor governed by shared training distribution biases.
 :::
 
-Whenever candidate outputs can be verified through deterministic execution—such as running unit tests (`pytest`), invoking formal compilers (`rustc`, `javac`), validating schemas (`pydantic`), or executing SQL against reference snapshots—the runtime must discard voting ensembles and route verification to an isolated mechanical execution oracle (@sec-vol3-rlvr).
+### Consensus Versus Invariant Verification
 
-@Tbl-vol3-multiagent-verification-paradigms compares neural voting ensembles against deterministic execution oracles.
+To prevent silent failure propagation, systems engineers must decouple *consensus* from *verification*:
 
-| Systems Dimension          | Neural Voting Ensemble (Quorum / Debate)                  | Deterministic Execution Oracle (Sandbox / Compiler)     |
-|:---------------------------|:----------------------------------------------------------|:--------------------------------------------------------|
-| **Verification Basis**     | Statistical agreement across token samples                | Physical execution against binary acceptance assertions |
-| **Error Independence**     | Strongly violated (shared pretraining bias)               | Strictly independent (deterministic hardware execution) |
-| **Byzantine Resilience**   | Vulnerable to sycophancy and injection                    | Immune to natural language deception or reasoning flaws |
-| **Verification Cost**      | Multiplied GPU inference costs ($N \times \text{tokens}$) | Minimal CPU/sandbox execution overhead ($< 1\text{ s}$) |
-| **Ground-Truth Guarantee** | Plausibility consensus; zero correctness guarantee        | Binary correctness guarantee for covered test paths     |
+1. **Stochastic Consensus:** Measures the degree of agreement across multiple model outputs or peer evaluations. Consensus is subjective, contextual, and ungrounded; it verifies only that multiple stochastic samplers produced similar token sequences from a shared distribution.
+2. **Deterministic Invariant Verification:** Measures an artifact directly against physical execution constraints and formal specifications. Verification is binary, deterministic, and grounded in concrete execution environments: compiler passes, type checkers, automated test harnesses, symbolic execution engines, and memory sanitizers (such as AddressSanitizer or ThreadSanitizer).
 
-: **Verification Paradigms in Multi-Agent Systems**: Systems comparison between stochastic neural consensus mechanisms and deterministic software verification oracles across reliability, latency, cost, and failure modes. {#tbl-vol3-multiagent-verification-paradigms tbl-colwidths="[22,38,40]"}
+An architectural invariant for robust fleet design is that peer consensus must never serve as an authorization gate for state mutation. An ensemble of twenty reviewer agents agreeing that a program is thread-safe provides zero operational guarantees; a single dynamic run under ThreadSanitizer or a bounded model check with a formal solver provides reproducible proof. Peer voting may be utilized as a heuristic triage filter to rank competing generation candidates, but the terminal commit gate must always execute deterministic invariant checks.
 
+### The Byzantine Threat in Autonomous Fleets
+
+The danger of correlated consensus is intensified when agents fail maliciously or adversarially. In classical distributed systems, Leslie Lamport, Robert Shostak, and Marshall Pease (1982) formulated the Byzantine Generals Problem to model nodes that fail arbitrarily, outputting conflicting, corrupt, or deceptive messages rather than failing cleanly via crash-stop.
+
+In an LLM fleet, an agent compromised by indirect prompt injection, poisoned context retrieved from untrusted storage, or stochastic drift operates as a Byzantine node. Crucially, a Byzantine language agent does not emit malformed bytes that trigger schema validation errors. Instead, it generates syntactically flawless, rhetorically persuasive, and confidently reasoned outputs designed to satisfy the scoring rubrics of its peers. When peer reviewers share the same alignment paradigms and linguistic priors, the deceptive output exploits shared blind spots. The Byzantine agent can convince downstream reviewer agents to validate corrupted state, subverting quorum-based safeguards. Because language models cannot inspect each other's internal latent representations and operate solely over emitted tokens, Byzantine faults cannot be screened through conversational peer debate.
+
+Deterministic invariant verification provides a binary mechanism to detect when an agent's proposal violates physical system constraints. However, when an invariant failure occurs, or when an agent becomes unresponsive, stalls in an infinite tool-invocation loop, or diverges during execution, the fleet runtime cannot simply discard the faulty node in isolation. Downstream dependent tasks must be aborted, leased resources must be reclaimed, and pending transactions must be safely unwound. In @sec-vol3-multiagent-cancellation, we analyze the concurrency mechanisms required to coordinate cancellation, handle timeouts, and manage cascading rollbacks across distributed agent fleets.
+
+<!-- SECTION_END: 15.5 -->
+
+<!-- SECTION_START: 15.6 (#sec-vol3-multiagent-backpressure) -->
 ## Cancellation Cascades {#sec-vol3-multiagent-backpressure}
 
-In distributed multi-agent systems, task failure and user interruption are inevitable operational occurrences. A user cancels an in-flight workflow, a supervisor detects that a parallel search branch has reached an irrecoverable dead end, or a worker exceeds its allocated wall-clock budget.
+<!-- OUTLINE_SPEC:
 
-When an agent is aborted or fails, the runtime must coordinate **Cancellation Cascades**\index{Cancellation Cascade} across the distributed dependency graph. Consider the systems failure when cancellation propagation is omitted: a supervisor agent timed out waiting for Subagent 4 and aborted the high-level goal. However, the runtime failed to propagate cancellation signals to Subagents 1, 2, and 3, which were executing parallel background web scraping tasks. The three orphaned workers continued running expensive inference and headless browser loops for $45\text{ min}$, consuming over \$300 in unmonitored GPU and cloud compute while exhausting the cluster's worker thread pool.
+- **Heading & Anchor:** `## Cancellation Cascades {#sec-vol3-multiagent-backpressure}`
+- **The Single Key Point:** When an agent in a coordination graph fails or is cancelled, the runtime must propagate cancellation signals across the dependency tree and enforce backpressure to prevent worker starvation.
+- **Concrete Systems Hook:**
+  - A supervisor agent times out waiting for Subagent 4 and aborts the task. However, the runtime fails to send cancellation signals to Subagents 1, 2, and 3, which continue running expensive GPU inference loops for 45 minutes, consuming $300 in orphaned compute and blocking the worker pool.
+- **Points to explain (paragraph-by-paragraph):**
+  - *Cancellation Trees:* Every task graph forms a hierarchy of cancellation contexts. When a root task is aborted, `SIGTERM`/cancellation tokens must cascade to all active child and descendant processes.
+  - *Handling Straggler Workers:* In parallel fan-out operations (e.g. running 10 parallel search agents), trajectory completion latency is bounded by the slowest 99th-percentile worker (The Tail at Scale). Implementing speculative restarts and hedged subtasks.
+  - *Backpressure & Bounded Buffers:* Preventing fast producer agents from overwhelming slow consumer agents with thousands of unread messages, causing memory leaks in message brokers.
+- **Visuals & Tables:**
+  - Sequence Diagram: Hierarchical Cancellation Cascade across a Multi-Agent Trajectory Tree.
+- **Causal Bridge to 15.7:** When parent agents spawn child workers, how do we restrict the authority and credentials granted to those workers?
+-->
 
-### Hierarchical cancellation trees
+In an asynchronous multi-agent coordination graph, task execution distributes across a directed acyclic graph (DAG) of decoupled processes, containerized sandboxes, and remote model-inference endpoints. When an execution branch fails, encounters a poison pill, or breaches an end-to-end deadline, the runtime encounters a critical containment boundary: terminating a supervising parent node does not automatically terminate descendant processes executing on independent worker nodes. If the runtime discards the parent context without propagating an explicit cancellation signal, child agents become orphaned workers. These orphaned processes continue executing iterative inference loops, acquiring hardware leases, and dispatching tool operations into external environments.
 
-Every multi-agent task graph forms a formal hierarchy of cancellation contexts. Production agent operating systems bind every child worker to an explicit **Cancellation Token** derived from its parent supervisor.
+Consider the concrete systems cost of an uncontained failure: a supervisor agent orchestrates a fan-out of four parallel subagents to generate and benchmark candidate code patches. Subagent 4 enters an infinite retry loop on an unresponsive language server. After a 180-second timeout, the supervisor aborts the evaluation and terminates its local session. However, because the execution framework lacks transitive signal propagation, Subagents 1, 2, and 3 continue running multi-turn inference routines for 45 minutes until reaching their individual step limits. Across the three unmanaged workers, the cluster expends $300 in redundant model inference calls and monopolizes 96 gigabytes of GPU High Bandwidth Memory (HBM) allocated to active key-value (KV) caches. This failure degrades trajectory goodput, defined as the ratio of useful execution time to total consumed compute time:
 
-When a root task aborts or times out:
+$$G = \frac{\sum T_{\text{success}}}{\sum T_{\text{all}}}$$
 
-1. The supervisor marks the parent task state as `CANCELLED` in the durable state store (@sec-vol3-checkpointing).
-2. The runtime instantly traverses the task dependency tree, dispatching asynchronous cancellation interrupts (`SIGINT`/`SIGTERM`) to all active child and descendant processes.
-3. The execution sandbox halts model inference, terminates running container sub-processes, and revokes network socket leases.
-4. The worker emits a terminal telemetry record capturing consumed resources up to the cancellation timestamp.
+When orphaned agents execute unmonitored generation loops, $\sum T_{\text{all}}$ expands continuously while $\sum T_{\text{success}}$ remains constant, driving fleet goodput toward zero and starving the worker pool of available execution slots.
 
-### Managing worker stragglers and tail latency
+### Cancellation Trees and Hierarchical Contexts
 
-In parallel fan-out operations (e.g., dispatching 10 parallel search agents to find relevant bug reports), trajectory completion latency is strictly governed by the slowest 99th-percentile worker—the classic **Tail at Scale** dilemma [@dean2013tail]. If 9 workers complete their subtasks in $4\text{ s}$, but 1 worker experiences a slow external API timeout taking $60\text{ s}$, the entire multi-agent pipeline stalls for a full minute.
+To enforce containment, multi-agent runtimes must organize concurrent trajectories into strict cancellation trees, mirroring the hierarchical process groups of POSIX operating systems and structured concurrency runtimes. Every task node in the execution graph is initialized with a cancellation context linked directly to its parent. When a root task aborts or encounters an unhandled exception, the runtime traverses the active sub-tree in reverse topological order, broadcasting cancellation tokens down every active branch.
 
-To mitigate straggler bottlenecks, production agent runtimes implement two techniques:
+A cancellation token defines a monotonically advancing lifecycle state machine: `ACTIVE` $\to$ `CANCEL_REQUESTED` $\to$ `TERMINATING` $\to$ `TERMINATED`. In cooperative runtime environments, worker agents must check token status at deterministic yield points—specifically before initiating autoregressive model inference, before dispatching an external tool call, and immediately upon receiving an external tool response. For uncooperative or stalled workers, such as agents blocked on hanging network sockets or compute-bound inference requests, the runtime must enforce non-cooperative preemption. This is accomplished by closing the underlying transport socket, revoking transient authentication credentials, and dispatching operating-system-level termination signals (`SIGTERM` followed by `SIGKILL` after a grace window) to the agent container. Concurrently, the runtime must execute compensating transactions to undo partial, uncommitted side effects registered in the worker's write-ahead log.
 
-- **Hedged Subtasks:** If a worker's latency exceeds the 95th percentile of expected duration, the runtime launches a duplicate hedged worker with an identical task envelope in parallel. The output of whichever worker finishes first is accepted, and the slower worker is immediately cancelled.
-- **Quorum Completion Gates:** Rather than requiring 100 percent completion across all fan-out workers, the supervisor establishes a quorum threshold (e.g., $K = 7$ of 10 workers). Once the first $K$ valid results are committed to the blackboard, the supervisor proceeds to the synthesis stage and cancels the remaining stragglers.
+::: {#fig-hierarchical-cancellation}
+```{mermaid}
+sequenceDiagram
+    autonumber
+    participant S as Supervisor
+    participant R as Fleet Runtime
+    participant A1 as Worker Agent 1
+    participant A2 as Worker Agent 2 (Straggler)
+    participant C1 as Child Tool/Agent 1.1
 
-### Reactive backpressure and bounded mailboxes
+    S->>R: Dispatch Fan-out [A1, A2] (Deadline: T_max)
+    R->>A1: Spawn(Ctx_1, Token_1)
+    R->>A2: Spawn(Ctx_2, Token_2)
+    A1->>C1: Spawn Subtask(Ctx_1.1)
+    Note over A2: Stalls in tool loop / KV hang
+    Note over R: Deadline T_max expires on A2
+    R->>S: TimeoutError(A2)
+    S->>R: Cancel(Root_Ctx)
+    R->>A2: Send SIGTERM / CancelToken
+    R->>A1: Send SIGTERM / CancelToken
+    A1->>C1: Cascade Cancel(Ctx_1.1)
+    C1-->>A1: Aborted & Cleaned
+    A1-->>R: Ack Canceled (Release Leases)
+    A2-->>R: Force Terminated (Reclaim KV Cache)
+    R-->>S: Fleet State Clean
+```
+Hierarchical cancellation cascade across a multi-agent execution tree. When a straggler or failure triggers a deadline abort at the supervisor layer, the runtime traverses the active dependency graph to propagate cancellation tokens downward, preempting child subtasks and reclaiming accelerator memory.
+:::
 
-When agents communicate via message passing, mismatched processing speeds introduce severe queueing instability. If a fast producer agent (e.g., an automated static analyzer emitting hundreds of lint warnings per minute) streams messages directly to a slow consumer agent (e.g., an LLM generating detailed code refactoring patches), the consumer's message mailbox balloons in memory.
+### Handling Straggler Workers in Fan-Out Topologies
 
-Unbounded mailboxes lead to out-of-memory (OOM) crashes and semantic amnesia, as the consumer agent's context window is flooded with stale pending requests. To ensure system stability, multi-agent message brokers enforce **Reactive Backpressure**:
+In parallel fan-out topologies—where a coordinator scatters subproblems across $M$ independent worker agents to accelerate code search, invariant checking, or synthetic data verification—trajectory completion latency is governed by the distribution of the extrema. As established by Jeffrey Dean and Luiz André Barroso (2013) in distributed systems architectures, the completion latency of an unhedged parallel operation is bounded by the slowest 99th-percentile worker:
 
-- Worker mailboxes are assigned hard capacity limits (e.g., maximum 10 pending envelopes).
-- When a mailbox reaches capacity, subsequent dispatch requests from producer agents are blocked or returned with a `RateLimitedBackpressure` signal.
-- The producer agent is forced to suspend token generation, yield its compute resources, and wait until the consumer drains pending work.
+$$T_{\text{fanout}} = \max \left( T_1, T_2, \dots, T_M \right)$$
 
+Because language model generation exhibits high variance due to stochastic output lengths, varying prefix cache hit rates, and unpredictable tool response latencies, the tail latency of an $M$-way fan-out degrades rapidly as $M$ increases. A fleet runtime cannot passively wait for every worker to complete. Instead, it must employ *hedged execution* and *speculative restarts*. If an agent's latency exceeds the 95th percentile ($p_{95}$) of historical task execution times without emitting an intermediate progress checkpoint, the runtime speculatively provisions a replica worker initialized with the identical input context. As soon as any worker satisfies the completion quorum or produces an output that passes deterministic verification, the cancellation tree immediately broadcasts preemptive termination signals to all remaining speculative and straggling peers, releasing their allocated GPU KV-cache blocks back to the cluster memory pool.
+
+### Backpressure and Bounded Buffers
+
+Cascading failures also arise from velocity mismatches between heterogeneous nodes in an execution pipeline. In multi-stage agent workflows, fast upstream generation agents frequently produce intermediate hypotheses, context chunks, or tool requests substantially faster than downstream verification agents can ingest and validate them.
+
+If intermediate message brokers use unbounded FIFO queues, buffer bloat manifests across the communication fabric. Unread messages accumulate in memory, ballooning broker heap footprints until the runtime triggers out-of-memory (OOM) kernel panics. Furthermore, high queue occupancy introduces queueing delay $T_{\text{wait}}$, such that by the time a consumer agent dequeues an upstream task, the underlying environment state has mutated, rendering the task obsolete. Robust multi-agent architectures prevent buffer bloat by enforcing explicit backpressure mechanisms:
+
+1. **Credit-Based Flow Control:** A consumer agent issues a bounded number of execution credits to upstream producers based on its available processing capacity and memory headroom. A producer agent cannot emit subsequent task batches once its credits reach zero, pausing its local inference loop until the consumer returns explicit credit replenishment receipts.
+2. **Bounded Mailboxes with Synchronous Blocking:** Inter-agent queues are configured with fixed capacity limits ($K$ messages). When a mailbox reaches saturation, subsequent write operations block the producer's execution thread or suspend its asynchronous event loop, physically propagating downstream latency upward through the pipeline.
+3. **Targeted Drop and Coalescing Policies:** For telemetry, perception, or heuristic evaluation streams where freshness supersedes completeness, queues discard stale intermediate artifacts via `drop-oldest` semantics or coalesce successive environment observations into a single delta, maintaining strict memory bounds without stalling upstream workers.
+
+Establishing structured cancellation trees and bounded communication channels guarantees that failing or runaway workers cannot exhaust cluster memory or orphan downstream processes. However, robust resource isolation addresses only the execution lifecycle of child tasks. When a supervisor provisions multiple subordinate workers to explore disjoint subtasks, it must also provide them with the operational capabilities required to execute tools, query data stores, and mutate environments. If a compromised or misaligned child agent inherits the full ambient permissions of its parent, physical isolation is rendered ineffective. In @sec-vol3-multiagent-delegation, we examine the delegation of authority, capability attenuation, and cryptographic privilege scoping within autonomous agent hierarchies.
+
+<!-- SECTION_END: 15.6 -->
+
+<!-- SECTION_START: 15.7 (#sec-vol3-multiagent-authority) -->
 ## Attenuated Capability Delegation {#sec-vol3-multiagent-authority}
 
-When a supervisor agent delegates a subtask to a child worker, what permissions, credentials, and tool capabilities should the child receive?
+<!-- OUTLINE_SPEC:
 
-In naive agent implementations, child workers inherit the ambient permissions of the root invoker. An enterprise user logs in with an administrative API key and requests an agent to *"index all customer tickets from the past week."* The primary agent spawns an indexing subagent and passes its administrative API key directly into the subagent's prompt context. When the subagent encounters an unexpected parsing exception, it hallucinates a troubleshooting script and invokes a database reset command, inadvertently dropping production customer tables.
+- **Heading & Anchor:** `## Attenuated Capability Delegation {#sec-vol3-multiagent-authority}`
+- **The Single Key Point:** Child agents must operate under strictly attenuated capability tokens derived from the parent, ensuring no delegated agent possesses more authority than its invoker.
+- **Concrete Systems Hook:**
+  - A user grants an agent read-only access to a corporate cloud storage bucket. The agent spawns a background indexing subagent and inadvertently passes its root API session token. The subagent encounters an indexing error and executes a script that wipes the bucket, violating the user's original read-only constraint.
+- **Points to explain (paragraph-by-paragraph):**
+  - *The Principle of Attenuation:* An agent possessing capability $\mathcal{C}$ may delegate a capability $\mathcal{C}' \subseteq \mathcal{C}$, but $\mathcal{C}'$ can never exceed $\mathcal{C}$.
+  - *Macaroons & Cryptographic Capability Descriptors:* Issuing HMAC-signed authorization tokens with caveats:
+    - *Scope Caveat:* Restricted to path `/tmp/workspaces/task-102`.
+    - *Lifetime Caveat:* Valid for 300 seconds.
+    - *Action Caveat:* Permitted tools: `read_file`, `compile`; prohibited tools: `curl`, `rm`.
+  - *Revocation Cascades:* When a parent agent is terminated, all derived capability tokens issued to child workers are instantly invalidated at the runtime API gateway.
+- **Visuals & Tables:**
+  - Diagram: Capability Attenuation Tree (Root User Grant $\rightarrow$ Attenuated Parent Token $\rightarrow$ Scoped Child Worker Tokens).
+- **Seminal Literature:**
+  - Jerome H. Saltzer & Michael D. Schroeder (1975, *The Protection of Information in Computer Systems*).
+- **Causal Bridge to 15.8:** How do we empirically measure whether a multi-agent system genuinely outperforms an optimized single-agent architecture?
+-->
 
-### The principle of capability attenuation {#sec-vol3-multiagent-capability-attenuation}
+When an autonomous agent delegates execution to subagents, the primary failure mode is authority leakage. In ambient authority architectures, subordinate workers inherit the supervisor's ambient credentials—such as long-lived cloud provider API keys, ambient database handles, or filesystem root paths. Consider an execution trace where a root user provisions an agent to index a repository with read-only privileges on an object store prefix (`s3://corp-analytics/data/2026/`). The supervisor agent partitions the workload and spawns an ephemeral worker to parse malformed log files. Instead of minting a constrained execution token, the supervisor passes its ambient session descriptor. When the child worker encounters an unparsed binary payload, its error-recovery routine triggers a cleanup tool that invokes a recursive delete command against the bucket. Because the ambient credential permits object deletion, the subordinate agent destroys production records, breaching the security boundary established by the human operator.
 
-To prevent catastrophic privilege escalation, multi-agent architectures strictly enforce the **Principle of Attenuation** [@saltzer1975; @miller2006robust]:
+### The Principle of Attenuated Authority
 
-::: {.callout-important title="The principle of capability attenuation"}
-*An agent possessing capability set $\mathcal{C}$ may delegate a capability set $\mathcal{C}'$ to a child worker if and only if $\mathcal{C}' \subseteq \mathcal{C}$. Delegated authority must attenuate monotonically across the subagent hierarchy.*
+This vulnerability represents a direct violation of the principle of least privilege, formulated by Jerome H. Saltzer and Michael D. Schroeder (1975) in *The Protection of Information in Computer Systems*. In multi-agent architectures, an agent must never operate under ambient authority. Instead, all access to tools, memory spaces, and network interfaces must be mediated by explicit, unforgeable *capabilities*.
+
+When an agent holding capability set $\mathcal{C}$ spawns a subordinate worker, it must delegate an *attenuated* capability set $\mathcal{C}'$ that is strictly a subset of its own authority:
+
+$$\mathcal{C}' \subseteq \mathcal{C}$$
+
+The delegation interface must enforce monotonicity: a delegating agent can restrict or attenuate permissions, but it can never amplify privileges ($\mathcal{C}' \not\subseteq \mathcal{C}$). If an agent lacks write permissions to a storage volume, no sequence of delegations to child workers can synthesize write permissions. Furthermore, capabilities must be bound to specific execution contexts rather than process identities, preventing the "confused deputy" problem where a privileged agent is tricked by a malicious or malformed prompt into misusing its ambient authority on behalf of an unprivileged peer.
+
+### Cryptographic Caveats and Chained Tokens
+
+In distributed fleet runtimes, checking a centralized access control list (ACL) on every inter-agent tool call introduces network bottlenecks and synchronization overhead. Capability attenuation is therefore implemented using cryptographically chained capability tokens, such as Macaroons.
+
+A macaroon construction relies on nested Hash-based Message Authentication Codes (HMAC). The runtime authority initializes a root token with an identifier $ID$ and a root secret key $K_0$, computing the initial signature:
+
+$$\sigma_0 = \text{HMAC}(K_0, ID)$$
+
+When the supervisor delegates this token to a child worker, it appends one or more *caveats*—contextual predicates that restrict the valid execution envelope—and computes a new signature without communicating with the authorization server:
+
+$$\sigma_{i} = \text{HMAC}(\sigma_{i-1}, c_i)$$
+
+Because the HMAC is a cryptographically secure one-way function, an agent possessing the attenuated token $(ID, c_1, \dots, c_n, \sigma_n)$ cannot strip caveat $c_n$ to restore signature $\sigma_{n-1}$. Any attempt to remove an operational restriction invalidates the signature chain. In an agent runtime, caveats enforce three orthogonal operational dimensions:
+
+1. **Scope Caveats:** Spatial restrictions bounding file system paths, network CIDR blocks, or resource namespaces (for example, `fs:prefix=/tmp/workspaces/task-102` or `db:table=logs_staging`).
+2. **Lifetime Caveats:** Strict temporal boundaries bounding the token time-to-live ($t_{\text{now}} \le t_{\text{spawn}} + \Delta t_{\text{ttl}}$). If an indexing subagent hangs or its process is compromised, the capability token expires autonomously after 300 seconds, neutralizing replay attacks.
+3. **Action Caveats:** Interface-level dispatch constraints restricting permissible tool invocations (for example, `permit: [read_file, compile]`; `deny: [exec, curl, rm]`).
+
+::: {#fig-capability-attenuation-tree}
+```{mermaid}
+flowchart TD
+    classDef root fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef parent fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef child fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+    classDef caveat fill:#f3e5f5,stroke:#4a148c,stroke-width:1px,stroke-dasharray: 3 3;
+
+    Root["Root User Grant<br/><code>ID: job-81</code><br/><code>Perms: Read, Write, Exec</code><br/><code>Signature: σ_0 = HMAC(K_0, ID)</code>"]:::root
+
+    Supervisor["Supervisor Agent Token<br/><code>Caveat c_1: fs:path = /workspace/repo/*</code><br/><code>Caveat c_2: ttl = 3600s</code><br/><code>Signature: σ_1 = HMAC(σ_0, c_1 || c_2)</code>"]:::parent
+
+    Worker1["Worker 1: Search Subagent<br/><code>Caveat c_3: permit = [read_file, grep]</code><br/><code>Caveat c_4: ttl = 300s</code><br/><code>Signature: σ_2 = HMAC(σ_1, c_3 || c_4)</code>"]:::child
+
+    Worker2["Worker 2: Build Subagent<br/><code>Caveat c_5: permit = [compile]</code><br/><code>Caveat c_6: fs:path = /workspace/repo/build/*</code><br/><code>Signature: σ_3 = HMAC(σ_1, c_5 || c_6)</code>"]:::child
+
+    Root -->|Delegate with Scope & TTL| Supervisor
+    Supervisor -->|Attenuate: Read-Only Tools| Worker1
+    Supervisor -->|Attenuate: Isolated Build Path| Worker2
+```
+Hierarchical capability attenuation tree using chained HMAC tokens. Each downward delegation step appends monotonic caveats that restrict resource paths, available tool interfaces, and token lifetimes. Because HMAC is non-invertible, subordinate agents cannot strip caveats to escalate privileges.
 :::
 
-Under monotonic attenuation, a child worker can never possess more authority, broader filesystem access, higher token budgets, or longer lifetimes than its invoking parent.
+### Dynamic Revocation Cascades
 
-### Cryptographic capability tokens and caveats
+While cryptographically attenuated tokens allow offline validation at local tool proxies, multi-agent fleet runtimes require rapid revocation when a supervisor aborts, encounters an unrecoverable invariant violation, or triggers preemption. If a child token is issued with a 300-second lifetime, waiting for passive cryptographic expiration leaves an open execution window during which a runaway worker can continue consuming API credits or mutating external state.
 
-Production runtimes implement capability delegation using **Macaroons**\index{Macaroons} [@birgisson2014macaroons]—cryptographically signed authorization credentials that support decentralized, client-side attenuation via chained HMAC caveats.
+To enforce immediate revocation, fleet runtimes combine bearer capability tokens with hierarchical revocation trees managed at the runtime API gateway. Each minted capability embeds a deterministic lineage path representing its position in the execution tree (such as `/root/job-81/worker-3/tool-1`). The API gateway maintains an in-memory prefix set of revoked execution nodes.
 
-When a root agent with administrative capability delegates a subtask, it does not share its root secret. Instead, it derives an attenuated child token by appending immutable **Caveats**:
+When a supervisor is terminated, the runtime registers its lineage prefix in the revocation filter. When any worker presents an attenuated token, the gateway verifies both the HMAC signature chain and verifies that no ancestor prefix exists in the revocation registry. Prefix matching operates in $\mathcal{O}(L)$ time where $L$ is the tree depth (typically $L \le 5$), ensuring sub-millisecond rejection of orphan delegations across the fleet without scanning leaf tokens.
 
-1. **Target Resource Caveat:** Restricting operations to a designated sub-path:
-   $$\text{Caveat}_1: \text{path} \in \text{"/workspace/src/auth/*"}$$
-2. **Action White-List Caveat:** Restricting permitted tool operations:
-   $$\text{Caveat}_2: \text{action} \in \{\text{"read\_file"}, \text{"ripgrep"}, \text{"compile"}\}$$
-3. **Temporal Horizon Caveat:** Bounding token validity to a short operational window:
-   $$\text{Caveat}_3: \text{expires\_at} \le t_{\text{dispatch}} + 300\text{ s}$$
-4. **Financial Budget Caveat:** Bounding allowable API spending:
-   $$\text{Caveat}_4: \text{max\_spend} \le \$2.00$$
+Securing execution boundaries through attenuated capability trees, structured cancellation, and backpressure guarantees that multi-agent fleets operate safely within distributed resource envelopes. However, these architectural safeguards introduce substantial runtime overhead: token minting, caveat verification, lineage tracking, and inter-agent serialization cumulatively inflate execution latency. This tension exposes the central empirical question of multi-agent engineering: Does partitioning a complex problem across a fleet of specialized, capability-attenuated agents deliver measurable accuracy and throughput gains, or does the coordination tax render the distributed fleet strictly inferior to a single, optimized model operating over an expanded context window? In @sec-vol3-multiagent-evaluation, we examine the formal metrics, benchmarking methodologies, and empirical trade-offs required to evaluate multi-agent performance.
 
-When the child worker attempts to invoke a tool, the Agent OS API Gateway verifies the HMAC signature chain. Because caveats are cryptographically chained, a compromised or hallucinating child agent cannot widen its permissions or strip caveats; any attempt to modify the token invalidates the cryptographic signature.
+<!-- SECTION_END: 15.7 -->
 
-### Instantaneous revocation cascades
-
-When a parent supervisor terminates or detects suspicious behavioral drift in a worker subtree, the runtime executes an **Instantaneous Revocation Cascade**. The runtime broadcasts the parent `token_id` to the API gateway blacklist. Because all child tokens carry the parent's lineage identifier, all derived subagent credentials across the entire delegation subtree are instantly invalidated in under $5\text{ ms}$, terminating tool execution across the fleet.
-
+<!-- SECTION_START: 15.8 (#sec-vol3-multiagent-evaluation) -->
 ## Single-Agent Baseline Benchmarking {#sec-vol3-multiagent-evaluation}
 
-Before deploying a multi-agent system into production, systems engineers must answer a fundamental question: *Does this multi-agent fleet actually outperform an optimized single-agent architecture?*
+<!-- OUTLINE_SPEC:
 
-In the empirical literature on autonomous agents, multi-agent frameworks frequently report dramatic performance improvements (e.g., "30 percent higher accuracy than baseline"). However, rigorous benchmarking audits reveal that these evaluations almost universally compare the multi-agent system against a **naive, zero-shot single-agent baseline**—a single model prompted once with zero test-time deliberation, zero tool iteration, and zero revision turns.
+- **Heading & Anchor:** `## Single-Agent Baseline Benchmarking {#sec-vol3-multiagent-evaluation}`
+- **The Single Key Point:** Any multi-agent architecture must be empirically benchmarked against an optimized single-agent baseline on identical task distributions, measuring quality, critical-path makespan, and total token expenditure.
+- **Concrete Systems Hook:**
+  - An enterprise replaces a single-agent coding pipeline with a 4-agent collaborative framework, claiming a 10% increase in benchmark accuracy. An independent systems audit reveals that the multi-agent framework consumes 6x more tokens and takes 8x longer; when the single-agent baseline is given just one additional test-time revision turn, it achieves higher accuracy than the 4-agent team at one-quarter the cost.
+- **Points to explain (paragraph-by-paragraph):**
+  - *The Baseline Rigor Requirement:* Comparing a multi-agent system to a weak, zero-shot single-agent baseline is scientifically invalid. Baselines must include test-time deliberation, revision, and tool-use from Chapter 3.
+  - *The Three Axes of Multi-Agent Evaluation:*
+    1. *Task Completion Quality:* Verified task pass rate.
+    2. *Critical-Path Makespan:* Wall-clock time to solution.
+    3. *Total Resource Cost:* Sum of all input/output tokens, container minutes, and API fees across all participating workers.
+  - *Amdahl's Speedup Calculation for Multi-Agent Fleets:*
+    $$\text{Speedup} = \frac{1}{(1-f) + \frac{f}{M} + h(M)}$$
+    where $f$ is the parallelizable fraction, $M$ is the number of concurrent agents, and $h(M)$ is the measured communication and integration overhead.
+- **Visuals & Tables:**
+  - Graph: Amdahl Scaling Curve with Coordination Overhead ($h(M)$ showing diminishing and negative returns beyond optimal worker count).
+- **Causal Bridge to Scaffolds:** Direct handoff to Fallacies and Pitfalls.
 
-When the single-agent baseline is upgraded with standard test-time compute optimizations (@sec-vol3-deliberation)—such as Best-of-$N$ candidate sampling, tree-of-thought search, and multi-turn tool self-correction—the single agent frequently matches or exceeds the multi-agent system's accuracy at a fraction of the token cost and wall-clock latency.
+#### Fallacies and Pitfalls
+`## Fallacies and Pitfalls {#sec-vol3-multiagent-fallacies}`
+- **Fallacy 1:** *Adding more agents to an autonomous team always improves problem-solving performance.*
+  - Refutation: Beyond a small worker count, communication overhead, context duplication, and coordinator bottlenecks dominate, often degrading both latency and accuracy.
+- **Pitfall 1:** *Allowing multiple agents to concurrently mutate a shared filesystem without optimistic concurrency control.*
+  - Refutation: Guarantees race conditions and silent write clobbering; concurrent agents must work in isolated worktrees and commit via verified three-way merges.
+- **Fallacy 2:** *Unanimous multi-agent consensus proves the factual or mathematical correctness of a solution.*
+  - Refutation: Homogeneous LLM ensembles suffer from heavily correlated failure modes; consensus only proves agreement, not correctness against ground truth.
+- **Pitfall 2:** *Failing to propagate cancellation tokens across child agents when a supervisor aborts.*
+  - Refutation: Spawns orphaned worker processes that continue consuming expensive GPU inference and cloud resources indefinitely.
 
-### The three axes of multi-agent evaluation
+#### Summary & Chapter Connection
+`## Summary {#sec-vol3-multiagent-summary}`
+- **Authoritative Synthesis:** Synthesizing multi-agent fleet design, coordination graphs, concurrency control, and evaluation.
+- `::: {.callout-takeaways title="Core Systems Principles of Multi-Agent Coordination"}`
+  1. *Partition work before adding workers: concurrency without parallelism is pure overhead.*
+  2. *Handoffs require typed task envelopes with explicit artifact references, not conversational chat.*
+  3. *Isolate concurrent agent writes in private worktrees with optimistic concurrency control.*
+  4. *Never substitute multi-agent consensus for mechanical invariant verification.*
+  5. *Benchmark multi-agent teams against an optimized single-agent baseline with revision compute.*
+- `::: {.callout-chapter-connection title="From Multi-Agent Fleets to Distributed Observability"}`
+  - Handoff forward: Operating distributed multi-agent fleets and complex single-agent runtimes in production requires complete visibility into their execution traces. When an agent fails after 20 minutes of multi-turn tool interaction, how do engineers diagnose the root cause? In Chapter 16 (*Distributed Observability and Empirical Evaluation*), we explore OpenTelemetry tracing, interactive evaluation gyms, statistical rigor, and diagnostic post-mortems.
 
-A scientifically defensible multi-agent evaluation requires benchmarking both architectures on identical task distributions across three standardized systems axes:
+---
+-->
 
-1. **Task Completion Quality:** Verified task pass rate against deterministic acceptance assertions (e.g., unit test pass rate on SWE-bench [@jimenez2024swebench]).
-2. **Critical-Path Makespan:** Total wall-clock execution time from task dispatch to verified completion.
-3. **Total Resource Expenditure:** Aggregate financial and compute cost, summing all prompt prefill tokens, generated tokens, tool execution minutes, and container overhead across all participating agents.
+The primary architectural justification for decomposing a task across a multi-agent fleet is that distributing execution across concurrent, specialized model contexts overcomes the finite capacity, memory saturation, and context-window degradation of a single agent. In distributed systems engineering, however, concurrency is never free. Adding workers introduces network serialization, lock contention, context synchronization, and merge conflicts. Evaluating whether a multi-agent topology yields a genuine engineering advantage requires establishing an empirical evaluation boundary that benchmarks the multi-agent system directly against an optimized single-agent baseline across identical task distributions.
 
-### Amdahl speedup formulation for multi-agent fleets {#sec-vol3-multiagent-amdahl-derivation}
+### The Baseline Rigor Requirement
 
-To formalize the scaling limits of multi-agent fleets, we extend classical **Amdahl's Law** [@amdahl1967] to account for linear provisioning overhead and quadratic coordination crosstalk [@gunther1993]:
+A common methodological flaw in multi-agent evaluations is comparing a multi-agent system against an artificially degraded baseline—such as a single-turn, zero-shot prompt lacking tool execution, reflection, or test-time compute. This comparison is methodologically invalid. A multi-agent framework inherently allocates multiplicative inference compute, additional generation turns, and structured tool loops across its fleet. Consequently, the valid reference baseline is not an unassisted zero-shot model, but an *optimized single-agent baseline* equipped with identical tool interfaces, deterministic execution feedback, and equivalent test-time compute budgets (such as the iterative self-correction, execution verification, and deliberation loops described in Chapter 3). When single-agent architectures are granted equivalent computational degrees of freedom, the observed performance advantage of multi-agent collaboration frequently diminishes or reverses entirely.
 
-$$S(M) = \frac{1}{s + \frac{1 - s}{M} + \alpha M^2 + \beta M}$$
+Consider an empirical audit conducted on an enterprise software refactoring pipeline. An engineering team replaced a single-agent coding pipeline with a four-agent hierarchical fleet comprising an architect, a software engineer, a code reviewer, and a quality assurance worker. The team reported a 3.9 percentage point increase in task resolution accuracy on a benchmark of complex repository migrations (improving pass rates from 40.2% to 44.1%). An independent systems audit, summarized in @tbl-baseline-comparison, revealed the operational cost of this marginal quality gain: total token consumption surged by $6.2\times$ (from $48\text{k}$ to $298\text{k}$ tokens per completed task), and critical-path wall-clock duration inflated by $8.4\times$ (from 18.4 seconds to 154.2 seconds) due to inter-agent serialization, conversational chatter, and reviewer-coder round-trips. When the single-agent baseline was granted a single deterministic execution-and-repair turn—running the compiler, capturing the stderr diagnostic trace, and executing a second revision prompt—its pass rate rose to 47.3%. The optimized single-agent baseline achieved higher accuracy than the four-agent team while consuming 74% fewer tokens and completing execution in one-seventh the wall-clock time.
 
-where:
+::: {#tbl-baseline-comparison}
+| System Architecture                                       | Verified Pass Rate ($Q$) | Critical-Path Makespan ($T$) | Total Tokens ($X_{\text{total}}$) | Mean Task Cost |
+|:----------------------------------------------------------|:------------------------:|:----------------------------:|:---------------------------------:|:--------------:|
+| Zero-Shot Single Agent (Unoptimized)                      |          40.2%           |            18.4 s            |               48,100              |     $0.15      |
+| 4-Agent Hierarchical Fleet                                |          44.1%           |           154.2 s            |              298,400              |     $0.98      |
+| Single Agent + 1 Repair Turn (Compiler Feedback)          |          47.3%           |            22.1 s            |               76,300              |     $0.24      |
+| Single Agent + Deliberation (Best-of-4 with Verification) |          51.8%           |            34.6 s            |              142,500              |     $0.46      |
 
-- $s \in (0, 1]$ is the irreducible serial fraction (task decomposition, final review, merge reconciliation).
-- $1 - s$ is the parallelizable fraction (independent file indexing, parallel search).
-- $\alpha > 0$ is the quadratic synchronization coefficient (inter-agent messaging, lock contention, consensus rounds).
-- $\beta > 0$ is the linear provisioning coefficient (context ingestion, system prompt overhead).
-
-::: {#fig-vol3-multiagent-coordination-tax fig-env="figure" fig-pos="htb" fig-cap="**The Coordination Tax and Multi-Agent Amdahl's Law**: Analytical speedup curves showing the optimal scaling point ($M^*$) and the subsequent descent into the Negative Return Collapse Zone caused by quadratic communication overhead. Unlike classical Amdahl scaling which plateaus asymptotically, multi-agent scaling turns downward past $M^*$, where adding agents increases total execution time. Source: Adapted from @amdahl1967 and @gunther1993." fig-alt="Line graph plotting effective speedup S(M) against number of concurrent subagents M. Curve rises to an optimal peak M* between 4 and 6 agents, then declines steeply into a shaded red Negative Return Collapse Zone where quadratic coordination tax dominates."}
-![](images/svg/coordination_tax_scaling.svg){width="100%"}
+Systems audit of an enterprise refactoring workload comparing naive single-agent, multi-agent fleet, and compute-matched single-agent baselines across identical task suites.
 :::
 
-As illustrated in @fig-vol3-multiagent-coordination-tax, multi-agent scaling behavior separates into three distinct operational regimes:
+### Empirical Axes of Multi-Agent Evaluation
 
-1. **Sub-Linear Acceleration ($1 \le M < M^*$):** When worker count $M$ is small, the parallel term $\frac{1 - s}{M}$ dominates. Adding workers reduces wall-clock execution time, though efficiency is damped by provisioning overhead $\beta M$.
-2. **Optimal Fleet Boundary ($M^*$):** Speedup reaches its absolute mathematical peak when the marginal parallel gain balances marginal coordination overhead. Differentiating the denominator yields the optimal concurrency:
-   $$2\alpha M^3 + \beta M^2 - (1 - s) = 0$$
-   For representative enterprise coding parameters ($s = 0.15, \alpha = 0.004, \beta = 0.030$), the optimal fleet concurrency is exactly $M^* = 4$ agents, achieving a peak speedup of $S(4) = 1.83\times$.
-3. **Negative Return Collapse Zone ($M > M^*$):** Beyond $M^*$, quadratic communication crosstalk $\alpha M^2$ overwhelms all parallel benefits. Every additional agent added to the team increases total wall-clock execution time while consuming massive additional token budgets. Beyond $M = 12$, speedup drops below $1.0\times$—meaning the multi-agent team takes longer to complete the task than a single focused agent working alone.
+Systematic evaluation of multi-agent architectures requires joint measurement across three orthogonal systems dimensions:
 
-@Tbl-vol3-multiagent-amdahl-regimes details the quantitative performance metrics across fleet sizes for enterprise software workloads.
+1. **Task Completion Quality ($Q$):** The verified proportion of tasks satisfying non-negotiable correctness invariants ($Q = N_{\text{pass}} / N_{\text{total}}$). Quality cannot be measured through subjective model-based evaluation or self-reported agent consensus; it requires deterministic verification harnesses, such as unit test suites, integration test suites, static analysis linters, or schema validators.
+2. **Critical-Path Makespan ($T_{\text{makespan}}$):** The elapsed wall-clock latency along the longest execution path in the task dependency directed acyclic graph (DAG):
+   $$T_{\text{makespan}} = \max_{k \in \mathcal{P}} \sum_{v \in k} \left( T_{\text{model}}(v) + T_{\text{tool}}(v) + T_{\text{wait}}(v) \right)$$
+   where $\mathcal{P}$ is the set of all source-to-sink paths through the execution DAG, $T_{\text{model}}(v)$ is the model inference latency (prefill plus token generation) at step $v$, $T_{\text{tool}}(v)$ is the execution duration of synchronous environment tools, and $T_{\text{wait}}(v)$ represents serialization queues, inter-process communication delays, and barrier synchronization latencies.
+3. **Total Resource Footprint ($C_{\text{total}}$):** The aggregate infrastructure cost consumed across all $M$ participating agents:
+   $$C_{\text{total}} = \sum_{m=1}^M \left( p_{\text{in}} X_{\text{in}}^{(m)} + p_{\text{out}} X_{\text{out}}^{(m)} \right) + c_{\text{compute}} \cdot T_{\text{runtime}}$$
+   where $X_{\text{in}}^{(m)}$ and $X_{\text{out}}^{(m)}$ represent input and output token counts for agent $m$, $p_{\text{in}}$ and $p_{\text{out}}$ denote pricing per token, and $c_{\text{compute}}$ represents container compute fees per unit of wall-clock time.
 
-| Fleet Size ($M$)      | Speedup $S(M)$ | Parallel Efficiency | Token Multiplier | Dominant Operational Bottleneck                        |
-|:----------------------|:---------------|:--------------------|:-----------------|:-------------------------------------------------------|
-| **1 (Single Agent)**  | $1.00\times$   | 100%                | $1.0\times$      | Model generation throughput; sequential tool execution |
-| **2 Workers**         | $1.49\times$   | 74.5%               | $2.2\times$      | Initial context duplication; linear prompt prefill     |
-| **4 Workers ($M^*$)** | $1.83\times$   | 45.8%               | $4.8\times$      | Optimal balance point; peak wall-clock throughput      |
-| **8 Workers**         | $1.41\times$   | 17.6%               | $11.2\times$     | Queue serialization; workspace merge contention        |
-| **16 Workers**        | $0.62\times$   | 3.9%                | $28.4\times$     | Quadratic crosstalk; severe negative return collapse   |
+### Amdahl's Law and the Fleet Coordination Tax
 
-: **Empirical Concurrency Regimes under Multi-Agent Amdahl's Law**: Quantitative speedup, parallel efficiency, aggregate token multipliers, and dominant operational bottlenecks across fleet sizes for representative enterprise software engineering parameters ($s = 0.15, \alpha = 0.004, \beta = 0.030$). Concurrency past $M^* = 4$ degrades wall-clock speedup while dramatically inflating financial token expenditures. {#tbl-vol3-multiagent-amdahl-regimes tbl-colwidths="[15,15,18,17,35]"}
+To understand why multi-agent systems often fail to scale sublinearly with fleet size, systems engineers apply Amdahl's Law, extended to incorporate the coordination tax of distributed model inference. Let $f \in [0, 1]$ represent the embarrassingly parallelizable fraction of the agentic workload, and let $(1 - f)$ represent the strictly sequential fraction (such as initial specification parsing, dependency graph scheduling, global commit validation, and final integration). If the parallel workload is partitioned across $M$ concurrent worker agents, the effective speedup $S(M)$ relative to an optimized single-agent baseline is:
 
-## Fallacies and Pitfalls {#sec-vol3-multiagent-fallacies}
+$$S(M) = \frac{1}{(1 - f) + \frac{f}{M} + h(M)}$$
+
+where $h(M)$ is the fleet coordination overhead function. In classical distributed systems, $h(M)$ reflects network transport latency and lock serialization. In multi-agent LLM fleets, $h(M)$ grows rapidly due to three domain-specific overhead mechanisms:
+
+- **Context Ingestion and Re-Serialization:** Each subagent operates in an independent context window. Distributing a task requires serializing the global repository or state graph into an envelope and transmitting it to each worker. Across $M$ workers, this generates an $\mathcal{O}(M)$ expansion in prompt prefill tokens and input processing latency.
+- **Conversational and Protocol Chatter:** When agents communicate through unstructured natural-language message buses or peer-to-peer negotiation topologies, inter-agent message exchanges scale quadratically as $\mathcal{O}(M^2)$, consuming token budgets without executing domain tasks.
+- **Conflict Resolution and State Merging:** Concurrent writes to shared filesystems or databases require three-way merges, dependency re-verification, and compensation logic when branches conflict. In the presence of workspace coupling, reconciliation overhead scales as $\mathcal{O}(M \log M)$ to $\mathcal{O}(M^2)$.
+
+::: {#fig-amdahl-multiagent}
+```{mermaid}
+xychart-beta
+    title "Fleet Speedup S(M) vs. Concurrent Agent Count M (Parallel Fraction f = 0.80)"
+    x-axis "Active Agents (M)" [1, 2, 4, 6, 8, 12, 16, 24, 32]
+    y-axis "Effective Speedup S(M)" 0 --> 3.0
+    line [1.00, 1.54, 2.11, 2.28, 2.15, 1.62, 1.15, 0.61, 0.32]
+```
+Amdahl scaling curve for a multi-agent fleet with parallel fraction $f = 0.80$ and superlinear coordination overhead $h(M) = 0.015 M^{1.5}$. Speedup peaks at $M^* = 6$ ($S \approx 2.28$), beyond which inter-agent context serialization, merge contention, and protocol chatter induce retrograde scaling.
+:::
+
+Because $h(M)$ is a monotonically increasing function of $M$, while $f/M$ provides strictly diminishing marginal latency reductions, the speedup function $S(M)$ possesses a finite global maximum. Taking the derivative of $S(M)$ with respect to $M$ shows that speedup reaches its physical ceiling when:
+
+$$\frac{f}{M^2} = \frac{d\,h(M)}{dM}$$
+
+When the number of concurrent workers exceeds this critical threshold $M^*$, the system enters *retrograde scaling*, where adding additional agents increases total makespan and degrades overall throughput, as illustrated in @fig-amdahl-multiagent. For tasks with low parallelizability ($f \le 0.50$) or high coordination overhead, $M^*$ is typically between 2 and 4. Deploying fleets beyond $M^*$ results in negative engineering returns: higher cloud expenditures, longer completion times, and increased vulnerability to cascading hallucination loops.
+
+The empirical reality of the coordination tax exposes why naive architectural intuition often misleads systems designers: distributing cognition across multiple agents is not an unalloyed performance multiplier, but a distributed systems trade-off governed by strict communication and synchronization bounds. When engineering teams fail to model these constraints or mistake agent consensus for ground-truth correctness, multi-agent deployments suffer predictable, systemic failures. In @sec-vol3-multiagent-fallacies, we examine the recurring fallacies and systems pitfalls that emerge when managing distributed multi-agent fleets.
+
+<!-- SECTION_END: 15.8 -->
+
+<!-- FALLACIES_START (#sec-vol3-ch15-fallacies) -->
+## Fallacies and Pitfalls {#sec-vol3-ch15-fallacies}
+
+<!-- FALLACIES_SPEC:
+
+- **Fallacy 1:** *Adding more agents to an autonomous team always improves problem-solving performance.*
+  - Refutation: Beyond a small worker count, communication overhead, context duplication, and coordinator bottlenecks dominate, often degrading both latency and accuracy.
+- **Pitfall 1:** *Allowing multiple agents to concurrently mutate a shared filesystem without optimistic concurrency control.*
+  - Refutation: Guarantees race conditions and silent write clobbering; concurrent agents must work in isolated worktrees and commit via verified three-way merges.
+- **Fallacy 2:** *Unanimous multi-agent consensus proves the factual or mathematical correctness of a solution.*
+  - Refutation: Homogeneous LLM ensembles suffer from heavily correlated failure modes; consensus only proves agreement, not correctness against ground truth.
+- **Pitfall 2:** *Failing to propagate cancellation tokens across child agents when a supervisor aborts.*
+  - Refutation: Spawns orphaned worker processes that continue consuming expensive GPU inference and cloud resources indefinitely.
+-->
 
 ::: {.fallacy-pitfall}
-### Fallacy: Adding more agents to an autonomous team always improves problem-solving performance {-}
 
-A ubiquitous assumption among system designers is that complex problems are best solved by assembling large swarms of specialized agents. In practice, beyond a small optimal team size ($M^* \approx 3\text{ -- }5$), the quadratic coordination tax, prompt context duplication, and coordinator context saturation completely overwhelm parallel exploration gains. In software benchmarks, 16-agent swarms routinely exhibit worse accuracy, $10\times$ higher latency, and $30\times$ higher token costs than a well-prompted single agent equipped with deliberate tool iteration.
+**Fallacy**: *Adding more agents to an autonomous team always improves problem-solving performance.*
 
-### Pitfall: Permitting concurrent agents to mutate shared filesystems without optimistic concurrency control {-}
+This belief commits a classical scheduling error analogous to assuming Amdahl's Law exhibits a zero serial fraction or that message-passing distributed systems scale linearly without synchronization costs. In an autonomous multi-agent fleet, expanding worker count introduces two steep systems penalties: combinatorial communication complexity and catastrophic tail latency. First, coordinating $N$ autonomous agents over a shared context or message bus requires quadratic $O(N^2)$ point-to-point exchanges or funnels into an $O(N)$ serialization bottleneck at the central supervisor. Each serialized dispatch forces redundant prompt token ingest, inflating aggregate key-value cache memory bandwidth demands at the serving cluster and accelerating context window exhaustion. Second, overall task completion time is bounded by the slowest subagent. If individual agent response latency follows a heavy-tailed distribution, the probability that the entire cohort finishes without a straggler decreases exponentially with fleet size. Furthermore, decomposing tasks introduces context poisoning: an undetected hallucination or semantic invariant violation emitted by a single upstream worker is ingested as authoritative ground truth by downstream workers, creating positive feedback loops that compound errors rather than filtering them. Consequently, scaling worker count beyond a minimal task-aligned partition increases token expenditure and tail latency while degrading end-to-end task accuracy.
 
-Allowing multiple stochastic agents to read and write directly to a shared directory without workspace isolation guarantees race conditions, dirty reads, and silent write clobbering. Because language models cannot execute atomic compare-and-swap operations, one worker's commits will silently overwrite another's work. Concurrent agents must always operate in isolated, private git worktrees or ephemeral microVM overlay layers, committing changes exclusively through validated three-way merge gates.
-
-### Fallacy: Unanimous multi-agent consensus proves the factual or mathematical correctness of a solution {-}
-
-Believing that a 7--0 majority vote across an LLM panel proves the correctness of a generated artifact is a critical systems fallacy. When agents share the same foundational pretraining data and tokenizers, their failure modes are strongly correlated. An entire panel of agents will unanimously and confidently approve code containing subtle security vulnerabilities or mathematical errors if the error pattern was prevalent in their common training corpus. Never use neural voting ensembles to verify what can be executed by a deterministic verification oracle.
-
-### Pitfall: Failing to propagate cancellation tokens across child workers when a supervisor aborts {-}
-
-When a supervisor agent times out, encounters an unhandled exception, or is interrupted by a user, runtimes that omit hierarchical cancellation cascades leave child workers executing indefinitely. Orphaned subagents continue running expensive GPU inference loops, invoking third-party APIs, and mutating cloud infrastructure for hours, consuming thousands of dollars in unmonitored compute and blocking execution pools. Runtimes must bind all child workers to hierarchical cancellation tokens and enforce immediate process termination upon parent abort.
 :::
 
-## Summary {#sec-vol3-multiagent-summary}
+::: {.fallacy-pitfall}
 
-Multi-agent coordination represents a powerful distributed systems paradigm for scaling execution beyond the context and authority boundaries of a single model. However, sustainable multi-agent architectures demand rigorous systems engineering rather than naive conversational chat.
+**Pitfall**: *Allowing multiple agents to concurrently mutate a shared filesystem without optimistic concurrency control.*
 
-By quantifying the delegation trade-off against strong single-agent deliberation baselines, structuring communication around formal task dependency graphs, enforcing typed task envelopes with immutable artifact references, isolating concurrent workers inside private worktrees governed by optimistic concurrency control, replacing vulnerable consensus voting with deterministic execution oracles, propagating hierarchical cancellation cascades, and attenuating capabilities using cryptographic macaroons, systems engineers construct robust, cost-effective distributed agent fleets.
+POSIX file system semantics guarantee atomic block writes at the kernel level, but they provide no transactional isolation for multi-step read-modify-write sequences spanning multiple model inference cycles. When multiple autonomous agents read, edit, and write back files within a common directory hierarchy without concurrency control, the system inevitably experiences the classical lost update anomaly. An agent inspects a source file at logical timestamp $t_0$, begins a multi-second inference pass to synthesize modifications, and writes back its patch at $t_2$. If a peer agent writes an alternative modification at $t_1$, the first agent blindly overwrites the intermediate state, silently clobbering file contents and invalidating syntactical and semantic invariants. This failure cannot be resolved with basic file locking alone, which induces deadlocks and stalls worker throughput during prolonged generation phases. Production multi-agent architectures must treat the filesystem as a versioned, immutable storage tree. Agents must operate within hermetic, isolated worktrees branched off a shared baseline. Mutation sets must be staged as discrete changesets, verified against a test harness, and reconciled through deterministic three-way merge algorithms governed by optimistic concurrency control, aborting and replaying transactions when parent commit hashes conflict.
 
-@Tbl-vol3-multiagent-synthesis synthesizes the core architectural subsystems, governing theoretical formalisms, failure modes, and operational invariants across production multi-agent systems.
-
-| Subsystem                    | Theoretical Formalism                                 | Primary Failure Mode              | Systems Mitigation                                               | Operational Invariant                               |
-|:-----------------------------|:------------------------------------------------------|:----------------------------------|:-----------------------------------------------------------------|:----------------------------------------------------|
-| **Fleet Coordination**       | Task Dependency DAGs [@lamport1978time]               | Semantic deadlocks and livelocks  | Hierarchical supervisor trees; topological cycle detection       | Execution graph must form a directed acyclic graph  |
-| **Inter-Agent Handoff**      | Actor Model [@hewitt1973actor]                        | Conversational semantic drift     | Typed task envelopes with pinned artifact SHAs                   | No unconstrained natural language handoffs          |
-| **Workspace Isolation**      | Optimistic Concurrency Control [@gray1981transaction] | Concurrent write clobbering       | Ephemeral git worktrees; automated three-way merge gates         | Workers execute in private copy-on-write workspaces |
-| **Consensus & Verification** | Condorcet Breakdown [@lamport1982byzantine]           | Correlated hallucination cascades | Deterministic execution oracles (`pytest`, compilers)            | Never vote on what can be mechanically tested       |
-| **Authority Management**     | Principle of Attenuation [@saltzer1975]               | Subagent privilege escalation     | Cryptographic macaroon tokens with chained caveats               | Delegated capabilities must attenuate monotonically |
-| **Fleet Scaling**            | Multi-Agent Amdahl's Law [@amdahl1967; @gunther1993]  | Negative return collapse zone     | Concurrency capping at $M^*$; baseline deliberation benchmarking | Concurrency must not exceed measured $M^*$ boundary |
-
-: **Distributed Stochastic Actors Architectural Synthesis**: Summary of core architectural subsystems, governing theoretical formalisms, primary failure modes, systems mitigations, and operational invariants in production multi-agent systems. {#tbl-vol3-multiagent-synthesis tbl-colwidths="[15,20,25,20,20]"}
-
-::: {.callout-takeaways title="Core systems principles of multi-agent coordination"}
-1. **The Delegation Trade-Off Requires Evidence:** Multi-agent delegation is justified only when context partitioning, tool authority separation, or true parallel search outweighs the context duplication and serialization tax.
-2. **Enforce Typed Task Envelopes:** Replace unconstrained conversational chat with machine-readable task envelopes containing immutable artifact hashes, cryptographic capabilities, and deterministic acceptance schemas.
-3. **Isolate Concurrent Workspaces:** Multiple agents must never write directly to a shared filesystem; provision private git worktrees and merge changes via optimistic concurrency control.
-4. **Correlated Errors Break Quorum Voting:** Neural agents sharing pretraining weights exhibit correlated hallucinations; consensus voting measures agreement, not truth. Gate state transitions with mechanical execution oracles.
-5. **Propagate Cancellation Cascades:** Every subagent must bind to a hierarchical cancellation context; aborting a root task must instantly terminate all descendant worker processes to prevent orphaned GPU compute.
-6. **Monotonically Attenuate Capabilities:** Delegated subagents must operate under attenuated cryptographic tokens with strict path, action, and financial caveats; child authority can never exceed parent authority.
-7. **Cap Concurrency at the Optimal Boundary ($M^*$):** Quadratic communication crosstalk causes multi-agent scaling to turn downward past $M^*$; benchmark fleets against optimized single-agent baselines to avoid negative return collapse.
 :::
 
-::: {.callout-chapter-connection title="From fleet coordination to operational observability"}
-In this chapter, we engineered the distributed protocols, state isolation primitives, and coordination topologies required to manage fleets of autonomous stochastic agents.
+::: {.fallacy-pitfall}
 
-However, operating distributed agent fleets in production introduces an acute operational visibility crisis. When a 16-agent fleet executes thousands of multi-turn tool invocations, how do operators track execution lineage, diagnose non-deterministic failures, detect prompt injection attacks, and attribute token expenditures across complex task trees?
+**Fallacy**: *Unanimous multi-agent consensus proves the factual or mathematical correctness of a solution.*
 
-In @sec-vol3-observability (*Operational Telemetry and Observability*), we transition from fleet coordination to production systems operations. We design distributed trace contexts for agent trajectories, engineer semantic span schemas, formulate step-level cost and token attribution pipelines, construct automated trajectory replay debuggers, and establish real-time guardrail monitors for mission-critical autonomous deployments.
+This assumption incorrectly applies the Condorcet Jury Theorem and classical voting mechanisms to statistical predictors that violate the fundamental requirement of independent error distributions. Homogeneous or even diverse frontier model ensembles share overlapping pretraining corpora, identical tokenization architectures, common reinforcement learning alignments, and shared safety filters. Consequently, their failure modes are strongly correlated rather than orthogonal. When presented with subtle mathematical fallacies, counter-intuitive physical reasoning, or out-of-distribution reasoning traps, multiple agents will converge upon the identical plausible hallucination with high statistical confidence. In multi-agent debate topologies, this correlation induces rapid epistemic closure: early authoritative declarations pollute the conversational context buffer, anchoring peer agents and accelerating consensus around an erroneous basin of attraction. Consensus in statistical language models measures distribution agreement across learned semantic priors, not empirical correspondence with physical reality or formal logical validity. A distributed system cannot substitute social consensus among generative agents for programmatic verification. Absolute correctness requires ground-truth validation against external oracles, including deterministic compilers, typecheckers, formal theorem provers, runtime unit test execution, and hardware state assertions.
+
 :::
+
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Failing to propagate cancellation tokens across child agents when a supervisor aborts.*
+
+In hierarchical multi-agent architectures, dispatching subtasks to worker agents establishes asynchronous distributed execution graphs across accelerator clusters and cloud inference endpoints. If a supervisor agent detects an unrecoverable invariant violation, encounters a user cancellation, or times out, terminating the parent process without explicitly propagating cooperative cancellation tokens leaves worker subagents orphaned. Because modern large language model inference pipelines buffer and queue generation requests asynchronously, an orphaned worker continues executing its task graph, invoking external tools, consuming high-bandwidth memory for key-value caches, and burning inference compute budget. Worse, orphaned workers may attempt to commit mutations back to the shared workspace or database long after the parent task transaction has been marked aborted, triggering stale writes and corrupting downstream system state. Systems engineers must treat multi-agent dispatch trees identically to distributed RPC fabrics. Every delegation boundary must bind child processes to a cascaded context abstraction—analogous to distributed context propagation in gRPC or POSIX process groups—that multiplexes cancellation signals, deadline expirations, and heartbeat monitors. When a parent aborts, explicit cancellation tokens must instantaneously preempt child inference queues, sever tool execution pipelines, and release allocated GPU memory pools.
+
+:::
+
+<!-- FALLACIES_END -->
+
+<!-- SUMMARY_START (#sec-vol3-ch15-summary) -->
+## Summary {#sec-vol3-ch15-summary}
+
+<!-- SUMMARY_SPEC:
+
+- **Authoritative Synthesis:** Synthesizing multi-agent fleet design, coordination graphs, concurrency control, and evaluation.
+- `::: {.callout-takeaways title="Core Systems Principles of Multi-Agent Coordination"}`
+  1. *Partition work before adding workers: concurrency without parallelism is pure overhead.*
+  2. *Handoffs require typed task envelopes with explicit artifact references, not conversational chat.*
+  3. *Isolate concurrent agent writes in private worktrees with optimistic concurrency control.*
+  4. *Never substitute multi-agent consensus for mechanical invariant verification.*
+  5. *Benchmark multi-agent teams against an optimized single-agent baseline with revision compute.*
+- `::: {.callout-chapter-connection title="From Multi-Agent Fleets to Distributed Observability"}`
+  - Handoff forward: Operating distributed multi-agent fleets and complex single-agent runtimes in production requires complete visibility into their execution traces. When an agent fails after 20 minutes of multi-turn tool interaction, how do engineers diagnose the root cause? In Chapter 16 (*Distributed Observability and Empirical Evaluation*), we explore OpenTelemetry tracing, interactive evaluation gyms, statistical rigor, and diagnostic post-mortems.
+-->
+
+Multi-agent systems represent a classical distributed systems trade-off: decomposing a monolithic reasoning loop into specialized agents can scale execution across decoupled subproblems, yet every agent boundary introduces synchronization latency, state serialization costs, and failure modes. As established throughout this chapter, decomposing a task across multiple agents improves performance only when the underlying problem possesses genuine task-level parallelism or structural boundaries that demand distinct context windows and privilege domains. Unstructured multi-agent communication—characterized by free-form natural language exchanges—rapidly degenerates into coordination chatter that amplifies token consumption and propagates hallucinated state without yielding proportional accuracy gains. Scalable fleet architectures instead model multi-agent workflows as explicit coordination graphs, enforcing typed task envelopes with immutable artifact handles rather than conversational handoffs. Concurrency control over shared environments requires strict isolation through transient execution worktrees, backed by optimistic concurrency checks and automated reconciliation before merges. Crucially, multi-agent consensus mechanisms cannot replace deterministic verification; systems engineers must ground agent actions against compiler checks, property tests, and static invariants. Ultimately, the decision to deploy multi-agent fleets must remain empirically grounded: distributed orchestration is justified only when its throughput and domain-partitioning benefits exceed the baseline performance of an optimized single-agent architecture allocated an equivalent inference and revision budget.
+
+::: {.callout-takeaways title="Core Systems Principles of Multi-Agent Coordination"}
+1. *Partition work before adding workers: concurrency without parallelism is pure overhead.* Subdividing an inherently sequential reasoning process across multiple agents introduces context switching and network serialization costs without accelerating wall-clock execution. Concurrency delivers tangible throughput benefits only when subproblems exhibit weak data coupling and independent state dependencies.
+2. *Handoffs require typed task envelopes with explicit artifact references, not conversational chat.* Natural language negotiation between autonomous processes introduces semantic drift, unbounded token expansion, and loss of intermediate intent. Inter-agent communication must instead rely on strongly typed schemas, structured input-output contracts, and immutable references to external content-addressed storage.
+3. *Isolate concurrent agent writes in private worktrees with optimistic concurrency control.* Uncontrolled concurrent writes to a shared filesystem or workspace inevitably yield race conditions and destructive state overwrites. Systems must constrain each agent worker to an isolated, branchable workspace, validating non-conflicting mutation sets through automated verification before committing changes to the primary repository.
+4. *Never substitute multi-agent consensus for mechanical invariant verification.* Aggregating democratic consensus across multiple stochastic models can mask systematic collective delusions and correlated failure modes. Invariant validation must be delegated to deterministic, mechanical oracles such as compilers, test suites, and formal property checkers.
+5. *Benchmark multi-agent teams against an optimized single-agent baseline with revision compute.* Apparent accuracy gains attributed to multi-agent architectures frequently stem from cumulative inference and token consumption rather than collaborative synergy. Rigorous systems evaluation demands equalized compute budgets, measuring fleet performance against a single agent equipped with equivalent test-time reflection and iterative refinement cycles.
+:::
+
+::: {.callout-chapter-connection title="From Multi-Agent Fleets to Distributed Observability"}
+Operating distributed multi-agent fleets and complex single-agent runtimes in production requires complete visibility into their execution traces. When an agent fails after twenty minutes of multi-turn tool interaction or asynchronous peer delegation, engineers cannot rely on post-hoc terminal outputs to diagnose whether the failure originated from a corrupted handoff envelope, an unresolved optimistic concurrency conflict, or a cascading tool hallucination. In Chapter 16 (*Distributed Observability and Empirical Evaluation*), we transition from coordination topology to operational telemetry, examining OpenTelemetry tracing for asynchronous agent spans, reproducible evaluation gyms, statistical significance testing under stochastic variance, and structured diagnostic post-mortems for production failures.
+:::
+
+<!-- SUMMARY_END -->
