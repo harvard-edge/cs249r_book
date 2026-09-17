@@ -105,7 +105,7 @@ Consider our configuration parser defect. An autonomous agent evaluates two cand
 - **Candidate A:** `int(seconds * 1000)` (23 characters)
 - **Candidate B:** `int(math.floor(float(sec) * 1e3))` (33 characters)
 
-While Candidate B is 43% longer in character count, in standard BPE vocabularies (such as cl100k_base or Llama 3), Candidate A partitions into 8 tokens, while Candidate B partitions into 12 tokens. Now consider what occurs when variable names contain camelCase or snake_case compounds: `parsed_timeout_in_milliseconds` may segment into 6 distinct tokens (`parsed`, `_time`, `out`, `_in`, `_milli`, `seconds`), whereas `timeoutMs` segments into 2 tokens (`timeout`, `Ms`). 
+While Candidate B is 43% longer in character count, in standard BPE vocabularies (such as cl100k_base or Llama 3), Candidate A partitions into 8 tokens, while Candidate B partitions into 12 tokens. Now consider what occurs when variable names contain camelCase or snake_case compounds: `parsed_timeout_in_milliseconds` may segment into 6 distinct tokens (`parsed`, `_time`, `out`, `_in`, `_milli`, `seconds`), whereas `timeoutMs` segments into 2 tokens (`timeout`, `Ms`).
 
 If the host runtime budgets an invocation's output ceiling based on approximate character counts (e.g., assuming $1 \text{ token} \approx 4 \text{ characters}$), an implementation generating verbose identifiers will exhaust its maximum output token limit ($N_{\text{max\_tokens}}$) mid-stream. The model abruptly halts, returning a truncated AST that fails Python parsing at the host boundary. Character count is merely a coarse heuristic; subword tokens are the exact accounting currency of the processor core.
 
@@ -146,7 +146,7 @@ Formally, the computational state of the stochastic processor core at step $t$ i
 
 $$\mathcal{S}_t = \left(\mathbf{x}, \mathbf{y}_{<t}, \Theta, \mathbf{K}_{1:t-1}, \mathbf{V}_{1:t-1}\right)$$
 
-where $\mathbf{x}$ denotes the staged context buffer, $\mathbf{y}_{<t}$ represents the generated output prefix, $\Theta$ encapsulates the static parameter weights, and $(\mathbf{K}_{1:t-1}, \mathbf{V}_{1:t-1})$ is the dynamic Key-Value activation state retained in serving memory. 
+where $\mathbf{x}$ denotes the staged context buffer, $\mathbf{y}_{<t}$ represents the generated output prefix, $\Theta$ encapsulates the static parameter weights, and $(\mathbf{K}_{1:t-1}, \mathbf{V}_{1:t-1})$ is the dynamic Key-Value activation state retained in serving memory.
 
 At each discrete step $t$, the transformer evaluates $\mathcal{S}_t$ through its attention layers and unembedding projection to produce a vector of raw unnormalized logits $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$. Applying the softmax operator parameterized by temperature $\tau > 0$ yields a categorical probability distribution:
 
@@ -187,7 +187,7 @@ flowchart LR
 
 ### The Irreducible Serial Dependency Chain
 
-This autoregressive recurrence, illustrated in @fig-autoregressive-loop, establishes that the critical path of generation is strictly sequential. To evaluate $P(y_t \mid \mathbf{x}, y_{<t})$, the self-attention mechanism at each layer must compute inner products between the query vector $\mathbf{q}_t$ of the current token and the key vectors $\mathbf{k}_i$ of all preceding tokens $i \in [1, M + t - 1]$. 
+This autoregressive recurrence, illustrated in @fig-autoregressive-loop, establishes that the critical path of generation is strictly sequential. To evaluate $P(y_t \mid \mathbf{x}, y_{<t})$, the self-attention mechanism at each layer must compute inner products between the query vector $\mathbf{q}_t$ of the current token and the key vectors $\mathbf{k}_i$ of all preceding tokens $i \in [1, M + t - 1]$.
 
 Because the discrete identity of token $y_t$ is non-deterministic and unknown prior to step $t$, the computational pipeline cannot evaluate subsequent query projections speculatively without incurring exponential branching overhead. The host accelerator is trapped in an iterative data-dependency loop. While cluster parallelization (tensor, pipeline, or expert parallelism) reduces the wall-clock duration of each individual matrix multiplication, it cannot reduce the sequence length $K$ of sequential decode steps.
 
@@ -276,7 +276,7 @@ For an agent trajectory generating $K = 1{,}000$ tokens with a nominal per-token
 
 ### Context Poisoning and Irreversible Forward Attention
 
-The danger of plausible errors is amplified by **context poisoning**. In transformer architectures, attention is strictly causal: token $y_{t+1}$ attends to all preceding tokens $[x_1, \dots, x_M, y_1, \dots, y_t]$. Once an incorrect assumption, hallucinated identifier, or flawed assertion is sampled at step $t$, it is permanently committed to the sequence prefix. 
+The danger of plausible errors is amplified by **context poisoning**. In transformer architectures, attention is strictly causal: token $y_{t+1}$ attends to all preceding tokens $[x_1, \dots, x_M, y_1, \dots, y_t]$. Once an incorrect assumption, hallucinated identifier, or flawed assertion is sampled at step $t$, it is permanently committed to the sequence prefix.
 
 The self-attention heads at step $t+1$ treat $y_t$ not as a tentative speculation, but as established historical ground truth. The model cannot backtrack, revise its internal state, or execute an `undo` operation within a single invocation. The erroneous token acts as an attentional sink, distorting the conditioning context for all downstream decode steps and causing the model to generate elaborate, highly confident justifications for an invalid starting premise.
 
@@ -478,12 +478,12 @@ On an NVIDIA H100 SXM accelerator (delivering nearly $2\text{,}000\text{ TFLOP/s
 
 The interaction between prompt length $N_{\text{in}}$ and generation length $N_{\text{out}}$ partitions model invocations into four distinct operational regimes. @tbl-vol3-latency-regimes outlines how resource bottlenecks shift across typical agent interaction patterns.
 
-| Regime | Context ($N_{\text{in}}$) | Output ($N_{\text{out}}$) | Dominant Latency Phase | Hardware Bottleneck | Representative Agent Workload |
-|:-------|:--------------------------|:---------------------------|:-----------------------|:---------------------|:------------------------------|
-| **Ingestion-Heavy** | High ($\ge 32\text{k}$) | Low ($\le 100$) | $T_{\text{prefill}}$ (TTFT) | Tensor Core compute (GEMM) | Repository inspection, log classification, tool selection |
-| **Generation-Heavy** | Low ($\le 1\text{k}$) | High ($\ge 1\text{k}$) | $\sum T_{\text{decode}, t}$ | Memory bandwidth (GEMV) | Patch synthesis, technical report drafting, code generation |
-| **Balanced / Dense** | High ($\ge 32\text{k}$) | High ($\ge 1\text{k}$) | Both $T_{\text{prefill}}$ & Decode | Compute followed by memory bandwidth & capacity | End-to-end refactoring, whole-file rewrite with context |
-| **Interactive Probe** | Low ($\le 1\text{k}$) | Low ($\le 100$) | $T_{\text{queue}} + T_{\text{transport}}$ | Scheduling, RPC latency, host serialization | Heartbeat checks, branch confirmation, single-token gating |
+| Regime                | Context ($N_{\text{in}}$) | Output ($N_{\text{out}}$) | Dominant Latency Phase                    | Hardware Bottleneck                             | Representative Agent Workload                               |
+|:----------------------|:--------------------------|:--------------------------|:------------------------------------------|:------------------------------------------------|:------------------------------------------------------------|
+| **Ingestion-Heavy**   | High ($\ge 32\text{k}$)   | Low ($\le 100$)           | $T_{\text{prefill}}$ (TTFT)               | Tensor Core compute (GEMM)                      | Repository inspection, log classification, tool selection   |
+| **Generation-Heavy**  | Low ($\le 1\text{k}$)     | High ($\ge 1\text{k}$)    | $\sum T_{\text{decode}, t}$               | Memory bandwidth (GEMV)                         | Patch synthesis, technical report drafting, code generation |
+| **Balanced / Dense**  | High ($\ge 32\text{k}$)   | High ($\ge 1\text{k}$)    | Both $T_{\text{prefill}}$ & Decode        | Compute followed by memory bandwidth & capacity | End-to-end refactoring, whole-file rewrite with context     |
+| **Interactive Probe** | Low ($\le 1\text{k}$)     | Low ($\le 100$)           | $T_{\text{queue}} + T_{\text{transport}}$ | Scheduling, RPC latency, host serialization     | Heartbeat checks, branch confirmation, single-token gating  |
 : **Operational Regimes of Stochastic Processor Invocations**: Dominant latency phases and hardware bottlenecks determined by input and output token boundaries. {#tbl-vol3-latency-regimes}
 
 Beyond arithmetic execution time, each active request incurs a physical state cost: the Key-Value (KV) cache. To prevent recomputing historical key and value projections at every decode step, the serving system retains past activations in high-bandwidth device memory. For a model with $L$ transformer layers, hidden dimension $d_{\text{model}}$, and $H_{\text{kv}}$ key-value heads of dimension $d_{\text{head}}$, each token consumes:
@@ -537,13 +537,13 @@ The empirical breakdown reveals critical systems trade-offs that aggregate metri
 
 A faster or more parseable response can worsen end-to-end task success if premature specialization cuts off necessary deliberation. An effective processor interface must make these boundaries explicit. @tbl-vol3-trace-guarantees synthesizes the exact division of responsibilities across the processor and runtime layers.
 
-| Property | Enforcing Mechanism | Stochastic Processor Guarantee | Host Runtime Responsibility |
-|:---------|:---------------------|:-------------------------------|:----------------------------|
-| **Syntactic Conformance** | FSM Logit Masking | Guaranteed by construction (valid tokens only) | Validate UTF-8 decoding and schema unmarshaling |
-| **Factual Truth** | Pre-training & In-Context Data | Non-binding hypothesis (nonzero hallucination rate) | Cross-reference citations against ground-truth index |
-| **Referential Integrity** | Grammar Patterns / Regex | Valid string format (e.g., `UUID`, file path syntax) | Verify object existence in live filesystem or DB |
-| **Authorization & Safety** | System Prompt Policies | Probabilistic compliance (untrusted output) | Evaluate capabilities, RBAC, and sandbox boundaries |
-| **Task Acceptance** | None (External Environment) | No guarantee (emissions may fail test harness) | Execute regression tests and commit state transitions |
+| Property                   | Enforcing Mechanism            | Stochastic Processor Guarantee                       | Host Runtime Responsibility                           |
+|:---------------------------|:-------------------------------|:-----------------------------------------------------|:------------------------------------------------------|
+| **Syntactic Conformance**  | FSM Logit Masking              | Guaranteed by construction (valid tokens only)       | Validate UTF-8 decoding and schema unmarshaling       |
+| **Factual Truth**          | Pre-training & In-Context Data | Non-binding hypothesis (nonzero hallucination rate)  | Cross-reference citations against ground-truth index  |
+| **Referential Integrity**  | Grammar Patterns / Regex       | Valid string format (e.g., `UUID`, file path syntax) | Verify object existence in live filesystem or DB      |
+| **Authorization & Safety** | System Prompt Policies         | Probabilistic compliance (untrusted output)          | Evaluate capabilities, RBAC, and sandbox boundaries   |
+| **Task Acceptance**        | None (External Environment)    | No guarantee (emissions may fail test harness)       | Execute regression tests and commit state transitions |
 : **End-to-End Property Guarantees**: Verification perimeter separating stochastic core capabilities from runtime obligations. {#tbl-vol3-trace-guarantees}
 
 The stochastic processor interface is now fully specified: it accepts tokenized context, bounds next-token sampling through grammar automata, accounts for prefill and decode cost asymmetries, and emits an explicit status envelope. Yet a single candidate continuation—no matter how strictly constrained—remains fundamentally inadequate when confronting ambiguous, multi-step engineering tasks.
