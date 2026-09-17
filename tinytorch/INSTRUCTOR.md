@@ -21,9 +21,12 @@ source .venv/bin/activate
 # Install with instructor tools
 pip install -r requirements.txt
 
-# NBGrader must be on PATH for instructor workflows.
-# For course deployments, install it system-wide or in the managed grading environment.
-python -m pip install nbgrader
+# NBGrader must be on PATH for instructor workflows. The repo declares an
+# extra that pulls nbgrader and the notebook tooling together:
+python -m pip install -e ".[grading]"
+
+# For course deployments, install it system-wide or in the managed grading
+# environment instead.
 
 # Setup grading infrastructure (creates assignments/ and nbgrader_config.py)
 tito nbgrader init
@@ -104,6 +107,23 @@ tito nbgrader collect 01_tensor
 # Or specific student
 tito nbgrader collect 01_tensor --student student_id
 ```
+
+> **`collect` reads nbgrader's exchange, which `tito nbgrader release` does not
+> fill.** `release` maps to nbgrader's `generate_assignment`, which writes the
+> student version to `assignments/release/` on your machine. `collect` maps to
+> nbgrader's `CollectApp`, which moves files students submitted *into the
+> exchange* with `nbgrader submit`. The exchange is a shared directory
+> (`/srv/nbgrader/exchange` by default) and is not supported on Windows.
+>
+> Two workable paths:
+>
+> - **Exchange.** Set up the exchange directory, hand it out with
+>   `nbgrader release_assignment`, have students run `nbgrader submit`, then
+>   `tito nbgrader collect` works as written.
+> - **Hand distribution** (GitHub Classroom, LMS, a zip). Skip `collect`
+>   entirely and place each submission yourself at
+>   `assignments/submitted/<student_id>/<assignment_id>/`, then go straight to
+>   `tito nbgrader autograde`.
 
 ### **4. Auto-Grade**
 ```bash
