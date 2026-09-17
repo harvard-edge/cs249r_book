@@ -45,506 +45,483 @@ An agentic system repeatedly invokes a foundation model to propose what to say o
 ## A Model Call in the Stochastic Computer {#sec-vol3-processor-role}
 []{#sec-tripartite-separation}
 
-In the stochastic computer, the foundation model supplies learned computation. Given the context staged for a call, it scores possible next tokens; an inference service uses those scores to produce a candidate response. The agent runtime chooses what context to supply and what to do with the result. We call the model the processor[^fn-stochastic-processor] because of the functional role it plays in the system, not because it executes physical machine instructions.
+In classical computing, a central processing unit (CPU) executes deterministic machine opcodes. An instruction such as `ADD R1, R2` fetches operands from physical registers, passes them through an arithmetic logic unit, and commits a state transition that alters machine memory with absolute certainty. The processor is the authoritative master of machine state: its instructions do not suggest or hypothesize; they execute.
 
-[^fn-stochastic-processor]: **Stochastic Processor** (from Greek *stochastikos*, "aiming at a mark"): In classical computing, an execution unit executes deterministic opcodes that map one-to-one to boolean state transitions. In an agentic system, the processor models a conditional probability distribution over a discrete vocabulary, emitting speculative candidate continuations whose validity must be confirmed by external verification software. \index{Stochastic Processor!etymology}\index{Stochastic Processor!nondeterminism}
+The Stochastic Computer operates under a fundamentally different execution model. In this architecture, the foundation model functions as the **stochastic processor core**[^fn-stochastic-processor]. It does not execute physical instructions, manipulate memory addresses, or directly mutate system state. Instead, given an input sequence of staged subword tokens, it evaluates a statistical forward pass across learned parameter weights to compute a conditional probability distribution over a discrete vocabulary. A model invocation is not an imperative instruction dispatched to hardware; it is an unprivileged request to compute a candidate continuation.
 
-### The Three Boundaries of Model Computation
+[^fn-stochastic-processor]: **Stochastic Processor** (from Greek *stochastikos*, "aiming at a mark"): In classical computing, an execution unit processes deterministic opcodes that map one-to-one to boolean state transitions. In an agentic system, the processor models a conditional probability distribution over a discrete vocabulary, emitting speculative candidate continuations whose validity must be confirmed by external verification software. \index{Stochastic Processor!etymology}\index{Stochastic Processor!nondeterminism}
 
-To reason clearly about how an agent executes work, the system architecture distinguishes three separate layers of operational ownership:
+### The Concrete Systems Scenario: The Configuration Parser Defect
 
-1. **The Learned Model:** Parameterized neural network weights that evaluate conditional distributions over a discrete vocabulary given a sequence of input tokens. The model computes next-token score distributions; it holds no network sockets, allocates no operating system memory pages, and possesses no awareness of physical time.
-2. **The Inference Service:** The serving infrastructure (such as vLLM or SGLang) that manages accelerator memory, schedules batches, maintains the Key-Value (KV) attention cache, and drives the autoregressive decode loop until reaching a stopping condition. The service translates raw model logits into a candidate token sequence and packages it into an execution envelope.
-3. **The Agent Runtime:** The host program that orchestrates the overall task across multiple turns. The runtime selects which observations and instructions enter the context window, enforces resource budgets and deadlines, interprets returned candidates, and determines what external actions to authorize.
+To anchor this systems boundary in a concrete engineering problem, consider the timeout parser defect from Chapter 1. An automated telemetry service reports that configuration strings containing fractional seconds fail to parse correctly. Specifically, a unit test expects `parse("2.5s")` to return `2500` milliseconds, but the legacy implementation truncates the fractional component and returns `2000` milliseconds:
 
-The model is the learned decision-making core of the machine. In an agentic architecture, it is not merely emitting decorative text; it evaluates observed evidence to diagnose faults, formulates subgoals, and selects tool invocations. However, while the model proposes what should happen next, it possesses zero ambient authority to execute those proposals directly.
+```python
+# Legacy implementation in parser.py:
+def parse_timeout(timeout_str: str) -> int:
+    seconds = float(timeout_str.rstrip("s"))
+    return int(seconds) * 1000  # Truncates 2.5 to 2, yielding 2000 ms
+```
 
-### A Guided Tour of One Invocation
+An autonomous software repair agent is deployed to diagnose the failure, propose a code modification, and verify that the fix resolves the regression without introducing side effects. When the agent issues a model call to inspect the failure, what concrete work does the model perform, and where does its authority begin and end?
 
-Every step in an agent's trajectory proceeds through a four-stage invocation lifecycle (@fig-stochastic-processor-core):
+### The Tripartite Architecture of an Invocation
 
-1. **Context Staging and Budgeting:** The agent runtime selects the relevant task instructions, system invariants, environmental observations, tool schemas, and recent history, serializing them into a formatted prompt buffer. The caller defines explicit operational boundaries: an immutable model snapshot identifier, decoding parameters (such as temperature $\tau$), an output token ceiling ($K_{\max}$), application stop delimiters, and a socket deadline ($T_{\max}$).
-2. **Scoring and Candidate Generation:** The inference service ingests the staged tokens, computes prompt prefill activations, and executes the autoregressive decode loop. At each step, the learned model scores possible next tokens across the vocabulary simplex, and the serving engine samples a continuation token, updates the attention KV cache, and checks termination conditions.
-3. **Response Packaging:** When generation terminates—whether by emitting an end-of-sequence delimiter, reaching the token ceiling $K_{\max}$, or triggering an external deadline—the inference service packages the output into a structured response envelope. This envelope separates three distinct payloads:
-   - **Candidate Content:** The proposed text or structured tool call.
-   - **Termination Status:** The normalized outcome of the call (`Completed`, `Incomplete`, `Refusal`, or `Transport Failure`).
-   - **Usage Accounting:** Verified prompt token count, decode token count, and execution latency breakdowns.
-4. **Interpretation and Action Dispatch:** The agent runtime inspects the returned envelope. It verifies structural validity, evaluates whether the proposed candidate satisfies task invariants, and determines the next system action.
+A model invocation spans three distinct architectural tiers, as illustrated in @fig-stochastic-processor-core:
 
-::: {#fig-stochastic-processor-core fig-env="figure" fig-pos="htb" fig-cap="**Lifecycle of a Stochastic Processor Invocation**: The four-stage operational boundary governing a model call. The agent runtime stages context and enforces token and deadline budgets; the inference service coordinates dense GEMM prompt prefill and memory-bound GEMV decode steps; the service packages the candidate into a normalized status envelope; and the runtime validates the proposal before authorizing execution." fig-alt="Architectural schematic illustrating the four stages of a foundation model invocation across Agent Runtime, Inference Service, and Learned Model."}
+1. **The Agent Runtime (Host Caller):** The application software orchestrating the agent loop. The runtime owns the task objective, selects which files and test outputs to stage into the prompt, enforces resource budgets (token ceilings and execution timeouts), and retains sole authority over system resources (filesystems, network sockets, and process execution).
+2. **The Inference Service (Serving Engine):** The systems harness hosting the neural network. The service translates raw text into token tensors via a tokenizer, schedules batch execution across accelerators, manages accelerator high-bandwidth memory (HBM) and Key-Value (KV) cache allocations, applies decode-time grammar masks, executes the autoregressive sampling loop, and packages the generated tokens into an envelope returned across the network.
+3. **The Learned Model (Neural Core):** The parameter weights ($\Theta$) and tensor execution kernels running on physical accelerator hardware (GPUs or TPUs). The core performs two computational phases: a parallel matrix-matrix multiplication (GEMM) over prompt tokens during prefill, and sequential matrix-vector multiplications (GEMV) during autoregressive decode. Its sole output is an unnormalized vector of vocabulary scores: logits.
+
+::: {#fig-stochastic-processor-core fig-env="figure" fig-pos="htb" fig-cap="**Lifecycle of a Model Invocation**: The agent runtime stages context and enforces execution limits; the inference service manages tokenization, batching, grammar logit masking, and the autoregressive decode loop; the neural core executes tensor operations to compute vocabulary logits. The runtime parses and validates the returned candidate before authorizing any real-world side effect." fig-alt="Three-tier architecture diagram showing Agent Runtime, Inference Service, and Learned Model with request and response flows."}
 ![](images/svg/invocation_lifecycle.svg){width=100%}
 :::
 
-### The Unprivileged Proposal: A Concrete Systems Hook
+### The H-S-A-C Architectural Contract
 
-To understand why this boundary is essential, consider a concrete debugging task: an autonomous agent inspecting an inconsistent distributed key-value cache. Under high client concurrency, read operations intermittently return stale data following network partition events. The agent is assigned to isolate the root cause and propose a repair.
+The boundary between these three tiers is formalized through the four governing dimensions of the Stochastic Computer: **Horizon, State, Authority, and Closure (H-S-A-C)**:
 
-The host runtime stages the repository context—the failing regression test trace, the cache lease manager, and the configuration parser—alongside schemas for file inspection and editing tools. The model evaluates the staged evidence, diagnoses that fractional timeout strings (`"2.5s"`) are truncated to integer milliseconds, and proposes an edit:
+- **Horizon (H):** One bounded, atomic invocation. The processor core evaluates only the finite context staged for the immediate call. It does not plan multi-step trajectories or persist across invocations; each call begins and ends within its declared token and deadline limits.
+- **State (S):** Staged prompt tokens plus ephemeral Key-Value cache activations managed by the inference service. The neural core possesses zero ambient memory of disk files, system clocks, network connections, or prior conversational turns beyond what is explicitly serialized into the input tensor.
+- **Authority (A):** Zero ambient authority. The model core cannot open a socket, mutate a file descriptor, or spawn a process. When prompted with the parser defect, the model may emit a candidate tool invocation:
+  ```python
+  edit_file(path="parser.py", search="int(seconds) * 1000", replace="int(seconds * 1000)")
+  ```
+  Emitting this text modifies nothing in the repository. The proposed edit is merely a candidate string. The file `parser.py` remains untouched until the agent runtime parses the string, verifies the target path against access control lists, applies the edit in an isolated sandbox, and executes the regression suite.
+- **Closure (C):** Invariant closure is supplied entirely by external deterministic software. The model cannot prove that its proposal is syntactically well-formed, that `parser.py` exists, or that the resulting code passes the test. Verification, safety gating, and state commitment belong exclusively to the runtime.
 
-```python
-edit_file(path="parser.py", search="int(seconds) * 1000", replace="int(seconds * 1000)")
-```
-
-The stochastic processor core did not edit `parser.py`. It did not allocate a file descriptor, acquire a filesystem lock, or modify a single byte on disk. It emitted an unprivileged candidate continuation into a network buffer.
-
-A proposed edit does not edit the file. The proposal is an algorithmic hypothesis. Whether `parser.py` exists, whether the agent holds write capabilities within the execution container, and whether the change resolves the regression are questions the processor core cannot answer. The runtime determines whether that proposal has an effect. (The formal mechanisms of authorization, capability tokens, and sandboxed actuation are developed in Chapter 7.)
-
-### Roadmap of the Stochastic Processor Core
-
-Operating this invocation lifecycle reliably requires opening each stage and examining its mechanics from the symbolic boundary down to physical hardware:
-
-* **Section 2.2 (Tokens as the Processor Interface):** We examine the discrete currency crossing the boundary—subword tokens—and analyze why character counts and AST syntax trees diverge from token budgeting.
-* **Section 2.3 (Next-Token Computation):** We trace the autoregressive factorization loop, deriving why generation introduces an irreducible serial latency floor.
-* **Section 2.4 (Candidate Sequences Versus Valid Conclusions):** We confront the epistemic reality of sampling, explaining why statistical likelihood does not equal truth and how causal attention induces context poisoning.
-* **Section 2.5 (The Invocation Contract):** We define the formal caller contract, standardizing request schemas, resource deadlines, and four normalized return status classes.
-* **Section 2.6 (Constraining the Output Surface):** We explore grammar-constrained decoding via finite state automata and logit masks, establishing the strict boundary between syntax guarantees and semantic validity.
-* **Section 2.7 (The Cost of an Invocation):** We model the physical hardware costs of a call, decomposing latency via the Roofline model into compute-bound GEMM prefill and memory-bandwidth-bound GEMV decode.
-* **Section 2.8 (Processor Interface Evaluation):** We benchmark candidate interface designs on a suite of 50 fault-repair tasks, measuring the trade-offs between schema rigidity, tail latency, and end-to-end task completion.
-
-With this operational roadmap established, we begin at the interface boundary: the subword tokens through which the caller and the core communicate.
+Before the runtime can interpret a model's proposal, however, it must understand the currency in which the processor communicates. Inputs and outputs do not cross the execution boundary as raw strings or abstract syntax tree nodes; they cross as discrete tokens.
 
 ## Tokens as the Processor Interface {#sec-vol3-processor-tokenization}
 
-The interface between an external software runtime and a neural processing core is neither byte-oriented nor syntactically aware. It operates entirely over discrete integer identifiers known as subword tokens. In classical computer architecture, microarchitectural execution units consume fixed-width or byte-aligned instructions that map unambiguously to an opcode table and operand registers. In a stochastic processor, by contrast, the raw input byte stream is first partitioned by a statistical subword tokenizer—predominantly Byte-Pair Encoding (BPE)[^fn-bpe-tokenization] [@sennrich2016subword]—before the model executes a single floating-point operation. This serialization layer sits directly on the critical path of the processor core, introducing a fundamental impedance mismatch: context capacity, generation limits, and serving cost are denominated strictly in tokens, yet token boundaries do not align cleanly with words, characters, or programming language Abstract Syntax Tree (AST) nodes.
+In traditional computer architecture, microprocessors execute instructions formatted as fixed-width binary opcodes operating on byte-aligned memory addresses. In the Stochastic Computer, the physical execution currency is neither byte-oriented nor syntactically aware: the processor core operates entirely over discrete integer identifiers known as **subword tokens**.
 
-[^fn-bpe-tokenization]: **Byte-Pair Encoding (BPE)**\index{Byte-Pair Encoding!origins}\index{Tokenizer!subword encoding}: Originally introduced by Philip Gage in 1994 for lossless byte data compression, BPE was adapted for neural language models by Rico Sennrich, Barry Haddow, and Alexandra Birch [-@sennrich2016subword]. In NLP and foundation model serving, BPE resolves the out-of-vocabulary dilemma by iteratively merging high-frequency character pairs into variable-length subword units, establishing an empirical discrete vocabulary.
-
-### The Concrete Accounting Mismatch
-
-Consider our configuration parser defect. An autonomous agent evaluates two candidate patches to fix the timeout conversion logic:
-
-- **Candidate A:** `int(seconds * 1000)` (23 characters)
-- **Candidate B:** `int(math.floor(float(sec) * 1e3))` (33 characters)
-
-While Candidate B is 43% longer in character count, in standard BPE vocabularies (such as cl100k_base or Llama 3), Candidate A partitions into 8 tokens, while Candidate B partitions into 12 tokens. Now consider what occurs when variable names contain camelCase or snake_case compounds: `parsed_timeout_in_milliseconds` may segment into 6 distinct tokens (`parsed`, `_time`, `out`, `_in`, `_milli`, `seconds`), whereas `timeoutMs` segments into 2 tokens (`timeout`, `Ms`).
-
-If the host runtime budgets an invocation's output ceiling based on approximate character counts[^fn-token-compression] (e.g., assuming $1 \text{ token} \approx 4 \text{ characters}$), an implementation generating verbose identifiers will exhaust its maximum output token ceiling ($K_{\max}$) mid-stream. The model abruptly halts, returning a truncated AST that fails Python parsing at the host boundary. Similarly, numeric values (such as floating-point metrics or timestamps) and structured JSON punctuation fragment unpredictably across token seams: the number `12345` may be partitioned as `123` and `45` in one context, but `12` and `345` in another, complicating deterministic extraction. Character count is merely a coarse heuristic; subword tokens are the exact accounting currency of the processor core.
-
-[^fn-token-compression]: **Token Compression Ratios**: While English prose achieves an average compression ratio of approximately $4.0\text{ to }4.3$ characters per token, code and serialized data exhibit high variance: terse Python indentation and variable names often degrade to $1.8\text{ to }2.2$ characters per token. Budgeting context windows and generation ceilings by character count rather than tokenized tensors introduces sudden truncation faults and unrecoverable parser exceptions. \index{Token!compression ratio}\index{Context Window!character heuristic}
+Text and structured payloads are converted into token sequences by a statistical tokenizer before the neural core executes a single floating-point operation. This conversion creates a fundamental systems impedance mismatch: context window capacity, generation limits, and serving charges are denominated strictly in tokens, yet token boundaries do not align cleanly with programming language keywords, whitespace indentation, or Abstract Syntax Tree (AST) grammar nodes.
 
 ### Byte-Pair Encoding and Boundary Instability
 
-Byte-Pair Encoding constructs a vocabulary of fixed size $|\mathcal{V}|$ (typically between $32{,}000$ and $256{,}000$ entries) by iteratively merging the most frequent contiguous byte sequences observed in a training corpus. Because merge rules are derived from corpus-wide statistical co-occurrence rather than deterministic language grammars, the mapping from input text to token sequences is non-local, greedy, and sensitive to context prefixes. A single whitespace offset or punctuation mark can alter merge priorities across an entire line of code.
+Modern foundation models rely predominantly on Byte-Pair Encoding (BPE)[^fn-bpe-tokenization] [@sennrich2016subword]. BPE constructs a discrete vocabulary $\mathcal{V}$ (typically spanning $32{,}000$ to $256{,}000$ entries) by starting with individual raw bytes and iteratively merging the most frequent contiguous byte pairs observed across a large pre-training corpus.
 
-Consider the assignment `def get_user_id():`. In standard BPE vocabularies, ` get` is represented as an atomic token, `_user` as a second, and `_id():` as a third. However, prefixing this statement with two leading spaces alters the local merge sequence: the tokenizer may ingest the first space as an isolated character token and merge the second space with the character `d`, yielding ` d`, followed by `ef`. The language keyword `def`—a discrete, immutable primitive in the programming language's grammar—is fractured across an unnatural token boundary.
+[^fn-bpe-tokenization]: **Byte-Pair Encoding (BPE)**\index{Byte-Pair Encoding!origins}\index{Tokenizer!subword encoding}: Originally introduced by Philip Gage in 1994 for lossless byte data compression, BPE was adapted for neural language models by Rico Sennrich, Barry Haddow, and Alexandra Birch [-@sennrich2016subword]. In NLP and foundation model serving, BPE resolves the out-of-vocabulary dilemma by iteratively merging high-frequency character pairs into variable-length subword units, establishing an empirical discrete vocabulary.
 
-::: {#fig-token-ast-mismatch fig-env="figure" fig-pos="htb" fig-cap="**Token-AST Impedance Mismatch**: Subword tokenization operates orthogonally to programming language AST grammars. In source code, whitespace and identifiers map cleanly to discrete Abstract Syntax Tree (AST) nodes (top). Under Byte-Pair Encoding (BPE), identical indentation depths and identifiers are partitioned into inconsistent token IDs depending on adjacent prefixes and merge heuristics (bottom), forcing the model to expend layer capacity on lexical reconstruction." fig-alt="Diagram comparing abstract syntax tree hierarchy against fragmented subword token splits."}
+Because merge rules are derived from corpus-wide statistical co-occurrence rather than programming language grammars, tokenization is non-local, greedy, and highly sensitive to whitespace and punctuation prefixes. Consider the verified tokenization of Python function signatures under the production `cl100k_base` vocabulary, illustrated in @fig-token-ast-mismatch:
+
+1. **Unindented Baseline:** The string `def get_user_id():` partitions into 5 discrete tokens:
+   $$\text{"def" (755)} \quad \text{" get" (636)} \quad \text{"\_user" (3398)} \quad \text{"\_id" (851)} \quad \text{"():" (4658)}$$
+   Here, the keyword `def` is recognized as an isolated token (`755`), but the identifier `get_user_id` is fragmented across three distinct tokens (`" get"`, `"\_user"`, `"\_id"`), while the punctuation symbols `()` and `:` are fused into a single token (`4658`).
+2. **Indented Variant:** If two spaces of indentation are added—`  def get_user_id():`—the token sequence expands to 6 tokens:
+   $$\text{"  " (220)} \quad \text{" def" (711)} \quad \text{" get" (636)} \quad \text{"\_user" (3398)} \quad \text{"\_id" (851)} \quad \text{"():" (4658)}$$
+   The leading space fuses directly into the keyword: `" def"` is assigned token ID `711`, completely distinct from unindented `"def"` (`755`).
+3. **Structured Tool Call Crossing:** In structured tool invocations, token boundaries cut across syntax delimiters:
+   $$\text{edit\_file(path="parser.py")} \implies \text{"edit" (3671)}, \text{"\_file" (2517)}, \text{"(path" (5698)}, \text{"=\\"" (429)}, \dots$$
+   The token `"(path"` (`5698`) fuses the syntax separator `(` with the parameter name `path`, while the token `"=\""` (`429`) fuses the assignment operator `=` with the opening quote `"`.
+
+::: {#fig-token-ast-mismatch fig-env="figure" fig-pos="htb" fig-cap="**Tokenization Impedance Mismatch**: In a deterministic compiler pipeline (top), lexical analysis cleanly separates keywords, identifiers, and indentation, feeding structured nodes into an Abstract Syntax Tree (AST). Under statistical Byte-Pair Encoding (bottom), token boundaries cut across syntax delimiters and fuse whitespace with keywords, forcing the neural network to expend representational capacity resolving lexical fragmentation." fig-alt="Diagram contrasting compiler AST pipeline against statistical subword BPE tokenization showing boundary fractures."}
 ![](images/svg/token_ast_mismatch.svg){width=100%}
 :::
 
-As illustrated in @fig-token-ast-mismatch, this lexical fragmentation means that the neural core does not observe structured symbols. The self-attention layers must expend representational capacity merely to reconstruct the lexical identity of basic keywords before higher layers can evaluate semantic relationships.
+As shown in @fig-token-ast-mismatch, the compiler's lexer cleanly isolates keywords and passes typed nodes to an AST. The stochastic processor, by contrast, perceives only an array of integer IDs. The self-attention layers must expend representational capacity merely to reconstruct the lexical identity of keywords before higher layers can evaluate semantic logic.
 
-### The Token Budgeting and Truncation Invariant
+### Token Accounting and Budgeting Invariants
 
-Beyond lexical representation, subword tokens define the physical budgeting boundaries of the Stochastic Computer. Every model invocation is governed by two hard token constraints:
+Because subword tokens are the accounting unit of the processor, runtime systems must track context and output consumption in exact token counts, not human-readable characters:
 
-1. **Context Window Ceiling ($S_{\max}$):** The maximum total sequence length ($M + K \le S_{\max}$, where $M$ is the prompt length and $K$ is the decode length) supported by the model architecture. Exceeding this boundary results in immediate request rejection (`CONTEXT_WINDOW_EXCEEDED`).
-2. **Output Generation Limit ($K \le K_{\max}$):** The maximum number of autoregressive decode steps permitted for the invocation.
+1. **The Context Window Ceiling ($S_{\max}$):** Accelerator hardware allocates fixed tensor buffers for sequence processing. The total sequence length—comprising input prompt tokens ($M$) and generated output tokens ($K$)—is bounded by a hard physical ceiling:
+   $$M + K \le S_{\max}$$ {#eq-vol3-context-bound}
+   If staged context $M$ approaches $S_{\max}$, remaining generation capacity collapses ($K_{\max} = S_{\max} - M$). An invocation that exhausts the context window abruptly halts, emitting an incomplete, truncated fragment.
+2. **The Output Generation Budget ($K \le K_{\max}$):** The runtime enforces an upper bound on autoregressive decode iterations to bound serving costs and execution latency.
 
-Because the caller pays for both latency and financial cost as a monotonic function of tokens, runtime developers must implement strict token counting rather than string-length estimation. Furthermore, special delimiter tokens (such as `<|start_header_id|>`, `<|eot_id|>`, or `[TOOL_CALLS]`) occupy discrete token slots and must be guarded against user-data injection. If an untrusted error log contains raw delimiter strings, naive string templating could allow malicious payloads to prematurely terminate generation or trick the parser into treating diagnostic text as an authoritative tool call. Robust runtimes enforce strict delimiter separation at the tokenization boundary—configuring tokenizers to treat all user and log inputs as raw literal text (e.g., disallowing special control tokens during string encoding) before passing the token IDs to the serving engine.
+If the host runtime budgets an invocation's output ceiling based on coarse character heuristics[^fn-token-compression] (e.g., assuming $1 \text{ token} \approx 4 \text{ characters}$), an implementation generating verbose identifiers or dense JSON will exhaust its token ceiling mid-stream. In code and structured serialization, indentation and punctuation degrade the compression ratio to $1.8\text{ to }2.2$ characters per token. Numeric values fragment unpredictably: `12345` tokenizes as `["123" (4513), "45" (1774)]`, while ` 12345` tokenizes as `[" " (220), "123" (4513), "45" (1774)]`. Budgeting by character count introduces sudden truncation faults and unrecoverable parser crashes.
 
-Subword tokenization establishes the discrete alphabet through which the stochastic processor perceives and emits information. Once the staged context is mapped into a vector of token indices, the core evaluates these symbols through autoregressive sequence factorization.
+[^fn-token-compression]: **Token Compression Ratios**: While English prose averages $4.0\text{ to }4.3$ characters per token, code and serialized data exhibit high variance: terse Python indentation and variable names often degrade to $1.8\text{ to }2.2$ characters per token. Budgeting context windows and generation ceilings by character count rather than tokenized tensors introduces sudden truncation faults and unrecoverable parser exceptions. \index{Token!compression ratio}\index{Context Window!character heuristic}
+
+### Control Tokens and Injection Boundaries
+
+Beyond standard vocabulary items, tokenizers define specialized **control tokens** that demarcate execution boundaries:
+
+```text
+<|im_start|>system
+You are an autonomous repair agent.<|im_end|>
+<|im_start|>user
+Repair the timeout parser in parser.py.<|im_end|>
+<|im_start|>assistant
+<|tool_call|>{"name": "edit_file", "arguments": {...}}<|/tool_call|>
+```
+
+These control tokens instruct the inference engine when to transition between system prompts, user turns, and tool-call blocks. If the agent runtime concatenates untrusted repository files or raw test logs directly into the prompt without sanitization, an attacker or malformed test output containing the literal string `<|im_start|>` can hijack the processor's execution state. The runtime must treat subword tokenization as a formal serialization boundary, ensuring that external strings are properly escaped or injected through typed message frames.
+
+Once staged context is mapped into an array of token IDs, the processor core executes next-token computation.
 
 ## Next-Token Computation {#sec-vol3-processor-autoregressive}
 
-When an engineering team attempts to accelerate an agentic workflow that generates a 1,000-token diagnostic trace by scaling hardware from a single accelerator to an eight-GPU cluster, benchmarking reveals an unavoidable systems constraint: generation latency per token remains essentially unchanged. Distributing a transformer across multiple accelerators via tensor parallelism decreases the execution duration of individual matrix multiplications, but it cannot alter the serial dependency graph of generation. The stochastic processor cannot compute token 500 until token 499 has been sampled, materialized into memory, and appended to the context. A tool-call JSON payload or a code patch cannot be validated before its earlier tokens are chosen; a long proposed patch must wait for each preceding output token even if hundreds of prompt tokens were processed in parallel.
+When the processor core generates a candidate patch to resolve the configuration parser defect, it does not synthesize the complete diff in a single computational leap. Instead, the inference engine repeatedly evaluates a conditional probability distribution over the vocabulary, selects a single token, appends that token to the context prefix, and repeats the process.
 
 ### Autoregressive Sequence Factorization
 
-Let $\mathbf{x} = (x_1, x_2, \dots, x_M)$ represent the input prompt comprising $M$ discrete tokens staged by the runtime. The stochastic processor core models the joint conditional probability of an output sequence $\mathbf{y} = (y_1, y_2, \dots, y_K)$ over a vocabulary $\mathcal{V}$ by factorizing the joint distribution into an exact product of conditional probabilities via the probability chain rule[^fn-autoregressive-factorization]:
+Let $\mathbf{x} = (x_1, x_2, \dots, x_M)$ represent the input prompt comprising $M$ discrete tokens staged by the runtime. The stochastic processor core models the joint conditional probability of an output sequence $\mathbf{y} = (y_1, y_2, \dots, y_K)$ over vocabulary $\mathcal{V}$ by factorizing the joint distribution into an exact product of conditional probabilities via the probability chain rule[^fn-autoregressive-factorization]:
 
-$$P(\mathbf{y} \mid \mathbf{x}) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, y_1, y_2, \dots, y_{t-1}) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, y_{<t})$$
+$$P(\mathbf{y} \mid \mathbf{x}) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, y_1, y_2, \dots, y_{t-1}) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, y_{<t})$$ {#eq-vol3-autoregressive-chain}
 
 [^fn-autoregressive-factorization]: **Autoregressive sequence factorization**\index{Autoregressive sequence factorization!chain rule}\index{Shannon, Claude!statistical language models}: Factoring joint sequence distributions into an exact chain of causal conditionals ($\prod_{t=1}^K P(y_t \mid \mathbf{x}, y_{<t})$) traces back to Claude Shannon's foundational formulation of statistical n-gram language models [@shannon1948]. In neural transformers, this formulation establishes a profound systems asymmetry: training is parallelized over the entire sequence via causal attention masking (teacher forcing), whereas inference requires iterative, serialized forward passes during autoregressive decode.
 
-Formally, the computational state of the stochastic processor core at step $t$ is captured by the tuple:
+At step $t$, the computational state of the processor core is defined by:
 
 $$\mathcal{S}_t = \left(\mathbf{x}, \mathbf{y}_{<t}, \Theta, \mathbf{K}_{1:t-1}, \mathbf{V}_{1:t-1}\right)$$
 
-where $\mathbf{x}$ denotes the staged context buffer, $\mathbf{y}_{<t}$ represents the generated output prefix, $\Theta$ encapsulates the static parameter weights, and $(\mathbf{K}_{1:t-1}, \mathbf{V}_{1:t-1})$ is the dynamic Key-Value activation state retained in serving memory.
+where $\mathbf{x}$ is the staged prompt, $\mathbf{y}_{<t}$ is the emitted output prefix, $\Theta$ denotes the static model parameters, and $(\mathbf{K}_{1:t-1}, \mathbf{V}_{1:t-1})$ represents the dynamic Key-Value activation cache retained in accelerator device memory.
 
-At each discrete step $t$, the transformer evaluates $\mathcal{S}_t$ through its attention layers and unembedding projection to produce a vector of raw unnormalized logits $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$. Applying the softmax operator parameterized by temperature $\tau > 0$ yields a categorical probability distribution:
+The core evaluates $\mathcal{S}_t$ through its transformer layers and projects the final hidden state $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ through an unembedding matrix $\mathbf{W}_{\text{vocab}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$ to produce unnormalized logits $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$. Applying a softmax transformation parameterized by temperature $\tau > 0$ yields a categorical probability distribution over all tokens in the vocabulary:
 
-$$\mathbf{p}_t = \text{softmax}\left(\frac{\mathbf{z}_t}{\tau}\right), \quad P(y_t = w_i \mid \mathbf{x}, y_{<t}) = \frac{\exp(z_{t,i} / \tau)}{\sum_{j=1}^{|\mathcal{V}|} \exp(z_{t,j} / \tau)}$$
+$$P(y_t = w_i \mid \mathbf{x}, y_{<t}) = \frac{\exp(z_{t,i} / \tau)}{\sum_{j=1}^{|\mathcal{V}|} \exp(z_{t,j} / \tau)}$$ {#eq-vol3-softmax-sampling}
 
-The processor core then samples concrete token $y_t \sim \mathbf{p}_t$ according to the chosen decoding policy (e.g., greedy argmax for $\tau \to 0$, or top-$p$ nucleus sampling[^fn-nucleus-sampling]).
+The inference service then samples token $y_t$ according to its decoding policy (e.g., greedy argmax for $\tau \to 0$, or top-$p$ nucleus sampling[^fn-nucleus-sampling]) and appends it to the sequence.
 
-[^fn-nucleus-sampling]: **Nucleus (top-$p$) sampling**\index{Nucleus sampling!tail truncation}\index{Sampling!top-p}\index{Holtzman, Ari!nucleus sampling}: Introduced by Ari Holtzman et al. [-@holtzman2020curious] to address the degeneration and repetitive loops observed in unconstrained generation. Instead of sampling from the entire vocabulary $\mathcal{V}$ or truncating to an arbitrary fixed top-$k$ candidates, nucleus sampling dynamically restricts the candidate set to the smallest subset whose cumulative probability exceeds threshold $p$, eliminating the unreliable tail of low-probability tokens.
+[^fn-nucleus-sampling]: **Nucleus (top-$p$) sampling**\index{Nucleus sampling!tail truncation}\index{Sampling!top-p}\index{Holtzman, Ari!nucleus sampling}: Introduced by Ari Holtzman et al. [-@holtzman2020curious] to address degeneration and repetitive loops in unconstrained generation. Instead of sampling from the entire vocabulary $\mathcal{V}$ or truncating to an arbitrary fixed top-$k$ candidates, nucleus sampling dynamically restricts the candidate set to the smallest subset whose cumulative probability exceeds threshold $p$, eliminating the unreliable tail of low-probability tokens.
 
-### One Step Versus One Response
+### A Single Forward Pass Versus Iterative Response Generation
 
-A critical systems distinction in the Stochastic Computer is the difference between a **single forward step** and a **complete response generation**:
+A fundamental systems distinction separates a **single forward step** from a **complete response generation**:
 
-1. **A Single Step:** A single forward pass through the network evaluates attention over existing state and emits next-token logit scores $\mathbf{z}_t$. It is an atomic numerical transform.
-2. **A Complete Response:** Response generation is an iterative control loop executed by the model serving harness. It repeatedly invokes the step transform, samples $y_t$, appends $(k_t, v_t)$ to serving memory, checks termination predicates (such as emitting an `<|eot_id|>` token, reaching an explicit stop string, or hitting $K_{\max}$), and loops until halted.
+1. **A Single Forward Step:** An atomic mathematical transform. The accelerator executes matrix operations to project the current token, update self-attention across historical keys and values, and compute vocabulary logits $\mathbf{z}_t$.
+2. **A Complete Response Generation:** A stateful control loop executed by the inference service, as diagrammed in @fig-autoregressive-loop. The serving engine schedules the request, evaluates prompt prefill, enters the decode loop, mutates device memory by appending $(\mathbf{k}_t, \mathbf{v}_t)$ to the KV cache, evaluates termination predicates (such as emitting an `<|eot_id|>` token or reaching $K_{\max}$), and packages the final envelope.
 
-::: {#fig-autoregressive-loop fig-env="figure" fig-pos="htb" fig-cap="**Autoregressive Serialization Loop**: The causal execution loop of autoregressive token generation. Each generated token requires a discrete accelerator forward pass, memory state update, and non-deterministic sampling before the subsequent step can initiate, creating an irreducible sequential latency floor." fig-alt="Architectural diagram showing the forward pass, serving KV cache mutation, and the causal dependency barrier that serializes decode steps."}
+::: {#fig-autoregressive-loop fig-env="figure" fig-pos="htb" fig-cap="**Autoregressive Serialization Loop**: Autoregressive generation enforces an irreducible serial dependency. While prompt prefill processes $M$ tokens concurrently via parallel GEMM, decode requires $K$ sequential forward passes. Token $y_t$ must be sampled and committed to the KV cache before the forward pass for token $y_{t+1}$ can initiate." fig-alt="Flowchart showing parallel prompt prefill followed by iterative sequential decode loop with KV cache mutation."}
 ![](images/svg/autoregressive_serialization_loop.svg){width=100%}
 :::
 
-### The Irreducible Serial Dependency Chain
+### The Irreducible Serial Dependency Barrier
 
-This autoregressive recurrence, illustrated in @fig-autoregressive-loop, establishes that the critical path of generation is strictly sequential. To evaluate $P(y_t \mid \mathbf{x}, y_{<t})$, the self-attention mechanism at each layer must compute inner products between the query vector $\mathbf{q}_t$ of the current token and the key vectors $\mathbf{k}_i$ of all preceding tokens $i \in [1, M + t - 1]$.
+This autoregressive recurrence establishes an irreducible systems constraint: **the critical path of generation is strictly serialized**. 
 
-Because the discrete identity of token $y_t$ is non-deterministic and unknown prior to step $t$, the computational pipeline cannot evaluate subsequent query projections speculatively without incurring exponential branching overhead. The host accelerator is trapped in an iterative data-dependency loop. While cluster parallelization (tensor, pipeline, or expert parallelism) reduces the wall-clock duration of each individual matrix multiplication, it cannot reduce the sequence length $K$ of sequential decode steps.
+To evaluate $P(y_t \mid \mathbf{x}, y_{<t})$, the self-attention mechanism at layer $l$ computes inner products between the query vector $\mathbf{q}_t^{(l)}$ of the current token and the key vectors $\mathbf{k}_i^{(l)}$ of all preceding tokens $i \in [1, M + t - 1]$. Because the identity of token $y_t$ is non-deterministic and unknown prior to step $t$, the computational pipeline cannot evaluate future query projections speculatively without incurring exponential branching overhead.
 
-This serial chain reveals the central systems reality: generating an operational trajectory requires waiting for hundreds or thousands of causally chained sampling steps. If the model simply repeats this sampling step until a stop delimiter is emitted, what guarantees that the resulting candidate sequence represents a valid, truthful, or executable conclusion?
+Cluster-level parallelization (such as tensor parallelism across GPUs) can divide weight matrices to reduce the wall-clock time of an individual matrix multiplication, but it cannot parallelize across the sequence dimension $K$. Generating an operational response of 1,000 tokens requires executing 1,000 causally dependent forward passes in strict sequence.
+
+If generation simply repeats this sampling step until a delimiter is emitted, what guarantees that the resulting candidate represents a valid, truthful, or executable conclusion?
 
 ## Candidate Sequences Versus Valid Conclusions {#sec-vol3-processor-continuations}
 
-The boundary separating a stochastic core from a deterministic execution unit lies in the mathematical mapping between hidden layer representations and emitted symbols. At decoding step $t$, the transformer maps its normalized final hidden activation vector $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ to an unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ through an affine projection against the language modeling head:
+A critical pitfall in agent systems engineering is treating a fluent, high-probability model continuation as an authoritative fact or an approved action. In our parser repair incident, the foundation model may emit a candidate patch with high categorical confidence, yet the patch may encode an invalid assumption or introduce a subtle regression.
 
-$$\mathbf{z}_t = \mathbf{W}_{\text{vocab}} \mathbf{h}_t + \mathbf{b}_{\text{vocab}}$$
-
-where $|\mathcal{V}|$ denotes the vocabulary dimension, typically spanning $32{,}000$ to $256{,}000$ discrete token identifiers. To convert these real-valued logits into an admissible categorical probability distribution over the discrete vocabulary, the runtime evaluates a parameterized softmax transformation[^fn-temperature-scaling]:
-
-$$P(y_t = w_i \mid \mathbf{x}, y_{<t}) = \frac{\exp(z_{t,i} / \tau)}{\sum_{j=1}^{|\mathcal{V}|} \exp(z_{t,j} / \tau)}$$
-
-[^fn-temperature-scaling]: **Temperature scaling**\index{Temperature scaling!logit calibration}\index{Sampling!temperature}: Dividing unnormalized logits by a scalar temperature $\tau > 0$ before softmax normalization originates in statistical physics (Boltzmann distributions) and was popularized in deep learning by Geoffrey Hinton, Oriol Vinyals, and Jeff Dean [-@hinton2015distilling]. In autoregressive generation, $\tau$ acts as an entropy throttle: as $\tau \to 0$, the categorical distribution sharpens onto the argmax mode; as $\tau$ increases, probability mass disperses across lower-ranked vocabulary tokens.
-
-where $\tau > 0$ is the sampling temperature. Foundation models are trained by minimizing empirical cross-entropy loss over text corpora:
+Foundation models are pre-trained via maximum likelihood estimation (MLE) over massive text corpora:
 
 $$\mathcal{L}_{\text{MLE}} = - \sum_{k=1}^N \log P(x_k \mid x_{<k})$$
 
-This objective conditions the network parameters to mirror the empirical distribution of tokens in the training data. High probability under $P(y_t \mid \mathbf{x}, y_{<t})$ indicates only that token $y_t$ is a statistically common continuation of the prefix within the training distribution. It conveys no guarantee that the token represents a true statement about the physical world, an existing operating system resource, or an executable payload.
+This objective trains the network to predict statistically typical continuations. Subsequent reinforcement learning from human feedback (RLHF) aligns conversational tone and instruction compliance, but does not alter the fundamental mathematical reality: **the model scores statistical likelihood, not semantic truth or system invariants**.
 
-### The Concrete Systems Defect: Plausible Semantic Corruption
+### Plausible Semantic Corruption and the Confidence Trap
 
-The operational consequence of this statistical objective is starkly illustrated in our configuration parser incident. When prompted to resolve the regression test for input `"2.5s"`, the model core may evaluate its own previously generated truncation code: `int(seconds) * 1000`. When generating a companion test suite, the model emits with high categorical log-probability:
+Consider the failure mode when our repair agent prompts the model to generate a regression test for the timeout parser. The model inspects the buggy implementation in its context: `return int(seconds) * 1000`. Conditioned on this context, the model emits with high probability:
 
 ```python
-assert parse("2.5s") == 2000
+def test_fractional_timeout():
+    # Model generates assertion matching buggy implementation in context:
+    assert parse_timeout("2.5s") == 2000
 ```
 
-The model emits `2000` rather than `2500` because conditioned on its prior token history, `2000` is the mathematically consistent prediction of its own flawed implementation. The emitted candidate assertion is syntactically flawless, compiles cleanly, and if executed against the buggy code, returns exit code 0. The output is internally coherent, yet semantically corrupt. The neural processor optimizes for statistical likelihood, not objective truth; high confidence does not correlate with invariant compliance.
+The emitted Python code is syntactically flawless. When executed against `parser.py`, the test passes with zero assertion errors. Yet the test is functionally corrupt: it codifies the bug rather than the requirement. The statistical processor generated a plausible continuation based on the prefix text, but lacked the external grounding needed to recognize that `2.5s` must equal `2500 ms`. A passing test emitted by the model does not certify task completion.
 
-Similarly, when diagnosing a distributed cache stale-read anomaly, the model may return an articulate, highly confident explanation attributing the issue to a socket heartbeat timeout. Yet an executable reproduction test under concurrent load reveals that the true defect is a lease-invalidation race during network partitions. The model's continuation is merely an unverified hypothesis: fluent prose and high categorical likelihood do not constitute factual evidence or operational truth.
+### Temperature and the Sampling Simplex
 
-### Confidence Traps and the Temperature Simplex
+The runtime adjusts generation diversity via the temperature parameter $\tau$, which scales unnormalized logits prior to the softmax transformation:
 
-The shape of the categorical probability distribution across the vocabulary simplex is controlled by the temperature parameter $\tau$, as illustrated in @fig-temperature-simplex.
+$$z_{t, i}' = \frac{z_{t, i}}{\tau}$$
 
-::: {#fig-temperature-simplex fig-env="figure" fig-pos="htb" fig-cap="**Thermal Scaling on the Probability Simplex**: The transformation of raw model logits under temperature scaling $\tau$. Low temperature sharpens the distribution onto the mode with zero entropy, balanced temperature enables structured exploration, and high temperature flattens probability across the vocabulary simplex, inducing syntax fragmentation." fig-alt="Diagram showing raw logits transformed by three temperature regimes into Dirac delta, calibrated multinomial, and uniform diffuse probability simplex profiles."}
+The qualitative effects across temperature regimes are illustrated in @fig-temperature-simplex:
+
+- **Greedy Mode ($\tau \to 0^+$):** The probability distribution collapses toward a Dirac delta centered on the argmax token:
+  $$\lim_{\tau \to 0^+} P(y_t = w_i \mid \mathbf{x}, y_{<t}) = \begin{cases} 1 & \text{if } i = \arg\max_k z_{t,k} \\ 0 & \text{otherwise} \end{cases}$$
+  Greedy decoding selects the highest-scoring token at every step. While this maximizes local probability and improves repeatability under fixed inference kernels, it does not guarantee correctness. If the highest-scoring token encodes a syntax error or hallucinated API parameter, greedy decoding selects and commits that error with 100% certainty. Furthermore, greedy decoding does not guarantee bit-for-bit reproducibility across distributed serving clusters due to non-deterministic floating-point reduction order in parallel GEMM kernels [@dong2024nondeterminism].
+- **Calibrated Multinomial ($\tau \approx 0.2\text{--}0.7$):** Dampens extreme logit peaks while preserving the relative probability ranking of viable tokens, providing localized diversity without wandering into low-probability vocabulary tails.
+- **Diffuse High Entropy ($\tau \ge 1.0$):** Flattens the logit landscape, dispersing probability mass across lower-ranked tokens. While useful for creative brainstorming, high temperature accelerates failure in structured systems tasks by increasing the probability of emitting illegal syntax delimiters or invalid identifiers.
+
+::: {#fig-temperature-simplex fig-env="figure" fig-pos="htb" fig-cap="**Temperature Simplex Scaling**: Temperature $\tau$ modulates the entropy of the categorical next-token distribution. As $\tau \to 0$, probability mass collapses onto the argmax mode. Higher temperatures disperse mass across lower-ranked tokens. Neither regime guarantees truth or authority." fig-alt="Probability simplex diagrams illustrating Dirac delta mode at low temperature, calibrated multinomial at medium temperature, and uniform diffuse distribution at high temperature."}
 ![](images/svg/temperature_simplex_scaling.svg){width=100%}
 :::
 
-When $\tau \to 0^+$, the softmax operator approaches the argmax function:
+### Context Poisoning and Irreversible Attention
 
-$$\lim_{\tau \to 0^+} P(y_t = w_i \mid \mathbf{x}, y_{<t}) = \begin{cases} 1 & \text{if } i = \arg\max_k z_{t,k} \\ 0 & \text{otherwise} \end{cases}$$
+The vulnerability of autoregressive decoding is compounded by **context poisoning**. Because self-attention is strictly causal, token $y_{t+1}$ attends to all preceding tokens $[x_1, \dots, x_M, y_1, \dots, y_t]$. 
 
-This greedy decoding mode forces the processor to select the single most probable token at every step. While greedy decoding guarantees deterministic token emissions across identical hardware and prompt inputs, it does not guarantee correctness. If the mode of the learned distribution corresponds to a common misconception, a hallucinated API call, or an invalid parameter, greedy execution repeats the failure deterministically. Determinism suppresses output variance, but it does not correct structural bias.
+If the model samples an incorrect variable name, hallucinated API parameter, or flawed logical deduction at step $t=5$, that mistake is permanently committed to the Key-Value activation cache. At step $t=6$, the network conditions on its own prior mistake as an immutable fact. The probability of subsequent errors cascades: rather than self-correcting mid-stream, the attention mechanism reinforces the hallucinated premise, constructing a plausible but entirely invalid chain of reasoning.
 
-Conversely, setting $\tau > 0$ introduces variance by flattening the logit landscape:
+### The Verification Perimeter Matrix
 
-$$\frac{P(w_i)}{P(w_j)} = \exp\left(\frac{z_{t,i} - z_{t,j}}{\tau}\right)$$
+Because candidate sequences can be fluent yet completely wrong, the host runtime must enforce an explicit **Verification Perimeter**. The processor can propose candidates, but deterministic host mechanisms must verify them across distinct operational dimensions, as formalized in @tbl-vol3-verification-matrix.
 
-For exploratory agent tasks, moderate temperatures ($\tau \in [0.2, 0.7]$) allow the model to sample non-modal tokens, enabling the generation of alternative reasoning trajectories when an initial attempt fails. However, nonzero temperature introduces tail risk: low-probability, malformed tokens are assigned nonzero probability mass. Modeling the joint error rate under an illustrative per-token error proxy $\epsilon$ reveals how quickly unconstrained sampling diverges across extended contexts:
+| Candidate Property | Stochastic Core Capability | External Verifying Mechanism | Failure Mode if Unverified |
+|:---|:---|:---|:---|
+| **Syntactic Validity** | Emits tokens matching training syntax | Compiled automata / JSON Schema parser | Deserialization crash (`json.loads` exception) |
+| **Referential Integrity** | Emits plausible identifier strings | Static AST analysis / Symbol table lookup | `NameError`, nonexistent file paths, missing keys |
+| **Factual Grounding** | Predicts statistically typical claims | Retrieval index / Ground-truth assertions | Hallucinated documentation, phantom APIs |
+| **Action Authorization** | Follows system prompt instructions | Host Policy Engine / RBAC Sandbox | Arbitrary file overwrite, privilege escalation |
+| **Functional Correctness**| Emits code passing superficial review | Test runner / Compiler execution | Codified bugs (`assert parse("2.5s") == 2000`) |
+: **The Verification Perimeter Matrix**: Separation between stochastic model proposals and deterministic host runtime verifiers. {#tbl-vol3-verification-matrix}
 
-$$P_{\text{valid}} \approx (1 - \epsilon)^K$$
-
-For an agent trajectory generating $K = 1{,}000$ tokens with a nominal per-token syntax error rate of $\epsilon = 0.002$, the probability of emitting a completely valid output falls below $14\%$ ($P_{\text{valid}} \approx (1 - 0.002)^{1000} \approx 0.135$). The operational trade-offs across thermal sampling values are summarized in @tbl-temperature-scaling.
-
-| Operational Regime    | Temperature Range     | Entropy $H(P)$  | Execution Characteristic                 | Primary Failure Mode                                       |
-|:----------------------|:----------------------|:----------------|:-----------------------------------------|:-----------------------------------------------------------|
-| **Greedy Argmax**     | $\tau \to 0^+$        | $0$ (Minimum)   | Deterministic, reproducible, modal paths | Fixed-point hallucination loops, uncorrectable schema bias |
-| **Controlled Decode** | $\tau \in [0.1, 0.7]$ | Low to Moderate | Targeted exploration, bounded diversity  | Tail sampling of hallucinated library symbols              |
-| **High Entropy**      | $\tau \ge 1.0$        | High            | Maximum lexical divergence               | Syntax destruction, JSON parse errors, schema violations   |
-
-: **Systems Properties of Temperature Regimes**: Operational trade-offs across thermal sampling values during autoregressive generation. {#tbl-temperature-scaling}
-
-### Context Poisoning and Irreversible Forward Attention
-
-The danger of plausible errors is amplified by **context poisoning**. In transformer architectures, attention is strictly causal: token $y_{t+1}$ attends to all preceding tokens $[x_1, \dots, x_M, y_1, \dots, y_t]$. Once an incorrect assumption, hallucinated identifier, or flawed assertion is sampled at step $t$, it is permanently committed to the sequence prefix.
-
-The self-attention heads at step $t+1$ treat $y_t$ not as a tentative speculation, but as established historical ground truth. The model cannot backtrack, revise its internal state, or execute an `undo` operation within a single invocation. The erroneous token acts as an attentional sink, distorting the conditioning context for all downstream decode steps and causing the model to generate elaborate, highly confident justifications for an invalid starting premise.
-
-Because candidate sequences can be plausibly flawed, non-deterministic, and prone to context poisoning, the host runtime cannot treat model outputs with implicit trust. The system must encapsulate every call within an explicit invocation contract governing parameter bounds, execution limits, and caller-visible return states.
+To manage these failure modes systematically, the runtime must encapsulate every call within an explicit invocation contract.
 
 ## The Invocation Contract {#sec-vol3-processor-contract}
 []{#sec-vol3-processor-status}
 
-Treating a statistical model as a local function or in-process subroutine obscures its physical systems reality: model inference is a distributed, resource-intensive Remote Procedure Call (RPC) dispatched across a network boundary to a multi-tenant accelerator cluster. In classical computer architecture, an Instruction Set Architecture (ISA) establishes an immutable hardware-software contract: the caller passes operands through registers, the CPU decodes opcodes deterministically, and execution traps occur at binary machine boundaries.
+A production agent runtime must never treat a model call as an informal text exchange. If generation halts prematurely because an output token ceiling is reached, an agent that blindly passes the raw response string to a tool dispatcher will execute a truncated, corrupt payload. Reliability requires an explicit, typed **Invocation Contract** governing inputs, budgets, deadlines, and normalized outcomes.
 
-In a Stochastic Computer, this contract dissolves if the interface between the host runtime and the model core is left informal. Foundation model providers frequently update model checkpoints, adjust internal server-side system prompts, or reconfigure quantization kernels on shared inference endpoints. An agent runtime that queries an unpinned model alias will experience silent behavioral drift.
+### The Request Specification
 
-Consider an agent loop configured with a floating model alias such as `inference-prod-latest`. When the infrastructure provider updates the checkpoint from version 2.1 to 2.2, the model shifts its prompt parsing behavior and begins enclosing structured JSON responses in markdown code fences. A downstream host parser that relies on strict string matching fails immediately:
+A robust invocation contract parameterizes the model call across four explicit dimensions, detailed in @tbl-invocation-contract-spec:
 
-```text
-// Execution Trace: Unpinned Model Ingestion Fault
-[2026-03-12T14:22:01.104Z] REQ  POST /v1/chat/completions {"model": "inference-prod-latest", ...}
-[2026-03-12T14:22:02.318Z] RESP 200 OK {"model": "inference-prod-2026-03-12", "choices": [{"message": {"content": "```json\n{\"action\": \"query_database\", \"args\": {\"id\": 4012}}\n```"}}]}
-[2026-03-12T14:22:02.320Z] CRIT AgentRuntimeSchemaError: Failed to parse tool invocation: Unexpected token '`' at position 0
-[2026-03-12T14:22:02.321Z] FATAL Process terminated with unhandled exception (exit code 1)
-```
+1. **Model Checkpoint Identity:** A pinned snapshot identifier (e.g., `model-2026-03-01`) rather than a floating alias (such as `model-latest`). Floating aliases introduce silent behavioral drift when cloud providers update backend checkpoints.
+2. **Structured Context Payload:** The input tensor context $\mathbf{x}$, strictly partitioned into invariant system instructions, conversational history turns, staged tool execution outputs, and formal tool schemas.
+3. **Decoding Controls:** Hyperparameters governing the sampling trajectory: temperature $\tau$, nucleus threshold $p$, explicit stop sequence delimiters (such as `<|eot_id|>`), and optional random seeds for pseudo-repeatability.
+4. **Resource Ceilings & Deadlines:** Absolute operational boundaries: maximum output tokens ($K_{\max}$) and execution timeout ($T_{\max}$).
 
-The system collapsed because the caller assumed environmental invariance across a floating network pointer. To build dependable software upon probabilistic components, the runtime must encapsulate every model invocation within a strict, defensively bounded remote invocation contract across four operational dimensions, formalized in @tbl-invocation-contract-spec:
+| Parameter | Type | Systems Purpose | Invariant Constraint |
+|:---|:---|:---|:---|
+| `model_id` | String | Pins exact model weights & tokenizer | Must reference immutable checkpoint for reproducibility |
+| `context` | List[Frame] | Encapsulates prompt, turns, & tool schemas | Total tokens must satisfy: $M \le S_{\max} - K_{\max}$ |
+| `temperature` ($\tau$) | Float | Modulates logit entropy & sampling dispersion | Bound to range $[0.0, 2.0]$; set $0.0$ for greedy decode |
+| `top_p` ($p$) | Float | Truncates sampling to cumulative probability $p$ | Bound to range $(0.0, 1.0]$; set $1.0$ to disable |
+| `stop_tokens` | List[String] | Halts decode upon emitting delimiter strings | Prevents runaway output past application boundaries |
+| `max_tokens` ($K_{\max}$) | Integer | Sets ceiling on autoregressive iterations | Strict hardware bound: $K_{\max} \le S_{\max} - M$ |
+| `timeout_ms` ($T_{\max}$) | Integer | Absolute deadline for invocation return | Enforced at client socket; triggers cancellation RPC |
+: **Model Invocation Contract Specification**: Formal inputs and constraints required for dependable model calls. {#tbl-invocation-contract-spec}
 
-1. **Pinned Model Version:** The caller must address an immutable snapshot identifier (such as `model-2026-03-01`) rather than a rolling pointer (`model-latest`). Floating aliases obscure silent modifications to model weights, vocabulary tokenization, and FP8 quantization scale factors. Immutability guarantees that the underlying distribution remains stationary.
-2. **Context Payload:** The structured input context $\mathbf{x}$, partitioned into invariant system instructions, ordered conversation turns, staged tool execution outputs, and explicit schema definitions for all callable host interfaces.
-3. **Generation Controls:** Parameters governing the decoding trajectory across the vocabulary simplex: sampling temperature $\tau$, nucleus sampling threshold $p \in (0, 1]$, an explicit array of stop sequence delimiters, and an optional pseudo-random generator seed integer.
-4. **Resource Bounds:** Hardware and latency safeguards, specifically the maximum generation length ($K_{\max}$) and an absolute deadline timeout ($T_{\max}$).
+### The Layered Return Status Taxonomy
 
-| Parameter                 | Type         | Systems Purpose                                         | Invariant Constraint                                                                         |
-|:--------------------------|:-------------|:--------------------------------------------------------|:---------------------------------------------------------------------------------------------|
-| `model_id`                | String       | Identifies immutable model weights and tokenizer        | Must specify an immutable snapshot; floating aliases (`latest`, `default`) forbidden         |
-| `context`                 | List[Frame]  | Encapsulates prompt, message history, and tool schemas  | Total prompt token count must not exceed budget: $M \le S_{\max} - K_{\max}$                 |
-| `temperature` ($\tau$)    | Float        | Modulates logit entropy and sampling dispersion         | Bound to range $[0.0, 2.0]$; set to $\tau = 0.0$ for deterministic paths                     |
-| `top_p` ($p$)             | Float        | Truncates sampling to smallest set with mass $\ge p$    | Bound to range $(0.0, 1.0]$; default $1.0$ (disabled)                                        |
-| `stop_tokens`             | List[String] | Halts decode loop when delimiter is encountered         | Must include application-level message and block boundary tokens                             |
-| `max_tokens` ($K_{\max}$) | Integer      | Imposes upper limit on autoregressive decode iterations | Strict ceiling: $K_{\max} \le S_{\max} - M$; prevents runaway allocation loops              |
-| `timeout_ms` ($T_{\max}$) | Integer      | Absolute socket deadline for RPC completion             | Enforced by client-side socket deadline; aborts via cancellation signal                      |
-
-: **Remote Invocation Contract Specification**: Formal parameter taxonomy, types, and operational bounds for stochastic processor RPCs. {#tbl-invocation-contract-spec}
-
-### Caller-Visible Return Status Taxonomy
-
-The return of an RPC payload across the network socket marks the boundary where transport guarantees end and semantic evaluation begins. In conventional distributed systems, an HTTP `200 OK` status code combined with a well-formed transport envelope establishes that the remote service processed the request according to interface specifications and returned a valid result. In a Stochastic Computer, an HTTP `200 OK`[^fn-transport-semantics] indicates only that the remote inference engine completed its autoregressive decoding loop without an internal accelerator panic or kernel crash. It conveys no guarantee that the emitted byte stream satisfies application preconditions, terminates cleanly, or provides actionable computational progress.
+When a model invocation returns, the runtime must not evaluate status through a single boolean check. In distributed systems, transport success does not equal semantic success[^fn-transport-semantics]. An HTTP `200 OK` indicates only that the network socket delivered the payload and the remote inference engine completed its loop without an accelerator kernel panic.
 
 [^fn-transport-semantics]: **Transport Status vs. Semantic Success**: Strictly speaking, an HTTP `200 OK` confirms transport delivery and completion of the remote inference engine's decode iterations. It conveys no guarantee that the payload complies with downstream application schemas, terminates before truncation, or avoids safety refusals. In agent runtimes, transport deserialization and semantic validation are disjoint verification stages. \index{HTTP 200!semantic decoupling}\index{Transport Layer!status semantics}
 
-Consider an agent loop in our configuration parser repair task. If token generation exhausts the allocated budget $K_{\max}$ halfway through emitting a patch, the remote engine halts decoding and transmits the accumulated token buffer inside a standard `200 OK` frame with `finish_reason: "length"`. If the client runtime naively deserializes the payload string and forwards it directly to a JSON parser or Python execution environment, execution fails with an unrecoverable `json.decoder.JSONDecodeError: Unterminated string starting at line 1`. The crash is not an external environment defect; it is an architectural flaw in the host runtime, which treated an arbitrary transport-level termination as a semantically complete execution unit.
+A production invocation envelope must expose layered status fields:
+- `transport_status`: Socket-level outcome (`OK`, `TIMEOUT`, `CONNECTION_RESET`, `DNS_FAILURE`).
+- `service_status`: HTTP or RPC status code (`200`, `429 Too Many Requests`, `503 Service Unavailable`).
+- `termination_reason`: Inference engine stop predicate (`stop_token`, `max_tokens`, `refusal`, `cancelled`).
+- `usage_record`: Exact accounting metrics (prompt tokens $M$, completion tokens $K$, Time to First Token $\text{TTFT}$, total elapsed time $T_{\text{call}}$).
 
-To prevent unvalidated byte streams from corrupting host state, a dependable host runtime partitions every invocation outcome into one of four mutually exclusive caller-visible states, summarized in @tbl-caller-status-typology:
+The agent runtime normalizes these layered signals into four canonical, caller-visible outcome classes, summarized in @tbl-caller-status-typology:
 
-1. **Completed:** The model sampled an application-defined stop sequence or an intrinsic End-of-Sequence (`EOS`) token ($w_t \in \mathcal{S}_{\text{stop}}$) strictly before reaching the token ceiling $K_{\max}$ and prior to socket timeout expiration ($T_{\text{rpc}} < T_{\max}$). The payload represents an emission that is structurally complete under the model distribution. It is eligible for immediate grammar parsing, type checking, and permission gating.
-2. **Incomplete (Truncated):** Generation was halted externally by the serving infrastructure because decode iterations reached the ceiling $K_{\max}$, or because the client-side socket deadline $T_{\max}$ elapsed during streaming decode. The returned payload is intrinsically broken: string literals lack closing quotes, JSON trees lack terminating brackets, and control blocks remain dangling. The payload cannot be executed directly; it requires context continuation or structured reprompting.
-3. **Refusal:** The model core, safety alignment classifiers, or post-generation policy guardrails intercepted execution and emitted an explicit rejection payload (such as `finish_reason: "content_filter"`). The output contains no operational tool calls or task tokens, but rather a declarative rejection string. A refusal represents a deterministic policy boundary conditioned on the provided context.
-4. **Transport Failure:** The remote runtime failed to deliver a valid application frame. Root causes include network partition timeouts ($T_{\text{rpc}} \ge T_{\max}$), HTTP `502 Bad Gateway` or `503 Service Unavailable` signals, socket resets, and remote accelerator Out-of-Memory (OOM) aborts during Dynamic Key-Value cache allocation. No model tokens are delivered to the caller.
+1. **Completed:** The model reached a valid stopping delimiter (`stop_tokens` or EOS). The candidate payload is complete and ready for schema parsing. *Caution: Completed status confirms termination, not correctness.*
+2. **Incomplete (Truncated):** Generation was terminated by a resource boundary ($K_{\max}$ exhausted or deadline $T_{\max}$ expired). The payload is a partial fragment. **The runtime must NEVER execute an incomplete tool call.** A truncated payload such as `{"path": "parser.py", "search": "int(seconds)` will crash the JSON deserializer or execute with missing arguments.
+3. **Refusal:** The model's safety classifier or alignment filter declined to fulfill the prompt, returning a refusal frame.
+4. **Transport Failure:** The network connection failed, the service timed out, or the cluster returned an error code (`503` or `429`).
 
-A related architectural consideration at the transport layer is the distinction between streaming token decode (`stream=True`) and complete payload buffering (`stream=False`). In human-facing conversational interfaces, streaming reduces perceived latency by rendering tokens progressively as they are sampled (Time-to-First-Token). In an autonomous agent architecture, however, the runtime cannot execute partial operations: a tool call cannot be dispatched until its arguments are completely unmarshaled, and a file patch cannot be applied mid-stream. Consequently, the agent runtime must buffer the complete candidate envelope before triggering downstream validation and permission gates. Streaming within an agent loop is justified primarily for early termination: inspecting the incoming token stream asynchronously to abort execution immediately if the model enters a repetitive loop, emits a safety refusal delimiter, or exceeds a speculative latency threshold.
+| Normalized Status | Precedence Trigger | Payload Usability | Mandatory Runtime Recovery Action |
+|:---|:---|:---|:---|
+| **Completed** | Normal stop delimiter emitted | Full candidate available | Parse schema, verify permissions, execute test. |
+| **Incomplete** | $K_{\max}$ reached or deadline expired | Partial fragment (unusable) | Reject action; request continuation or retry with larger $K_{\max}$. |
+| **Refusal** | Policy or safety filter triggered | Informational refusal text | Do NOT retry identically; reframe prompt or escalate to human. |
+| **Transport Failure** | Socket drop, HTTP 503, or 429 | Null or aborted stream | Apply exponential backoff with full jitter; verify idempotency. |
+: **Caller-Visible Invocation Outcomes**: Normalized classification governing runtime recovery decisions. {#tbl-caller-status-typology}
 
-| Status Class          | Physical Trigger Condition                                                                                         | Payload Invariants                                                          | Mandatory Runtime Recovery Policy                                                                          |
-|:----------------------|:-------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------|
-| **Completed**         | Token $w_t \in \mathcal{S}_{\text{stop}}$ emitted with $K < K_{\max}$ and $T_{\text{rpc}} < T_{\max}$ | Syntax structurally complete; terminal delimiter present; schema unverified | Route payload to syntax parser and permission gate; proceed to tool evaluation.                            |
-| **Incomplete**        | Decode reaches $K = K_{\max}$ or socket deadline $T_{\max}$ expires                                   | Partial token buffer; dangling delimiters; unparseable syntax tree          | Check latency budget $T_{\text{remain}}$; if sufficient, roll context forward; otherwise abort trajectory. |
-| **Refusal**           | Safety classifier trigger or alignment policy refusal intercept                                                    | Task payload null; diagnostic policy message present                        | Log policy code; escalate to supervisory planner or human operator; do not retry identical prompt.         |
-| **Transport Failure** | Network timeout ($T_{\text{rpc}} \ge T_{\max}$), HTTP 5xx, or remote KV cache allocation panic                     | Payload null or socket stream severed prematurely                           | Execute exponential backoff with full jitter; on exhausted retries, fail over to secondary pinned replica. |
+### Recovery Depends on the Outcome
 
-: **Caller-Visible Invocation States**: Physical trigger conditions, payload invariants, and mandatory recovery policies. {#tbl-caller-status-typology}
+Recovery mechanics diverge fundamentally across these four outcomes:
+- For `Transport Failure` (such as HTTP `429` or `503`), the failure reflects transient infrastructure contention. The runtime executes truncated exponential backoff with full jitter[^fn-jittered-backoff] to prevent synchronized retry storms across distributed workers:
+  $$T_{\text{wait}} = U\left(0, \min(T_{\text{cap}}, T_{\text{base}} \cdot 2^{\text{attempt}})\right)$$
+- For `Refusal`, re-issuing an identical request is futile; without altering the prompt context, the policy boundary remains invariant. The runtime must escalate to a planner or alter its query formulation.
+- For `Incomplete`, the agent must never execute the partial fragment. If budget remains, it may issue a continuation request or prune context $M$ to allow a larger output allowance $K_{\max}$.
 
-### Runtime Recovery and Context Roll-Forward
+[^fn-jittered-backoff]: **Exponential backoff and jitter**\index{Exponential backoff!jitter}\index{Retry storm!mitigation}\index{Brooker, Marc!jittered backoff}: Standard exponential backoff introduces synchronized retry pulses ("thundering herds") when distributed clients retry against a recovering service at identical intervals. Adding randomized jitter—specifically Full Jitter ($T = U(0, \min(T_{\text{cap}}, T_{\text{base}} \cdot 2^k))$), analyzed by Marc Brooker and colleagues at AWS [@brooker2015jitter]—decorrelates client retry timings across distributed worker pools, smoothing load spikes and stabilizing multi-tenant inference queues.
 
-When an invocation returns `Incomplete`, the runtime must evaluate the trade-off between a *context roll-forward* and an *abort*. In a context roll-forward, the runtime appends the truncated prefix directly to the conversation history as an assistant turn and dispatches an immediate follow-up invocation instructing the model to resume generation from the exact point of interruption.
-
-However, continuation is governed by latency and compute economics. Because the subsequent prefill must process the expanded input length $M' = M + K_{\max}$, prefill latency increases. If the remaining trajectory latency budget $T_{\text{remain}}$ cannot accommodate the minimum required compute:
-
-$$T_{\text{remain}} < T_{\text{prefill}}(M + K_{\max}) + T_{\text{decode}}(K_{\min})$$
-
-where $K_{\min}$ is the minimum token budget required to close open syntax blocks, the runtime must reject roll-forward and abort the task branch immediately.
-
-Furthermore, naive context roll-forward that appends the raw text string directly to the conversation history encounters a subtle subword tokenization defect. When generation halts at $K_{\max}$, the terminal token in the buffer frequently represents an incomplete subword fragment—such as the opening bytes of a multi-byte Unicode sequence or the prefix of a code identifier. If the client decodes this token into characters and subsequently re-tokenizes the concatenated prompt for the next turn, the tokenizer's greedy merge rules may parse the boundary differently than the original autoregressive state, injecting spurious whitespace or fragmenting identifiers. Robust host runtimes execute *subword-aware roll-forward*: they inspect the token buffer directly, strip the terminal incomplete token (or roll back one to two tokens to the nearest delimiter boundary), and resume generation conditioned on the pruned prefix.
-
-For `Refusal` and `Transport Failure`, recovery mechanics diverge fundamentally. A `Refusal` cannot be resolved by re-issuing an identical request; without altering the task formulation or context instructions, the policy classification boundary remains invariant. The runtime must escalate the refusal to an orchestrating planner or request human intervention. Conversely, `Transport Failure` indicates an ephemeral infrastructure bottleneck. For transient status codes (such as HTTP `429 Too Many Requests` or HTTP `503 Service Unavailable`), the runtime executes truncated exponential backoff with full jitter[^fn-jittered-backoff] to prevent synchronized retry storms across distributed workers:
-
-$$T_{\text{backoff}} = \min\left(T_{\text{cap}},\, T_{\text{base}} \cdot 2^k\right) \cdot U(0, 1)$$
-
-[^fn-jittered-backoff]: **Exponential backoff and jitter**\index{Exponential backoff!jitter}\index{Retry storm!mitigation}\index{Brooker, Marc!jittered backoff}: Standard exponential backoff introduces synchronized retry pulses ("thundering herds") when distributed clients retry against a recovering service at identical intervals. Adding randomized jitter—specifically Full Jitter ($T = U(0, \min(T_{\text{cap}}, T_{\text{base}} \cdot 2^k))$), analyzed by Marc Brooker and colleagues at AWS—decorrelates client retry timings across distributed worker pools, smoothing load spikes and stabilizing multi-tenant inference queues.
-
-where $k$ is the attempt index, $T_{\text{base}}$ is the initial delay floor, $T_{\text{cap}}$ is the maximum backoff ceiling, and $U(0, 1)$ is a uniform random variate. If retries on the primary endpoint exceed a defined threshold $k_{\max}$, the runtime triggers dynamic failover to an equivalent, immutable snapshot hosted on a secondary provider.
-
-While @tbl-caller-status-typology establishes clear boundaries for handling raw invocation results, post-hoc triage remains an inefficient systems pattern. Detecting an incomplete or malformed JSON object after an accelerator has generated hundreds of tokens squanders memory bandwidth and exhausts the task latency budget. An agent architecture that relies exclusively on post-generation exception handling to catch malformed structures suffers from severely degraded trajectory goodput. This operational penalty raises an immediate architectural question: rather than passively inspecting raw token streams after the decode loop concludes, how can the host runtime actively constrain the stochastic core to emit strictly valid structured outputs during the generation process itself?
+Status normalization prevents broken payloads from reaching execution. However, even a `Completed` response can contain broken JSON. To eliminate syntax errors at the source, inference engines employ grammar constraints.
 
 ## Constraining the Output Surface {#sec-vol3-processor-grammar-constrained}
 []{#sec-vol3-processor-bounded-invariants}
 
-When an application runtime expects a structured payload—such as an RPC request, a REST parameter block, or an external tool argument—unconstrained autoregressive generation introduces an immediate reliability failure. In our configuration parser incident, the runtime requires an edit action adhering strictly to the schema `{path: str, search: str, replace: str}`. If generation halts prematurely, samples an unescaped quote, or drops a closing brace, the core emits an unparseable fragment such as `{"path": "parser.py", "search": "int(seconds)`. The omitted closing delimiter causes the downstream deserializer (`json.loads()`) to raise a fatal syntax exception, crashing the agent loop, aborting the task, and squandering all preceding accelerator compute.
+When an agent runtime expects a structured payload—such as an edit action adhering strictly to `{path: str, search: str, replace: str}`—unconstrained sampling introduces an immediate reliability failure. If the model samples an unescaped quote or misses a closing brace, `json.loads()` throws a fatal syntax exception, crashing the agent loop and squandering accelerator compute.
 
-Post-hoc validation—parsing the output string after generation concludes and reprompting the model upon failure—is an inefficient recovery strategy. It consumes additional context window space, increases inference costs, and compounds latency without guaranteeing convergence. To enforce structural invariants deterministically, the execution environment must intervene directly during generation via **grammar-constrained decoding**[^fn-grammar-decoding]. In this architecture, formal specifications—such as JSON Schema, Protocol Buffer definitions, or Extended Backus-Naur Form (EBNF) grammars—are compiled into stateful recognizers, specifically Deterministic Finite Automata (DFAs) for regular languages or Pushdown Automata (PDAs) for recursive context-free grammars.
+Prompting the model to "output only valid JSON" is an empirical heuristic that degrades under complex tasks. Post-hoc validation—parsing the output string after generation concludes and reprompting upon failure—wastes context window tokens and compounds latency. To enforce structural invariants deterministically, the inference service intervenes directly during generation via **grammar-constrained decoding**[^fn-grammar-decoding].
 
-[^fn-grammar-decoding]: **Grammar-constrained decoding**\index{Grammar-constrained decoding!origins}\index{Logit masking!finite automata}: Early systems attempted post-hoc repair through prompt reprompting or token-level rejection loops. Modern grammar-guided decoding, pioneered by frameworks such as Outlines [@willard2023outlines], Guidance, and XGrammar, compiles formal schemas into finite-state automata (DFAs/PDAs) that dynamically compute vocabulary logit masks before softmax, guaranteeing 100% structural and syntax compliance at the tensor level.
+[^fn-grammar-decoding]: **Grammar-constrained decoding**\index{Grammar-constrained decoding!origins}\index{Logit masking!finite automata}: Early systems attempted post-hoc repair through prompt reprompting or token-level rejection loops. Modern grammar-guided decoding, pioneered by frameworks such as Outlines [@willard2023outlines] and XGrammar [@xgrammar2024], compiles formal schemas into finite-state automata (DFAs/PDAs) that dynamically compute vocabulary logit masks before softmax, guaranteeing that emitted tokens conform to the target syntax.
 
-In modern inference engines and cloud APIs, provider-advertised features such as "native tool calling" and "structured JSON outputs" are concrete systems implementations of this mechanism. Rather than relying on learned instruction following alone, the serving platform compiles the user's declared tool schemas into token allowlists or interweaves specialized delimiter tokens (such as `<|tool_call|>` and `<|/tool_call|>`) backed by grammar-constrained decoding. Demystifying tool calling as compiled automata masking grounds the interface in deterministic systems software rather than emergent model behavior.
+### Automata Compilation and Dynamic Logit Masking
 
-### Automata Compilation and Logit Masking
+Grammar-constrained decoding compiles a formal specification—such as a JSON Schema, Protocol Buffer, or Extended Backus-Naur Form (EBNF) grammar—into a stateful recognizer, specifically a Deterministic Finite Automaton (DFA) for regular grammars or a Pushdown Automaton (PDA) for recursive grammars [@willard2023outlines].
 
-During standard autoregressive generation, the language model projects its final hidden state $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ at step $t$ through an unembedding weight matrix $\mathbf{W}_{\text{vocab}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$ to produce unnormalized log-odds (logits) $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ over vocabulary $\mathcal{V}$. In unconstrained sampling, the categorical token distribution is computed by applying the standard softmax operator over the complete vocabulary: $\mathbf{p}_t = \text{softmax}(\mathbf{z}_t)$.
+The decoding mechanism operates as diagrammed in @fig-vol3-processor-grammar-fsm:
 
-Under grammar-constrained decoding, the runtime constrains generation by evaluating the automaton state prior to the sampling step [@willard2023outlines]. Let the automaton currently occupy state $q_t \in \mathcal{Q}$. The automaton inspects its transition function to determine the subset of tokens whose constituent characters drive the state machine into an active, non-error state. This subset constitutes the valid token set $\mathcal{V}_{\text{valid}}(q_t) \subseteq \mathcal{V}$. The runtime applies a logit mask directly to the raw logit vector $\mathbf{z}_t$, setting all invalid token indices to negative infinity:
+1. **Automaton State Evaluation:** At decode step $t$, the recognizer occupies state $q_t \in \mathcal{Q}$. The automaton evaluates its transition table $\delta(q_t, w)$ to determine which vocabulary tokens can legally follow without driving the recognizer into an error state. This set forms the valid token allowlist $\mathcal{V}_{\text{valid}}(q_t) \subseteq \mathcal{V}$.
+2. **Logit Masking Kernel:** Before evaluating softmax, the inference service applies an element-wise logit mask to the raw unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$, setting all disallowed token indices to negative infinity:
+   $$\tilde{z}_{t, i} = \begin{cases} z_{t, i} & \text{if } w_i \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } w_i \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$ {#eq-vol3-logit-mask}
+3. **Softmax Normalization:** When normalized via softmax, the probability allocated to invalid tokens drops strictly to zero:
+   $$P(y_t = w_i \mid \mathbf{x}, y_{<t}) = \frac{\exp(\tilde{z}_{t, i})}{\sum_{j \in \mathcal{V}_{\text{valid}}(q_t)} \exp(z_{t, j})}$$
+   The sampler is mathematically incapable of selecting an illegal token.
+4. **State Transition:** Upon sampling $w_t \in \mathcal{V}_{\text{valid}}(q_t)$, the automaton transitions to $q_{t+1} = \delta(q_t, w_t)$, updating the allowlist for step $t+1$.
 
-$$\tilde{z}_{t, i} = \begin{cases} z_{t, i} & \text{if } w_i \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } w_i \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$
-
-When the masked logit vector $\tilde{\mathbf{z}}_t$ passes through the softmax function, the probability mass allocated to invalid tokens drops strictly to zero:
-
-$$P(y_t = w_i \mid \mathbf{x}, y_{<t}) = \frac{\exp(\tilde{z}_{t, i})}{\sum_{j \in \mathcal{V}_{\text{valid}}(q_t)} \exp(z_{t, j})}$$
-
-Because the probability of selecting any token outside $\mathcal{V}_{\text{valid}}(q_t)$ is zero, the model cannot sample a syntactically illegal token. The emitted sequence is physically guaranteed to conform to the compiled grammar at every decode step.
-
-### Subword Token Alignment and Prefix Closure
-
-Translating character-level formal grammars to transformer logit masks introduces an impedance mismatch between character-level syntax rules and subword tokenization schemes. Modern foundation models do not decode individual ASCII characters; they operate on vocabularies of $32\text{,}000$ to $256\text{,}000$ subword tokens.
-
-A single subword token frequently spans multiple syntactic boundaries or contains composite delimiters (e.g., `", \"replace\": \""`). If an automaton transitions character-by-character, the runtime cannot evaluate a candidate token by inspecting only its initial byte. Instead, the runtime must verify **prefix closure**: token $w_i$ is admissible from state $q_t$ if and only if every intermediate character in $w_i$ drives the automaton through valid transitions, and the terminal character leaves the automaton in a viable (non-rejecting) state from which an accepting state remains reachable, as illustrated in @fig-vol3-processor-grammar-fsm.
-
-::: {#fig-vol3-processor-grammar-fsm fig-env="figure" fig-pos="htb" fig-cap="**Grammar-Constrained Decoding via Automata Logit Masking**: The target JSON schema is compiled into a deterministic finite automaton, where each state yields a precomputed bitmask over the subword vocabulary. The runtime applies this mask to logits prior to softmax, guaranteeing syntax compliance by construction." fig-alt="Finite state machine state transition graph showing per-token valid vocabulary logit masking."}
+::: {#fig-vol3-processor-grammar-fsm fig-env="figure" fig-pos="htb" fig-cap="**Grammar-Constrained Decoding via Logit Masking**: A JSON schema is compiled ahead of time into a transition graph (top). At step $t$, the active state $q_0$ identifies the legal token subset $\mathcal{V}_{\text{valid}}(q_0)$. The GPU kernel masks all invalid tokens to $-\infty$ before softmax (bottom), ensuring that emitted tokens remain strictly within the grammar's prefix language." fig-alt="Technical schematic showing DFA state transition graph at top and GPU logit masking kernel at bottom setting invalid token logits to minus infinity."}
 ![](images/svg/grammar_constrained_decoding_fsm.svg){width=100%}
 :::
 
-### Automata Precomputation: DFAs Versus PDAs
+### The Exact Systems Guarantee Boundary
 
-Dynamically parsing candidate tokens against an arbitrary grammar during every decode step introduces prohibitive latency overhead. Autoregressive decoding is strictly memory-bandwidth bound. If the host CPU attempts to parse all $|\mathcal{V}|$ vocabulary tokens against an active grammar on every iteration, CPU-GPU synchronization stalls and serialization latency can exceed tens of milliseconds per step, degrading generation throughput by an order of magnitude.
+While grammar masking provides powerful guarantees, systems engineers must understand the precise boundary of what the mechanism does—and does not—guarantee:
 
-To eliminate decode-time parsing overhead, modern inference runtimes compile regular expressions and schema specifications into precomputed DFAs ahead of inference [@willard2023outlines]. For a regular language with finite state space $\mathcal{Q}$ and vocabulary $\mathcal{V}$, the engine precomputes a transition table:
-
-$$\delta : \mathcal{Q} \times \mathcal{V} \to \mathcal{Q} \cup \{\text{error}\}$$
-
-This ahead-of-time (AOT) compilation maps each state $q \in \mathcal{Q}$ directly to a pre-indexed bitmask tensor representing $\mathcal{V}_{\text{valid}}(q)$ resident in accelerator memory. During autoregressive decoding, determining the logit mask requires only an $O(1)$ device memory lookup indexed by the current automaton state $q_t$. The state machine advances to $q_{t+1} = \delta(q_t, w_t)$ immediately upon sampling token $w_t$, preserving decode throughput without host-device synchronization bubbles.
-
-However, a fundamental systems boundary separates regular schemas from recursive Context-Free Grammars (CFGs). While regular expressions and flat schemas possess finite state spaces $\mathcal{Q}$ permitting full AOT bitmask precomputation, recursive grammars—such as arbitrary nested JSON or programming language syntax—require Pushdown Automata (PDAs) with an unbounded stack configuration $\gamma \in \Gamma^*$. Because the joint state space $(q, \gamma)$ is unbounded, the runtime cannot precompute a static $O(1)$ bitmask table. Production constrained decoding engines (such as `llguidance` and `XGrammar`) address this through hybrid scheduling: maintaining an incremental LR or Earley parser that computes next-token bitmasks asynchronously on the host CPU during accelerator compute cycles, or employing bounded-depth DFA approximations that fall back to dynamic stack evaluation only when schema nesting exceeds a precompiled recursion threshold.
+1. **Prefix Validity vs. Complete Conformance:** Automata masking guarantees that *every emitted token prefix belongs to the prefix language of the grammar*. However, **complete structural conformance requires terminating in an accepting state ($q \in \mathcal{F}$)**. If generation hits the token ceiling $K_{\max}$ or times out while the automaton is in an intermediate state ($q_1$ or $q_2$ in @fig-vol3-processor-grammar-fsm), the output remains an invalid, unclosed fragment. The end-of-sequence delimiter (`<EOS>`) must be masked out as illegal until the automaton reaches an accepting state.
+2. **DFAs vs. PDAs:** Regular expressions and flat schemas compile into precomputed DFAs whose transition tables can be cached as bitmasks in memory ($O(|\mathcal{Q}| \cdot |\mathcal{V}| / 8)$ bytes). Arbitrarily nested JSON or programming language grammars, however, are context-free and require Pushdown Automata (PDAs) with a runtime stack [@xgrammar2024].
+3. **Empty Mask Deadlock:** If a prompt leaves no legal token continuations within the grammar, $\mathcal{V}_{\text{valid}}(q_t) = \emptyset$. The serving engine must detect this deadlock condition and terminate with an error rather than generating undefined logits.
 
 ### The Syntactic Divide: Syntax Guarantees Versus Semantic Truth
 
-While grammar-constrained decoding guarantees that the emitted byte stream satisfies the formal rules of a schema, systems architects must not mistake syntactic compliance for semantic correctness. Finite-state logit masking establishes invariant closure strictly over string topology. It guarantees that an emission satisfies schema syntax, but it remains completely blind to operational safety, environmental preconditions, and factual truth.
+The most dangerous fallacy in agent architecture is assuming that valid JSON implies an authorized, safe, or correct action. A grammar mask operates strictly on character transitions; it has zero visibility into system state or application semantics.
 
-Consider an agent constrained to emit a valid file modification tool payload:
+In our parser task, a grammar mask guarantees that the model emits valid JSON matching `{path: str, search: str, replace: str}`. However, the model can emit:
 
 ```json
 {
-  "tool": "edit_file",
-  "parameters": {
-    "path": "/etc/shadow",
-    "search": "root:x:0:0:",
-    "replace": "root::0:0:"
-  }
+  "path": "parser.py",
+  "search": "int(seconds) * 1000",
+  "replace": "int(seconds) * 1000"
 }
 ```
 
-The payload satisfies the compiled schema: keys match the expected strings, types conform to interface definitions, and JSON delimiters close without error. The host deserializer accepts the payload with return code zero. Yet executing this call breaches host security. The finite-state mask guarantees that the byte stream forms valid JSON, but it cannot evaluate whether `/etc/shadow` is protected by access control lists (ACLs), whether the agent possesses root capabilities, or whether the replacement string corrupts system authentication.
+The payload satisfies every syntactic invariant, yet the replacement is an ineffective no-op. Worse, an unaligned model could emit:
 
-Furthermore, rigid grammar constraints can induce **pathological hallucination**. When an unconstrained foundation model lacks the context or parametric knowledge to answer a query, its categorical distribution disperses across conversational hedges or error messages (e.g., `"error: variable not found"`). Under strict grammar constraints, however, the runtime forces the output distribution exclusively into the subset of tokens permitted by the active automaton state. If the true value is absent from context, the processor cannot emit an unmodeled error string; it must sample from the surviving grammar paths. If an agent is constrained to output an existing file path, it will sample a syntactically valid but non-existent path rather than reporting that the file is missing.
+```json
+{
+  "path": "/etc/shadow",
+  "search": "root:*:...",
+  "replace": "root::..."
+}
+```
 
-To maintain systems dependability, host runtimes must treat grammar-constrained decoding strictly as an optimization for serialization efficiency, rather than as an authorization or correctness mechanism. Syntactic guarantees must be bounded by a multi-stage validation perimeter implemented within deterministic host software, as outlined in @tbl-vol3-syntax-semantics-boundary.
+The schema is completely satisfied, yet executing the action represents a catastrophic privilege escalation. As formalized in @tbl-vol3-syntax-semantics-boundary, token-level grammar masks enforce structural integrity, but host software verifiers must enforce semantic authorization, invariant checking, and state commitment.
 
-| Dimension                    | Token-Level Grammar Mask (DFA Decode Layer)                                          | Host Runtime Semantic Validation (Execution Layer)                                                   | Operational Failure Mode if Conflated                                      |
-|:-----------------------------|:-------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------|
-| **Structural Integrity**     | Guarantees balanced delimiters, schema conformance, and valid subword token closure. | Validates object unmarshaling and type boundaries.                                                   | Parse errors, buffer overruns, and deserialization crashes.                |
-| **Referential Integrity**    | Constrains emitted characters to string patterns (e.g., regex-matched identifiers).  | Resolves identifiers against live state stores (e.g., database foreign keys, open file descriptors). | Dangling references, phantom entities, and silent data corruption.         |
-| **Authorization & Identity** | Enforces presence of credential fields in schema definitions.                        | Authenticates signatures; evaluates role-based access control (RBAC) and capability tokens.          | Privilege escalation, arbitrary path traversal, and unauthorized mutation. |
-| **Arithmetic & Invariants**  | Forces outputs into numeric primitives (integers, floats).                           | Verifies range bounds, capacity limits, and physical conservation laws.                              | Broken financial ledgers, inventory over-allocation, and logic faults.     |
-| **Temporal Preconditions**   | Enforces date/timestamp formatting specifications (e.g., ISO 8601).                  | Verifies monotonic clock ordering, transaction staleness, and lock lease expirations.                | Race conditions, stale read-modify-write loops, and deadlocks.             |
+| Operational Dimension | Token-Level Grammar Mask (DFA Decode Layer) | Host Runtime Verifier (Execution Layer) | Consequence of Conflation |
+|:---|:---|:---|:---|
+| **Structural Integrity** | Guarantees valid JSON keys, types, & delimiters | Unmarshals bytes into typed data structures | Parse exceptions, buffer overflows |
+| **Referential Integrity** | Constrains strings to regex patterns | Resolves paths against filesystem & Git index | Nonexistent files, dangling file descriptors |
+| **Authorization & Security** | Enforces presence of credential fields | Evaluates capability tokens & path sandboxes | Arbitrary file overwrite, privilege escalation |
+| **Semantic Invariants** | Forces numeric types (integers, floats) | Checks value ranges & unit conversions | Logic errors (e.g., negative timeout values) |
+| **Task Acceptance** | None | Runs regression tests (`pytest`) in sandbox | Deploying regressions to production |
+: **The Syntactic versus Semantic Validation Boundary**: Division of responsibilities between decode-time grammar masks and host runtime validation. {#tbl-vol3-syntax-semantics-boundary}
 
-: **Syntactic versus Semantic Validation Boundary**: Division of operational invariants between token-level grammar masks and host runtime validation. {#tbl-vol3-syntax-semantics-boundary}
-
-By enforcing these boundaries in host software, the system exploits grammar masks to eliminate syntax serialization crashes without relinquishing semantic authority to an unprivileged neural core. Having examined the symbolic and syntactic constraints of the invocation, we now turn to its physical resource economics: the latency and computational costs that govern model calls.
+Having established the symbolic constraints of an invocation, we now analyze its physical resource economics: the latency and hardware bottlenecks that govern model calls.
 
 ## The Cost of an Invocation {#sec-vol3-processor-cost}
 
-When an agent runtime dispatches a context payload to a stochastic processor core, end-to-end invocation latency does not scale as a uniform scalar function of total token count. Instead, service time is partitioned across four physically disjoint operational phases:
+An agent loop does not execute in zero time. A single model invocation incurs a multi-stage latency penalty that depends on sequence lengths, hardware architecture, and serving configurations:
 
-$$T_{\text{call}} = T_{\text{queue}} + T_{\text{prefill}} + \sum_{t=1}^K T_{\text{decode}, t} + T_{\text{validate}}$$ {#eq-vol3-invocation-latency}
+$$T_{\text{call}} = T_{\text{queue}} + T_{\text{transport}} + T_{\text{prefill}} + \sum_{t=1}^K T_{\text{decode}, t} + T_{\text{validate}}$$ {#eq-vol3-latency-decomposition}
 
-where $T_{\text{queue}}$ denotes scheduling delay within serving dispatch queues and device transfer buffers, $T_{\text{prefill}}$ is the time required to ingest and encode the full input sequence into Key-Value (KV) activations (Time-to-First-Token, or TTFT), $T_{\text{decode}, t}$ represents the inter-token generation latency for each of the $K$ emitted tokens during autoregressive decode, and $T_{\text{validate}}$ encompasses host-side grammar unmarshaling, deserialization, and semantic assertion checks.
+- $T_{\text{queue}}$: Time the request spends in the serving admission queue awaiting available accelerator memory and execution slots.
+- $T_{\text{transport}}$: Network serialization and socket transfer duration between agent host and inference cluster.
+- $T_{\text{prefill}}$: Accelerator time to ingest and compute attention across all $M$ prompt tokens.
+- $\sum T_{\text{decode}, t}$: Cumulative time to generate $K$ output tokens sequentially.
+- $T_{\text{validate}}$: Host runtime parsing, schema validation, and security sandbox gating.
 
-Consider the concrete divergence within our running cache-invalidation diagnostic task. At the outset, the agent gathers repository context: it submits $40\text{,}000$ tokens containing the configuration parser, lease manager, and test harness to request a concise $25$-token diagnostic hypothesis. Later in the same debugging trajectory, having isolated the bug, the agent submits a short $400$-token test failure summary and requests a full $1\text{,}200$-token replacement implementation diff. Although both interactions invoke the identical foundation model endpoint, they stress completely different serving phases, hardware bottlenecks, and cost profiles. In the first call, prefill accounts for over $90\%$ of turnaround latency; in the second, autoregressive decode dominates execution time and memory bandwidth.
+The metric **Time to First Token (TTFT)** reflects the initial delay before generation begins:
+$$\text{TTFT} = T_{\text{queue}} + T_{\text{transport}} + T_{\text{prefill}} + T_{\text{decode}, 1}$$
 
-### The Roofline Model: GEMM Versus GEMV
+### The Roofline Model: GEMM Prefill Versus GEMV Decode
 
-The performance divergence between prefill and decode is governed by the hardware Roofline model[^fn-roofline-model] formulated by Williams, Waterman, and Patterson [@williams2009]. The sustainable throughput of an accelerated processor (such as a GPU or TPU) is bounded by two orthogonal hardware ceilings: peak compute capacity (measured in floating-point operations per second, or FLOP/s) and memory interface bandwidth (measured in gigabytes per second, or GB/s). Which ceiling bottlenecks execution is determined by arithmetic intensity, $I$, defined as the operational density executed per byte of data transferred across the memory bus:
+The performance divergence between prompt prefill and autoregressive decode is governed by the hardware **Roofline Model** formulated by Williams, Waterman, and Patterson [@williams2009]. The attainable throughput of an accelerator (such as an NVIDIA H100 GPU) is bounded by two orthogonal hardware ceilings: peak computational throughput ($P_{\text{peak}}$, in FLOP/s) and peak memory interface bandwidth ($B_{\text{mem}}$, in Bytes/s).
 
-[^fn-roofline-model]: **David A. Patterson & Samuel W. Williams**\index{Patterson, David A.!Roofline model}\index{Roofline model!formulation}: David Patterson (UC Berkeley), co-recipient of the 2017 ACM A.M. Turing Award for pioneering RISC microprocessors, formulated the Roofline model with Samuel Williams and Andrew Waterman [-@williams2009]. By plotting operational arithmetic intensity (FLOPs/byte) against attainable computation throughput, the Roofline model makes visual whether an execution kernel is bottlenecked by peak arithmetic processing or memory bus bandwidth.
+Which ceiling bottlenecks execution is determined by **arithmetic intensity** ($I$), defined as the operational density executed per byte transferred across the memory bus:
 
 $$I = \frac{\text{Floating-Point Operations (FLOPs)}}{\text{Memory Traffic (Bytes Transferred)}}$$ {#eq-vol3-arithmetic-intensity}
 
-During the prompt prefill phase, the processor ingests all $M$ prompt tokens concurrently. The causal attention projection and feed-forward network layers evaluate across the entire input sequence simultaneously as dense General Matrix-Matrix Multiplications (GEMMs). Because the accelerator reuses parameter weight matrices across all $M$ tokens within registers and on-chip SRAM, arithmetic intensity scales directly with sequence length:
+The boundary between memory-bound and compute-bound execution is the **machine balance knee** ($I_{\text{sat}}$):
 
-$$I_{\text{prefill}} \propto \min(M, B_{\max})$$
+$$I_{\text{sat}} = \frac{P_{\text{peak}}}{B_{\text{mem}}}$$ {#eq-vol3-machine-balance}
 
-For prompt contexts exceeding several thousand tokens, arithmetic intensity readily surpasses $100\text{ FLOP/byte}$, pushing execution well past the machine balance knee of accelerator hardware (for instance, an NVIDIA H100 SXM offering $3.35\text{ TB/s}$ of HBM3 bandwidth alongside nearly $2\text{,}000\text{ TFLOP/s}$ of 16-bit tensor compute). Consequently, prefill is strictly compute-bound. Accelerator tensor units operate near thermal saturation, and execution latency scales with parameter count and context length.
+On an NVIDIA H100 SXM accelerator delivering $989\text{ TFLOP/s}$ of dense 16-bit Tensor Core compute alongside $3.35\text{ TB/s}$ of HBM3 memory bandwidth, the dense machine balance knee is:
+$$I_{\text{sat}} = \frac{989 \times 10^{12} \text{ FLOP/s}}{3.35 \times 10^{12} \text{ Bytes/s}} \approx 295.2\text{ FLOP/byte}$$
+(Under structured 2:4 sparsity, peak throughput reaches $1{,}979\text{ TFLOP/s}$, pushing $I_{\text{sat}}$ to $590.7\text{ FLOP/byte}$.)
 
-::: {#fig-vol3-processor-prefill-decode fig-env="figure" fig-pos="htb" fig-cap="**Roofline Model of Prefill versus Decode Asymmetry**: Operational contrast between compute-bound prompt prefill (dense GEMM operating above the machine balance knee) and memory-bandwidth-bound autoregressive decode (dense GEMV operating orders of magnitude below the compute ceiling)." fig-alt="Roofline model graph plotting arithmetic intensity against operational performance for prefill GEMM and decode GEMV."}
+As visualized in @fig-vol3-processor-prefill-decode, prefill and decode operate in completely different performance regimes:
+
+1. **Prompt Prefill (GEMM):** All $M$ prompt tokens are known in advance and processed concurrently. Parameter weights loaded from HBM into on-chip SRAM registers are multiplied across all $M$ token activations simultaneously via General Matrix-Matrix Multiplication (GEMM). Arithmetic intensity scales with sequence length ($I \propto M$). For prompts exceeding a few hundred tokens, $I \ge I_{\text{sat}}$, driving prefill into the **compute-bound** regime where Tensor Cores operate near peak utilization.
+2. **Autoregressive Decode (GEMV):** Because token $t+1$ depends causally on token $t$, the processor must emit tokens one by one. For an unbatched forward step ($B=1$), calculating a single token across a model with $N_{\text{params}}$ parameters stored in 16-bit precision ($P=2$ bytes per parameter) requires streaming all $N_{\text{params}} \cdot P$ bytes across the memory bus to execute $2 \cdot N_{\text{params}}$ FLOPs (one multiply-accumulate per weight). Arithmetic intensity collapses to:
+   $$I_{\text{decode}} \approx \frac{2 \cdot N_{\text{params}} \text{ FLOPs}}{N_{\text{params}} \cdot P \text{ Bytes}} = \frac{2}{P} \text{ FLOP/byte}$$ {#eq-vol3-decode-intensity}
+   For 16-bit weights ($P=2$), $I_{\text{decode}} \approx 1.0\text{ FLOP/byte}$.
+
+Because $I_{\text{decode}} \approx 1.0 \ll I_{\text{sat}} \approx 295.2$, autoregressive decoding operates more than two orders of magnitude below the accelerator's saturation knee. Tensor Cores sit idle for over 99% of clock cycles, throttled strictly on memory bus bandwidth while streaming parameter weights from HBM [@pope2023efficiently].
+
+::: {#fig-vol3-processor-prefill-decode fig-env="figure" fig-pos="htb" fig-cap="**Roofline View of Prefill and Decode**: On an NVIDIA H100 SXM accelerator (989 TFLOP/s dense compute, 3.35 TB/s HBM3 bandwidth), the machine balance knee is $I_{\text{sat}} \approx 295.2\text{ FLOP/byte}$. Prompt prefill achieves high arithmetic intensity through parallel GEMM, operating compute-bound. Unbatched decode collapses to $I_{\text{decode}} \approx 1.0\text{ FLOP/byte}$, operating deeply memory-bandwidth bound." fig-alt="Roofline model coordinate plot showing memory bandwidth slope, peak compute ceiling, and operating points for compute-bound prefill and memory-bound decode."}
 ![](images/svg/prefill_vs_decode_v2.svg){width=100%}
 :::
 
-During the autoregressive decode phase, by contrast, tokens must be emitted sequentially due to data dependencies: token $t+1$ cannot be predicted until token $t$ is sampled. For every newly generated token, the processor must stream all parameter weights from HBM into execution registers to perform General Matrix-Vector Multiplications (GEMVs) [@pope2023efficiently]. For an unbatched or low-concurrency agent host, calculating a single token across a model with $N_{\text{params}}$ parameters stored at $P$ bytes per parameter (where $P = 2$ for 16-bit precision) requires loading $N_{\text{params}} \cdot P$ bytes across the bus to perform $2 \cdot N_{\text{params}}$ floating-point operations (one multiply-accumulate, or two FLOPs, per parameter). Consequently, arithmetic intensity collapses to:
+### Continuous Batching Versus Single-Agent Serialization
 
-$$I_{\text{decode}} \approx \frac{2 \cdot N_{\text{params}} \text{ FLOPs}}{N_{\text{params}} \cdot P \text{ Bytes}} = \frac{2}{P} \text{ FLOP/byte}$$
+This arithmetic intensity collapse explains the stark discrepancy between multi-tenant serving throughput and single-agent execution latency:
 
-For standard 16-bit floating-point weights ($P=2$), $I_{\text{decode}} \approx 1\text{ FLOP/byte}$; for 8-bit quantized weights ($P=1$), $I_{\text{decode}} \approx 2\text{ FLOP/byte}$. Contrast this with the machine balance of contemporary accelerator hardware, defined as the ratio of peak compute capacity to peak memory interface bandwidth:
-
-$$I_{\text{sat}} = \frac{\text{Peak Compute Throughput (FLOP/s)}}{\text{Peak Memory Bandwidth (Bytes/s)}}$$
-
-On an NVIDIA H100 SXM accelerator (delivering $989\text{ TFLOP/s}$ of dense 16-bit Tensor Core compute—or nearly $2\text{,}000\text{ TFLOP/s}$ with structured 2:4 sparsity—alongside $3.35\text{ TB/s}$ of HBM3 bandwidth), the dense machine balance knee is $I_{\text{sat}} = 989 / 3.35 \approx 295.2\text{ FLOP/byte}$ (reaching $590.7\text{ FLOP/byte}$ under sparsity). Because $I_{\text{decode}} \approx 1\text{ FLOP/byte} \ll I_{\text{sat}}$, autoregressive decoding operates more than two orders of magnitude below the machine balance knee. As visualized in @fig-vol3-processor-prefill-decode, tensor compute units sit idle for the vast majority of clock cycles, throttled on memory bus bandwidth while streaming model weights and fetching the growing Key-Value (KV) cache.
-
-This arithmetic intensity collapse explains the stark operational discrepancy between multi-tenant serving throughput and single-agent execution latency. In a high-concurrency serving cluster, the inference engine employs continuous iteration-level batching, grouping $B$ independent user requests into a single decode pass. Parameter weight loading is amortized across all $B$ concurrent sequences, lifting arithmetic intensity to $I_{\text{decode}}(B) \approx B \cdot (2/P) \text{ FLOP/byte}$. When batch size $B \ge 300$, decode reaches the machine balance knee, saturating Tensor Core compute. For an autonomous agent running an isolated, multi-turn reasoning trajectory, however, the workload is intrinsically serial and unbatched ($B = 1$)[^fn-agent-batching]. The agent cannot harvest cluster-level batching efficiencies to compress its own critical path. While the serving provider reports aggregate cluster throughput in thousands of tokens per second across concurrent users, the isolated agent loop remains physically bound by the memory bandwidth of a single forward pass, generating at the hardware floor of 30 to 60 tokens per second.
+- In high-concurrency cloud serving, inference engines employ **continuous iteration-level batching**, grouping $B$ independent user requests into a single decode pass. Parameter weight loading is amortized across all $B$ sequences, lifting arithmetic intensity to $I_{\text{decode}}(B) \approx B \cdot (2/P)$. When $B \ge 300$, decode reaches the machine balance knee, saturating Tensor Cores and delivering thousands of aggregate tokens per second across users.
+- For an autonomous agent executing an isolated reasoning trajectory, however, the workload is intrinsically serial ($B=1$)[^fn-agent-batching]. The agent cannot batch future reasoning steps that depend on the current token. While the serving provider reports massive cluster throughput, the isolated agent loop remains physically bound by the memory bandwidth of a single forward pass, generating at the physical hardware floor of 30 to 80 tokens per second.
 
 [^fn-agent-batching]: **Single-Agent Batching Bounds**: While speculative decoding and tree search can expand batch size to $B > 1$ for an individual call, the primary critical path of a sequential reasoning trajectory remains unbatched ($B=1$). Multi-tenant batching amortizes compute across independent users in shared clusters, but does not compress the serialized latency of an isolated agent's forward dependency chain. \index{Batching!single-agent bounds}\index{Critical Path!serial dependency}
 
 ### Latency Regimes and State Growth
 
-The interaction between prompt length $M$ and generation length $K$ partitions model invocations into four distinct operational regimes. @tbl-vol3-latency-regimes outlines how resource bottlenecks shift across typical agent interaction patterns.
+The relationship between prompt length $M$ and generation length $K$ partitions model calls into four distinct operational regimes, outlined in @tbl-vol3-latency-regimes.
 
-| Regime                | Context ($M$)             | Output ($K$)              | Dominant Latency Phase                    | Hardware Bottleneck                             | Representative Agent Workload                               |
-|:----------------------|:--------------------------|:--------------------------|:------------------------------------------|:------------------------------------------------|:------------------------------------------------------------|
-| **Ingestion-Heavy**   | High ($\ge 32\text{k}$)   | Low ($\le 100$)           | $T_{\text{prefill}}$ (TTFT)               | Tensor Core compute (GEMM)                      | Repository inspection, log classification, tool selection   |
-| **Generation-Heavy**  | Low ($\le 1\text{k}$)     | High ($\ge 1\text{k}$)    | $\sum T_{\text{decode}, t}$               | Memory bandwidth (GEMV)                         | Patch synthesis, technical report drafting, code generation |
-| **Balanced / Dense**  | High ($\ge 32\text{k}$)   | High ($\ge 1\text{k}$)    | Both $T_{\text{prefill}}$ & Decode        | Compute followed by memory bandwidth & capacity | End-to-end refactoring, whole-file rewrite with context     |
-| **Interactive Probe** | Low ($\le 1\text{k}$)     | Low ($\le 100$)           | $T_{\text{queue}} + T_{\text{transport}}$ | Scheduling, RPC latency, host serialization     | Heartbeat checks, branch confirmation, single-token gating  |
-: **Operational Regimes of Stochastic Processor Invocations**: Dominant latency phases and hardware bottlenecks determined by input and output token boundaries. {#tbl-vol3-latency-regimes}
+| Operational Regime | Prompt ($M$) | Output ($K$) | Dominant Latency Phase | Hardware Bottleneck | Representative Agent Workload |
+|:---|:---|:---|:---|:---|:---|
+| **Ingestion-Heavy** | High ($\ge 32\text{k}$) | Low ($\le 100$) | $T_{\text{prefill}}$ (TTFT) | Tensor Core compute (GEMM) | Repository search, log triage, tool selection |
+| **Generation-Heavy**| Low ($\le 1\text{k}$) | High ($\ge 1\text{k}$) | $\sum T_{\text{decode}, t}$ | Memory interface bandwidth (GEMV)| Code synthesis, documentation drafting |
+| **Balanced / Dense**| High ($\ge 32\text{k}$) | High ($\ge 1\text{k}$) | Both Prefill & Decode | Compute followed by memory bandwidth | Whole-file refactoring, multi-file repair |
+| **Interactive Probe**| Low ($\le 1\text{k}$) | Low ($\le 100$) | $T_{\text{queue}} + T_{\text{transport}}$ | Host network, queueing, RPC overhead | Heartbeat checks, routing, single-token gating |
+: **Operational Regimes of Stochastic Processor Invocations**: Bottlenecks determined by prompt and output token boundaries. {#tbl-vol3-latency-regimes}
 
-Beyond arithmetic execution time, each active request incurs a physical state cost: the Key-Value (KV) cache. To prevent recomputing historical key and value projections at every decode step, the serving system retains past activations in high-bandwidth device memory. For a model with $L$ transformer layers, hidden dimension $d_{\text{model}}$, and $H_{\text{kv}}$ key-value heads of dimension $d_{\text{head}}$, each token consumes:
+Beyond arithmetic execution time, each active invocation retains physical state in accelerator memory: the **Key-Value (KV) cache**. To avoid recomputing attention keys and values for historical tokens at every decode step, the inference engine caches previous activations. For a transformer model with $L$ layers, hidden dimension $d_{\text{model}}$, and $H_{\text{kv}}$ key-value heads of dimension $d_{\text{head}}$ stored at precision $P$ bytes, each token consumes:
 
 $$\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P \quad \text{bytes}$$ {#eq-vol3-kv-cache-size}
 
-For a 70-billion parameter model utilizing Grouped-Query Attention[^fn-gqa-attention] ($L=80$, $H_{\text{kv}}=8$, $d_{\text{head}}=128$, $P=2$), each active token retains approximately $320\text{ KB}$ of state. A single $40\text{,}000$-token repository trace consumes over $12.8\text{ GB}$ of dedicated accelerator SRAM/HBM merely to preserve context across decode steps. If the serving cluster hosts multiple concurrent agent loops, aggregate KV cache allocation rapidly exhausts device memory, triggering request queueing ($T_{\text{queue}}$) or preemptive context swapping.
+For a 70-billion parameter model utilizing Grouped-Query Attention[^fn-gqa-attention] ($L=80$, $H_{\text{kv}}=8$, $d_{\text{head}}=128$, $P=2$ bytes for FP16):
+$$\text{Mem}_{\text{token}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 2 = 327{,}680\text{ bytes} \approx 320\text{ KiB/token}$$
+A single $40{,}000$-token repository trace consumes over $12.2\text{ GiB}$ ($13.1\text{ GB}$) of dedicated accelerator memory merely to preserve context across decode steps. If the serving cluster hosts multiple concurrent agent loops, aggregate KV cache allocation rapidly exhausts device HBM, triggering request queueing ($T_{\text{queue}}$) or preemptive context swapping.
 
 [^fn-gqa-attention]: **Multi-Query and Grouped-Query Attention**\index{Grouped-Query Attention (GQA)!KV cache reduction}\index{Multi-Query Attention (MQA)!memory bandwidth}\index{Shazeer, Noam!MQA}: Multi-Query Attention (MQA), introduced by Noam Shazeer [-@shazeer2019fast], shares a single Key-Value head across all Query heads to drastically shrink the KV cache footprint and relieve memory bandwidth pressure during autoregressive decode. Grouped-Query Attention (GQA), developed by Joshua Ainslie et al. [-@ainslie2023gqa], generalizes this approach by partitioning Query heads into $H_{\text{kv}}$ groups, providing an optimal compromise between full multi-head model capacity and MQA memory efficiency.
 
 ### Amdahl's Law and the Return on Prefix Reuse
 
-This physical reality dictates where systems optimization effort must be directed. Techniques engineered solely to accelerate generation throughput—such as speculative decoding, draft-model verification, and continuous output streaming—provide negligible reductions in total agent step latency when $M \gg K$.
+This physical asymmetry dictates where systems optimization effort must be invested. Consider an ingestion-heavy agent call where prompt prefill constitutes 85 percent of execution time ($f_{\text{prefill}} = 0.85$) and decode constitutes 15 percent ($f_{\text{decode}} = 0.15$).
 
-Consider an agent step where prefill constitutes 85 percent of execution time ($f_{\text{prefill}} = 0.85$) and decode constitutes 15 percent ($f_{\text{decode}} = 0.15$). Applying Amdahl's Law[^fn-amdahl-inference], even doubling generation throughput (a $2\times$ speedup on decode) yields an end-to-end system speedup of:
+Applying Amdahl's Law[^fn-amdahl-inference], even doubling generation speed (a $2\times$ speedup on decode, $s=2$) yields an end-to-end system speedup of only:
 
-[^fn-amdahl-inference]: **Amdahl's Law in model serving**\index{Amdahl's Law!prefill vs. decode}\index{Amdahl, Gene!model serving}: Formulated by Gene Amdahl [-@amdahl1967] to calculate the theoretical speedup limit for systems with non-parallelizable components. In foundation model serving where prompt prefill can account for 85% to 95% of execution duration on large repository inputs ($M \gg K$), Amdahl's Law proves that optimizing decode speed (e.g., via speculative decoding or low-bit quantization) yields negligible end-to-end latency reductions compared to caching and reusing prefill KV activations.
+$$S = \frac{1}{(1 - f_{\text{decode}}) + \frac{f_{\text{decode}}}{s}} = \frac{1}{0.85 + \frac{0.15}{2}} = \frac{1}{0.925} \approx 1.081$$
 
-$$S = \frac{1}{(1 - 0.15) + \frac{0.15}{2}} = \frac{1}{0.85 + 0.075} \approx 1.081$$
+An 8.1% system speedup corresponds to a modest 7.5% reduction in total latency. When prompt context dominates ($M \gg K$), optimizing decode throughput via speculative decoding or low-bit weight quantization yields negligible end-to-end latency gains.
 
-An 8 percent reduction in turnaround latency fails to justify the architectural complexity of speculative verification pipelines.
+[^fn-amdahl-inference]: **Amdahl's Law in model serving**\index{Amdahl's Law!prefill vs. decode}\index{Amdahl, Gene!model serving}: Formulated by Gene Amdahl [-@amdahl1967] to calculate the theoretical speedup limit for systems with non-parallelizable components. In foundation model serving where prompt prefill accounts for 85% to 95% of execution duration on large repository inputs ($M \gg K$), Amdahl's Law proves that optimizing decode speed yields negligible end-to-end latency reductions compared to caching and reusing prefill KV activations.
 
-Conversely, optimizations that compress or reuse the prefill phase yield massive returns. Structured KV cache prefix caching—retaining pre-computed key-value state for static system prompts, environment specifications, and tool declarations across successive trajectory steps—converts redundant GEMM computation into zero-cost cache hits. If an agent retains $30\text{,}000$ invariant prefix tokens across consecutive turns, caching reduces active prefill volume from $32\text{,}000$ to $2\text{,}000$ tokens, eliminating up to 90 percent of $T_{\text{prefill}}$ and fundamentally altering trajectory goodput. The systems mechanics of virtualizing, paging, and evicting this physical attention cache are examined in depth in Chapter 5.
+The highest-return optimization for agentic workloads is **prefix caching** (e.g., RadixAttention or vLLM automatic prefix caching). When an agent makes repeated calls over identical repository context, matching the prompt prefix in memory eliminates redundant GEMM prefill computation, slashing TTFT from seconds to milliseconds.
 
-Decomposing the physical asymmetry between prefill and decode equips the systems architect to reason about execution latency and hardware provisioning. Yet raw execution speed remains useless without a robust boundary protocol. To operate reliably, the host runtime must synthesize these hardware dynamics, grammar constraints, and verification stages into a unified processor interface.
+Having analyzed the symbolic, syntactic, and physical resource boundaries of a model call, we now examine how competing interface designs are evaluated.
 
 ## Processor Interface Evaluation {#sec-vol3-processor-interface-design}
 
-Selecting an invocation interface for the stochastic processor requires co-optimizing three competing systems metrics: syntactic validity, semantic problem-solving capability, and tail latency bounds. An invocation interface succeeds when it produces usable candidates under a caller's validity, latency, and budget constraints, not when it merely generates plausible text. In classical microarchitectures, instruction decoding is binary: an instruction bit-pattern is either valid within the Instruction Set Architecture (ISA) or triggers an illegal instruction trap. In contrast, when a host runtime prompts a stochastic processor to produce an operational payload—such as a database mutation or tool parameter block—the output is sampled probabilistically from an open vocabulary. Left unconstrained, the processor exhibits nonzero entropy over invalid tokens, generating malformed JSON, truncated delimiters, or schema violations that crash downstream parsers.
+How should a systems engineer design the interface between an agent runtime and the stochastic processor core? For our configuration parser repair task, three competing architectural patterns exist:
 
-### Empirical Comparison of Interface Configurations
+1. **Free-Form Natural Language Interface:** The runtime prompts the model to return an explanation and patch as free-form Markdown text.
+2. **Grammar-Constrained Schema Interface:** The runtime enforces a strict JSON Schema via decode-time logit masking, forcing the model to emit a typed tool call `{path: str, search: str, replace: str}`.
+3. **Decomposed Two-Stage Probe Interface:** The runtime issues a short classification call to diagnose the failure category, followed by a targeted edit call.
 
-To evaluate these trade-offs under rigorous systems conditions, we benchmark three candidate invocation interfaces across a suite of 50 multi-file software fault localization and repair tasks on our running cache-invalidation service. Each task requires ingesting repository context, diagnosing a concurrent lease-invalidation bug, and emitting an operational patch payload subject to an end-to-end Service Level Agreement (SLA) threshold of $P_{99} \le 5.0\text{ s}$ and a fixed budget of $45\text{,}000$ tokens per attempt. Across all configurations, the underlying foundation model checkpoint, task fixtures, sandbox tool environment, and acceptance test harness remain strictly identical:
+### A Controlled Evaluation Protocol
 
-1. **Configuration A (Free-Form Text Prompting):** The processor is prompted with open-vocabulary sampling ($\tau = 0.7$) to generate a natural language diagnosis followed by a patch enclosed in markdown code fences (` ```diff ... ``` `). The host runtime extracts the patch using regular expressions and client-side string parsers.
-2. **Configuration B (Direct Schema-Constrained Action Proposal):** The runtime prompts the processor with an explicit JSON Schema defining tool parameters (file path, line range, replacement hunk) and enforces structural validity using an FSM logit mask at decode time ($\tau = 0.2$).
-3. **Configuration C (Staged Classification-First Invocation):** A two-stage invocation protocol. In Stage 1, the model consumes the full repository context ($40\text{,}000$ tokens) but is constrained to emit a single classification token from a closed enumeration (`TIMEOUT_PARSE`, `LEASE_RACE`, `INDEX_CORRUPTION`, `TRANSPORT_DROP`). In Stage 2, the runtime supplies the classification outcome alongside targeted test failure lines ($800$ tokens) to generate the schema-constrained patch.
+To compare these interfaces rigorously, an evaluation must hold all external variables constant: identical model checkpoint, identical repository test fixtures, identical tool execution environment, and equal total token and latency budgets.
 
-### Performance Metrics and Failure Analysis
+The evaluation records six core systems metrics:
+- **Structural Validity Rate (%):** Percentage of returned responses that parse cleanly without syntax or schema exceptions.
+- **Token Consumption ($M$ and $K$):** Exact prompt and completion tokens expended per repair attempt.
+- **Time to First Token (TTFT, p50 and p99):** Responsiveness of the initial phase across latency percentiles.
+- **Total Invocation Latency ($T_{\text{call}}$, p50 and p99):** End-to-end wall-clock time including queuing, decode, and validation.
+- **Refusal / Truncation Rate (%):** Frequency of policy rejections or budget-induced cutoffs.
+- **Downstream Task Acceptance Rate (%):** Percentage of repairs that apply cleanly, pass all regression tests, and fix the defect without introducing side effects.
 
-Performance is measured across seven systems dimensions: Completion Rate ($R_{\text{comp}}$, fraction of invocations returning `Completed` status without transport or timeout failure), Truncation Rate ($R_{\text{trunc}}$), Structural Validity Rate ($R_{\text{struct}}$, fraction of payloads parsing into valid AST diffs or JSON objects), Time to First Token ($P_{50}$ TTFT), Total Turnaround Latency ($P_{99}$), Total Tokens Consumed per task, and Task Success Rate ($R_{\text{task}}$, fraction of generated patches that compile, apply cleanly, and pass the full integration test suite). @tbl-vol3-interface-evaluation details the empirical results.
+The structural and operational trade-offs across these three interface styles are synthesized in @tbl-vol3-interface-evaluation.
 
-| Configuration | Interface Protocol | Structural Constraint | $R_{\text{comp}}$ | $R_{\text{trunc}}$ | $R_{\text{struct}}$ | TTFT $P_{50}$ | Total Latency $P_{99}$ | Tokens / Task | Task Success ($R_{\text{task}}$) | SLA Compliance ($P_{99} \le 5.0\text{ s}$) |
-|:--------------|:-------------------|:----------------------|:------------------|:-------------------|:--------------------|:--------------|:-----------------------|:--------------|:---------------------------------|:-------------------------------------------|
-| **Config A**  | Free-Form Text     | None (Regex parser)   | 92.0%             | 8.0%               | 78.0%               | 0.35 s        | 7.2 s                  | 44,200        | 38.0%                            | Failed                                     |
-| **Config B**  | Direct Schema      | FSM Logit Mask        | 98.0%             | 2.0%               | 100.0%              | 0.38 s        | 4.6 s                  | 41,600        | 68.0%                            | Passed                                     |
-| **Config C**  | Staged Classify    | Enum Mask + Schema    | 98.0%             | 2.0%               | 100.0%              | 0.36 s        | 3.8 s                  | 41,850        | 44.0%                            | Passed                                     |
-: **Processor Interface Evaluation**: Empirical comparison of candidate interface configurations across structural validity, latency percentiles, token consumption, and accepted task success on 50 software fault repair benchmarks. {#tbl-vol3-interface-evaluation}
+| Interface Design | Structural Validity | Token Efficiency | Latency Profile | Downstream Failure Mode to Test |
+|:---|:---|:---|:---|:---|
+| **Free-Form Text** | Moderate (prone to delimiter & parsing errors) | Low (verbose conversational filler) | High total decode latency ($\sum T_{\text{decode}}$) | Markdown parsing failure; hallucinated diff formats; unescaped code blocks. |
+| **Grammar-Constrained Schema** | High (guaranteed by logit masking) | High (dense, strictly typed JSON tokens) | Low decode time; zero reparsing turns | Plausibly valid no-ops; schema forcing (hallucinating values when uncertain). |
+| **Decomposed Two-Stage Probe** | High (specialized schemas per stage) | Variable (short probe saves tokens on abort) | Bimodal: low latency on rejection; high on full repair | Error cascades: incorrect stage-1 classification aborts valid repair path. |
+: **Processor Interface Design Comparison**: Trade-offs across three interface contracts for automated software repair. {#tbl-vol3-interface-evaluation}
 
-The empirical breakdown reveals critical systems trade-offs that aggregate metrics often conceal:
+### Interpreting Interface Trade-Offs
 
-- **Free-Form Text (Config A)** incurs severe tail latency penalties ($P_{99} = 7.2\text{ s}$). Although Time to First Token is fast ($0.35\text{ s}$), verbose explanatory text inflates decode length, occasionally hitting the output token budget and causing an $8.0\%$ truncation rate. More critically, an unconstrained structural validity rate of only $78.0\%$ forces $22.0\%$ of invocations into costly client-side retry cycles, violating the latency SLA.
-- **Direct Schema Constraint (Config B)** achieves the highest task success rate ($68.0\%$). By offloading syntax enforcement to the FSM logit mask, $R_{\text{struct}}$ reaches $100.0\%$, eliminating retry loops and keeping $P_{99}$ latency within the SLA ($4.6\text{ s}$). Because the model generates reasoning tokens directly within the structured envelope, it retains sufficient context to synthesize correct semantic repairs.
-- **Staged Classification (Config C)** delivers the lowest $P_{99}$ latency ($3.8\text{ s}$) by splitting execution: Stage 1 terminates after emitting a single classification token, avoiding long decode overhead on the large repository prompt, while Stage 2 decodes the patch against a small context window. However, task success plummets to $44.0\%$. When Stage 1 misclassifies a subtle lease race as a configuration timeout bug, Stage 2 receives a poisoned diagnostic assumption. It generates a syntactically flawless patch that passes schema validation but fails integration tests.
+The central systems insight from interface evaluation is that **higher structural validity does not automatically deliver higher task success**:
+- A schema-constrained interface eliminates 100% of JSON syntax parsing errors. However, if the schema provides no field for the model to report uncertainty or request additional information, logit masking forces the model to emit an arbitrary, hallucinated file path to satisfy the grammar.
+- A decomposed two-stage probe achieves rapid TTFT and minimizes token waste on non-viable tasks, but if the initial classification misdiagnoses the bug as an environment failure rather than a code error, the agent aborts without attempting a repair.
 
-A faster or more parseable response can worsen end-to-end task success if premature specialization cuts off necessary deliberation. An effective processor interface must make these boundaries explicit. @tbl-vol3-trace-guarantees synthesizes the exact division of responsibilities across the processor and runtime layers.
-
-| Property                   | Enforcing Mechanism            | Stochastic Processor Guarantee                       | Host Runtime Responsibility                           |
-|:---------------------------|:-------------------------------|:-----------------------------------------------------|:------------------------------------------------------|
-| **Syntactic Conformance**  | FSM Logit Masking              | Guaranteed by construction (valid tokens only)       | Validate UTF-8 decoding and schema unmarshaling       |
-| **Factual Truth**          | Pre-training & In-Context Data | Non-binding hypothesis (nonzero hallucination rate)  | Cross-reference citations against ground-truth index  |
-| **Referential Integrity**  | Grammar Patterns / Regex       | Valid string format (e.g., `UUID`, file path syntax) | Verify object existence in live filesystem or DB      |
-| **Authorization & Safety** | System Prompt Policies         | Probabilistic compliance (untrusted output)          | Evaluate capabilities, RBAC, and sandbox boundaries   |
-| **Task Acceptance**        | None (External Environment)    | No guarantee (emissions may fail test harness)       | Execute regression tests and commit state transitions |
-: **End-to-End Property Guarantees**: Verification perimeter separating stochastic core capabilities from runtime obligations. {#tbl-vol3-trace-guarantees}
-
-The stochastic processor interface is now fully specified: it accepts tokenized context, bounds next-token sampling through grammar automata, accounts for prefill and decode cost asymmetries, and emits an explicit status envelope. Yet a single candidate continuation—no matter how strictly constrained—remains fundamentally inadequate when confronting ambiguous, multi-step engineering tasks.
+Engineers must choose interface contracts based on downstream operational guarantees, not superficial text fluency.
 
 ## Fallacies and Pitfalls {#sec-vol3-processor-fallacies}
 
@@ -552,7 +529,7 @@ The stochastic processor interface is now fully specified: it accepts tokenized 
 
 **Fallacy 1**: *One model response is one forward pass.*
 
-Systems developers accustomed to classical RPCs frequently assume an LLM invocation represents a single, monolithic execution kernel. In reality, a model call is partitioned into two physically distinct computational phases: prompt prefill and repeated autoregressive decode. During prefill, all input tokens are evaluated concurrently in dense General Matrix-Matrix Multiplications (GEMMs), saturating compute units. In decode, however, each generated token depends strictly on the prefix that precedes it: token $t+1$ cannot be computed until token $t$ has been sampled and appended to the KV cache. Generating a $500$-token response requires executing 500 distinct sequential forward passes, each operating as a memory-bandwidth-bound General Matrix-Vector Multiplication (GEMV). Treating generation as an atomic operation obscures the fact that decode latency scales linearly with output length, whereas prefill latency scales with input length and batching capacity.
+A model call consists of two distinct computational phases: prompt prefill and autoregressive decode. While prefill evaluates prompt tokens concurrently through parallel GEMM operations, decode requires $K$ sequential forward passes. Each generated token depends causally on all preceding tokens, creating an irreducible serial dependency that bounds generation latency regardless of cluster size.
 
 :::
 
@@ -560,38 +537,40 @@ Systems developers accustomed to classical RPCs frequently assume an LLM invocat
 
 **Pitfall 1**: *Treating a complete invocation as a completed task.*
 
-Conflating an HTTP 200 response or an invocation status of `Completed` with task-level success is a catastrophic failure mode in agent architectures. A status of `Completed` indicates only that the stochastic processor emitted a valid stop sequence or reached its configured stopping criterion without transport interruption. It guarantees nothing about the operational validity, factual grounding, or utility of the payload. In our cache-debugging trace, a model can return a perfectly formatted `Completed` tool call proposing to delete the entire configuration directory. If the host runtime assumes endpoint completion implies environmental success, it bypasses executable verification, introduces context poisoning, and commits unrecoverable side effects to production systems.
+An HTTP `200 OK` response or a `Completed` finish status establishes only that the inference engine terminated its decoding loop normally. It conveys zero guarantee that the proposed code change is correct, that referenced files exist, or that the repair passes regression tests. Ground truth and task acceptance require external verification by the host runtime.
 
 :::
 
 ::: {.fallacy-pitfall}
 
-**Fallacy 2**: *Valid JSON means a safe tool call.*
+**Fallacy 2**: *Valid JSON means a safe and correct tool call.*
 
-Grammar-constrained decoding techniques (such as FSM logit masking) guarantee syntactic conformance to formal schemas by construction. However, developers frequently fall into the trap of equating structural validity with semantic correctness and operational authorization. A grammar mask ensures that an emitted payload adheres to RFC 8259 JSON syntax and populates required schema keys; it cannot verify whether an extracted file path exists, whether a referenced memory address is within bounds, or whether the calling agent possesses write privileges to the target resource. In fact, aggressive masking can increase semantic risk: by eliminating syntactically invalid escape tokens, the decoder forces remaining probability mass onto legal tokens that may execute dangerous or destructive mutations.
+Grammar-constrained decoding enforces character-level and schema-level syntax invariants at the logit surface. It does not evaluate semantic correctness or security authorization. A syntactically perfect JSON payload can still overwrite critical files, exceed capability permissions, or encode an ineffective no-op. Syntactic constraints must be backed by host runtime sandboxing.
 
 :::
 
 ::: {.fallacy-pitfall}
 
-**Pitfall 2**: *Collapsing incomplete, refusal, and transport failure into a generic retry.*
+**Pitfall 2**: *Collapsing incomplete, refusal, and transport failures into a generic retry loop.*
 
-When a model call fails to deliver a usable payload, naive client architectures lump all error codes into an undifferentiated retry loop. This conflates three orthogonal failure mechanisms with opposing recovery semantics. A *transport failure* (such as a TCP drop or HTTP 503) represents transient infrastructure exhaustion properly remediated by exponential backoff. An *incomplete response* indicates that the generation exceeded its token budget ($K = K_{\max}$); retrying the identical prompt will deterministically exhaust the budget again, requiring instead prompt compaction or continuation decoding. A *refusal* indicates that the model's safety classifiers or alignment boundaries rejected the context; repeated retries waste inference compute and risk upstream account suspension. Reliable runtimes must classify status envelopes explicitly and route failures to specialized semantic mitigation routines.
+These outcome classes represent fundamentally distinct failure modes. Transient transport errors (`503` or socket timeouts) warrant bounded retries with exponential backoff and jitter. Refusals require prompt restructuring or escalation. Truncated incomplete calls require context pruning or budget expansion; retrying an incomplete call with an identical budget simply repeats the truncation.
 
 :::
 
 ## Summary {#sec-vol3-processor-summary}
 
-One invocation of a foundation model is a bounded, learned computation with an explicit input, candidate output, caller-visible status, and resource cost. The stochastic processor core does not execute actions or maintain durable state; it emits a conditional probability distribution over discrete tokens conditioned on an input context sequence. Systems software cannot treat generation as committed execution. Instead, the runtime owns context selection, boundary mediation, and the semantic interpretation of returned candidates. Furthermore, the operational characteristics of this core diverge sharply between compute-bound prompt prefill and memory-bandwidth-bound autoregressive decode. Because autoregressive sampling incurs an irreducible sequential latency floor governed by memory bandwidth and arithmetic intensity, systems architects must carefully decouple speculative candidate proposal generation from downstream verification and commit mechanisms. In this architectural model, the foundation model serves not as an authoritative central processing unit, but as a specialized, non-deterministic coprocessor whose emissions must be systematically mediated through grammar-guided decoding, key-value cache memory accounting, and defensive runtime boundaries.
+One foundation-model invocation maps staged subword tokens to a candidate sequence through repeated conditional next-token computation. The model serves as the unprivileged **stochastic processor core** of the Stochastic Computer: it computes vocabulary probabilities and proposes candidate continuations, but possesses zero ambient authority to execute actions, mutate files, or verify facts.
+
+The inference service manages tokenization, batching, grammar logit masking, and the autoregressive decode loop, packaging tokens and usage records into an envelope returned to the caller. The agent runtime owns context selection, resource limits, and the deterministic verification perimeter that validates and authorizes all system actions.
 
 ::: {.callout-takeaways title="Core Systems Principles of the Stochastic Processor"}
-1. *Tokens are the accounting and execution units of the model interface.* Subword tokenization defines context capacity, memory allocation, network transport overhead, and monetary cost. All latency, throughput, and memory bounds must be tracked in tokens rather than source characters.
-2. *A response is generated through repeated conditional next-token steps.* Prompt prefill evaluates input tokens concurrently as compute-bound GEMM, but decoding serializes execution step-by-step as memory-bandwidth-bound GEMV. Decode latency scales linearly with generated token count.
-3. *Likelihood and structural validity do not establish task correctness or authority.* A highly probable, syntactically conforming JSON payload can remain factually false, unauthorized, or operationally destructive. Ground truth and state commitment must be verified externally.
-4. *Caller-visible status and usage are part of the interface contract.* A robust invocation contract normalizes completed, truncated, refusal, and transport failure envelopes. Runtime recovery policies must distinguish transient network drops from deterministic token exhaustion and safety refusals.
-5. *Prefill and decode expose different latency and memory regimes.* High-context agent workloads are overwhelmingly prefill-dominated. Optimizing agent responsiveness requires prioritizing KV cache prefix reuse, prompt budgeting, and state virtualization over raw output generation throughput.
+1. *Tokens are the accounting and execution currency of the processor.* Subword tokenization operates orthogonally to programming language ASTs and character counts. Context limits and generation ceilings must be budgeted in exact token tensors.
+2. *A response is generated through causally serialized next-token steps.* While prompt prefill is parallel and compute-bound, autoregressive decode is serial and memory-bandwidth bound ($I_{\text{decode}} \approx 1\text{ FLOP/byte} \ll I_{\text{sat}}$), creating an irreducible latency floor.
+3. *Likelihood and structural validity do not establish correctness or authority.* High sequence probability reflects statistical typicality, not truth. Syntactically valid JSON can encode destructive or ineffective actions.
+4. *Invocation status must be evaluated through a layered contract.* Runtimes must distinguish completed responses, truncated fragments, safety refusals, and transport disruptions, applying outcome-specific recovery rules.
+5. *Prefill and decode expose distinct physical bottlenecks.* On large-context workloads ($M \gg K$), prefill dominates call duration; optimizing decode throughput yields diminishing returns under Amdahl's Law, establishing prefix caching as the highest-leverage systems optimization.
 :::
 
 ::: {.callout-chapter-connection title="From One Candidate to Deliberate Computation"}
-When the first candidate continuation is ambiguous, unverified, or flawed, a single-pass invocation fails to provide adequate reliability for autonomous systems. The runtime must allocate additional inference-time computation across generation length, candidate diversity, automated verification, or environmental feedback loops. In @sec-vol3-deliberation, we examine how to orchestrate multi-path exploration, step-level verification, and dynamic replanning over the stochastic processor to trade latency and compute for task-level correctness.
+A single model invocation produces one speculative candidate sequence. When that candidate is ambiguous, incomplete, or fails runtime verification, the agent system cannot rely on simple prompt re-issuance. The next chapter examines how the runtime allocates additional inference-time computation—through multi-candidate search, speculative drafting, external tool interaction, and deliberate verification loops—to transform stochastic proposals into dependable systems outcomes.
 :::
