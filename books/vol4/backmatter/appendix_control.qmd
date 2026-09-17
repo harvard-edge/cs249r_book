@@ -16,6 +16,7 @@ Consult this appendix when encountering specific physical systems bottlenecks, c
 | Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties            |
 | Physics simulation diverges or sim-to-real transfer fails during mechanical contact          | @sec-appendix-control-contact      | Linear Complementarity Problem (LCP) formulation and non-smooth impact mechanics |
 | Sensor occlusions or unobservable states cause state estimation uncertainty to diverge       | @sec-appendix-control-covariance   | Continuous Lyapunov covariance propagation and Lie derivative observability rank |
+| Teleoperation or compliant contact chatters due to transport delay                           | @sec-appendix-control-passivity    | Passivity conditions, wave variables, and energy-bounded interaction             |
 | Underactuated legged or humanoid robots balance dynamic momentum across multi-contact points | @sec-appendix-control-centroidal   | Centroidal momentum equations and hierarchical Whole-Body Control QP             |
 
 ## Safety and Control Barrier Functions {#sec-appendix-control-cbf}
@@ -270,6 +271,36 @@ $$
 \end{aligned}
 $$
 Because this QP is convex, active-set or interior-point solvers resolve joint accelerations $\ddot{\mathbf{q}}$ and feedforward torques $\boldsymbol{\tau}$ deterministically within $1.0\text{ ms}$, ensuring that learned policy setpoints never cause foot slippage or dynamic tipping.
+
+## Passivity and Energy-Bounded Interaction {#sec-appendix-control-passivity}
+
+When physical AI systems interact with humans (such as teleoperation data collection in @sec-data) or with stiff environments (such as precision contact assembly), transport latency in communication buses and neural inference introduces severe instability hazards. In linear and nonlinear systems theory, **passivity**\index{Passivity!energy storage}\index{Passivity theorem!feedback stability} provides a fundamental, physics-grounded framework to guarantee stability regardless of parameter uncertainty.
+
+### Energy storage and the passivity definition
+
+Consider a continuous-time dynamical system with state $\mathbf{x}(t)$, control input $\mathbf{u}(t)$ (an effort variable, such as force or torque $\mathbf{F}$), and measured output $\mathbf{y}(t)$ (a flow variable, such as velocity $\mathbf{v}$). The system is defined as **passive** if there exists a continuously differentiable, non-negative storage function $V(\mathbf{x}) \ge 0$ (representing the total internal physical energy stored in mass momentum and structural compliance) such that:
+$$\dot{V}(\mathbf{x}) \le \mathbf{u}(t)^\top \mathbf{y}(t) - g(\mathbf{x})$$ {#eq-control-passivity-derivative}
+where $\mathbf{u}(t)^\top \mathbf{y}(t)$ represents instantaneous power injected into the system, and $g(\mathbf{x}) \ge 0$ denotes internal energy dissipation (such as mechanical damping or electrical resistance). Integrating @eq-control-passivity-derivative over any operational duration $[0, T]$ yields the fundamental passivity energy inequality:
+$$\int_0^T \mathbf{u}(t)^\top \mathbf{y}(t) \, dt \ge V(\mathbf{x}(T)) - V(\mathbf{x}(0)) \ge -V(\mathbf{x}(0)) = -c^2$$ {#eq-control-passivity-integral}
+The physical meaning is absolute: a passive system cannot generate energy from nothing. The maximum net energy an observer or environment can extract from the system is strictly bounded by its initial stored energy $c^2$.
+
+By the **Passivity Theorem**, the negative feedback interconnection of any two passive systems is unconditionally stable. Because passive mechanical objects (such as tables, workpieces, and human arms) cannot generate energy, a robot whose controller is certified to be passive can never destabilize the physical environment—even under severe model mismatch or unexpected contact.
+
+### The transport delay destabilization hazard
+
+In physical AI systems, transport latency breaks this passivity guarantee. Consider a delayed command-response loop where master force $\mathbf{F}_m(t)$ is transmitted to a follower robot across latency $\tau_d$, and delayed reaction force $\mathbf{F}_s(t - \tau_d)$ is returned to the operator. In the frequency domain, a pure time delay introduces phase lag $\Delta \phi = -\omega \tau_d$. When phase lag exceeds $90^\circ$ ($\pi/2\text{ rad}$), the apparent mechanical impedance exhibits negative real parts.
+
+Physically, the delayed reaction force arrives late, continuing to push the operator or workpiece in the direction of motion while they are already decelerating or retracting. The delayed feedback injects virtual energy into the mechanical loop ($\int \mathbf{F}(t)^\top \mathbf{v}(t) \, dt < 0$), violating @eq-control-passivity-integral and exciting high-frequency limit cycles that chatter violently against rigid contact surfaces.
+
+### Passivity preservation via wave variables
+
+To preserve passivity across arbitrary communication or inference delays, @anderson1989bilateral formulated the **wave variable transformation**\index{Wave variables!time delay passivity}. Rather than transmitting raw effort ($\mathbf{F}$) and flow (velocity $\mathbf{\dot{x}}$) directly across delayed buses, the interface maps power variables into incoming and outgoing wave variables ($\mathbf{u}, \mathbf{w}$) parameterized by characteristic impedance $b > 0$:
+$$\mathbf{u}_m(t) = \frac{\mathbf{F}_m(t) + b \mathbf{\dot{x}}_m(t)}{\sqrt{2b}}, \quad \mathbf{w}_m(t) = \frac{\mathbf{F}_m(t) - b \mathbf{\dot{x}}_m(t)}{\sqrt{2b}}$$ {#eq-control-wave-variables}
+Computing instantaneous power from the wave transformation in @eq-control-wave-variables reveals:
+$$P_m(t) = \mathbf{F}_m(t)^\top \mathbf{\dot{x}}_m(t) = \frac{1}{2} \|\mathbf{u}_m(t)\|^2 - \frac{1}{2} \|\mathbf{w}_m(t)\|^2$$
+When transmitted across an arbitrary time delay $\tau_d$, the delayed wave variable satisfies $\mathbf{u}_s(t) = \mathbf{u}_m(t - \tau_d)$. The total energy delivered to the remote slave robot over any window is bounded by the energy entering the communication channel:
+$$\int_0^T P_s(t) \, dt = \int_0^T \left( \frac{1}{2} \|\mathbf{u}_s(t)\|^2 - \frac{1}{2} \|\mathbf{w}_s(t)\|^2 \right) dt \le \int_0^T P_m(t) \, dt$$
+Because the delayed communication channel acts as a passive transmission line that cannot produce energy, the coupled teleoperation and learning pipeline is mathematically guaranteed to remain passive and stable for any constant or time-varying communication delay.
 
 ## Further Reading
 
