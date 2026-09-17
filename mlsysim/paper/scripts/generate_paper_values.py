@@ -111,7 +111,6 @@ from mlsysim.solvers import (  # noqa: E402
     SustainabilityModel,
     SynthesisSolver,
     TopologyModel,
-    TrainingMemoryModel,
     TransformationModel,
     WeightStreamingModel,
 )
@@ -945,7 +944,7 @@ def section_researchers(V: Values) -> None:
         except ValueError:
             p *= 2
     require(min_pp is not None, "R4: no pipeline depth is memory-feasible")
-    tp_max, params = f2k.node.accelerators_per_node, gpt3.parameters.m_as("count")
+    tp_max = f2k.node.accelerators_per_node
 
     def state_gb(pp):  # replica training state (activations included) the optimizer checks at TP = node size
         dp = f2k.total_accelerators // (tp_max * pp)
