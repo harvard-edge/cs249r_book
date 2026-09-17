@@ -69,36 +69,8 @@ Every step in an agent's trajectory proceeds through a four-stage invocation lif
    - **Usage Accounting:** Verified prompt token count, decode token count, and execution latency breakdowns.
 4. **Interpretation and Action Dispatch:** The agent runtime inspects the returned envelope. It verifies structural validity, evaluates whether the proposed candidate satisfies task invariants, and determines the next system action.
 
-::: {#fig-stochastic-processor-core}
-```{mermaid}
-%%| fig-cap: "The four-stage lifecycle of a single foundation-model invocation. The agent runtime stages context and budgets; the inference service evaluates the learned model across prefill and decode; the service returns a candidate payload with status and resource usage; and the runtime interprets the proposal to decide the next action."
-sequenceDiagram
-    autonumber
-    participant Runtime as Agent Runtime (Caller)
-    participant Service as Inference Service (Serving)
-    participant Model as Learned Model (Core)
-
-    Note over Runtime: 1. Context Staging & Budgeting
-    Runtime->>Service: Dispatch Request(Context, K_max, T_max, Model_ID)
-
-    activate Service
-    Note over Service,Model: 2. Scoring & Candidate Generation
-    Service->>Model: Forward Pass(Prefill Staged Tokens)
-    Model-->>Service: Initial Next-Token Logits
-    loop Autoregressive Decode Loop (until stop condition)
-        Service->>Service: Sample Token y_t & Update KV Cache
-        Service->>Model: Forward Step(y_t)
-        Model-->>Service: Logits z_{t+1}
-    end
-
-    Note over Service: 3. Response Packaging
-    Service-->>Runtime: Response Envelope(Candidate, Status, Token Usage, Latency)
-    deactivate Service
-
-    Note over Runtime: 4. Interpretation & Action Dispatch
-    Runtime->>Runtime: Validate Schema & Permissions
-    Runtime->>Runtime: Decide Next Step (Execute Tool, Reprompt, or Terminate)
-```
+::: {#fig-stochastic-processor-core fig-env="figure" fig-pos="htb" fig-cap="**Lifecycle of a Stochastic Processor Invocation**: The four-stage operational boundary governing a model call. The agent runtime stages context and enforces token and deadline budgets; the inference service coordinates dense GEMM prompt prefill and memory-bound GEMV decode steps; the service packages the candidate into a normalized status envelope; and the runtime validates the proposal before authorizing execution." fig-alt="Architectural schematic illustrating the four stages of a foundation model invocation across Agent Runtime, Inference Service, and Learned Model."}
+![](images/svg/invocation_lifecycle.svg){width=100%}
 :::
 
 ### The Unprivileged Proposal: A Concrete Systems Hook
@@ -202,28 +174,8 @@ A critical systems distinction in the Stochastic Computer is the difference betw
 1. **A Single Step:** A single forward pass through the network evaluates attention over existing state and emits next-token logit scores $\mathbf{z}_t$. It is an atomic numerical transform.
 2. **A Complete Response:** Response generation is an iterative control loop executed by the model serving harness. It repeatedly invokes the step transform, samples $y_t$, appends $(k_t, v_t)$ to serving memory, checks termination predicates (such as emitting an `<|eot_id|>` token, reaching an explicit stop string, or hitting $K_{\max}$), and loops until halted.
 
-::: {#fig-autoregressive-loop fig-env="figure" fig-pos="htb" fig-cap="**Autoregressive Serialization Loop**: The causal execution loop of autoregressive token generation. Each generated token requires a discrete accelerator forward pass, memory state update, and non-deterministic sampling before the subsequent step can initiate." fig-alt="Flowchart illustrating the causal loop of autoregressive decoding, showing forward pass, KV cache mutation, and serial dependency."}
-```mermaid
-flowchart LR
-    subgraph StepT ["Step t: Forward Pass and Sample"]
-        direction TB
-        KVCache["Serving KV State for Tokens 1 to t-1"] --> Attn["Causal Multi-Head Attention"]
-        CurToken["Current Input Token y_t-1"] --> Attn
-        Attn --> Proj["Feed-Forward and Logit Projection"]
-        Proj --> Logits["Output Logits z_t"]
-        Logits --> Sample["Softmax and Categorical Sampling"]
-        Sample --> NewToken["Sampled Token y_t"]
-    end
-
-    subgraph StateUpdate ["Serving State Update"]
-        direction TB
-        NewToken --> AppendKV["Append k_t and v_t to Attention State"]
-        AppendKV --> CheckStop["Check Stop Criteria (EOS, Max Tokens)"]
-        CheckStop --> SerialLoop["Form Input Prefix for Step t+1"]
-    end
-
-    SerialLoop -->|"Irreducible Causal Dependency"| StepT
-```
+::: {#fig-autoregressive-loop fig-env="figure" fig-pos="htb" fig-cap="**Autoregressive Serialization Loop**: The causal execution loop of autoregressive token generation. Each generated token requires a discrete accelerator forward pass, memory state update, and non-deterministic sampling before the subsequent step can initiate, creating an irreducible sequential latency floor." fig-alt="Architectural diagram showing the forward pass, serving KV cache mutation, and the causal dependency barrier that serializes decode steps."}
+![](images/svg/autoregressive_serialization_loop.svg){width=100%}
 :::
 
 ### The Irreducible Serial Dependency Chain
@@ -268,31 +220,8 @@ Similarly, when diagnosing a distributed cache stale-read anomaly, the model may
 
 The shape of the categorical probability distribution across the vocabulary simplex is controlled by the temperature parameter $\tau$, as illustrated in @fig-temperature-simplex.
 
-::: {#fig-temperature-simplex fig-env="figure" fig-pos="htb" fig-cap="**Thermal Scaling on the Probability Simplex**: The effect of temperature scaling on logit transformation and categorical sampling. Low temperature sharpens the distribution onto the mode, whereas high temperature disperses probability mass across the vocabulary simplex." fig-alt="Flowchart showing raw logits, temperature division, softmax normalization, and three sampling regimes."}
-```mermaid
-flowchart LR
-    subgraph LogitSpace ["1. Raw Model Output"]
-        Z["Logit Vector z_t in R^|V|"]
-    end
-
-    subgraph TempScaling ["2. Thermal Scaling: z_i / tau"]
-        direction TB
-        TZero["tau -> 0 (Greedy Argmax)"]
-        TMed["tau ~ 0.7 (Balanced Search)"]
-        THigh["tau -> inf (Uniform Noise)"]
-    end
-
-    subgraph ProbSimplex ["3. Probability Simplex Delta^|V|-1"]
-        direction TB
-        PZero["Dirac Delta: P(mode) = 1.0"]
-        PMed["Calibrated Multinomial Distribution"]
-        PHigh["Uniform Distribution: P(w_i) = 1 / |V|"]
-    end
-
-    Z --> TZero --> PZero
-    Z --> TMed --> PMed
-    Z --> THigh --> PHigh
-```
+::: {#fig-temperature-simplex fig-env="figure" fig-pos="htb" fig-cap="**Thermal Scaling on the Probability Simplex**: The transformation of raw model logits under temperature scaling $\tau$. Low temperature sharpens the distribution onto the mode with zero entropy, balanced temperature enables structured exploration, and high temperature flattens probability across the vocabulary simplex, inducing syntax fragmentation." fig-alt="Diagram showing raw logits transformed by three temperature regimes into Dirac delta, calibrated multinomial, and uniform diffuse probability simplex profiles."}
+![](images/svg/temperature_simplex_scaling.svg){width=100%}
 :::
 
 When $\tau \to 0^+$, the softmax operator approaches the argmax function:
