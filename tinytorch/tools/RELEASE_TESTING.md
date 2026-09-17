@@ -165,7 +165,7 @@ All three must agree.
    exercises for 91 points) to 90 (module 01, one exercise). Module totals span
    54 to 220. Deliberate authorial decision, not yet normalized.
 4. **Book-authored examples and explanatory claims.** Symbol-derived narrative
-   listings are synchronized by `narrative_book/tools/listings.py --check`; that
+   listings are synchronized by `book/tools/listings.py --check`; that
    does not validate surrounding prose, figures, or separately authored examples.
 
 ---

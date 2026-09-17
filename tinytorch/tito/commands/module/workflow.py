@@ -238,7 +238,7 @@ class ModuleWorkflowCommand(BaseCommand):
         path_group.add_argument(
             '--guide',
             action='store_true',
-            help='Path to module Lab Guide chapter (quarto/modules/NN_xxx.qmd)'
+            help='Path to module Lab Guide chapter (guide/modules/NN_xxx.qmd)'
         )
 
     # Module mapping and normalization now imported from core.modules
@@ -1790,7 +1790,7 @@ if missing:
         elif source:
             target = project_root / "src" / folder / f"{folder}.py"
         elif guide:
-            target = project_root / "quarto" / "modules" / f"{folder}.qmd"
+            target = project_root / "guide" / "modules" / f"{folder}.qmd"
         else:
             self.console.print("[red]❌ Specify --notebook, --source, or --guide[/red]")
             return 1

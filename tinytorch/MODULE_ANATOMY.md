@@ -44,9 +44,9 @@ module or a milestone imports must carry `#| export` or `#| exporti`, and every
 `solution: true` cell must carry one on its first line (gate:
 `package: every solution cell opens with an export directive`).
 
-The chapter listings in `narrative_book/` quote the source by symbol name, so a
+The chapter listings in `book/` quote the source by symbol name, so a
 renamed class or function must be followed by
-`python3 narrative_book/tools/listings.py` to regenerate the quotes and
+`python3 book/tools/listings.py` to regenerate the quotes and
 `--check` to confirm they match.
 
 ## 2. The spine: thirteen sections, one order
@@ -303,7 +303,7 @@ are not relitigated one module at a time.
 python3 -m tito.main dev export --all         # regenerate reference notebooks and exports
 python3 tools/release_check.py --fast          # 33 gates (two slow gates omitted)
 python3 tools/validate_nbgrader_config.py      # expect Passed: 20, Failed: 0
-python3 narrative_book/tools/listings.py --check
+python3 book/tools/listings.py --check
 python3 tools/release_check.py                 # adds the notebook run and full pytest
 ```
 
