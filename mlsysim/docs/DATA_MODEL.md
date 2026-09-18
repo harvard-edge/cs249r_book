@@ -17,7 +17,7 @@ that populate Layers A–D of that stack.
 |-----|----------|------|
 | Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Embodied.*`, … | Chip/board/appliance specs (datasheet truth). **Canonical paths only** — no bare `Hardware.H100`. |
 | Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*` | Cyber-physical machine platforms and archetypes across the four Physical AI classes. |
-| Agents | `Agents.Coding.*`, `Agents.Deliberation.*`, `Agents.MultiAgent.*`, `Agents.Interactive.*` | Agentic ML system profiles, execution harnesses, and test-time search architectures. |
+| Agents | `Agents.Coding.*`, `Agents.Deliberation.*`, `Agents.MultiAgent.*`, `Agents.Interactive.*`, `Agents.Platforms.*` | Agentic ML system profiles, execution harnesses, deliberation search architectures, and reference execution platforms. |
 | Models | `Models.*` | Workloads and architectures (parameters, layers, FLOPs). |
 | Datasets | `Datasets.*` | Data zoo — ImageNet, MNIST, CIFAR, etc. |
 | Platforms | `Platforms.*` | Abstract deployment envelopes (RAM, storage, latency ranges). Replaces `Systems.Tiers`. |
@@ -66,6 +66,8 @@ validated before they reach solver equations.
 flowchart TB
   subgraph zoos [Zoos]
     Hardware
+    Embodied
+    Agents
     Models
     Datasets
     Platforms
@@ -85,6 +87,9 @@ flowchart TB
   Hardware --> Systems
   Platforms --> Systems
   Infrastructure --> Systems
+  Systems --> Agents
+  Systems --> Embodied
+  Models --> Agents
   Models --> physics
   Datasets --> physics
   units --> physics

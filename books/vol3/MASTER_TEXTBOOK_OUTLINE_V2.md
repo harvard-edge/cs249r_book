@@ -26,9 +26,10 @@ To prevent content from drifting into either an abstract linguistics tutorial or
 ### 1. The Middle Ground: Systems Engineering, Not NLP and Not Silicon
 - **Audience Stance (The MLSys Graduate Student):** The reader already understands computer systems and machine learning systems basics (transformers, attention mechanisms, GPU architectures, weight matrices, and CUDA). We are not teaching introductory deep learning, and we do not recite GPU marketing datasheets. We teach how to engineer autonomous, verifiable, cost-effective agentic systems around a stochastic processor core.
 - **Pedagogical Exposition Law (Concept First, Progressive Grounding Second):**
-  - Always explain the **conceptual systems architecture first**: execution models, control loops, interface contracts, state transitions, authority boundaries, error envelopes, and mechanical verification perimeters.
-  - **No Premature Hardware Vomit:** Never open a section or paragraph with raw silicon acronym dumps ("staged in accelerator High Bandwidth Memory (HBM)..."). Open with the systems problem, computational interface, or control loop.
-  - **Progressive Grounding:** Ground the conceptual architecture *slowly and progressively* into hard, applicable systems realities (latency scaling, memory bounds, serialization limits, operational failure) as the section develops, or in dedicated hardware/cost sections.
+  - Explain the **native mechanism** in terms students can recognize: what the model computes, what state or interface it uses, and what behavior follows. Then explain the surrounding runtime's contract, authority boundary, and failure modes. Derive physical cost only when it changes the section's decision or in a dedicated cost section.
+  - Open with the governing systems problem or computational interface, not an unexplained hardware specification. Introduce tokens, attention, prefill, decode, KV state, or sampling accurately before turning them into latency, memory, or throughput claims.
+  - A mechanism's definition, its correctness or capability limits, its implementation, and its measured performance are different claims. Keep them distinguishable even when a worked example connects them.
+- **Concept–Performance Separation (Chapter Review Rule):** For each chapter, check that students can answer *what the mechanism is* before being asked *when it is fast, slow, costly, or worth optimizing*. A logical context window is a bounded token sequence, not an HBM allocation policy; a KV cache is reusable attention state, not PagedAttention; a tool call is a proposed operation, not a particular RPC transport; an agent trajectory is a control loop, not a GPU scheduling regime. State the workload, model architecture, batch or concurrency level, deployment boundary, and measured or assumed resource when a performance claim depends on them. Label lower bounds, illustrative estimates, and empirical observations as such. Do not require all of these steps in every section: develop the concept in its owning section and the cost where it becomes relevant.
 - **It is NOT an NLP Linguistics Book:** We do not teach linguistic morphology, speech, human conversational flow, or superficial prompt engineering tricks. Emitting fluent text is fundamentally distinct from solving an operational engineering problem.
 - **It is NOT an Operating System or CPU Silicon Book:** We do not force artificial 1-to-1 metaphors that pretend an attention layer is literally an x86 ALU, that tokens are "micro-instructions", or that token IDs are binary opcodes. Tokens are discrete integer symbols and embedding gather addresses, not executable instructions; the neural core has no instruction decoder or arithmetic register file.
 - **The 30,000-Foot Architectural Mental Model:**
@@ -36,27 +37,27 @@ To prevent content from drifting into either an abstract linguistics tutorial or
   - It is **NOT** required or intended that each and every chapter and section be tied down to low-level silicon processor execution details. Maintain the unifying systems abstraction.
   - When discussing the stochastic processor core, it is fundamentally the LLM, the BPE tokenizer, the autoregressive decode loop, and logit sampling. Talk about it as if the system is doing these things, using clean, first-principles ML systems language, without getting bogged down in gratuitous mathematical notation for explaining everyday engineering realities.
 
-- **The Central Role of the Host CPU in Agentic Systems:**
-  - In traditional standalone deep learning serving, the host CPU acts merely as a dormant orchestrator streaming batches to an accelerator. In **Agentic Machine Learning Systems, the Host CPU is an active co-processor and primary execution engine**.
-  - The Host CPU directly executes:
+- **The Central Role of the Host Runtime in Agentic Systems:**
+  - The host runtime owns trajectory control and mediates model and tool services. Depending on deployment, those services may run on the same node or across network boundaries; CPU work and accelerator work must be accounted for at their actual locations.
+  - In a local reference implementation, host CPUs execute or coordinate:
     1. The Agent Runtime and control plane (task lifecycle, state machines, scheduling, priority queues).
     2. Input tokenization and output detokenization.
     3. Parameter serialization, JSON schema validation, and structured output parsing.
     4. Sandbox isolation and environment management: process spawning, container/microVM lifecycle (namespaces, cgroups, seccomp filters), virtual file system overlays, and network filtering.
     5. Deterministic invariant verification: running compilers (`gcc`, `rustc`), test suites (`pytest`), linters, AST syntax checkers, and Git repository operations.
     6. Local embedding models, vector similarity indexing, and trajectory metadata logging (e.g., SQLite/PostgreSQL WAL).
-  - **The Alternating GPU-CPU Duty Cycle:** Agent execution alternates between accelerator-dominated phases (generating reasoning tokens and candidate tool calls, where GPU memory bandwidth is saturated and CPU waits) and Host-CPU-dominated phases (executing tools, running test suites, diffing code repositories, where the GPU sits idle while CPU cores, host memory bandwidth, and IPC pipes are 100% saturated).
-  - **System Co-Design & Benchmarking:** Agentic ML systems benchmarks (such as SWE-bench or WebArena) and fleet capacity planning (Chapters 16 & 17) must profile and dimension both accelerator resources and Host CPU / RAM / I/O resources; in many production workflows, host execution time exceeds model generation time.
+  - **The Alternating Duty Cycle:** A trajectory may alternate among model generation, tool execution, network waits, verification, and human waits. These phases have different resource demands. A shared inference service can serve other requests while one trajectory waits; whether its KV state stays resident is a cache-policy decision.
+  - **System Co-Design & Benchmarking:** Agentic ML systems benchmarks and fleet capacity planning (Chapters 16 & 17) must measure model serving, host execution, I/O, and waiting separately before naming the bottleneck.
 
-- **It IS a Systems Engineering Book for Agentic AI:** We call native concepts by their real names (**tokens, BPE, context windows, autoregressive loops, logit sampling, grammar masks, KV caches, prefill, and decode**), but we explain every single one as a **Computer Science and Systems problem**:
-  - **Tokens & BPE:** Data representation and compression edge cases. BPE is a statistical byte-merging algorithm that causes boundary fragmentation, fuses indentation (`" def"` vs `"def"`), and fractures syntax. Token counts do not correspond to character counts, creating unpredictable memory budget consumption.
-  - **Context Window:** A hard physical buffer capacity ($M + K \le L_{\max}$). Exceeding it causes allocation faults and mid-execution truncation crashes.
-  - **Autoregressive Loop:** A serialized execution loop with an irreducible latency penalty. Token $t$ causally depends on token $t-1$; output generation cannot be parallelized across cores.
+- **It IS a Systems Engineering Book for Agentic AI:** Call native concepts by their real names (**tokens, BPE, context windows, autoregressive loops, logit sampling, grammar masks, KV caches, prefill, and decode**). Explain each mechanism accurately, then show the Computer Science and systems decisions it creates:
+  - **Tokens & BPE:** Token IDs are the model's discrete input and output representation; BPE is one tokenizer construction method. Exact identifiers, indentation, and serialization can split differently from compiler tokens, so count tokens with the selected tokenizer before budgeting.
+  - **Context Window:** The maximum token span available to an invocation ($M + K \le L_{\max}$); the serving implementation determines physical allocation and its over-limit behavior must be handled by the invocation contract.
+  - **Autoregressive Loop:** A causal dependency between successive output tokens. That dependency limits one sequence's generation depth; serving systems can batch work across independent sequences and may use specialized acceleration within a step.
   - **The Invocation Contract:** A typed client-server RPC contract with explicit resource budgets ($K_{\max}, T_{\max}$) and a normalized 4-outcome status envelope (`COMPLETED`, `TRUNCATED`, `REFUSED`, `TRANSPORT_FAILURE`). An HTTP `200 OK` indicates transport delivery, not task completion. Truncated output must be quarantined and discarded.
-  - **Grammar Constraints:** Decode-time logit masking executed by the Inference Service on device memory. Compiling schemas into state machines guarantees syntactically valid brackets, but provides zero semantic truth or security authorization.
-  - **Prefill vs. Decode:** Hardware execution bottlenecks on the Roofline curve. Parallel compute-bound GEMM (fast) vs. serial memory-bandwidth-bound GEMV (slow, shuttling weights $\Theta$ from memory for every token). Single-agent loops face the $B=1$ serialization wall, and prefix caching via Radix trees is the dominant systems lever.
+  - **Grammar Constraints:** A serving implementation may restrict next-token choices with a grammar. A completed output can then satisfy the enforced syntax; truncation, semantic correctness, and authorization remain separate concerns.
+  - **Prefill vs. Decode:** First explain prompt processing and successive token generation. Then analyze arithmetic intensity, memory traffic, batching, prefix reuse, and latency for a stated model and serving workload; no one optimization is universally dominant.
   - **Tool Actuation & Sandboxing:** Mediated system calls crossing an unprivileged proposal boundary into an isolated, disposable execution environment.
-  - **Mechanical Verification:** Invariant closure enforced by deterministic software (compilers, test runners, exit codes), never subjective model self-evaluation.
+  - **Verification and Acceptance:** Enforceable constraints belong in deterministic runtime controls. Compilers and tests provide evidence within their coverage; open-ended task quality may also require calibrated human assessment. A model's self-assessment alone does not establish completion.
 
 ### 2. How to Use Classical Systems Analogies
 Classical architecture analogies (instruction registers, DMA staging buffers, system calls, protection rings, process control blocks) are powerful teaching tools, but they should be used as **illuminating bridges and margin notes/footnotes** (e.g., *"Analogous to a fixed-size staging buffer in classical I/O..."*), not as a rigid structural straitjacket.
@@ -65,13 +66,19 @@ Classical architecture analogies (instruction registers, DMA staging buffers, sy
 The book's mission is to build a durable systems mental model of how the machine behaves under load. Maintain the 30,000-foot systems engineering altitude: explain what the system is doing, why it matters, and how components interact using first-principles, basic ML systems concepts. Avoid dense multi-page calculus proofs, continuous integrals, or gratuitous Greek-letter notation for explaining everyday systems realities. Ground every derivation in physical, observable quantities: megabytes of memory, memory bus bandwidth (GB/s), serial latency fractions, and Amdahl's Law.
 - **The Law of Constant Provenance:** NEVER drop an unexplained constant or coefficient (e.g., $2$, $4$, $d_{\text{head}}$) into a mathematical equation without a one-sentence physical derivation in the immediate text. (e.g., the factor of 2 in $2|\Theta|M$ is 1 multiply + 1 accumulate in fused multiply-add arithmetic; the factor of 2 in KV cache accounts for storing Key $\mathbf{K}$ and Value $\mathbf{V}$ tensors).
 
+#### The Engineer's Napkin Estimate
+
+Teach students to make a useful decision before they have a simulator or a benchmark. At natural decision points across the seven Parts, include a short, worked order-of-magnitude estimate: state the workload and assumptions; write the few governing quantities with units; calculate a plausible bound or range; identify the dominant term; and say what measurement would test the estimate. A numerical result matters only when it changes an architectural choice. Show sensitivity to uncertain inputs and distinguish a lower bound from expected observed performance. Use `mlsysim` for canonical hardware parameters and executable examples, but let the student see the arithmetic and assumptions before the code. Do not manufacture a calculation for every section or present a precise simulated output as a timeless law.
+
+Illustrative decisions include whether another candidate is worth its verification cost (Part I); how many concurrent trajectories fit in KV memory (Part II); whether tool startup or isolation overhead matters at the expected call rate (Part III); how many trajectories a supervisor can keep in flight under tool and human waits (Part IV); whether verifier throughput can keep up with training rollouts (Part V); whether delegation shortens the critical path and what an accepted task costs (Part VI); and which single bottleneck to address first in the capstone (Part VII). These are examples, not required beats or fixed workloads.
+
 ### 4. Strict Subsystem Ownership & Negative Scope Invariants (No Topic Bleed)
 
 To build a coherent 18-chapter computer systems architecture, every topic, data structure, and mechanism has exactly **ONE primary architectural home**.
 
 - **The Principle of Single Subsystem Responsibility:**
   - **Chapter 01 (Introduction):** The whole-system trajectory architecture, Software 3.0 paradigm, H-S-A-C 4D coordinate space, and Amdahl's Law for trajectories.
-  - **Chapter 02 (The Stochastic Processor Core):** Discrete token representation (BPE), autoregressive next-token decode loop, typed client-server RPC invocation contract with 4-outcome status envelope (`COMPLETED`, `TRUNCATED`, `REFUSED`, `TRANSPORT_FAILURE`), decode-time logit masking via DFAs/PDAs, and accelerator Roofline hardware cost (GEMM prefill vs. GEMV decode, $B=1$ serialization wall).
+  - **Chapter 02 (The Stochastic Processor Core):** Discrete token representation, autoregressive next-token generation, typed invocation contract with a normalized status envelope, optional decode-time grammar constraints, and a conditional prefill/decode cost model for a stated serving workload.
   - **Chapter 03 (Inference-Time Deliberation):** Test-time compute allocation across depth, breadth, and feedback; search topologies (sample-and-select, Best-of-$N$, bounded tree search); verifier mechanics and failure modes (ORMs, PRMs, Goodhart over-optimization); revisable plans as state; and stopping rules.
   - **Chapter 04 (Context-Window Working Memory):** Logical working-set selection, prompt context assembly, working set compaction, lost-in-the-middle degradation, and context invalidation.
   - **Chapter 05 (The KV-Cache Hierarchy):** Physical KV-cache memory allocation, PagedAttention virtual memory block tables, prefix sharing via Radix trees, multi-tier swapping to host DRAM, and Tool-Wait memory management.
@@ -90,8 +97,8 @@ To build a coherent 18-chapter computer systems architecture, every topic, data 
   - **Chapter 18 (System Synthesis: Designing the Stochastic Computer):** Capstone architecture, end-to-end systems integration, and formal safety case verification.
 
 - **The Curricular Compass & Forward Deferral Rule:**
-  - A chapter may ONLY assume subsystems that have already been built in preceding chapters.
-  - A chapter is STRICTLY FORBIDDEN from assuming, explaining, or solving downstream subsystems. If a concept touches a downstream component, it must be bounded with an explicit forward deferral (e.g. *"virtualization and sandbox containment are developed in Chapter 8"*).
+  - A chapter may use the whole-system trajectory introduced in Chapter 1 and previously taught mechanisms as context. It may name an observable downstream need, such as a tool wait or approval, to motivate a current decision.
+  - Teach each subsystem's mechanism in its owning chapter. When a current section needs a downstream component, state only the interface assumption and defer its implementation (e.g. *"virtualization and sandbox containment are developed in Chapter 8"*). Do not make students learn a future implementation to understand the present concept.
 
 - **Sectional Negative Scope Boundaries:**
   - Within every chapter, each individual section answers exactly ONE architectural question.
@@ -100,65 +107,70 @@ To build a coherent 18-chapter computer systems architecture, every topic, data 
 - **The H-S-A-C Taxonomy (Horizon, State, Authority, Closure):**
   - Owned and defined by **Chapter 01** as the 4D coordinate space for the entire volume. Subsystem chapters anchor their components to this space without re-teaching or duplicating the taxonomy.
 
-- **Dual-Topology Execution Tiers (Volume Invariant):**
-  - Maintain a strict, unambiguous operational separation between the **Host Agent OS** (user-space CPU runtime managing task state, context staging, tool sandboxing, and verification) and the **Inference Service Daemon** (GPU serving engine managing KV cache memory, scheduling forward passes, and executing decode-time logit masking directly on device memory).
+- **Functional Ownership Across Deployment Topologies:**
+  - Distinguish the **agent runtime** (task state, context selection, authorization, tool mediation, and acceptance) from the **inference service** (model execution and its serving state). A reference implementation may place them on a CPU host and GPU service, locally or remotely. Explain what each side can observe and control before analyzing placement-specific performance.
 
 ### 5. The Systems Engineering Translation Lexicon
 
-To eliminate semantic drift into NLP linguistics, conversational prompt engineering, or empty set-theoretic pseudo-math, authors and agents must translate common AI concepts into their concrete systems engineering reality:
+Use this lexicon to replace vague language with an accurate mechanism and a relevant systems question. The rightmost column lists possible consequences to analyze under stated workload assumptions; it does not define the concept or require a metric in every section.
 
-| Overloaded AI / NLP Term | ❌ Faux-Math / Prompt Trap (BANNED) | ✅ Physical ML Systems Reality & Mandated Metric / Equation |
+| Concept | Explain the mechanism first | Then analyze the systems implication where relevant |
 |:---|:---|:---|
-| **Prompt / Context Window** | $x \in \mathcal{V}^*$, $|x| \le L$; "Prompting the model with context" | Staged input tensor in accelerator HBM. Buffer ceiling $M + K \le S_{\max}$. Ingestion phase executes parallel GEMM saturating Tensor Cores; TTFT bounded by prefill FLOPs: $\text{TTFT} \approx \frac{2 M N_{\text{params}}}{P_{\text{peak}} \cdot \text{MFU}} + T_{\text{queue}}$. |
-| **Token / BPE** | String tokens $w_i \in \mathcal{W}$; "Subwords that help the model understand words" | Tensors of `int32` indices. Statistical byte compression algorithm causing boundary fragmentation, byte-level syntax fractures, and variable char-to-token ratios ($1.8\text{--}4.2$). Memory allocated strictly in integer token blocks. |
-| **Autoregressive Decoding** | Sampling $y_t \sim P(y_t \mid y_{<t})$; "Generating text step-by-step" | Iterative causal execution loop where token $t+1$ depends on token $t$. GEMV arithmetic intensity collapses to $I_{\text{decode}} \approx 2/P\text{ FLOP/byte}$. Unbatched $B=1$ serialization wall: entire weight tensor $\Theta$ shuttled from HBM for every token generated. |
-| **Attention / KV State** | Attention matrix $A = \text{softmax}(QK^T/\sqrt{d})$; "Focusing on relevant information" | Dynamic activation tensor cached in HBM. Memory consumption: $\text{Mem}_{\text{token}} = 2 L H_{\text{kv}} d_{\text{head}} P$ bytes/token. Managed via PagedAttention virtual memory tables with fixed page size (16 tokens) to eliminate external fragmentation. |
-| **Chain-of-Thought / Reasoning** | Trajectory $\tau = (s_0, a_0, \dots)$; "Prompting the model to think step-by-step" | Allocating inference-time compute budget ($K_{\text{delib}}$ tokens). Physical cost: $2 N_{\text{params}} K_{\text{delib}}$ FLOPs and $K_{\text{delib}} \cdot (N_{\text{params}} P / \text{BW}_{\text{mem}})$ seconds of serialized memory bus occupation. Explores search trees before committing external state mutations. |
-| **Temperature / Logit Sampling** | Softmax policy $\pi_\theta(a|s) = \frac{\exp(Q(s,a)/\tau)}{\sum \exp}$; "Controlling model creativity" | Scaling unnormalized logit vectors $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$ by scalar $1/\tau$ prior to GPU categorical reduction. $\tau \to 0$ collapses probability to deterministic argmax mode. Low-temperature sampling reduces entropy; temperature scaling does not alter model capability or memory bandwidth. |
-| **Tool Calling / Function Calling** | Action space $\mathcal{A}$; "Teaching the model to use APIs" | Typed RPC over IPC socket crossing an unprivileged boundary into an isolated runtime. Incurs data marshalling overhead ($T_{\text{serialize}}$), process spawn latency ($T_{\text{spawn}}$), and bounded stdout/stderr pipe buffer capture ($64\text{ KiB}$). |
-| **Agent Sandboxing / Security** | "System prompt telling the agent to be safe" | OS-level capability isolation (Principle of Least Privilege). Hardware virtualization (MicroVMs via Firecracker/gVisor), Linux cgroups (memory/CPU limits), seccomp-bpf syscall filters, and copy-on-write filesystems. |
-| **Agent Memory / RAG** | Vector similarity function $\text{sim}(q, d)$; "Giving the agent long-term memory" | Multi-tier storage hierarchy: L1 HBM staged buffer $\to$ L2 Host DRAM / PagedAttention KV cache $\to$ L3 NVMe vector index. Performance governed by index read latency ($p99$), working-set cache miss penalty, and cache invalidation under file mutation. |
-| **Agent Self-Correction / Reflection** | $\pi_{\text{refine}}(\tau)$; "The model realizes its mistake and fixes it" | Stochastic self-evaluation cannot close invariants ($P_{\text{correct}} < 1.0$). Invariant closure requires an external deterministic evidence hierarchy: reference monitors (enforced invariants), compilers/test runners (verified properties), and test harnesses (acceptance evidence). |
-| **Multi-Agent Coordination** | Multi-agent MDP $\langle \mathcal{N}, \mathcal{S}, \{\mathcal{A}_i\}, \mathcal{P}, \{R_i\} \rangle$; "Agents having a meeting" | Distributed asynchronous worker processes communicating via message queues (e.g. RabbitMQ/Kafka). Bottlenecks: network serialization, distributed lock contention, shared state merge conflicts, and aggregate space-time HBM occupancy. |
+| **Prompt / context window** | A bounded sequence of input tokens selected for one invocation; the logical working set is distinct from its serving representation. | Token limits, prefill work, relevance, and physical KV occupancy depend on the model and serving workload. |
+| **Tokenization / BPE** | A tokenizer maps text or other inputs to discrete token IDs; BPE is one possible statistical subword method. | Exact identifiers, whitespace, and serialization formats can change token counts and interface reliability. Measure counts for the chosen tokenizer. |
+| **Autoregressive generation** | Each output token is conditioned on the preceding sequence. | One sequence has a serial dependency; latency and throughput depend on model architecture, batch size, and serving schedule. |
+| **Attention / KV state** | The serving engine may retain key and value projections from processed tokens to reuse them during later attention steps. | Derive bytes per token from model geometry, then compare allocation, sharing, eviction, and recomputation policies. Paging is one implementation. |
+| **Inference-time deliberation** | Additional candidates, longer reasoning paths, or new observations can inform a decision. | Compare their marginal accepted-task benefit with generation, verifier, state, and wall-clock costs. |
+| **Temperature / sampling** | A decoding rule transforms logits into a token-selection distribution. | Sampling can change candidate diversity and repeatability; it does not itself grant authority or establish correctness. |
+| **Tool calling** | The model proposes an operation; the runtime parses, authorizes, dispatches, and observes it. | Transport, serialization, startup, external service time, and retry semantics vary by tool and deployment. |
+| **Sandboxing / security** | Capabilities and isolation limit what an authorized operation can affect. | Compare containment strength, compatibility, startup time, and residual external effects for a stated threat model. |
+| **Working context, KV state, and external memory** | These have different owners and lifetimes: selected tokens, serving activations, and durable artifacts or indexes. | Evaluate staging cost, capacity, retrieval latency, freshness, and access control separately; they are not one literal cache ladder. |
+| **Verification and revision** | The runtime can test a proposal, observe failures, and revise or stop. | Distinguish enforced invariants, bounded test evidence, and human assessment of open-ended outcomes. |
+| **Multi-agent coordination** | Delegated workers have task dependencies, handoff contracts, and limited authority. | Compare critical-path gain with communication, duplicated context, contention, and correlated failures. |
 
 ### 6. The Four Invariant Systems Questions (The Subsystem Checklist)
 
-Every technical chapter and section must answer four fundamental systems questions before moving on:
+Use these four questions to review each technical chapter as a whole. An individual section should answer its own governing question and address only the dimensions that materially affect its engineering decision. Do not force a hardware Roofline, byte count, or verification mechanism into a section where it does not clarify the topic.
 
 1. **Interface Contract & Authority Boundary:** What are the explicit inputs, outputs, schemas, resource ceilings ($K_{\max}, T_{\max}$), and failure envelopes? What authority does the component possess, and how is that authority mediated?
-2. **Physical State Placement & Memory Lifetime:** Where does state physically reside across execution phases (accelerator HBM, host DRAM, local NVMe, remote storage)? What are the exact bytes-per-unit allocations, eviction policies, and cache invalidation rules?
-3. **Hardware Execution Bottleneck & Latency Scaling:** Where does execution sit on the Roofline curve (compute-bound GEMM vs. memory-bandwidth-bound GEMV)? What is the serial critical path ($O(K)$) vs. parallelized phases? What is the Amdahl speedup fraction?
-4. **Failure Model & Mechanical Invariant Closure:** How can the component fail (fail-stop crash vs. fail-plausible semantic corruption)? Who mechanically verifies correctness (compilers, test runners, exit codes), and what deterministic recovery protocol handles failure?
+2. **State Ownership, Placement & Lifetime:** What state does the mechanism require, who owns it, and how long does it live? If placement affects the design, where is it stored, how much space does it use, and when is it refreshed or reclaimed?
+3. **Workload-Dependent Cost & Bottleneck:** Under a stated workload and deployment, what dominates latency, memory, throughput, or cost? Which phases are serial or parallel, and what estimate or measurement supports the conclusion? Apply Roofline or Amdahl analysis where its assumptions fit.
+4. **Failure Model & Completion Evidence:** How can the component fail? Which constraints are enforced mechanically, what do tests establish within their coverage, and what additional evidence or human judgment is needed for acceptance and recovery?
 
-### 6.5 The MLSysIM Heterogeneous Reference Hardware Specification
+### 6.5 The MLSysIM Heterogeneous Reference Platform Specification
 
-To ensure quantitative consistency and eliminate conflicting hand-typed numbers, **no chapter may hardcode static hardware specifications in arbitrary markdown tables**. In accordance with the Volume 1 architecture, all reference hardware numbers, Rooflines, arithmetic intensities, memory footprint equations, and latency envelopes must derive programmatically from `mlsysim.hardware.registry.Hardware` via Pint-typed Python LEGO cells.
+To ensure quantitative consistency and eliminate conflicting hand-typed numbers, **no chapter may hardcode static hardware specifications in arbitrary markdown tables**. In accordance with the textbook systems architecture, all reference platforms, hardware numbers, Rooflines, arithmetic intensities, memory footprint equations, and latency envelopes must derive programmatically from `mlsysim.Agents.Platforms` and `mlsysim.Systems.Nodes` via Pint-typed Python LEGO cells.
 
-#### The Heterogeneous Agent Node Architecture
+#### The Heterogeneous Agent Platform Architecture
 
 Agentic machine learning systems run on **heterogeneous computing nodes** where the Accelerator and the Host CPU share responsibility for end-to-end task execution:
 
 1. **Accelerator Tier (The Neural Core):**
    - Executes dense prefill (GEMM) and serialized autoregressive decode (GEMV).
-   - Governed by High-Bandwidth Memory (HBM) interface bandwidth ($B_{\text{mem}}$), tensor compute throughput ($P_{\text{peak}}$), and device memory capacity.
-   - Canonical datacenter baselines in `mlsysim`:
+   - Governed by High-Bandwidth Memory (HBM) interface bandwidth ($\text{BW}_{\text{mem}}$), tensor compute throughput ($P_{\text{peak}}$), and device memory capacity.
+   - Canonical datacenter baseline in `mlsysim`:
      * `Hardware.Cloud.H100`: NVIDIA H100 SXM5 ($80\text{ GiB}$ HBM3, $3.35\text{ TB/s}$ memory bandwidth, $989\text{ TFLOP/s}$ dense FP16/BF16, $I_{\text{sat}} = 295.2\text{ FLOP/byte}$, NVLink 4 bidirectional bandwidth $900\text{ GB/s}$).
      * `Hardware.Cloud.B200`: NVIDIA B200 ($192\text{ GiB}$ HBM3e, $8.0\text{ TB/s}$ memory bandwidth, $2{,}250\text{ TFLOP/s}$ dense FP16, NVLink 5 bidirectional bandwidth $1{,}800\text{ GB/s}$).
    - Canonical workstation baseline in `mlsysim`:
-     * `Hardware.Workstation.M4Max`: Apple M4 Max ($128\text{ GiB}$ Unified LPDDR5X, $546\text{ GB/s}$ bandwidth shared between CPU and GPU, $\sim 34\text{ TFLOP/s}$ FP16, $I_{\text{sat}} \approx 62\text{ FLOP/byte}$, internal SoC fabric).
+     * `Hardware.Workstation.MacBookM3Max`: Apple M3 Max ($128\text{ GiB}$ Unified LPDDR5X, $400\text{ GB/s}$ bandwidth shared between CPU and GPU, $14.2\text{ TFLOP/s}$ FP16, internal unified SoC fabric).
 
 2. **Host CPU & System Tier (The Agent Runtime & Sandboxed Environment):**
    - Executes the agent control plane, tokenization, serialization, sandbox isolation (microVM/cgroup lifecycles), and deterministic verification (compilers, test runners, linters, Git operations).
-   - Canonical datacenter host node in `mlsysim`:
-     * Dual AMD EPYC 9654 (192 physical x86-64 Zen4 cores, 384 hardware threads, 2.4 GHz base / 3.7 GHz boost, $1.5\text{ TB}$ DDR5-4800 RAM across 24 channels yielding $460\text{ GB/s}$ host memory bandwidth, PCIe Gen5 $\times 16$ interconnect providing $64\text{ GB/s}$ simplex / $128\text{ GB/s}$ duplex to each accelerator, and NVMe Gen5 SSD arrays providing $14\text{ GB/s}$ sequential I/O).
+   - Canonical datacenter host nodes in `mlsysim`:
+     * `Systems.Nodes.DGX_H100`: Official NVIDIA DGX H100 server: Dual Intel Xeon Platinum 8480C (112 physical cores, 224 threads, 2.0 GHz base / 3.8 GHz boost, $2\text{ TiB}$ DDR5-4800 RAM across 16 channels yielding $614\text{ GB/s}$ peak host memory bandwidth, $30.72\text{ TB}$ NVMe storage, and 8× ConnectX-7 400 Gbps InfiniBand ports).
+     * `Systems.Nodes.HGX_H100_EPYC`: High-density agent evaluation node: Dual AMD EPYC 9654 (192 physical x86-64 Zen4 cores, 384 hardware threads, 2.4 GHz base / 3.7 GHz boost, $1.5\text{ TiB}$ DDR5-4800 RAM across 24 channels yielding $460\text{ GB/s}$ sustained host memory bandwidth, PCIe Gen5 $\times 16$ interconnect to each accelerator, and 4× Gen5 NVMe SSD arrays yielding $56\text{ GB/s}$ aggregate I/O).
    - Canonical workstation host tier in `mlsysim`:
-     * Apple M4 Max 16-Core CPU (12 Performance cores + 4 Efficiency cores), sharing the $546\text{ GB/s}$ unified memory fabric directly with the GPU, eliminating PCIe host-to-device data transfer penalties.
+     * `Systems.Nodes.Workstation_M3Max`: Apple M3 Max 16-Core CPU (12 Performance cores + 4 Efficiency cores), sharing the $400\text{ GB/s}$ unified memory fabric directly with the GPU, eliminating PCIe host-to-device data transfer penalties.
 
 3. **The Alternating Duty Cycle & Systems Bottleneck Shifts:**
-   - Agent workflows exhibit a bi-modal phase distribution:
-     * *Generation Phase:* Dominated by model inference (GEMM/GEMV). Accelerator HBM bandwidth is saturated; Host CPU utilization is low.
-     * *Tool-Wait & Verification Phase:* Dominated by environment actuation. The model accelerator is idle (or time-sliced via continuous batching to other tasks); Host CPU cores, host memory bandwidth, and local storage I/O are fully saturated by compilers, unit test runners, and sandbox virtualization.
-   - **Benchmarking & Evaluation Invariant (Chapters 16 & 17):** In benchmarks such as SWE-bench, over $40\%\text{--}70\%$ of end-to-end trajectory latency is spent in Host CPU execution and sandbox verification rather than model forward passes. System profiling must capture both accelerator and host system metrics.
+   - Agent trajectories alternate among generation, tools, verification, and waits. The active bottleneck can move among accelerator compute or memory, host CPU, network, storage, external services, and human review; a shared accelerator may serve unrelated requests during a trajectory pause.
+   - **Benchmarking & Evaluation Invariant (Chapters 16 & 17):** Measure phase durations and resource occupancy for the chosen workload before claiming that any one phase dominates end-to-end latency.
+
+#### The Turnkey Agent Platform Registry: `mlsysim.Agents.Platforms`
+
+To ensure every chapter models the **system as a whole**, the textbook establishes two canonical platforms:
+- **`Agents.Platforms.Cloud_DGX_H100` (`Agents.Coding.SWE_Bench_Runner`):** The primary datacenter reference platform. Combines `Systems.Nodes.HGX_H100_EPYC` (8× H100 + Dual AMD EPYC 9654 192 cores) with `Models.Language.Llama3_70B`, a $128\text{k}$ token context window, Firecracker microVM sandboxes ($5.0\text{ ms}$ cold boot, $15.0\text{ ms}$ snapshot restore, $512\text{ MiB}$ footprint), and a 30-turn trajectory limit.
+- **`Agents.Platforms.Workstation_Apple` (`Agents.Coding.SWE_Bench_Workstation`):** The local developer baseline. Combines `Systems.Nodes.Workstation_M3Max` (Apple M3 Max 16-Core CPU + 40-Core GPU UMA) with `Models.Language.Llama3_8B` and container sandboxes ($25.0\text{ ms}$ startup).
 
 #### The Python LEGO Cell Implementation Standard
 
@@ -166,15 +178,27 @@ In all chapter manuscripts (`.qmd`), hardware specifications and derivations mus
 
 ```python
 # ┌── LEGO ───────────────────────────────────────────────
-class ReferenceH100Roofline:
-    """MLSysIM baseline roofline for H100 SXM5."""
-    h100 = Hardware.Cloud.H100
-    bw = h100.memory.bandwidth
-    peak_fp16 = h100.compute.peak_flops
-    i_sat = (peak_fp16 / bw).to("FLOP/byte")
+from mlsysim import AgentPlatforms, Systems
+
+class ReferencePlatformMetrics:
+    """MLSysIM baseline reference platform metrics for Volume III."""
+    platform = AgentPlatforms.Cloud_DGX_H100
+    node = platform.serving_node
+    accelerator = node.accelerator
+
+    # Accelerator roofline parameters
+    hbm_bw = accelerator.memory.bandwidth
+    peak_fp16 = accelerator.compute.peak_flops
+    i_sat = (peak_fp16 / hbm_bw).to("FLOP/byte")
+
+    # Host system & sandbox parameters
+    host_cores = node.host_cpu_cores
+    host_ram = node.host_memory
+    sandbox_boot = platform.sandbox_startup_latency
+    sandbox_restore = platform.sandbox_snapshot_restore_latency
 ```
 
-Values are referenced dynamically in text (e.g., `{python} ReferenceH100Roofline.i_sat`). If a parameter or platform is missing, it must be added to `mlsysim/hardware/data/` with datasheet provenance rather than typed as an ad-hoc number in prose.
+Values are referenced dynamically in text (e.g., `{python} ReferencePlatformMetrics.i_sat`). If a parameter or platform is missing, it must be added to `mlsysim` with datasheet provenance rather than typed as an ad-hoc number in prose.
 
 ### 7. Zero-Tolerance Negative Guardrails & Forbidden Phrasing
 
@@ -210,10 +234,10 @@ Textbook chapters must be grounded in **concrete systems engineering realities**
 
 When drafting, revising, or reviewing any chapter in Volume III, follow this four-stage pipeline:
 
-1. **Anchor:** Identify the chapter's canonical systems scenario, physical hardware footprint, and baseline H-S-A-C coordinate.
-2. **Translate:** Pass all planned concepts through the *Systems Engineering Translation Lexicon* (Section 5) and the *Agentic Systems Notation* (`books/vol3/frontmatter/_notation_agentic.qmd`) to replace NLP vocabulary with systems realities and canonical mathematical symbols.
-3. **Execute the Four Questions:** Verify that each section addresses Interface/Authority, Physical State/Placement, Roofline/Cost Bottleneck, and Failure/Mechanical Invariant Closure.
-4. **Audit:** Pass generated sections through the *Three-Filter Acceptance Test* and deterministic project review gates (`.claude/rules/`) before merging.
+1. **Anchor:** Identify the chapter's governing engineering question, an appropriate systems scenario, and the relevant H-S-A-C dimensions. Establish a physical hardware footprint when it affects the chapter's decision.
+2. **Explain, Then Translate:** State the native model or runtime mechanism accurately, then use the *Systems Engineering Translation Lexicon* (Section 5) and the *Agentic Systems Notation* (`books/vol3/frontmatter/_notation_agentic.qmd`) to expose the interface, relevant constraints, and suitable notation. Do not replace the mechanism with its cost model.
+3. **Review the Chapter Across the Four Questions:** Check that the chapter, taken as a whole, covers the relevant interface and authority boundaries, state ownership, resource costs, and failure and evidence limits. In each section, develop only the questions needed for its governing decision.
+4. **Audit:** Pass generated sections through the *Three-Filter Acceptance Test*, the concept–performance separation check, and deterministic project review gates (`.claude/rules/`) before merging.
 
 ### 10. Sectional Drafting & Context Staging Protocol
 
@@ -222,12 +246,12 @@ To maintain maximum depth, technical rigor, and systems focus, every chapter sec
 #### The Three-Filter Acceptance Test for Generated Prose
 
 Every section and paragraph drafted for Volume III must strictly satisfy three gates:
-1. 🛑 **Filter 1 (The Anti-NLP Gate):** Does this text discuss prompt wording tricks ("let's think step by step"), conversational chatbot banter, persona roleplay, human dialogue flows, or subjective "LLM-as-a-judge" evaluation?
-   - **Action:** If YES, REJECT immediately. Re-anchor in runtime state machines, typed RPC schemas, deterministic compilers, and POSIX exit codes.
+1. 🛑 **Filter 1 (The Discipline Gate):** Does this text substitute prompt folklore, persona roleplay, unsupported model self-assessment, or a vendor API tour for an explanation of model behavior and the engineering decision it creates?
+   - **Action:** If YES, revise around the actual mechanism, its interface, and the evidence needed to choose or evaluate a system. Human interaction and calibrated subjective assessment are legitimate when the task requires them.
 2. 🛑 **Filter 2 (The Anti-Silicon Gate):** Does this text dump raw GPU hardware specs prematurely without systems context, pretend attention heads are literal x86 ALUs/registers, treat token IDs as machine opcodes, or dive into transistor/warp microarchitecture with no software control lever?
    - **Action:** If YES, REJECT immediately. Re-anchor in the software systems layer (the Agent OS control plane, host runtime, memory allocation, and container/microVM sandboxing).
-3. ✅ **Filter 3 (The Systems Engineering Gate):** Does this text define an explicit interface contract, an operational trade-off, a physical latency/memory cost, an error boundary, or an external mechanical verification protocol?
-   - **Action:** MUST BE YES.
+3. ✅ **Filter 3 (The Systems Engineering Gate):** Does the chapter make each governing model or runtime mechanism clear and connect it to an engineering decision, boundary, trade-off, or evidence requirement? Are performance claims conditional on a stated workload rather than part of the concept's definition?
+   - **Action:** Both answers must be YES for the chapter. An individual section develops only the mechanism or consequence it owns.
 
 #### The Metaphor Boundary Directive
 
@@ -243,11 +267,11 @@ To ensure natural narrative flow and intellectual depth, **all rigid word budget
 ##### Structural Role Hierarchy (The Four Section Types):
 
 1. **`[stage-setter]` (Section .1 only):**
-   - Unbroken 4-beat narrative introducing the subsystem, the systems challenge, the 3-tier boundary, and the analytical handoff.
-   - **Structural Invariants:** Zero `###` subheadings. Zero bullet lists. Seamless prose progression across the 4 beats.
+   - Introduce the chapter's governing problem and establish the boundary needed to understand its first mechanism. Use the shortest narrative that accomplishes that work; the listed topics in a chapter blueprint are content guidance, not required beats or paragraph slots.
+   - **Structural Invariants:** Zero `###` subheadings. Zero bullet lists. End with a natural handoff to the first mechanism.
 2. **`[core]` (Foundational Mechanics & Derivations):**
-   - Load-bearing technical sections developing primary systems mechanisms, formal trade-off models, and Pint-typed MLSysIM LEGO simulation cells.
-   - **Structural Invariants:** 2–3 `###` subsections ending in an explicit causal bridge to the next section.
+   - Load-bearing technical sections developing the mechanism and trade-off owned by the section. Include a derivation or Pint-typed MLSysIM LEGO cell when it helps students reason about a measurable quantity.
+   - **Structural Invariants:** Use subsections when they clarify distinct steps; end with the consequence that motivates the next section.
 3. **`[survey]` (Taxonomy & Architectural Design Space):**
    - Structured comparison of competing engineering designs, protocols, or interfaces.
    - **Structural Invariants:** Anchored by an architectural decision matrix, taxonomy table, or trade-off spectrum.
@@ -258,32 +282,27 @@ To ensure natural narrative flow and intellectual depth, **all rigid word budget
 ##### The Depth Contract (Revising the Drafting Rubric):
 
 Instead of arbitrary word counts, every body section specification is governed by an explicit **Depth Contract**:
-1. **Governing Engineering Decision:** The explicit systems trade-off or architectural choice owned by the section.
-2. **Required Derivations & MLSysIM LEGO Cells:** The exact mathematical relationships and corresponding executable Python LEGO cells importing from `mlsysim.hardware.registry`.
-3. **Concrete Exit Criteria:** What the student must be able to calculate, design, or mechanically verify after completing the section.
+1. **Governing Engineering Decision:** The question, trade-off, or architectural choice owned by the section.
+2. **Needed Mechanism and Evidence:** The native mechanism students must understand and the example, source, napkin estimate, calculation, or executable LEGO cell that establishes its relevant consequence. Keep assumptions and units visible; use hardware quantities only where they affect the decision.
+3. **Concrete Exit Criteria:** What the student must be able to explain, calculate, design, or check after completing the section.
 
 #### The Core Sectional Directives:
 0. **The Chapter Purpose Law (The Core Question + Why It Matters):**
    - The `Purpose` block of EVERY chapter must strictly follow the canonical two-tier structure:
      - `**The Core Question:** *[Exactly one sharp, italicized systems provocation]*`
-     - `**Why It Matters:** *[Exactly ONE single, unbroken, dense systems confrontation paragraph (150–220 words) defining the architectural stakes, failure modes, and runtime invariants]*`
-   - It must never be split into multiple paragraphs or list items. It defines the systems confrontation and transitions directly into the `::: {.callout-learning-objectives}`.
+     - `**Why It Matters:** *[A concise paragraph explaining the architectural stakes and the consequence of getting the decision wrong]*`
+   - Keep the Purpose focused on the chapter's question. Let its length follow the complexity of the question, then transition into the `::: {.callout-learning-objectives}`.
 1. **The Section .1 Law (Unbroken Introduction):**
    - Section .1 of every chapter (e.g., Section 2.1, Section 3.1) must **never have subsections (`###`)**.
-   - It is an unbroken stage-setting narrative that establishes the chapter's core paradigm, defines the operational boundary (e.g., the tripartite architecture), anchors the component in the 4D H-S-A-C coordinate space, and delivers an explicit causal bridge to Section .2.
-   - It executes a continuous 4-beat narrative progression:
-     - *Beat 1 (Architectural Stage-Setting, ~200–250w):* Situate subsystem within *The Stochastic Computer* architecture; define the host runtime vs. unprivileged component boundary; map baseline H-S-A-C coordinate without re-deriving Chapter 1.
-     - *Beat 2 (The Systems Problem & Operational Reality, ~250–300w):* Expose the core systems engineering challenge and failure domain (e.g., why unprivileged model outputs cannot mutate host state, or why memory bandwidth limits decode throughput), illustrated with authentic interface interactions, execution boundaries, or performance trade-offs.
-     - *Beat 3 (The Systems Confrontation, ~250–300w):* Expose why this challenge arises by contrasting classical deterministic systems expectations with stochastic computing realities (fail-plausible semantic corruption, zero ambient authority, serialization bottlenecks).
-     - *Beat 4 (Computational Boundary & Analytical Handoff, ~200–250w):* Formulate interface contract and resource ceilings ($K_{\max}, T_{\max}$), concluding with an unbroken prose bridge directly posing the first mechanistic question for Section .2.
-   - Detailed submechanisms, formulas, and taxonomies pick up strictly in Section .2 onwards.
+   - Establish the chapter's governing problem, the relevant operational boundary, and the consequence that motivates Section .2. Refer to H-S-A-C when it illuminates that problem; do not recite the taxonomy in every opening.
+   - The chapter-specific topics listed for Section .1 are a menu of possible evidence and examples, not a required sequence or paragraph plan. Develop detailed submechanisms, formulas, and taxonomies where they best serve the chapter's argument.
 2. **Context Staging for Section $k$ (Preventing Context Pollution & Recap Bloat):**
    - **DO NOT** stage the entire preceding chapter text into the drafting prompt. Staging full preceding sections causes attentional dilution, lost-in-the-middle degradation, and triggers repetitive recaps ("As we saw in the previous section...").
    - When drafting Section $k$, stage exactly four bounded context artifacts:
      - **Tier 1: Systems Engineering System Frame:** Core systems directives, forbidden anthropomorphisms, and American English spelling rules.
      - **Tier 2: Chapter Grounding Blueprint:** Chapter Title, Governing Systems Question, Core Takeaway, Curricular Compass, baseline H-S-A-C coordinate, and the explicit section specification from this outline.
      - **Tier 3: Upstream Stitching Interface (Bounded Context):**
-       - *Terminal Bridge of Section $k-1$:* Exactly the final 150–250 words (1–2 paragraphs) of the preceding accepted section to establish voice and continuity.
+       - *Terminal Bridge of Section $k-1$:* The preceding section's closing paragraph or another short excerpt sufficient to establish voice and continuity.
        - *Active Symbol & Entity Registry:* A structured key-value ledger of all mathematical symbols ($M, K, S_{\max}, \tau, \Theta$), variable names, file paths, and Quarto cross-reference IDs established so far in the chapter.
      - **Tier 4: Forward Handoff Contract:** The title and single key point of Section $k+1$, ensuring Section $k$ concludes with an unbroken causal bridge.
 3. **Anti-Recap Opening Directive:**
@@ -344,7 +363,7 @@ To keep all 18 chapters anchored in **Systems Engineering for Agentic AI**, ever
   - The 5-Part Task Contract (Goal, Environment, Permitted Actions, Available Observations, Completion Criteria).
   - The 4 Engineering Dimensions (Duration, State, Permitted Authority, Completion Evidence).
   - Whole-task elapsed duration accounting ($T_{\text{task}} = T_{\text{model}} + T_{\text{tool}} + T_{\text{wait}} + T_{\text{runtime}}$) and Amdahl limits on trajectories.
-  - The Invariant Closure Principle: stochastic policies cannot verify their own invariants; invariants must be closed at the deterministic runtime/OS layer.
+  - The Invariant Closure Principle: enforceable permissions and resource limits belong in runtime controls; task completion needs evidence within the coverage of its checks.
   - Edsger Dijkstra's testing principle: testing demonstrates the presence of bugs, never their absence; passing test suites provide empirical evidence under tested conditions, not global correctness.
 - **❌ Non-Systems Traps (What is NOT Good):**
   - *The Chatbot / Conversational Advice Trap:* Treating the agent as an open-loop question-answering assistant that leaves execution to humans.
@@ -354,13 +373,13 @@ To keep all 18 chapters anchored in **Systems Engineering for Agentic AI**, ever
 ### Part I: The Stochastic Processor & Deliberation (Chapters 02–03)
 - **The Core Systems Mission:** The datapath, execution loops, and test-time compute allocation of the stochastic computing core.
 - **✅ Timeless Systems Principles (What IS Good):**
-  - The foundation model as an unprivileged stochastic execution core / ALU with zero ambient authority.
+  - The foundation model as an unprivileged learned proposal engine within the agent runtime's authority boundary; ALU language is an optional analogy.
   - Tokens as discrete integer data representations; Byte-Pair Encoding (BPE) as statistical compression with boundary fragmentation hazards.
   - Autoregressive generation as an irreducibly serial execution loop ($O(K)$ causal dependency chain).
   - Typed invocation contracts with explicit physical budgets ($K_{\max}, T_{\max}$) and normalized 4-outcome status envelopes (`Completed`, `Truncated`, `Refused`, `Transport Error`).
   - Decode-time logit masking via Finite State Machines (syntactic validity $\ne$ semantic truth).
-  - The Roofline Model: Compute-bound GEMM prefill vs. Memory-bandwidth-bound GEMV decode (the memory shuttle problem).
-  - The Single-Agent ($B=1$) serialization wall; Prefix caching and Amdahl's Law.
+  - The Roofline Model: use prefill and decode as contrasting workload regimes, then establish the actual bottleneck from model geometry, batching, and measurements.
+  - Per-trajectory serial dependencies, service-level batching, prefix reuse, and Amdahl's Law under stated workloads.
   - Allocating test-time compute: search topologies (Best-of-$N$, beam search, MCTS), process verifiers, and explicit budget-based stopping rules.
 - **❌ Non-Systems Traps (What is NOT Good):**
   - *The NLP / Linguistics Trap:* Explaining BPE through linguistic morphology, roots, and suffixes ("how models understand words").
@@ -368,7 +387,7 @@ To keep all 18 chapters anchored in **Systems Engineering for Agentic AI**, ever
   - *The Math Dump:* Dense multi-page calculus proofs or continuous integrals that obscure physical hardware realities.
 
 ### Part II: Context Memory and Storage Hierarchy (Chapters 04–06)
-- **The Core Systems Mission:** Managing the multi-tier memory hierarchy of the Stochastic Computer (Logical L1 Buffer $\to$ Physical Silicon Cache $\to$ External Non-Volatile Storage).
+- **The Core Systems Mission:** Assigning distinct owners, lifetimes, and update rules to selected context, serving KV state, and durable artifacts or indexes; these are related forms of state rather than levels of one literal cache.
 - **✅ Timeless Systems Principles (What IS Good):**
   - **Chapter 04 (Logical Working Memory):** Working set selection, token budgeting, context compaction, eviction policies, and addressing attentional degradation ("lost-in-the-middle").
   - **Chapter 05 (Physical Attention State):** Memory management on accelerator silicon: PagedAttention (virtual memory paging for attention tensors), memory fragmentation, prefix sharing across branches, offloading to host DRAM/SSD, and chunked prefill.
@@ -580,17 +599,17 @@ Every chapter transition in this book is governed by an explicit handoff:
 
 #### Section 1.1: The Agentic Systems Moment [stage-setter]
 - **Heading & Anchor:** `## The Agentic Systems Moment {#sec-vol3-intro-operational-incident}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 5 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than five prescribed beats.**
 - **The Single Key Point:** The transition from conversational chatbots to autonomous agents marks the fundamental systems shift from advisory text generation to delegated, closed-loop task execution; because foundation models possess zero execution authority, agency is a property of the whole computer system, not the neural model.
 - **Curricular Placement:** Serves as the opening landing of the entire volume, bridging the engineer's prior knowledge of passive model serving to stateful, closed-loop agentic execution.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (The Inflection Point: From Chat to Delegation):* Tracing the evolution from Software 2.0 pattern recognition and conversational chatbots to delegated operational execution. Chatbots provide advice, leaving humans to manually read codebases, run compilers, debug test failures, and deploy patches. The "Agentic Systems Moment" occurs the instant we instruct the machine not merely to explain how to complete a task, but to autonomously execute it to an accepted, verified deliverable.
-  - *Beat 2 (The Central Systems Paradox: The Unprivileged Predictor):* The foundational systems tension: foundation models possess zero ambient authority, direct environment access, or execution capability. The model is an unprivileged probability distribution estimator running on matrix accelerators; it evaluates integer tokens and emits candidate strings into an output buffer. It cannot open file descriptors, issue syscalls, ping network sockets, or inspect system clocks. Emitting text that resembles a solution alters zero external state.
-  - *Beat 3 (The Open-Loop Failure Wall):* Why executing generated plans open-loop fails in production. In extended multi-step tasks, independent errors compound exponentially: $P(\text{success}) \le (1 - \epsilon)^N$. Over a 20-step execution trajectory, a $95\%$ per-step accuracy ($\epsilon = 0.05$) drops whole-task success below $36\%$. Open-loop generation is blind: it cannot observe environmental resistance, detect tool timeouts, or recover from intermediate errors.
-  - *Beat 4 (The Closed-Loop Trajectory Walkthrough):* Operational reliability requires closing the loop through runtime mediation:
+  - *Possible focus (The Inflection Point: From Chat to Delegation):* Tracing the evolution from Software 2.0 pattern recognition and conversational chatbots to delegated operational execution. Chatbots provide advice, leaving humans to manually read codebases, run compilers, debug test failures, and deploy patches. The "Agentic Systems Moment" occurs the instant we instruct the machine not merely to explain how to complete a task, but to autonomously execute it to an accepted, verified deliverable.
+  - *Possible focus (The Central Systems Paradox: The Unprivileged Predictor):* The foundational systems tension: foundation models possess zero ambient authority, direct environment access, or execution capability. The model is an unprivileged probability distribution estimator running on matrix accelerators; it evaluates integer tokens and emits candidate strings into an output buffer. It cannot open file descriptors, issue syscalls, ping network sockets, or inspect system clocks. Emitting text that resembles a solution alters zero external state.
+  - *Possible focus (The Open-Loop Failure Wall):* Why executing generated plans open-loop can fail over extended tasks. Under an illustrative assumption of independent steps with equal conditional success probability $1-\epsilon$, whole-task success is $(1-\epsilon)^N$; correlated errors and recovery change that result. Open-loop generation cannot observe environmental resistance, detect tool timeouts, or recover from intermediate errors.
+  - *Possible focus (The Closed-Loop Trajectory Walkthrough):* Operational reliability requires closing the loop through runtime mediation:
     $$\text{Task Goal } g, \text{ Context } x_t \xrightarrow{\text{Propose}} \text{Candidate Action } a_t \xrightarrow{\text{Runtime Gate}} \text{Sandboxed Execution } e(a_t) \xrightarrow{\text{Observe}} o_{t+1} \xrightarrow{\text{Evaluate}} \text{Evidence } E$$
     The runtime intercepts the candidate action, executes it inside an isolated sandbox, captures structured execution telemetry (stdout, stderr, exit codes), and appends real-world observations back into the context for iterative repair. Edsger Dijkstra's 1970 testing principle (*"Program testing can be used to show the presence of bugs, but never to show their absence"*): passing test suites (`exit code 0`) provide verifiable empirical evidence under isolated conditions, distinguishing observed evidence from unverified verbal claims of completion.
-  - *Beat 5 (The Foundational Thesis of the Volume):* **Agency is a property of the whole computer system, not the neural model.** The foundation model is simply the stochastic processor core; reliability, safety, fault tolerance, and resource efficiency must be engineered into the operating system, memory, peripheral, and verification layers surrounding it.
+  - *Possible focus (The Foundational Thesis of the Volume):* **Agency is a property of the whole computer system, not the neural model.** The foundation model is simply the stochastic processor core; reliability, safety, fault tolerance, and resource efficiency must be engineered into the operating system, memory, peripheral, and verification layers surrounding it.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** derive Byte-Pair Encoding (BPE), logit sampling, or autoregressive attention math (Deferred exclusively to Chapter 02: The Stochastic Processor Core).
   - 🛑 **DO NOT** detail container, cgroup, or hypervisor virtualization architectures (Deferred exclusively to Chapter 08: Virtualization & Sandboxing).
@@ -614,7 +633,7 @@ Every chapter transition in this book is governed by an explicit handoff:
   - *The Stateful Trajectory Era:* Tasks such as repository repair and multi-step research require a sequence of model invocations, tool operations, observations, and acceptance checks. That extended **trajectory** becomes the systems management unit.
   - *The Temporal Stretching of Execution Units:*
     - Machine instructions ($10^{-9}\text{ s}$) $\to$ OS threads/processes ($10^{-6}\text{ s}$) $\to$ RPC/REST requests ($10^{-3}\text{ s}$) $\to$ Stateless LLM inference ($10^{-1}\text{ s}$) $\to$ Autonomous trajectories ($10^1\text{ to }10^4\text{ s}$).
-  - *Why Passive Models Hit an Open-Loop Systems Ceiling:* In open-loop generation, errors compound exponentially ($P(\text{success}) \le (1-\epsilon)^N$); agentic systems trade test-time compute for sample efficiency via closed-loop feedback.
+  - *Why Passive Models Hit an Open-Loop Systems Ceiling:* Under stated assumptions, uncorrected step errors accumulate with task horizon; closed-loop feedback lets the runtime observe and correct some failures at additional compute and tool cost.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** write historical essays on 1940s vacuum tube computing; use EDSAC purely to anchor the temporal stretching of execution units.
   - 🛑 **DO NOT** re-derive Rooflines, FLOP counts, or GPU memory bandwidth equations from Volume I/II (Reserved for Section 2.7).
@@ -737,13 +756,13 @@ Every chapter transition in this book is governed by an explicit handoff:
 
 #### Section 1.7: The Invariant Closure Principle [core]
 - **Heading & Anchor:** `## The Invariant Closure Principle {#sec-vol3-intro-invariant-closure}`
-- **The Single Key Point:** Any invariant that must hold with certainty ($P = 1.0$) across an autonomous trajectory cannot rely on model self-regulation; it must be closed at the deterministic runtime, sandbox, or OS layer below the neural policy.
+- **The Single Key Point:** Constraints the system must enforce cannot depend on a model's compliance alone; runtime controls can enforce bounded properties, while task correctness requires evidence commensurate with the claim.
 - **Curricular Placement:** Foundational security and verification doctrine governing the entire volume.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Inverting Saltzer's End-to-End Argument (Saltzer et al. 1984):* Classical systems state that lower layers shouldn't enforce application semantics. In agentic systems, because the top-level application is an unconstrained stochastic neural policy, that policy cannot be trusted to guarantee its own correctness, security, or resource boundaries.
+  - *The End-to-End Boundary (Saltzer et al. 1984):* Lower layers can enforce permissions and resource limits within their scope; application-level task success still requires end-to-end evidence. A learned policy cannot substitute for either obligation.
   - *The Formal Invariant Closure Principle (`@pri-invariant-closure`):*
     - Mechanical enforcement below the model: filesystem boundaries enforced by Linux namespaces/seccomp, budgets enforced by token bucket controllers, syntax enforced by CFG logit masks.
-  - *Creating the Deterministic Envelope:* The runtime provides the immutable safety walls within which the stochastic policy can freely explore and deliberate.
+  - *Creating the Enforced Envelope:* The runtime constrains actions, resources, and effects through controls whose coverage is explicit; it does not certify all downstream task semantics.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** implement grammar-constrained decode bitmasks or state automata (Deferred to Chapter 02).
   - 🛑 **DO NOT** detail seccomp-bpf system call filters or Linux namespace mounts (Deferred to Chapter 08).
@@ -839,7 +858,7 @@ A larger supported context window does not make every item in a task history use
 
 **Pitfall**: *Holding accelerator memory allocated during blocking tool executions.*
 
-In naive synchronous agent loops, the serving engine allocates accelerator memory for model weights and the active KV cache, generates an external tool invocation—such as calling a remote REST API, executing a compiler build, running a database query, or awaiting human approval—and blocks synchronously on I/O before generating the next token. This pattern incurs a severe Tool-Wait memory tax. Neural token generation executes in millisecond bursts ($10\text{ to }50\text{ ms}$ per token step), while external effectors operate on human and network timescales spanning seconds, minutes, or hours. In a multi-turn trajectory, the runtime can spend over 90 percent of wall-clock time waiting on external I/O. Pinning gigabytes of premium accelerator memory to hold KV cache state during idle wait cycles starves the cluster, collapsing effective compute utilization and preventing other agent sessions from scheduling onto the accelerator. Autonomous runtimes must decouple compute allocation from the trajectory lifecycle, treating tool execution as asynchronous I/O and paging out KV cache to host memory.
+A tool operation may outlast the model invocation that requested it. A runtime that blocks a scarce worker throughout the wait can reduce concurrency. A serving design that also retains KV state for the paused trajectory pays a separate memory-occupancy cost; another design may release that state and later recompute or recover a cached prefix. The engineer must measure tool-wait duration, host-worker occupancy, KV reuse probability, and serving capacity before choosing asynchronous dispatch and a state-retention policy. These choices address different resources and need separate explanations.
 
 :::
 
@@ -884,7 +903,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
   3. *Workload constraints dictate the needed machinery.*
   4. *Autonomy demands task-level evidence and accounting.*
   5. *Hierarchical context memory management is mandatory.*
-  6. *Asynchronous actuation and trajectory swapping eliminate the Tool-Wait memory tax.*
+  6. *Asynchronous dispatch limits blocked host work; serving-state retention requires its own measured policy.*
 - `::: {.callout-chapter-connection title="From Architectural Foundations to Stochastic Silicon"}`
   - Handoff forward to Part I (*The Stochastic Processor*) and Chapter 02 (*The Stochastic Processor Core*).
 - Part transition marker: ````{=latex}\\part{key:vol3_processor}````
@@ -933,24 +952,24 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 - Decouple statistical sequence likelihood and text fluency from operational truth, defining the host runtime's external verification perimeter.
 - Specify a typed model invocation contract with explicit token/deadline limits and a normalized four-outcome status envelope.
 - Explain grammar-constrained decoding via decode-time logit masking at the execution surface, distinguishing syntactic validity from semantic safety.
-- Diagnose physical latency and throughput bottlenecks: compute-bound GEMM prefill vs. memory-bandwidth-bound GEMV decode, the memory shuttle problem, and the single-agent ($B=1$) serialization wall.
+- Diagnose invocation latency and throughput for a stated model, batch, and serving workload, distinguishing per-trajectory serial steps from service-level batching.
 - Evaluate invocation interface designs (free-form, schema-constrained, and decomposed probes) by downstream verified task success under equal resource budgets.
 
 :::
 
 #### Section 2.1: A Model Call in the Stochastic Computer [stage-setter]
 - **Heading & Anchor:** `## A Model Call in the Stochastic Computer {#sec-vol3-processor-role}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** The foundation model is an unprivileged stochastic processor core; the agent runtime is the authoritative host that owns context staging, execution limits, and action verification.
 - **Curricular Placement:** Establishes the 3-tier boundary between Host Runtime, Serving Daemon, and Neural Core.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* The Machine Analogy (CPU vs. Stochastic Core). A traditional CPU deterministically executes instructions with direct authority over registers, memory buses, and privileged control registers. The stochastic processor core evaluates a sequence of staged inputs and uses learned weights to propose the most likely *next* tokens under zero ambient authority.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Candidate Proposal Disconnect. Trace how a candidate output buffer is emitted across the serving boundary. Emphasize that emitting text or code alters zero external state; it is an unprivileged hypothesis requiring host mediation.
-  - *Beat 3 (The Systems Confrontation):* The Three-Tier Operational Boundary:
+  - *Possible focus (Architectural Stage-Setting):* The Machine Analogy (CPU vs. Stochastic Core). A traditional CPU deterministically executes instructions with direct authority over registers, memory buses, and privileged control registers. The stochastic processor core evaluates a sequence of staged inputs and uses learned weights to propose the most likely *next* tokens under zero ambient authority.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Candidate Proposal Disconnect. Trace how a candidate output buffer is emitted across the serving boundary. Emphasize that emitting text or code alters zero external state; it is an unprivileged hypothesis requiring host mediation.
+  - *Possible focus (The Systems Confrontation):* The Three-Tier Operational Boundary:
     1. **Agent Runtime (Host OS / Ring 0):** Assembles context, enforces token ceilings ($K_{\max}$) and deadlines ($T_{\max}$), mediates permissions, and verifies invariant closure.
     2. **Inference Service (Serving Engine / Driver):** Manages tokenization, request queueing, accelerator memory (KV cache), grammar logit masks, and the decode sampling loop.
     3. **Learned Model (Neural Core / ALU):** Executes tensor operations (GEMM/GEMV) on physical accelerator silicon, emitting unnormalized logit vectors.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* Situates the atomic invocation within the volume's H-S-A-C taxonomy ($H=1$ single call, $S=\text{staged context + ephemeral KV cache}$, $A=0$ unprivileged candidate output, $C=\text{external runtime closure}$) without duplicating Chapter 1. Concludes with prose bridge to Section 2.2.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* Situates the atomic invocation within the volume's H-S-A-C taxonomy ($H=1$ single call, $S=\text{staged context + ephemeral KV cache}$, $A=0$ unprivileged candidate output, $C=\text{external runtime closure}$) without duplicating Chapter 1. Concludes with prose bridge to Section 2.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** discuss microVMs, Firecracker, containers, or test execution harnesses (Deferred exclusively to Chapter 08: Virtualization & Sandboxing).
   - 🛑 **DO NOT** derive the Roofline model or hardware memory bandwidth tables (Deferred exclusively to Section 2.7).
@@ -962,13 +981,13 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 2.2: Tokens as the Processor Interface [core]
 - **Heading & Anchor:** `## Tokens as the Processor Interface {#sec-vol3-processor-tokenization}`
-- **The Single Key Point:** Tokens are the discrete integer micro-currency of the processor; statistical Byte-Pair Encoding (BPE) creates a structural impedance mismatch with programming language syntax and requires strict token budgeting.
-- **Curricular Placement:** Defines data representation and hardware staging format crossing into accelerator memory.
+- **The Single Key Point:** A tokenizer maps inputs and outputs to discrete token IDs; its boundaries need not match source-language syntax or character counts, which matters when the runtime stages code and enforces token limits.
+- **Curricular Placement:** Defines the model's discrete interface first, then derives consequences for code representation and invocation budgeting.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *BPE as Hardware Data Encoding:* The processor evaluates integer ID vectors, not text strings. BPE constructs a discrete vocabulary by iteratively merging frequent contiguous byte pairs based on corpus statistics.
-  - *The AST Impedance Mismatch:* Compilers parse code into Abstract Syntax Trees (ASTs) with clean boundaries between keywords, identifiers, and delimiters. BPE operates statistically, fracturing identifiers (`get_user_id` into multiple tokens), fusing leading whitespace into keywords (`" def"` ID 711 vs. unindented `"def"` ID 755), and fusing tool call delimiters with parameter names (`"(path="`).
-  - *The JSON Escaping Tax:* Escaped quotes (`\"`) and newlines (`\n`) in structured JSON tool calls generate disproportionate token counts, consuming up to $25\%$ of generation budgets on escaping syntax.
-  - *Physical Context Budgeting & Allocation Ceilings:* Context capacity is a hard physical ceiling denominated strictly in integer token IDs ($M + K \le S_{\max}$). Budgeting via character heuristics causes allocation faults and mid-execution truncation crashes. Physical KV cache memory footprint per token, allocation geometry ($2 L H_{\text{kv}} d_{\text{head}} P$), and PagedAttention virtual block tables are derived and managed in Chapter 05 (§5.1); Section 2.2 owns the discrete token budget ceiling.
+  - *Tokenization as Model Representation:* The model evaluates token IDs rather than raw strings. Explain how one BPE tokenizer constructs a vocabulary from frequent adjacent units without treating that construction as hardware encoding.
+  - *The AST Impedance Mismatch:* Compilers parse code into Abstract Syntax Trees (ASTs) with boundaries between keywords, identifiers, and delimiters. A statistical tokenizer may split an identifier such as `get_user_id` or combine leading whitespace with a keyword; show the actual tokens from the selected tokenizer rather than assigning timeless IDs.
+  - *Serialization Overhead:* Escaped quotes (`\"`) and newlines (`\n`) can change token counts in structured tool calls. Measure the overhead with the chosen tokenizer and format rather than assuming a fixed percentage.
+  - *Invocation Token Budget:* Context capacity is specified in token IDs ($M + K \le S_{\max}$). Character counts are an unreliable substitute; the invocation contract must define over-limit and truncation behavior. Physical KV footprint and allocation belong to Chapter 05 (§5.1).
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** explain PagedAttention virtual memory, block allocation tables, or page swapping to host DRAM (Deferred exclusively to Chapter 05: The KV-Cache Hierarchy).
   - 🛑 **DO NOT** discuss prompt compaction, retrieval, or vector embeddings (Deferred to Chapter 04 & Chapter 06).
@@ -979,12 +998,12 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 2.3: Next-Token Computation [core]
 - **Heading & Anchor:** `## Next-Token Computation {#sec-vol3-processor-autoregressive}`
-- **The Single Key Point:** Response generation is an iterative autoregressive control loop; each output token requires an independent forward pass, creating an irreducible serial dependency chain.
+- **The Single Key Point:** Autoregressive generation conditions each next token on earlier tokens; a serving loop repeatedly evaluates the model and applies a decoding rule, creating a serial dependency along one output sequence.
 - **Curricular Placement:** Explains execution mechanics and control flow on the neural core.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *Autoregressive Factorization:* The joint probability decomposes into a product of conditional next-token probabilities: $P(y_{1:K}\mid x) = \prod_{t=1}^K P(y_t\mid x, y_{<t})$.
   - *Atomic Forward Step vs. Serving Control Loop:* A single network forward pass computes logits $\mathbf{z}_t$ over vocabulary $\mathcal{V}$. Generating a complete response requires an iterative control loop executed by the serving engine: compute logits, sample token $y_t$, append to KV state, check stop criteria, and repeat.
-  - *The Causal Serialization Bottleneck:* Token $t$ strictly depends on token $t-1$. Unlike prompt ingestion which parallelizes across matrix dimensions, output generation is irreducibly sequential ($O(K)$ serial barrier).
+  - *The Causal Serialization Boundary:* Token $t$ depends on the selected preceding tokens. This limits parallelism along one realized output sequence, while independent requests and work within a model step may run in parallel; the latency consequences are derived in Section 2.7.
   - *Thermal Scaling on the Vocabulary Simplex:* Temperature parameter $\tau$ scales logits before softmax: $\tau \to 0$ collapses probability onto the greedy argmax mode, while high $\tau$ disperses entropy across the vocabulary simplex.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** derive the Roofline model, GEMM vs. GEMV arithmetic intensity, or hardware balance tables (Deferred exclusively to Section 2.7).
@@ -1002,8 +1021,8 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *Candidate Generation Versus Deterministic Verification:* High sequence probability reflects statistical typicality within training weights, not empirical truth or execution safety. A model can emit high-probability code that fails compilation or introduces security flaws.
   - *Zero Ambient Authority:* Generating a command or SQL query alters zero external state; it is merely an unprivileged string proposal residing in host DRAM. The processor has zero capability to issue syscalls, mutate files, read clocks, or open network sockets.
-  - *The Fallacy of Stochastic Self-Verification:* Why asking the core *"Are you sure?"* or *"Verify your previous answer"* fails ($P < 1.0$) because attention anchors in the generated hallucination within the KV cache, reinforcing the error basin.
-  - *Mechanical Invariant Closure:* Invariant closure must be external and deterministic. An invariant is closed only when deterministic software (compilers, type checkers, test runners, linters) verifies the candidate against ground truth and returns a binary exit status ($V \in \{0, 1\}$).
+  - *The Limit of Stochastic Self-Assessment:* A second model pass may generate useful criticism, but agreement or confidence from the same model does not independently establish task completion.
+  - *External Checks and Their Coverage:* Compilers, type checkers, tests, and reference monitors can check bounded properties. A binary exit status reports a check's result; it does not certify untested requirements or authorize an external effect.
   - *The Two-Phase Speculative Proposal Pattern:* Candidate output is staged in memory escrow $\to$ passed to the external verification perimeter $\to$ committed or discarded.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** describe microVM hypervisors, Firecracker snapshot boots, container runtimes, OverlayFS Copy-on-Write mounts, cgroups, or seccomp syscall filters (Deferred exclusively to Chapter 08: Virtualization & Sandboxing).
@@ -1055,19 +1074,17 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 2.7: The Cost of an Invocation [core]
 - **Heading & Anchor:** `## The Cost of an Invocation {#sec-vol3-processor-cost}`
-- **The Single Key Point:** An invocation has two distinct physical bottlenecks: compute-bound GEMM prefill and memory-bandwidth-bound GEMV decode; single-agent loops face the $B=1$ serialization wall, making prefix caching the dominant systems optimization.
+- **The Single Key Point:** After the model's prefill and token-generation behavior is clear, invocation cost can be estimated from prompt work, serial output steps, queueing, and the serving configuration; the dominant bottleneck depends on the workload.
 - **Curricular Placement:** Dedicated home for physical hardware limits, Roofline derivations, and memory bus latency.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *End-to-End Invocation Latency Breakdown:*
     $$T_{\text{total}} = T_{\text{CPU,prep}} + T_{\text{queue}} + T_{\text{prefill}} + T_{\text{decode}} + T_{\text{CPU,post}}$$
     where $T_{\text{CPU,prep}}$ accounts for Host CPU prompt formatting, tokenization, and request serialization; $T_{\text{queue}}$ represents serving queue wait time; $T_{\text{prefill}}$ is ingestion latency; $T_{\text{decode}} = \sum_{t=1}^K T_{\text{step}}(t)$ is serialized token emission; and $T_{\text{CPU,post}}$ accounts for output detokenization, JSON/schema parsing, and validation.
-  - *Prefill vs. Decode Bottlenecks (The Accelerator Roofline Model):*
-    - **Prefill (Ingestion):** Parallel matrix-matrix multiplication (GEMM). Compute-bound regime with high arithmetic intensity ($I_{\text{prefill}} \approx 2M/P \gg I_{\text{sat}}$), saturating Tensor Cores. Attention adds $O(M^2)$ compute.
-    - **Decode (Generation):** Matrix-vector multiplication (GEMV). Deep in the memory-bandwidth-bound regime ($I_{\text{decode}} \approx 1\text{ FLOP/byte} \ll I_{\text{sat}}$).
-  - *The Memory Shuttle Law (Dense vs. Sparse MoE):*
-    - *Dense Models:* For *every single token* emitted, the accelerator must shuttle the entire model parameter weight tensor $\Theta$ across the memory bus from HBM into SRAM: $T_{\text{shuttle}} = \frac{|\Theta| \cdot P}{B_{\text{mem}}}$.
-    - *Sparse Mixture-of-Experts (MoE):* Decode shuttles only the active routed expert weights plus shared parameters, materially lowering memory bandwidth pressure per emitted token ($T_{\text{shuttle,MoE}} = \frac{|\Theta_{\text{active}}| \cdot P}{B_{\text{mem}}}$).
-  - *The Single-Agent $B=1$ Serialization Wall:* Multi-tenant inference engines batch hundreds of concurrent requests ($B \ge 256$) to amortize parameter loading. However, an autonomous agent running an iterative single-agent trajectory loop is an isolated $B=1$ stream. It cannot amortize parameter shuttle time across requests, hitting the serial memory-bandwidth wall.
+  - *Prefill vs. Decode Cost (The Accelerator Roofline Model):* Use a stated dense-model, precision, sequence-length, and batch regime to compare prompt processing with successive output steps. Prefill can achieve high arithmetic intensity through matrix-matrix work; low-batch decode often becomes memory-bandwidth bound. Attention, batching, quantization, and implementation overhead can shift the measured bottleneck.
+  - *A Weight-Traffic Lower Bound (Dense vs. Sparse MoE):*
+    - *Dense Models:* In an illustrative low-batch, memory-bound decode regime, parameter bytes divided by effective memory bandwidth provides a first estimate of one step's weight-read time. Label cache reuse, quantization, parallelism, and other work omitted from this bound.
+    - *Sparse Mixture-of-Experts (MoE):* Only routed expert weights and shared parameters participate in a step, but routing, communication, and utilization affect realized latency. Compare active weight traffic under stated assumptions rather than treating it as complete step time.
+  - *Per-Trajectory Serialization vs. Service Batching:* One trajectory's next decision may depend on its previous output or tool observation, limiting parallelism along that path. A shared inference service can batch independent trajectories, so effective batch size and parameter-traffic amortization must be measured at the service boundary rather than assumed to be $B=1$.
   - *Forward Deferrals for Downstream Levers:*
     * Radix-tree prefix caching and KV block sharing are deferred exclusively to Chapter 05 (§5.4).
     * Speculative decoding (draft-target verification) is deferred exclusively to Chapter 17 (§17.4).
@@ -1077,7 +1094,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
   - 🛑 **DO NOT** explain virtual memory block tables or host DRAM swapping (Deferred to Chapter 05).
   - 🛑 **DO NOT** cover multi-node tensor or pipeline parallelism (Deferred to Chapter 15 & 17).
 - **Visuals & Tables:**
-  - Prefill vs. Decode Roofline diagram (@fig-prefill-vs-decode / `prefill_vs_decode_v2.svg`): Contrasting compute-bound parallel GEMM with memory-bound serialized GEMV.
+  - Prefill vs. Decode Roofline diagram (@fig-prefill-vs-decode / `prefill_vs_decode_v2.svg`): Show illustrative high-batch and low-batch operating points and label their workload assumptions.
   - MLSysIM LEGO Roofline Cell: Executable Python cell computing $I_{\text{sat}}$ and decode time for H100 SXM5, B200, and M4 Max.
   - Latency Regimes Table (@tbl-vol3-latency-regimes): Comparing short/long prompt and short/long output operational regimes.
 - **Causal Bridge to 2.8:** Given these output properties and physical costs, how should engineers evaluate competing interface designs?
@@ -1117,7 +1134,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
   2. *Autoregressive decode forms an irreducibly serial causal dependency chain.*
   3. *Likelihood and structural validity do not establish truth, safety, or authority.*
   4. *The invocation contract must enforce explicit budgets and evaluate normalized outcome envelopes.*
-  5. *Prefill is compute-bound, while decode is memory-bandwidth bound and throttled by single-agent ($B=1$) serialization.*
+  5. *Prefill and decode perform different work; their measured bottlenecks depend on model geometry, batching, and serving conditions.*
 - `::: {.callout-chapter-connection title="From One Candidate to Deliberate Computation"}`
   - Handoff forward: A single invocation produces one unprivileged, stochastic candidate sequence. When that candidate is ambiguous, incomplete, or fails runtime tests, the system cannot rely on simple prompt re-issuance. Chapter 3 examines how the runtime allocates additional inference-time compute—through search trees, verification loops, and environment interaction—to turn stochastic proposals into dependable systems outcomes.
 
@@ -1151,7 +1168,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 **The Core Question:** *When a single forward pass produces a flawed, incomplete, or ambiguous proposal, how should an agent runtime allocate additional inference-time computation—extended sequential generation, parallel candidate branching, or tool-assisted feedback—to reach a verified task outcome?*
 
-**Why It Matters:** *In multi-step autonomous execution, error rates compound exponentially with task horizon ($P(\text{success}) \le (1-\epsilon)^N$). An engineer cannot simply prompt a model to "think harder" or sample dozens of alternatives without exploding accelerator memory and latency. Deliberation is fundamentally a resource allocation problem over finite token budgets, KV cache capacity, and wall-clock deadlines. The runtime must decide when to explore alternative branches, when to evaluate external evidence (linters, test suites, sandboxed compilers), and when to terminate execution.*
+**Why It Matters:** *In multi-step autonomous execution, an uncorrected error can invalidate later actions, while extra candidate generation consumes time and serving resources. Under an illustrative independent-step model, success probability falls with task horizon; actual trajectories also contain correlated errors and feedback-driven recovery. Deliberation is therefore a resource allocation decision: the runtime must choose when another candidate, a verifier, or a new environmental observation is likely to improve the accepted outcome enough to justify its cost.*
 
 
 ::: {.callout-learning-objectives}
@@ -1168,14 +1185,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 3.1: Why One Candidate Can Fail [stage-setter]
 - **Heading & Anchor:** `## Why One Candidate Can Fail {#sec-vol3-deliberation-insufficient-response}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** A first response can commit to a plausible but unsupported hypothesis; additional compute is useful only if it can generate or acquire evidence that distinguishes alternatives.
 - **Curricular Placement:** Bridges the atomic invocation of Chapter 02 to multi-candidate and deliberate search topologies.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Moving from $H=1$ atomic execution to deliberative policy. Why the unprivileged core's first token sample can steer subsequent generation into an unrecoverable error basin.
-  - *Beat 2 (The Systems Problem & Operational Reality):* Autoregressive commitment. Once tokens are emitted into the KV cache, causal masking forces all subsequent attention to condition upon them. A wrong early choice cannot be un-generated within the same forward stream.
-  - *Beat 3 (The Systems Confrontation):* Failure taxonomies of single-pass generation: shallow generation (insufficient reasoning tokens to unpack complex dependency chains), incorrect initial premise, and lack of external discriminating evidence. Paraphrasing a flawed premise adds zero entropy or information.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The decision standard: when does buying more compute (tokens, samples, or tests) yield positive marginal information value? Formulates the transition to compute allocation axes. Concludes with prose bridge to Section 3.2.
+  - *Possible focus (Architectural Stage-Setting):* Moving from $H=1$ atomic execution to deliberative policy. Why the unprivileged core's first token sample can steer subsequent generation into an unrecoverable error basin.
+  - *Possible focus (The Systems Problem & Operational Reality):* Autoregressive commitment. Once tokens are emitted into the KV cache, causal masking forces all subsequent attention to condition upon them. A wrong early choice cannot be un-generated within the same forward stream.
+  - *Possible focus (The Systems Confrontation):* Failure taxonomies of single-pass generation: shallow generation (insufficient reasoning tokens to unpack complex dependency chains), incorrect initial premise, and lack of external discriminating evidence. Paraphrasing a flawed premise adds zero entropy or information.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The decision standard: when does buying more compute (tokens, samples, or tests) yield positive marginal information value? Formulates the transition to compute allocation axes. Concludes with prose bridge to Section 3.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** discuss context window compaction, summarization, or lost-in-the-middle (Deferred exclusively to Chapter 04).
   - 🛑 **DO NOT** discuss PagedAttention block tables or DRAM swapping (Deferred exclusively to Chapter 05).
@@ -1192,7 +1209,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 - **The Single Key Point:** Depth, breadth, and feedback are distinct execution topologies with different information, critical-path latency, and memory costs.
 - **Curricular Placement:** Core taxonomy of test-time compute scaling.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Depth (Sequential Token Extension / CoT):* Spending compute serially within a single invocation. Enables decomposing problems into intermediate lemmas; bounded by staged evidence (cannot observe new environmental data); subject to the $B=1$ memory shuttle latency wall ($T \propto K$).
+  - *Depth (Sequential Token Extension):* Spending additional output steps within one invocation can develop a candidate using staged evidence but cannot acquire a new environmental observation. The path has serial token dependencies; its measured cost depends on the serving configuration.
   - *Breadth (Parallel Candidate Sampling / Best-of-N):* Sampling $N$ independent continuations from the same prompt prefix. Explores distinct branches of the probability distribution; parallelizable across batch dimensions or serving workers; critical path is $\max(T_i)$ rather than $\sum T_i$.
   - *Feedback (Observation-Conditioned Revision):* Interleaving generation with deterministic environmental verification (linters, test runs, compilers). Each iteration injects fresh observations, converting open-loop extrapolation into closed-loop error correction.
   - *Comparative Cost & Latency Formulation:* Formulate total compute ($C_{\text{FLOP}}$), wall-clock critical path ($T_{\text{wall}}$), and token consumption ($K_{\text{total}}$) for each axis.
@@ -1384,14 +1401,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 4.1: The Working-Set Decision [stage-setter]
 - **Heading & Anchor:** `## The Working-Set Decision {#sec-vol3-working-sets-decision}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** The active context window is a deliberately selected logical working set, not an append-only transaction log or a physical cache.
 - **Curricular Placement:** Establishes the boundary between logical prompt staging (Host Agent OS) and physical KV serving memory (Inference Service).
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Denning's working-set principle adapted to Software 3.0. Context is active working memory: the minimal set of facts, instructions, and observations required to evaluate the next action.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Append-Only Transcript Trap. As trajectories lengthen, naive transcript concatenation causes quadratic compute growth, attentional dispersion, and token budget exhaustion.
-  - *Beat 3 (The Systems Confrontation):* Decoupling Logical Context from Physical KV Cache. Distinguishing what the agent OS selects to stage (logical working set in host DRAM) from how the GPU serving daemon physically represents and computes attention (physical KV pages in HBM).
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* Formulating working-set membership $\mathcal{W}(t) \subset \mathcal{H}_{1:t-1}$. Defining the active token budget constraint ($|\mathcal{W}(t)| \le S_{\max}$). Concludes with prose bridge to Section 4.2.
+  - *Possible focus (Architectural Stage-Setting):* Denning's working-set principle adapted to Software 3.0. Context is active working memory: the minimal set of facts, instructions, and observations required to evaluate the next action.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Append-Only Transcript Trap. As trajectories lengthen, naive transcript concatenation causes quadratic compute growth, attentional dispersion, and token budget exhaustion.
+  - *Possible focus (The Systems Confrontation):* Decoupling Logical Context from Physical KV Cache. Distinguishing what the agent OS selects to stage (logical working set in host DRAM) from how the GPU serving daemon physically represents and computes attention (physical KV pages in HBM).
+  - *Possible focus (Computational Boundary & Analytical Handoff):* Formulating working-set membership $\mathcal{W}(t) \subset \mathcal{H}_{1:t-1}$. Defining the active token budget constraint ($|\mathcal{W}(t)| \le S_{\max}$). Concludes with prose bridge to Section 4.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** derive physical KV cache geometry or PagedAttention block tables (Deferred exclusively to Chapter 05).
   - 🛑 **DO NOT** discuss external vector databases or embedding retrieval (Deferred exclusively to Chapter 06).
@@ -1405,13 +1422,13 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 4.2: Capacity, Cost, and Relevance [core]
 - **Heading & Anchor:** `## Capacity, Cost, and Relevance {#sec-vol3-working-sets-physics}`
-- **The Single Key Point:** Context expansion increases prefill latency and quadratic compute while triggering attention degradation (lost-in-the-middle); usable context is governed by retrieval fidelity, not nominal sequence length.
+- **The Single Key Point:** A larger context admits more information but does not guarantee that the model uses the relevant evidence; its task benefit and prefill cost must be measured for the selected workload.
 - **Curricular Placement:** Analyzes empirical attention dynamics and resource scaling over long sequences.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Lost-in-the-Middle Phenomenon:* U-shaped attention recall curves (Liu et al., 2024). Primacy and recency bias in transformer attention; entropy dispersion across thousands of intermediate tokens.
+  - *The Lost-in-the-Middle Phenomenon:* Present position-dependent retrieval failures as an empirical finding for particular models and tasks, then test whether the selected workload shows the same behavior.
   - *Distractor Interference:* How irrelevant code fragments or historical failures pull attention away from relevant task constraints.
   - *Prefill Latency & Compute Scaling:* Quadratic self-attention compute ($O(M^2)$) vs linear projection compute ($O(M)$); impact on Time to First Token (TTFT) and token budget expenditure.
-  - *Usable Context vs Nominal Context:* Why a "128k context model" cannot reliably execute multi-hop reasoning over 128k unstructured tokens.
+  - *Usable Context vs Nominal Context:* A stated maximum token span is a capacity property; evidence use and multi-hop task accuracy are separate empirical properties.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover FlashAttention kernel implementations or online softmax tiling (Covered in Volume II / Section 2.7).
   - 🛑 **DO NOT** discuss PagedAttention block allocation or DRAM page swapping (Deferred to Chapter 05).
@@ -1424,15 +1441,15 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 4.3: Staging the Next Invocation [core]
 - **Heading & Anchor:** `## Staging the Next Invocation {#sec-vol3-working-sets-staging}`
-- **The Single Key Point:** Context layout must enforce strict structural zoning (Root/Trunk/Leaf) to separate authority levels, preserve provenance, and maintain prefix stability.
+- **The Single Key Point:** Context assembly must preserve instruction authority, source provenance, and task relevance; a stable-prefix layout may also improve cache reuse when repeated invocations share exact tokens.
 - **Curricular Placement:** Architecture of prompt assembly and authority containment.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Three-Zone Context Topology:*
+  - *One Three-Zone Context Layout (Illustrative, Not Required):*
     1. **Root (Immutable Task Contract & Directives):** System policies, security boundaries, available tool schemas. Highest authority, static prefix.
     2. **Trunk (Active State & Relevant Environment Artifacts):** Current plan DAG, verified facts, open subgoals, primary code under edit. Medium authority, slowly mutating.
     3. **Leaf (Dynamic Observations & Scratchpad):** Latest tool execution stdout/stderr, compiler return codes, ephemeral candidate reasoning. Low authority, untrusted data, high turnover.
   - *Provenance Tracking & Quarantine:* Tagging every token block with source identity, timestamp, and trust level. Formatting tool outputs with clear data-channel boundaries (`<tool_response>` tags) to prevent prompt injection from environmental data.
-  - *Prefix Layout Stability:* Organizing tokens so the immutable Root and slowly changing Trunk remain at the head of the prompt, maximizing prefix cache hit rates in serving engines.
+  - *Prefix Layout Stability:* Where exact prefix reuse is supported, placing stable content before changing observations may increase cache hits; measure that benefit against relevance and authority needs.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** discuss Radix tree physical implementation in GPU memory (Deferred to Chapter 05).
   - 🛑 **DO NOT** discuss MCP protocol message frames (Deferred to Chapter 07).
@@ -1551,7 +1568,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 - **Core Takeaway:** *The KV cache is physical attention state maintained by an inference service; its dynamic footprint, sharing, scheduling, and eviction determine how many long or branching trajectories the service can run.*
 - **Governing Systems Question:** *How can a serving system allocate and reuse the attention state of active trajectories under finite accelerator memory?*
-- **Curricular Role in Volume III:** *"The Physical Attention Memory Hierarchy."* Where Chapter 04 addressed what logical context to stage, Chapter 05 addresses where and how that context physically lives on GPU hardware. It treats the KV cache as scarce, volatile accelerator memory governed by virtual memory paging (PagedAttention), prefix trie sharing (Radix trees), prefill/decode co-scheduling (chunked prefill), and multi-tier memory offloading under the Tool-Wait memory tax.
+- **Curricular Role in Volume III:** *"The Physical Attention State of a Serving Request."* Where Chapter 04 selected logical context, Chapter 05 explains the KV projections used during attention and then compares physical allocation, prefix reuse, scheduling, and retention policies for long or branching trajectories. Paged blocks, Radix trees, chunked prefill, and offloading are candidate implementations of those policies.
 
 #### The Curricular Compass (Where We Are in the 18 Chapters)
 
@@ -1573,7 +1590,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 **The Core Question:** *How can a serving runtime allocate, share, and evict the physical key-value attention tensors of active trajectories under hard accelerator memory limits?*
 
-**Why It Matters:** *In multi-turn agent systems, the KV cache footprint quickly eclipses model weight memory. Unlike isolated batch inference, agent trajectories pause for seconds or minutes while awaiting tool execution or human approval, stranding valuable high-bandwidth memory (HBM) on accelerators. Furthermore, multi-candidate deliberation branches share common prompt prefixes that waste gigabytes if duplicated. Without virtual memory paging (PagedAttention), dynamic prefix caching, and intelligent offload/recomputation policies, serving systems suffer severe memory fragmentation, thrashing, and early request aborts under high concurrency.*
+**Why It Matters:** *KV state grows with processed tokens and active requests. Long contexts, branching candidates, and repeated prefixes can therefore change serving capacity and recomputation cost. When a trajectory pauses for a tool or human, the serving system may retain, evict, or offload reusable state; each choice trades memory occupancy against later work. Students first derive the state footprint, then estimate which allocation and reuse policy helps a specified workload.*
 
 
 ::: {.callout-learning-objectives}
@@ -1589,14 +1606,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 5.1: From Context Tokens to KV State [stage-setter]
 - **Heading & Anchor:** `## From Context Tokens to KV State {#sec-vol3-kvcache-geometry}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
-- **The Single Key Point:** The KV cache stores intermediate attention state for processed tokens; its capacity cost follows model geometry, active sequence length, and concurrency.
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
+- **The Single Key Point:** A KV cache retains previously computed key and value projections so later attention steps can reuse them; model geometry and live token count determine its memory footprint.
 - **Curricular Placement:** Establishes physical GPU memory mechanics underlying the logical context selected in Chapter 04.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Grounding in physical accelerator memory. Transitioning from Chapter 04's logical working set into physical HBM tensors.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The KV Activation Explosion. Key and Value projections ($K_t, V_t$) must remain resident in accelerator memory across subsequent decode steps to avoid quadratic recompute.
-  - *Beat 3 (The Systems Confrontation):* Physical Memory Footprint Derivation: $\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P$ bytes/token. Calculating total sequence footprint ($\text{Mem}_{\text{seq}} = S \cdot \text{Mem}_{\text{token}}$) and batch footprint ($\text{Mem}_{\text{batch}} = B \cdot S \cdot \text{Mem}_{\text{token}}$). Contrast Multi-Head Attention (MHA) vs Grouped-Query Attention (GQA) vs Multi-Query Attention (MQA).
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The concurrency ceiling on physical accelerator memory ($B_{\max} = \frac{\text{HBM}_{\text{total}} - \text{Mem}_{\text{weights}}}{\text{Mem}_{\text{seq}}}$). Concludes with prose bridge to Section 5.2.
+  - *Possible focus (Architectural Stage-Setting):* Explain how processing context tokens produces key and value projections and why a later attention step can reuse them. Then locate those tensors in a chosen serving implementation.
+  - *Possible focus (The Systems Problem & Operational Reality):* Retaining KV state avoids recomputing earlier projections during continued generation; retaining every request's state consumes serving memory. Residency across separate invocations or tool waits is a policy choice, not part of the cache's definition.
+  - *Possible focus (The Systems Confrontation):* Physical Memory Footprint Derivation: $\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P$ bytes/token. Calculating total sequence footprint ($\text{Mem}_{\text{seq}} = S \cdot \text{Mem}_{\text{token}}$) and batch footprint ($\text{Mem}_{\text{batch}} = B \cdot S \cdot \text{Mem}_{\text{token}}$). Contrast Multi-Head Attention (MHA) vs Grouped-Query Attention (GQA) vs Multi-Query Attention (MQA).
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The concurrency ceiling on physical accelerator memory ($B_{\max} = \frac{\text{HBM}_{\text{total}} - \text{Mem}_{\text{weights}}}{\text{Mem}_{\text{seq}}}$). Concludes with prose bridge to Section 5.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** derive Roofline arithmetic intensity or memory bus bandwidth (Covered in Section 2.7).
   - 🛑 **DO NOT** discuss logical context working set compaction (Covered in Chapter 04).
@@ -1609,10 +1626,10 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 5.2: Dynamic Allocation and Fragmentation [core]
 - **Heading & Anchor:** `## Dynamic Allocation and Fragmentation {#sec-vol3-kvcache-fragmentation}`
-- **The Single Key Point:** Variable-length agent trajectories and bursty tool waits cause severe memory fragmentation under contiguous memory allocation, stranding up to 60-80% of accelerator capacity.
+- **The Single Key Point:** Variable sequence lengths make fixed reservations and contiguous KV allocation waste capacity; the magnitude depends on the allocator and workload.
 - **Curricular Placement:** Identifies the fundamental memory allocation failure in naive LLM serving runtimes.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Static Allocation vs Dynamic Growth:* Why reserving $S_{\max}$ up-front wastes $>70\%$ of memory when trajectories terminate early or grow incrementally.
+  - *Static Allocation vs Dynamic Growth:* Estimate waste from maximum-length reservation under an explicit sequence-length distribution; use published measurements as examples tied to their baselines.
   - *Internal vs External Fragmentation:* Internal fragmentation from coarse over-provisioning; external fragmentation from memory holes between variable-length requests.
   - *Stranded Memory in Agent Workloads:* Trajectories with unpredictable completion lengths ($K \in [1, 4096]$) causing rapid allocation churn.
   - *The Usable Memory Metric:* Measuring live, useful KV bytes versus nominal allocated pool memory.
@@ -1627,7 +1644,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 5.3: Paged KV Allocation [core]
 - **Heading & Anchor:** `## Paged KV Allocation {#sec-vol3-kvcache-pagedattention}`
-- **The Single Key Point:** Virtual memory paging applied to LLM serving (PagedAttention) decouples logical token positions from physical HBM addresses, eliminating external fragmentation and enabling copy-on-write branching.
+- **The Single Key Point:** Paged KV allocation maps logical token positions to noncontiguous physical blocks, reducing external fragmentation; reference-counted sharing can make branching cheaper at the cost of block-table and tail-block overhead.
 - **Curricular Placement:** Core virtual memory architecture for accelerator attention serving.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *PagedAttention Architecture (Kwon et al., 2023):* Dividing KV cache into fixed-size physical blocks (e.g. 16 or 32 tokens).
@@ -1645,7 +1662,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 5.4: Prefix Identity and Reuse [core]
 - **Heading & Anchor:** `## Prefix Identity and Reuse {#sec-vol3-kvcache-radix-tree}`
-- **The Single Key Point:** Global prefix caching using Radix trees indexes precomputed KV blocks across distinct requests and turns, converting redundant prefill compute into fast cache hits.
+- **The Single Key Point:** Exact repeated token prefixes can reuse retained KV state across compatible requests; a Radix tree is one indexing design, and realized savings depend on prefix identity, residency, and workload repetition.
 - **Curricular Placement:** Cross-request memory indexing and token prefix trees.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *Prefix Caching Across Turns and Sessions:* Recognizing common token prefixes across independent invocations.
@@ -1664,10 +1681,10 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 5.5: Prefill and Decode Scheduling [core]
 - **Heading & Anchor:** `## Prefill and Decode Scheduling {#sec-vol3-kvcache-chunked-prefill}`
-- **The Single Key Point:** Unchunked prefill requests monopolize GPU compute and induce high inter-token latency (ITL) jitter on active decoders; chunked prefill co-schedules prefill and decode to maintain SLA guarantees.
+- **The Single Key Point:** Long prefills and active decodes compete for serving resources; chunking is one scheduling policy for balancing time to first token, inter-token latency, and throughput under a measured arrival mix.
 - **Curricular Placement:** Accelerator compute-scheduling policies under mixed workloads.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Prefill vs Decode Interference:* Prefill is compute-bound (saturates Tensor Cores); decode is memory-bound (saturates HBM bandwidth). Co-locating them in the same iteration without control creates severe scheduling bubbles.
+  - *Prefill vs Decode Interference:* Explain the different work of the two phases, then measure whether their co-scheduling causes contention or useful overlap in the chosen model, batch, and serving regime.
   - *Chunked Prefill Architecture (Sarathi-Serve / vLLM):* Slicing massive prompts into uniform token chunks (e.g. 512 tokens). Interleaving prefill chunks with decode tokens in the same forward iteration.
   - *SLA Trade-Offs:* Balancing Time to First Token (TTFT) against Inter-Token Latency (ITL) and aggregate serving throughput.
   - *Dynamic Batching Policies:* Token-budget-based iteration scheduling ($\sum M_{\text{chunk}} + \sum B_{\text{decode}} \le C_{\text{budget}}$).
@@ -1682,12 +1699,12 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 5.6: Retain, Evict, Recompute, or Offload [core]
 - **Heading & Anchor:** `## Retain, Evict, Recompute, or Offload {#sec-vol3-kvcache-swapping}`
-- **The Single Key Point:** The Tool-Wait memory tax strands scarce accelerator HBM during external tool execution; serving systems must decide whether to retain, evict, recompute, or swap KV blocks to host DRAM based on expected wait times and transfer costs.
+- **The Single Key Point:** When a trajectory pauses for a tool or human, the serving system chooses whether any reusable KV state remains resident, is evicted, is recomputed, or is offloaded; the best policy depends on reuse probability, wait time, capacity pressure, and transfer cost.
 - **Curricular Placement:** Multi-tier memory offloading and memory reclamation protocols.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Tool-Wait Memory Tax:* Analysis of $T_{\text{tool}}$ ($10^0$ to $10^2$ seconds) vs GPU forward pass latency ($10^{-2}$ seconds). Stranding HBM memory during non-GPU execution.
+  - *The Tool-Wait Memory Tax:* In a serving design that retains KV across turns, estimate the memory occupancy cost of a paused trajectory. Contrast with a design that releases state after each invocation and pays recomputation or prefix lookup on return.
   - *The Four Management Policies:*
-    1. **Resident Retention:** Hold KV cache in HBM throughout tool execution. Optimal for microsecond tool calls; catastrophic for multi-second tools.
+    1. **Resident Retention:** Hold reusable KV in device memory while the trajectory waits; compare its opportunity cost with expected reuse and available capacity.
     2. **Eviction and Recomputation:** Free HBM immediately; re-run prefill when tool returns. Cost: $T_{\text{prefill}}$ and GPU compute FLOPs.
     3. **Host DRAM Offloading (Swapping):** Asynchronously stream KV blocks over PCIe Gen5 ($64\text{ GB/s}$) to host system memory, freeing HBM. Swap back when tool completes.
     4. **Tiered Eviction (NVMe / Remote):** Pushing dormant trajectories to local SSDs for long suspensions.
@@ -1778,24 +1795,24 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 6.1: What Must Persist [stage-setter]
 - **Heading & Anchor:** `## What Must Persist {#sec-vol3-persistent-need}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** Durable task state, source-of-truth artifacts, and search indexes serve different purposes and must not be collapsed into one generic “agent memory.”
 - **Curricular Placement:** Establishes external storage architecture beyond volatile working context and GPU KV cache.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* The External Storage Boundary. Volatile context (Ch 4) and ephemeral KV cache (Ch 5) vanish upon process exit. Persistent external memory maintains state across extended trajectories, sessions, and restarts.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Multi-Tier Storage Hierarchy. L1 Context Window (tens of KB, microsecond attention) $\to$ L2 GPU KV Cache (tens of GB, volatile serving activation) $\to$ L3 Local NVMe Storage (hundreds of GB, millisecond disk access, Git trees, SQLite indices) $\to$ L4 Remote Distributed Stores (terabytes, network RPC, vector DBs, object stores).
-  - *Beat 3 (The Systems Confrontation):* Taxonomy of Persistent Information:
+  - *Possible focus (Architectural Stage-Setting):* The External Storage Boundary. Volatile context (Ch 4) and ephemeral KV cache (Ch 5) vanish upon process exit. Persistent external memory maintains state across extended trajectories, sessions, and restarts.
+  - *Possible focus (The Systems Problem & Operational Reality):* Distinguish selected context (an invocation input), KV state (a serving activation), authoritative artifacts (the source of truth), and derivative indexes (retrieval aids). Compare their owners, lifetimes, and access costs without presenting them as successive levels of one literal cache.
+  - *Possible focus (The Systems Confrontation):* Taxonomy of Persistent Information:
     1. **Source-of-Truth Artifacts:** Git repositories, databases, filesystems. Authoritative, mutable.
     2. **Trajectory Event Logs:** Append-only records of actions and observations.
     3. **Derivative Retrieval Indexes:** Vector embeddings, inverted keyword indexes, symbol graphs. Secondary, disposable, derived from source truth.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The Retrieval-to-Context Pipeline. Formalizing the query, retrieval, verification, and staging pipeline. Concludes with prose bridge to Section 6.2.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The Retrieval-to-Context Pipeline. Formalizing the query, retrieval, verification, and staging pipeline. Concludes with prose bridge to Section 6.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** discuss prompt compaction or lost-in-the-middle (Covered in Chapter 04).
   - 🛑 **DO NOT** discuss GPU PagedAttention or DRAM swapping (Covered in Chapter 05).
   - 🛑 **DO NOT** discuss subprocess tool execution (Deferred to Chapter 07).
   - 🛑 **DO NOT** discuss Write-Ahead Logging (WAL) engine implementation (Deferred to Chapter 10).
 - **Visuals & Tables:**
-  - Multi-tier persistent memory hierarchy table (@tbl-vol3-memory-tiers): Comparing L1 Context, L2 KV Cache, L3 Local NVMe, and L4 Remote Stores across latency, capacity, volatility, and authority.
+  - State ownership and lifetime table (@tbl-vol3-memory-tiers): Compare selected context, serving KV state, authoritative artifacts, and derivative indexes across owner, lifetime, capacity, and refresh rule without labeling them a literal L1–L4 cache hierarchy.
 - **Seminal Literature:**
   - Core distributed systems and storage hierarchy foundations.
 - **Causal Bridge to 6.2:** What contract should every retrieval satisfy before the result enters context?
@@ -1969,21 +1986,21 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 - Analyze standardized peripheral protocols (Model Context Protocol / MCP), evaluating the trade-offs between local UNIX domain sockets, stdio pipes, and remote SSE/RPC transports.
 - Architect an asynchronous, non-blocking tool dispatch engine that issues execution handles, frees accelerator compute during I/O waits, and wakes suspended agent sessions via event notifications.
 - Implement an observation normalization pipeline that strips ANSI escape codes, extracts structured stack traces, preserves deterministic integer exit codes, and truncates high-volume logs with explicit truncation markers.
-- Evaluate the catalog capacity paradox: proving empirically why exposing 3 to 5 universal, expressive primitives (Bash, FileView, FileEdit, Grep) outperforms bloated catalogs of dozens of specialized micro-tools.
+- Evaluate tool catalog granularity by schema footprint, selection error, permission scope, and accepted-task results under matched workloads.
 - Formulate error taxonomy and retry policies for transient network drops, rate-limit throttles, and tool parameter schema violations.
 
 :::
 
 #### Section 7.1: Peripheral Subsystem Abstraction [stage-setter]
 - **Heading & Anchor:** `## Peripheral Subsystem Abstraction {#sec-vol3-actuation-unix-analogy}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** A typed tool contract gives the runtime a uniform way to parse proposals, check authority, dispatch heterogeneous operations, and return observations; the UNIX interface is a design precedent, not a literal device mapping.
 - **Curricular Placement:** Establishes the peripheral boundary of the Stochastic Computer where stochastic model output transitions into deterministic external side effects.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* The Peripheral Boundary. Moving from the internal computational core (Ch 2), reasoning loops (Ch 3), working memory (Ch 4), attention caches (Ch 5), and durable storage (Ch 6) to external actuation. A candidate token sequence has zero external effect until interpreted, validated, authorized, and dispatched by the host runtime.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Classical I/O Abstraction (Ritchie & Thompson 1974: "everything is a file" via `open`, `read`, `write`, `close`, `ioctl`) versus the Agent Peripheral Interface: "everything is an RPC tool dispatch" (tool definition schema, parameter binding, runtime authorization gate, execution handle, structured observation envelope).
-  - *Beat 3 (The Systems Confrontation):* Unstructured Text Streaming vs. Mediated Typed RPCs. The failure modes of unmediated string execution (command injection, malformed flags, unescaped quotes) vs. typed parameter schemas enforcing semantic and type boundaries before dispatch.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The 4-Stage Peripheral Lifecycle: (1) Proposal validation against schema, (2) Permission and capability gating, (3) Dispatched execution, (4) Observation normalization and context staging. Concludes with handoff to Section 7.2.
+  - *Possible focus (Architectural Stage-Setting):* The Peripheral Boundary. Moving from the internal computational core (Ch 2), reasoning loops (Ch 3), working memory (Ch 4), attention caches (Ch 5), and durable storage (Ch 6) to external actuation. A candidate token sequence has zero external effect until interpreted, validated, authorized, and dispatched by the host runtime.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Classical I/O Abstraction (Ritchie & Thompson 1974: "everything is a file" via `open`, `read`, `write`, `close`, `ioctl`) versus the Agent Peripheral Interface: "everything is an RPC tool dispatch" (tool definition schema, parameter binding, runtime authorization gate, execution handle, structured observation envelope).
+  - *Possible focus (The Systems Confrontation):* Unstructured Text Streaming vs. Mediated Typed RPCs. The failure modes of unmediated string execution (command injection, malformed flags, unescaped quotes) vs. typed parameter schemas enforcing semantic and type boundaries before dispatch.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The 4-Stage Peripheral Lifecycle: (1) Proposal validation against schema, (2) Permission and capability gating, (3) Dispatched execution, (4) Observation normalization and context staging. Concludes with handoff to Section 7.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** explain hypervisor sandboxing, Firecracker microVMs, or cgroups (Deferred exclusively to Chapter 08: Virtualization & Sandboxing).
   - 🛑 **DO NOT** detail the MCP JSON-RPC protocol specification (Reserved for Section 7.3).
@@ -2079,7 +2096,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
   - *The Normalization Pipeline:*
     1. *Stripping ANSI Control Sequences:* Regex/state-machine parsing of terminal escape sequences (colors, cursor movements, line clears, spinners).
     2. *Handling Carriage Returns (`\r`):* Resolving progress bar overwrites to avoid duplicating thousands of intermediate progress strings into context.
-    3. *Primacy of the Integer Exit Code:* Why the operating system exit code ($0 = \text{success}, \ne 0 = \text{failure}$) is the sole ground truth of command success; never relying on model parsing of stdout strings like `"All tests passed"`.
+    3. *Exit Status and Its Limit:* Preserve the operating system exit code as authoritative evidence of how the process terminated. Exit code 0 does not by itself establish that a task objective was met or that the program's reported result is trustworthy.
     4. *Structured Traceback Extraction:* Parsing stack traces into structured dictionaries (exception class, error message, source file, line number).
   - *Explicit Truncation Metadata:* Formatting truncated output with explicit, machine-readable headers: `"[WARNING: Output exceeded 2,000 tokens. Showing last 50 lines. Full output saved to /tmp/trace_78a.log]"`.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
@@ -2093,30 +2110,30 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 7.7: Asynchronous Tool Dispatch [core]
 - **Heading & Anchor:** `## Asynchronous Tool Dispatch {#sec-vol3-actuation-async}`
-- **The Single Key Point:** Neural token generation and peripheral execution operate on vastly different timescales; runtimes must decouple invocation from waiting via non-blocking asynchronous dispatch, freeing accelerator memory while jobs run.
+- **The Single Key Point:** A tool call can outlive a model invocation; asynchronous dispatch lets the runtime track pending work and schedule other tasks while waiting, with KV residency handled separately by serving policy.
 - **Curricular Placement:** Systems concurrency and resource management for tool execution.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Timescale Mismatch:* Token decode latency ($10\text{--}40\text{ ms}$) vs. peripheral tool execution (hundreds of milliseconds to hours).
   - *Synchronous vs. Asynchronous Dispatch Architecture:*
-    - *Synchronous:* Client blocks on RPC response; GPU thread/KV-cache remains pinned; high risk of cascading timeouts.
-    - *Asynchronous:* Immediate return of a lightweight Job Handle ($\text{job\_id}$); agent yields execution; runtime transitions process to suspended state; GPU memory is freed or reclaimed.
+    - *Synchronous:* The caller waits for the tool result, potentially tying up a host worker or delaying other trajectory work; whether the inference service retains KV state is independent.
+    - *Asynchronous:* The runtime records a job handle ($\text{job\_id}$), suspends the trajectory, and resumes it when the result arrives; the serving system applies its own state-retention policy.
   - *Event-Driven Resumption:* Polling loops vs. Webhooks vs. kernel event queues (`epoll`/`kqueue`); notifying the agent supervisor upon tool termination to schedule the next inference turn.
   - *Background Task Management:* Inspecting, interacting with (`send_input`), and terminating (`SIGKILL`) long-running background tasks.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** derive GPU KV-cache swapping formulas or host DRAM bandwidth equations (Covered in Chapter 05).
   - 🛑 **DO NOT** implement full Agent Operating System scheduler and ACB queues (Deferred to Chapter 09).
 - **Visuals & Tables:**
-  - Sequence diagram: Synchronous blocking RPC (stranding GPU) vs. Asynchronous Job Handle dispatch and event-driven wakeup (@fig-vol3-async-tool-dispatch).
+  - Sequence diagram: Blocking caller vs. asynchronous job handle and event-driven wakeup, with serving-state retention shown as a separate decision (@fig-vol3-async-tool-dispatch).
 - **Seminal Literature:**
   - Event-driven architecture and asynchronous I/O design.
 - **Causal Bridge to 7.8:** How should an engineer design the overall tool catalog to maximize agent problem-solving while minimizing model confusion?
 
 #### Section 7.8: Toolkit Granularity Partitioning [synthesis]
 - **Heading & Anchor:** `## Toolkit Granularity Partitioning {#sec-vol3-actuation-toolkit-design}`
-- **The Single Key Point:** Exposing a sprawling catalog of narrow micro-tools degrades model decision quality and inflates context; an orthogonal core of 3–5 expressive, composable primitives consistently outperforms tool bloat.
+- **The Single Key Point:** Tool granularity trades selection ambiguity and schema overhead against expressiveness, safety, and task fit; the best catalog size must be evaluated for the workload and model.
 - **Curricular Placement:** Toolkit architectural design, composition, and cognitive ergonomics.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Catalog Capacity Paradox:* Mathematical and empirical evidence showing that tool selection accuracy drops exponentially as catalog size exceeds working memory limits; context token cost of staging dozens of tool schemas.
+  - *Catalog Size and Selection:* Measure schema-token overhead, tool-selection errors, and accepted-task outcomes as candidate catalogs grow; avoid assuming a universal exponential decline or fixed ideal count.
   - *Principles of Orthogonal Tool Design:* High cohesion, loose coupling; ensuring each tool has a single, distinct failure domain; eliminating redundant overlapping tools that compete for identical user intent.
   - *Expressiveness vs. Guardrails:* The spectrum between open expressive primitives (e.g. `bash`) and tightly constrained structured tools (e.g. `ast_rename_variable`); selecting the appropriate abstraction level based on agent authority and sandbox strength.
   - *Defensive Parameter Design:* Safe defaults (e.g. non-destructive append vs destructive overwrite); dry-run simulation flags (`dry_run: true`); atomic batching.
@@ -2124,7 +2141,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
   - 🛑 **DO NOT** discuss multi-agent specialization or role division (Deferred to Chapter 15).
   - 🛑 **DO NOT** discuss reinforcement learning policy optimization on tool use (Deferred to Chapter 14).
 - **Visuals & Tables:**
-  - Comparison matrix: Sprawling 40-micro-tool catalog vs. Lean 4-primitive orthogonal toolkit across token footprint, selection error rate, and task completion (@tbl-vol3-toolkit-granularity).
+  - Comparison matrix: Narrow and broad tool catalogs across schema footprint, authority, selection error, and task completion for the same workload (@tbl-vol3-toolkit-granularity).
 - **Seminal Literature:**
   - John Ousterhout (2018, *A Philosophy of Software Design* on deep vs. shallow interfaces).
 - **Causal Bridge to Scaffolds:** Direct handoff to Fallacies and Pitfalls.
@@ -2132,7 +2149,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 #### Fallacies and Pitfalls [fallacies]
 `## Fallacies and Pitfalls {#sec-vol3-actuation-fallacies}`
 - **Fallacy 1:** *Providing more tools in context always increases agent capability.*
-  - Refutation: Context bloat and tool confusion; exposing 50 tools degrades tool selection accuracy; a tight, orthogonal set of 5–8 primitives outperforms sprawling registries.
+  - Refutation: Additional tools can increase schema cost and selection ambiguity; compare catalogs under matched tasks and authority before choosing their granularity.
 - **Pitfall 1:** *Retrying failed non-idempotent tool calls without an idempotency key.*
   - Refutation: Network drops cause duplicate mutations in the real world (duplicate payments, duplicate database inserts, duplicate VM provisioning).
 - **Fallacy 2:** *Inferring tool success from model generation or stdout text alone.*
@@ -2148,7 +2165,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
   2. *The Model Context Protocol (MCP) standardizes peripheral connectivity across clients and servers.*
   3. *Idempotency keys are mandatory for all non-idempotent mutating peripheral calls.*
   4. *Large tool outputs require headless tailing, pagination, and backpressure before context staging.*
-  5. *Long-running tools must execute asynchronously to avoid tying up expensive accelerator memory.*
+  5. *Long-running tools need an explicit wait and resumption contract; host-worker occupancy and serving-state retention are separate costs.*
 - `::: {.callout-chapter-connection title="From Peripheral Connectivity to Hardware Isolation"}`
   - Handoff forward: Connecting an agent to external tools gives it the power to act on the world. However, unchecked execution of shell commands, scripts, and code allows prompt injection attacks and hallucinated actions to compromise host infrastructure. In Chapter 08 (*Virtualization & Sandboxing*), we study how to contain untrusted execution inside hardware-isolated microVMs, WebAssembly sandboxes, and capability-based security boundaries.
 
@@ -2193,14 +2210,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 8.1: Adversarial Threat Models [stage-setter]
 - **Heading & Anchor:** `## Adversarial Threat Models {#sec-vol3-virtualization-threat-model}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** Untrusted observations can induce unsafe proposals, while mistaken proposals can cause damage if the runtime grants excessive authority; threat analysis must identify the boundary where content could become an effect.
 - **Curricular Placement:** Establishes the security and containment boundary of the Stochastic Computer.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* The Isolation Boundary. Moving from peripheral contracts (Ch 7) to containment. Tool execution gives models the power to mutate disk, network, and compute state; the host runtime must assume the model is untrusted or compromised.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Dual Threat Landscape: (1) Indirect Prompt Injection (instruction-data co-inhabitation in transformer context, where untrusted external data hijacks the generation stream), and (2) Hallucinated Destruction (unintentional destructive mutations like `rm -rf /` or deleting database tables generated by non-malicious but confused models).
-  - *Beat 3 (The Systems Confrontation):* Why Text-Level Alignment Fails as Systems Security. Reinforcement learning from human feedback (RLHF), safety prompts, and guardrail models operate probabilistically at the semantic level; they provide zero mathematical guarantees. True isolation must be enforced below the model in the systems software and kernel architecture.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The Blast Radius Invariant: Containing effects such that complete model compromise cannot breach host integrity, access peer agent state, or exfiltrate private credentials. Concludes with handoff to Section 8.2.
+  - *Possible focus (Architectural Stage-Setting):* The Isolation Boundary. Moving from peripheral contracts (Ch 7) to containment. Tool execution gives models the power to mutate disk, network, and compute state; the host runtime must assume the model is untrusted or compromised.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Dual Threat Landscape: (1) Indirect Prompt Injection (instruction-data co-inhabitation in transformer context, where untrusted external data hijacks the generation stream), and (2) Hallucinated Destruction (unintentional destructive mutations like `rm -rf /` or deleting database tables generated by non-malicious but confused models).
+  - *Possible focus (The Systems Confrontation):* Why Text-Level Alignment Fails as Systems Security. Reinforcement learning from human feedback (RLHF), safety prompts, and guardrail models operate probabilistically at the semantic level; they provide zero mathematical guarantees. True isolation must be enforced below the model in the systems software and kernel architecture.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The Blast Radius Invariant: Containing effects such that complete model compromise cannot breach host integrity, access peer agent state, or exfiltrate private credentials. Concludes with handoff to Section 8.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** implement Agent Control Block (ACB) preemption signals (Deferred to Chapter 09).
   - 🛑 **DO NOT** discuss multi-agent Byzantine consensus (Deferred to Chapter 15).
@@ -2213,7 +2230,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 8.2: In-Process Sandbox Failures [core]
 - **Heading & Anchor:** `## In-Process Sandbox Failures {#sec-vol3-virtualization-in-process-failure}`
-- **The Single Key Point:** Language-level sandboxes (e.g., Python `exec()` with restricted globals, AST inspection, monkey-patching) fail universally; dynamic language reflection, memory-unsafe native C/C++ extensions, and shared kernel syscalls leak host authority immediately.
+- **The Single Key Point:** Restricting language syntax or globals alone is an inadequate isolation boundary for adversarial code that retains access to the host process, native extensions, or system calls.
 - **Curricular Placement:** Deconstruction of naive containment architectures.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Illusion of Language Restrictions:* Dynamic reflection and introspection in high-level languages (Python, JavaScript, Ruby); traversing object inheritance graphs to resurrect removed primitives in heap memory.
@@ -2249,10 +2266,10 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 8.4: MicroVM Kernel Isolation [core]
 - **Heading & Anchor:** `## MicroVM Kernel Isolation {#sec-vol3-virtualization-microvms}`
-- **The Single Key Point:** Linux containers share the host kernel and remain vulnerable to kernel-level privilege escalation; minimal KVM microVMs (Firecracker) boot independent guest Linux kernels and init processes in approximately $125\text{ ms}$ (with sub-millisecond VMM launch), delivering hardware hypervisor isolation with near-container operational density.
+- **The Single Key Point:** Containers and microVMs place different boundaries around untrusted execution: containers share a host kernel, while microVMs run a guest kernel behind a hypervisor; choose between them using the threat model and measured overhead.
 - **Curricular Placement:** Hardware-enforced virtualization architecture.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Containers vs. Hypervisors:* Containers rely on shared host kernel primitives (namespaces, cgroups); any kernel vulnerability (e.g., Dirty COW, eBPF exploits) grants root access to the entire host. Hypervisors enforce a hardware CPU boundary (Intel VT-x / AMD-V) separating guest memory from host memory.
+  - *Containers vs. Hypervisors:* Containers rely on a shared host kernel, so an exploitable kernel flaw can cross the intended boundary. Hypervisors add a guest–host boundary, with their own attack surface and operational cost.
   - *Architecture of Firecracker:* Minimal Virtual Machine Monitor (VMM) written in Rust using Linux KVM (`/dev/kvm`). Stripping legacy BIOS, PCI buses, and ACPI devices; exposing only minimal `virtio-net`, `virtio-block`, and `virtio-vsock`.
   - *Multi-Tenant Defense-in-Depth (The Firecracker Jailer):* Wrapping the VMM process in a chroot jail, dropping privileges to an unprivileged UID/GID, applying strict cgroups resource limits, and locking down syscalls via seccomp-bpf.
   - *Trade-Off Matrix:* Containers (Docker/LXC) vs. User-space Kernels (gVisor) vs. MicroVMs (Firecracker) across boot latency, memory footprint, syscall compatibility, and isolation strength.
@@ -2267,12 +2284,12 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 8.5: WebAssembly Sandboxing [core]
 - **Heading & Anchor:** `## WebAssembly Sandboxing {#sec-vol3-virtualization-wasm}`
-- **The Single Key Point:** WebAssembly (Wasm) provides a memory-safe, portable, capability-based stack architecture with sub-millisecond instantiation and zero ambient access, ideal for high-density, pure-computation agent workloads.
+- **The Single Key Point:** WebAssembly provides an isolated execution model whose host-provided interfaces determine available authority; compare its compatibility, startup time, and density with process and VM isolation for the intended workload.
 - **Curricular Placement:** Language-independent, capability-gated runtime sandboxing.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Wasm Sandbox Model:* Linear memory architecture with hardware-enforced boundary checks; sandboxed code cannot address memory outside its assigned linear array; formal stack machine execution.
+  - *The Wasm Sandbox Model:* Linear memory and validated module execution constrain direct memory access; the runtime and host interface implementation remain part of the trusted boundary.
   - *WebAssembly System Interface (WASI):* Capability-based systems interface; by default, a Wasm module has zero access to filesystems, network sockets, or system clocks unless the host explicitly injects pre-opened capability handles during module instantiation.
-  - *MicroVMs vs. Wasm Trade-Offs:* MicroVMs provide full POSIX compatibility for legacy tools (Bash, Python interpreters, compilers); Wasm provides ultra-lightweight ($<1\text{ ms}$ startup, kilobytes of RAM) execution for deterministic computation and data transformation.
+  - *MicroVMs vs. Wasm Trade-Offs:* A guest OS can support legacy POSIX tools; Wasm can have lower startup and memory overhead for compatible modules. Compare measured overhead and required host interfaces for the workload.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover filesystem Copy-on-Write overlay mechanics (Reserved for Section 8.6).
   - 🛑 **DO NOT** cover network egress firewalls (Reserved for Section 8.7).
@@ -2283,12 +2300,12 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 8.6: Copy-on-Write Filesystem Overlays [core]
 - **Heading & Anchor:** `## Copy-on-Write Filesystem Overlays {#sec-vol3-virtualization-cow}`
-- **The Single Key Point:** Filesystem isolation requires Copy-on-Write (CoW) overlays (OverlayFS, Btrfs/ZFS snapshots) that present an isolated writable workspace while preserving pristine base images and enabling sub-millisecond rollback.
+- **The Single Key Point:** An isolated writable workspace separates task mutations from its baseline; copy-on-write overlays and snapshots are implementation choices with different reset costs and compatibility limits.
 - **Curricular Placement:** Filesystem sandboxing and state containment.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *OverlayFS Architecture:* Layering a read-only lower directory (`lowerdir`, the pristine repository snapshot) beneath an ephemeral writable upper directory (`upperdir`, the agent's working scratchpad) with a merged virtual mount (`merged`).
   - *Mutation Mechanics:* Reads fall through to `lowerdir`; writes trigger kernel copy-up of the target file into `upperdir`; file deletions create "whiteout" character devices without modifying the base image.
-  - *Sub-Millisecond Reset and Rollback:* Discarding the upper layer or rolling back a Btrfs/ZFS snapshot provides instantaneous, zero-copy rollback to a verified clean state.
+  - *Reset and Rollback:* Discarding an upper layer or restoring a snapshot can reduce reset work; measure metadata, storage, and verification costs before claiming a latency bound or a clean state.
   - *Disk Write Quotas and Fork Bombs:* Enforcing strict storage quotas via cgroups/project quotas to prevent runaway or malicious scripts from filling host disk partitions (`dd if=/dev/zero of=/tmp/fill`).
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover database Write-Ahead Logging (WAL) or ACID checkpointing (Deferred to Chapter 10).
@@ -2319,13 +2336,13 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 8.8: Pre-Warmed Sandbox Pooling [synthesis]
 - **Heading & Anchor:** `## Pre-Warmed Sandbox Pooling {#sec-vol3-virtualization-pooling}`
-- **The Single Key Point:** Pre-warmed sandbox pools hide startup latency, but strict single-use lifecycles and memory zeroing are mandatory to eliminate cross-session data and credential leakage.
+- **The Single Key Point:** A pool can trade reserved memory and operational complexity for lower sandbox acquisition latency; each leased environment must meet an explicit reset and isolation contract before reuse or release.
 - **Curricular Placement:** Systems performance engineering, pool dimensioning, and cold-start optimization.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Latency vs. Isolation Trade-Off:* Interactive responsiveness requires sub-100ms environment readiness, but robust hardware isolation introduces hypervisor boot overhead.
+  - *The Latency vs. Isolation Trade-Off:* Specify the workload's environment-readiness target and compare cold start with pre-warmed acquisition under the same isolation contract.
   - *The Pre-Warmed Pool Architecture:* Maintaining a pool of pre-initialized, paused microVMs or container namespaces in host memory; instant allocation via lease acquisition.
-  - *Memory Snapshot Re-hydration:* Using Firecracker VM snapshots (serialized memory dump + KVM vCPU state) to restore fully booted guest kernels with warm Python/PyTorch runtimes in $<10\text{ ms}$.
-  - *The Single-Use Ephemeral Invariant:* Why sandboxes must never be reused across different tasks or user sessions; upon task termination, the microVM is destroyed, disk overlays are unmounted and purged, and memory pages are zeroed to prevent forensic state recovery.
+  - *Memory Snapshot Re-hydration:* A VM snapshot can restore a prepared guest; measure restore time, memory footprint, and the work needed to remove task-specific state.
+  - *Reset and Reuse Contract:* Before an environment serves another task, demonstrate that files, memory, credentials, and network state meet the required isolation policy. Destruction and fresh creation are one implementation; verified reset is another design to evaluate.
   - *Sizing and Capacity Planning:* Modeling pool replenishment rates, queueing theory under bursty arrival traffic, and memory footprint management.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** implement full Agent OS process scheduling (Deferred to Chapter 09).
@@ -2352,7 +2369,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 - **Authoritative Synthesis:** Synthesizing virtualization and execution isolation for the Stochastic Computer.
 - `::: {.callout-takeaways title="Core Systems Principles of Virtualization & Sandboxing"}`
   1. *Prompt safety is not systems security: the model must be treated as an untrusted adversary.*
-  2. *In-process language sandboxes fail universally: dynamic reflection and native syscalls leak.*
+  2. *Language-level restrictions alone do not contain adversarial code with host process authority.*
   3. *Enforce Least Privilege and Complete Mediation: eliminate ambient authority with scoped capabilities.*
   4. *Firecracker microVMs provide hardware hypervisor isolation with fast guest boot times (~125 ms cold, <10 ms from snapshot).*
   5. *Default-deny network egress and single-use ephemeral sandboxes prevent data exfiltration.*
@@ -2403,14 +2420,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 9.1: The Supervisory Runtime [stage-setter]
 - **Heading & Anchor:** `## The Supervisory Runtime {#sec-vol3-controlplane-need}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** Ad-hoc loops and scripting frameworks collapse when long-horizon tasks encounter crashes, human interrupts, or budget overruns; autonomous agents require an operating system control plane that separates task logic from process governance.
 - **Curricular Placement:** Establishes the supervisory operating system layer governing autonomous execution.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* The Shift to Supervisory Process Governance. Reviewing the boundary crossed from isolated execution environments (Ch 8) to supervisory lifecycle management. An autonomous agent is not an ephemeral function call; it is a long-lived, multi-turn stateful process.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Scripting Anti-Pattern. Why raw Python/Node loops fail in production: lack of asynchronous interrupt handling, zero state preservation upon unexpected crashes, unconstrained resource leakage, and intertwining business logic with systems infrastructure.
-  - *Beat 3 (The Systems Confrontation):* The Classical OS Analogy (Saltzer & Kaashoek 2009). How classical operating systems enforce isolation, arbitrate shared resources, virtualize hardware, and govern process lifecycles. Adapting these timeless principles to the Stochastic Computer: the runtime as a deterministic supervisor governing stochastic model invocations.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The Control Plane Architecture. The supervisor sits between the model inference endpoint, the sandbox environment, and the human operator, mediating all state transitions. Concludes with handoff to Section 9.2.
+  - *Possible focus (Architectural Stage-Setting):* The Shift to Supervisory Process Governance. Reviewing the boundary crossed from isolated execution environments (Ch 8) to supervisory lifecycle management. An autonomous agent is not an ephemeral function call; it is a long-lived, multi-turn stateful process.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Scripting Anti-Pattern. Why raw Python/Node loops fail in production: lack of asynchronous interrupt handling, zero state preservation upon unexpected crashes, unconstrained resource leakage, and intertwining business logic with systems infrastructure.
+  - *Possible focus (The Systems Confrontation):* The Classical OS Analogy (Saltzer & Kaashoek 2009). How classical operating systems enforce isolation, arbitrate shared resources, virtualize hardware, and govern process lifecycles. Adapting these timeless principles to the Stochastic Computer: the runtime as a deterministic supervisor governing stochastic model invocations.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The Control Plane Architecture. The supervisor sits between the model inference endpoint, the sandbox environment, and the human operator, mediating all state transitions. Concludes with handoff to Section 9.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover disk-backed Write-Ahead Logging (WAL) engines (Deferred to Chapter 10).
   - 🛑 **DO NOT** design multi-agent fleet schedulers across distributed clusters (Deferred to Chapter 15 & 17).
@@ -2490,10 +2507,10 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 9.5: Cooperative Process Yielding [core]
 - **Heading & Anchor:** `## Cooperative Process Yielding {#sec-vol3-controlplane-yielding}`
-- **The Single Key Point:** Non-blocking cooperative yielding at tool boundaries and preemptive generation timeouts eliminate the Tool-Wait memory tax and prevent rogue processes from locking worker threads.
+- **The Single Key Point:** Yielding at tool boundaries and bounding model generation keep a trajectory responsive to cancellation and budgets; serving-state retention remains a separate memory-management decision.
 - **Curricular Placement:** Concurrency scheduling, thread management, and resource yielding.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Tool-Wait Inefficiency:* Neural token generation takes tens of milliseconds, while tool operations (compilation, network queries) take seconds to minutes. Synchronous blocking strands host threads and GPU serving slots.
+  - *The Tool-Wait Inefficiency:* A blocking host worker may be occupied by a long tool operation. Measure model, tool, and wait durations independently; a paused trajectory need not occupy a GPU serving slot.
   - *Cooperative Yielding Mechanics:* When an agent dispatches a tool action, the supervisor persists intermediate state, registers an asynchronous event callback, and yields the execution thread to other runnable agents.
   - *Preemptive Generation Ceilings:* Why models cannot be trusted to yield cooperatively during token decode; enforcing strict maximum output token limits ($K_{\text{max}}$) and decode wall-clock timeouts to preempt runaway loops.
   - *Event-Driven Wakeup:* Integrating with OS event multiplexers (`epoll`/`kqueue`/event loops) to re-enqueue suspended ACBs onto the active run queue immediately upon tool completion.
@@ -2570,7 +2587,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 - **Fallacy 1:** *An autonomous agent can be reliably implemented as a simple Python while-loop.*
   - Refutation: While-loops lack asynchronous signal trapping, state persistence across crashes, and multi-tenant resource fairness.
 - **Pitfall 1:** *Permitting tools to block orchestrator worker threads synchronously.*
-  - Refutation: Synchronous blocking locks CPU threads, strands GPU serving memory, and starves concurrent agents.
+  - Refutation: Blocking can occupy host workers and delay other trajectories; GPU state is stranded only if the serving policy retains it during the wait.
 - **Fallacy 2:** *System prompt instructions ('Stay within your budget and do not spend more than \$5') can reliably enforce resource governance.*
   - Refutation: Models are notoriously incapable of calculating their own token costs; budgets must be enforced deterministically by the runtime supervisor.
 - **Pitfall 2:** *Allowing human approval escrows to wait indefinitely without timeout expirations.*
@@ -2629,14 +2646,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 10.1: Append-Only Event Sourcing [stage-setter]
 - **Heading & Anchor:** `## Append-Only Event Sourcing {#sec-vol3-persistence-event-sourcing}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** An append-only event history preserves what the runtime knew, authorized, and observed, while current-state projections make operational resumption efficient; mutable in-place updates destroy causal auditability.
 - **Curricular Placement:** The foundational storage paradigm for autonomous agent trajectories.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* The Durability Boundary. Moving from the in-memory supervisor control plane (Ch 9) to durable persistence. Volatile RAM vanishes upon node restarts; persistent storage guarantees that every step of an autonomous trajectory survives crashes.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Destructive Nature of In-Place Updates (`UPDATE agent SET state = ...`). Why classical CRUD models fail for agent systems: loss of intermediate reasoning, lack of causality, inability to debug regressions, and vulnerability to inconsistent half-written records.
-  - *Beat 3 (The Systems Confrontation):* Event Sourcing as the Core Invariant. Modeling trajectory progression as an immutable, append-only stream of discrete lifecycle events: $\mathcal{E} = [e_1, e_2, \dots, e_t]$. Event types: `TaskInitialized`, `WorkingSetStaged`, `ActionProposed`, `ActionGated`, `ToolDispatched`, `ObservationIngested`, `CheckpointCommitted`. The active Agent Control Block (ACB) at turn $t$ is an immutable projection: $\text{ACB}_t = \text{fold}(\text{ACB}_0, \mathcal{E})$.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* Auditability and Legal Provenance. Complete causal traceability for autonomous systems. Concludes with handoff to Section 10.2.
+  - *Possible focus (Architectural Stage-Setting):* The Durability Boundary. Moving from the in-memory supervisor control plane (Ch 9) to durable persistence. Volatile RAM vanishes upon node restarts; persistent storage guarantees that every step of an autonomous trajectory survives crashes.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Destructive Nature of In-Place Updates (`UPDATE agent SET state = ...`). Why classical CRUD models fail for agent systems: loss of intermediate reasoning, lack of causality, inability to debug regressions, and vulnerability to inconsistent half-written records.
+  - *Possible focus (The Systems Confrontation):* Event Sourcing as the Core Invariant. Modeling trajectory progression as an immutable, append-only stream of discrete lifecycle events: $\mathcal{E} = [e_1, e_2, \dots, e_t]$. Event types: `TaskInitialized`, `WorkingSetStaged`, `ActionProposed`, `ActionGated`, `ToolDispatched`, `ObservationIngested`, `CheckpointCommitted`. The active Agent Control Block (ACB) at turn $t$ is an immutable projection: $\text{ACB}_t = \text{fold}(\text{ACB}_0, \mathcal{E})$.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* Auditability and Legal Provenance. Complete causal traceability for autonomous systems. Concludes with handoff to Section 10.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover compensating transactions or saga rollbacks (Deferred to Chapter 11).
   - 🛑 **DO NOT** cover training dataset harvesting or RLVR reward generation (Deferred to Chapter 12 & 14).
@@ -2844,14 +2861,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 11.1: The Transactional Boundary and ACID Collapse [stage-setter]
 - **Heading & Anchor:** `## The Transactional Boundary and ACID Collapse {#sec-vol3-sagas-acid-boundary}`
-- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats.**
+- **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than four prescribed beats.**
 - **The Single Key Point:** Database transactions protect only the local resources they control; long-horizon trajectories spanning independent services, APIs, and physical side effects require a Saga recovery contract for partial execution.
 - **Curricular Placement:** Theoretical and operational boundary of transactional consistency in autonomous agent systems.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* The Transactional Boundary. Connecting durable event logs (Ch 10) to distributed execution failure. Recording that an action occurred does not resolve what to do when multi-step mutations fail midway through an external environment.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Collapse of Classical ACID. Why Two-Phase Commit ($2\text{PC}$) and strict serializability are mathematically impossible across independent SaaS APIs (GitHub, AWS, Stripe, Slack). External APIs do not participate in distributed lock managers or undo logs; effects are immediately committed and observable to the world.
-  - *Beat 3 (The Systems Confrontation):* Long-Lived Transactions (LLTs) and Lock Starvation. The physical impossibility of holding locks across human approval delays or high-latency network calls (minutes to hours).
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* Introducing the Saga Pattern (Garcia-Molina & Salem 1987) as the fundamental abstraction for multi-step agent fault recovery. Concludes with handoff to Section 11.2.
+  - *Possible focus (Architectural Stage-Setting):* The Transactional Boundary. Connecting durable event logs (Ch 10) to distributed execution failure. Recording that an action occurred does not resolve what to do when multi-step mutations fail midway through an external environment.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Collapse of Classical ACID. Why Two-Phase Commit ($2\text{PC}$) and strict serializability are mathematically impossible across independent SaaS APIs (GitHub, AWS, Stripe, Slack). External APIs do not participate in distributed lock managers or undo logs; effects are immediately committed and observable to the world.
+  - *Possible focus (The Systems Confrontation):* Long-Lived Transactions (LLTs) and Lock Starvation. The physical impossibility of holding locks across human approval delays or high-latency network calls (minutes to hours).
+  - *Possible focus (Computational Boundary & Analytical Handoff):* Introducing the Saga Pattern (Garcia-Molina & Salem 1987) as the fundamental abstraction for multi-step agent fault recovery. Concludes with handoff to Section 11.2.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover neural network fine-tuning or policy adaptation (Deferred to Chapters 12–14).
   - 🛑 **DO NOT** design multi-agent communication topologies (Deferred to Chapter 15).
@@ -3070,18 +3087,18 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 12.1: Capability Gap Diagnosis [stage-setter]
 - **Heading & Anchor:** `## Capability Gap Diagnosis {#sec-vol3-flywheel-gap}`
-- **Structural Invariant (for Section 12.1):** NO SUBSECTIONS (H3/H4). An unbroken 4-beat narrative establishing the systems boundary between runtime faults and true policy capability gaps.
+- **Structural Invariant (for Section 12.1):** NO SUBSECTIONS (H3/H4). A focused opening establishing the systems boundary between runtime faults and true policy capability gaps.
 - **The Single Key Point:** Before selecting policy adaptation, runtime engineers must rigorously diagnose whether an observed failure stems from an information deficit, an ambiguous tool interface, a runtime defect, or a true model capability deficit.
 - **Curricular Placement:** Transition from online runtime operations to offline data curation; the first decision gate of Part V.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Locate trajectory harvesting at the output of the Agent OS (Chapters 09–11); explain why runtime logs are chaotic raw artifacts requiring forensic classification before entering training pipelines.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Premature Fine-Tuning Trap: fine-tuning is the slowest, most capital-intensive, and least reversible intervention in agentic engineering.
-  - *Beat 3 (The Systems Confrontation):* The Four Root Causes of Trajectory Failure:
+  - *Possible focus (Architectural Stage-Setting):* Locate trajectory harvesting at the output of the Agent OS (Chapters 09–11); explain why runtime logs are chaotic raw artifacts requiring forensic classification before entering training pipelines.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Premature Fine-Tuning Trap: fine-tuning is the slowest, most capital-intensive, and least reversible intervention in agentic engineering.
+  - *Possible focus (The Systems Confrontation):* The Four Root Causes of Trajectory Failure:
     1. *Context Deficit:* The retrieval policy omitted necessary file excerpts or environment facts (Chapter 04/06 issue).
     2. *Interface Ambiguity:* Tool docstrings, parameter types, or error return schemas fail to specify constraints (Chapter 07 issue).
     3. *Runtime Defect:* Sandbox timeout, network partition, memory exhaustion, or race condition (Chapter 08/09 issue).
     4. *Policy Incapability:* Base model possesses full context and unambiguous schemas but fails at multi-step procedural logic, counterfactual deduction, or error recovery.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* Formulating the Systems Intervention Ladder: Prompt/Context Engineering $\to$ Tool Schema Redesign $\to$ Runtime Hardening $\to$ Supervised Fine-Tuning $\to$ RLVR. Concluding that once a genuine policy gap is isolated, data collection requires controlled task fixtures.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* Formulating the Systems Intervention Ladder: Prompt/Context Engineering $\to$ Tool Schema Redesign $\to$ Runtime Hardening $\to$ Supervised Fine-Tuning $\to$ RLVR. Concluding that once a genuine policy gap is isolated, data collection requires controlled task fixtures.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover gradient descent, backpropagation, or optimizer state (Volume I prerequisite).
   - 🛑 **DO NOT** cover SFT loss masking or sequence packing (Deferred to Chapter 13).
@@ -3327,18 +3344,18 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 13.1: Trajectory Example Serialization [stage-setter]
 - **Heading & Anchor:** `## Trajectory Example Serialization {#sec-vol3-sft-serialization}`
-- **Structural Invariant (for Section 13.1):** NO SUBSECTIONS (H3/H4). An unbroken 4-beat narrative establishing the serialization contract between runtime event logs and training tensors.
+- **Structural Invariant (for Section 13.1):** NO SUBSECTIONS (H3/H4). A focused opening establishing the serialization contract between runtime event logs and training tensors.
 - **The Single Key Point:** Converting an asynchronous execution trajectory into a supervised training example requires deterministic serialization of multi-turn role boundaries and strict causal information isolation.
 - **Curricular Placement:** Interface contract between trajectory persistence (Chapter 10) and policy compilation (Part V).
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Bridge from Chapter 12's curated dataset to neural training tensors; define the serialization contract converting discrete ACB event logs into 1D token sequences.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Asynchronous-to-Serial Translation Failure: real runtime execution involves parallel sandbox streams, asynchronous tool waits, and multi-turn state updates; training requires a single causal autoregressive sequence.
-  - *Beat 3 (The Systems Confrontation):* The Four Invariant Role Boundaries:
+  - *Possible focus (Architectural Stage-Setting):* Bridge from Chapter 12's curated dataset to neural training tensors; define the serialization contract converting discrete ACB event logs into 1D token sequences.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Asynchronous-to-Serial Translation Failure: real runtime execution involves parallel sandbox streams, asynchronous tool waits, and multi-turn state updates; training requires a single causal autoregressive sequence.
+  - *Possible focus (The Systems Confrontation):* The Four Invariant Role Boundaries:
     1. `System`: Task instructions, environment constraints, and available tool schemas.
     2. `User`: Initial task intent and runtime steer messages.
     3. `Assistant (Rationale & Action)`: Internal deliberation scratchpads and typed tool call invocations.
     4. `Environment (Observation)`: Sandboxed command return codes, terminal stdout/stderr, and API payloads.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* Causal Information Isolation: enforcing that token $t$ in step $k$ contains *only* the historical context available to the agent at decision time $t_k$, concluding with the requirement to decide which tokens receive gradient updates.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* Causal Information Isolation: enforcing that token $t$ in step $k$ contains *only* the historical context available to the agent at decision time $t_k$, concluding with the requirement to decide which tokens receive gradient updates.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** derive BPE tokenization mechanics or vocabularies (Covered in Chapter 02).
   - 🛑 **DO NOT** derive loss masking equations (Reserved for Section 13.2).
@@ -3350,13 +3367,13 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 13.2: Action-Targeted Loss Masking [core]
 - **Heading & Anchor:** `## Action-Targeted Loss Masking {#sec-vol3-sft-loss-masking}`
-- **The Single Key Point:** Supervised loss must be strictly masked to compute cross-entropy over model-generated action and rationale tokens, setting loss over environment-returned observation tokens to zero.
+- **The Single Key Point:** For action-prediction fine-tuning, a loss mask can train on model-produced targets while treating prompts and environment observations as conditioning context; the mask follows the learning objective.
 - **Curricular Placement:** Loss formulation, gradient dynamics, and target construction for agent fine-tuning.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Mathematical Formalism of Action Masking:*
     $$\mathcal{L}_{\text{SFT}}(\theta) = -\sum_{t=1}^T m_t \cdot \log P_\theta(x_t \mid x_{<t})$$
     where binary mask $m_t = 1$ if $x_t \in \mathcal{T}_{\text{action}} \cup \mathcal{T}_{\text{rationale}}$, and $m_t = 0$ if $x_t \in \mathcal{T}_{\text{prompt}} \cup \mathcal{T}_{\text{observation}}$.
-  - *Why Observation Masking is Mandatory:* The neural core is an action proposer, not a world simulator; predicting external compiler warnings or database error dumps wastes gradient capacity, induces hallucinated self-play, and causes catastrophic mode collapse.
+  - *Why Masking Follows the Objective:* If the objective is to improve action proposals, predicting compiler output or tool observations may spend capacity on a different task. Explain the target choice and compare it with objectives that deliberately train environment prediction; do not claim a universal collapse mechanism.
   - *Selective Masking of Thought Chains vs. Tool Syntax:* Trade-offs of backpropagating through internal scratchpads (improving multi-step reasoning) versus masking directly to tool call parameters (optimizing latency and syntax fidelity).
   - *Handling Edge Cases in Multi-Turn Masking:* Handling partial tool calls, unclosed JSON brackets, and truncated generation sequences.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
@@ -3411,7 +3428,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 13.5: Parameter-Efficient Memory Bounds [core]
 - **Heading & Anchor:** `## Parameter-Efficient Memory Bounds {#sec-vol3-sft-peft}`
-- **The Single Key Point:** Low-Rank Adaptation (LoRA) dramatically reduces optimizer and gradient accelerator memory, enabling multi-tenant adapter swapping, but leaves the activation memory bottleneck during long-context backpropagation unchanged.
+- **The Single Key Point:** Low-rank adaptation freezes base weights and trains smaller update matrices; its memory benefit and remaining activation cost must be calculated for the model, sequence length, and training configuration.
 - **Curricular Placement:** Accelerator memory modeling, PEFT architectures, and physical hardware bounds.
 - **What to Cover (Positive Scope & Systems Mechanics):**
   - *Physical Accelerator Memory Accounting during Training:*
@@ -3568,18 +3585,18 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 14.1: Environmental Exploration Foundations [stage-setter]
 - **Heading & Anchor:** `## Environmental Exploration Foundations {#sec-vol3-rlvr-need}`
-- **Structural Invariant (for Section 14.1):** NO SUBSECTIONS (H3/H4). An unbroken 4-beat narrative establishing the systems transition from supervised imitation to trial-and-error environmental exploration.
+- **Structural Invariant (for Section 14.1):** NO SUBSECTIONS (H3/H4). A focused opening establishing the systems transition from supervised imitation to trial-and-error environmental exploration.
 - **The Single Key Point:** Supervised adaptation is bounded by demonstration coverage; verifiable outcome checks can justify training-time exploration when environment fixtures and reward oracles support uncompromised feedback.
 - **Curricular Placement:** Transition from imitation learning (Chapter 13) to environmental reinforcement learning (Chapter 14); the exploration frontier of Part V.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Position RLVR at the apex of the Policy Compiler (Part V); contrast the imitation ceiling of SFT with closed-loop policy improvement through environment interaction.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Exploration Dilemma: in an interactive environment, the policy must explore suboptimal actions to discover high-value solutions, but unconstrained exploration risks destructive mutations, sandbox exhaustion, and reward hacking.
-  - *Beat 3 (The Systems Confrontation):* The Four Prerequisites for Feasible Environmental RL:
+  - *Possible focus (Architectural Stage-Setting):* Position RLVR at the apex of the Policy Compiler (Part V); contrast the imitation ceiling of SFT with closed-loop policy improvement through environment interaction.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Exploration Dilemma: in an interactive environment, the policy must explore suboptimal actions to discover high-value solutions, but unconstrained exploration risks destructive mutations, sandbox exhaustion, and reward hacking.
+  - *Possible focus (The Systems Confrontation):* The Four Prerequisites for Feasible Environmental RL:
     1. Fast, reproducible, and resettable environment fixtures (sub-second CoW snapshots from Chapter 12).
     2. Permissible exploration boundaries (capability isolation and sandboxing from Chapter 08).
     3. A base or SFT policy with non-zero initial probability ($P > 0$) of discovering successful completions.
     4. An uncompromised, mechanically verifiable reward oracle.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The Exploration-Verification Contract: defining the closed-loop MDP tuple $\langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}_{\text{verifiable}} \rangle$, concluding with the requirement to formally specify what makes a reward mechanically verifiable.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The Exploration-Verification Contract: defining the closed-loop MDP tuple $\langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}_{\text{verifiable}} \rangle$, concluding with the requirement to formally specify what makes a reward mechanically verifiable.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover test-time deliberation, MCTS, or Best-of-$N$ runtime search (Covered in Chapter 03).
   - 🛑 **DO NOT** cover general reinforcement learning basics (Q-learning, Bellman equations) (Volume I prerequisite).
@@ -3815,17 +3832,17 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 15.1: The Delegation Trade-Off [stage-setter]
 - **Heading & Anchor:** `## The Delegation Trade-Off {#sec-vol3-multiagent-need}`
-- **Structural Invariant (for Section 15.1):** NO SUBSECTIONS (H3/H4). An unbroken 4-beat narrative establishing the systems trade-offs between single-agent deliberation and multi-agent distributed delegation.
+- **Structural Invariant (for Section 15.1):** NO SUBSECTIONS (H3/H4). A focused opening establishing the systems trade-offs between single-agent deliberation and multi-agent distributed delegation.
 - **The Single Key Point:** Multi-agent delegation is justified only when domain specialization or parallel exploration outweighs the significant overhead of duplicated context, inter-agent serialization, and integration reconciliation.
 - **Curricular Placement:** Transition from single-agent runtimes (Parts I–V) to distributed fleets (Part VI); the entry gate to distributed systems engineering.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Position multi-agent systems within the broader architecture of the Stochastic Computer; define delegation as spawning concurrent stochastic processor cores across the Agent OS.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Concurrency vs. Parallelism Illusion: concurrency does not guarantee speedup; if Subtask B requires the output of Subtask A, running them as distinct agents adds network serialization and duplicated prompt tokens without reducing critical-path wall-clock duration.
-  - *Beat 3 (The Systems Confrontation):* The Three Legitimate Systems Motivations for Delegation:
+  - *Possible focus (Architectural Stage-Setting):* Position multi-agent systems within the broader architecture of the Stochastic Computer; define delegation as spawning concurrent stochastic processor cores across the Agent OS.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Concurrency vs. Parallelism Illusion: concurrency does not guarantee speedup; if Subtask B requires the output of Subtask A, running them as distinct agents adds network serialization and duplicated prompt tokens without reducing critical-path wall-clock duration.
+  - *Possible focus (The Systems Confrontation):* The Three Legitimate Systems Motivations for Delegation:
     1. *Context Partitioning:* Total operational state exceeds the working memory capacity ($S_{\max}$) of a single context window (Chapter 04).
     2. *Tool Authority Attenuation:* Enforcing security boundaries by isolating sensitive tools in unprivileged subagents (Chapter 08).
     3. *True Parallel Search:* Exploring orthogonal, non-overlapping solution spaces (e.g. parallel fuzzing, distributed vulnerability scanning).
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The Coordination Tax Equation:
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The Coordination Tax Equation:
     $$T_{\text{total}} = T_{\text{work}} + T_{\text{serialize}} + T_{\text{network}} + T_{\text{context\_duplication}} + T_{\text{reconciliation}}$$
     Concluding that when delegation is mathematically justified, systems must formally structure the coordination topology.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
@@ -4057,18 +4074,18 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 16.1: The Multi-Layer Evaluation Contract [stage-setter]
 - **Heading & Anchor:** `## The Multi-Layer Evaluation Contract {#sec-vol3-observability-contract}`
-- **Structural Invariant (for Section 16.1):** NO SUBSECTIONS (H3/H4). An unbroken 4-beat narrative establishing the systems distinction between classical service health and agentic task completion.
-- **The Single Key Point:** Evaluation must measure task-level state criteria and explicit operational constraints, not intermediate model fluency, tool execution status, or judge agreement.
+- **Structural Invariant (for Section 16.1):** NO SUBSECTIONS (H3/H4). A focused opening establishing the systems distinction between classical service health and agentic task completion.
+- **The Single Key Point:** Evaluation compares the observed trajectory and resulting state with a task contract, using mechanical checks where possible and calibrated judgment where acceptance cannot be fully reduced to an exact oracle.
 - **Curricular Placement:** Transition from multi-agent coordination (Chapter 15) to empirical measurement and verification; the foundational entry point of evaluation systems.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Define evaluation in the Stochastic Computer as verifying the final state delta against the formal task contract. Contrast with classical Software 1.0 (unit tests with deterministic assertion paths).
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Telemetry-Success Decoupling: in distributed services, HTTP 200 means success; in agentic runtimes, every model invocation and tool call can exit with code 0 while producing completely incorrect mutations or violating policy invariants.
-  - *Beat 3 (The Systems Confrontation):* The 4-Layer Evaluation Hierarchy:
+  - *Possible focus (Architectural Stage-Setting):* Define evaluation in the Stochastic Computer as verifying the final state delta against the formal task contract. Contrast with classical Software 1.0 (unit tests with deterministic assertion paths).
+  - *Possible focus (The Systems Problem & Operational Reality):* The Telemetry-Success Decoupling: in distributed services, HTTP 200 means success; in agentic runtimes, every model invocation and tool call can exit with code 0 while producing completely incorrect mutations or violating policy invariants.
+  - *Possible focus (The Systems Confrontation):* The 4-Layer Evaluation Hierarchy:
     1. Layer 1: Syntactic Validity (schema validation, JSON parseability).
     2. Layer 2: Execution Invariants (sandbox exit codes, no unhandled exceptions, stderr cleanliness).
     3. Layer 3: State Delta Verification (ground-truth environment diffs: git diff, DB row mutations, created files matching objective criteria).
     4. Layer 4: Constraint Compliance (budget ceilings, capability boundaries, security constraints).
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The Failure of LLM-as-a-Judge: why model-based grading exhibits verbosity bias, self-preference, and cannot inspect non-textual environment state; establishing that mechanical state delta verification is the primary ground truth.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* Separate enforceable constraints and executable tests from assessment of open-ended quality. A model-based grader may assist on the latter if calibrated against human judgments and given the necessary evidence; agreement alone is not ground truth.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover static question-answering benchmarks like MMLU or GSM8K (Pre-training evaluation; belongs to Volume I).
   - 🛑 **DO NOT** re-derive container isolation primitives (Covered in Chapter 08; Chapter 16 evaluates test harness execution).
@@ -4286,7 +4303,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 **The Core Question:** *How do we optimize end-to-end trajectory latency, accelerator memory occupancy, and operational dollar costs across a fleet of heterogeneous serving and execution engines?*
 
-**Why It Matters:** *In production agent fleets, serving costs are not simply a function of token price. A cheap, low-capability model that requires five retries and runs into tool timeouts ultimately costs more in accelerator occupancy, sandbox compute, and wall-clock delay than a high-capability model that completes the task on the first attempt. Furthermore, long-running agent trajectories strand KV cache memory during tool waits, collapsing serving throughput. Fleet economics requires holistic trajectory-level cost accounting: balancing time-to-first-token against generation throughput, employing speculative decoding and prefix caching, and routing subtasks dynamically across specialized local and frontier models.*
+**Why It Matters:** *A lower price per token can produce a higher cost per accepted task when it increases retries, tool use, verification, or human review. Long trajectories also create changing demand for model serving, host workers, external services, and retained state. Fleet economics therefore starts with whole-task accounting and the measured critical path, then tests whether routing, caching, scheduling, or serving acceleration improves the chosen workload.*
 
 
 ::: {.callout-learning-objectives}
@@ -4295,7 +4312,7 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 - Apply Amdahl's Law to multi-turn trajectory execution, decomposing wall-clock critical paths across prefill, decode, tool execution, network latency, and container startup.
 - Architect tiered model routing cascades that dynamically dispatch subtasks across small language models, generalists, and frontier reasoning models to optimize the cost-accuracy Pareto frontier.
 - Implement speculative decoding pipelines using draft models and parallel target verification, proving the mathematical preservation of target output probability distributions.
-- Apply $M/G/k$ queueing theory to model bimodal agent service times and design Multi-Level Feedback Queues (MLFQ) that prevent long-running agent workflows from starving interactive queries.
+- Characterize model-invocation service times separately from trajectory lifetime; use a suitable queueing model or simulation to test admission and scheduling policies, including MLFQ where appropriate.
 - Implement hierarchical budget reservation ledgers and multi-tier circuit breakers to enforce monotonic spending ceilings across recursive subagent delegations.
 - Evaluate production workloads across the architectural trade-off spectrum: Software 1.0 deterministic scripts, Software 2.0 direct calls, bounded agentic workflows, and multi-agent fleets.
 - Synthesize an integrated fleet economics control plane optimizing goodput per dollar while meeting strict p95 latency and verification invariants.
@@ -4304,18 +4321,18 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 17.1: Task Cost Accounting [stage-setter]
 - **Heading & Anchor:** `## Task Cost Accounting {#sec-vol3-tokenomics-accounting}`
-- **Structural Invariant (for Section 17.1):** NO SUBSECTIONS (H3/H4). An unbroken 4-beat narrative establishing the whole-trajectory cost model for autonomous agent execution.
+- **Structural Invariant (for Section 17.1):** NO SUBSECTIONS (H3/H4). A focused opening establishing the whole-trajectory cost model for autonomous agent execution.
 - **The Single Key Point:** True agent cost accounting encompasses model prefill/decode, tool API fees, sandbox compute time, assessment overhead, failed attempts, and human review costs—not merely model provider token rates.
 - **Curricular Placement:** Entry gate to fleet economics; establishing the comprehensive objective function.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Moving from telemetry and verification (Chapter 16) to economic and performance optimization; defining the unit of accounting as the accepted task, not the raw token or API call.
-  - *Beat 2 (The Systems Problem & Operational Reality):* The Token-Price Fallacy: why evaluating agent economics strictly on $/1M tokens ignores the compounding cost dynamics of multi-turn autonomous loops.
-  - *Beat 3 (The Systems Confrontation):* The Whole-Trajectory Cost Equation:
+  - *Possible focus (Architectural Stage-Setting):* Moving from telemetry and verification (Chapter 16) to economic and performance optimization; defining the unit of accounting as the accepted task, not the raw token or API call.
+  - *Possible focus (The Systems Problem & Operational Reality):* The Token-Price Fallacy: why evaluating agent economics strictly on $/1M tokens ignores the compounding cost dynamics of multi-turn autonomous loops.
+  - *Possible focus (The Systems Confrontation):* The Whole-Trajectory Cost Equation:
     $$C_{\text{task}} = \sum_{k=1}^K \left( C_{\text{prefill}, k} + C_{\text{decode}, k} + C_{\text{tools}, k} + C_{\text{sandbox}, k} \right) + C_{\text{verify}} + C_{\text{human}}$$
     Formalizing cost normalized strictly by accepted completions:
     $$C_{\text{effective}} = \frac{\sum_{i=1}^N C_{\text{attempt}_i}}{N_{\text{acceptable}}}$$
     Proving mathematically that a low-accuracy cheap model rapidly becomes more expensive per completed task than a high-accuracy premium model.
-  - *Beat 4 (Computational Boundary & Analytical Handoff):* The Pareto Frontier of Cost vs. Accuracy: establishing that cost optimization cannot be decoupled from latency and task acceptance criteria.
+  - *Possible focus (Computational Boundary & Analytical Handoff):* The Pareto Frontier of Cost vs. Accuracy: establishing that cost optimization cannot be decoupled from latency and task acceptance criteria.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** cover GPU hardware bandwidth mechanics (Covered in Chapter 02).
   - 🛑 **DO NOT** cover critical-path makespan analysis (Covered in Section 17.2).
@@ -4395,13 +4412,13 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 17.5: Fleet Capacity Provisioning [core]
 - **Heading & Anchor:** `## Fleet Capacity Provisioning {#sec-vol3-tokenomics-capacity}`
-- **The Single Key Point:** Sizing GPU cluster capacity for agentic workloads requires modeling bimodal service time distributions (short queries vs. 30-minute trajectories) using multi-level feedback queues to prevent head-of-line blocking.
+- **The Single Key Point:** Capacity planning must distinguish short model invocations from long-lived trajectories and measure the distribution of each resource's occupancy; admission and scheduling policies follow the observed workload.
 - **Curricular Placement:** Cluster sizing, queueing theory, and admission control.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *The Bimodal Service Time Challenge:* Unlike web applications where request service times are relatively uniform, agentic workloads exhibit variance spanning four orders of magnitude ($10^0$ to $10^4$ seconds).
-  - *Queueing Theory in Agent Clusters:* Applying $M/G/k$ queueing models to understand how high service time variance ($\,C_v^2 \gg 1\,$) dramatically inflates queue waiting times:
+  - *The Occupancy-Duration Challenge:* A trajectory may last much longer than any one model invocation. Characterize arrival rates, invocation service times, tool waits, and resource occupancy separately before selecting a queueing model.
+  - *Queueing Theory as a First Estimate:* The following single-server $G/G/1$ approximation illustrates how arrival and service variability affect wait time; a multi-server $M/G/k$ fleet requires a separate model or simulation:
     $$W_q \approx \frac{C_a^2 + C_s^2}{2} \cdot \frac{\rho}{1-\rho} \cdot \frac{1}{\mu}$$
-  - *Multi-Level Feedback Queues (MLFQ) for Serving:*
+  - *Multi-Level Feedback Queues (MLFQ) as One Policy to Evaluate:*
     - Priority Queue 0: Short interactive requests, single-turn tool calls.
     - Priority Queue 1: Medium multi-turn workflows.
     - Priority Queue 2: Long-running background trajectories (preemptible, batched during off-peak hours).
@@ -4556,14 +4573,14 @@ Assessing the true cost of an agentic system requires drawing the accounting bou
 
 #### Section 18.1: The Capstone Reference Architecture [stage-setter]
 - **Heading & Anchor:** `## The Capstone Reference Architecture {#sec-vol3-conclusion-capstone}`
-- **Structural Invariant (for Section 18.1):** NO SUBSECTIONS (H3/H4). An unbroken 4-beat narrative establishing the complete synthesized architecture of the Stochastic Computer.
+- **Structural Invariant (for Section 18.1):** NO SUBSECTIONS (H3/H4). A focused opening establishing the complete synthesized architecture of the Stochastic Computer.
 - **The Single Key Point:** The reference architecture is derived from one complete trajectory: each model call, state transition, permission decision, external effect, and acceptance check has an explicit owner and record.
 - **Curricular Placement:** The integrative capstone entry point; bringing all subsystems of Chapters 01–17 into one coherent reference architecture.
 - **What to Cover (Positive Scope & Systems Mechanics):**
-  - *Beat 1 (Architectural Stage-Setting):* Revisit the central thesis of Chapter 01: the Stochastic Computer is an accountable execution loop, not an anthropomorphic intelligence. Synthesize the core model: a non-deterministic token prediction engine governed by deterministic systems invariants.
-  - *Beat 2 (The Reference Trajectory Walkthrough):* Trace one end-to-end enterprise incident remediation task from initial alert trigger to closed pull request, explicitly mapping every action to its subsystem owner (Processor, Memory, Tools, OS, Sagas, Telemetry).
-  - *Beat 3 (Live Owners vs. Operational Infrastructure):* Explicitly delineate live runtime owners (Processor Core, Working Memory, KV Cache, Tool Sandbox, OS Supervisor) from across-task lifecycle infrastructure (Trajectory Data Engine, Policy SFT/RLVR Compiler, OpenTelemetry Tracing, SRE Canary Gates).
-  - *Beat 4 (Closing the Bookend):* Contrast the functional computer model with literal hardware equivalences; demonstrate where the architectural abstraction provides profound systems design leverage and where literal physical chip analogies break down.
+  - *Possible focus (Architectural Stage-Setting):* Revisit the central thesis of Chapter 01: the Stochastic Computer is an accountable execution loop, not an anthropomorphic intelligence. Synthesize the core model: a non-deterministic token prediction engine governed by deterministic systems invariants.
+  - *Possible focus (The Reference Trajectory Walkthrough):* Trace one end-to-end enterprise incident remediation task from initial alert trigger to closed pull request, explicitly mapping every action to its subsystem owner (Processor, Memory, Tools, OS, Sagas, Telemetry).
+  - *Possible focus (Live Owners vs. Operational Infrastructure):* Explicitly delineate live runtime owners (Processor Core, Working Memory, KV Cache, Tool Sandbox, OS Supervisor) from across-task lifecycle infrastructure (Trajectory Data Engine, Policy SFT/RLVR Compiler, OpenTelemetry Tracing, SRE Canary Gates).
+  - *Possible focus (Closing the Bookend):* Contrast the functional computer model with literal hardware equivalences; demonstrate where the architectural abstraction provides profound systems design leverage and where literal physical chip analogies break down.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** re-derive individual subsystem equations (e.g. KV attention complexity, BPE tokenization, PPO updates).
   - 🛑 **DO NOT** introduce speculative future neuromorphic or quantum hardware.

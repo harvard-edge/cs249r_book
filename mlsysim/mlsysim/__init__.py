@@ -30,7 +30,7 @@ from .literature.registry import Literature
 # Non-executable sourced anchors used by examples and external analyses.
 from .reference_stats.registry import ReferenceStats
 from .embodied.registry import Embodied
-from .agents.registry import Agents
+from .agents.registry import Agents, ReferencePlatforms as AgentPlatforms
 from .ops import Ops
 from .engine import calibration
 

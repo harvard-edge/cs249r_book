@@ -10,7 +10,7 @@ from .types import (
 )
 from .reliability import Reliability
 from .orchestration import Orchestration as OrchestrationProfile
-from ..core.units import ureg, Q_, Gbps, GB, TB, TiB, watt, MB, kilowatt, pJ, bit
+from ..core.units import ureg, Q_, Gbps, GB, GiB, TB, TiB, watt, MB, kilowatt, pJ, bit
 from ..core.provenance import sourced, sourced_qty
 from ..hardware.registry import Hardware
 from ..core.registry import Registry
@@ -47,7 +47,43 @@ class Nodes(Registry):
         intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
         nics_per_node=8,
         host_memory=2 * TiB,
-        metadata=Metadata(provenance=pc.DGX_GPUS_PER_HOST),
+        host_cpu="Dual Intel Xeon Platinum 8480C",
+        host_cpu_cores=112,
+        host_memory_bw=614 * (GB / ureg.second),
+        metadata=Metadata(
+            provenance=pc.DGX_H100_SYSTEM_SPEC,
+            description="Official NVIDIA DGX H100 server: 8x H100 80GB SXM5, Dual Intel Xeon 8480C (112 cores).",
+        ),
+    )
+    HGX_H100_EPYC = Node(
+        name="HGX H100 (Dual AMD EPYC 9654)",
+        accelerator=Hardware.Cloud.H100,
+        accelerators_per_node=8,
+        intra_node_bw=Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+        nics_per_node=8,
+        host_memory=1.5 * TiB,
+        host_cpu="Dual AMD EPYC 9654",
+        host_cpu_cores=192,
+        host_memory_bw=460 * (GB / ureg.second),
+        metadata=Metadata(
+            provenance=pc.HGX_H100_EPYC_SYSTEM_SPEC,
+            description="High-density agent evaluation node: 8x H100 SXM5, Dual AMD EPYC 9654 (192 cores).",
+        ),
+    )
+    Workstation_M3Max = Node(
+        name="MacBook Pro M3 Max Workstation",
+        accelerator=Hardware.Workstation.MacBookM3Max,
+        accelerators_per_node=1,
+        intra_node_bw=Hardware.Workstation.MacBookM3Max.memory.bandwidth,
+        nics_per_node=1,
+        host_memory=128 * GiB,
+        host_cpu="Apple M3 Max 16-Core",
+        host_cpu_cores=16,
+        host_memory_bw=Hardware.Workstation.MacBookM3Max.memory.bandwidth,
+        metadata=Metadata(
+            provenance=pc.APPLE_M3_MAX_WORKSTATION_SPEC,
+            description="Apple Silicon unified memory developer baseline (16-core CPU + 40-core GPU).",
+        ),
     )
     DGX_A100 = Node(
         name="DGX A100",
@@ -310,6 +346,17 @@ class Storage(Registry):
         description="Reference per-transfer latency for GPU Direct Storage bypass I/O.",
     )
 
+    LocalNvmeGen5 = StorageSubsystem(
+        name="Local NVMe SSD (Gen5)",
+        storage_tech=Hardware.Tech.Storage.NvmeGen5,
+        bandwidth=Hardware.Tech.Storage.NvmeGen5.bandwidth,
+        latency=Q_(10.0, "us"),
+        iops=1_500_000,
+        media="NVMe SSD",
+        interface="PCIe Gen5",
+        durability="local",
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+    )
     LocalNvmeGen4 = StorageSubsystem(
         name="Local NVMe SSD (Gen4)",
         storage_tech=Hardware.Tech.Storage.NvmeGen4,
@@ -390,6 +437,12 @@ class Storage(Registry):
     LocalNvmeGen4x4 = NodeStorageConfig(
         name="4x local Gen4 NVMe drives per node",
         device=LocalNvmeGen4,
+        devices_per_node=4,
+        metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
+    )
+    LocalNvmeGen5x4 = NodeStorageConfig(
+        name="4x local Gen5 NVMe drives per node",
+        device=LocalNvmeGen5,
         devices_per_node=4,
         metadata=Metadata(provenance=pc.STORAGE_TIER_CONVENTIONS),
     )

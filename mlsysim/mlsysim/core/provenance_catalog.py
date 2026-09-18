@@ -769,6 +769,39 @@ DGX_GPUS_PER_HOST = _conv(
     notes="Used for cluster tier node counts in fleet appendices.",
 )
 
+DGX_H100_SYSTEM_SPEC = _ds(
+    "prov:nvidia-dgx-h100-system-spec",
+    "NVIDIA DGX H100 System Datasheet and Architecture Whitepaper",
+    url="https://resources.nvidia.com/en-us-dgx-systems/dgx-h100-datasheet",
+    notes=(
+        "Official NVIDIA DGX H100 chassis specification: 8x H100 80GB SXM5 GPUs, "
+        "Dual Intel Xeon Platinum 8480C processors (112 cores / 224 threads total), "
+        "2 TB DDR5-4800 RAM across 16 channels, 8x ConnectX-7 400 Gbps InfiniBand OSFP ports, "
+        "30.72 TB internal NVMe U.2 storage in RAID-0."
+    ),
+)
+
+HGX_H100_EPYC_SYSTEM_SPEC = _ds(
+    "prov:supermicro-hgx-h100-epyc-spec",
+    "Supermicro AS-8125GS-TNHR / Dell PowerEdge XE9680 HGX H100 8-GPU Datasheet",
+    url="https://www.supermicro.com/en/products/system/gpu/8u/as-8125gs-tnhr",
+    notes=(
+        "High-density agent evaluation node: 8x H100 80GB SXM5 GPUs, Dual AMD EPYC 9654 "
+        "processors (192 physical Zen 4 cores / 384 threads total), 1.5 TB DDR5-4800 RAM "
+        "across 24 memory channels (460 GB/s sustained read bandwidth), PCIe Gen5 NVMe arrays."
+    ),
+)
+
+APPLE_M3_MAX_WORKSTATION_SPEC = _ds(
+    "prov:apple-m3-max-workstation-spec",
+    "Apple MacBook Pro 16-inch M3 Max Technical Specifications",
+    url="https://www.apple.com/macbook-pro/specs/",
+    notes=(
+        "Apple Silicon unified memory developer baseline: 16-core CPU (12 Performance + 4 Efficiency), "
+        "40-core GPU, 128 GiB unified LPDDR5X at 400 GB/s shared between CPU and GPU."
+    ),
+)
+
 GIBIANSKY_ALLREDUCE = _lit(
     "prov:gibiansky-allreduce-factor",
     "Gibiansky (2017), Ring AllReduce communication identity (2× factor)",
