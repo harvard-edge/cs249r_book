@@ -10,7 +10,7 @@ parameters and ignoring spatial structure.
 
 Then in 1998, Yann LeCun's LeNet-5 revolutionized computer vision with
 Convolutional Neural Networks (CNNs). By using:
-- Shared weights (convolution) → 100× fewer parameters
+- Shared weights (convolution) → parameters independent of image size
 - Local connectivity → preserves spatial structure
 - Pooling → translation invariance
 
@@ -376,7 +376,7 @@ def train_cnn():
     console.print("  • ReLU: Non-linear activation")
     console.print("  • MaxPool: Spatial downsampling + translation invariance")
     console.print("  • Linear: Final classification (72 → 10 classes)")
-    console.print("  • [bold cyan]Key insight: Shared weights → 100× fewer params![/bold cyan]")
+    console.print("  • [bold cyan]Key insight: Shared weights → parameter count set by filter size, not image size[/bold cyan]")
 
     # Create model
     console.print("\n🧠 Building Convolutional Neural Network...")
@@ -534,7 +534,7 @@ def train_cnn():
     console.print(f"  • CNNs preserve spatial structure")
     console.print(f"  • Conv layers detect local patterns (edges → digits)")
     console.print(f"  • Pooling provides translation invariance")
-    console.print(f"  • {total_params} params vs ~5,000 for MLP with similar accuracy!")
+    console.print(f"  • {total_params} params vs 2,410 for the Milestone 03 MLP (about 3× fewer)")
 
     press_enter_to_continue()
 
@@ -555,7 +555,7 @@ def train_cnn():
         "  ✓ Applied MaxPooling for translation invariance\n"
         f"  ✓ Achieved {final_test_acc:.1f}% test accuracy!\n"
         f"  ✓ Model generalizes well (gap: {overfitting_gap:.1f}%)\n"
-        "  ✓ Used 100× fewer parameters than MLP!\n\n"
+        "  ✓ Used about 3× fewer parameters than the Milestone 03 MLP\n\n"
 
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 

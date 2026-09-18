@@ -5,7 +5,7 @@
 After backpropagation revived neural networks (1986), researchers still struggled with image recognition. MLPs treated pixels independently, requiring millions of parameters and ignoring spatial structure.
 
 Then in 1998, **Yann LeCun's LeNet-5** revolutionized computer vision with **Convolutional Neural Networks (CNNs)**. By using:
-- **Shared weights** (convolution) → 100× fewer parameters
+- **Shared weights** (convolution) → parameter count set by filter size, not image size
 - **Local connectivity** → preserves spatial structure
 - **Pooling** → translation invariance
 
@@ -53,8 +53,8 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 **Purpose:** Prove CNNs > MLPs on same data
 
 - **Dataset:** TinyDigits (8x8 handwritten digits, ships with repo)
-- **Architecture:** Conv(1->8) -> Pool -> Conv(8->16) -> Pool -> Linear(->10)
-- **Comparison:** CNN ~90% vs MLP ~80% (Milestone 03)
+- **Architecture:** Conv(1->8, 3×3) -> ReLU -> MaxPool(2) -> Linear(72->10), 810 parameters
+- **Comparison:** at a matched training budget the Milestone 03 MLP (2,410 parameters) is as accurate or slightly better, about 90% at 100 epochs for both; the CNN's gain on 8×8 images is parameter count, and it trains about 87× slower per epoch because Module 09's convolution runs in Python loops
 - **Key Learning:** "Convolution preserves spatial structure!"
 
 **Why This Comparison Matters:**
@@ -96,7 +96,7 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 </tr>
 </thead>
 <tbody>
-<tr><td><b>01 (TinyDigits)</b></td><td>1K train</td><td>8×8 gray</td><td>Simple CNN</td><td>~90%</td><td>5-7 min</td><td>+10% improvement</td></tr>
+<tr><td><b>01 (TinyDigits)</b></td><td>1K train</td><td>8×8 gray</td><td>Simple CNN</td><td>86–87% (50 epochs)</td><td>~2 min</td><td>3× fewer parameters, not higher accuracy</td></tr>
 <tr><td><b>02 (CIFAR-10)</b></td><td>50K train</td><td>32×32 RGB</td><td>Deeper CNN</td><td>65-75%</td><td>30-60 min</td><td>MLPs struggle here</td></tr>
 </tbody>
 </table>
@@ -107,7 +107,7 @@ CNNs exploit three key principles:
 
 ### 1. Local Connectivity
 **MLP:** Every pixel connects to every neuron (millions of parameters)
-**CNN:** Only local regions connect (shared filters, 100× fewer params)
+**CNN:** Only local regions connect (shared filters, so parameters do not grow with image size)
 
 ### 2. Translation Invariance
 **MLP:** "Cat in top-left" ≠ "Cat in bottom-right" (different weights!)
