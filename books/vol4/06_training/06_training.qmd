@@ -250,7 +250,11 @@ Because the noise itself is purely unimodal (having only one central peak), the 
 ![](images/svg/fig06_canonical_diffusion_policy.svg){width="100%"}
 :::
 
-*Continuous flow matching extension:* While diffusion relies on stochastic paths requiring many denoising steps, **continuous flow matching**\index{Continuous flow matching} [@lipman2022flow] formulates trajectory generation as a deterministic process along straight probability paths from noise to demonstrations. A neural network learns the constant velocity vector field driving noise samples directly into target action chunks. Straight probability paths reduce numerical ODE integration from $16$ DDIM steps down to $2\text{--}4$ midpoint steps, cutting edge NPU execution latency from $35\text{--}65\text{ ms}$ down to $8\text{--}15\text{ ms}$ while natively modeling multimodal distributions.
+*Continuous flow matching extension:* While standard diffusion models rely on stochastic differential equations (SDEs) where Brownian noise forces trajectories to meander along winding, non-linear diffusion paths, **continuous flow matching**\index{Continuous flow matching} [@lipman2022flow] constructs optimal transport along straight probability paths. Instead of simulating Brownian wanderings across scores of iterations, flow matching defines a deterministic linear interpolation between standard Gaussian noise $\mathbf{x}_0 \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ and demonstration action chunk $\mathbf{x}_1 \sim \mathcal{D}$:
+$$\mathbf{x}_t = (1 - t)\mathbf{x}_0 + t \mathbf{x}_1, \quad \text{for } t \in [0, 1]$$
+The time derivative of this straight line is constant: $\dot{\mathbf{x}}_t = \mathbf{x}_1 - \mathbf{x}_0$. A neural network $v_\theta(\mathbf{x}_t, t, \mathbf{O}_t)$ is trained with simple mean squared error to predict this constant velocity vector field:
+$$\mathcal{L}_{\text{FM}}(\theta) = \mathbb{E}_{t \sim U(0, 1), \mathbf{x}_0 \sim \mathcal{N}(\mathbf{0}, \mathbf{I}), \mathbf{x}_1 \sim \mathcal{D}} \left[ \left\| v_\theta(\mathbf{x}_t, t, \mathbf{O}_t) - (\mathbf{x}_1 - \mathbf{x}_0) \right\|^2 \right]$$
+Because probability trajectories are straight rays rather than curlicued stochastic diffusions, numerical ordinary differential equation (ODE) solvers (such as Euler or midpoint Runge-Kutta) can take large integration steps without accumulating truncation drift or veering off-manifold. At inference time, integrating the learned ODE from noise ($t=0$) to policy proposal ($t=1$) requires only $2\text{--}4$ forward evaluations, cutting edge NPU execution latency from $35\text{--}65\text{ ms}$ down to $8\text{--}15\text{ ms}$—recovering positive timing slack against the $20\text{ ms}$ control deadline while natively preserving multimodal action distributions.
 
 4. **Latent Variable Action Chunking** (Action Chunking with Transformers - ACT):
 ACT [@zhao2023learning] reformulates policy synthesis by predicting an entire sequence of future actions $\mathbf{A}_t = (\mathbf{a}_t, \mathbf{a}_{t+1}, \dots, \mathbf{a}_{t+K-1}) \in \mathbb{R}^{K \times D_a}$ across a receding horizon $K$ given the current observation $\mathbf{o}_t$. To capture multimodality, ACT employs a Conditional Variational Autoencoder (CVAE) parameterized by a Transformer encoder-decoder. During training, a Transformer encoder compresses demonstrated action chunks and current observations into a low-dimensional latent style variable $\mathbf{z} \sim q_\phi(\mathbf{z} \mid \mathbf{o}_t, \mathbf{A}_t)$, optimized via the variational lower bound:
@@ -499,15 +503,30 @@ data = pd.read_csv("vol4/06_training/data/simulation_throughput_scaling.csv")
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 5.5))
 ax.plot(data['year'], data['sps'], marker='o', linewidth=2.5, markersize=10, color='#2c3e50')
 
+# Custom offsets: (dx, dy, ha, va)
+offsets = [
+    (-10, 18, 'right', 'bottom'),  # 2012 MuJoCo
+    (15, -22, 'left', 'top'),  # 2013 Bullet
+    (-15, 15, 'right', 'bottom'),  # 2017 MuJoCo Ray
+    (-15, 15, 'right', 'bottom'),  # 2019 Isaac Gym
+    (-15, 15, 'right', 'bottom'),  # 2021 Brax
+    (15, -22, 'left', 'top'),  # 2022 Isaac Gym Preview 4
+    (-15, 15, 'right', 'bottom'),  # 2023 MuJoCo MJX
+    (0, 18, 'center', 'bottom'),  # 2024 Isaac Lab
+]
+
 for i in range(len(data)):
+    dx, dy, ha, va = offsets[i]
     plt.annotate(
         f"{data['simulator'].iloc[i]}\n({data['hardware'].iloc[i]})",
         (data['year'].iloc[i], data['sps'].iloc[i]),
         textcoords="offset points",
-        xytext=(0, 15),
-        ha='center',
+        xytext=(dx, dy),
+        ha=ha,
+        va=va,
         fontsize=9,
         color='#34495e',
+        arrowprops=dict(arrowstyle='-', color='#7f8c8d', lw=0.8, alpha=0.7) if abs(dx) > 10 or abs(dy) > 15 else None,
     )
 
 plt.yscale('log')
