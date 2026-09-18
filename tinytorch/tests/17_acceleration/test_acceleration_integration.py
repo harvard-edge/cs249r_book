@@ -15,6 +15,8 @@ from tinytorch.perf.acceleration import (
     tiled_matmul,
     fused_gelu,
     unfused_gelu,
+    im2col,
+    im2col_conv2d,
 )
 
 
@@ -85,11 +87,44 @@ def test_fusion_does_not_change_the_activation():
     assert float(fused_gelu(Tensor(np.array([-0.5], dtype=np.float32))).data[0]) < 0.0
 
 
+def test_im2col_conv2d_agrees_with_the_loops_at_every_stride_and_padding():
+    """im2col schedules the multiply-adds differently; the answer must not move."""
+    from tinytorch.core.spatial import Conv2d
+
+    rng = np.random.default_rng(4)
+    x = Tensor(rng.standard_normal((2, 3, 9, 9)).astype(np.float32))
+
+    for stride, padding in ((1, 0), (1, 1), (2, 0), (2, 1)):
+        conv = Conv2d(3, 4, kernel_size=3, stride=stride, padding=padding)
+        conv.bias.data[:] = rng.standard_normal(4)
+        fast = im2col_conv2d(x, conv.weight, conv.bias, stride=stride, padding=padding)
+        reference = conv(x)
+        assert fast.data.shape == reference.data.shape, (
+            f"stride={stride}, padding={padding} changed the output shape"
+        )
+        np.testing.assert_allclose(
+            fast.data, reference.data, rtol=1e-5, atol=1e-5,
+            err_msg=f"im2col_conv2d disagreed with Conv2d at stride={stride}, padding={padding}",
+        )
+
+
+def test_im2col_rows_are_the_patches_under_the_kernel():
+    """A stub that returns the right shape with the wrong pixels must fail."""
+    x = Tensor(np.arange(16, dtype=np.float32).reshape(1, 1, 4, 4))
+    cols = im2col(x, kernel_size=2, stride=2)
+    np.testing.assert_array_equal(cols.data, [[0, 1, 4, 5],
+                                              [2, 3, 6, 7],
+                                              [8, 9, 12, 13],
+                                              [10, 11, 14, 15]])
+
+
 if __name__ == "__main__":
     test_vectorized_matmul_matches_the_reference_product()
     test_tiled_matmul_agrees_at_every_tile_size()
     test_tiled_matmul_handles_a_partial_final_tile()
     test_fusion_does_not_change_the_activation()
+    test_im2col_conv2d_agrees_with_the_loops_at_every_stride_and_padding()
+    test_im2col_rows_are_the_patches_under_the_kernel()
     print("✅ Acceleration integration tests passed")
 
 

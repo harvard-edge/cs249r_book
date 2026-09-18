@@ -16,11 +16,11 @@
 """
 # Module 17: Acceleration - Hardware-Aware Optimization
 
-Welcome to Module 17! Compare vectorized operations, blocked multiplication, and GELU allocation patterns, then connect them to production kernel fusion.
+Welcome to Module 17! Compare vectorized operations, blocked multiplication, and GELU allocation patterns, connect them to production kernel fusion, and turn Module 09's convolution loops into a single matrix multiply.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete neural network foundation with tensors (01), layers (03), autograd (06), training (08), and CNNs (09)
-**You'll Build**: Vectorized inference operations, tiled multiplication, and an allocation comparison
+**You'll Build**: Vectorized inference operations, tiled multiplication, an allocation comparison, and an im2col convolution
 **You'll Enable**: Hardware-efficient execution for production deployment
 
 **Connection Map**:
@@ -34,7 +34,8 @@ By the end of this module, you will:
 1. Implement vectorized operations for maximum throughput
 2. Compare intermediate allocation costs and explain what true kernel fusion changes
 3. Understand the relationship between compute and memory bandwidth
-4. Analyze acceleration trade-offs in production systems
+4. Lower a convolution to one matrix multiply with im2col, and measure its speed and memory cost
+5. Analyze acceleration trade-offs in production systems
 
 Let's optimize for speed!
 
@@ -45,7 +46,7 @@ Let's optimize for speed!
 
 ```python
 # How to use this module:
-from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
+from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu, im2col_conv2d
 ```
 
 **Why this matters:**
@@ -59,7 +60,7 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 """
 ## 📋 Module Dependencies
 
-**Prerequisites**: Module 01 (Tensor); Module 14 (Profiling) for the measurement habits
+**Prerequisites**: Module 01 (Tensor); Module 09 (Convolutions), whose Conv2d is the reference the im2col convolution must match; Module 14 (Profiling) for the measurement habits
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
@@ -67,13 +68,14 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor` (Tensor class from Module 01)
+- `tinytorch.core.spatial` (Conv2d from Module 09, used by the tests as the reference)
 - `tinytorch.perf.profiling` (Profiler from Module 14)
 
 **Dependency Flow**:
 ```
-Module 01 (Tensor) → Module 14 (Profiling) → Module 17 (Acceleration)
-     ↓                       ↓                      ↓
-  Foundation          Measurement Tools      Performance Optimization
+Module 01 (Tensor) → Module 09 (Conv2d) → Module 14 (Profiling) → Module 17 (Acceleration)
+     ↓                     ↓                     ↓                       ↓
+  Foundation         Loop reference       Measurement Tools     Performance Optimization
 ```
 
 Students completing this module will have built acceleration techniques
@@ -161,6 +163,7 @@ Performance questions you can investigate:
 - How much Python-loop overhead does vectorization remove?
 - How much do retained intermediate copies cost?
 - When does explicit tiling help or hurt compared with one BLAS call?
+- What does it cost in memory to run a convolution as one matrix multiply?
 """
 
 # %% [markdown]
@@ -876,6 +879,423 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## 🏗️ Convolution as Matrix Multiplication: im2col
+
+Module 09's `Conv2d` computes every output pixel as a dot product written out in
+Python: seven nested loops over batch, output channel, output row, output column,
+kernel row, kernel column, and input channel. That was the right way to learn
+what a convolution does. It is also why the CNN milestones are slow.
+
+### Why the Loops Are Slow
+
+Count the work for one layer of the CIFAR-10 milestone: a batch of 4 images,
+32 input channels, 64 output channels, a 32×32 feature map, and a 3×3 kernel.
+
+```
+multiply-adds = batch × out_ch × out_h × out_w × in_ch × k_h × k_w
+              = 4 × 64 × 32 × 32 × 32 × 3 × 3
+              = 75,497,472
+```
+
+In `_convolve_loops`, each of those 75 million multiply-adds is a separate
+Python operation. The arithmetic is not the problem; the interpreter is. The
+same 75 million multiply-adds inside one BLAS call finish in milliseconds.
+
+### The im2col Trick
+
+Look at a single output pixel. It is the dot product of two lists of
+`in_ch × k_h × k_w` numbers: the input patch under the filter, flattened, and
+the filter itself, flattened. So the whole layer is a matrix multiply in
+disguise:
+
+```
+Patch matrix (one row per output position)      Filter matrix (one column per filter)
+┌──────────────────────────────┐                ┌──────────────┐
+│ patch at (n=0, oh=0, ow=0)   │                │ f₀  f₁ … f₆₃ │
+│ patch at (n=0, oh=0, ow=1)   │       @        │  ↓   ↓    ↓  │   =   output rows
+│ ...                          │                │ (in_ch·k·k   │       (one per position,
+│ patch at (n=3, oh=31, ow=31) │                │  rows each)  │        one column per filter)
+└──────────────────────────────┘                └──────────────┘
+  (N·H_out·W_out) × (in_ch·k·k)                  (in_ch·k·k) × out_ch
+```
+
+Building the patch matrix is called **im2col** ("image to columns"; we store the
+patches as rows, the transposed convention, so the product needs no transpose of
+the big matrix). After one matmul, reshaping the `(N·H_out·W_out) × out_ch`
+result gives back the `(N, out_ch, H_out, W_out)` feature map.
+
+A 1-channel 3×3 input with a 2×2 kernel and stride 1 has four output positions,
+so four patches:
+
+```
+Input          Patches (rows of the patch matrix)
+┌───┬───┬───┐  position (0,0): [1, 2, 4, 5]
+│ 1 │ 2 │ 3 │  position (0,1): [2, 3, 5, 6]
+├───┼───┼───┤  position (1,0): [4, 5, 7, 8]
+│ 4 │ 5 │ 6 │  position (1,1): [5, 6, 8, 9]
+├───┼───┼───┤
+│ 7 │ 8 │ 9 │  Pixel 5 appears in all four rows.
+└───┴───┴───┘
+```
+
+### The Memory Price
+
+That repetition is the cost. Every interior pixel is copied once for each
+kernel position that covers it, up to `k_h × k_w` times. For the CIFAR layer
+above, the input is `4 × 32 × 32 × 32 × 4 bytes = 524 KB`, and the patch matrix
+is `(4 × 32 × 32) × (32 × 3 × 3) × 4 bytes = 4.7 MB`, nine times larger. im2col
+trades memory for speed. On a laptop that is an easy trade; on a microcontroller
+with 256 KB of RAM it may not fit at all.
+
+### Building the Patch Matrix Without Looping Over Pixels
+
+The obvious way to build the patch matrix loops over every output position and
+copies one patch at a time, which is a Python loop over `N × H_out × W_out`
+positions and gives back much of the speed. Turn it around and loop over the
+**kernel offsets** instead. For kernel element `(i, j)`, the input values it
+touches at every output position form one strided slice of the padded input:
+
+```
+padded[:, :, i : i + stride*H_out : stride, j : j + stride*W_out : stride]
+        ↑  ↑                                                   shape (N, C, H_out, W_out)
+      all images, all channels, all output positions at once
+```
+
+A 3×3 kernel needs nine slice copies, whatever the image size. The only care
+needed is the column order: `weight.reshape(out_ch, -1)` flattens each filter in
+`(channel, kernel row, kernel column)` order, so each patch must be flattened in
+the same order or the dot products pair the wrong numbers.
+
+### What You Are and Are Not Building
+
+Like the other helpers in this module, `im2col_conv2d` is an inference path: it
+returns a new Tensor without recording autograd, so it computes the same forward
+pass as Module 09's `Conv2d` but cannot train one. Training through im2col also
+needs the reverse step, **col2im**, which adds each patch gradient back into the
+pixels it came from. The reflection questions ask you to work out what that costs.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "im2col", "solution": true}
+#| export
+
+def im2col(x: Tensor, kernel_size: int, stride: int = 1, padding: int = 0) -> Tensor:
+    """
+    Unroll every convolution patch of a batch of images into one row of a matrix.
+
+    Row r of the result is the input patch for output position r, with positions
+    ordered (image, output row, output column). Each row is flattened in
+    (channel, kernel row, kernel column) order, the same order in which
+    weight.reshape(out_channels, -1) flattens a Conv2d filter.
+
+    TODO: Build the patch matrix by looping over kernel offsets, not output pixels
+
+    APPROACH:
+    1. Validate that x is 4D (batch, channels, height, width) and that the kernel
+       fits inside the padded input
+    2. Zero-pad the two spatial dimensions, exactly as Conv2d._apply_padding does
+    3. Compute out_h = (H + 2*padding - kernel_size) // stride + 1, and out_w likewise
+    4. Allocate cols with shape (N, C, kernel_size, kernel_size, out_h, out_w)
+    5. For each kernel offset (i, j), copy the strided slice
+       padded[:, :, i : i + stride*out_h : stride, j : j + stride*out_w : stride]
+       into cols[:, :, i, j, :, :]
+    6. Move the position axes to the front with transpose(0, 4, 5, 1, 2, 3) and
+       reshape to (N * out_h * out_w, C * kernel_size * kernel_size)
+
+    Args:
+        x: Input images, shape (N, C, H, W)
+        kernel_size: Edge length of the square kernel
+        stride: Step between neighboring patches (default: 1)
+        padding: Zeros added on each side of both spatial dimensions (default: 0)
+
+    Returns:
+        Patch matrix of shape (N * out_h * out_w, C * kernel_size * kernel_size)
+
+    EXAMPLE:
+    >>> x = Tensor(np.arange(1, 10, dtype=np.float32).reshape(1, 1, 3, 3))
+    >>> print(im2col(x, kernel_size=2).data)
+    [[1. 2. 4. 5.]
+     [2. 3. 5. 6.]
+     [4. 5. 7. 8.]
+     [5. 6. 8. 9.]]
+
+    MEMORY CHARACTERISTICS:
+    - The patch matrix holds N * out_h * out_w * C * kernel_size^2 values
+    - With stride 1 and "same" padding that is about kernel_size^2 times the input
+    - The loop runs kernel_size^2 times, independent of the image size
+
+    HINTS:
+    - np.pad with ((0, 0), (0, 0), (padding, padding), (padding, padding)) pads
+      only height and width
+    - A slice with a step, a[start:stop:step], selects every stride-th position
+    - Check your column order with the 3x3 example above before moving on
+    """
+    ### BEGIN SOLUTION
+    if len(x.shape) != 4:
+        raise ValueError(
+            f"im2col requires a 4D tensor (batch, channels, height, width)\n"
+            f"  ❌ Got shape {x.shape} ({len(x.shape)}D)\n"
+            f"  💡 Convolution slides over the last two axes of every channel of every image, so all four axes must be present\n"
+            f"  🔧 Add a batch axis for a single image: x.reshape(1, *x.shape)"
+        )
+
+    N, C, H, W = x.shape
+    if kernel_size < 1 or stride < 1 or padding < 0:
+        raise ValueError(
+            f"Invalid im2col parameters: kernel_size={kernel_size}, stride={stride}, padding={padding}\n"
+            f"  💡 kernel_size and stride must be at least 1, and padding cannot be negative"
+        )
+    if kernel_size > H + 2 * padding or kernel_size > W + 2 * padding:
+        raise ValueError(
+            f"Kernel does not fit the padded input\n"
+            f"  ❌ kernel_size={kernel_size} but the padded input is {H + 2 * padding}×{W + 2 * padding}\n"
+            f"  💡 Every patch must lie inside the padded image, so the kernel can be no larger than it\n"
+            f"  🔧 Use a smaller kernel or more padding"
+        )
+
+    padded = np.pad(x.data, ((0, 0), (0, 0), (padding, padding), (padding, padding)),
+                    mode='constant', constant_values=0)
+    out_h = (H + 2 * padding - kernel_size) // stride + 1
+    out_w = (W + 2 * padding - kernel_size) // stride + 1
+
+    # One strided slice per kernel offset: slice (i, j) holds, for every output
+    # position at once, the input value that kernel element (i, j) multiplies.
+    cols = np.empty((N, C, kernel_size, kernel_size, out_h, out_w), dtype=padded.dtype)
+    for i in range(kernel_size):
+        for j in range(kernel_size):
+            cols[:, :, i, j, :, :] = padded[:, :,
+                                            i:i + stride * out_h:stride,
+                                            j:j + stride * out_w:stride]
+
+    # Positions first (n, oh, ow), then the patch in (c, ki, kj) order to match
+    # weight.reshape(out_channels, -1).
+    cols = cols.transpose(0, 4, 5, 1, 2, 3).reshape(N * out_h * out_w, C * kernel_size * kernel_size)
+    return Tensor(cols)
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: im2col
+
+This test validates the patch matrix against patches written out by hand.
+
+**What we're testing**: Row contents and order, column order, output shape with
+stride and padding, and rejection of non-image input
+**Why it matters**: A patch matrix with its columns in the wrong order still
+multiplies without error; it just pairs the wrong pixels with the wrong weights
+**Expected**: The four hand-written patches of the 3×3 example, and shapes that
+follow the convolution output formula
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-im2col", "locked": true, "points": 10}
+def test_unit_im2col():
+    """🧪 Test the im2col patch matrix."""
+    print("🧪 Unit Test: im2col...")
+
+    # The worked example: one 3×3 image, 2×2 kernel, stride 1, no padding
+    x = Tensor(np.arange(1, 10, dtype=np.float32).reshape(1, 1, 3, 3))
+    cols = im2col(x, kernel_size=2)
+    expected = np.array([[1, 2, 4, 5],
+                         [2, 3, 5, 6],
+                         [4, 5, 7, 8],
+                         [5, 6, 8, 9]], dtype=np.float32)
+    assert cols.shape == (4, 4), f"Expected a 4×4 patch matrix, got {cols.shape}"
+    assert np.array_equal(cols.data, expected), f"Patches are wrong:\n{cols.data}"
+
+    # Column order must be (channel, kernel row, kernel column): with two channels,
+    # the first four columns come from channel 0 and the next four from channel 1
+    two_channel = Tensor(np.stack([np.arange(9), 100 + np.arange(9)]).reshape(1, 2, 3, 3).astype(np.float32))
+    first_patch = im2col(two_channel, kernel_size=2).data[0]
+    assert np.array_equal(first_patch, [0, 1, 3, 4, 100, 101, 103, 104]), \
+        f"Columns must be ordered (channel, kernel row, kernel column), got {first_patch}"
+
+    # Shape follows the convolution output formula with stride and padding
+    batch = Tensor(rng.standard_normal((2, 3, 8, 8)).astype(np.float32))
+    padded_cols = im2col(batch, kernel_size=3, stride=1, padding=1)
+    assert padded_cols.shape == (2 * 8 * 8, 3 * 3 * 3), f"Wrong shape with padding: {padded_cols.shape}"
+    strided_cols = im2col(batch, kernel_size=3, stride=2, padding=1)
+    assert strided_cols.shape == (2 * 4 * 4, 3 * 3 * 3), f"Wrong shape with stride 2: {strided_cols.shape}"
+
+    # Padding supplies zeros: the first patch of a padded image has a zero border
+    corner = im2col(Tensor(np.ones((1, 1, 3, 3), dtype=np.float32)), kernel_size=3, padding=1).data[0]
+    assert np.array_equal(corner, [0, 0, 0, 0, 1, 1, 0, 1, 1]), f"Padding is wrong: {corner}"
+
+    # Non-image input is rejected
+    try:
+        im2col(Tensor(np.ones((3, 8, 8))), kernel_size=3)
+        assert False, "Should reject a 3D tensor"
+    except ValueError as e:
+        assert "4D" in str(e)
+
+    print("✅ im2col works correctly!")
+
+if __name__ == "__main__":
+    test_unit_im2col()
+
+# %% [markdown]
+"""
+### Convolution Through One Matrix Multiply
+
+With the patch matrix built, the convolution itself is three steps: flatten the
+filters into a matrix, multiply, and put the result back into image layout.
+
+```
+cols      = im2col(x, k, stride, padding)          (N·H_out·W_out, C·k·k)
+w_matrix  = weight.reshape(out_ch, C·k·k).T        (C·k·k, out_ch)
+out       = cols @ w_matrix (+ bias)               (N·H_out·W_out, out_ch)
+feature map = out.reshape(N, H_out, W_out, out_ch)
+                 .transpose(0, 3, 1, 2)            (N, out_ch, H_out, W_out)
+```
+
+The multiply is your `vectorized_matmul`, so all of the speed comes from the
+vectorized matrix multiply you already wrote. The final transpose matters: the
+matmul produces one row per position with the channels last, and Conv2d's
+output puts the channels second.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "im2col-conv2d", "solution": true}
+#| export
+
+def im2col_conv2d(x: Tensor, weight: Tensor, bias: Tensor = None,
+                  stride: int = 1, padding: int = 0) -> Tensor:
+    """
+    2D convolution computed as one matrix multiply over an im2col patch matrix.
+
+    Computes the same forward pass as Module 09's Conv2d with the same weight,
+    bias, stride, and padding, but replaces its seven nested loops with one
+    vectorized_matmul. Inference only: the result does not record autograd.
+
+    TODO: Compute the convolution with im2col and vectorized_matmul
+
+    APPROACH:
+    1. Validate that weight is 4D (out_ch, in_ch, k, k) with a square kernel and
+       that in_ch matches x's channel count
+    2. Build the patch matrix with im2col(x, k, stride, padding)
+    3. Reshape the weight to (out_ch, in_ch * k * k) and transpose it
+    4. Multiply with vectorized_matmul; add the bias to every row if one is given
+    5. Reshape to (N, out_h, out_w, out_ch) and transpose to (N, out_ch, out_h, out_w)
+
+    Args:
+        x: Input images, shape (N, C, H, W)
+        weight: Filters, shape (out_ch, C, k, k), as in Conv2d.weight
+        bias: Optional per-filter bias, shape (out_ch,), as in Conv2d.bias
+        stride: Step between neighboring patches (default: 1)
+        padding: Zeros added on each side of both spatial dimensions (default: 0)
+
+    Returns:
+        Feature map of shape (N, out_ch, out_h, out_w)
+
+    EXAMPLE:
+    >>> conv = Conv2d(3, 16, kernel_size=3, padding=1)
+    >>> x = Tensor(np.random.randn(2, 3, 8, 8))
+    >>> fast = im2col_conv2d(x, conv.weight, conv.bias, padding=1)
+    >>> print(fast.shape)
+    (2, 16, 8, 8)
+    >>> np.allclose(fast.data, conv(x).data)
+    True
+
+    PERFORMANCE CHARACTERISTICS:
+    - Same multiply-add count as the loop version
+    - All of them run inside one BLAS call instead of the Python interpreter
+    - Extra memory: the patch matrix, about k^2 times the input
+
+    HINTS:
+    - N, H_out, and W_out can be recovered from x.shape and the patch count, or
+      recomputed with the output-size formula
+    - Adding a (out_ch,) bias to an (rows, out_ch) array broadcasts across rows
+    - Compare against Conv2d on a small input before timing anything
+    """
+    ### BEGIN SOLUTION
+    if len(weight.shape) != 4 or weight.shape[2] != weight.shape[3]:
+        raise ValueError(
+            f"im2col_conv2d requires a 4D weight with a square kernel\n"
+            f"  ❌ Got weight shape {weight.shape}\n"
+            f"  💡 Conv2d stores its filters as (out_channels, in_channels, k, k)\n"
+            f"  🔧 Pass conv.weight from a Conv2d layer"
+        )
+    if len(x.shape) != 4 or x.shape[1] != weight.shape[1]:
+        raise ValueError(
+            f"Input channels do not match the filters\n"
+            f"  ❌ Input shape {x.shape}, weight shape {weight.shape}\n"
+            f"  💡 Each filter has one slice per input channel, so x.shape[1] must equal weight.shape[1]\n"
+            f"  🔧 Check that the input is (N, C, H, W) with C = {weight.shape[1]}"
+        )
+
+    N, _, H, W = x.shape
+    out_ch, _, k, _ = weight.shape
+    out_h = (H + 2 * padding - k) // stride + 1
+    out_w = (W + 2 * padding - k) // stride + 1
+
+    cols = im2col(x, kernel_size=k, stride=stride, padding=padding)
+    w_matrix = Tensor(weight.data.reshape(out_ch, -1).T)
+
+    out = vectorized_matmul(cols, w_matrix).data          # (N*out_h*out_w, out_ch)
+    if bias is not None:
+        out = out + bias.data
+
+    return Tensor(out.reshape(N, out_h, out_w, out_ch).transpose(0, 3, 1, 2))
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: im2col Convolution
+
+This test validates the matrix-multiply convolution against Module 09's loops.
+
+**What we're testing**: Agreement with `Conv2d` for padding, stride, and no-bias
+cases, output layout, and channel validation
+**Why it matters**: An optimization is only correct if it computes the same
+function as the reference; Module 09's `Conv2d` is that reference
+**Expected**: Outputs match `Conv2d` within float tolerance in every case
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-im2col-conv2d", "locked": true, "points": 10}
+def test_unit_im2col_conv2d():
+    """🧪 Test im2col convolution against Module 09's Conv2d."""
+    print("🧪 Unit Test: im2col Convolution...")
+
+    from tinytorch.core.spatial import Conv2d
+
+    x = Tensor(rng.standard_normal((2, 3, 8, 8)).astype(np.float32))
+
+    # Same padding, stride 1, with bias
+    conv = Conv2d(3, 4, kernel_size=3, padding=1)
+    conv.bias.data[:] = rng.standard_normal(4)
+    fast = im2col_conv2d(x, conv.weight, conv.bias, stride=1, padding=1)
+    reference = conv(x)
+    assert fast.shape == reference.shape == (2, 4, 8, 8), f"Wrong output shape: {fast.shape}"
+    assert np.allclose(fast.data, reference.data, atol=1e-5), \
+        f"Differs from Conv2d by up to {np.abs(fast.data - reference.data).max():.2e}"
+
+    # Stride 2, no padding, no bias
+    conv_strided = Conv2d(3, 5, kernel_size=3, stride=2, bias=False)
+    fast_strided = im2col_conv2d(x, conv_strided.weight, None, stride=2, padding=0)
+    reference_strided = conv_strided(x)
+    assert fast_strided.shape == reference_strided.shape == (2, 5, 3, 3), \
+        f"Wrong strided shape: {fast_strided.shape}"
+    assert np.allclose(fast_strided.data, reference_strided.data, atol=1e-5), \
+        "Strided im2col convolution differs from Conv2d"
+
+    # Channel layout: the output channel axis is second, as in Conv2d
+    one_filter = Tensor(np.zeros((2, 3, 3, 3)))
+    one_filter.data[1, 0, 1, 1] = 1.0  # filter 1 copies channel 0 unchanged
+    copied = im2col_conv2d(x, one_filter, padding=1)
+    assert np.allclose(copied.data[:, 1], x.data[:, 0]), "Output channels are in the wrong axis"
+    assert np.allclose(copied.data[:, 0], 0.0), "Filter 0 is all zeros, so its channel must be zero"
+
+    # Mismatched channels are rejected
+    try:
+        im2col_conv2d(Tensor(np.ones((1, 2, 8, 8))), conv.weight, padding=1)
+        assert False, "Should reject input with the wrong number of channels"
+    except ValueError as e:
+        assert "channels" in str(e).lower()
+
+    print("✅ im2col_conv2d works correctly!")
+
+if __name__ == "__main__":
+    test_unit_im2col_conv2d()
+
+# %% [markdown]
+"""
 ## 🔧 Integration: Measuring Acceleration Gains with Profiler
 
 Now let's use the **Profiler** tool you built in Module 14 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M14), apply optimizations (M15-M17), measure gains.
@@ -1199,6 +1619,66 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+### Convolution Lowering Analysis
+
+im2col makes two claims: the matrix multiply is much faster than Module 09's
+loops, and the patch matrix costs about `k × k` times the input's memory. Measure
+both on layers shaped like the CNN milestones, kept small enough that the loop
+version finishes in a few seconds.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "analyze-im2col", "solution": false}
+def analyze_im2col_tradeoff():
+    """📊 Measure the speed and memory trade-off of im2col convolution."""
+    print("📊 Analyzing im2col convolution against Module 09's loops...")
+
+    from tinytorch.core.spatial import Conv2d
+
+    # (batch, in_ch, out_ch, size): a first layer on RGB input, then a deeper one
+    layers = [(2, 3, 16, 16), (2, 16, 32, 16)]
+    kernel_size, padding = 3, 1
+
+    print("\n🔍 Loops vs im2col + one matmul (3×3 kernel, same padding):")
+    print("┌──────────────────────┬────────────┬────────────┬──────────┬──────────────┐")
+    print("│ Layer                │ Loops (ms) │ im2col (ms)│ Speedup  │ Patch memory │")
+    print("├──────────────────────┼────────────┼────────────┼──────────┼──────────────┤")
+
+    for batch, in_ch, out_ch, size in layers:
+        conv = Conv2d(in_ch, out_ch, kernel_size=kernel_size, padding=padding)
+        x = Tensor(rng.standard_normal((batch, in_ch, size, size)).astype(np.float32))
+
+        # The loop version is slow, so it runs once; im2col is timed over several runs
+        start = time.perf_counter()
+        reference = conv(x)
+        loop_time = time.perf_counter() - start
+
+        _ = im2col_conv2d(x, conv.weight, conv.bias, padding=padding)  # warmup
+        start = time.perf_counter()
+        for _ in range(DEFAULT_TIMING_ITERATIONS):
+            fast = im2col_conv2d(x, conv.weight, conv.bias, padding=padding)
+        im2col_time = (time.perf_counter() - start) / DEFAULT_TIMING_ITERATIONS
+
+        assert np.allclose(fast.data, reference.data, atol=1e-5), "im2col must match the loops"
+
+        patch_bytes = im2col(x, kernel_size, padding=padding).data.size * BYTES_PER_FLOAT32
+        input_bytes = x.data.size * BYTES_PER_FLOAT32
+        label = f"{batch}×{in_ch}→{out_ch} @ {size}×{size}"
+        print(f"│ {label:20s} │ {loop_time*1000:10.1f} │ {im2col_time*1000:10.3f} │ "
+              f"{loop_time/im2col_time:7.0f}× │ {patch_bytes/input_bytes:5.1f}× input │")
+
+    print("└──────────────────────┴────────────┴────────────┴──────────┴──────────────┘")
+
+    print("\n💡 Key insights:")
+    print("   • Both versions do the same multiply-adds; the loops run them one at a time in Python")
+    print("   • The patch matrix repeats each interior pixel up to k×k = 9 times")
+    print("   • Speedups depend on the machine; the memory ratio depends only on the shapes")
+    print("🚀 im2col trades memory for one large, fast matrix multiply")
+
+if __name__ == "__main__":
+    analyze_im2col_tradeoff()
+
+# %% [markdown]
+"""
 ### Optimization Insights: Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
@@ -1392,6 +1872,8 @@ def test_module():
     test_unit_fused_gelu()
     test_unit_fusion_speedup()
     test_unit_tiled_matmul()
+    test_unit_im2col()
+    test_unit_im2col_conv2d()
 
     print("\nRunning integration scenarios...")
 
@@ -1496,6 +1978,26 @@ def test_module():
 
     print("✅ End-to-end acceleration pipeline works!")
 
+    # Convolution lowered to a matmul feeds the same accelerated pipeline
+    print("🧪 Integration Test: im2col convolution in a CNN forward pass...")
+    from tinytorch.core.spatial import Conv2d
+
+    images = Tensor(rng.standard_normal((4, 3, 8, 8)).astype(np.float32))
+    conv = Conv2d(3, 8, kernel_size=3, padding=1)
+    features = im2col_conv2d(images, conv.weight, conv.bias, padding=1)
+    assert np.allclose(features.data, conv(images).data, atol=1e-5), \
+        "im2col convolution must match Conv2d inside a pipeline"
+    print(f"   ✅ Convolution: {images.shape} → {features.shape} (matches Conv2d)")
+
+    # Flatten the feature map, then classify with the vectorized ops from above
+    flat = Tensor(features.data.reshape(images.shape[0], -1))
+    classifier = Tensor(rng.standard_normal((flat.shape[1], 10)).astype(np.float32) * 0.01)
+    logits = fused_gelu(vectorized_matmul(flat, classifier))
+    assert logits.shape == (4, 10), f"Wrong classifier output shape: {logits.shape}"
+    assert np.all(np.isfinite(logits.data)), "CNN pipeline produced NaN or Inf"
+    print(f"   ✅ Classifier head: {flat.shape} → {logits.shape}")
+    print("✅ im2col convolution composes with the rest of the pipeline!")
+
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 17")
@@ -1532,14 +2034,28 @@ For edge deployment (memory critical, stability required, hardware diverse):
 - Priority 2 technique: _____ (memory benefits)
 - Skip technique: _____ (why: _____)
 - What's the primary constraint: memory, compute, or power? _____
+
+---
+
+### Question 4: Training Through im2col
+Your im2col_conv2d computes the forward pass as `out = cols @ W`.
+- The gradient with respect to the weights is `cols.T @ grad_out`. Is that a
+  matrix multiply of the same size as the forward pass? _____
+- The gradient with respect to `cols` is `grad_out @ W.T`, but training needs the
+  gradient with respect to the *image*. Each pixel appears in up to k×k rows of
+  `cols`. How do you combine those rows into one pixel gradient? _____
+- That reverse step is called col2im. Why can't it be a single matrix multiply? _____
+- For the 4×32×32×32 layer in this module, how much memory must you keep from the
+  forward pass to run the backward pass? _____
 """
 
 # %% [markdown]
 """
 ## ⭐ Aha Moment: Vectorization and Fusion Speed Things Up
 
-**What you built:** Vectorized operations, blocked matrix multiplication, and a
-GELU comparison that exposes the cost of retaining intermediate Tensor objects.
+**What you built:** Vectorized operations, blocked matrix multiplication, a
+GELU comparison that exposes the cost of retaining intermediate Tensor objects,
+and a convolution that runs as one matrix multiply.
 
 **Why it matters:** The same mathematical expression can allocate and copy different
 amounts of data. The compact GELU expression avoids those Tensor wrappers, but NumPy
@@ -1593,6 +2109,7 @@ Congratulations! You've mastered the fundamental techniques for accelerating neu
 - Built **vectorized operations** using optimized BLAS and measured their timing
 - Compared **GELU implementations** with different intermediate Tensor allocation costs; actual kernel fusion remains a production bridge
 - Created **cache-aware tiling** for efficient large matrix operations
+- Lowered **convolution to one matrix multiply** with im2col and checked it against Module 09's Conv2d
 - Analyzed **arithmetic intensity patterns** and their impact on the roofline model
 - Measured **memory efficiency** across different operation types
 - Developed **production decision framework** for systematic optimization
@@ -1602,6 +2119,7 @@ Congratulations! You've mastered the fundamental techniques for accelerating neu
 - **Roofline Model**: Operations with high arithmetic intensity (FLOPs/byte) scale better
 - **Memory Bandwidth**: Often the limiting factor for modern accelerators
 - **Cache Awareness**: Tiling keeps working sets in cache for better performance
+- **Lowering**: im2col turns a convolution into a GEMM by copying each pixel up to k×k times; the same multiply-adds run thousands of times faster once they leave the Python interpreter
 - **Kernel Fusion**: A compiled fused kernel can eliminate intermediate arrays; the savings depend on the expression
 - **Optimization Strategy**: Start simple (vectorization), add complexity as needed
 
