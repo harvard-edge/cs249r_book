@@ -17,7 +17,7 @@ Convolutional Neural Networks (CNNs). By using:
 LeNet achieved 99%+ accuracy on handwritten digits, launching the deep learning
 revolution that led to modern computer vision.
 
-🎯 MILESTONE 4 PART 1: PROVE CNNs > MLPs (Offline)
+🎯 MILESTONE 4 PART 1: CONVOLUTION VS. DENSE ON THE SAME DIGITS (Offline)
 Using YOUR Tiny🔥Torch spatial modules, you'll build a CNN that OUTPERFORMS the
 MLP from Milestone 03 on the SAME dataset. This proves spatial operations matter!
 
@@ -50,7 +50,7 @@ MLP from Milestone 03 on the SAME dataset. This proves spatial operations matter
     Flatten: (batch, 72)           ← 8 × 3 × 3 = 72 features
     Output: (batch, 10)            ← 10 class probabilities
 
-🔍 WHY CNNs > MLPs - The Key Insight:
+🔍 WHAT CONVOLUTION CHANGES - The Key Insight:
 
     MLP (Milestone 03):                  CNN (This Milestone):
 

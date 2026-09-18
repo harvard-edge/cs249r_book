@@ -50,7 +50,7 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 
 **Script:** `01_lecun_tinydigits.py`
 
-**Purpose:** Prove CNNs > MLPs on same data
+**Purpose:** Compare a CNN with the Milestone 03 MLP on the same digits
 
 - **Dataset:** TinyDigits (8x8 handwritten digits, ships with repo)
 - **Architecture:** Conv(1->8, 3×3) -> ReLU -> MaxPool(2) -> Linear(72->10), 810 parameters
