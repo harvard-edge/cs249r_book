@@ -1,28 +1,28 @@
-## Tokens as the Processor Interface {#sec-vol3-processor-tokenization}
+## Tokens as the Model Interface {#sec-vol3-processor-tokenization}
 
-A classical CPU interfaces with system memory and peripherals through standardized binary encodings defined by an Instruction Set Architecture (ISA). In an x86-64 or ARM processor, the hardware instruction decoder unpacks binary machine words into discrete opcodes, register specifiers, and immediate memory offsets; execution units operate directly on binary integers and IEEE 754 floating-point words. In contrast, a foundation model possesses no hardware instruction decoder, no binary registers, and no native awareness of text strings, programming language grammars, or ASCII characters. Its physical computational substrate consists of continuous tensor contractions executed across multi-dimensional vector spaces.
+A classical CPU interfaces with system memory and peripherals through standardized binary encodings defined by an Instruction Set Architecture (ISA). In an x86-64 or ARM processor, the hardware instruction decoder unpacks binary machine words into discrete opcodes, register specifiers, and immediate memory offsets; execution units operate directly on binary integers and IEEE 754 floating-point words. In contrast, a Large Language Model possesses no hardware instruction decoder, no binary registers, and no native awareness of text strings, programming language grammars, or ASCII characters. Its physical computational substrate consists of continuous tensor contractions executed across multi-dimensional vector spaces on an accelerator.
 
-To bridge external symbolic text with continuous neural state, the system relies on the *tokenizer*. The tokenizer serves as the fundamental hardware-software serializer (Application Binary Interface) of the system. It establishes a deterministic, bidirectional mapping between variable-length UTF-8 byte sequences $\Sigma^*$ and discrete integer identifiers drawn from a bounded vocabulary $\mathcal{V}$:
+To bridge external symbolic text with continuous neural state, the system relies on the *tokenizer*. The tokenizer serves as the fundamental hardware-software serializer (the Application Binary Interface) of the system. It establishes a deterministic, bidirectional mapping between variable-length UTF-8 byte sequences $\Sigma^*$ and discrete integer identifiers drawn from a bounded vocabulary $\mathcal{V}$:
 
 $$\mathcal{T}: \Sigma^* \to \mathcal{V}^*, \quad \mathcal{T}^{-1}: \mathcal{V}^* \to \Sigma^*$$
 
 where $|\mathcal{V}|$ denotes the total vocabulary cardinality (typically between $32{,}000$ and $128{,}000$ tokens). These discrete *token IDs* constitute the raw data currency and execution primitives of the foundation model.
 
-### The Lexing Boundary: Why Neural Networks Cannot Read Strings
+### The Serialization Boundary: Why Language Models Cannot Read Strings
 
-To an engineer designing a runtime, the choice of token representation presents a classic systems trade-off between dictionary size and sequence length. Two naive approaches immediately fail at scale:
+To an engineer designing an agent runtime, the choice of token representation presents a classic systems trade-off between dictionary size and sequence length. Two naive approaches immediately fail at scale:
 
 1. **Word-Level Dictionaries:** Mapping every distinct word to a unique integer ID is intuitive for standard prose (`"algorithm"`, `"network"`), but fails catastrophically on open-vocabulary technical domains. In software systems, codebases are populated by arbitrary variable names (`user_account_id_v2`), SHA-256 hashes (`e3b0c442...`), hexadecimal memory addresses, and timestamps. When a word-level tokenizer encounters an unseen identifier, it triggers a fatal Out-of-Vocabulary ($OOV$) exception or maps the symbol to an uninformative unknown token (`<unk>`), obliterating critical semantic distinctions.
 2. **Character-Level Tokenization:** Mapping each individual ASCII character or UTF-8 byte to a distinct token ID eliminates $OOV$ faults completely, as any text string can be decomposed into raw bytes. However, it inflates sequence lengths by $3\times$ to $5\times$. Because the computational and memory footprint of the transformer's self-attention mechanism scales quadratically with sequence length ($O(S^2)$), a $4\times$ increase in sequence length causes a $16\times$ explosion in attention compute and intermediate cache storage, severely degrading serving throughput.
 
-Serving runtimes standardize on *subword tokenization* via Byte-Pair Encoding (BPE)[^fn-bpe-history]. BPE achieves the systems sweet spot: frequent words receive a single, atomic token ID, while rare words, variable names, and code identifiers fracture into smaller reusable subwords. The vocabulary is constructed offline across training corpora through a greedy compression algorithm:
+Modern serving runtimes standardize on *subword tokenization* via Byte-Pair Encoding (BPE)[^fn-bpe-history]. BPE achieves the systems sweet spot: frequent words receive a single, atomic token ID, while rare words, variable names, and code identifiers fracture into smaller reusable subwords. The vocabulary is constructed offline across training corpora through a greedy compression algorithm:
 
 1. Base vocabulary $\mathcal{V}_0$ contains all 256 raw UTF-8 octets ($0x00$–$0xFF$) and special control symbols (`<|im_start|>`, `<|endoftext|>`).
 2. Pair co-occurrences are tallied across training corpora.
 3. The most frequent pair $(u, v)$ merges into atomic token $w = uv$, updating vocabulary: $\mathcal{V}_{k+1} = \mathcal{V}_k \cup \{w\}$, with merge rule $(u, v) \to w$ ranked by creation priority.
 4. Merges iterate until vocabulary cardinality reaches ceiling $|\mathcal{V}| \in [32{,}000, 131{,}072]$.
 
-[^fn-bpe-history]: **Byte-Pair Encoding** (historical data compression): Gage [@gage1994bpe] introduced BPE for compression; @sennrich2016subword adapted it to NLP to eliminate out-of-vocabulary exceptions. In stochastic processor cores, BPE forms the discrete data representation boundary, transforming byte streams into bounded integer vocabulary indices. \index{Byte-Pair Encoding}\index{Tokenizer!Byte-Pair Encoding}
+[^fn-bpe-history]: **Byte-Pair Encoding** (Historical Data Compression): Gage [@gage1994bpe] introduced BPE for data compression; @sennrich2016subword adapted it to NLP to eliminate out-of-vocabulary exceptions. In modern LLM systems, BPE forms the discrete data serialization boundary, transforming UTF-8 byte streams into bounded integer vocabulary indices. \index{Byte-Pair Encoding}\index{Tokenizer!Byte-Pair Encoding}
 
 At runtime, BPE executes merge rules by priority rank over raw UTF-8 bytes rather than greedy longest-match prefixing. Because base vocabulary $\mathcal{V}_0$ contains all 256 byte octets, BPE can serialize arbitrary byte streams, binary payloads, or malformed UTF-8 fragments without ever raising an $OOV$ exception. Decoding ($\mathcal{T}^{-1}$) maps token IDs to byte chunks concatenated into a raw buffer, performing byte-level reassembly of split multi-byte UTF-8 code points before string emission.
 
@@ -30,7 +30,7 @@ Byte-level BPE [@radford2019language] remaps octets to printable Unicode, mappin
 
 [^fn-whitespace-prefix]: **Whitespace Prefix Encodings**: Because BPE vocabularies encode leading whitespace directly into subword identifiers, modifying indentation or trimming trailing whitespace fundamentally alters downstream token IDs, embedding vector lookups, and continuation probabilities. \index{Whitespace Encoding}\index{Tokenizer!Whitespace Prefix}
 
-### The Silicon Mechanism: Embedding Table Gather
+### How Tokens Become Tensors: The Embedding Table Gather
 
 In hardware, token IDs do not participate in arithmetic operations directly. Instead, token ID $x_i \in \{0, \dots, |\mathcal{V}|-1\}$ serves as a physical row index into the model's *embedding table* $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$, where $d_{\text{model}}$ is the model's hidden dimension (e.g., $4{,}096$ or $8{,}192$ floats).
 
@@ -40,7 +40,7 @@ $$\mathbf{E} = \mathbf{W}_{\text{embed}}[\mathbf{x}, :] = \begin{bmatrix} \mathb
 
 Each row occupies $d_{\text{model}} \cdot b$ bytes in device memory, where $b$ is the parameter byte-width (e.g., $b=2$ bytes for 16-bit BF16/FP16). The memory controller gathers these rows from High-Bandwidth Memory (HBM) into on-chip SRAM via coalesced memory transactions. Once gathered, this dense matrix $\mathbf{E}$ enters the transformer's attention layers as the initial activation state.
 
-### The AST Impedance Mismatch
+### The AST Impedance Mismatch: When Subwords Clash with Code Grammars
 
 In electrical engineering, an *impedance mismatch* between a signal source and its transmission line reflects energy backward, corrupting the transmitted waveform. In systems architecture, an impedance mismatch occurs when two adjacent abstraction layers operate on fundamentally incompatible data representations.
 
@@ -111,7 +111,7 @@ In hardware, token IDs index directly into the embedding matrix $\mathbf{W}_{\te
 Vectors $\mathbf{e}_{755}$ and $\mathbf{e}_{711}$ are completely distinct rows in high-dimensional vector space ($\mathbb{R}^{d_{\text{model}}}$). The neural core receives no architectural signal indicating that token 711 represents the keyword `def` shifted by two spaces. To the transformer's attention heads, token 711 is an entirely different numerical entity with its own learned affinities.
 
 **Systems Consequences:**
-1. *Continuation Shifts and Syntax Hallucinations:* Because $\mathbf{e}_{755} \neq \mathbf{e}_{711}$, the neural core computes different attention activations at the decode boundary. An accidental trailing space or minor indentation discrepancy at the end of a prompt shifts downstream logits, potentially suppressing a valid syntax token or triggering an unexpected completion.
+1. *Continuation Shifts and Syntax Hallucinations:* Because $\mathbf{e}_{755} \neq \mathbf{e}_{711}$, the model computes different attention activations at the decode boundary. An accidental trailing space or minor indentation discrepancy at the end of a prompt shifts downstream logits, potentially suppressing a valid syntax token or triggering an unexpected completion.
 2. *Identifier Splintering Latency:* Emitting `execute_transaction_with_retry` requires four sequential autoregressive decode steps (`"execute"`, `"_transaction"`, `"_with"`, `"_retry"`). Because each decode step requires a full sweep of all model parameters through the memory bus, identifier splintering directly inflates execution latency by $4\times$ compared to an atomic token.
 3. *Prefix Cache Invalidation:* In serving systems utilizing prefix caching (such as RadixAttention), KV cache blocks are indexed by exact token ID sequences. If a user or prompt template changes indentation or adds a single whitespace character, the resulting token IDs diverge immediately, invalidating the cached prefix and forcing an expensive full prompt prefill.
 :::
@@ -139,7 +139,7 @@ In `cl100k_base`, a raw newline is token 198 (`'\n'`), while a literal escaped n
 
 ### Context Capacity and Budget Enforcement: Why Character Counts Lie
 
-The stochastic processor operates within a strict maximum context ceiling $S_{\max}$, bounding total sequence length:
+The model operates within a strict maximum context ceiling $S_{\max}$, bounding total sequence length:
 
 $$M + K \le S_{\max}$$
 
@@ -250,4 +250,4 @@ To serve extended 128k contexts at 70B scale without crashing, systems architect
 
 This steep memory scaling makes context capacity the primary physical constraint on concurrency, motivating paged attention virtual memory architectures and prefix-sharing techniques (detailed in Chapter 5).
 
-Once staged as an integer token array and loaded into accelerator memory, how does the processor actually compute its candidate output?
+Once staged as an integer token array and loaded into accelerator memory, how does the model actually compute its candidate output?
