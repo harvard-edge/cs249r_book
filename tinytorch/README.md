@@ -25,7 +25,7 @@
 >
 > TinyTorch is **live and usable**. It shipped with the **2026** MLSysBook refresh and we expect **steady iteration**—modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.
 >
-> **Classroom roadmap** — Summer/Fall 2026 | **Right now** — [Help shape TinyTorch](#-help-shape-tinytorch)
+> **Classroom release** — Spring 2027 | **Right now** — [Help shape TinyTorch](#-help-shape-tinytorch)
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 ---
