@@ -232,16 +232,65 @@ To quantify this reality gap, consider the divergence between rigid-body physics
 
 [^fn-math-stiction-deadband]: **Actuator Stiction Deadband**\index{Actuator!stiction deadband}: Motor winding inductance and discrete current-loop update intervals prevent commanded torque from rising instantaneously. Before applied torque overcomes static breakaway friction ($\tau_c$), the joint remains mechanically immobilized for deadband duration $t_{\text{dead}} = \tau_{\text{lag}} \ln\left(\frac{\tau_{\text{cmd}}}{\tau_{\text{cmd}} - \tau_c}\right)$. This unmodeled phase lag erodes phase margin in high-gain feedback loops, triggering destructive limit-cycle chattering across contact boundaries.
 
+```{python}
+#| label: calc-verify-coulomb-stiction-deadband
+#| echo: false
+import math
+from mlsysim.core.units import ureg, millisecond, kilogram, meter, second
+from mlsysim.physics.robotics import calc_coulomb_stiction_deadband
+from mlsysim.fmt import fmt, fmt_int, fmt_multiple, fmt_latency
+
+class CoulombStictionDeadband:
+    tau_cmd = 6.0 * (ureg.newton * meter)
+    tau_c = 4.5 * (ureg.newton * meter)
+    tau_lag = 5.0 * millisecond
+    inertia = 0.050 * (kilogram * (meter**2))
+
+    t_dead = calc_coulomb_stiction_deadband(
+        commanded_torque=tau_cmd,
+        coulomb_friction_torque=tau_c,
+        stator_electrical_lag=tau_lag,
+    )
+    alpha_sim = (tau_cmd / inertia).to(ureg.radian / (second**2))
+    tau_net_real = tau_cmd - tau_c
+    alpha_real = (tau_net_real / inertia).to(ureg.radian / (second**2))
+
+    t_eval = 50.0 * millisecond
+    theta_sim = 0.5 * alpha_sim.magnitude * (t_eval.to(second).magnitude ** 2)
+    t_active_real = (t_eval - t_dead).to(second).magnitude
+    theta_real = 0.5 * alpha_real.magnitude * (t_active_real**2)
+    delta_theta = abs(theta_sim - theta_real)
+
+    theta_sim_deg = math.degrees(theta_sim)
+    theta_real_deg = math.degrees(theta_real)
+    delta_theta_deg = math.degrees(delta_theta)
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    t_dead_ms_str = fmt_latency(t_dead, unit=millisecond, precision=2)
+    alpha_sim_str = fmt_int(round(alpha_sim.magnitude))
+    alpha_real_str = fmt_int(round(alpha_real.magnitude))
+    accel_ratio_mult_str = fmt_multiple(round((alpha_sim / alpha_real).to_base_units().magnitude))
+
+    t_active_ms_str = fmt_latency(t_active_real * 1000.0 * millisecond, unit=millisecond, precision=2)
+    theta_sim_str = fmt(theta_sim, precision=4)
+    theta_real_str = fmt(theta_real, precision=4)
+    delta_theta_str = fmt(delta_theta, precision=4)
+
+    theta_sim_deg_str = fmt(theta_sim_deg, precision=3)
+    theta_real_deg_str = fmt(theta_real_deg, precision=3)
+    delta_theta_deg_str = fmt_int(round(delta_theta_deg))
+```
+
 ::: {#exmp-verification-coulomb-friction-reality-gap .callout-example title="Coulomb friction and stator lag reality gap"}
 Consider a robotic manipulator arm trained in a rigid-body physics simulator (SIL) assuming an idealized joint actuator with linear viscous damping $b_{\text{sim}} = 0.10\text{ N}\cdot\text{s/rad}$ and zero static or Coulomb friction ($\tau_{\text{Coulomb}} = 0$). On physical hardware (HIL and in-situ test rig), the joint's cycloidal drive exhibits Coulomb breakaway friction $\tau_c = 4.50\text{ N}\cdot\text{m}$. Furthermore, the motor power stage exhibits an unmodeled stator electrical time constant $T_e = 3.50\text{ ms}$ and an inverter current-loop sampling delay of $1.50\text{ ms}$, producing an effective first-order torque buildup lag $\tau_{\text{lag}} = 5.00\text{ ms}$ such that applied torque follows $\tau(t) = \tau_{\text{cmd}}(1 - e^{-t/\tau_{\text{lag}}})$. When the policy commands a step torque $\tau_{\text{cmd}} = 6.00\text{ N}\cdot\text{m}$ to accelerate a load inertia $J = 0.050\text{ kg}\cdot\text{m}^2$ from rest ($\dot{\theta}(0) = 0$), dynamics diverge across three stages:
 
-1. In simulation, with zero Coulomb threshold, the full torque accelerates the inertia at $t = 0^+$, yielding $\ddot{\theta}_{\text{sim}}(0^+) = \frac{\tau_{\text{cmd}}}{J} = \frac{6.00\text{ N}\cdot\text{m}}{0.050\text{ kg}\cdot\text{m}^2} = 120.00\text{ rad/s}^2$. On physical hardware, motion is impossible until electromagnetic torque overcomes $\tau_c$. Once torque reaches the commanded $6.00\text{ N}\cdot\text{m}$, net accelerating torque is reduced by Coulomb friction to $\tau_{\text{net}} = \tau_{\text{cmd}} - \tau_c = 1.50\text{ N}\cdot\text{m}$, yielding steady acceleration of $\ddot{\theta}_{\text{real}} = \frac{1.50}{0.050} = 30.00\text{ rad/s}^2$—a fourfold reduction ($4.0\times$) from simulation.
+1. In simulation, with zero Coulomb threshold, the full torque accelerates the inertia at $t = 0^+$, yielding $\ddot{\theta}_{\text{sim}}(0^+) = \frac{\tau_{\text{cmd}}}{J} = \frac{6.00\text{ N}\cdot\text{m}}{0.050\text{ kg}\cdot\text{m}^2} =$ `{python} CoulombStictionDeadband.alpha_sim_str` $\text{rad/s}^2$. On physical hardware, motion is impossible until electromagnetic torque overcomes $\tau_c$. Once torque reaches the commanded $6.00\text{ N}\cdot\text{m}$, net accelerating torque is reduced by Coulomb friction to $\tau_{\text{net}} = \tau_{\text{cmd}} - \tau_c = 1.50\text{ N}\cdot\text{m}$, yielding steady acceleration of $\ddot{\theta}_{\text{real}} = \frac{1.50}{0.050} =$ `{python} CoulombStictionDeadband.alpha_real_str` $\text{rad/s}^2$—a fourfold reduction (`{python} CoulombStictionDeadband.accel_ratio_mult_str`) from simulation.
 2. Motion initiates only when electromagnetic torque overcomes static stiction ($\tau_c$). With first-order torque buildup $\tau(t) = \tau_{\text{cmd}}(1 - e^{-t/\tau_{\text{lag}}})$, solving $\tau(t_{\text{dead}}) = \tau_c$ yields the exact deadband duration:
 $$t_{\text{dead}} = \tau_{\text{lag}} \ln\left(\frac{\tau_{\text{cmd}}}{\tau_{\text{cmd}} - \tau_c}\right)$$ {#eq-verification-coulomb-deadtime}
-Evaluating @eq-verification-coulomb-deadtime gives $t_{\text{dead}} = 5.00\text{ ms} \times \ln\left(\frac{6.00}{6.00 - 4.50}\right) = 5.00\text{ ms} \times \ln(4.0) \approx 6.93\text{ ms}$. During these initial $6.93\text{ ms}$, the real joint remains stationary ($\theta_{\text{real}} = 0$), whereas the simulation claims the joint has already reached $\theta_{\text{sim}}(t_{\text{dead}}) \approx \frac{1}{2} \ddot{\theta}_{\text{sim}} t_{\text{dead}}^2 = \frac{1}{2}(120.00\text{ rad/s}^2)(0.00693\text{ s})^2 \approx 2.88 \times 10^{-3}\text{ rad}$ ($0.165^\circ$).
-3. At $t = 50.0\text{ ms}$ ($0.050\text{ s}$), the simulated trajectory reaches $\theta_{\text{sim}} \approx \frac{1}{2}(120.00)(0.050)^2 = 0.1500\text{ rad}$ ($8.594^\circ$). On physical hardware, motion only occurs over the active duration $t' = t - t_{\text{dead}} = 50.0\text{ ms} - 6.93\text{ ms} = 43.07\text{ ms}$, reaching $\theta_{\text{real}} \approx \frac{1}{2}(30.00)(0.04307\text{ s})^2 \approx 0.0278\text{ rad}$ ($1.594^\circ$). The spatial tracking divergence between simulation and physical hardware is $\Delta \theta(t) = |\theta_{\text{sim}}(t) - \theta_{\text{real}}(t)|$, which evaluates at $50.0\text{ ms}$ to $\Delta \theta = |0.1500\text{ rad} - 0.0278\text{ rad}| = 0.1222\text{ rad}$ ($7.00^\circ$).
+Evaluating @eq-verification-coulomb-deadtime gives $t_{\text{dead}} = 5.00\text{ ms} \times \ln\left(\frac{6.00}{6.00 - 4.50}\right) = 5.00\text{ ms} \times \ln(4.0) \approx$ `{python} CoulombStictionDeadband.t_dead_ms_str`. During these initial `{python} CoulombStictionDeadband.t_dead_ms_str`, the real joint remains stationary ($\theta_{\text{real}} = 0$), whereas the simulation claims the joint has already reached $\theta_{\text{sim}}(t_{\text{dead}}) \approx \frac{1}{2} \ddot{\theta}_{\text{sim}} t_{\text{dead}}^2 \approx 2.88 \times 10^{-3}\text{ rad}$ ($0.165^\circ$).
+3. At $t = 50.0\text{ ms}$ ($0.050\text{ s}$), the simulated trajectory reaches $\theta_{\text{sim}} \approx \frac{1}{2}(120.00)(0.050)^2 \approx$ `{python} CoulombStictionDeadband.theta_sim_str` $\text{rad}$ (`{python} CoulombStictionDeadband.theta_sim_deg_str`$^\circ$). On physical hardware, motion only occurs over the active duration $t' = t - t_{\text{dead}} = 50.0\text{ ms} - 6.93\text{ ms} =$ `{python} CoulombStictionDeadband.t_active_ms_str`, reaching $\theta_{\text{real}} \approx \frac{1}{2}(30.00)(0.04307\text{ s})^2 \approx$ `{python} CoulombStictionDeadband.theta_real_str` $\text{rad}$ (`{python} CoulombStictionDeadband.theta_real_deg_str`$^\circ$). The spatial tracking divergence between simulation and physical hardware is $\Delta \theta(t) = |\theta_{\text{sim}}(t) - \theta_{\text{real}}(t)|$, which evaluates at $50.0\text{ ms}$ to $\Delta \theta = |0.1500\text{ rad} - 0.0278\text{ rad}| =$ `{python} CoulombStictionDeadband.delta_theta_str` $\text{rad}$ (`{python} CoulombStictionDeadband.delta_theta_deg_str`$^\circ$).
 
-A policy evaluated solely in SIL observes prompt motion and low tracking error, prompting its internal integrator to remain dormant. On physical hardware, the $6.93\text{ ms}$ stick deadband causes integrator windup, followed by sudden breakaway and high-velocity overshoot that invalidates simulated safety claims.
+A policy evaluated solely in SIL observes prompt motion and low tracking error, prompting its internal integrator to remain dormant. On physical hardware, the `{python} CoulombStictionDeadband.t_dead_ms_str` stick deadband causes integrator windup, followed by sudden breakaway and high-velocity overshoot that invalidates simulated safety claims.
 :::
 
 ::: {#chk-verification-sim-to-real-reality-gap-dynamics .callout-checkpoint title="Sim-to-real reality gap and actuation lag"}

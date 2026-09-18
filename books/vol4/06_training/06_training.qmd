@@ -146,6 +146,32 @@ Now consider an **action chunking**\index{Action chunking} policy (such as Actio
 
 [^fn-math-chunk-suppression]: **Action chunking and receding-horizon ensembling**\index{Action chunking!receding-horizon ensembling}: Action chunking suppresses single-step compounding errors by predicting $H$ consecutive actions simultaneously, enforcing smooth trajectory priors. In physical systems, overlapping action chunks are continuously re-queried at an interval $k \ll H$ and blended via temporal ensembling, injecting closed-loop sensory feedback while eliminating high-frequency decision chatter.
 
+```{python}
+#| label: calc-training-covariate-drift-compounding
+#| echo: false
+from mlsysim.core.units import ureg, second, meter
+from mlsysim.fmt import fmt, fmt_multiple, fmt_percent, fmt_length
+
+class CovariateDriftCompounding:
+    dt = 0.020 * second
+    t_total = 10.0 * second
+    n_steps = 500
+    epsilon = 0.005
+    a_bias = 0.05 * (meter / (second**2))
+    tau_rec = 0.10 * second
+
+    p_drift = 1.0 - ((1.0 - epsilon) ** n_steps)
+    drift_open = (epsilon / dt.magnitude) * 0.5 * a_bias.magnitude * ((t_total.magnitude**3) / 3.0) * meter
+    delta_y_rec = 0.5 * a_bias.magnitude * (tau_rec.magnitude**2) * meter
+    drift_closed = (n_steps * epsilon) * delta_y_rec
+    drift_ratio = (drift_open / drift_closed).to_base_units().magnitude
+
+    p_drift_pct_str = fmt_percent(p_drift, precision=1)
+    drift_open_str = fmt_length(drift_open, unit=meter, precision=2)
+    drift_closed_mm_str = fmt(drift_closed.to(ureg.millimeter).magnitude, precision=3)
+    drift_ratio_mult_str = fmt_multiple(round(drift_ratio), commas=True)
+```
+
 ::: {#nbk-training-compounding-covariate-drift-closed-loop-recovery .callout-notebook title="Covariate drift vs. closed-loop recovery"}
 **Problem statement**: An autonomous mobile delivery robot operates at a control frequency of $50\text{ Hz}$ ($\Delta t = 20\text{ ms}$) across a $10.0\text{ s}$ transit corridor ($T = 500$ steps). A learned behavioral cloning policy achieves a 99.5 percent one-step accuracy on validation data ($\epsilon = 0.005$). If an uncorrected single-step error introduces an unmodeled lateral acceleration drift bias of $a_{\text{bias}} = 0.05\text{ m/s}^2$, calculate:
 
@@ -153,15 +179,15 @@ Now consider an **action chunking**\index{Action chunking} policy (such as Actio
 2. The expected cumulative trajectory lateral displacement drift under open-loop cloning versus closed-loop on-policy recovery (where recovery time constant $\tau_{\text{rec}} = 5\Delta t = 0.10\text{ s}$).
 
 *Step 1: Probability of at least one error*
-With a 0.5 percent error rate applied independently over 500 decision steps, the probability of at least one error compounds rapidly. Even with 99.5 percent one-step precision, an off-distribution departure is virtually guaranteed (over 90 percent probability) across a $10\text{ s}$ horizon.
+With a 0.5 percent error rate applied independently over 500 decision steps, the probability of at least one error compounds rapidly. Even with 99.5 percent one-step precision, an off-distribution departure is virtually guaranteed (`{python} CovariateDriftCompounding.p_drift_pct_str` percent probability) across a $10\text{ s}$ horizon.
 
 *Step 2: Cumulative trajectory drift under open-loop cloning*
-Under open-loop cloning, once the robot is perturbed, the lateral error grows uncorrected, accelerating away from the nominal path. Because the errors compound quadratically over the remaining execution steps, the final displacement is proportional to the cube of the total horizon time multiplied by the error rate. For this robot, an uncorrected bias across the trajectory results in over $2.0\text{ meters}$ of accumulated lateral drift—driving it completely off the corridor.
+Under open-loop cloning, once the robot is perturbed, the lateral error grows uncorrected, accelerating away from the nominal path. Because the errors compound quadratically over the remaining execution steps, the final displacement is proportional to the cube of the total horizon time multiplied by the error rate. For this robot, an uncorrected bias across the trajectory results in over `{python} CovariateDriftCompounding.drift_open_str` of accumulated lateral drift—driving it completely off the corridor.
 
 *Step 3: Cumulative trajectory drift under on-policy recovery*
-Under on-policy recovery training, the policy actively steers back to the corridor within a few timesteps. This bounds the local displacement for any single error to less than a millimeter. Because the policy recovers, the total drift scales only linearly with the number of errors. Over the full trajectory, the expected cumulative drift remains under $1\text{ millimeter}$.
+Under on-policy recovery training, the policy actively steers back to the corridor within a few timesteps. This bounds the local displacement for any single error to less than a millimeter. Because the policy recovers, the total drift scales only linearly with the number of errors. Over the full trajectory, the expected cumulative drift remains under $1\text{ millimeter}$ (`{python} CovariateDriftCompounding.drift_closed_mm_str` mm).
 
-**Systems insight**: The ratio between open-loop cloning drift ($2.08\text{ m}$) and closed-loop recovery drift ($0.625\text{ mm}$) exceeds $3300\times$. A 99.5 percent accurate supervised policy is completely unusable on physical mobile or robotic hardware without active closed-loop recovery training or runtime support monitors.
+**Systems insight**: The ratio between open-loop cloning drift (`{python} CovariateDriftCompounding.drift_open_str`) and closed-loop recovery drift (`{python} CovariateDriftCompounding.drift_closed_mm_str` mm) exceeds `{python} CovariateDriftCompounding.drift_ratio_mult_str`. A 99.5 percent accurate supervised policy is completely unusable on physical mobile or robotic hardware without active closed-loop recovery training or runtime support monitors.
 :::
 
 ::: {#psp-training-imitation-horizon .callout-perspective title="The imitation horizon limit"}
@@ -276,21 +302,60 @@ Deploying generative imitation architectures introduces significant computationa
 ![](images/svg/fig06_bespoke_diffusion_denoising_process.svg){width="100%"}
 :::
 
+```{python}
+#| label: calc-training-action-chunk-denoising-cadence
+#| echo: false
+from mlsysim.core.units import ureg, millisecond, second
+from mlsysim.fmt import fmt, fmt_latency, fmt_percent, fmt_int
+
+class ActionChunkDenoisingCadence:
+    t_vis = 14.0 * millisecond
+    t_step = 1.65 * millisecond
+
+    k_ddim = 16
+    t_denoise_ddim = k_ddim * t_step
+    tau_inf_ddim = t_vis + t_denoise_ddim
+
+    n_flow = 2
+    t_flow = n_flow * t_step
+    tau_inf_flow = t_vis + t_flow
+
+    t_deadline = 20.0 * millisecond
+    ddim_overrun_pct = ((tau_inf_ddim - t_deadline) / t_deadline).magnitude * 100.0
+    flow_slack = t_deadline - tau_inf_flow
+    flow_slack_pct = (flow_slack / t_deadline).magnitude * 100.0
+
+    t_period_async = (1.0 / 15.0) * second
+    async_slack = t_period_async.to(millisecond) - tau_inf_ddim
+
+    t_vis_str = fmt_latency(t_vis, unit=millisecond, precision=0)
+    t_step_str = fmt_latency(t_step, unit=millisecond, precision=2)
+    t_denoise_ddim_str = fmt_latency(t_denoise_ddim, unit=millisecond, precision=1)
+    tau_inf_ddim_str = fmt_latency(tau_inf_ddim, unit=millisecond, precision=1)
+    t_flow_str = fmt_latency(t_flow, unit=millisecond, precision=1)
+    tau_inf_flow_str = fmt_latency(tau_inf_flow, unit=millisecond, precision=1)
+
+    ddim_overrun_pct_str = fmt_int(round(ddim_overrun_pct))
+    flow_slack_str = fmt_latency(flow_slack, unit=millisecond, precision=1)
+    flow_slack_pct_str = fmt_percent(flow_slack / t_deadline, precision=1)
+    async_slack_str = fmt_latency(async_slack, unit=millisecond, precision=1)
+```
+
 To see how diffusion denoising interacts with real-time execution deadlines (@fig-diffusion-denoising-process), consider an embedded edge deployment on an NVIDIA Jetson AGX Orin controlling a 7-DoF manipulator arm with a two-finger gripper ($D_a = 8$). The policy generates continuous action trajectory chunks across a horizon of $H = 16$ timesteps ($320\text{ ms}$ at $50\text{ Hz}$) using a 1D Temporal Convolutional U-Net backbone containing $M_{\text{weights}} = 48\times 10^6$ parameters ($96\text{ MB}$ at FP16). The edge SoC provides unified memory bandwidth $BW_{\text{mem}} = 204.8\text{ GB/s}$ and dense compute $C_{\text{peak}} = 40\text{ TFLOPs}$. Analyzing this compute pipeline reveals three distinct timing phases:
 
 1. **Perception backbone latency**:
-   The dual-camera visual feature extractor processes two synchronized $224 \times 224$ RGB streams (wrist-mounted and over-the-shoulder), executing convolutional or vision transformer feature extraction to produce conditioning embedding $\mathbf{E}_t$. This visual stage requires $t_{\text{vis}} = 14.0\text{ ms}$ per planning cycle. Because visual features are extracted once per action chunk before denoising begins, $t_{\text{vis}}$ establishes a fixed latency baseline regardless of the diffusion sampling schedule.
+   The dual-camera visual feature extractor processes two synchronized $224 \times 224$ RGB streams (wrist-mounted and over-the-shoulder), executing convolutional or vision transformer feature extraction to produce conditioning embedding $\mathbf{E}_t$. This visual stage requires $t_{\text{vis}} =$ `{python} ActionChunkDenoisingCadence.t_vis_str` per planning cycle. Because visual features are extracted once per action chunk before denoising begins, $t_{\text{vis}}$ establishes a fixed latency baseline regardless of the diffusion sampling schedule.
 
 2. **Diffusion action chunk denoising compute**:
-   Each reverse diffusion iteration evaluates the noise-prediction network $\boldsymbol{\epsilon}_\theta$, consuming $14.2\text{ GFLOPs}$. Streaming the $96\text{ MB}$ model weights across the shared memory bus requires $t_{\text{stream}} = 96\times 10^6 / (204.8\times 10^9) = 0.469\text{ ms}$, yielding an arithmetic intensity of $I \approx 14.2\times 10^9 / (96\times 10^6) \approx 147.9\text{ FLOP/byte}$. Accounting for kernel launch overhead ($\approx 0.3\text{ ms}$) and activation cache spills, empirical NPU execution time is $t_{\text{step}} = 1.65\text{ ms}$ per denoising iteration. Denoising latency depends directly on the sampling algorithm:
+   Each reverse diffusion iteration evaluates the noise-prediction network $\boldsymbol{\epsilon}_\theta$, consuming $14.2\text{ GFLOPs}$. Streaming the $96\text{ MB}$ model weights across the shared memory bus requires $t_{\text{stream}} = 96\times 10^6 / (204.8\times 10^9) = 0.469\text{ ms}$, yielding an arithmetic intensity of $I \approx 14.2\times 10^9 / (96\times 10^6) \approx 147.9\text{ FLOP/byte}$. Accounting for kernel launch overhead ($\approx 0.3\text{ ms}$) and activation cache spills, empirical NPU execution time is $t_{\text{step}} =$ `{python} ActionChunkDenoisingCadence.t_step_str` per denoising iteration. Denoising latency depends directly on the sampling algorithm:
 
-   - *Standard DDIM ($K = 16$ iterations)*: Denoising requires $t_{\text{denoise}} = 16 \times 1.65\text{ ms} = 26.4\text{ ms}$. Adding perception yields a total inference latency of $\tau_{\text{inf}} = 14.0\text{ ms} + 26.4\text{ ms} = 40.4\text{ ms}$.
-   - *Continuous Flow Matching ($N = 2$ midpoint steps)*: Straight probability paths require only two solver steps, completing in $t_{\text{flow}} = 2 \times 1.65\text{ ms} = 3.3\text{ ms}$. Total inference latency drops to $\tau_{\text{inf}} = 14.0\text{ ms} + 3.3\text{ ms} = 17.3\text{ ms}$.
+   - *Standard DDIM ($K = 16$ iterations)*: Denoising requires $t_{\text{denoise}} = 16 \times 1.65\text{ ms} =$ `{python} ActionChunkDenoisingCadence.t_denoise_ddim_str`. Adding perception yields a total inference latency of $\tau_{\text{inf}} = 14.0\text{ ms} + 26.4\text{ ms} =$ `{python} ActionChunkDenoisingCadence.tau_inf_ddim_str`.
+   - *Continuous Flow Matching ($N = 2$ midpoint steps)*: Straight probability paths require only two solver steps, completing in $t_{\text{flow}} = 2 \times 1.65\text{ ms} =$ `{python} ActionChunkDenoisingCadence.t_flow_str`. Total inference latency drops to $\tau_{\text{inf}} = 14.0\text{ ms} + 3.3\text{ ms} =$ `{python} ActionChunkDenoisingCadence.tau_inf_flow_str`.
 3. **Real-time control deadlines and architectural timing trade-offs**:
    Evaluating these inference latencies against physical actuation deadlines highlights the critical architectural trade-off:
 
-   - *Synchronous lockstep ($50\text{ Hz}$, $20.0\text{ ms}$ deadline)*: If the policy is evaluated synchronously in the inner control loop, standard DDIM overruns the deadline by $102\%$ ($40.4\text{ ms} > 20.0\text{ ms}$), starving motor buffers and inducing emergency brake engagement. Continuous Flow Matching fits within the window ($17.3\text{ ms} \le 20.0\text{ ms}$), preserving $2.7\text{ ms}$ (13.5 percent) timing slack to absorb PCIe bus jitter and OS scheduling overhead.
-   - *Asynchronous dual-rate decoupling ($15\text{ Hz}$ Brain / $1000\text{ Hz}$ Nervous System)*: Under the proposal-permission architecture (@algo-diffusion-policy-trajectory), the host MPU schedules DDIM asynchronously at $15\text{ Hz}$ ($66.7\text{ ms}$ period), refreshing an action chunk ring buffer comfortably within its $40.4\text{ ms}$ compute window ($26.3\text{ ms}$ slack). Meanwhile, the bare-metal Real-Time MCU samples and cubic-spline interpolates the $320\text{ ms}$ buffer deterministically at $1000\text{ Hz}$, completely decoupling high-latency generative inference from high-rate motor current loops.
+   - *Synchronous lockstep ($50\text{ Hz}$, $20.0\text{ ms}$ deadline)*: If the policy is evaluated synchronously in the inner control loop, standard DDIM overruns the deadline by `{python} ActionChunkDenoisingCadence.ddim_overrun_pct_str` percent (`{python} ActionChunkDenoisingCadence.tau_inf_ddim_str` $> 20.0\text{ ms}$), starving motor buffers and inducing emergency brake engagement. Continuous Flow Matching fits within the window (`{python} ActionChunkDenoisingCadence.tau_inf_flow_str` $\le 20.0\text{ ms}$), preserving `{python} ActionChunkDenoisingCadence.flow_slack_str` (`{python} ActionChunkDenoisingCadence.flow_slack_pct_str` percent) timing slack to absorb PCIe bus jitter and OS scheduling overhead.
+   - *Asynchronous dual-rate decoupling ($15\text{ Hz}$ Brain / $1000\text{ Hz}$ Nervous System)*: Under the proposal-permission architecture (@algo-diffusion-policy-trajectory), the host MPU schedules DDIM asynchronously at $15\text{ Hz}$ ($66.7\text{ ms}$ period), refreshing an action chunk ring buffer comfortably within its `{python} ActionChunkDenoisingCadence.tau_inf_ddim_str` compute window (`{python} ActionChunkDenoisingCadence.async_slack_str` slack). Meanwhile, the bare-metal Real-Time MCU samples and cubic-spline interpolates the $320\text{ ms}$ buffer deterministically at $1000\text{ Hz}$, completely decoupling high-latency generative inference from high-rate motor current loops.
 
 ::: {#chk-training-diffusion-denoising-budget .callout-checkpoint title="Diffusion denoising and execution deadlines"}
 - [ ] **Diffusion step budgets**: Can you explain why iterative denoising latency in diffusion policies conflicts with real-time feedback deadlines on embedded accelerators?
@@ -323,13 +388,17 @@ Factoring in the reset phase reveals the true temporal bottleneck of physical ex
 ![](images/png/fig06_real_robot_arm_farm.png){width="85%"}
 :::
 
-Converting that same sample count into physical fatigue metrics demonstrates why time is often not the primary limiting constraint. In our analytical example, an 8-second contact sequence operating under a $100\text{ Hz}$ inner control loop executes 800 torque commands per trial, subjecting each joint to approximately $k = 4$ reciprocating load cycles. Across $N = 10^6$ trials, the drivetrain accumulates $4.0 \times 10^6$ bidirectional load reversals. If the joint relies on a standard strain-wave gear with a manufacturer-specified fatigue life of $L_{10} = 1.5 \times 10^6\text{ cycles}$ at rated output torque (the ISO 281 metric indicating when 10 percent of units are statistically expected to fail), the training campaign consumes the certified operational life of nearly three full gearheads per articulated joint before the policy learns to seat the door latch or complete the harness routing. Simultaneously, one million physical contact events crush compliant silicone gripper pads, abrade surface-wiping elastomeric squeegees, generate micro-notches in aluminum alignment jigs, and cycle electrical wiring looms toward fatigue fracture. At an average electrical power demand of $350\text{ W}$ per test bench, executing $1.2 \times 10^7\text{ s}$ of automated trials draws $1167\text{ kWh}$ of electrical energy, transforming policy training into an industrial-scale manufacturing operation.
+Converting that same sample count into physical fatigue metrics demonstrates why time is often not the primary limiting constraint. In our analytical example, an 8-second contact sequence operating under a $100\text{ Hz}$ inner control loop executes 800 torque commands per trial, subjecting each joint to approximately $k = 4$ reciprocating load cycles. Across $N = 10^6$ trials, the drivetrain accumulates $4.0 \times 10^6$ bidirectional load reversals. If the joint relies on a standard strain-wave gear with a manufacturer-specified fatigue life of $L_{10} = 1.5 \times 10^6\text{ cycles}$ at rated output torque (the ISO 281 metric indicating when 10 percent of units are statistically expected to fail),[^fn-hw-bearing-life] the training campaign consumes the certified operational life of nearly three full gearheads per articulated joint before the policy learns to seat the door latch or complete the harness routing. Simultaneously, one million physical contact events crush compliant silicone gripper pads, abrade surface-wiping elastomeric squeegees, generate micro-notches in aluminum alignment jigs, and cycle electrical wiring looms toward fatigue fracture. At an average electrical power demand of $350\text{ W}$ per test bench, executing $1.2 \times 10^7\text{ s}$ of automated trials draws $1167\text{ kWh}$ of electrical energy, transforming policy training into an industrial-scale manufacturing operation.
+
+[^fn-hw-bearing-life]: **$L_{10}$ Mechanical Fatigue Life**\index{Hardware wear!$L_{10}$ bearing life}: The ISO 281 rating defining the operating hours or revolution cycles that 90 percent of identical bearings or strain-wave gearheads complete before initial rolling contact fatigue flaking occurs. Aggressive RL exploration consumes this rating orders of magnitude faster than steady industrial cycles.
 
 These wear mechanics highlight a fundamental difference between software tensors and mechanical hardware. In a purely computational environment, evaluating an exploratory branch that produces numerical instability costs nothing beyond discarding a GPU memory buffer. In a physical machine, exploration is thermodynamic, irreversible, and potentially destructive across all machine archetypes:
 
 - In *Mobile Systems*, exploratory steering torque spikes skid tires across asphalt, rapidly abrading tread rubber and overheating motor inverters during stall recoveries.
-- In *Manipulators*, unconstrained exploratory torque commands drive end-effectors into rigid aluminum tables, bending load-cell flexures, stripping harmonic drive teeth\index{Harmonic drive!fatigue life under RL exploration}, and heating brushless DC motor stators past their $155^\circ\text{C}$ Class F insulation threshold (building on the actuator thermal limits established in @sec-body-thermal-duty-cycles).
+- In *Manipulators*, unconstrained exploratory torque commands drive end-effectors into rigid aluminum tables, bending load-cell flexures, stripping harmonic drive teeth\index{Harmonic drive!fatigue life under RL exploration}, and heating brushless DC motor stators past their $155^\circ\text{C}$ Class F insulation threshold[^fn-hw-thermal-insulation] (building on the actuator thermal limits established in @sec-body-thermal-duty-cycles).
 - In *Process Systems*, exploratory pressure pulsing degrades valve seat elastomeric seals, accelerates cavitation pitting (where collapsing vapor bubbles chip away metal) on pump impellers, and cycles high-voltage DC contactors toward premature arc erosion (where electrical sparking vaporizes the contacts).
+
+[^fn-hw-thermal-insulation]: **Class F Thermal Insulation Limit**\index{Actuator!Class F insulation}: Under NEMA/IEC standards, Class F motor winding insulation permits a maximum operating temperature of $155^\circ\text{C}$. Bang-bang torque commands from unregularized reward functions drive continuous high current that triggers rapid thermal insulation breakdown.
 
 Furthermore, physical degradation alters the plant during the training process itself\index{Plant mutation during training}. As contact surfaces burnish, gear backlash expands (increasing the mechanical slop or dead-zone between gear teeth), and structural fasteners loosen under repetitive vibration, the physical transition distribution $p(s_{t+1} \mid s_t, a_t)$ at trial $n = 900{,}000$ differs measurably from the pristine dynamics at trial $n = 1$. The machine being controlled mutates under the physical cost of collecting its own training data.
 
@@ -342,6 +411,18 @@ Compounding the physical burden of data collection is the structural fragility o
 Trial-based learning on physical hardware is not categorically impossible. For low-dimensional systems with trivial reset dynamics, negligible wear rates, and wide safety margins, direct on-hardware reinforcement learning remains technically viable. Simulation becomes mandatory at the threshold where the required sample count exceeds the allowable time, budget, structural life, or risk tolerance of the physical apparatus. To collect the $10^6$ to $10^9$ transitions needed for complex motor policies without destroying physical hardware, practitioners shift the rollout loop into a digital physics engine executed in parallel across computing clusters.
 
 This transition substitutes computational hardware for physical mechanisms, but it alters the contract between training and reality. A policy trained inside a simulator avoids bending linkages or burning out stators during exploration, but it inherits both the omissions of the reward function and the simulator's specific mathematical model of mechanics. Every unmodeled friction discontinuity, idealized rigid-body contact impulse, uncharacterized actuator latency, and simplified cable compliance in the physics engine becomes an assumption the policy learns to rely upon. When the converged network is transferred to the physical robot, those simulation inaccuracies re-emerge as unmodeled disturbances and tracking failures at the hardware interface.
+
+::: {#chk-training-physical-trial-fatigue .callout-checkpoint title="Physical trial wear and simulation feasibility limits"}
+
+Before examining simulator abstraction contracts, verify your intuition regarding hardware fatigue life, sample budgets, and policy exploitation:
+
+- [ ] **Calendar scaling**: Can you calculate why gathering one million 8-second trials on a single physical robot requires over 138 days of 24/7 cell time when automated resets take 4 seconds, and why manual interventions expand this past 440 days?
+- [ ] **Mechanical fatigue consumption**: Can you explain why one million trials at 4 load cycles per attempt ($4.0 \times 10^6$ cycles) consumes nearly three times the manufacturer-certified $L_{10}$ bearing life ($1.5 \times 10^6$ cycles) of strain-wave joint gearheads?
+- [ ] **Objective function exploitation**: Can you describe how an unpenalized tracking reward encourages aggressive bang-bang actuator switching that overheats BLDC stator windings past their $155^\circ\text{C}$ Class F insulation limit?
+- [ ] **Feasibility crossover estimate**: If automated reset fixtures fail on 5 percent of exploratory trials requiring a 30-second manual intervention, calculate the net collection rate. At what sample size threshold does physical exploration become economically impossible compared to distributed simulation?
+
+*When trial sample requirements exceed the thermal, structural, or maintenance limits of physical mechanisms, training must transfer into physics simulation.*
+:::
 
 ## The Simulator as a System Component {#sec-training-simulator-component}
 

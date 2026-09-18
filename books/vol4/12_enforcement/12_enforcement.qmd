@@ -182,6 +182,18 @@ Placing the enforcer correctly is useless if its inputs share failure modes with
 A safety monitor must never evaluate a state estimate produced by the component it is designed to constrain, nor share an un-preemptible communication bus, memory matrix, or clock tree with unverified processes. Where independent sensing is physically impossible, the safety claim is conditional on model uncertainty rather than guaranteed by hardware.
 :::
 
+::: {#chk-enforcement-placement-boundaries .callout-checkpoint title="Zero-jitter enforcement boundaries and hardware trip paths"}
+
+Before analyzing dynamic stopping equations, verify your architectural understanding of where safety enforcement must execute relative to the operating system and motor hardware:
+
+- [ ] **Co-location vulnerability**: Can you explain why running safety filtering inside the same Linux user-space process as a vision-language policy exposes the machine to unbudgeted kernel scheduling jitter ($> 20\text{ ms}$)?
+- [ ] **Hardware break circuits**: Can you identify the physical silicon mechanism (e.g., advanced timer break input pins like `TIMx_BKIN`) that forces motor PWM pins into high-impedance cutoff without executing software instructions?
+- [ ] **Asymmetric privilege boundaries**: Can you contrast the fault domain of an unprivileged Linux Application Processor (MPU) with a bare-metal microcontroller (MCU) running deterministic 1 kHz safety loops?
+- [ ] **Shared-bus starvation**: Can you describe how high-throughput direct memory access (DMA) bursts from camera image sensors can stall real-time SPI torque command packets across shared system crossbars?
+
+*Never place a hard real-time safety enforcer downstream of a preemptible general-purpose operating system scheduler; safety reflexes require bare-metal execution and direct hardware trip paths.*
+:::
+
 ## Stopping Envelopes {#sec-enforcement-stopping-envelopes}
 
 To guarantee that a machine never enters a forbidden state, the nervous system must know at every moment that an unassisted stop remains physically achievable. This guarantee defines the **stopping envelope**\index{Stopping envelope}, the set of all state trajectories from which maximum available braking can bring the system to rest without violating a spatial or kinematic boundary. Maintaining this guarantee requires reserving both distance and time for an emergency deceleration maneuver that the machine may never execute during nominal operation. Continually ensuring that a safe stop is available costs achievable speed, and managing this fundamental trade-off is the essence of safety design. Every increase in operating velocity expands the distance required to arrest momentum, consuming the spatial buffer between the machine and its physical constraints.
@@ -326,6 +338,18 @@ Because a conditional guarantee whose conditions are unmonitored is an ungrounde
 
 When any runtime detector trips, the mathematical premise of the safe set collapses. If an actuator overheats and drops its torque limit, or if an unexpected payload disturbance exceeds the observer threshold, the enforcer cannot continue claiming that tangential projection along $\partial \mathcal{C}$ guarantees safety. The correct system response is not to recompute the barrier with optimistic parameters, but to execute an immediate transition to a dedicated fallback mode via the **Simplex switch**\index{Simplex switch}. Triggering this architectural safety pattern instantly revokes the neural policy's authority, disengages normal tracking, and commands a verified emergency stop sequence or mechanical brake engagement. The safe set provides a valid permission path only while its operating contract is intact, and the nervous system enforces safety by knowing precisely when that contract has failed.
 
+::: {#chk-enforcement-forward-invariance-guarantees .callout-checkpoint title="Forward invariance, Lie derivatives, and viability kernels"}
+
+Before studying minimal intervention filters, verify your mathematical understanding of how forward invariance guarantees containment under worst-case plant dynamics:
+
+- [ ] **Nagumo viability condition**: Can you explain why the system velocity vector must belong to the contingent cone of the safe set at every boundary point ($\dot{h}(\mathbf{x}, \mathbf{u}) \ge -\alpha(h(\mathbf{x}))$) to guarantee set invariance?
+- [ ] **Relative degree mismatch**: Can you describe why applying a first-order Control Barrier Function directly to an acceleration-controlled plant with relative degree two creates an uncontrolled boundary overshoot?
+- [ ] **Lie derivative projection**: Can you demonstrate how Lie derivatives ($L_f h(\mathbf{x}) + L_g h(\mathbf{x}) \mathbf{u}$) linearize nonlinear plant dynamics into an instantaneous affine half-space constraint on actuator torque?
+- [ ] **Viability kernel shrinkage**: Can you explain why the topological safe set $\mathcal{C}$ must be strictly smaller than the kinematic free-space manifold to account for finite actuator deceleration capacity?
+
+*A state is not safe merely because it is currently collision-free; it is safe only if there exists an executable sequence of future control actions that terminates within the admissible boundary under physical torque limits.*
+:::
+
 ## Minimal Intervention {#sec-enforcement-minimal-intervention}
 
 The principle of **minimal intervention**\index{Minimal intervention} grants the learned policy complete operational authority across the interior of the safe set, modifying a command if and only if the proposed action violates a barrier constraint. When an autonomous machine executes a task, replacing the neural network's commands with a hand-crafted conservative controller during nominal operation discards the behavioral competence that justified deploying a learned model. Conversely, overriding a proposed action by forcing an aggressive, full-magnitude braking command at the first encounter with a boundary creates large acceleration spikes, destabilizes dynamic balance, and interrupts task progress. Minimal intervention treats safety enforcement as a **safety shield**\index{Safety shield} (projection operator). The nervous system accepts the policy's proposal as the default intent and computes the smallest physical correction that keeps the system within the invariant set.
@@ -337,6 +361,56 @@ $$\min_{\mathbf{u}} \frac{1}{2}\|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2 \quad 
 where $\mathbf{a}(\mathbf{x})^\top \mathbf{u} \le b(\mathbf{x})$ represents the linear braking constraint enforcing the rate-of-approach condition ($\dot{d} \ge -\gamma \cdot d$),[^fn-math-cbf-lie] and $[\mathbf{u}_{\min}, \mathbf{u}_{\max}]$ represents the verified actuator torque envelope.
 
 [^fn-hw-cortex-cycles]: **Worst-case execution time and active-set QP complexity**\index{Quadratic programming!Worst-case execution time}\index{Worst-case execution time!Active-set QP}: On bare-metal safety MCUs, QP safety filters execute within static memory arrays using fixed iteration limits. While typical active-set solve times range between $60\text{--}120\ \mu\text{s}$, worst-case execution time spikes to $600\ \mu\text{s}$ under ill-conditioned or nearly degenerate constraint geometries. Hard real-time control loops must budget for this maximum execution envelope to prevent timing overruns from causing uncommanded actuator hold states.
+
+```{python}
+#| label: calc-enforce-cbf-qp-projection
+#| echo: false
+import math
+from mlsysim.physics.robotics import calc_cbf_qp_orthogonal_projection
+from mlsysim.fmt import fmt
+
+class CBFQPProjection:
+    u_nom = [3.5, 3.0]
+    a_vec = [2.0, 1.0]
+    b_scalar = 5.0
+    u_clip = [2.0, 3.0]
+
+    res = calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar)
+    u_proj = res["u_projected"]
+    lambda_star = res["lambda_star"]
+    correction_norm = res["correction_norm"]
+
+    a_dot_u_nom = a_vec[0] * u_nom[0] + a_vec[1] * u_nom[1]
+    breach = a_dot_u_nom - b_scalar
+    a_dot_u_clip = a_vec[0] * u_clip[0] + a_vec[1] * u_clip[1]
+    clip_penetration = a_dot_u_clip - b_scalar
+
+    theta_nom_deg = math.degrees(math.atan2(u_nom[1], u_nom[0]))
+    theta_clip_deg = math.degrees(math.atan2(u_clip[1], u_clip[0]))
+    skew_deg = theta_clip_deg - theta_nom_deg
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    u_nom_1_str = fmt(u_nom[0], precision=1)
+    u_nom_2_str = fmt(u_nom[1], precision=0)
+    a_1_str = fmt(a_vec[0], precision=0)
+    a_2_str = fmt(a_vec[1], precision=0)
+    b_str = fmt(b_scalar, precision=0)
+
+    a_dot_u_nom_str = fmt(a_dot_u_nom, precision=0)
+    breach_str = fmt(breach, precision=0)
+    lambda_star_str = fmt(lambda_star, precision=0)
+    u_proj_1_str = fmt(u_proj[0], precision=1)
+    u_proj_2_str = fmt(u_proj[1], precision=0)
+    correction_norm_str = fmt(correction_norm, precision=3)
+
+    u_clip_1_str = fmt(u_clip[0], precision=0)
+    u_clip_2_str = fmt(u_clip[1], precision=0)
+    a_dot_u_clip_str = fmt(a_dot_u_clip, precision=0)
+    clip_penetration_str = fmt(clip_penetration, precision=0)
+    theta_nom_deg_str = fmt(theta_nom_deg, precision=1)
+    theta_clip_deg_str = fmt(theta_clip_deg, precision=1)
+    skew_deg_str = fmt(skew_deg, precision=1)
+```
 
 ::: {#nbk-enforcement-cbf-qp-formulation .callout-notebook title="Minimal intervention through optimization"}
 **Objective**: Intervene strictly on the boundary of the safe set while minimizing modification of nominal policy commands.
@@ -352,13 +426,13 @@ When enforcing a single active linear barrier constraint $\mathbf{a}^\top \mathb
 $$\mathbf{u}^* = \mathbf{u}_{\text{nom}} - \frac{\mathbf{a}^\top \mathbf{u}_{\text{nom}} - b}{\|\mathbf{a}\|^2} \mathbf{a}$$ {#eq-enforce-cbf-projection}
 where the optimal Lagrange multiplier $\lambda^* = (\mathbf{a}^\top \mathbf{u}_{\text{nom}} - b) / \|\mathbf{a}\|^2$ scales the minimal intervention vector $\Delta \mathbf{u} = -\lambda^* \mathbf{a}$.
 
-Consider an analytical example of a 2-axis robotic manipulator governed by an unconstrained neural policy proposing joint torques $\mathbf{u}_{\text{nom}} = [3.5, 3.0]^\top\text{ N}\cdot\text{m}$. A low-level safety filter must enforce a single Control Barrier Function constraint $\mathbf{a}^\top \mathbf{u} \le b$ where $\mathbf{a} = [2.0, 1.0]^\top$ and $b = 5.0\text{ N}\cdot\text{m}$, with per-joint actuator saturation limits of $[-5.0, 5.0]\text{ N}\cdot\text{m}$. Evaluating the constraint on the candidate command yields $\mathbf{a}^\top \mathbf{u}_{\text{nom}} = 2.0(3.5) + 1.0(3.0) = 10.0\text{ N}\cdot\text{m}$. Because $10.0 > 5.0$, the policy proposal breaches the barrier boundary by $\Delta b = 5.0\text{ N}\cdot\text{m}$, demanding intervention.
+Consider an analytical example of a 2-axis robotic manipulator governed by an unconstrained neural policy proposing joint torques $\mathbf{u}_{\text{nom}} = [$ `{python} CBFQPProjection.u_nom_1_str`, `{python} CBFQPProjection.u_nom_2_str` $]^\top\text{ N}\cdot\text{m}$. A low-level safety filter must enforce a single Control Barrier Function constraint $\mathbf{a}^\top \mathbf{u} \le b$ where $\mathbf{a} = [$ `{python} CBFQPProjection.a_1_str`, `{python} CBFQPProjection.a_2_str` $]^\top$ and $b =$ `{python} CBFQPProjection.b_str` $\text{N}\cdot\text{m}$, with per-joint actuator saturation limits of $[-5.0, 5.0]\text{ N}\cdot\text{m}$. Evaluating the constraint on the candidate command yields $\mathbf{a}^\top \mathbf{u}_{\text{nom}} = 2.0(3.5) + 1.0(3.0) =$ `{python} CBFQPProjection.a_dot_u_nom_str` $\text{N}\cdot\text{m}$. Because $10 > 5$, the policy proposal breaches the barrier boundary by $\Delta b =$ `{python} CBFQPProjection.breach_str` $\text{N}\cdot\text{m}$, demanding intervention.
 
-Applying the closed-form projection from @eq-enforce-cbf-projection, the optimal Lagrange multiplier is $\lambda^* = (10.0 - 5.0) / (2.0^2 + 1.0^2) = 5.0 / 5.0 = 1.0$. The minimal-intervention command is:
+Applying the closed-form projection from @eq-enforce-cbf-projection, the optimal Lagrange multiplier is $\lambda^* = (10 - 5) / (2^2 + 1^2) = 5 / 5 =$ `{python} CBFQPProjection.lambda_star_str`. The minimal-intervention command is:
 $$\mathbf{u}^* = \begin{bmatrix} 3.5 \\ 3.0 \end{bmatrix} - 1.0 \begin{bmatrix} 2.0 \\ 1.0 \end{bmatrix} = \begin{bmatrix} 1.5 \\ 2.0 \end{bmatrix}\text{ N}\cdot\text{m}$$
-Evaluating the barrier boundary confirms $\mathbf{a}^\top \mathbf{u}^* = 2.0(1.5) + 1.0(2.0) = 5.0\text{ N}\cdot\text{m}$, exactly satisfying forward invariance while both joints remain well within their $[-5.0, 5.0]\text{ N}\cdot\text{m}$ limits. The intervention norm is $\|\Delta \mathbf{u}\| = \sqrt{(-2.0)^2 + (-1.0)^2} = \sqrt{5} \approx 2.236\text{ N}\cdot\text{m}$.
+yielding $\mathbf{u}^* = [$ `{python} CBFQPProjection.u_proj_1_str`, `{python} CBFQPProjection.u_proj_2_str` $]^\top\text{ N}\cdot\text{m}$. Evaluating the barrier boundary confirms $\mathbf{a}^\top \mathbf{u}^* = 2.0(1.5) + 1.0(2.0) = 5\text{ N}\cdot\text{m}$, exactly satisfying forward invariance while both joints remain well within their $[-5.0, 5.0]\text{ N}\cdot\text{m}$ limits. The intervention norm is $\|\Delta \mathbf{u}\| = \sqrt{(-2.0)^2 + (-1.0)^2} = \sqrt{5} \approx$ `{python} CBFQPProjection.correction_norm_str` $\text{N}\cdot\text{m}$.
 
-The geometric necessity of this projection becomes obvious when contrasted with heuristic per-axis clamping. If an embedded controller naively clamps Joint 1 at $2.0\text{ N}\cdot\text{m}$ while passing Joint 2 at $3.0\text{ N}\cdot\text{m}$ ($\mathbf{u}_{\text{clip}} = [2.0, 3.0]^\top\text{ N}\cdot\text{m}$), evaluating the barrier yields $\mathbf{a}^\top \mathbf{u}_{\text{clip}} = 2.0(2.0) + 1.0(3.0) = 7.0\text{ N}\cdot\text{m} > 5.0\text{ N}\cdot\text{m}$. The heuristic clamp fails to enforce safety, allowing the physical state to penetrate the unsafe set by $2.0\text{ N}\cdot\text{m}$. Furthermore, while the nominal command had an actuation angle of $\theta_{\text{nom}} = \arctan(3.0/3.5) \approx 40.6^\circ$, the heuristic clamp shifts the torque vector to $\theta_{\text{clip}} = \arctan(3.0/2.0) \approx 56.3^\circ$ (a $15.7^\circ$ uncoordinated skew). In an articulated body, clamping joint torques independently rotates the net Cartesian wrench vector away from its intended line of action, causing the arm to swerve violently off its intended path, exciting structural vibrations, and increasing gear wear. Constrained quadratic projection via @eq-enforce-cbf-qp prevents this distortion by scaling the modification across all actuation axes simultaneously.
+The geometric necessity of this projection becomes obvious when contrasted with heuristic per-axis clamping. If an embedded controller naively clamps Joint 1 at $2\text{ N}\cdot\text{m}$ while passing Joint 2 at $3\text{ N}\cdot\text{m}$ ($\mathbf{u}_{\text{clip}} = [$ `{python} CBFQPProjection.u_clip_1_str`, `{python} CBFQPProjection.u_clip_2_str` $]^\top\text{ N}\cdot\text{m}$), evaluating the barrier yields $\mathbf{a}^\top \mathbf{u}_{\text{clip}} = 2.0(2.0) + 1.0(3.0) =$ `{python} CBFQPProjection.a_dot_u_clip_str` $\text{N}\cdot\text{m} > 5\text{ N}\cdot\text{m}$. The heuristic clamp fails to enforce safety, allowing the physical state to penetrate the unsafe set by `{python} CBFQPProjection.clip_penetration_str` $\text{N}\cdot\text{m}$. Furthermore, while the nominal command had an actuation angle of $\theta_{\text{nom}} = \arctan(3.0/3.5) \approx$ `{python} CBFQPProjection.theta_nom_deg_str`$^\circ$, the heuristic clamp shifts the torque vector to $\theta_{\text{clip}} = \arctan(3.0/2.0) \approx$ `{python} CBFQPProjection.theta_clip_deg_str`$^\circ$ (a `{python} CBFQPProjection.skew_deg_str`$^\circ$ uncoordinated skew). In an articulated body, clamping joint torques independently rotates the net Cartesian wrench vector away from its intended line of action, causing the arm to swerve violently off its intended path, exciting structural vibrations, and increasing gear wear. Constrained quadratic projection via @eq-enforce-cbf-qp prevents this distortion by scaling the modification across all actuation axes simultaneously.
 
 @Fig-12-cbf-safety-filter works the minimal-intervention architecture simultaneously across state space $\mathcal{X}$ and control input space $\mathcal{U}$. In state space (panel a), unconstrained policy proposals vectoring across the barrier into the unsafe region are deflected tangentially along the forward-invariant safe set boundary $\partial \mathcal{C}$ inset by the tracking error margin $\delta_{\text{margin}}$. In control space (panel b), the enforcer orthogonally projects the unconstrained command $\mathbf{u}_{\text{nom}}$ onto the linear half-space boundary $\mathbf{a}^\top \mathbf{u} \le b$, preserving multi-axis dynamic coupling where heuristic scalar clipping fails to guarantee safety.
 
@@ -471,6 +545,18 @@ To bridge abstract control tiers with statutory machinery compliance, @tbl-12-ie
 
 Every rung of the ladder assumes that the hardware executing the fallback remains independent of the fault that triggered the escalation. If an enforcer shares its power rail, crystal oscillator, or memory bus with the host processor producing the unsafe commands, a single electrical disturbance can compromise both the nominal planner and the defensive fallback. A deterministic state machine in firmware cannot provide safety if the physical substrate executing it lacks genuine isolation.
 
+::: {#chk-enforcement-fallback-ladder-preemption .callout-checkpoint title="Deterministic fallback escalation and fail-operational transitions"}
+
+Before implementing emergency responses, audit the deterministic escalation path between software optimization and physical power cutoffs:
+
+- [ ] **Fail-safe versus fail-operational**: Can you explain why cutting actuator power (Category 0 Safe Torque Off) is safe for a stationary manipulator but immediately catastrophic for an airborne drone or balancing bipedal humanoid?
+- [ ] **Four-tier escalation hierarchy**: Can you trace the transition latencies, reversibility penalties, and hardware degradation costs across Rung 1 (QP filter), Rung 2 (position hold), Rung 3 (controlled dynamic stop), and Rung 4 (galvanic STO)?
+- [ ] **Minimal Risk Maneuver execution**: Can you describe the autonomous sequencing required to transition an unstable dynamic machine to a verified Minimal Risk Condition (MRC) before releasing spring brakes?
+- [ ] **Dynamic brake choppers**: Can you explain how regenerative kinetic energy is dissipated through dynamic braking resistors during a Category 1 stop to prevent destructive DC bus overvoltage spikes?
+
+*Structure fallbacks as an irreversible descending ladder where lower rungs sacrifice mission context and hardware lifetime to guarantee physical containment.*
+:::
+
 ## How Enforcement Goes Wrong {#sec-enforcement-failure-modes}
 
 Placing a secondary processor alongside the primary compute module creates an illusion of architectural independence that physical packaging routinely undermines. When a machine hosts a trajectory planner on a high-throughput system-on-chip\index{Hardware Architecture!system-on-chip (SoC)} and an enforcement monitor on a real-time microcontroller\index{Hardware Architecture!microcontroller}, both chips almost always share a common circuit board. That shared board introduces common-mode coupling\index{Hardware Architecture!common-mode coupling} across power distribution networks\index{Power Systems!power distribution network (PDN)}, clock sources, and shared copper ground planes. If a single $5.0\text{ V}$ to $3.3\text{ V}$ step-down regulator powers both processors, an electrical short, transient latch-up, or thermal shutdown on the host side drops the supply rail below the microcontroller operating threshold of $2.7\text{ V}$, resetting both chips simultaneously. Similarly, routing clock lines from a single crystal oscillator or distribution tree creates a shared failure point where a crystal fracture or line ringing halts both execution pipelines on the exact same cycle. High return currents from pulse-width-modulated motor drivers\index{Actuation!PWM drivers} elevate local potential across the digital ground plane\index{Hardware Architecture!ground plane}, inducing ground bounce\index{Hardware Architecture!ground bounce} that shifts reference potentials and corrupts logic thresholds on shared board-level communication buses such as I2C and SPI. These hardware failure modes are completely invisible to software running on the chips. A microcontroller brownout detector can pull a reset line when rail voltage collapses, but if the reference supply to the detector itself drops, the enforcer fails silently without executing its defensive routine.
@@ -559,6 +645,18 @@ Enforcing Control Barrier Functions (CBFs) on a bipedal humanoid exposes the sev
 * **High Relative Degree of Balance Constraints:** For a mobile robot or manipulator arm, kinematic velocity bounds and obstacle distances have relative degree 1 or 2 with respect to actuator inputs (joint torques $\boldsymbol{\tau}$ or motor voltages), allowing standard quadratic programming (CBF-QP) filters to enforce forward invariance. On a floating-base humanoid, however, center-of-mass balance and Zero Moment Point (ZMP) constraints possess higher relative degree ($\ge 2$) through underactuated centroidal dynamics. Modulating the ZMP requires propagating control actions through contact force distributions and foot angular accelerations. Applying a naive relative-degree-1 CBF creates severe constraint chattering or fails to halt tipping until the state has already breached the viable recovery basin.
 * **Nonlinear Friction Cone Polytope Projection:** Bipedal balance requires that contact forces remain strictly within friction cones at the feet ($\sqrt{f_x^2 + f_y^2} \le \mu f_z$). In dynamic maneuvers, an unconstrained learned policy may propose aggressive torso twists or arm reaches that demand shear ground forces violating this cone. The real-time safety filter must project the policy's candidate joint torque proposals onto the safe polyhedral contact polytope at 1 kHz. If the QP projection solver experiences numerical ill-conditioning as a foot rolls onto its outer edge, the enforcer must instantly fall back to an analytical reflex (such as expanding ankle compliance) within $500\ \mu\text{s}$ before stator current can induce foot slip.
 * **Minimal Intervention without Posture Collapse:** The core promise of minimal-intervention enforcement is that the filter alters the learned policy only when the safe boundary is threatened ($\min \|\mathbf{u} - \mathbf{u}_{\text{policy}}\|^2$). On a humanoid, however, modifying torques on a single joint alters accelerations across all links via the dense joint-space inertia matrix $\mathbf{M}(\mathbf{q})$. A local torque modification to avoid a hand collision with a table can inadvertently perturb the ground reaction wrench, initiating a tip-over. The safety filter must solve a coupled whole-body QP that accounts for the complete dynamically consistent null-space projection.
+:::
+
+::: {#chk-enforcement-telemetry-auditability .callout-checkpoint title="Enforcement records, flight recorders, and empirical bounds"}
+
+Before examining common fallacies and pitfalls, review the data schema and provenance requirements necessary to make safety interventions auditable across deployment lifecycles:
+
+- [ ] **Provenance tag differentiation**: Can you distinguish between safety parameter bounds derived from analytical rigid-body physics, multibody Monte Carlo simulations, and empirical hardware fault injection?
+- [ ] **Black-box ring buffering**: Can you explain why flight-recorder telemetry buffers must reside in lock-free pre-allocated SRAM rather than dynamic heap memory to guarantee capture during fatal kernel panics?
+- [ ] **Shadow mode divergence tracking**: Can you describe how running an experimental neural policy in shadow mode alongside an active deterministic controller quantifies safety barrier breach rates prior to deployment?
+- [ ] **Intervention chatter detection**: Can you formulate a metric to detect high-frequency boundary chattering between policy proposals and safety filter projections before stator winding thermal limits are breached?
+
+*Every safety intervention must produce an immutable cryptographic trace linking the triggering state estimate, barrier margin, and actuator veto to physical sensor evidence.*
 :::
 
 ## Fallacies and Pitfalls {#sec-enforcement-fallacies-pitfalls}

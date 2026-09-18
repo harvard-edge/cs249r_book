@@ -272,6 +272,54 @@ The computational advantage of this bidirectional hierarchy lies in how it resol
 
 [^fn-math-tsdf-fusion]: **Continuous TSDF surface integration**\index{Geometry!TSDF integration}: Truncated Signed Distance Fields parameterize metric distance to the nearest physical zero-crossing surface within a narrow truncation band $\mu$. Integrating depth frames via running weighted averages attenuates high-frequency sensor noise while yielding continuous spatial gradients ($\nabla D(\mathbf{x})$). Trajectory optimizers query these gradients in constant time to compute repulsive potential forces that steer actuators away from obstacle surfaces.
 
+```{python}
+#| label: calc-memory-tsdf-voxel-grid
+#| echo: false
+from mlsysim.core.units import ureg, meter, second, GB, MB
+from mlsysim.physics.robotics import calc_tsdf_voxel_grid_budget
+from mlsysim.fmt import fmt, fmt_memory, fmt_bandwidth, fmt_int, fmt_multiple, fmt_percent
+
+class TSDFVoxelGridBudget:
+    workspace = 300.0 * (meter**3)
+    res_1cm = calc_tsdf_voxel_grid_budget(
+        workspace_volume=workspace,
+        voxel_size=0.01 * meter,
+        bytes_per_voxel=4,
+        sparsity_ratio=0.03,
+        ray_rate=18432000.0 / second,
+        dense_voxels_per_ray=300,
+        sparse_voxels_per_ray=6,
+        bytes_per_ray_voxel=8,
+        cache_hit_rate=0.95,
+    )
+    res_5mm = calc_tsdf_voxel_grid_budget(
+        workspace_volume=workspace,
+        voxel_size=0.005 * meter,
+        bytes_per_voxel=4,
+        sparsity_ratio=0.03,
+    )
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    dense_voxels_1cm_str = fmt_int(res_1cm["dense_voxel_count"], commas=True)
+    dense_mem_1cm_str = fmt_memory(res_1cm["dense_memory"], unit=GB, precision=2)
+
+    dense_voxels_5mm_str = fmt_int(res_5mm["dense_voxel_count"], commas=True)
+    dense_mem_5mm_str = fmt_memory(res_5mm["dense_memory"], unit=GB, precision=2)
+
+    sparse_blocks_1cm_str = fmt_int(res_1cm["sparse_block_count"], commas=True)
+    sparse_mem_1cm_str = fmt_memory(res_1cm["sparse_memory"], unit=MB, precision=1)
+
+    sparse_mem_5mm_str = fmt_memory(res_5mm["sparse_memory"], unit=MB, precision=1)
+
+    dense_bw_str = fmt_bandwidth(res_1cm["dense_dram_bandwidth"], unit=GB / second, precision=1)
+    sparse_bw_str = fmt_bandwidth(res_1cm["sparse_dram_bandwidth"], unit=MB / second, precision=1)
+
+    mem_reduction_mult_str = fmt_multiple(round(((res_1cm["dense_memory"] / res_1cm["sparse_memory"])).to_base_units().magnitude))
+    bw_reduction_mult_str = fmt_multiple(
+        round(((res_1cm["dense_dram_bandwidth"] / res_1cm["sparse_dram_bandwidth"])).to_base_units().magnitude), commas=True
+    )
+```
+
 ::: {#nbk-memory-memory-footprint-dram-bandwidth-3d-tsdf .callout-notebook title="DRAM bandwidth of 3D TSDF voxel grids"}
 **Practical Engineering Question**\index{Practical Engineering Question}: What is the memory footprint and DRAM bandwidth demand of 3D TSDF voxel grids across sparse vs naive dense representations, and why does naive dense allocation starve concurrent NPU policy inference on edge SoCs?
 
@@ -280,23 +328,26 @@ Consider an active robotic manipulation workcell measuring $10\text{ m} \times 1
 
 - At isotropic resolution $\Delta v = 1.0\text{ cm} = 0.01\text{ m}$:
   $$\text{Voxel Count} = \left(\frac{10}{0.01}\right) \times \left(\frac{10}{0.01}\right) \times \left(\frac{3}{0.01}\right) = 1000 \times 1000 \times 300 = 3 \times 10^8\text{ voxels}$$
+  yielding `{python} TSDFVoxelGridBudget.dense_voxels_1cm_str` voxels.
 
 - Memory footprint at $4\text{ bytes}$ per voxel ($16\text{-bit}$ TSDF distance $+ 16\text{-bit}$ fusion weight):
   $$M_{\text{dense, 1cm}} = 3 \times 10^8 \times 4\text{ B} = 1.20 \times 10^9\text{ B} = 1.20\text{ GB}$$
+  yielding `{python} TSDFVoxelGridBudget.dense_mem_1cm_str`.
 
 - If resolution is refined to $\Delta v = 5.0\text{ mm} = 0.005\text{ m}$ for precision tool contact:
   $$\text{Voxel Count} = 2000 \times 2000 \times 600 = 2.4 \times 10^9\text{ voxels} \implies M_{\text{dense, 5mm}} = 9.60\text{ GB}$$
-  This exceeds the entire physical DRAM capacity ($8\text{ GB}$) of the edge SoC!
+  yielding `{python} TSDFVoxelGridBudget.dense_voxels_5mm_str` voxels and a memory footprint of `{python} TSDFVoxelGridBudget.dense_mem_5mm_str`. This exceeds the entire physical DRAM capacity ($8\text{ GB}$) of the edge SoC!
 
 *2. Sparse Voxel Hashing (Occupancy Sparsity $\approx 3$ percent):*
 Physical obstacles and workcell surfaces occupy only a thin 2D manifold within 3D volume. Grouping voxels into $8^3 = 512$ voxel leaf blocks and allocating only within the TSDF truncation band ($\mu = \pm 3\text{ cm}$):
 
 - Active occupied volume: $\approx 3.0$ percent of $300\text{ m}^3 = 9.0\text{ m}^3$.
-- Active voxel count at $1\text{ cm}$: $9.0 \times 10^6\text{ voxels} \implies \approx 17,578\text{ blocks}$.
+- Active voxel count at $1\text{ cm}$: $9.0 \times 10^6\text{ voxels} \implies \approx 17,578\text{ blocks}$ (`{python} TSDFVoxelGridBudget.sparse_blocks_1cm_str` blocks).
 - Memory footprint:
   $$M_{\text{sparse, 1cm}} = 17,578\text{ blocks} \times (512\text{ voxels} \times 4\text{ B} + 32\text{ B header}) \approx 36.5\text{ MB}$$
+  yielding `{python} TSDFVoxelGridBudget.sparse_mem_1cm_str`.
 
-- At $5.0\text{ mm}$ resolution: $M_{\text{sparse, 5mm}} \approx 292\text{ MB}$ (easily fits in SoC LPDDR5).
+- At $5.0\text{ mm}$ resolution: $M_{\text{sparse, 5mm}} \approx 292\text{ MB}$ (yielding `{python} TSDFVoxelGridBudget.sparse_mem_5mm_str`, which easily fits in SoC LPDDR5).
 
 *3. DRAM Bus Bandwidth under $60\text{ Hz}$ RGB-D Raycasting:*
 A depth sensor running at $640 \times 480$ resolution at $60\text{ fps}$ produces:
@@ -304,12 +355,13 @@ $$\text{Ray Rate} = 640 \times 480 \times 60 = 18,432,000\text{ rays/sec} \appro
 
 - Traversing a dense grid requires reading and writing along the full $3.0\text{ m}$ ray ($300$ voxel lookups per ray):
   $$\text{Dense DRAM Bandwidth} = 18.43 \times 10^6 \times 300 \times 8\text{ B (R+W)} \approx 44.2\text{ GB/s}$$
-  This consumes over 85 percent of the SoC's total shared LPDDR5 bandwidth ($51.2\text{ GB/s}$), causing severe memory bus throttling.
+  yielding `{python} TSDFVoxelGridBudget.dense_bw_str`. This consumes over 85 percent of the SoC's total shared LPDDR5 bandwidth ($51.2\text{ GB/s}$), causing severe memory bus throttling.
 
 - Sparse VDB with 3D-DDA only updates voxels within the narrow truncation margin ($6$ voxels per ray) and caches active leaf blocks in GPU shared memory / L2 cache:
   $$\text{Sparse DRAM Bandwidth} = 18.43 \times 10^6 \times 6 \times 8\text{ B} \times (1 - 0.95\text{ cache hit rate}) \approx 44.2\text{ MB/s}$$
+  yielding `{python} TSDFVoxelGridBudget.sparse_bw_str`.
 
-**Systems insight**: Naive dense 3D grids are mathematically trivial but silicon-infeasible. Dependable physical AI architectures must use sparse hierarchical voxel hashing (e.g., OpenVDB / Voxblox) with GPU thread-block localization to reduce memory footprint by $33\times$ and DRAM bus traffic by $1000\times$, protecting the memory bus for real-time neural policy execution. Sustained memory bus saturation also induces SoC thermal dissipation, triggering dynamic voltage and frequency scaling (DVFS) that inflates raycasting latency tails.
+**Systems insight**: Naive dense 3D grids are mathematically trivial but silicon-infeasible. Dependable physical AI architectures must use sparse hierarchical voxel hashing (e.g., OpenVDB / Voxblox) with GPU thread-block localization to reduce memory footprint by `{python} TSDFVoxelGridBudget.mem_reduction_mult_str` and DRAM bus traffic by `{python} TSDFVoxelGridBudget.bw_reduction_mult_str`, protecting the memory bus for real-time neural policy execution. Sustained memory bus saturation also induces SoC thermal dissipation, triggering dynamic voltage and frequency scaling (DVFS) that inflates raycasting latency tails.
 :::
 
 ::: {#chk-mem-volumetric-dram-bandwidth .callout-checkpoint title="Volumetric spatial memory and memory bus saturation"}

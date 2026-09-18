@@ -111,19 +111,101 @@ A defensible release claim must be stated as a falsifiable physical proposition 
 
 [^fn-math-contact-mechanics]: **Contact Mechanics Force Model**\index{Contact mechanics!force model}: The elastodynamic model couples translational kinetic energy, effective moving inertia, and contact interface stiffness to determine transient peak impact force during an unmitigated collision. Impacting a rigid boundary concentrates stored kinetic energy into a sub-millisecond impulse with severe force amplification, whereas elastic compliance extends deformation time and dissipates energy over a longer stroke. Failing to account for contact stiffness leads to severe underestimation of peak impact force during rapid decelerations.
 
+```{python}
+#| label: calc-release-biomechanical-impact-envelope
+#| echo: false
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_energy, fmt_qty, fmt_multiple, fmt_latency, fmt_acceleration, fmt_length, fmt_int, check
+from mlsysim.physics.robotics import (
+    calc_safe_stopping_distance,
+    calc_transient_impact_force,
+    calc_kinetic_energy,
+)
+
+# ┌── 1. INPUT (Manipulator kinematics & biomechanical tissue context) ─
+m_eff = 12.0 * kilogram
+v_max = 1.71 * (meter / second)
+k_tissue = 15000.0 * (newton / meter)
+f_iso_limit = 50.0 * newton
+
+t_detect_nominal = 2.0 * millisecond
+a_brake_spring = 45.0 * (meter / (second**2))
+delta_t_contamination = 12.0 * millisecond
+
+# ┌── 2. COMPUTE (Impact energy, contact force & stopping envelopes) ───
+e_k = calc_kinetic_energy(m_eff, v_max)
+f_unbraked = calc_transient_impact_force(v_max, m_eff, k_tissue)
+f_ratio = (f_unbraked / f_iso_limit).magnitude
+
+# Nominal stopping envelope
+d_drift_nom = (v_max * t_detect_nominal).to(millimeter)
+t_brake_nom = (v_max / a_brake_spring).to(millisecond)
+d_brake_nom = ((v_max**2) / (2.0 * a_brake_spring)).to(millimeter)
+t_stop_nom = t_detect_nominal + t_brake_nom
+d_stop_nom = d_drift_nom + d_brake_nom
+
+# Contaminated / delayed envelope
+t_detect_delayed = t_detect_nominal + delta_t_contamination
+d_drift_delayed = (v_max * t_detect_delayed).to(millimeter)
+d_stop_delayed = d_drift_delayed + d_brake_nom
+t_stop_delayed = t_detect_delayed + t_brake_nom
+d_breach = d_stop_delayed - d_stop_nom
+expansion_pct = ((d_stop_delayed - d_stop_nom) / d_stop_nom).magnitude * 100.0
+
+# ┌── 3. GUARDS (Integrity checks) ────────────────────────────────────
+check(abs(e_k.to(joule).magnitude - 17.54) < 0.02, f"Unexpected kinetic energy: {e_k}")
+check(abs(f_unbraked.to(newton).magnitude - 725.5) < 0.2, f"Unexpected unbraked force: {f_unbraked}")
+check(abs(f_ratio - 14.51) < 0.1, f"Unexpected force ratio: {f_ratio}")
+check(abs(d_drift_nom.to(millimeter).magnitude - 3.42) < 0.01, f"Unexpected nominal drift: {d_drift_nom}")
+check(abs(t_brake_nom.to(millisecond).magnitude - 38.0) < 0.1, f"Unexpected brake time: {t_brake_nom}")
+check(abs(d_brake_nom.to(millimeter).magnitude - 32.49) < 0.02, f"Unexpected brake distance: {d_brake_nom}")
+check(abs(t_stop_nom.to(millisecond).magnitude - 40.0) < 0.1, f"Unexpected total nominal stop time: {t_stop_nom}")
+check(abs(d_stop_nom.to(millimeter).magnitude - 35.91) < 0.02, f"Unexpected nominal stop distance: {d_stop_nom}")
+check(abs(d_drift_delayed.to(millimeter).magnitude - 23.94) < 0.01, f"Unexpected delayed drift: {d_drift_delayed}")
+check(abs(d_stop_delayed.to(millimeter).magnitude - 56.43) < 0.02, f"Unexpected delayed stop distance: {d_stop_delayed}")
+check(abs(t_stop_delayed.to(millisecond).magnitude - 52.0) < 0.1, f"Unexpected delayed stop time: {t_stop_delayed}")
+check(abs(d_breach.to(millimeter).magnitude - 20.52) < 0.1, f"Unexpected breach distance: {d_breach}")
+check(abs(expansion_pct - 57.14) < 0.2, f"Unexpected expansion pct: {expansion_pct}")
+
+# ┌── 4. OUTPUT (Canonical math formatting) ───────────────────────────
+class BiomechanicalImpactEnvelope:
+    e_k_str = fmt_energy(e_k, unit=joule, precision=2)
+    f_unbraked_str = fmt_qty(f_unbraked, newton, precision=1)
+    f_limit_str = fmt_qty(f_iso_limit, newton, precision=0)
+    f_ratio_mult_str = fmt_multiple(f_ratio, precision=1)
+
+    t_detect_str = fmt_latency(t_detect_nominal, unit=millisecond, precision=0)
+    a_brake_str = fmt_acceleration(a_brake_spring, unit=meter / (second**2), precision=0)
+    d_drift_str = fmt_length(d_drift_nom, unit=millimeter, precision=2)
+    t_brake_str = fmt_latency(t_brake_nom, unit=millisecond, precision=0)
+    d_brake_str = fmt_length(d_brake_nom, unit=millimeter, precision=1)
+    t_stop_str = fmt_latency(t_stop_nom, unit=millisecond, precision=0)
+    d_stop_str = fmt_length(d_stop_nom, unit=millimeter, precision=1)
+
+    delta_t_delay_str = fmt_latency(delta_t_contamination, unit=millisecond, precision=0)
+    t_detect_delayed_str = fmt_latency(t_detect_delayed, unit=millisecond, precision=0)
+    d_drift_delayed_str = fmt_length(d_drift_delayed, unit=millimeter, precision=2)
+    d_stop_delayed_str = fmt_length(d_stop_delayed, unit=millimeter, precision=2)
+    d_stop_delayed_round_str = fmt_length(d_stop_delayed, unit=millimeter, precision=1)
+    t_stop_delayed_str = fmt_latency(t_stop_delayed, unit=millisecond, precision=0)
+    d_breach_str = fmt_length(d_breach, unit=millimeter, precision=1)
+    expansion_pct_int_str = fmt_int(round(expansion_pct))
+```
+
 Consider an effective moving mass (manipulator link, wrist, and gripped casting) of $m_{\text{eff}} = 12.0\text{ kg}$ traveling at peak transit velocity $v_{\text{max}} = 1.71\text{ m/s}$. The initial translational kinetic energy carried by the payload evaluates to:
 $$E_k = \frac{1}{2} m_{\text{eff}} v_{\text{max}}^2 = \frac{1}{2} (12.0\text{ kg})(1.71\text{ m/s})^2 = 17.54\text{ J}$$
 In an unbraked elastic impact against human tissue modeled with effective compliance stiffness $k_{\text{tissue}} = 15{,}000\text{ N/m}$, the peak contact force follows @eq-release-unbraked-force:
 $$F_{\text{unbraked}} = v_{\text{max}} \sqrt{k_{\text{tissue}} m_{\text{eff}}} = 1.71\text{ m/s} \times \sqrt{15{,}000\text{ N/m} \times 12.0\text{ kg}} \approx 725.5\text{ N}$$ {#eq-release-unbraked-force}
-This unbraked impact delivers $725.5\text{ N}$—exceeding the allowable ISO/TS 15066 biomechanical threshold of $50.0\text{ N}$ by $14.5\times$ ($725.5 / 50.0$), carrying severe crushing and fracturing risk.
+This unbraked impact delivers `{python} BiomechanicalImpactEnvelope.f_unbraked_str`—exceeding the allowable ISO/TS 15066 biomechanical threshold of `{python} BiomechanicalImpactEnvelope.f_limit_str` by `{python} BiomechanicalImpactEnvelope.f_ratio_mult_str` ($725.5 / 50.0$), carrying severe crushing and fracturing risk.
 
-To maintain the release claim, the safety reflex incorporates an optical-tactile contact detector with latency $t_{\text{detect}} = 2.0\text{ ms}$, followed by electromechanical spring brakes providing sustained deceleration $a_{\text{brake}} = 45.0\text{ m/s}^2$. The total stopping distance combines reaction drift and active braking displacement, formalized in @eq-release-stopping-distance:[^fn-math-braking-distance]
+To maintain the release claim, the safety reflex incorporates an optical-tactile contact detector with latency $t_{\text{detect}} =$ `{python} BiomechanicalImpactEnvelope.t_detect_str`, followed by electromechanical spring brakes providing sustained deceleration $a_{\text{brake}} =$ `{python} BiomechanicalImpactEnvelope.a_brake_str`. The total stopping distance combines reaction drift and active braking displacement, formalized in @eq-release-stopping-distance:[^fn-math-braking-distance]
 $$d_{\text{stop}} = d_{\text{drift}} + d_{\text{brake}} = v_{\text{max}} \cdot t_{\text{detect}} + \frac{v_{\text{max}}^2}{2 a_{\text{brake}}}$$ {#eq-release-stopping-distance}
-Under nominal execution, reaction drift spans $d_{\text{drift}} = (1.71\text{ m/s})(0.0020\text{ s}) = 3.42\text{ mm}$, active braking requires $t_{\text{brake}} = 1.71 / 45.0 = 38.0\text{ ms}$ across $d_{\text{brake}} = (1.71)^2 / (2 \times 45.0) \approx 32.5\text{ mm}$, yielding a total stopping time $t_{\text{stop}} = 2.0\text{ ms} + 38.0\text{ ms} = 40.0\text{ ms}$ and stopping envelope $d_{\text{stop}} \approx 36.0\text{ mm}$.
+Under nominal execution, reaction drift spans $d_{\text{drift}} = (1.71\text{ m/s})(0.0020\text{ s}) =$ `{python} BiomechanicalImpactEnvelope.d_drift_str`, active braking requires $t_{\text{brake}} = 1.71 / 45.0 =$ `{python} BiomechanicalImpactEnvelope.t_brake_str` across $d_{\text{brake}} = (1.71)^2 / (2 \times 45.0) \approx$ `{python} BiomechanicalImpactEnvelope.d_brake_str`, yielding a total stopping time $t_{\text{stop}} = 2.0\text{ ms} + 38.0\text{ ms} =$ `{python} BiomechanicalImpactEnvelope.t_stop_str` and stopping envelope $d_{\text{stop}} \approx$ `{python} BiomechanicalImpactEnvelope.d_stop_str`.
 
 [^fn-math-braking-distance]: **Kinematic Braking Integration**\index{Kinematic braking!integration}: Computing total stopping distance requires piecewise integration of the velocity profile across initial reaction latency and active mechanical deceleration phases. The moving mass drifts linearly at maximum velocity during the sensing and brake solenoid engagement interval before following a quadratic trajectory as mechanical friction dissipates stored momentum. Underestimating reaction latency or brake engagement lag causes the machine to penetrate safety zones before deceleration begins.
 
-If optical surface contamination (e.g., airborne oil mist on tactile covers) delays impact detection by an unbudgeted $\Delta t_{\text{delay}} = 12.0\text{ ms}$ (expanding perception latency to $t_{\text{detect}}' = 14.0\text{ ms}$), reaction drift expands to $d_{\text{drift}}' = (1.71)(0.014) = 23.94\text{ mm}$. The total stopping envelope widens to $d_{\text{stop}}' = 23.94\text{ mm} + 32.49\text{ mm} = 56.43\text{ mm}$, while stopping time extends to $t_{\text{stop}}' = 14.0\text{ ms} + 38.0\text{ ms} = 52.0\text{ ms}$. Because $t_{\text{stop}}' = 52.0\text{ ms} > 40.0\text{ ms}$ and $d_{\text{stop}}' = 56.4\text{ mm} > 36.0\text{ mm}$, the machine breaches its certified kinematic envelope by $20.4\text{ mm}$ (a 57 percent expansion), transferring destructive kinetic energy into the worker and falsifying the release claim (\ref{chk-release-contact-force-and-stopping-envelope-budget}).
+If optical surface contamination (e.g., airborne oil mist on tactile covers) delays impact detection by an unbudgeted $\Delta t_{\text{delay}} =$ `{python} BiomechanicalImpactEnvelope.delta_t_delay_str` (expanding perception latency to $t_{\text{detect}}' =$ `{python} BiomechanicalImpactEnvelope.t_detect_delayed_str`), reaction drift expands to $d_{\text{drift}}' = (1.71)(0.014) =$ `{python} BiomechanicalImpactEnvelope.d_drift_delayed_str`. The total stopping envelope widens to $d_{\text{stop}}' = 23.94\text{ mm} + 32.49\text{ mm} =$ `{python} BiomechanicalImpactEnvelope.d_stop_delayed_str`, while stopping time extends to $t_{\text{stop}}' = 14.0\text{ ms} + 38.0\text{ ms} =$ `{python} BiomechanicalImpactEnvelope.t_stop_delayed_str`. Because $t_{\text{stop}}' = 52.0\text{ ms} > 40.0\text{ ms}$ and $d_{\text{stop}}' = 56.4\text{ mm} > 36.0\text{ mm}$, the machine breaches its certified kinematic envelope by `{python} BiomechanicalImpactEnvelope.d_breach_str` (a `{python} BiomechanicalImpactEnvelope.expansion_pct_int_str` percent expansion), transferring destructive kinetic energy into the worker and falsifying the release claim (\ref{chk-release-contact-force-and-stopping-envelope-budget}).
 
 ::: {#chk-release-contact-force-and-stopping-envelope-budget .callout-checkpoint title="Biomechanical force and stopping envelope"}
 - [ ] **Biomechanical injury thresholds**: Can you explain why unbraked kinematic momentum transforms into transient peak forces exceeding human tissue pain limits by more than an order of magnitude?
@@ -269,6 +351,18 @@ The structured decomposition of physical claims, inferential warrants, empirical
 
 : **Claim-Argument-Evidence (CAE) Safety Case Scorecard Matrix**: Decomposition of top-level physical AI safety claims across architectural and inductive warrants, contextual physical assumptions, empirical evidentiary artifacts, audit acceptance thresholds, and final adjudication verdicts. High inductive accuracy on nominal benchmarks cannot compensate for a broken warrant, such as tactile slip classification failing under fluid contamination (Claim C3), requiring secondary deterministic fallback interceptors. {#tbl-16-cae-scorecard tbl-colwidths="[16,16,18,18,16,16]"}
 
+::: {#chk-release-claim-argument-evidence-and-inductive-warrants .callout-checkpoint title="Claim-argument-evidence decomposition and inductive warrants"}
+
+Before presenting a safety case to external adjudicators, test the logical integrity of your Claim-Argument-Evidence structure against formal assurance criteria:
+
+- [ ] **Top-level claim falsifiability**: Can you formulate the top-level safety goal as an unambiguous, mathematically falsifiable proposition (e.g., bounding kinetic energy transfer below tissue fracture limits) rather than an aspirational qualitative assertion?
+- [ ] **Inductive warrant validity**: Can you identify the explicit physical or probabilistic warrants connecting low-level empirical test benches to high-level system safety claims, and document the operational premises under which those warrants hold?
+- [ ] **Defeater and rebuttal enumeration**: Can you show where potential defeaters (e.g., sensor surface fouling, unmodeled ambient temperature swings, or CAN bus arbitration collisions) are explicitly represented in the Goal Structuring Notation graph?
+- [ ] **Evidentiary provenance binding**: Can you trace every terminal evidence node in the argument tree back to an immutable, cryptographically signed test execution trace with calibrated sensor certificates?
+
+*A safety argument with unstated inductive leaps is an operational liability disguised as formal diligence. Ensure that every claim-argument link is reinforced by empirical test manifests before submitting the dossier for adjudication.*
+:::
+
 ## The Three Verdicts {#sec-release-three-verdicts}
 
 The adjudication of a safety case resolves the claim-argument-evidence tree into three distinct verdicts, comprising **unconditional operation**\index{Verdicts!unconditional operation}, **conditional operation**\index{Verdicts!conditional operation}, and **refusal to operate**\index{Verdicts!refusal to operate}.[^fn-std-iso26262-sotif] Every verdict establishes an explicit operating contract and obliges concrete engineering actions afterwards. The first verdict, unconditional operation, applies when every hazard identified during verification possesses an unbroken chain of evidence grounded in both deterministic nervous-system enforcement and immutable physical limits. Under this verdict, no credible failure mode relies on the statistical benevolence or unverified generalization of a learned policy, enforcing the causal boundary established in @sec-boundary-causal-boundary. Kinetic energy dissipation remains within thermal and mechanical brake ratings under worst-case payload velocity, consistent with the actuator thermal limits detailed in @sec-body-thermal-duty-cycles, and maximum tracking deviations are bounded by hardware interlocks. Unconditional release does not imply that the machine cannot fail, but rather that every known hazard is governed by a verified physical or architectural mitigation that preserves safety across the entire operational design domain.
@@ -398,6 +492,18 @@ Reviewers operationalize these vulnerabilities by constructing explicit **defeat
 The adversarial review also audits the execution integrity of the permission path, verifying that neither model inference tasks nor auxiliary background services can bypass, corrupt, or starve safety enforcer assertions (@sec-enforcement) or human authority overrides (@sec-intervention). Under the proposal-permission architecture (@sec-brain-embodied), safety assertions and human overrides must maintain non-preemptible execution priority over learned models. An adversary evaluates whether a runaway policy thread, an unhandled exception in an accelerator runtime, or a high-volume telemetry stream can saturate memory channels, freeze the operating system by locking a kernel spinlock, or exhaust physical power delivery rails. If an onboard graphics accelerator draws peak transient current that causes a voltage droop, resetting an adjacent micro-controller on the same power plane, the nervous system loses its ability to command actuator brakes within the required $5\text{ ms}$ deadline. Validating **permission path**\index{Permission path} independence requires physical fault injection, including bus saturation, power rail glitching, and forced kernel panics. If the permission path is implemented in user-space software rather than isolated hard real-time threads and dedicated hardware interrupt lines, the reviewer marks the link as broken.
 
 When an adversarial attack succeeds, the safety case cannot be salvaged by editing claim descriptions or inserting arbitrary safety margins. The protocol requires decomposing the broken warrant into its underlying systems failure, whether that represents an uncharacterized physical boundary, an inadequate verification dataset, or an unmodeled hardware latency. Remediation routes the defect directly back to the owning subsystem. If an adversary proves that the motor-current observer fails under gearbox compliance, the mechanical specification must introduce hard wear limits and runtime compliance estimation. If shared bus contention compromises enforcer latency, the compute architecture must enforce physical memory partitioning and real-time scheduling guarantees. If perception transfer fails across lighting variations, the verification pipeline must collect hardware-in-the-loop datasets under physical extremes. The safety case returns to the engineering team with broken warrants explicitly identified, requiring updated hardware boundaries, re-derived stopping distances, and renewed empirical verification before the machine can be submitted for a new release verdict.
+
+::: {#chk-release-adversarial-review-and-margin-erosion .callout-checkpoint title="Adversarial review vectors and margin erosion"}
+
+Before approving a deployment contract, evaluate the safety case through the adversarial posture of an independent auditor seeking to dismantle its claims:
+
+- [ ] **Empirical sufficiency stress-testing**: Can you verify that testing datasets deliberately attacked the physical boundaries of the Operational Design Domain (such as extreme temperature, oil mist contamination, and voltage droop) rather than sampling only nominal interiors?
+- [ ] **Sim-to-real transfer challenge**: Can you identify every claim that relies on synthetic simulation data and verify whether physical HIL dynamometer experiments have confirmed the transfer boundaries under non-linear friction and contact dynamics?
+- [ ] **Normalization of deviance detection**: Can you audit field telemetry records for recurring, non-fatal anomalous transients (such as bus jitter spikes or brief tracking errors) that have been improperly rationalized as acceptable operational noise?
+- [ ] **Proxy metric gaming resistance**: Can you prove that optimizing for secondary performance metrics (such as cycle time, trajectory smoothness, or power conservation) has not silently eroded the physical braking clearance and reaction buffers?
+
+*If an adversarial review cannot identify the exact physical conditions that would invalidate the release verdict, the audit is incomplete. Review this section before examining structural argument failure modes.*
+:::
 
 ## How Release Arguments Go Wrong {#sec-release-failure-modes}
 
