@@ -207,7 +207,8 @@ def ladder(ax, tiers, wall=False, color=None, domain=None, style='bars'):
             _label(lab, v, yy, (np.log10(v) - np.log10(xmin)) / span, v * 0.92, v * 1.55)
         if wall:
             ax.plot([xmin, xmax], [n - 0.45, n - 0.45], color=RED, lw=0.75)
-        ax.text(xmax, -0.32, "log scale", ha="right", va="bottom",
+        ax.set_ylim(-0.65, n - 0.4)
+        ax.text(xmax, -0.52, "log scale", ha="right", va="bottom",
                 color="#777777", fontsize=3.9)
     else:
         xmax = max(vals) * 1.12; pad = 0.015 * xmax
@@ -523,7 +524,7 @@ def budget_envelope(ax, rows=(("used", 0.7, COMP), ("limit", 1.0, RED)), limit=1
         label_x += limit_label_offset
         label_ha = "left" if limit_label_offset > 0 else "right"
     ax.text(label_x, 0.82, limit_label or "limit", ha=label_ha, va="center",
-            color=RED, fontsize=4.8)
+            color=RED, fontsize=4.8, bbox=dict(boxstyle="square,pad=0.12", fc="white", ec="none"))
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); _clean(ax)
 
 # ── short ordered window/process → sequence-strip ─────────────────────────────
@@ -537,9 +538,10 @@ def sequence_strip(ax, steps=(("1", GRID), ("2", GRID), ("3", GRID)), bracket=No
         x = x0 + i * (cell + gap)
         ax.add_patch(plt.Rectangle((x, y), cell, h, facecolor=color,
                                    edgecolor="white", lw=0.35))
+        fs = 3.2 if len(str(label)) > 5 else 4.0
         ax.text(x + cell / 2, y + h / 2, label, ha="center", va="center",
                 color="white" if color != GRID else "#555555",
-                fontsize=4.0, multialignment="center", fontweight="bold")
+                fontsize=fs, multialignment="center", fontweight="bold")
     if bracket:
         a, b = bracket
         left = x0 + a * (cell + gap)

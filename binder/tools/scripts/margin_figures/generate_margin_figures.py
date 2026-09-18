@@ -241,13 +241,13 @@ def gen_ch07():
     # Fig 07-M2: Extreme Value Shock vs Gaussian
     fig, ax = new_fig('sparkline-trend')
     t = np.linspace(0, 1, 100)
-    p_gauss = np.exp(-15 * t)
-    p_frechet = 0.05 + 0.90 * (1 / (1 + 4 * (1 - t)**2))
+    p_gauss = np.exp(-8 * t)
+    p_frechet = 1.0 / (1.0 + 3.0 * t) ** 1.8
     ax.plot(t, p_frechet, color=RED, lw=1.35)
     ax.plot(t, p_gauss, color=TIME, lw=1.35)
     ax.fill_between(t, p_gauss, p_frechet, color=REDFILL, alpha=0.35)
-    ax.text(0.95, p_frechet[-1], "Heavy tail", color=RED, fontsize=5.0, fontweight="bold", ha="right", va="bottom")
-    ax.text(0.95, p_gauss[-1] + 0.08, "Gaussian", color=TIME, fontsize=4.8, ha="right", va="bottom")
+    ax.text(0.95, p_frechet[-1] + 0.08, "Heavy tail", color=RED, fontsize=5.0, fontweight="bold", ha="right", va="bottom")
+    ax.text(0.75, 0.18, "Gaussian", color=TIME, fontsize=4.8, ha="right", va="bottom")
     ax.set_xlim(0, 1.0); ax.set_ylim(0, 1.1)
     for s in ("top", "right", "left", "bottom"):
         ax.spines[s].set_visible(False)
@@ -357,9 +357,8 @@ def gen_ch11():
     ax.text(45, 7.5, "Limit: 5 Nm", color=INK, fontsize=4.6)
     ax.plot(1.0, 50.0, "o", color=RED, ms=3.3)
     ax.text(4.0, 48.0, "1 ms: 50 Nm", color=RED, fontsize=4.8, fontweight="bold")
-    ax.plot(50.0, 1.0, "o", color=DATA, ms=3.3)
-    ax.text(50.0, 2.5, "50 ms: 1 Nm", color=DATA, fontsize=4.8, fontweight="bold", ha="center")
-    ax.set_xlim(0, 62); ax.set_ylim(0, 55)
+    ax.text(48.0, 14.0, "50 ms: 1 Nm", color=DATA, fontsize=4.8, fontweight="bold", ha="center")
+    ax.set_xlim(-1, 65); ax.set_ylim(0, 58)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     for s in ("left", "bottom"):
@@ -496,11 +495,10 @@ def gen_ch16():
     steps = [
         ("eFuse", NET),
         ("Ed25519", DATA),
-        ("SHA384", DATA),
         ("Audit", TIME),
-        ("DC Bus", COMP)
+        ("Power", COMP)
     ]
-    sequence_strip(ax, steps=steps, bracket=(0, 4), bracket_label="Root of Trust")
+    sequence_strip(ax, steps=steps, bracket=(0, 3), bracket_label="Root of Trust")
     save(fig, out_path(chap, "margin_cryptographic_seal_strip"))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -517,19 +515,23 @@ def gen_ch17():
 
     # Fig 17-M2: Battery Specific Energy Diminishing Returns
     fig, ax = new_fig('scale-anchor')
-    m_batt = np.linspace(0, 50, 100)
-    t_endurance = 3.6 * (1 - np.exp(-0.06 * m_batt))
+    m_batt = np.linspace(0, 40, 100)
+    # Rational transport equation from §17.5.1: e_spec*m_b / (P_comp + P_mech*(m_dry + m_b))
+    t_endurance = (160.0 * m_batt) / (150.0 + 42.0 * (15.0 + m_batt))
     ax.plot(m_batt, t_endurance, color=COMP, lw=1.35)
-    ax.axhline(3.6, color=RED, ls="--", lw=0.65)
-    ax.text(45, 3.75, "Ceiling: 3.6 h", color=RED, fontsize=5.0, fontweight="bold", ha="right")
-    ax.plot(15.0, 3.6 * (1 - np.exp(-0.06 * 15.0)), "o", color=COMP, ms=3.3)
-    ax.text(17.0, 1.8, "15 kg: 2.4 h", color=COMP, fontsize=4.8)
-    ax.set_xlim(0, 50); ax.set_ylim(0, 4.2)
+    ax.axhline(3.8, color=RED, ls="--", lw=0.65)
+    ax.text(38, 3.95, "Ceiling: 3.8 h", color=RED, fontsize=5.0, fontweight="bold", ha="right")
+    ax.plot(12.0, 2.3, "o", color=COMP, ms=3.3)
+    ax.text(14.0, 2.0, "12 kg: 2.3 h", color=COMP, fontsize=4.8)
+    ax.set_xlim(0, 42); ax.set_ylim(0, 4.5)
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
     for s in ("left", "bottom"):
         ax.spines[s].set_color(GRID); ax.spines[s].set_linewidth(0.55)
-    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_xticks([0, 20, 40])
+    ax.set_xticklabels(["0", "20", "40 kg"], fontsize=4.0, color="#555555")
+    ax.set_yticks([0, 2, 4])
+    ax.set_yticklabels(["0", "2", "4 h"], fontsize=4.0, color="#555555")
     save(fig, out_path(chap, "margin_battery_diminishing_returns_knee"))
 
 def main():
