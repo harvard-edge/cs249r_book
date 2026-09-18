@@ -76,12 +76,12 @@ VOL3_CHAPTERS = [
         'prefix': 'deliberation',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'deliberation tree architect', 'pill': (660, 80), 'targ': (580, 240), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'laser rollout drafting stylus', 'pill': (240, 320), 'targ': (575, 350), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'deliberation search agent', 'pill': (660, 80), 'targ': (580, 240), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'active exploratory branch', 'pill': (240, 320), 'targ': (580, 380), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'root decision state', 'pill': (240, 540), 'targ': (595, 425), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'optimal high-reward trajectory', 'pill': (1180, 220), 'targ': (740, 330), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'pruned dead-end branch', 'pill': (1180, 440), 'targ': (840, 430), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'speculative tree expansion', 'pill': (1160, 640), 'targ': (780, 470), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'speculative rollout branch', 'pill': (1160, 640), 'targ': (780, 470), 'border': '#D97706', 'color': '#D97706'},
         ]
     },
     {
@@ -105,7 +105,7 @@ VOL3_CHAPTERS = [
             {'text': 'logical virtual blocks', 'pill': (240, 200), 'targ': (360, 220), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'shared prefix block pool', 'pill': (240, 400), 'targ': (490, 280), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'radix block table mmu', 'pill': (240, 600), 'targ': (581, 310), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'pagedattention block librarian', 'pill': (680, 80), 'targ': (680, 240), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'pagedattention block manager', 'pill': (680, 80), 'targ': (680, 240), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'physical hbm page frames', 'pill': (1180, 200), 'targ': (1040, 280), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'zero-fragmentation page allocation', 'pill': (1180, 420), 'targ': (1014, 350), 'border': '#2EC4B6', 'color': '#2EC4B6'},
         ]
