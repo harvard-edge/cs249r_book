@@ -17,6 +17,8 @@ from tinytorch.perf.acceleration import (
     unfused_gelu,
     im2col,
     im2col_conv2d,
+    col2im,
+    Im2colConv2dFunction,
 )
 
 
@@ -118,6 +120,40 @@ def test_im2col_rows_are_the_patches_under_the_kernel():
                                               [10, 11, 14, 15]])
 
 
+def test_col2im_is_the_transpose_of_im2col():
+    """<im2col(x), c> == <x, col2im(c)> for every x and c: the definition of a transpose."""
+    rng = np.random.default_rng(5)
+    for stride, padding in ((1, 0), (2, 1)):
+        x = rng.standard_normal((2, 2, 6, 6))
+        cols = im2col(Tensor(x), kernel_size=3, stride=stride, padding=padding).data
+        c = rng.standard_normal(cols.shape)
+        back = col2im(Tensor(c), x.shape, kernel_size=3, stride=stride, padding=padding).data
+        np.testing.assert_allclose(np.sum(cols * c), np.sum(x * back), rtol=1e-4)
+
+
+def test_im2col_function_gradients_match_conv2d_backward():
+    """The training path must produce the loops' gradients, not just their output."""
+    from tinytorch.core.spatial import Conv2d
+
+    rng = np.random.default_rng(6)
+    conv = Conv2d(2, 3, kernel_size=3, stride=2, padding=1)
+    x_data = rng.standard_normal((2, 2, 7, 7)).astype(np.float32)
+
+    x_ref = Tensor(x_data, requires_grad=True)
+    conv(x_ref).sum().backward()
+
+    x = Tensor(x_data, requires_grad=True)
+    w = Tensor(conv.weight.data.copy(), requires_grad=True)
+    b = Tensor(conv.bias.data.copy(), requires_grad=True)
+    Im2colConv2dFunction.apply(x, w, b, stride=2, padding=1).sum().backward()
+
+    as_array = lambda g: np.asarray(getattr(g, "data", g))
+    for name, got, ref in (("input", x.grad, x_ref.grad), ("weight", w.grad, conv.weight.grad),
+                           ("bias", b.grad, conv.bias.grad)):
+        np.testing.assert_allclose(as_array(got), as_array(ref), rtol=1e-4, atol=1e-4,
+                                   err_msg=f"{name} gradient differs from Conv2d")
+
+
 if __name__ == "__main__":
     test_vectorized_matmul_matches_the_reference_product()
     test_tiled_matmul_agrees_at_every_tile_size()
@@ -125,6 +161,8 @@ if __name__ == "__main__":
     test_fusion_does_not_change_the_activation()
     test_im2col_conv2d_agrees_with_the_loops_at_every_stride_and_padding()
     test_im2col_rows_are_the_patches_under_the_kernel()
+    test_col2im_is_the_transpose_of_im2col()
+    test_im2col_function_gradients_match_conv2d_backward()
     print("✅ Acceleration integration tests passed")
 
 

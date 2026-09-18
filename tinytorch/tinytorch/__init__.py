@@ -132,9 +132,9 @@ except ImportError:
 
 # Module 17: Acceleration
 try:
-    from .perf.acceleration import vectorized_matmul, fused_gelu, tiled_matmul, im2col, im2col_conv2d
+    from .perf.acceleration import vectorized_matmul, fused_gelu, tiled_matmul, im2col, im2col_conv2d, col2im, Im2colConv2dFunction
 except ImportError:
-    vectorized_matmul = fused_gelu = tiled_matmul = im2col = im2col_conv2d = None
+    vectorized_matmul = fused_gelu = tiled_matmul = im2col = im2col_conv2d = col2im = Im2colConv2dFunction = None
 
 # Module 18: Memoization
 try:
@@ -184,7 +184,7 @@ __all__ = [
     'Profiler', 'quick_profile',
     'Quantizer', 'quantize_int8', 'dequantize_int8',
     'magnitude_prune', 'structured_prune', 'low_rank_approximate', 'Compressor',
-    'vectorized_matmul', 'fused_gelu', 'tiled_matmul', 'im2col', 'im2col_conv2d',
+    'vectorized_matmul', 'fused_gelu', 'tiled_matmul', 'im2col', 'im2col_conv2d', 'col2im', 'Im2colConv2dFunction',
     'KVCache', 'enable_kv_cache', 'disable_kv_cache',
     'benchmarking', 'Benchmark', 'MLPerf',
     'olympics',

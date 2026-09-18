@@ -20,7 +20,7 @@ Welcome to Module 17! Compare vectorized operations, blocked multiplication, and
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete neural network foundation with tensors (01), layers (03), autograd (06), training (08), and CNNs (09)
-**You'll Build**: Vectorized inference operations, tiled multiplication, an allocation comparison, and an im2col convolution
+**You'll Build**: Vectorized inference operations, tiled multiplication, an allocation comparison, and an im2col convolution you can train through
 **You'll Enable**: Hardware-efficient execution for production deployment
 
 **Connection Map**:
@@ -34,7 +34,7 @@ By the end of this module, you will:
 1. Implement vectorized operations for maximum throughput
 2. Compare intermediate allocation costs and explain what true kernel fusion changes
 3. Understand the relationship between compute and memory bandwidth
-4. Lower a convolution to one matrix multiply with im2col, and measure its speed and memory cost
+4. Lower a convolution to one matrix multiply with im2col, write its backward pass with col2im, and measure its speed and memory cost
 5. Analyze acceleration trade-offs in production systems
 
 Let's optimize for speed!
@@ -67,7 +67,7 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu, im2col_co
 - `time` (for performance measurement)
 
 **TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor class from Module 01)
+- `tinytorch.core.tensor` (Tensor and Function from Module 01; Module 06 makes Function record gradients)
 - `tinytorch.core.spatial` (Conv2d from Module 09, used by the tests as the reference)
 - `tinytorch.perf.profiling` (Profiler from Module 14)
 
@@ -92,7 +92,7 @@ import time
 from typing import Any
 
 # Import from TinyTorch package (previous modules must be completed and exported)
-from tinytorch.core.tensor import Tensor
+from tinytorch.core.tensor import Tensor, Function
 
 # Constants for performance measurement
 DEFAULT_WARMUP_ITERATIONS = 2  # Default warmup iterations for timing
@@ -970,9 +970,9 @@ the same order or the dot products pair the wrong numbers.
 
 Like the other helpers in this module, `im2col_conv2d` is an inference path: it
 returns a new Tensor without recording autograd, so it computes the same forward
-pass as Module 09's `Conv2d` but cannot train one. Training through im2col also
-needs the reverse step, **col2im**, which adds each patch gradient back into the
-pixels it came from. The reflection questions ask you to work out what that costs.
+pass as Module 09's `Conv2d` but cannot train one. The next section adds the
+reverse step, **col2im**, and turns the convolution into a differentiable
+`Function` that can.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "im2col", "solution": true}
@@ -1293,6 +1293,384 @@ def test_unit_im2col_conv2d():
 
 if __name__ == "__main__":
     test_unit_im2col_conv2d()
+
+# %% [markdown]
+"""
+## 🏗️ Training Through im2col: col2im and the Backward Pass
+
+`im2col_conv2d` computes the forward pass, but it wraps a NumPy result in a new
+Tensor, so autograd cannot see through it. A model that uses it can predict but
+not learn. Training needs the backward pass, and im2col makes most of it easy.
+
+### Three Gradients From One Matrix Multiply
+
+Write the forward pass in matrix form. With `cols` the patch matrix
+`(R, C·k·k)` where `R = N·H_out·W_out`, and `W` the filters flattened and
+transposed to `(C·k·k, out_ch)`:
+
+```
+out_rows = cols @ W + b                          (R, out_ch)
+```
+
+Let `G` be the gradient of the loss with respect to `out_rows`, the incoming
+`grad_output` moved into the same `(R, out_ch)` layout. The chain rule for a
+matrix multiply, which you used in Module 06, gives:
+
+```
+grad_W    = cols.T @ G          (C·k·k, out_ch)   one matmul
+grad_b    = G.sum(axis=0)       (out_ch,)         one reduction
+grad_cols = G @ W.T             (R, C·k·k)        one matmul
+```
+
+Two of the three gradients are matrix multiplies the same size as the forward
+pass, so they get the same speedup. The third is not yet the gradient we need:
+it is the gradient with respect to the **patch matrix**, and the layer's input
+is the image.
+
+### col2im: Putting Patch Gradients Back Into the Image
+
+Every pixel was copied into several rows of `cols`, once for each kernel
+position that covered it. A pixel's gradient is therefore the **sum** of the
+gradients of all its copies. col2im is im2col run backwards with the copy turned
+into an addition:
+
+```
+im2col (forward)                          col2im (backward)
+cols[.., i, j, ..] = padded[slice(i, j)]   padded_grad[slice(i, j)] += cols_grad[.., i, j, ..]
+```
+
+It loops over the same `k × k` kernel offsets with the same strided slices. The
+`+=` is the whole point: with `=` each pixel would keep only the gradient from
+the last patch that touched it. After the loop, cropping off the padding gives
+the input gradient, because padded zeros are constants and have no gradient.
+
+On the 3×3 example with a 2×2 kernel, sending a gradient of 1 from every patch
+entry back through col2im counts how many patches covered each pixel:
+
+```
+┌───┬───┬───┐
+│ 1 │ 2 │ 1 │   corners: one patch
+├───┼───┼───┤   edges:   two patches
+│ 2 │ 4 │ 2 │   center:  all four
+├───┼───┼───┤
+│ 1 │ 2 │ 1 │
+└───┴───┴───┘
+```
+
+### The Memory the Backward Pass Keeps
+
+`grad_W = cols.T @ G` needs the patch matrix from the forward pass. Keeping it
+alive between forward and backward holds the `k × k` times larger buffer for
+every convolution in the model until its backward pass runs. The alternative is
+to throw `cols` away and rebuild it from the saved input during backward, which
+trades memory for a second im2col. This implementation keeps it.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "col2im", "solution": true}
+#| export
+
+def col2im(cols: Tensor, x_shape: tuple, kernel_size: int, stride: int = 1, padding: int = 0) -> Tensor:
+    """
+    Add every row of a patch-gradient matrix back into the image it came from.
+
+    The reverse of im2col: where im2col copied each input value into every
+    patch that covers it, col2im sums the gradients of those copies into one
+    gradient per input value. Overlapping patches therefore accumulate.
+
+    TODO: Scatter-add the patch gradients back into image layout
+
+    APPROACH:
+    1. Recover N, C, H, W from x_shape and compute out_h and out_w with the
+       same formula as im2col
+    2. Undo im2col's final reshape and transpose: reshape cols to
+       (N, out_h, out_w, C, k, k), then transpose(0, 3, 4, 5, 1, 2) to
+       (N, C, k, k, out_h, out_w)
+    3. Allocate a zero array for the padded image, (N, C, H + 2p, W + 2p)
+    4. For each kernel offset (i, j), ADD cols6[:, :, i, j, :, :] into the
+       strided slice padded[:, :, i : i + stride*out_h : stride,
+       j : j + stride*out_w : stride]
+    5. Crop the padding off and wrap the result in a Tensor
+
+    Args:
+        cols: Patch gradients, shape (N * out_h * out_w, C * k * k)
+        x_shape: Shape of the original input, (N, C, H, W)
+        kernel_size: Edge length of the square kernel
+        stride: Step between neighboring patches (default: 1)
+        padding: Zeros that im2col added on each side (default: 0)
+
+    Returns:
+        Image-shaped gradient, shape x_shape
+
+    EXAMPLE:
+    >>> ones = Tensor(np.ones((4, 4), dtype=np.float32))
+    >>> print(col2im(ones, (1, 1, 3, 3), kernel_size=2).data[0, 0])
+    [[1. 2. 1.]
+     [2. 4. 2.]
+     [1. 2. 1.]]
+
+    HINTS:
+    - Use += in the loop; = keeps only the last patch's contribution
+    - Within one offset (i, j) the slice touches each pixel at most once, so
+      the in-place add over the slice is safe
+    - If padding is 0, the crop is the whole array
+    """
+    ### BEGIN SOLUTION
+    N, C, H, W = x_shape
+    out_h = (H + 2 * padding - kernel_size) // stride + 1
+    out_w = (W + 2 * padding - kernel_size) // stride + 1
+    expected = (N * out_h * out_w, C * kernel_size * kernel_size)
+    if tuple(cols.shape) != expected:
+        raise ValueError(
+            f"Patch matrix does not match the image it should come from\n"
+            f"  ❌ Got cols shape {cols.shape}, expected {expected} for x_shape={x_shape}, "
+            f"kernel_size={kernel_size}, stride={stride}, padding={padding}\n"
+            f"  💡 col2im must use the same x_shape, kernel_size, stride, and padding as the im2col it reverses\n"
+            f"  🔧 Pass the parameters the forward pass used"
+        )
+
+    # Undo im2col's layout: rows back to (n, oh, ow), columns back to (c, i, j)
+    cols6 = cols.data.reshape(N, out_h, out_w, C, kernel_size, kernel_size).transpose(0, 3, 4, 5, 1, 2)
+
+    padded = np.zeros((N, C, H + 2 * padding, W + 2 * padding), dtype=cols6.dtype)
+    for i in range(kernel_size):
+        for j in range(kernel_size):
+            # Accumulate: a pixel covered by several patches collects all their gradients
+            padded[:, :,
+                   i:i + stride * out_h:stride,
+                   j:j + stride * out_w:stride] += cols6[:, :, i, j, :, :]
+
+    return Tensor(padded[:, :, padding:padding + H, padding:padding + W])
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: col2im
+
+This test validates col2im as the exact reverse of im2col.
+
+**What we're testing**: Patch-count accumulation on the 3×3 example, the
+adjoint identity `<im2col(x), c> = <x, col2im(c)>`, and padding removal
+**Why it matters**: A col2im that copies instead of adds produces gradients of
+the right shape and the wrong size, and training silently goes wrong
+**Expected**: The 1-2-1 / 2-4-2 coverage counts, equal inner products, and an
+output with the input's shape
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-col2im", "locked": true, "points": 10}
+def test_unit_col2im():
+    """🧪 Test col2im as the reverse of im2col."""
+    print("🧪 Unit Test: col2im...")
+
+    # Coverage counts: a gradient of 1 from every patch entry
+    counts = col2im(Tensor(np.ones((4, 4), dtype=np.float32)), (1, 1, 3, 3), kernel_size=2)
+    expected = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=np.float32)
+    assert counts.shape == (1, 1, 3, 3), f"Wrong output shape: {counts.shape}"
+    assert np.array_equal(counts.data[0, 0], expected), \
+        f"Overlapping patches must add up, got:\n{counts.data[0, 0]}"
+
+    # Adjoint identity: col2im is the transpose of im2col, so for any x and c,
+    # sum(im2col(x) * c) == sum(x * col2im(c)). Checked with stride and padding.
+    for stride, padding in ((1, 0), (1, 1), (2, 1)):
+        x = Tensor(rng.standard_normal((2, 3, 7, 7)))
+        cols = im2col(x, kernel_size=3, stride=stride, padding=padding)
+        c = Tensor(rng.standard_normal(cols.shape))
+        back = col2im(c, x.shape, kernel_size=3, stride=stride, padding=padding)
+        assert back.shape == x.shape, f"col2im must return the input shape, got {back.shape}"
+        lhs = float(np.sum(cols.data * c.data))
+        rhs = float(np.sum(x.data * back.data))
+        assert np.isclose(lhs, rhs, rtol=1e-4), \
+            f"col2im is not the reverse of im2col at stride={stride}, padding={padding}: {lhs:.4f} vs {rhs:.4f}"
+
+    # Mismatched parameters are rejected
+    try:
+        col2im(Tensor(np.ones((4, 4))), (1, 1, 3, 3), kernel_size=3)
+        assert False, "Should reject a patch matrix that does not match the parameters"
+    except ValueError as e:
+        assert "does not match" in str(e)
+
+    print("✅ col2im works correctly!")
+
+if __name__ == "__main__":
+    test_unit_col2im()
+
+# %% [markdown]
+"""
+### A Differentiable im2col Convolution
+
+With col2im in hand, the convolution becomes a `Function` in the same shape as
+Module 09's `Conv2dFunction`: `forward` receives NumPy arrays and returns the
+output array, `backward` receives the output gradient and returns one gradient
+per input. `Function.apply` records the operation, so `loss.backward()` reaches
+it like any other.
+
+```
+forward(x, weight, bias)                         backward(grad_output)
+────────────────────────                         ─────────────────────
+cols = im2col(x)          ── saved ──►           G = grad_output as (R, out_ch)
+W = weight → (C·k·k, out_ch)  ── saved ──►       grad_W    = cols.T @ G  → weight shape
+out = cols @ W + bias                            grad_b    = G.sum(axis=0)
+→ (N, out_ch, H_out, W_out)                      grad_x    = col2im(G @ W.T)
+```
+
+`stride` and `padding` arrive as keyword parameters of `apply`, which the base
+class stores as attributes, exactly as `layer` does for `Conv2dFunction`.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "im2col-conv2d-function", "solution": true}
+#| export
+
+class Im2colConv2dFunction(Function):
+    """
+    2D convolution as a differentiable operation: im2col + one matmul forward,
+    two matmuls + col2im backward.
+
+    Usage:
+        out = Im2colConv2dFunction.apply(x, weight, bias, stride=1, padding=1)
+        out = Im2colConv2dFunction.apply(x, weight, stride=1, padding=1)   # no bias
+    """
+
+    def forward(self, x, weight, bias=None):
+        """
+        Convolve with one matrix multiply and save what backward needs.
+
+        TODO: Compute the convolution and save the patch matrix and flattened filters
+
+        APPROACH:
+        1. Read out_ch and k from weight.shape; compute out_h and out_w
+        2. Build the patch matrix: im2col(Tensor(x), k, self.stride, self.padding).data
+        3. Flatten the filters: weight.reshape(out_ch, -1).T
+        4. Save both on self (self.cols, self.w_matrix) with the output shape
+        5. Multiply, add the bias if given, and return the array in
+           (N, out_ch, out_h, out_w) layout
+
+        EXAMPLE:
+        >>> conv = Conv2d(3, 8, kernel_size=3, padding=1)
+        >>> out = Im2colConv2dFunction.apply(x, conv.weight, conv.bias, stride=1, padding=1)
+        >>> out.shape
+        (2, 8, 16, 16)
+
+        HINT: The arrays arriving here are NumPy arrays, not Tensors.
+        """
+        ### BEGIN SOLUTION
+        N, _, H, W = x.shape
+        out_ch, _, k, _ = weight.shape
+        out_h = (H + 2 * self.padding - k) // self.stride + 1
+        out_w = (W + 2 * self.padding - k) // self.stride + 1
+
+        self.cols = im2col(Tensor(x), k, self.stride, self.padding).data
+        self.w_matrix = weight.reshape(out_ch, -1).T
+        self.out_shape = (N, out_h, out_w, out_ch)
+
+        out = self.cols @ self.w_matrix
+        if bias is not None:
+            out = out + bias
+        return out.reshape(self.out_shape).transpose(0, 3, 1, 2)
+        ### END SOLUTION
+
+    def backward(self, grad_output):
+        """
+        Turn the output gradient into gradients for the input, weight, and bias.
+
+        TODO: Compute grad_x, grad_weight, and (if there is a bias) grad_bias
+
+        APPROACH:
+        1. Move grad_output from (N, out_ch, out_h, out_w) to (R, out_ch):
+           transpose(0, 2, 3, 1), then reshape(-1, out_ch)
+        2. grad_W = self.cols.T @ G, then transpose and reshape to weight's shape
+        3. grad_cols = G @ self.w_matrix.T, then col2im it back to x's shape
+        4. grad_b = G.sum(axis=0)
+        5. Return one gradient per input: (grad_x, grad_weight) or
+           (grad_x, grad_weight, grad_b)
+
+        EXAMPLE:
+        >>> out = Im2colConv2dFunction.apply(x, conv.weight, conv.bias, stride=1, padding=1)
+        >>> out.sum().backward()
+        >>> conv.weight.grad.shape
+        (8, 3, 3, 3)
+
+        HINTS:
+        - self.inputs holds the input Tensors: (x, weight) or (x, weight, bias)
+        - The transpose in step 1 undoes the one at the end of forward
+        """
+        ### BEGIN SOLUTION
+        x, weight = self.inputs[0], self.inputs[1]
+        out_ch, _, k, _ = weight.shape
+
+        G = np.asarray(grad_output).transpose(0, 2, 3, 1).reshape(-1, out_ch)
+
+        grad_weight = (self.cols.T @ G).T.reshape(weight.shape)
+        grad_cols = G @ self.w_matrix.T
+        grad_x = col2im(Tensor(grad_cols), x.shape, k, self.stride, self.padding).data
+
+        if len(self.inputs) > 2:
+            return grad_x, grad_weight, G.sum(axis=0)
+        return grad_x, grad_weight
+        ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: im2col Convolution Gradients
+
+This test validates the im2col backward pass against Module 09's loops.
+
+**What we're testing**: Output, input gradient, weight gradient, and bias
+gradient all match `Conv2d` on the same weights, with and without stride
+**Why it matters**: A convolution that computes the right output with the wrong
+gradients trains a different model; only a gradient check catches it
+**Expected**: Every gradient agrees with Conv2d's backward within float tolerance
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-im2col-conv2d-function", "locked": true, "points": 15}
+def test_unit_im2col_conv2d_function():
+    """🧪 Test im2col convolution gradients against Module 09's Conv2d."""
+    print("🧪 Unit Test: im2col Convolution Gradients...")
+
+    from tinytorch.core.spatial import Conv2d
+
+    def grads_of(output, tensors):
+        # A fixed random projection makes every output element matter differently
+        projection = Tensor(np.random.default_rng(11).standard_normal(output.shape))
+        (output * projection).sum().backward()
+        return [np.asarray(getattr(t.grad, "data", t.grad)) for t in tensors]
+
+    for stride, padding in ((1, 1), (2, 0)):
+        conv = Conv2d(3, 4, kernel_size=3, stride=stride, padding=padding)
+        conv.bias.data[:] = rng.standard_normal(4)
+        x_data = rng.standard_normal((2, 3, 7, 7)).astype(np.float32)
+
+        # Reference: Module 09's loops
+        x_ref = Tensor(x_data, requires_grad=True)
+        out_ref = conv(x_ref)
+        ref = grads_of(out_ref, [x_ref, conv.weight, conv.bias])
+
+        # im2col path on copies of the same parameters
+        x = Tensor(x_data, requires_grad=True)
+        w = Tensor(conv.weight.data.copy(), requires_grad=True)
+        b = Tensor(conv.bias.data.copy(), requires_grad=True)
+        out = Im2colConv2dFunction.apply(x, w, b, stride=stride, padding=padding)
+        assert out._grad_fn is not None, \
+            "Output has no _grad_fn: backward() would never reach this convolution"
+        assert np.allclose(out.data, out_ref.data, atol=1e-5), \
+            f"Forward pass differs from Conv2d at stride={stride}, padding={padding}"
+        got = grads_of(out, [x, w, b])
+
+        for name, g, r in zip(("input", "weight", "bias"), got, ref):
+            assert g.shape == r.shape, f"{name} gradient shape {g.shape}, expected {r.shape}"
+            assert np.allclose(g, r, atol=1e-4), \
+                f"{name} gradient differs from Conv2d by up to {np.abs(g - r).max():.2e} " \
+                f"at stride={stride}, padding={padding}"
+
+    # Without a bias there are exactly two gradients
+    x = Tensor(rng.standard_normal((1, 2, 5, 5)), requires_grad=True)
+    w = Tensor(rng.standard_normal((3, 2, 3, 3)), requires_grad=True)
+    out = Im2colConv2dFunction.apply(x, w, stride=1, padding=0)
+    out.sum().backward()
+    assert x.grad is not None and w.grad is not None, "Gradients must reach input and weight without a bias"
+
+    print("✅ Im2colConv2dFunction works correctly!")
+
+if __name__ == "__main__":
+    test_unit_im2col_conv2d_function()
 
 # %% [markdown]
 """
@@ -1624,7 +2002,8 @@ if __name__ == "__main__":
 im2col makes two claims: the matrix multiply is much faster than Module 09's
 loops, and the patch matrix costs about `k × k` times the input's memory. Measure
 both on layers shaped like the CNN milestones, kept small enough that the loop
-version finishes in a few seconds.
+version finishes in a few seconds, first for the forward pass alone and then for
+a full training step through `Im2colConv2dFunction`.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-im2col", "solution": false}
@@ -1667,6 +2046,31 @@ def analyze_im2col_tradeoff():
               f"{loop_time/im2col_time:7.0f}× │ {patch_bytes/input_bytes:5.1f}× input │")
 
     print("└──────────────────────┴────────────┴────────────┴──────────┴──────────────┘")
+
+    # Training needs forward AND backward. Time one full step on each path.
+    print("\n🔍 One training step (forward + backward):")
+    print("┌──────────────────────┬────────────┬────────────┬──────────┐")
+    print("│ Layer                │ Loops (ms) │ im2col (ms)│ Speedup  │")
+    print("├──────────────────────┼────────────┼────────────┼──────────┤")
+    for batch, in_ch, out_ch, size in layers:
+        conv = Conv2d(in_ch, out_ch, kernel_size=kernel_size, padding=padding)
+        x_data = rng.standard_normal((batch, in_ch, size, size)).astype(np.float32)
+
+        start = time.perf_counter()
+        conv(Tensor(x_data, requires_grad=True)).sum().backward()
+        loop_step = time.perf_counter() - start
+
+        w = Tensor(conv.weight.data.copy(), requires_grad=True)
+        b = Tensor(conv.bias.data.copy(), requires_grad=True)
+        start = time.perf_counter()
+        for _ in range(DEFAULT_TIMING_ITERATIONS):
+            Im2colConv2dFunction.apply(Tensor(x_data, requires_grad=True), w, b,
+                                       stride=1, padding=padding).sum().backward()
+        im2col_step = (time.perf_counter() - start) / DEFAULT_TIMING_ITERATIONS
+
+        label = f"{batch}×{in_ch}→{out_ch} @ {size}×{size}"
+        print(f"│ {label:20s} │ {loop_step*1000:10.1f} │ {im2col_step*1000:10.3f} │ {loop_step/im2col_step:7.0f}× │")
+    print("└──────────────────────┴────────────┴────────────┴──────────┘")
 
     print("\n💡 Key insights:")
     print("   • Both versions do the same multiply-adds; the loops run them one at a time in Python")
@@ -1874,6 +2278,8 @@ def test_module():
     test_unit_tiled_matmul()
     test_unit_im2col()
     test_unit_im2col_conv2d()
+    test_unit_col2im()
+    test_unit_im2col_conv2d_function()
 
     print("\nRunning integration scenarios...")
 
@@ -1998,6 +2404,31 @@ def test_module():
     print(f"   ✅ Classifier head: {flat.shape} → {logits.shape}")
     print("✅ im2col convolution composes with the rest of the pipeline!")
 
+    # One training step: the im2col Function must update weights exactly as Conv2d does
+    print("🧪 Integration Test: one SGD step through im2col matches Conv2d...")
+    learning_rate = 0.1
+    x_data = rng.standard_normal((2, 3, 6, 6)).astype(np.float32)
+    target = rng.standard_normal((2, 4, 6, 6)).astype(np.float32)
+
+    reference_conv = Conv2d(3, 4, kernel_size=3, padding=1)
+    w = Tensor(reference_conv.weight.data.copy(), requires_grad=True)
+    b = Tensor(reference_conv.bias.data.copy(), requires_grad=True)
+
+    def squared_error(out):
+        diff = out - Tensor(target)
+        return (diff * diff).sum()
+
+    squared_error(reference_conv(Tensor(x_data))).backward()
+    squared_error(Im2colConv2dFunction.apply(Tensor(x_data), w, b, stride=1, padding=1)).backward()
+
+    grad_of = lambda t: np.asarray(getattr(t.grad, "data", t.grad))
+    updated_reference = reference_conv.weight.data - learning_rate * grad_of(reference_conv.weight)
+    updated_im2col = w.data - learning_rate * grad_of(w)
+    assert np.allclose(updated_im2col, updated_reference, atol=1e-3), \
+        "One SGD step through im2col must move the weights exactly as Conv2d does"
+    print(f"   ✅ Weight update matches Conv2d (max difference {np.abs(updated_im2col - updated_reference).max():.1e})")
+    print("✅ im2col convolution trains like Conv2d!")
+
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 17")
@@ -2037,16 +2468,16 @@ For edge deployment (memory critical, stability required, hardware diverse):
 
 ---
 
-### Question 4: Training Through im2col
-Your im2col_conv2d computes the forward pass as `out = cols @ W`.
-- The gradient with respect to the weights is `cols.T @ grad_out`. Is that a
-  matrix multiply of the same size as the forward pass? _____
-- The gradient with respect to `cols` is `grad_out @ W.T`, but training needs the
-  gradient with respect to the *image*. Each pixel appears in up to k×k rows of
-  `cols`. How do you combine those rows into one pixel gradient? _____
-- That reverse step is called col2im. Why can't it be a single matrix multiply? _____
-- For the 4×32×32×32 layer in this module, how much memory must you keep from the
-  forward pass to run the backward pass? _____
+### Question 4: What Training Through im2col Costs
+Your Im2colConv2dFunction saves the patch matrix in forward and uses it in backward.
+- For the 4×32×32×32 layer with a 3×3 kernel and same padding, how many bytes does
+  that saved patch matrix hold? How many for the input it came from? _____
+- A 20-layer CNN keeps one such buffer per convolution until backward reaches
+  it. Roughly how does that compare with storing only the layer inputs? _____
+- The alternative is to rebuild `cols` from the saved input during backward.
+  What does that cost in time, and when would you choose it? _____
+- col2im is the only step of the backward pass that is not a matrix multiply.
+  Why can't it be one? _____
 """
 
 # %% [markdown]
@@ -2110,6 +2541,7 @@ Congratulations! You've mastered the fundamental techniques for accelerating neu
 - Compared **GELU implementations** with different intermediate Tensor allocation costs; actual kernel fusion remains a production bridge
 - Created **cache-aware tiling** for efficient large matrix operations
 - Lowered **convolution to one matrix multiply** with im2col and checked it against Module 09's Conv2d
+- Wrote its **backward pass** with col2im, so a convolution can train through two matmuls and a scatter-add instead of seven nested loops
 - Analyzed **arithmetic intensity patterns** and their impact on the roofline model
 - Measured **memory efficiency** across different operation types
 - Developed **production decision framework** for systematic optimization
