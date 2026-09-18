@@ -1,40 +1,40 @@
 ## The Cost of an Invocation {#sec-vol3-processor-cost}
 
-Every invocation of a stochastic processor core exacts a concrete physical toll on accelerator hardware, translating the evaluation of conditional probability distributions into memory bus transactions, thermal dissipation, and wall-clock execution delay. A host operating system cannot treat a model call as an abstract mathematical function with uniform latency. The total elapsed wall-clock latency of an invocation, $T_{\text{call}}$, decomposes across multiple physical and software subsystems:
+Every invocation of a stochastic processor core exacts a physical toll on accelerator hardware, translating probability distribution evaluations into memory bus transactions, thermal dissipation, and wall-clock delay. The total elapsed wall-clock latency, $T_{\text{call}}$, decomposes across physical and software subsystems:
 
 $$T_{\text{call}} = T_{\text{queue}} + T_{\text{transport}} + T_{\text{prefill}} + \sum_{t=1}^K T_{\text{step}}(M + t) + T_{\text{validate}}$$ {#eq-vol3-call-latency}
 
-In this pipeline, $T_{\text{queue}}$ reflects host-side runtime dispatch and scheduling delays within the inference engine; $T_{\text{transport}}$ accounts for streaming serialization and ingress/egress transport over the RPC boundary; $T_{\text{prefill}}$ is the accelerator time required to ingest and project the input context sequence $\mathbf{x}_{1:M}$; $\sum_{t=1}^K T_{\text{step}}(M + t)$ represents the iterative autoregressive generation of $K$ candidate tokens across time; and $T_{\text{validate}}$ captures deterministic host-side verification, including streaming AST parsing, schema checks, and sandboxed test execution.
+where $T_{\text{queue}}$ is host runtime scheduling delay; $T_{\text{transport}}$ is streaming RPC transport; $T_{\text{prefill}}$ is accelerator time to ingest prompt context $\mathbf{x}_{1:M}$; $\sum_{t=1}^K T_{\text{step}}(M + t)$ is iterative autoregressive generation of $K$ candidate tokens; and $T_{\text{validate}}$ is deterministic verification (AST parsing, schema validation, test execution).
 
-Consider our canonical repository repair agent diagnosing the configuration parser defect. To construct the diagnostic prompt, the agent runtime stages an input context of $M = 40{,}000$ tokens consisting of Abstract Syntax Trees, compiler diagnostic logs, test execution traces, and source file buffers. From this context, the neural core must generate an edit tool call of merely $K = 200$ tokens. Although the output sequence represents less than $0.5\%$ of the total processed tokens, the physical hardware spends its time across two radically different execution regimes governed by distinct architectural bottlenecks.
+Consider our repair agent diagnosing the configuration parser defect. The runtime stages an input context of $M = 40{,}000$ tokens (ASTs, logs, test traces, source files). From this context, the neural core emits an edit tool call of $K = 200$ tokens. Although the output sequence is under $0.5\%$ of total tokens, execution spans two radically different physical regimes.
 
 ### Prefill versus Decode: The Roofline Disparity and Activation Ceilings
 
-The physical behavior of an accelerator executing transformer workloads is characterized by the Roofline Model [@williams2009], which relates attainable computational throughput to operational arithmetic intensity:
+Accelerator execution is characterized by the Roofline Model [@williams2009], relating attainable throughput to operational arithmetic intensity:
 
 $$I = \frac{\text{Floating-Point Operations (FLOPs)}}{\text{DRAM Bytes Transferred Across Memory Bus}}$$ {#eq-vol3-arithmetic-intensity}
 
-An accelerator architecture possesses an intrinsic saturation point known as the machine balance:
+An accelerator architecture possesses a hardware saturation threshold known as the machine balance:
 
 $$I_{\text{sat}} = \frac{\Pi_{\text{peak}}}{\beta_{\text{mem}}}$$ {#eq-vol3-machine-balance}
 
-where $\Pi_{\text{peak}}$ denotes peak compute throughput in floating-point operations per second ($\text{FLOP/s}$), and $\beta_{\text{mem}}$ represents high-bandwidth memory (HBM) streaming bandwidth in bytes per second ($\text{bytes/s}$). Workloads whose arithmetic intensity satisfies $I \ge I_{\text{sat}}$ sit on the compute-bound plateau of the Roofline curve, fully saturating accelerator tensor ALUs. Workloads where $I < I_{\text{sat}}$ reside on the sloped, memory-bandwidth-bound boundary, where compute pipelines remain idle while waiting for weight and activation transfers across the bus (@fig-prefill-vs-decode).
+where $\Pi_{\text{peak}}$ denotes peak compute throughput ($\text{FLOP/s}$), and $\beta_{\text{mem}}$ represents high-bandwidth memory (HBM) bandwidth ($\text{bytes/s}$). Workloads with $I \ge I_{\text{sat}}$ sit on the compute-bound plateau. Workloads with $I < I_{\text{sat}}$ reside on the memory-bandwidth-bound boundary, where compute pipelines stall waiting for memory transfers (@fig-prefill-vs-decode).
 
 ![Arithmetic intensity across prefill and decode execution phases on the accelerator Roofline model. Compute-bound prefill saturates execution pipelines, whereas decode stalls on memory bandwidth.](images/svg/prefill_vs_decode_v2.svg){#fig-prefill-vs-decode width="95%"}
 
 #### Prefill Arithmetic Intensity and Activation Traffic
 
-During the prefill phase ($T_{\text{prefill}}$), the stochastic core processes all $M$ prompt tokens concurrently. Because the causal attention mask permits parallel ingestion of historical positions during prompt evaluation, the projection of input tokens through the network's linear layers maps directly to General Matrix-Matrix Multiplication (GEMM).
+During prefill ($T_{\text{prefill}}$), the core processes all $M$ prompt tokens concurrently. Because the causal attention mask permits parallel ingestion, projecting input tokens through linear layers maps directly to General Matrix-Matrix Multiplication (GEMM).
 
-For a single linear projection $\mathbf{Y} = \mathbf{X} \mathbf{W}$ where input activation $\mathbf{X} \in \mathbb{R}^{M \times d}$ is multiplied against weight matrix $\mathbf{W} \in \mathbb{R}^{d \times d'}$, the layer requires $2 M d d'$ floating-point operations. However, evaluating true operational intensity requires accounting for all memory traffic across the bus: reading weights ($P d d'$ bytes), reading input activations ($P M d$ bytes), and writing output activations ($P M d'$ bytes), where $P$ is the storage precision (e.g., $P = 2$ for FP16/BF16):
+For a linear projection $\mathbf{Y} = \mathbf{X} \mathbf{W}$ ($\mathbf{X} \in \mathbb{R}^{M \times d}, \mathbf{W} \in \mathbb{R}^{d \times d'}$), the layer requires $2 M d d'$ FLOPs. Accounting for all bus traffic—reading weights ($P d d'$ bytes), reading inputs ($P M d$ bytes), and writing outputs ($P M d'$ bytes) at precision $P$ (e.g., $P = 2$ for FP16/BF16):
 
 $$I_{\text{layer}}(M) = \frac{2 M d d'}{P [d d' + M (d + d')]} = \frac{2}{P \left[ \frac{1}{M} + \frac{1}{d} + \frac{1}{d'} \right]}$$ {#eq-vol3-layer-intensity}
 
-As prompt length $M$ increases from $1$ to $40{,}000$, arithmetic intensity rises from $I \approx 1\text{ FLOP/byte}$ up to an asymptotic saturation ceiling:
+As prompt length $M$ increases from $1$ to $40{,}000$, arithmetic intensity rises from $I \approx 1\text{ FLOP/byte}$ to an asymptotic ceiling:
 
 $$I_{\max} = \frac{2}{P \left( \frac{1}{d} + \frac{1}{d'} \right)} \approx \frac{d}{2P} \quad (\text{for } d = d')$$
 
-For a model with hidden dimension $d = 8192$ at FP16 ($P = 2$), the operational intensity asymptotically saturates at $I_{\max} \approx 2{,}048\text{ FLOP/byte}$. It does *not* scale infinitely with sequence length. Furthermore, intermediate activations in the SwiGLU feed-forward blocks ($\frac{8}{3}d \approx 28{,}672$) generate over $2.29\text{ GiB}$ per activation tensor, while writing the Key-Value (KV) cache for $M = 40{,}000$ tokens incurs $13.1\text{ GB}$ of DRAM write traffic. Nonetheless, comparing $I_{\max} \approx 2{,}048\text{ FLOP/byte}$ against the machine balance of enterprise accelerators (@tbl-hardware-balance) demonstrates that $I_{\text{prefill}} \gg I_{\text{sat}}$. Prefill operates deep within the compute-bound plateau.
+For a model with hidden dimension $d = 8192$ at FP16 ($P = 2$), operational intensity saturates at $I_{\max} \approx 2{,}048\text{ FLOP/byte}$. Intermediate activations in SwiGLU blocks ($\frac{8}{3}d \approx 28{,}672$) generate over $2.29\text{ GiB}$ per tensor, while writing the Key-Value (KV) cache for $M = 40{,}000$ tokens incurs $13.1\text{ GB}$ of DRAM traffic. Comparing $I_{\max} \approx 2{,}048\text{ FLOP/byte}$ against hardware machine balance (@tbl-hardware-balance) confirms that $I_{\text{prefill}} \gg I_{\text{sat}}$: prefill operates deep within the compute-bound plateau.
 
 ::: {#tbl-hardware-balance}
 | Hardware Platform | Precision Format | Peak Compute ($\Pi_{\text{peak}}$) | Memory Bandwidth ($\beta_{\text{mem}}$) | Machine Balance ($I_{\text{sat}}$) |
@@ -43,172 +43,150 @@ For a model with hidden dimension $d = 8192$ at FP16 ($P = 2$), the operational 
 | **NVIDIA B200** [@nvidia2024blackwell] | FP16 / BF16 | $2{,}250.0\text{ TFLOP/s}$ | $8{,}000\text{ GB/s}$ | $281.3\text{ FLOP/byte}$ |
 | **Apple M4 Max** | FP16 | $104.0\text{ TFLOP/s}$ | $546\text{ GB/s}$ | $190.5\text{ FLOP/byte}$ |
 
-: Hardware balance and arithmetic intensity saturation thresholds across representative accelerator platforms. Peak compute rates reflect dense half-precision Tensor Core execution without structural 2:4 sparsity. {#tbl-hardware-balance}
+: Hardware balance and arithmetic intensity saturation thresholds across representative accelerator platforms. {#tbl-hardware-balance}
 :::
 
 #### Accounting for $O(M^2)$ Attention Compute
 
-A common systems error is modeling prefill compute purely as linear weight projections ($2 |\Theta| M$), ignoring the self-attention mechanism. While linear projections scale as $O(M)$, self-attention computes pairwise interactions between all tokens, scaling as $O(M^2)$:
+A common systems error is modeling prefill compute purely as linear projections ($2 |\Theta| M$). While linear projections scale as $O(M)$, self-attention scales as $O(M^2)$:
 
 $$\text{FLOPs}_{\text{prefill}} = 2 |\Theta| M + 2 L H_Q M^2 d_{\text{head}}$$ {#eq-vol3-prefill-flops-full}
 
-where the factor of 2 in the second term accounts for the two matrix multiplications in attention ($\mathbf{Q}\mathbf{K}^\top$ and $\mathbf{A}\mathbf{V}$), $L$ is the number of transformer layers, $H_Q$ is the count of query heads, and $d_{\text{head}}$ is head dimension.
-
-For Llama-3-70B ($L = 80$, $H_Q = 64$, $d_{\text{head}} = 128$) at $M = 40{,}000$ tokens:
-- Linear weight projections require $2 \times 70 \times 10^9 \times 40{,}000 = 5.60 \times 10^{15}\text{ FLOPs}$ ($5.60\text{ PFLOPs}$).
-- Self-Attention (accounting for causal triangular masking halving the pairwise space) requires:
-  $$\text{FLOPs}_{\text{attn}} = 2 \times 80 \times 64 \times (40{,}000)^2 \times 128 \times \frac{1}{2} \approx 2.10 \times 10^{15}\text{ FLOPs} \quad (2.10\text{ PFLOPs})$$
-- **Total prefill compute is $5.60 + 2.10 = 7.70\text{ PFLOPs}$.** Self-attention constitutes $37.5\%$ of the linear projection compute! Omitting attention compute understates prefill latency by more than a third.
+where $L$ is transformer layers, $H_Q$ is query heads, and $d_{\text{head}}$ is head dimension. For Llama-3-70B ($L = 80, H_Q = 64, d_{\text{head}} = 128$) at $M = 40{,}000$ tokens, linear projections require $5.60\text{ PFLOPs}$, while causal self-attention adds $2.10\text{ PFLOPs}$ ($37.5\%$ additional compute). Total prefill reaches $7.70\text{ PFLOPs}$. Omitting attention understates prefill latency by over a third.
 
 ### The Memory Shuttle Problem and the Single-Agent Serialization Wall
 
-Once generation begins ($T_{\text{step}}$), the execution model undergoes a phase change. The processor core evaluates tokens autoregressively: emitting token $t+1$ requires the causal output of token $t$. At step $t$, the input activation collapses from an $M$-token matrix into a single token vector $\mathbf{x}_t \in \mathbb{R}^{1 \times d}$.
+Once generation begins ($T_{\text{step}}$), execution undergoes a phase change. Emitting token $t+1$ requires the causal output of token $t$. At step $t$, the input activation collapses to a single token vector $\mathbf{x}_t \in \mathbb{R}^{1 \times d}$.
 
-Computing the next-token probability distribution requires evaluating linear projections between this single activation vector and the weight matrices of $\Theta$, converting the linear algebra from a dense matrix-matrix multiplication (GEMM) into a matrix-vector multiplication (GEMV). Generating one token still demands $2 |\Theta|$ floating-point operations. However, to execute those operations, the accelerator must fetch the entire parameter tensor $\Theta$ across the memory bus from DRAM into SRAM, alongside reading the historical Key-Value activations $\text{Mem}_{\text{KV}}(M+t)$ required for causal attention across the active context:
+Linear algebra transitions from matrix-matrix multiplication (GEMM) to matrix-vector multiplication (GEMV). Generating one token still demands $2 |\Theta|$ FLOPs. However, to execute them, the accelerator must stream the entire parameter tensor $\Theta$ from DRAM into SRAM, alongside reading historical KV activations:
 
 $$I_{\text{decode}}(t) = \frac{2 |\Theta| + 4 L H_Q (M + t) d_{\text{head}}}{P |\Theta| + \text{Mem}_{\text{KV}}(M + t)} \le \frac{2}{P}$$ {#eq-vol3-decode-intensity}
 
-For 16-bit weights ($P = 2$) and negligible context, operational intensity is strictly bounded by $I_{\text{decode}} \le 1\text{ FLOP/byte}$. When the staged context is deep (e.g., $M = 40{,}000$ tokens in a repository repair task), reading the KV cache adds $13.1\text{ GB}$ of DRAM read traffic per token (where each token consumes $2 \times L \times H_{\text{kv}} \times d_{\text{head}} \times P = 327{,}680\text{ bytes} \approx 320\text{ KiB}$). This extra shuttle depresses decode arithmetic intensity further to:
+For 16-bit weights ($P = 2$), intensity collapses to $I_{\text{decode}} \le 1\text{ FLOP/byte}$. On an accelerator where $I_{\text{sat}} \approx 295\text{ FLOP/byte}$, generation operates nearly three orders of magnitude below balance: tensor cores sit starved of operands for $>99\%$ of the cycle, stalled on the memory bus.
 
-$$I_{\text{decode}} \approx \frac{140 \times 10^9 + 0.105 \times 10^{12}\text{ FLOPs}}{140\text{ GB} + 13.1\text{ GB}} \approx 0.98\text{ FLOP/byte}$$
+#### On-Chip SRAM Limits and the Shuttle Floor
 
-On an NVIDIA H100 accelerator where $I_{\text{sat}} \approx 295\text{ FLOP/byte}$, generation operates nearly three orders of magnitude below the machine balance point. The tensor compute cores sit starved of operands for more than $99\%$ of the decode cycle, stalled on the physical memory bus.
-
-#### On-Chip SRAM Hierarchy and the Shuttle Mechanics
-
-This structural starvation during decode is termed the **Memory Shuttle Problem**. For every individual token emitted, the physical memory controller must shuttle tens or hundreds of gigabytes of silicon DRAM across the bus pin interfaces to perform arithmetic on a single row vector.
-
-Why cannot these parameter weights remain in high-speed on-chip cache? Modern accelerator silicon provides approximately $117.6\text{ MiB}$ of total on-chip SRAM across its architecture:
-- An NVIDIA H100 SXM5 features 132 active Streaming Multiprocessors (SMs).
-- Each SM integrates $256\text{ KiB}$ of unified L1 Data Cache / Shared Memory ($132 \times 256\text{ KiB} = 33.79\text{ MiB}$).
-- Each SM integrates $256\text{ KiB}$ of Register File SRAM ($132 \times 256\text{ KiB} = 33.79\text{ MiB}$).
-- The GPU integrates $50\text{ MiB}$ of dedicated L2 cache partitioned across memory controllers on the crossbar interconnect.
-
-Total on-chip SRAM equals $33.79 + 33.79 + 50.0 \approx 117.6\text{ MiB}$. In contrast, the static weight tensor $\Theta$ of a 70B model ($140{,}000\text{ MB}$) is more than one thousand times larger than total on-chip storage. Each transformer layer alone requires $\approx 1.75\text{ GB}$ of weights. Consequently, weights cannot reside on-chip; every layer's weight matrices must be continuously streamed from off-chip HBM across internal buses into SRAM, multiplied against the single token activation, and immediately evicted to accommodate the subsequent layer.
+This structural starvation is the **Memory Shuttle Problem**. Modern accelerator silicon integrates only $\sim 100\text{ MB}$ of total on-chip SRAM, while a 70B model requires $140\text{ GB}$ of weights—over a thousand times larger. For every token emitted, the entire weight tensor must be streamed from HBM into SRAM, multiplied against the single activation, and evicted.
 
 #### Reference Accelerator Cluster and Real Bus Utilization
 
-To ground these numbers in real hardware, consider our reference deployment: a dual-GPU Tensor Parallelism configuration ($TP=2$) across two NVIDIA H100 SXM5 accelerators connected via NVLink 4 ($900\text{ GB/s}$ bidirectional per GPU).
+Consider our reference deployment: dual-GPU Tensor Parallelism ($TP=2$) across two NVIDIA H100 SXM5 accelerators connected via NVLink 4 ($900\text{ GB/s}$ bidirectional per GPU).
 
 - **Aggregate HBM3 Capacity:** $2 \times 80\text{ GB} = 160\text{ GB}$.
 - **Weight Footprint:** $140\text{ GB}$ at FP16 ($70\text{ GB}$ per GPU).
 - **Theoretical Peak Bandwidth:** $2 \times 3{,}350\text{ GB/s} = 6{,}700\text{ GB/s}$.
-- **Real Bus Efficiency ($\eta_{\text{bus}}$):** No memory controller sustains $100\%$ of theoretical pin bandwidth due to DRAM refresh cycles (tREFI/tRFC), read-to-write turnaround cycles, bank conflicts, and ECC overhead. Tuned GEMV kernels achieve $\eta_{\text{bus}} \approx 80\%$, yielding an effective streaming bandwidth of:
+- **Real Bus Efficiency ($\eta_{\text{bus}}$):** Due to DRAM refresh cycles, read-write turnarounds, bank conflicts, and ECC, tuned GEMV kernels achieve $\eta_{\text{bus}} \approx 80\%$, yielding effective streaming bandwidth:
   $$\beta_{\text{eff}} = 0.80 \times 6{,}700\text{ GB/s} = 5{,}360\text{ GB/s}$$
 
-The raw weight shuttle transfer floor per token is therefore:
+The weight shuttle transfer floor per token is:
 
 $$T_{\text{shuttle}} = \frac{140\text{ GB}}{5{,}360\text{ GB/s}} \approx 26.1\text{ ms/token} \quad (\approx 38.3\text{ tokens/s})$$
 
 #### The Complete Dynamic Decode Step Formulation
 
-In reality, decode latency per token is not a flat constant; it grows monotonically with context length $M + t$ and includes network and driver overheads:
+Decode latency grows with context length $M + t$ and includes network and driver overheads:
 
 $$T_{\text{step}}(t) = \frac{\text{Footprint}_{\Theta}}{\beta_{\text{eff}}} + \frac{2 L H_{\text{kv}} d_{\text{head}} P (M + t)}{\beta_{\text{eff}}} + 2 L \cdot \tau_{\text{NVLink}}(d_{\text{model}}) + \tau_{\text{launch}}$$ {#eq-vol3-dynamic-decode-step}
 
 where:
 1. **Weight Shuttle:** $\frac{140\text{ GB}}{5{,}360\text{ GB/s}} \approx 26.1\text{ ms}$.
-2. **KV Cache Read Overhead:** At $M = 40{,}000$ tokens, fetching the $13.1\text{ GB}$ KV cache across $5{,}360\text{ GB/s}$ adds:
+2. **KV Cache Read Overhead:** At $M = 40{,}000$, fetching the $13.1\text{ GB}$ KV cache across $5{,}360\text{ GB/s}$ adds:
    $$\Delta T_{\text{KV}} = \frac{13.1\text{ GB}}{5{,}360\text{ GB/s}} \approx 2.44\text{ ms per token}$$
-3. **NVLink Synchronization Latency ($\tau_{\text{NVLink}}$):** Megatron-style Tensor Parallelism requires two All-Reduce communications per transformer layer (Self-Attention and MLP). For $L = 80$ layers, each token requires $160$ sequential All-Reduces. In decode ($B=1$), the payload is a tiny $16\text{ KiB}$ activation vector, making NVLink completely latency-bound ($\approx 3.0\,\mu\text{s}$ per call):
-   $$160 \times 3.0\,\mu\text{s} \approx 0.48\text{ ms of network synchronization}$$
-4. **Driver Kernel Launch Latency ($\tau_{\text{launch}}$):** Dispatched imperatively, 560 projection kernels and normalization passes would incur $2.4\text{ ms}$ of CPU driver launch latency. Captured inside **CUDA Graphs**, this overhead is amortized to $< 5\,\mu\text{s}$.
+3. **NVLink Synchronization Latency ($\tau_{\text{NVLink}}$):** Megatron-style TP requires two All-Reduce calls per layer ($160$ sequential All-Reduces for $L = 80$). In decode ($B=1$), the tiny $16\text{ KiB}$ payload makes NVLink latency-bound ($\approx 3.0\,\mu\text{s}$ per call):
+   $$160 \times 3.0\,\mu\text{s} \approx 0.48\text{ ms}$$
+4. **Driver Kernel Launch Latency ($\tau_{\text{launch}}$):** Captured inside **CUDA Graphs**, launch overhead is amortized to $< 5\,\mu\text{s}$.
 
-Summing these components, generating a token at position $M = 40{,}000$ requires:
+Generating a token at position $M = 40{,}000$ requires:
 
 $$T_{\text{step}} = 26.1\text{ ms} + 2.44\text{ ms} + 0.48\text{ ms} + 0.005\text{ ms} \approx 29.0\text{ ms/token} \quad (\approx 34.5\text{ tokens/s})$$
 
-At $29.0\text{ ms/token}$, generating our $K = 200$ token patch takes $200 \times 29.0\text{ ms} \approx 5.80\text{ seconds}$. Meanwhile, computing prefill over $7.70\text{ PFLOPs}$ on our dual-H100 cluster running at $70\%$ Model Flops Utilization ($1{,}385\text{ TFLOP/s}$ effective):
+Generating $K = 200$ tokens takes $200 \times 29.0\text{ ms} \approx 5.80\text{ seconds}$. Meanwhile, prefill over $7.70\text{ PFLOPs}$ at $70\%$ Model Flops Utilization ($1{,}385\text{ TFLOP/s}$ effective):
 
 $$T_{\text{prefill}} = \frac{7.70 \times 10^{15}\text{ FLOPs}}{1.385 \times 10^{15}\text{ FLOP/s}} \approx 5.56\text{ seconds}$$
 
-In this cold invocation, prefill ($5.56\text{ s}$) and decode ($5.80\text{ s}$) contribute almost equally to the $11.36$-second execution time.
+In this cold invocation, prefill ($5.56\text{ s}$) and decode ($5.80\text{ s}$) contribute equally to the $11.36$-second execution time.
 
 ::: {#tbl-vol3-latency-regimes}
 | Context Regime | Workload Characteristics | Primary System Bottleneck | Dominant Optimization Strategy |
 | :--- | :--- | :--- | :--- |
 | **Short $M$ / Short $K$** | Status pings, binary intent checks | RPC and queue transport overhead ($T_{\text{transport}} + T_{\text{queue}}$) | Connection pooling, collocated host runtimes |
 | **Short $M$ / Long $K$** | Code synthesis, greenfield generation | Memory bandwidth shuttle during decode ($I_{\text{decode}} \approx 1$) | Speculative decoding, parameter quantization |
-| **Long $M$ / Short $K$** | Repository triage, log failure diagnosis | Compute capacity during prefill ($2 |\Theta| M + \text{Attn}$) | Prefix KV-caching, chunked prefill |
+| **Long $M$ / Short $K$** | Repository triage, log failure diagnosis | Compute capacity during prefill ($2 \lvert \Theta \rvert M + \text{Attn}$) | Prefix KV-caching, chunked prefill |
 | **Long $M$ / Long $K$** | Full-file refactoring, end-to-end rewrite | Compound: Compute prefill followed by memory-stalled decode | Paged context tiering, asynchronous streaming |
 
 : Execution regimes, operational bottlenecks, and systems mitigations across input context ($M$) and generation ($K$) scales. {#tbl-vol3-latency-regimes}
 :::
 
-### The Twin Pillars of Agent Latency: Prefix Caching and Speculative Decoding
+##### The Twin Pillars of Agent Latency: Prefix Caching and Speculative Decoding
 
-When the repair agent inspects a failed test run and issues a subsequent invocation (Turn 2), the repository files, compiler configurations, and system prompts remain unchanged; only the compiler's terminal error trace and the agent's scratchpad update. If the host runtime transmits the entire context as an opaque token buffer on every turn, the inference engine re-evaluates the full prefill GEMM, squandering billions of floating-point operations re-ingesting static context.
+When the repair agent inspects a failed test run and issues a subsequent call (Turn 2), repository files and system prompts remain unchanged; only the compiler's error trace and scratchpad update. Re-transmitting the entire context forces the engine to re-evaluate the full prefill GEMM, squandering billions of FLOPs re-ingesting static context.
 
-To eliminate this redundant compute, modern inference engines implement **Prefix Caching** through persistent memory structures such as Radix Trees (@fig-radix-prefix-cache).
+To eliminate redundant compute, modern engines implement **Prefix Caching** via Radix Trees (@fig-radix-prefix-cache).
 
-```{mermaid}
-%%| label: fig-radix-prefix-cache
-%%| fig-cap: "Radix tree hierarchy for structural KV-cache prefix retention across sequential agent turns."
-flowchart TD
-    Root["<b>Cache Node A (Root)</b><br>System Identity & Schema Contracts<br><i>Tokens 1..5,000</i>"]
-    Trunk["<b>Cache Node B (Trunk)</b><br>Repository AST & File Buffers<br><i>Tokens 5,001..38,000</i>"]
-    Turn1["<b>Cache Node C (Turn 1 Leaf)</b><br>Test Run Log A<br><i>Tokens 38,001..40,000</i><br><b>[Cache Hit / Retained]</b>"]
-    Turn2["<b>Cache Node D (Turn 2 Leaf)</b><br>Test Run Log B<br><i>Tokens 38,001..40,200</i><br><b>[Cache Miss &rarr; Compute Prefill]</b>"]
-
-    Root --> Trunk
-    Trunk -->|Turn 1 Request| Turn1
-    Trunk -->|Turn 2 Request| Turn2
+::: {#fig-radix-prefix-cache}
+```
++-----------------------------------------------------------------------------------+
+| Radix Tree Prefix Cache Hierarchy in Accelerator HBM                              |
+|                                                                                   |
+|  [ Cache Node A (Root): System Identity & Schema Contracts (Tokens 1..5,000) ]     |
+|                                      |                                            |
+|                                      v                                            |
+|  [ Cache Node B (Trunk): Repository AST & File Buffers (Tokens 5,001..38,000) ]   |
+|                         /                         \                               |
+|       Turn 1 Request   /                           \  Turn 2 Request              |
+|                       v                             v                             |
+|  [ Cache Node C (Turn 1 Leaf) ]             [ Cache Node D (Turn 2 Leaf) ]        |
+|    Test Run Log A (38,001..40,000)            Test Run Log B (38,001..40,200)     |
+|    ==> [Cache Hit / Retained]                 ==> [Cache Miss -> Compute Prefill] |
++-----------------------------------------------------------------------------------+
 ```
 
-The inference engine maintains precomputed Key-Value (KV) cache pages in accelerator HBM. When Turn 2 enters the engine, the scheduler traverses the Radix tree to find the longest common prefix match against prompt sequence $\mathbf{x}_{1:M}$. If our agent matches $38{,}000$ static context tokens ($M_{\text{match}} = 38{,}000$), the compute-bound prefill phase processes only the remaining $2{,}000$ dynamic tokens:
+Radix tree hierarchy for structural KV-cache prefix retention across sequential agent turns.
+:::
+
+The engine maintains precomputed KV cache pages in HBM. On Turn 2, the scheduler traverses the Radix tree to match prompt prefix $\mathbf{x}_{1:M}$. Matching $38{,}000$ static tokens ($M_{\text{match}} = 38{,}000$) leaves only $2{,}000$ dynamic tokens for prefill:
 
 $$T_{\text{prefill, Turn 2}} \approx \frac{2{,}000}{40{,}000} \times 5.56\text{ s} \approx 0.28\text{ seconds}$$
 
-Prefix caching delivers a **$20\times$ local phase speedup**, collapsing prefill from $5.56\text{ s}$ down to $0.28\text{ s}$.
+Prefix caching delivers a **$20\times$ local phase speedup**, collapsing prefill from $5.56\text{ s}$ to $0.28\text{ s}$.
 
 #### How Prefix Caching Inverts Amdahl's Law
 
-Now watch the systems transformation that occurs across multi-turn agent execution. Consider the latency breakdown for Turn 2:
+Consider the latency breakdown for Turn 2:
 - **Prefill (Cached):** $0.28\text{ seconds}$
-- **Decode (Generating 300 tokens):** $300 \times 29.0\text{ ms} \approx 8.70\text{ seconds}$
-- **Total Turn Latency:** $0.28 + 8.70 = 8.98\text{ seconds}$
-- **Decode now represents $96.9\%$ of total execution time!**
+- **Decode (300 tokens):** $300 \times 29.0\text{ ms} \approx 8.70\text{ seconds}$
+- **Total Turn Latency:** $0.28 + 8.70 = 8.98\text{ seconds}$ (Decode represents **$96.9\%$** of execution time).
 
-This exposes the fatal fallacy of evaluating optimization priorities on isolated cold calls. On Turn 1, prefill dominated. But the moment prefix caching succeeds, **Amdahl's Law is inverted**: decode becomes $>95\%$ of the remaining execution time!
+Once prefix caching succeeds, **Amdahl's Law is inverted**: decode dominates $>95\%$ of remaining execution time.
 
 $$S_{\text{turn2}} = \frac{1}{(1 - 0.969) + \frac{0.969}{s_{\text{decode}}}}$$
 
-If an engineering team accelerates decode by $2.5\times$ ($s_{\text{decode}} = 2.5$), the total turn latency collapses from $8.98\text{ s}$ down to:
+Accelerating decode by $2.5\times$ ($s_{\text{decode}} = 2.5$) collapses total latency to:
 
-$$0.28\text{ s} + \frac{8.70\text{ s}}{2.5} = 0.28\text{ s} + 3.48\text{ s} = 3.76\text{ s} \quad (\mathbf{2.39\times \text{ global end-to-end speedup!}})$$
+$$0.28\text{ s} + \frac{8.70\text{ s}}{2.5} = 3.76\text{ s} \quad (\mathbf{2.39\times \text{ global speedup}})$$
 
-Prefix caching does not make decode optimization irrelevant—**prefix caching is the exact reason why decode optimization is mandatory in agent systems.**
+Prefix caching does not make decode optimization irrelevant—**it makes decode optimization mandatory.**
 
 #### Speculative Decoding: Defeating the Memory Shuttle at $B=1$
 
-How can an engine accelerate decode at single-agent batch size $B=1$ when physical memory bandwidth is saturated? The answer is **Speculative Decoding** [@leviathan2023fast].
+To accelerate decode at single-agent batch size $B=1$, runtimes employ **Speculative Decoding** [@leviathan2023fast]:
 
-1. **Draft Model Speculation:** A lightweight draft model (such as Llama-3-8B at FP8, whose weight shuttle is only $8\text{ GB} / 5{,}360\text{ GB/s} \approx 1.5\text{ ms}$) speculatively generates $\gamma = 4\text{--}6$ candidate tokens.
-2. **Parallel Target Verification:** The 70B target model verifies all $\gamma$ candidate tokens in **a single forward pass**. Crucially, verifying $\gamma$ tokens converts the target model's forward pass from a memory-bound GEMV into a compute-efficient GEMM with batch size $M = \gamma$, raising arithmetic intensity by $\gamma\times$!
-3. **Prompt-Lookup Decoding (N-gram Speculation):** In software engineering agent workloads, an even higher leverage optimization exists: **Prompt-Lookup Decoding** [@promptlookup2023]. Over $70\%$ of tokens emitted in a code repair patch (variable names, imports, class signatures, path strings) already exist verbatim in the staged prompt context! An engine-level n-gram matcher scans the prompt for matches against recent tokens, proposing candidate continuation strings with *zero extra parameter weights*. With acceptance rates $\alpha > 0.75$, prompt-lookup decoding delivers a $2\times$ to $2.5\times$ decode speedup at zero computational cost.
+1. **Draft Model Speculation:** A small draft model (e.g., Llama-3-8B at FP8, shuttle latency $\approx 1.5\text{ ms}$) speculatively generates $\gamma = 4\text{--}6$ candidate tokens.
+2. **Parallel Target Verification:** The 70B target model verifies all $\gamma$ candidate tokens in **a single forward pass**, converting memory-bound GEMV into compute-efficient GEMM ($M = \gamma$) and raising arithmetic intensity by $\gamma\times$.
+3. **Prompt-Lookup Decoding:** In coding workloads, $>70\%$ of patch tokens exist verbatim in the prompt. Prompt-lookup decoding [@promptlookup2023] matches n-grams against prompt context, proposing continuations with *zero extra weights*. With acceptance rates $\alpha > 0.75$, it delivers $2\times$ speedups at zero parameter cost.
 
-Prefix caching and speculative decoding are the **twin architectural pillars** of low-latency agent systems: prefix caching eliminates the prefill wall, and speculative decoding breaks the $B=1$ memory shuttle wall.
+Prefix caching eliminates the prefill wall; speculative decoding breaks the $B=1$ memory shuttle wall.
 
-### Prefill-Decode Interference and Chunked Prefill
+### Prefill-Decode Interference and Context Layout Stability
 
-In multi-agent production clusters, multiple agent threads share the underlying accelerator pool. If Agent A dispatches an unchunked 40,000-token prompt prefill, that GEMM kernel monopolizes the GPU's Tensor Cores continuously for over $5$ seconds.
+When long prompt ingestion shares hardware with active decode streams, unchunked prefill can monopolize Tensor Cores, causing inter-token latency spikes. Serving engines mitigate this by slicing long prefills into bounded chunks (detailed in Chapter 5).
 
-The consequence is **Prefill-Decode Interference**: all concurrent decode streams running on that GPU are completely starved. Inter-Token Latency (ITL / jitter) spikes from $29\text{ ms}$ to $5{,}000\text{ ms}$, violating service-level agreements (SLAs) and triggering socket timeout exceptions in client agent event loops.
+For the client agent runtime, prefix caching imposes a strict invariant: **Context Layout Stability**. Because prefix caches match tokens strictly from origin $\mathbf{x}_1$, prompts must follow a tiered layout:
 
-Production serving runtimes solve this through **Chunked Prefill** (e.g., Sarathi-Serve [@sarathi2023] and vLLM v1). The engine scheduler slices the 40k prompt into bounded chunks (e.g., $P_{\text{chunk}} = 512$ tokens). In each execution step, the scheduler co-schedules one 512-token prefill chunk alongside active decode tokens in a unified batch. This achieves:
-- Sustained, peak Tensor Core utilization.
-- Predictable, bounded step execution times ($\sim 30\text{--}45\text{ ms}$).
-- Elimination of inter-token jitter for active agent streams.
-
-#### Context Layout Stability and Gateway Routing
-
-Finally, prefix caching imposes an immutable invariant on agent runtime design: **Context Layout Stability**.
-
-Because the Radix tree matches token sequences strictly from the sequence origin $\mathbf{x}_1$, the host runtime must discipline its prompt structure:
 1. **Static System Contracts (Root Tier):** Tool schemas and system identity ($\mathbf{x}_{1:j}$) pinned at the absolute head.
 2. **Repository Semantic State (Trunk Tier):** File buffers and project ASTs ($\mathbf{x}_{j+1:k}$) remaining invariant across turns.
-3. **Dynamic Observation Stream (Leaf Tier):** Per-turn tool execution receipts and diffs ($\mathbf{x}_{k+1:M}$) appended strictly at the tail.
+3. **Dynamic Observation Stream (Leaf Tier):** Per-turn tool receipts and diffs ($\mathbf{x}_{k+1:M}$) appended strictly at the tail.
 
-Injecting dynamic nonces or localized timestamps (`"Current Time: 14:22:01"`) at the head of a prompt alters token index $\mathbf{x}_1$, invalidating every cached page in the Radix tree and forcing a catastrophic recomputation of the full prefill GEMM. Furthermore, multi-GPU clusters require **Cache-Aware Gateway Routing** (e.g., SGLang Router): the front-end load balancer must hash prompt prefixes to route subsequent turns of the same agent to the exact physical GPU holding its pinned KV cache pages.
+Injecting timestamps (`"Current Time: 14:22:01"`) at the head of a prompt alters token $\mathbf{x}_1$, invalidating every cached prefix page and forcing catastrophic prefill recomputation. Maintaining structural stability ensures maximal cache hits, keeping the system on the accelerated side of Amdahl's Law.
 
-Given these physical hardware constraints and memory realities, how should systems engineers evaluate competing processor interface contracts? We now turn to empirical interface evaluation.
+We now turn to empirical interface evaluation to compare competing processor contracts.

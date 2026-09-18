@@ -8,9 +8,9 @@ To isolate the impact of the processor interface, an empirical evaluation must h
 
 Under this controlled environment, the host runtime evaluates three distinct production interface architectures:
 
-1. **Native Tool Calling (OpenAPI / Model Context Protocol):** The runtime exposes a typed `edit_file(path, search, replace)` tool schema to the inference engine. Arguments are emitted under decode-time compressed bitmask constraints (Section 2.6). Deliberation tokens stream unconstrained prior to tool invocation, but argument fields are strictly validated against JSON schema rules.
-2. **Search/Replace Block Diffs (Aider-Style):** The runtime prompts the model to emit raw, targeted search-and-replace block diffs wrapped in minimal structural markers (`<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE`). The payload is parsed using Tree-sitter AST queries and applied via exact text matching, bypassing JSON serialization entirely.
-3. **Interactive Bash REPL (MicroVM Subprocess):** The runtime exposes a sandboxed Bash terminal inside a warm Firecracker microVM snapshot. The model emits shell commands (`python -m pytest ...`, `sed -i ...`, `git diff`), inspecting command stdout/stderr streams interactively over multi-turn re-entrant cycles.
+1. **Free-Form Text (Markdown Blocks):** The runtime prompts the model unconstrained, extracting proposed code patches from markdown fenced code blocks via regular expressions.
+2. **Native Tool Calling (OpenAPI / JSON Schema):** The runtime exposes a typed `edit_file(path, search, replace)` tool schema to the inference engine. Arguments are emitted under decode-time compressed bitmask constraints (Section 2.6). Deliberation tokens stream unconstrained prior to tool invocation, but argument fields are strictly validated against JSON schema rules.
+3. **Search/Replace Block Diffs (Aider-Style):** The runtime prompts the model to emit raw, targeted search-and-replace block diffs wrapped in minimal structural markers (`<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE`). The payload is parsed using exact text matching, bypassing JSON serialization entirely.
 
 To compare these paradigms rigorously, the host runtime records a multi-dimensional metric vector for each invocation $i$:
 
@@ -25,14 +25,20 @@ Analyzing benchmark runs across hundreds of defect fixtures reveals foundational
 ::: {#tbl-vol3-interface-evaluation}
 | Interface Architecture | Structural Validity ($R_{\text{syntax}}$) | Downstream Acceptance ($R_{\text{task}}$) | Mean Prefill Tokens ($M$) | Mean Decode Tokens ($K$) | Mean Call Latency ($T_{\text{call}}$) | Truncation Rate ($R_{\text{trunc}}$) | Primary System Failure Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Native Tool Calling (MCP)** | $99.6\%$ | $68.4\%$ | $4{,}450$ | $480$ | $9.8\text{ s}$ | $0.8\%$ | JSON escaping inflation; search block misalignment |
-| **Search/Replace Block Diffs** | $91.2\%$ | $74.2\%$ | $3{,}920$ | $340$ | $7.2\text{ s}$ | $1.4\%$ | Search anchor drift; indentation mismatch |
-| **Interactive Bash REPL** | $97.8\%$ | $81.6\%$ | $4{,}820$ | $620$ (across turns) | $12.4\text{ s}$ | $3.2\%$ | Command syntax errors; multi-turn context exhaustion |
+| **Free-Form Markdown** | $72.4\%$ | $54.2\%$ | $3{,}650$ | $680$ | $13.6\text{ s}$ | $8.6\%$ | Ambiguous delimiters; regex extraction failure; truncation |
+| **Native Tool Calling (JSON)** | $99.6\%$ | $68.4\%$ | $4{,}450$ | $480$ | $9.8\text{ s}$ | $0.8\%$ | JSON escaping inflation; search block misalignment |
+| **Search/Replace Block Diffs** | $91.2\%$ | $74.2\%$ | $3{,}920$ | $340$ | $7.2\text{ s}$ | $1.4\%$ | Search anchor drift; whitespace indentation mismatch |
 
 : Empirical comparison of production processor interface contracts on the configuration parser benchmark under equal resource envelopes ($K_{\max} = 1{,}024$, $T_{\max} = 15.0\text{ s}$). {#tbl-vol3-interface-evaluation}
 :::
 
-#### 1. Native Tool Calling: Perfect Syntax vs. The JSON Escaping Tax
+#### 1. Free-Form Markdown: Extraction Fragility and Token Bloat
+
+Free-form natural language generation with markdown fenced blocks requires zero specialized decode-time logit masking and imposes minimal prompt schema overhead ($M = 3{,}650$). However, structural validity drops precipitously to $R_{\text{syntax}} = 72.4\%$.
+
+In $27.6\%$ of invocations, host regular expressions fail to extract an actionable patch. The neural core routinely embeds conversational preamble before the patch, omits target file paths, or uses variable backtick delimiters (e.g., four backticks or mismatched language tags). Furthermore, because unconstrained generation wanders through verbose discursive text before emitting the patch, decode token consumption inflates to $\bar{K} = 680$ tokens, driving truncation rate to $8.6\%$ and depressing downstream task acceptance to $54.2\%$.
+
+#### 2. Native Tool Calling: Perfect Syntax vs. The JSON Escaping Tax
 
 Native Tool Calling delivers near-flawless structural compliance ($R_{\text{syntax}} = 99.6\%$). The combination of OpenAPI schema definitions and compressed bitmask logit filtering eliminates malformed JSON envelopes.
 
@@ -40,7 +46,7 @@ However, Native Tool Calling incurs the **JSON Escaping Penalty** detailed in Se
 
 Furthermore, downstream task acceptance reaches $68.4\%$. The primary failure mode is **Search Block Alignment**: the model emits syntactically valid JSON containing a search string that slightly diverges from the source file's indentation or comments, causing the host's string replacement engine to fail.
 
-#### 2. Search/Replace Block Diffs: Maximum Token Efficiency
+#### 3. Search/Replace Block Diffs: Maximum Token Efficiency
 
 Search/Replace Block Diffs (popularized by production tools like Aider) bypass JSON serialization completely. Code patches are emitted in raw text format, delimited by simple marker tokens:
 
@@ -56,34 +62,14 @@ Search/Replace Block Diffs (popularized by production tools like Aider) bypass J
 
 Because code is transmitted verbatim without JSON escaping, BPE tokenization preserves multi-character indentation merges. This achieves exceptional token efficiency: mean decode tokens collapse to $\bar{K} = 340$, and mean invocation latency drops to $7.2\text{ seconds}$—a $26\%$ speedup over Native Tool Calling.
 
-Downstream task acceptance reaches $74.2\%$. By operating directly on raw text representations, the neural core preserves natural code structure. However, structural validity drops to $91.2\%$: in $8.8\%$ of calls, the model misplaces the marker boundaries or generates ambiguous search blocks that match multiple locations in the target file, requiring host-side fallback fuzzing.
-
-#### 3. Interactive Bash REPL: Observability and Environmental Grounding
-
-The Interactive Bash REPL interface operates under a fundamentally different control paradigm. Rather than forcing the model to generate a complete file patch in a single shot, the runtime allows the agent to execute exploratory shell commands within a warm microVM:
-
-```bash
-# Turn 1: Localize defect
-pytest tests/test_config.py -k "test_parse_timeout"
-# Turn 2: Inspect source
-grep -n -C 5 "parse_timeout" config_parser.py
-# Turn 3: Apply fix and verify
-sed -i 's/int(seconds) \* 1000/int(seconds \* 1000)/' config_parser.py
-pytest tests/test_config.py
-```
-
-The Interactive Bash REPL achieves the highest end-to-end task acceptance rate across the benchmark: **$81.6\%$**.
-
-Why does an interface with lower token efficiency ($\bar{K} = 620$ across turns, $T_{\text{call}} = 12.4\text{ s}$) outperform one-shot tool calling by more than $13$ percentage points? Because the Bash REPL provides **environmental grounding**. When the agent runs a reproduction test on Turn 1, it receives deterministic execution receipts from the real operating system. If its initial `sed` command contains an error, the test runner immediately returns a non-zero exit code, allowing the model to self-correct on Turn 3.
-
-The primary systems failure mode of the Bash REPL is **Context Exhaustion**: accumulating command outputs, directory listings, and test traces across multiple turns rapidly expands input context $M$, threatening memory budgets and requiring prefix cache compaction.
+Downstream task acceptance reaches $74.2\%$. By operating directly on raw text representations, the neural core preserves natural code structure. However, structural validity is $91.2\%$: in $8.8\%$ of calls, the model misplaces marker boundaries or generates ambiguous search blocks that match multiple locations in the target file, requiring host-side fallback fuzzing.
 
 ### Systems Synthesis: Choosing the Right Interface Contract
 
 The empirical benchmark confirms an essential architectural lesson: **no single interface contract dominates across all systems dimensions**.
 
-- When **low latency and deterministic serialization** are paramount (such as high-throughput automated triage or automated API generation), **Native Tool Calling with MCP** provides robust, crash-free execution.
+- When **crash-free execution and schema interoperability** are paramount (such as high-throughput automated RPC dispatch), **Native Tool Calling** provides robust syntactic guarantees.
 - When **token efficiency and file-editing precision** dominate (such as multi-file repository refactoring), **Search/Replace Block Diffs** minimize memory bus transfers and eliminate the JSON escaping tax.
-- When **complex bug localization and iterative diagnosis** are required (such as deep debugging of distributed systems defects), the **Interactive Bash REPL** provides the requisite closed-loop feedback, trading token volume for superior verified task success.
+- When **human inspection and open-ended exploration** are required, **Free-Form Text** provides conversational flexibility, but requires robust host-side regex fallbacks and expanded token budgets.
 
 Evaluating these interface contracts exposes a fundamental reality of the stochastic processor: high probability and structural perfection provide no guarantee of computational correctness. To build dependable systems on top of stochastic cores, engineers must first dismantle the persistent architectural fallacies that conflate model execution with verified system progress.

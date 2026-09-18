@@ -1,50 +1,50 @@
 ## Constraining the Output Surface {#sec-vol3-processor-grammar-constrained}
 
-To prevent malformed syntax from destabilizing downstream systems, the host runtime intercepts the autoregressive generation loop before categorical sampling occurs. While an unconstrained stochastic processor emits arbitrary sequences across the discrete vocabulary $\mathcal{V}_0$, host operating systems and agent runtimes require structured interfaces—such as JSON payloads, SQL queries, or tool-invocation protocols—that satisfy rigid formal specifications.
+To prevent malformed syntax from destabilizing downstream systems, the host runtime intercepts the autoregressive generation loop before categorical sampling occurs. While an unconstrained stochastic processor emits arbitrary sequences across the vocabulary $\mathcal{V}_0$, host operating systems require structured interfaces—such as JSON payloads, SQL queries, or tool-invocation protocols—that satisfy rigid formal specifications.
 
-If the host simply samples tokens unconstrained and runs a parser over the emitted string post hoc, syntax errors consume execution budgets and induce high retry latencies. Instead, the runtime can enforce syntactic invariants directly during token generation. By projecting formal language constraints onto the processor's output distribution, the host guarantees that emitted candidate sequences are parseable by construction.
+Sampling tokens unconstrained and validating post hoc wastes token budgets and induces high retry latencies. Instead, the runtime enforces syntactic invariants directly during generation by projecting formal language constraints onto the processor's output distribution, guaranteeing that emitted sequences are parseable by construction.
 
 ### Automata Compilation and Compressed Bitmask Masking
 
-Grammar-constrained decoding operates by transforming a formal language specification into a state machine that governs token selection at each decode step $t$. The host runtime compiles structural contracts into one of two abstract machine classes based on language complexity:
+Grammar-constrained decoding transforms a formal specification into a state machine governing token selection at each decode step $t$. The runtime compiles structural contracts into one of two abstract machine classes:
 
-1. **Deterministic Finite Automata (DFAs):** Used for regular languages, including fixed regular expressions, bounded string patterns, and flat key-value schemas.
-2. **Pushdown Automata (PDAs):** Used for context-free grammars (CFGs), such as nested JSON objects, programming language Abstract Syntax Trees (ASTs), and recursive arithmetic expressions that require a stack to match opening and closing delimiters.
+1. **Deterministic Finite Automata (DFAs):** For regular languages, including fixed regular expressions, bounded patterns, and flat key-value schemas.
+2. **Pushdown Automata (PDAs):** For context-free grammars (CFGs), including nested JSON objects, ASTs, and recursive expressions requiring a stack to match delimiters.
 
-A fundamental systems challenge arises from the impedance mismatch between character-level grammar terminals and the subword token vocabulary $\mathcal{V}_0$. Formal grammars are defined over an alphabet of single characters or bytes $\Sigma$. In contrast, the neural core's vocabulary $\mathcal{V}_0$ consists of variable-length subword strings, byte fragments, and whitespace permutations produced by byte-pair encoding (BPE). A single token $v \in \mathcal{V}_0$ may contain multiple character transitions (such as the token `",\n  \"path\":"`), or a single character may be split across multiple tokens in multi-byte UTF-8 sequences.
+A systems challenge arises from the impedance mismatch between character-level grammar terminals ($\Sigma$) and the subword token vocabulary ($\mathcal{V}_0$). Formal grammars operate over single bytes or characters, whereas $\mathcal{V}_0$ consists of variable-length subwords. A single token may contain multiple character transitions (such as `",\n  \"path\":"`), or a single character may span multiple tokens in multi-byte UTF-8 sequences.
 
-To reconcile this mismatch without incurring prohibitive runtime overhead, modern inference engines (such as XGrammar [@xgrammar2024], Outlines, and SGLang) precompute an index mapping automaton states to permissible vocabulary tokens. Let $Q$ denote the set of automaton states, and let $\delta: Q \times \Sigma^* \to Q \cup \{\bot\}$ denote the extended transition function that consumes a string and returns the resulting state or an error state $\bot$. For each automaton state $s$, the compiler determines the subset of valid continuation tokens:
+To bridge this mismatch efficiently, modern engines (such as XGrammar [@xgrammar2024], Outlines, and SGLang) precompute an index mapping automaton states to permissible vocabulary tokens. For each state $s$, the compiler determines valid continuation tokens:
 
 $$\mathcal{V}_{\text{valid}}(s) = \{ v \in \mathcal{V}_0 \mid \delta(s, \text{decode}(v)) \ne \bot \}$$
 
-In production engines, vocabulary indexing is compiled ahead of time into a **compressed bitmask tensor**. For a model with vocabulary $|\mathcal{V}_0| = 128{,}000$, a bitmask requires only:
+In production engines, vocabulary indexing is compiled into a **compressed bitmask tensor**. For a vocabulary $|\mathcal{V}_0| = 128{,}000$, a bitmask requires:
 
 $$\text{Bitmask Size} = \frac{128{,}000}{8\text{ bits/byte}} = 16\text{ KiB per state}$$
 
-Because $16\text{ KiB}$ fits easily within the on-chip L2 cache of the accelerator, the engine applies constraints with zero DRAM bus traffic. At decode step $t$, a fused GPU kernel reads the bitmask for the current FSM state and zeroes out illegal token logits directly in accelerator SRAM before top-$p$/top-$k$ reduction:
+Fitting within accelerator L2 cache, the engine applies constraints with zero DRAM bus traffic. At decode step $t$, a fused GPU kernel reads the bitmask for current state $s_{t-1}$ and sets illegal token logits to $-\infty$ directly in SRAM:
 
 $$z_{t, i}' = \begin{cases} z_{t, i} & \text{if bit } i \text{ is set in } \mathbf{B}(s_{t-1}) \\ -\infty & \text{if bit } i \text{ is clear} \end{cases}$$
 
-The masked logits $\mathbf{z}_t'$ pass to the softmax operator, which computes normalized categorical probabilities strictly over the valid token set:
+The masked logits $\mathbf{z}_t'$ pass to softmax, computing categorical probabilities strictly over valid tokens:
 
 $$P(y_t = v \mid \mathbf{y}_{<t}, \mathbf{x}) = \frac{\exp(z_{t, v}')}{\sum_{w \in \mathcal{V}_{\text{valid}}(s_{t-1})} \exp(z_{t, w}')}$$
 
-Any token that would drive the automaton into an illegal state receives zero probability. Once the categorical sampler selects token $y_t$, the host updates the automaton state $s_t = \delta(s_{t-1}, \text{decode}(y_t))$ and appends $y_t$ to the context window.
+Tokens that would transition to an illegal state receive zero probability.
 
 ![Architectural flow of grammar-constrained decoding via decode-time logit masking.](images/svg/grammar_constrained_decoding_fsm.svg){#fig-grammar-constrained-decoding width="100%"}
 
 #### CUDA Graph Compatibility and Jump-Forward Decoding
 
-Early implementations of grammar masking executed dynamic tensor allocations on the host CPU at every step (e.g., converting Python sets to device index tensors). In production serving runtimes, this pattern is catastrophic:
+Early implementations executed dynamic tensor allocations on the CPU per step. In production runtimes, this pattern breaks performance:
 
-1. **CUDA Graph Annihilation:** Modern inference engines capture the entire decode iteration inside **CUDA Graphs** to eliminate the $2\text{--}5\,\mu\text{s}$ per-kernel launch overhead across 80 transformer layers (which would otherwise accumulate over $2.4\text{ ms}$ of pure CPU dispatch latency per token). Dynamic host allocations and variable-length index copies break CUDA Graph capture, degrading decode throughput by $3\times$ to $5\times$. Precompiled bitmasks preserve fixed memory shapes, allowing grammar masking to execute seamlessly within captured CUDA Graphs.
-2. **Jump-Forward Decoding (Grammar Fast-Forwarding):** When an FSM transitions through deterministic syntax strings (for example, the JSON key sequence `",\n  \"path\": \""`), there is exactly *one* valid continuation. The inference engine does not need to invoke the neural core! It directly appends those static tokens to the KV cache, bypassing accelerator GEMV execution entirely. Jump-forward decoding accelerates structured output generation by $20\%$ to $40\%$ on fixed schemas.
+1. **CUDA Graph Compatibility:** Modern engines capture decode iterations in **CUDA Graphs** to eliminate the $2\text{--}5\,\mu\text{s}$ per-kernel launch overhead across 80 transformer layers ($>2.4\text{ ms}$ CPU latency per token). Variable-length allocations break CUDA Graph capture, degrading decode throughput by $3\times$ to $5\times$. Precompiled bitmasks preserve static tensor shapes, executing seamlessly within captured graphs.
+2. **Jump-Forward Decoding:** When an FSM traverses deterministic syntax tokens (such as JSON keys `",\n  \"path\": \""`), there is exactly *one* valid continuation. The engine bypasses accelerator forward passes entirely, directly appending static tokens to the KV cache and accelerating structured generation by $20\%$ to $40\%$.
 
 ### The Syntactic Divide: Structural Invariants vs. Semantic Validity
 
-Grammar-constrained decoding guarantees that emitted sequences adhere to structural syntax rules, but it provides no verification of semantic correctness or operational safety. Systems engineers must maintain a strict boundary between *syntactic validity* (conformance to formal grammar rules) and *semantic validity* (correctness within the operating environment).
+Grammar-constrained decoding guarantees syntactic conformance, but provides no verification of semantic correctness or operational safety. Systems engineers must maintain a strict boundary between *syntactic validity* (conformance to grammar rules) and *semantic validity* (correctness within the execution environment).
 
-Consider an agent runtime executing a configuration parser defect remediation task. The runtime detects an issue where `int(seconds) * 1000` improperly truncates fractional durations (such as `2.5s` to `2000ms`). To apply a repair, the host provides a file-patching actuation interface governed by a strict JSON schema:
+Consider patching the configuration parser defect via a JSON schema:
 
 ```json
 {
@@ -59,17 +59,11 @@ Consider an agent runtime executing a configuration parser defect remediation ta
 }
 ```
 
-When compiled into an automaton, the grammar mask guarantees that:
-- The output begins with an opening brace `{` and terminates with a closing brace `}`.
-- Field names are strictly `"path"`, `"search"`, and `"replace"`, separated by colons and commas.
-- String literals contain properly escaped delimiters and control characters.
-- The emitted payload will never trigger a parser error such as `JSONDecodeError: Expecting ',' delimiter`.
+The compiled grammar mask guarantees balanced braces, valid field names, and escaped literals, preventing JSON parser crashes. However, it cannot evaluate operational state:
 
-However, the grammar mask cannot evaluate whether the contents of those strings correspond to valid operational state:
-
-1. **Path Existence:** The mask permits the core to emit `"path": "config/nonexistent_parser.py"`. Syntactically, this is an impeccable string; operationally, it triggers a `FileNotFoundError` in the host filesystem.
-2. **Search Target Alignment:** The mask permits `"search": "def parse_timeout(s):"`. If the actual source file contains `def parse_timeout(timeout_str: str):`, the host's string replacement engine fails to locate the target block, returning an exit code indicating patch failure.
-3. **Semantic Integrity:** The mask permits the core to satisfy the `"replace"` field by emitting `"replace": "round(int(seconds) * 1000)"`, which compiles cleanly but fails to resolve the underlying truncation defect, or `"replace": ""`, which deletes critical logic entirely.
+1. **Path Existence:** The mask permits `"path": "config/nonexistent_parser.py"`, triggering a `FileNotFoundError`.
+2. **Search Target Alignment:** The mask permits `"search": "def parse_timeout(s):"`. If the file contains `def parse_timeout(timeout_str: str):`, the patcher fails to locate the target block.
+3. **Semantic Integrity:** The mask permits `"replace": "round(int(seconds) * 1000)"`, which compiles cleanly but fails to fix the truncation defect.
 
 ```
 Syntactic Boundary (Closed by Automaton)
@@ -79,19 +73,19 @@ Semantic Boundary (Unverified by Automaton)
 [ File Path Exists? ]   ---> [ Patch String Matches? ] ---> [ Defect Resolved? ]
 ```
 
-A grammar mask provides invariant closure only over deserialization. It guarantees that the host's communication bus will not reject the frame due to serialization corruption. All substantive operational invariants—file existence, semantic correctness, patch idempotency, and system safety—must be verified by external deterministic tooling, such as static analyzers, test runners, and sandboxed execution environments.
+A grammar mask provides invariant closure only over deserialization. All substantive operational invariants—file existence, semantic correctness, and safety—must be verified by external deterministic tooling.
 
 ### The Hazard of Schema Forcing and Induced Hallucination
 
-When an agent runtime constrains the stochastic processor's output, it alters the conditional probability distribution over future tokens. If the compiled schema fails to provide expressive branches for uncertainty, failure states, or alternative actions, logit masking introduces a severe operational hazard: *schema forcing*.
+When the host constrains the processor's output, it alters the conditional distribution over future tokens. If the schema lacks expressive branches for uncertainty or failure, logit masking introduces *schema forcing*.
 
-Schema forcing occurs when the host runtime forces the neural core down a specific grammar branch despite the core having near-zero conditional probability mass allocated to valid completions on that branch. Setting invalid token logits to $-\infty$ acts as a hard conditioning operator. If the probability mass of the valid set $\mathcal{V}_{\text{valid}}$ under the unconstrained distribution is exceptionally small:
+Setting invalid logits to $-\infty$ acts as a hard conditioning operator. If valid tokens hold near-zero probability mass under the unconstrained distribution:
 
 $$\sum_{v \in \mathcal{V}_{\text{valid}}} P_{\text{unconstrained}}(v \mid \mathbf{y}_{<t}, \mathbf{x}) = \epsilon \ll 10^{-4}$$
 
-the normalization step forces the categorical sampler to draw exclusively from this low-probability subset. The processor cannot refuse, fail gracefully, or signal low confidence; it is compelled to sample from the constrained subset, often producing plausible-sounding but entirely fabricated tokens.
+the softmax normalization forces the sampler to draw exclusively from this low-probability subset. The processor cannot refuse or report uncertainty; it is compelled to sample from the constrained subset, producing fabricated tokens.
 
-Consider an incident where the host runtime queries the processor to extract database connection limits from an unfamiliar service repository. The host enforces a rigid schema that mandates an integer output:
+Consider querying a model for a service's database connection limit under a schema mandating an integer:
 
 ```json
 {
@@ -104,19 +98,9 @@ Consider an incident where the host runtime queries the processor to extract dat
 }
 ```
 
-If the repository does not define a static connection limit, an unconstrained core might emit: `"Unable to locate connection_limit in config.yaml; pool size is dynamically allocated."` Under the constrained schema, however, tokens representing alphabetic text are masked to $-\infty$ immediately following `"connection_limit": `. The automaton permits only the digits `0` through `9`.
+If the repository does not define a static limit, an unconstrained core might emit: `"Connection limit is dynamically allocated."` Under the constrained schema, alphabetic tokens are masked to $-\infty$; the automaton permits only digits `0`--`9`. The sampler draws from residual probabilities, emitting `{"connection_limit": 100}`. The host receives syntactically valid JSON containing an entirely hallucinated threshold.
 
-Because the probability mass over the digit tokens was conditioned on context that did not contain numerical limits, the sampler draws from arbitrary residual probabilities, emitting:
-
-```json
-{
-  "connection_limit": 100
-}
-```
-
-The host runtime receives a syntactically pristine JSON object that passes all schema validation layers. The agent proceeds to configure downstream infrastructure using an entirely hallucinated connection threshold, leading to service degradation under production load. The failure was not caused by a failure of the parser, but by an overconstrained schema that eliminated the core's ability to signal that the requested information was absent.
-
-To protect against schema forcing, runtime engineers must design formal schemas as discriminated unions that provide explicit failure and refusal paths:
+To prevent schema forcing, schemas must be designed as discriminated unions with explicit failure and refusal branches:
 
 ```json
 {
@@ -141,16 +125,12 @@ To protect against schema forcing, runtime engineers must design formal schemas 
 }
 ```
 
-By ensuring that the automaton contains valid transitions for error reports, diagnostic explanations, and uncertainty indicators, the runtime avoids artificially concentrating probability mass into hallucinated values, preserving the integrity of the broader systems control loop.
+### Native Tool Calling and Action Envelopes
 
-### Native Tool Calling and Interleaved Reasoning Streams
+Early frameworks attempted to resolve structural constraints using "scratchpad-first JSON"—injecting an unconstrained string property like `"thought"` as the first key of a JSON schema. As shown in Section 2.2, stringifying reasoning within JSON inflicts a $15\%$ to $35\%$ token inflation penalty due to character escaping.
 
-In early agent frameworks, developers attempted to resolve the tension between structural constraints and causal deliberation using the "scratchpad-first JSON" pattern—injecting an unconstrained string property like `"scratchpad_reasoning"` as the very first key of a JSON object. While functional, this approach suffers from the JSON escaping penalty detailed in Section 2.2, inflating reasoning token footprints by up to $35\%$.
+Modern production runtimes resolve this via **Native Tool Calling**:
+1. **Decoupled Reasoning Channels:** The core generates unconstrained deliberation tokens in a dedicated thought channel *outside* the schema envelope, preserving high-frequency BPE merges without escaping backslashes or quotes.
+2. **Grammar-Masked Action Envelope:** Once deliberation completes, the model emits a control token activating the grammar FSM for the tool schema, generating arguments under compressed bitmask constraints.
 
-Modern production agent architectures employ **Native Tool Calling (OpenAPI / Model Context Protocol / MCP)** [@modelcontextprotocol2024] combined with **Interleaved Reasoning Streams**. Under this paradigm:
-
-1. **Decoupled Deliberation:** The neural core emits unconstrained chain-of-thought tokens into a dedicated reasoning stream *outside* the tool call schema. The attention heads establish rich contextual representations over diagnostic traces without escaping newlines or quotation marks.
-2. **Grammar-Masked Tool Dispatches:** Once deliberation completes, the model emits a designated control token (e.g., `<tool_call>`), triggering the inference engine to switch its active grammar FSM to the target tool's schema. The tool arguments are generated under compressed bitmask constraints, guaranteeing perfect JSON or RPC syntax.
-3. **Multi-Turn Re-entrancy:** The host intercepts the completed tool call, executes it in an isolated sandbox, and appends the execution receipt to the conversation history. The core resumes generation, attending to both prior reasoning and the newly staged execution receipt.
-
-Even when candidate sequences are structurally valid and generated through optimized streaming interfaces, what physical hardware resources were expended to produce them? To answer this, we must inspect the physical memory bus and compute engines of the underlying accelerator silicon.
+Even with structurally valid sequences, generating tokens expends physical hardware resources. Understanding these costs requires analyzing the physical memory bus and compute balance.

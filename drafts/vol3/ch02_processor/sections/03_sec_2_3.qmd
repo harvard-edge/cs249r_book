@@ -1,10 +1,10 @@
 ## Next-Token Computation {#sec-vol3-processor-autoregressive}
 
-An autoregressive foundation model operates under an execution model fundamentally distinct from batch compilation or single-pass numerical transforms: candidate sequence synthesis is an iterative, causal control loop. The neural core does not evaluate an entire multi-token response in one atomic computational sweep. Instead, conditioned on an immutable sequence of $M$ staged input token identifiers, the processor evaluates a probability distribution over the discrete vocabulary $\mathcal{V}_0$, samples exactly one continuation token, commits that token to its operational state, and loops. The joint probability of generating a continuation sequence of $K$ tokens $y_{1:K} = (y_1, y_2, \dots, y_K)$ given an input prompt $x = (x_1, x_2, \dots, x_M)$ factorizes strictly according to the causal chain rule of probability:
+An autoregressive foundation model operates under an execution model distinct from batch compilation or single-pass numerical transforms: candidate sequence synthesis is an iterative, causal control loop. Conditioned on an immutable sequence of $M$ staged input tokens, the processor evaluates a probability distribution over vocabulary $\mathcal{V}_0$, samples exactly one continuation token, commits it to operational state, and loops. The joint probability of generating $K$ tokens $y_{1:K} = (y_1, \dots, y_K)$ given prompt $x = (x_1, \dots, x_M)$ factorizes via the causal chain rule of probability:
 
-$$P(y_{1:K} \mid x) = \prod_{t=1}^{K} P(y_t \mid x, y_{1:t-1}) = \prod_{t=1}^{K} P(y_t \mid x, y_{<t})$$ {#eq-autoregressive-factorization}
+$$P(y_{1:K} \mid x) = \prod_{t=1}^{K} P(y_t \mid x, y_{<t})$$ {#eq-autoregressive-factorization}
 
-This mathematical factorization dictates the control topology of the stochastic processor core. Generating the repair payload for the configuration parser defect introduced in Section 2.1—replacing the bug-inducing truncation `int(seconds) * 1000` with the precision-preserving `int(seconds * 1000)`—requires emitting a structured tool call token by token:
+This factorization dictates the processor's control topology. Generating the tool call repairing `config_parser.py`:
 
 ```python
 edit_file(
@@ -14,67 +14,51 @@ edit_file(
 )
 ```
 
-Emitting the terminal closing parenthesis `)` or the specific character tokens inside the replacement string cannot occur through speculative global optimization. Every single token $y_t$ requires an independent, sequential traversal of the deep transformer network. Each forward step takes the entire historical sequence $(x_1, \dots, x_M, y_1, \dots, y_{t-1})$ as conditioning context to evaluate the unnormalized log-probability vector (the *logits*) $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}_0|}$ from which $y_t$ is sampled. Because token $y_t$ cannot be known before step $t$ completes, the generation phase forms an irreducible serial dependency chain: execution cannot be parallelized across the time dimension $K$.
+requires emitting tokens sequentially. Every token $y_t$ requires an independent traversal of the transformer network, taking historical context $(x_1, \dots, x_M, y_1, \dots, y_{t-1})$ to evaluate logits $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}_0|}$. Because $y_t$ cannot be known before step $t$ completes, generation forms an irreducible serial dependency chain: execution cannot parallelize across time dimension $K$.
 
 ### The Autoregressive Execution Loop as Stateful Activation Accumulation {#sec-vol3-processor-loop}
 
-The execution of an autoregressive model is governed by an explicit host-runtime supervisory loop. Rather than delegating unbounded autonomy to the neural core, the serving system encloses the forward execution kernel within a rigid supervisory contract defined by four explicit boundaries: a maximum token limit $K_{\max}$, a wall-clock execution deadline $T_{\max}$, an explicit set of terminal stop tokens $\Omega_{\text{stop}} \subset \mathcal{V}_0$, and an allocated memory budget in accelerator memory.
+The serving runtime encloses the forward execution kernel within a supervisory contract bounded by four limits: token ceiling $K_{\max}$, wall-clock deadline $T_{\max}$, stop tokens $\Omega_{\text{stop}} \subset \mathcal{V}_0$, and allocated accelerator memory.
 
-The discrete mechanics of this execution loop proceed through four sequential stages at each step $t \in [1, K_{\max}]$, as diagrammed in @fig-autoregressive-loop:
+At each step $t \in [1, K_{\max}]$, execution proceeds through four stages (@fig-autoregressive-loop):
 
-1. **Kernel Invocation:** The accelerator executes a forward pass over the latest token $y_{t-1}$ (or the full prefix $x_{1:M}$ at step $t=1$). The network processes the token through $L$ transformer layers, reading historical Key-Value (KV) activation tensors from device memory to compute attention, and projects the final hidden representation $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ through the language model head $\mathbf{W}_U \in \mathbb{R}^{|\mathcal{V}_0| \times d_{\text{model}}}$ to yield logits $\mathbf{z}_t$:
-   $$\mathbf{z}_t = \mathbf{W}_U \mathbf{h}_t$$
-
-2. **Logit Transformation and Sampling:** The logit vector $\mathbf{z}_t$ is optionally masked by grammatical constraints, scaled by temperature $\tau$, and reduced via a categorical sampling kernel on the accelerator to select an integer token identifier $y_t \in \mathcal{V}_0$.
-
-3. **Activation State Mutation:** The key and value projection vectors computed at step $t$, denoted $\mathbf{k}_t^{(l)}$ and $\mathbf{v}_t^{(l)}$ for each layer $l \in [1, L]$, are committed to the dynamically growing KV cache allocated in device memory. This state mutation ensures that subsequent steps $t+1, \dots, K$ can attend to $y_t$ without recomputing the activations of steps $1$ through $t$.
-
-4. **Predicate Evaluation and Boundary Check:** The host runtime inspects the sampled token $y_t$ against termination criteria:
+1. **Kernel Invocation:** The accelerator executes a forward pass over latest token $y_{t-1}$ (or prompt $x_{1:M}$ at $t=1$). The network traverses $L$ layers, reading historical Key-Value (KV) activations from device memory, and projects hidden representation $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ through language model head $\mathbf{W}_U$ to yield logits $\mathbf{z}_t = \mathbf{W}_U \mathbf{h}_t$.
+2. **Logit Transformation and Sampling:** Logit vector $\mathbf{z}_t$ is optionally masked by grammatical constraints, scaled by temperature $\tau$, and reduced via a categorical sampling kernel to select token identifier $y_t \in \mathcal{V}_0$.
+3. **Activation State Mutation:** Key and value projection vectors $\mathbf{k}_t^{(l)}, \mathbf{v}_t^{(l)}$ for each layer $l \in [1, L]$ are committed to the dynamically growing KV cache in device memory, enabling subsequent steps to attend to $y_t$ without recomputing steps $1$ to $t$.
+4. **Predicate Evaluation:** The host runtime inspects $y_t$ against termination criteria:
    $$\text{HALT} \iff (y_t \in \Omega_{\text{stop}}) \lor (t \ge K_{\max}) \lor (\text{elapsed\_time}() \ge T_{\max})$$
-   If HALT evaluates to false, $y_t$ is fed back to the accelerator input register as the operand for step $t+1$.
+   If HALT is false, $y_t$ is fed back to the accelerator as operand for step $t+1$.
 
 ![Autoregressive serialization loop across the accelerator memory hierarchy. A single forward pass evaluates logits $\mathbf{z}_t$, updates the dynamic KV cache in device memory, and samples token $y_t$. The output token is fed back into the core, enforcing an irreducible causal dependency barrier.](images/svg/autoregressive_serialization_loop.svg){#fig-autoregressive-loop}
 
-This loop exposes a fundamental architectural property: the KV cache is not static workspace memory, but a stateful, monotonically growing activation tensor. As established in Section 2.2, each decoded token permanently appends key and value activations across all $L$ layers.
-
-In production engines, this monotonic growth is tracked by the PagedAttention memory manager. If an unconstrained agent enters an infinite generation loop, memory pages deplete rapidly. When free physical blocks drop below a high-water mark, the engine scheduler preempts the lowest-priority requests—either by streaming their KV pages to host DRAM or by terminating the generation with an explicit status signal—protecting the cluster from unhandled memory faults.
+This loop exposes a core architectural property: the KV cache is a stateful, monotonically growing activation tensor. Each decoded token permanently appends key and value activations across all $L$ layers, consuming physical memory pools managed by the serving daemon (detailed in Chapter 5).
 
 ### Causal Serialization and the Single-Agent Serialization Wall {#sec-vol3-processor-serialization}
 
-The causal factorization in @eq-autoregressive-factorization establishes an irreducible physical barrier: token generation is serialized in time. In classical parallel computing, workloads scale across processor cores by partitioning data along spatial or iteration dimensions. In autoregressive inference, while the initial prompt ingestion phase (*prefill*) parallelizes across all $M$ tokens simultaneously, the subsequent generation phase (*decode*) cannot be parallelized across the $K$ output steps.
-
-To evaluate token $y_t$, the attention mechanism must compute inner products against the key and value projections of all preceding tokens $1, \dots, t-1$. Because $y_{t-1}$ is determined only after step $t-1$ finishes sampling, step $t$ cannot begin speculative computation without risking complete invalidation. Generating a repair patch of $K = 500$ tokens requires executing 500 discrete, back-to-back forward passes through the full depth of the neural network:
+While the initial prompt ingestion phase (*prefill*) parallelizes across all $M$ tokens simultaneously, the generation phase (*decode*) cannot parallelize across output steps $K$:
 
 $$T_{\text{decode}} = \sum_{t=1}^{K} T_{\text{step}}(M + t)$$ {#eq-decode-latency-sum}
 
-where $T_{\text{step}}(S)$ is the wall-clock time required to execute one forward pass at sequence length $S$.
+where $T_{\text{step}}(S)$ is wall-clock latency for one forward pass at sequence length $S$.
 
-Crucially, autonomous agents face the **Single-Agent $B=1$ Serialization Wall**. In standard multi-user web serving, inference engines achieve high accelerator utilization by batching hundreds of independent user requests together ($B \gg 1$), amortizing the cost of reading model weights across multiple tokens simultaneously. In contrast, an agent executing an iterative reasoning or tool-use loop is trapped in a sequential environment loop:
+Crucially, autonomous agents face the **Single-Agent $B=1$ Serialization Wall**. Multi-user web serving achieves high accelerator efficiency by batching independent requests ($B \gg 1$), amortizing weight transfers across multiple concurrent tokens. In contrast, an agent executing an iterative tool-use loop is bound by environment feedback:
 
 $$s_{k+1} = \text{Env}(s_k, a_k)$$
 
-The agent cannot execute turn $k+1$ until it receives the execution output of action $a_k$ (e.g., test runner exit codes or compiler error streams). It cannot batch future turns against itself. Consequently, the agent executes at batch size $B=1$, absorbing the full latency penalty of sequential forward passes.
+The agent cannot execute turn $k+1$ until receiving tool output for action $a_k$. It cannot batch future turns against itself. Consequently, the agent executes at batch size $B=1$, absorbing the full latency penalty of sequential forward passes.
 
 ### Sampling Mechanics and Invariant Boundaries on the Simplex {#sec-vol3-processor-sampling}
 
-At the culmination of each forward step, the network projects its hidden activation $\mathbf{h}_t$ into unnormalized logit space $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}_0|}$. Before a discrete token index can be emitted, the logit vector must be mapped onto the probability simplex $\Delta^{|\mathcal{V}_0|-1} = \{\mathbf{p} \in \mathbb{R}^{|\mathcal{V}_0|} : \sum_i p_i = 1, p_i \ge 0\}$. This mapping is parameterized by a thermal scaling coefficient $\tau \in [0, \infty)$:
+At each step, logits $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}_0|}$ are mapped onto the probability simplex $\Delta^{|\mathcal{V}_0|-1}$ via temperature parameter $\tau \in [0, \infty)$:
 
 $$p_i = \frac{\exp(z_i / \tau)}{\sum_{j=1}^{|\mathcal{V}_0|} \exp(z_j / \tau)}$$ {#eq-softmax-temperature}
 
-The temperature scalar $\tau$ modulates the entropy of the categorical distribution across three distinct systems operating regimes, illustrated in @fig-temperature-simplex:
+Temperature modulates categorical entropy across three operational regimes (@fig-temperature-simplex):
 
-1. **Greedy Mode ($\tau \to 0$):** The distribution collapses to a Dirac delta function centered on the maximal logit:
-   $$y_t = \arg\max_{i \in \mathcal{V}_0} z_i$$
-   Sampling becomes entirely deterministic. The processor executes repeatable candidate generation, eliminating run-to-run variance. However, in ambiguous context configurations, greedy decoding risks falling into degenerate repetitive cycles if the top logit paths reinforce self-referential loops.
-
-2. **Controlled Stochasticity ($0 < \tau \le 1.0$):** Thermal scaling smooths the distribution, allowing tokens with competitive logits to be sampled according to their relative model likelihood. This enables exploratory search across diverse repair strategies while preserving grammatical coherence.
-
-3. **Maximum Entropy Noise ($\tau \to \infty$):** As temperature approaches infinity, $z_i / \tau \to 0$, causing $p_i \to 1/|\mathcal{V}_0|$ for all vocabulary tokens. The output collapses into uniform white noise, destroying syntactic structure and semantic coherence.
+1. **Greedy Mode ($\tau \to 0$):** Collapses to a Dirac delta centered on the maximal logit: $y_t = \arg\max_i z_i$. Sampling is deterministic, eliminating run-to-run variance, but risks repetitive loops under ambiguous contexts.
+2. **Controlled Stochasticity ($0 < \tau \le 1.0$):** Smooths the distribution, allowing tokens with competitive logits to be sampled according to relative model likelihood.
+3. **Maximum Entropy Noise ($\tau \to \infty$):** Probabilities approach uniform distribution ($p_i \to 1/|\mathcal{V}_0|$), collapsing output into white noise.
 
 ![Temperature simplex scaling graphic. As thermal parameter $\tau$ varies from greedy collapse ($\tau \to 0$) to uniform dispersion ($\tau \to \infty$), the probability simplex transitions between deterministic mode selection and entropy saturation.](images/svg/temperature_simplex_scaling.svg){#fig-temperature-simplex}
 
-In production agent harnesses, sampling parameters represent an operational trade-off between reproducibility and candidate exploration. When generating precise, syntax-critical payloads—such as tool invocation arguments or database migration scripts—runtimes frequently set $\tau = 0$ to guarantee deterministic execution and stable regression test fixtures. Conversely, during multi-candidate exploration or search trees (developed in Chapter 3), higher temperature allocations allow the system to sample independent alternative hypotheses.
-
-Crucially, the temperature parameter operates strictly on the mathematical simplex; it alters neither model capability nor underlying logical validity. Whether a candidate sequence is generated via greedy argmax selection or high-entropy sampling, it remains an unverified hypothesis produced by a non-deterministic execution unit.
-
-This mathematical reality exposes the core tension of the Stochastic Computer: high sequence likelihood within learned weights bears no necessary correspondence to empirical software truth. Why a high-probability continuation can be entirely counterfactual—and how the host system constructs an external verification perimeter to close invariants—is the subject of the next section.
+In production harnesses, $\tau = 0$ is standard for syntax-critical payloads (tool calls, code diffs) to guarantee reproducible test fixtures. Temperature alters sampling entropy on the mathematical simplex, but alters neither model capability nor underlying correctness: candidate tokens remain unverified hypotheses. Why a high-probability continuation can be completely counterfactual is the focus of Section 2.4.

@@ -4,19 +4,19 @@ The interface boundary of a stochastic processor core is not a stream of human-r
 
 $$\mathbf{t} = [t_0, t_1, \dots, t_{M-1}]^\top, \quad t_i \in \{0, 1, \dots, |\mathcal{V}| - 1\}$$
 
-where $|\mathcal{V}|$ represents the discrete vocabulary size of the core. The runtime component that performs this data marshaling is the *tokenizer*. Far from being a mere text-formatting utility, the tokenizer functions as the processor's front-end serialization transducer. It governs the physical memory footprint of the context window, dictates the numerical stability of structured schemas, and introduces severe semantic fractures when translating deterministic programming constructs into statistical subword units.
+where $|\mathcal{V}|$ is the core's discrete vocabulary size. The runtime component performing this data marshaling is the *tokenizer*. Far from a mere text-formatting utility, the tokenizer functions as the processor's front-end serialization transducer. It governs the physical memory footprint of the context window, dictates the numerical stability of structured schemas, and introduces severe semantic fractures when translating deterministic code constructs into statistical subwords.
 
 ### Subword Tokenization and the Accelerator DMA Boundary {#sec-vol3-processor-bpe-encoding}
 
-Modern stochastic processor cores deploy Byte-Pair Encoding (BPE) or its byte-level variants (such as those underpinning the `cl100k_base` and `o200k_base` tokenizers) to compress arbitrary byte streams into an integer vocabulary ranging typically from $|\mathcal{V}| \approx 100{,}000$ to $|\mathcal{V}| \approx 256{,}000$ unique IDs.
+Modern stochastic processor cores deploy Byte-Pair Encoding (BPE) or byte-level variants (such as `cl100k_base` and `o200k_base`) to compress arbitrary byte streams into an integer vocabulary ranging from $|\mathcal{V}| \approx 100{,}000$ to $|\mathcal{V}| \approx 256{,}000$ unique IDs.
 
-Crucially, tokenization is not an on-chip accelerator operation. No mainstream AI accelerator (NVIDIA H100/B200, Google TPU v4/v5p, AMD MI300X) contains hardware execution units for BPE string splitting. Instead, tokenization executes entirely in user-space software on the host CPU—implemented in high-performance native runtimes (such as HuggingFace `tokenizers` in Rust or `tiktoken` in C++). Beginning with an initial base vocabulary $\mathcal{V}_0$ containing all 256 individual byte values alongside designated control tokens, BPE applies a statically learned, ordered sequence of merge operations:
+Crucially, tokenization is not an on-chip accelerator operation. No modern AI accelerator (NVIDIA H100/B200, Google TPU v5p, AMD MI300X) contains hardware execution units for string splitting or BPE merge lookup. Instead, tokenization executes entirely in user-space software on the host CPU—implemented in high-performance native runtimes (such as HuggingFace `tokenizers` in Rust or `tiktoken` in C++). Beginning with an initial base vocabulary $\mathcal{V}_0$ containing all 256 individual byte values alongside designated control tokens, BPE applies a statically learned, ordered sequence of merge rules:
 
 $$(b_i, b_j) \longrightarrow b_{\text{merged}}$$
 
-These merge rules are computed offline over massive training corpora by greedily fusing the most frequent contiguous byte pairs. During runtime execution, the host tokenizer scans the input byte stream, matches merge rules via a deterministic trie or finite-state transducer, and yields a contiguous array of 32-bit integer indices.
+computed offline over massive training corpora by greedily fusing frequent contiguous byte pairs. During execution, the host tokenizer scans the input byte stream, matches merge rules via a deterministic trie or finite-state transducer, and yields a contiguous array of 32-bit integer indices.
 
-Once tokenization completes in host DRAM, the agent runtime stages the integer array across the host-accelerator bus (PCIe Gen5 at $128\text{ GB/s}$ bidirectional, or NVLink-C2C at $900\text{ GB/s}$) into device HBM via Direct Memory Access (DMA), as illustrated in @fig-token-dma-boundary.
+Once tokenization completes in host DRAM, the agent runtime stages the integer array across the host-accelerator bus (PCIe Gen5 at $128\text{ GB/s}$ bidirectional, or NVLink-C2C at $900\text{ GB/s}$) into device HBM via Direct Memory Access (DMA), as shown in @fig-token-dma-boundary.
 
 ::: {#fig-token-dma-boundary}
 ```
@@ -48,51 +48,45 @@ Once tokenization completes in host DRAM, the agent runtime stages the integer a
 Host-to-accelerator token marshaling and embedding lookup across the DMA boundary.
 :::
 
-In physical accelerator memory, the processor core maintains an embedding weight table $\mathbf{W}_E \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$. For an enterprise-scale model with $d_{\text{model}} = 8192$ and vocabulary $|\mathcal{V}| = 100{,}256$ in 16-bit precision (FP16/BF16), $\mathbf{W}_E$ occupies:
-
-$$\text{Mem}(\mathbf{W}_E) = 100{,}256 \times 8{,}192 \times 2\text{ bytes} \approx 1.642\text{ GB}$$
-
-of dedicated HBM. For each staged token identifier $t_i$, the memory controller retrieves a contiguous $16\text{ KiB}$ row vector $\mathbf{x}_i \in \mathbb{R}^{d_{\text{model}}}$. Staging an input context of $M = 4{,}000$ tokens retrieves $4{,}000 \times 16\text{ KiB} \approx 65.5\text{ MB}$. Across an HBM3 bus running at $3{,}350\text{ GB/s}$, transferring this memory takes under $20\,\mu\text{s}$—a negligible fraction ($<0.01\%$) of the hundreds of milliseconds consumed by downstream transformer matrix multiplications. The true systems significance of tokenization lies not in memory bus transit, but in the mathematical structure of the representation itself.
+In accelerator memory, the core maintains an embedding weight table $\mathbf{W}_E \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$ ($1.64\text{ GB}$ for $d_{\text{model}} = 8192, |\mathcal{V}| = 100{,}256$ in FP16). For each staged token identifier $t_i$, the memory controller retrieves a contiguous $16\text{ KiB}$ row vector $\mathbf{x}_i \in \mathbb{R}^{d_{\text{model}}}$. Staging an input context of $M = 4{,}000$ tokens retrieves $65.5\text{ MB}$, traversing an HBM3 bus at $3{,}350\text{ GB/s}$ in under $20\,\mu\text{s}$—less than $0.01\%$ of subsequent matrix multiplications. The true systems impact of tokenization lies not in bus transit, but in the mathematical structure of the representation.
 
 ### The AST Impedance Mismatch: Non-Compositional Embeddings and Syntax Fractures {#sec-vol3-processor-ast-mismatch}
 
-Compilers, static analyzers, and operating system runtimes process software through deterministic lexical scanners that construct Abstract Syntax Trees (ASTs). A language lexer partitions a character stream along formal grammatical boundaries: language keywords, user-defined identifiers, operators, and whitespace tokens occupy distinct, non-overlapping AST nodes.
+Compilers and operating system runtimes process software through deterministic lexical scanners that construct Abstract Syntax Trees (ASTs). A lexer partitions a character stream along formal grammatical boundaries: keywords, identifiers, operators, and whitespace occupy distinct syntactic nodes.
 
-In contrast, statistical BPE tokenization possesses zero grammatical awareness. BPE merges bytes purely on frequency distribution across natural language and mixed code corpora. This creates a severe **AST Impedance Mismatch**, diagrammed in @fig-token-ast-mismatch.
+In contrast, statistical BPE tokenization possesses zero grammatical awareness. It merges bytes purely based on co-occurrence frequencies across natural language and mixed code corpora. This creates a severe **AST Impedance Mismatch** (@fig-token-ast-mismatch).
 
 ![Impedance mismatch between a compiler Abstract Syntax Tree (AST) and statistical Byte-Pair Encoding (BPE) for a Python function signature. The compiler cleanly delineates keywords, identifiers, and symbols into distinct syntactic nodes. Statistical BPE fractures compound identifiers across arbitrary subwords, fuses leading whitespace into keyword tokens, and binds delimiters across scope boundaries.](images/svg/token_ast_mismatch.svg){#fig-token-ast-mismatch}
 
-Consider what occurs when the agent runtime stages the defective signature from `config_parser.py`:
+Consider staging the defective signature from `config_parser.py`:
 
 ```python
 def parse_timeout(timeout_str: str) -> int: ...
 ```
 
-The compiler's lexical scanner constructs clean, semantically isolated tokens: `INDENT` (if nested), `def`, `parse_timeout`, `(`, `timeout_str`, `:`, `str`, `)`, `->`, `int`, `:`, `...`. Under a production BPE tokenizer like `cl100k_base`, however, this sequence fractures into a radically divergent representation that exposes three critical systems failure modes:
+The compiler's lexer constructs isolated syntactic tokens: `INDENT`, `def`, `parse_timeout`, `(`, `timeout_str`, `:`, `str`, `)`, `->`, `int`, `:`, `...`. Under a production BPE tokenizer like `cl100k_base`, however, this sequence fractures into a radically divergent representation that exposes three critical failure modes:
 
-1. **Non-Compositional Embedding Lookups:** In embedding table $\mathbf{W}_E$, every token ID indexes an orthogonal row vector. An unindented keyword `"def"` and an indented keyword `" def"` (with a single leading space) map to completely distinct, non-adjacent rows in $\mathbf{W}_E$. A two-space indent (`"  def"`) splits into a separate space subword followed by `" def"`, while a four-space indent (`"    def"`) decomposes into a multi-space token followed by `" def"`. Because these vectors share no compositional algebraic relationship in $\mathbb{R}^{d_{\text{model}}}$, the neural core cannot generalize syntactic properties of the keyword `def` across different indentation levels without allocating parameter capacity across transformer layers to learn synthetic linear transformations between unindented and indented vectors. A single whitespace shift changes the addressable vector, altering the attention key-value projections for all subsequent layers.
-2. **Identifier Fracturing:** Compound function and variable names are routinely fractured across arbitrary subword boundaries. The function identifier `parse_timeout` is split into distinct subwords for `" parse"` and `"_timeout"`. If written in camelCase (`" parseTimeout"`), the tokenization shifts to `" parse"` and `"Timeout"`. Furthermore, the parameter signature `(timeout_str` fuses the opening parenthesis directly into the identifier subword: `"(timeout"` and `"_str"`. The processor core does not observe a singular identifier bound to a memory address or symbol table entry; it observes a variable-length chain of arbitrary subwords whose causal attention heads must reconstruct the semantic identity of the variable across layers.
-3. **Delimiter-Parameter Fusion:** Structured tool definitions and JSON-RPC envelopes frequently fuse punctuation with keys. In a tool call such as `{"timeout": "2.5s"}`, the sequence `{"` merges into a single token, and `":` merges into another. If the agent core emits a space before the colon (`{ "timeout" : "2.5s"}`), the opening brace becomes a standalone token, the key becomes another, and the colon becomes a third. The generated token sequence diverges entirely, defeating external deterministic string matchers and regular expressions downstream.
+1. **Non-Compositional Embedding Lookups:** In $\mathbf{W}_E$, every token ID indexes an orthogonal row vector. An unindented `"def"` and an indented `" def"` map to distinct, non-adjacent rows. Two-space and four-space indentations fracture into separate whitespace subwords followed by `" def"`. Because these vectors share no compositional relationship, the core must dedicate parameters to learn linear mappings between indentation variants.
+2. **Identifier Fracturing:** Compound identifiers are split across arbitrary subword boundaries: `parse_timeout` becomes `" parse"` and `"_timeout"`, while `(timeout_str` fuses the opening parenthesis: `"(timeout"` and `"_str"`. The core observes a variable-length chain of subwords whose causal attention heads must reconstruct semantic identity across layers.
+3. **Delimiter-Parameter Fusion:** Structured tool definitions and JSON envelopes frequently fuse punctuation with keys. In `{"timeout": "2.5s"}`, `{"` merges into one token and `":` into another. A single space before the colon alters the token sequence completely, defeating string matchers.
 
 #### The JSON Escaping Penalty
 
-A particularly severe consequence of subword tokenization in modern agent systems is the **JSON Escaping Penalty**. When an agent runtime commands a model to emit code edits inside a structured JSON tool call (e.g., `{"search": "...", "replace": "..."}`), the target code must be serialized as a JSON string literal. In JSON, every newline must be escaped as `\n` (two ASCII characters: backslash and `n`), and every double quote must be escaped as `\"`.
+A direct consequence of subword tokenization in agent systems is the **JSON Escaping Penalty**. When an agent commands a model to emit code edits inside a JSON tool call (`{"search": "...", "replace": "..."}`), newlines must be escaped as `\n` and double quotes as `\"`.
 
-In standard source code, common indentation patterns (such as `\n    def `) are frequently merged by BPE into single subword tokens. Inside an escaped JSON string literal, however, the backslash character fractures these high-frequency merges. The literal string `\n    ` decomposes into separate tokens for the backslash, the character `n`, and the subsequent spaces. Profiling real agent code generation reveals that stringifying code within JSON inflicts a **$15\%$ to $35\%$ token inflation penalty** compared to raw code blocks. This inflation wastes accelerator memory bandwidth, shortens the usable context window, and slows autoregressive decode proportionally.
+In standard code, common indentation patterns (`\n    def `) merge into single subwords. Inside escaped JSON string literals, the backslash fractures these merges: `\n    ` decomposes into separate tokens for `\`, `n`, and spaces. Profiling real agent code generation reveals that stringifying code within JSON inflicts a **$15\%$ to $35\%$ token inflation penalty**, wasting memory bandwidth, shrinking effective context, and slowing decode.
 
-### Physical Memory Budgeting: PagedAttention and Allocator Realities {#sec-vol3-processor-memory-budgeting}
+### Physical Context Budgeting and Activation Footprint {#sec-vol3-processor-memory-budgeting}
 
-Because host software systems routinely abstract text buffers as variable-length string objects with dynamic heap allocations, systems engineers frequently commit the fatal design error of budgeting stochastic processor calls using character heuristics (e.g., assuming $1\text{ token} \approx 4\text{ characters}$).
-
-In hardware, context memory is a fixed physical reservation denominated strictly in integer tokens:
+Because host software abstracts text as dynamically allocated strings, engineers frequently budget model calls using character heuristics ($1\text{ token} \approx 4\text{ characters}$). In hardware, context memory is a fixed physical reservation denominated in integer tokens:
 
 $$M + K \le S_{\max}$$
 
-where $M$ represents the number of staged input prompt tokens, $K$ denotes the requested output generation budget, and $S_{\max}$ is the architectural context ceiling of the processor. Violating this inequality does not trigger graceful paging; it causes an unrecoverable runtime allocation fault or silent tail-truncation of the staged input tensor.
+where $M$ is prompt tokens, $K$ is output budget, and $S_{\max}$ is context capacity. Violating this triggers an unrecoverable allocation fault or silent tail-truncation.
 
-The character-to-token ratio $\rho = \frac{N_{\text{chars}}}{N_{\text{tokens}}}$ is non-linear and highly volatile across system payloads, as demonstrated in @tbl-token-expansion-ratios.
+The character-to-token ratio $\rho = \frac{N_{\text{chars}}}{N_{\text{tokens}}}$ varies widely across system payloads (@tbl-token-expansion-ratios).
 
-: Tokenization expansion and density variance across system payloads under `cl100k_base`. Character heuristics systematically underestimate token consumption in non-prose system payloads. {#tbl-token-expansion-ratios}
+: Tokenization expansion and density variance across system payloads under `cl100k_base`. Character heuristics systematically underestimate token consumption in non-prose payloads. {#tbl-token-expansion-ratios}
 
 | Payload Type | Example Payload Segment | Raw Bytes | Tokens ($N_{\text{tok}}$) | Ratio $\rho$ (chars/tok) | Budget Variance vs. Heuristic ($4.0\text{ chars/tok}$) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -102,37 +96,20 @@ The character-to-token ratio $\rho = \frac{N_{\text{chars}}}{N_{\text{tokens}}}$
 | Whitespace Indent | `            ` (12 spaces) | 12 | 1 | 12.00 | $-66.7\%$ (Under-budget) |
 | Hex Memory Dump | `0x7ffeefbff5a0: 48 89 e5 48 83 ec` | 33 | 21 | 1.57 | $+154.5\%$ (Catastrophic Overrun) |
 
-When an agent runtime captures standard error streams, compiler diagnostic traces, or configuration payloads, relying on a naive $4.0\text{ chars/token}$ heuristic introduces massive estimation drift. If an agent ingests an execution trace consisting of $64\text{ KiB}$ of hex dumps and structured JSON logs, the heuristic predicts:
+Ingesting $64\text{ KiB}$ of hex dumps and JSON logs yields $40{,}960$ tokens under real BPE ($\rho \approx 1.6$), vs. $16{,}384$ under the heuristic—instantly blowing past a $32{,}768$-token budget and truncating critical system context.
 
-$$N_{\text{est}} = \frac{65{,}536}{4} = 16{,}384\text{ tokens}$$
-
-Under real BPE serialization, where $\rho \approx 1.6\text{ chars/token}$, the actual token allocation is:
-
-$$N_{\text{actual}} = \frac{65{,}536}{1.6} = 40{,}960\text{ tokens}$$
-
-If the staging pipeline reserves context based on $N_{\text{est}}$ within an accelerator envelope of $S_{\max} = 32{,}768$, the dispatch kernel fails immediately with an out-of-bounds context exception, or silently drops the initial $8{,}192$ tokens containing the system prompt and security capability envelopes.
-
-Furthermore, every token admitted into the staged input tensor commits physical accelerator HBM for the lifespan of the invocation via the Key-Value (KV) cache. In modern architectures employing Grouped-Query Attention (GQA), the memory consumed by a single token across all transformer layers is defined analytically by:
+Furthermore, every admitted token commits physical accelerator HBM for the invocation's lifespan via the Key-Value (KV) cache. Under Grouped-Query Attention (GQA), memory per token across all layers is:
 
 $$\text{Mem}_{\text{token}} = 2 \times L \times H_{\text{kv}} \times d_{\text{head}} \times P \quad [\text{bytes/token}]$$
 
-where the leading factor of $2$ accounts for storing separate Key ($\mathbf{K}$) and Value ($\mathbf{V}$) activation tensors, $L$ is the number of transformer layers, $H_{\text{kv}}$ is the count of key-value heads, $d_{\text{head}}$ is the dimension per head, and $P$ is the byte-precision of the activation tensor (e.g., $P = 2$ for FP16/BF16, $P = 1$ for FP8).
-
-Consider an open-weights core such as Llama-3-70B ($L = 80$, $H_{\text{kv}} = 8$, $d_{\text{head}} = 128$, $P = 2$):
+where $2$ accounts for Key ($\mathbf{K}$) and Value ($\mathbf{V}$) activations, $L$ is layer count, $H_{\text{kv}}$ is KV heads, $d_{\text{head}}$ is head dimension, and $P$ is byte precision ($P = 2$ for FP16). For Llama-3-70B ($L = 80$, $H_{\text{kv}} = 8$, $d_{\text{head}} = 128$, $P = 2$):
 
 $$\text{Mem}_{\text{token}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ bytes} \approx 320\text{ KiB/token}$$
 
-For an agent staging a maximum context of $M = 65{,}536$ tokens, the KV cache allocation alone demands:
+Staging a maximum context of $M = 65{,}536$ tokens demands:
 
-$$\text{Mem}_{\text{KV}} = 65{,}536 \times 320\text{ KiB} = 20{,}971{,}520\text{ KiB} = 20.0\text{ GiB} \approx 21.5\text{ GB}$$
+$$\text{Mem}_{\text{KV}} = 65{,}536 \times 320\text{ KiB} \approx 20.0\text{ GiB} \quad (21.5\text{ GB})$$
 
-In modern production serving runtimes (such as vLLM, SGLang, and TensorRT-LLM), memory is not allocated dynamically via per-token `cudaMalloc` calls—a pattern that would trigger catastrophic memory fragmentation. Instead, the runtime initializes a dedicated block pool managed by **PagedAttention** [@kwon2023pagedattention]. The serving daemon partitions accelerator memory into non-contiguous physical pages (typically 16 or 32 tokens per page).
+In modern serving engines, this activation memory is managed in fixed physical allocation pools to avoid heap fragmentation (detailed in Chapter 5). The host runtime must execute tokenization locally on the CPU, verify that $M + K_{\max} \le S_{\max}$, and enforce deterministic bounds *before* dispatching tensors across the bus.
 
-When memory pressure spikes because an agent ingests an unexpectedly large diagnostic trace:
-- **Preemption by Swapping:** The scheduler evicts lower-priority KV pages to host CPU DRAM via high-speed pinned DMA memory.
-- **Preemption by Recomputation:** The scheduler drops the KV cache of active decode streams, suspending the requests and recomputing their prefill once memory clears.
-- **Admission Control:** The HTTP/gRPC front-end rejects incoming invocations with HTTP 429 (Too Many Requests) or HTTP 503 before any forward pass executes.
-
-To guarantee mechanical invariant closure, the host agent runtime must treat tokenization as an explicit, bounded serialization protocol. The host must execute the exact BPE tokenizer locally on the CPU, measure the precise vector length $M = |\text{encode}(s)|$, verify that $M + K_{\text{reserve}} \le S_{\max}$, and enforce deterministic truncation or compaction *before* allocating execution frames on the accelerator bus.
-
-With the context vector staged in accelerator HBM and its memory pages pinned in the PagedAttention block table, the stochastic core initiates execution. How the processor traverses these staged activations to generate candidate output is governed by the causal dynamics of the autoregressive decode loop.
+With the context vector staged in accelerator memory, the stochastic core initiates execution through the autoregressive decode loop.

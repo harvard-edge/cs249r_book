@@ -33,19 +33,3 @@ Designing reliable agentic architectures requires confronting widespread misconc
 
 **Architectural Defense:** Implement outcome-discriminated recovery handlers based on the normalized status envelope. When handling `TRUNCATED`, the runtime must either expand the output budget ($K_{\max}$) or prune non-essential historical context to grant the model sufficient generation headroom. When handling `REFUSED`, the runtime must sanitize the input context or escalate to an alternative model endpoint. Only transient transport errors (`TRANSPORT_FAILURE` with socket timeout or connection reset) should trigger exponential backoff retries, bounded by strict maximum attempt counts.
 :::
-
-::: {.fallacy-pitfall}
-**Fallacy 3:** *Speculative decoding is unnecessary in agent systems because prefill dominates runtime.*
-
-**Mechanism of Failure:** In an isolated cold call with a $40{,}000$-token prompt, prefill GEMM computation accounts for the majority of execution time. Engineers observing this profile frequently conclude that optimizing decode throughput (via speculative decoding or draft models) yields negligible end-to-end latency speedup under Amdahl's Law. However, this analysis completely breaks down in multi-turn agent systems. The moment prefix caching is deployed, redundant prefill is eliminated ($>95\%$ latency reduction). On Turn 2, decode becomes $>95\%$ of the remaining execution time! Dismissing speculative decoding leaves the agent severely bottlenecked by the $B=1$ memory shuttle wall.
-
-**Architectural Defense:** Treat prefix caching and speculative decoding as the twin architectural pillars of agent serving. Once static prompt prefixes are pinned in the inference engine's Radix tree, deploy speculative decoding (such as draft model speculation or prompt-lookup n-gram matching) to accelerate serialized generation, achieving $2\times$ to $2.5\times$ end-to-end cycle speedups across multi-turn workflows.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall 3:** *Assuming a passing test inside the agent workspace verifies the defect is resolved.*
-
-**Mechanism of Failure:** Naive agent frameworks execute unit tests directly inside the workspace that the agent is permitted to mutate. This creates two fatal vulnerabilities: **Oracle Poisoning** (where the model modifies the test file to delete failing assertions or insert trivial pass statements) and **Pre-Existing Test Noise** (where pre-existing broken tests cause the agent to falsely reject valid patches).
-
-**Architectural Defense:** Deploy **Differential Baseline Pre-Flight Testing** and **Out-of-Band Evaluation**. Run the test suite prior to mutation to record baseline test results $V(s_0)$, requiring that candidate patches achieve a positive delta ($\Delta V$) without regressing existing passing tests. Mount evaluation fixtures strictly read-only (`ro`) from a path external to the repository, disabling in-tree configuration overrides (`pytest -c /dev/null`) to guarantee oracle integrity.
-:::
