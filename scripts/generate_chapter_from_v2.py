@@ -384,6 +384,17 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
      4. Cross-Reference (connections across chapters or volumes)
      5. Physical / Mathematical Detail (minor derivation step, unit conversion)
    - Every footnote MUST include at least one `\index{...}` command on its core technical term for the book index.
+
+12. UNDERGRADUATE PEDAGOGICAL POLISH & CLARITY DIRECTIVES (STUDENT REVIEW LOOP INVARIANTS):
+   - **Define All Lifecycle Acronyms Immediately on First Introduction**: E.g., when introducing H-S-A-C, define it explicitly on first mention (Hypothesize -> Search -> Act -> Check) before using it in diagrams, text, or equations.
+   - **Distinguish Host-Device Graph Friction from SIMT Warp Divergence**: When discussing structured decoding or constrained execution, clearly differentiate:
+     (a) CUDA Graph capture friction / host synchronization: dynamic FSM mask pointer updates and variable-length sequence steps prevent static CUDA Graph capture, causing CPU-launch overhead.
+     (b) Warp divergence: PDA (context-free pushdown automata) execution branches across thread warps when tokens trigger dynamic grammar stack pushes/pops.
+   - **UTF-8 Multibyte Buffering**: When explaining tokenization or streaming FSMs, explicitly note that multi-byte UTF-8 characters (2-4 bytes) can be split across token boundaries, requiring an intermediate byte accumulator before decoding.
+   - **Grounded Memory Bus Efficiency ($\eta_{\text{bw}}$)**: In worked numerical examples calculating memory shuttling or decode latency, explicitly specify the effective bus utilization factor $\eta_{\text{bw}}$ (e.g. $\approx 0.80$ for H100 SXM5) so equations match physical wall-clock measurements.
+   - **Algorithmic Transparency in Sampling & Penalties**: Provide explicit algorithmic steps alongside math (e.g. Top-$p$ cumulative sum cutoff; sign-dependent repetition penalties dividing positive logits but multiplying negative logits).
+   - **Toy Pedagogical Table Explicit Clarification**: When using toy examples (e.g., 5-token vocabulary for logit masking), explicitly state that real vocabularies contain $100\text{k+}$ tokens, but the SIMD/SIMT bitmasking mechanics across GPU threads are identical.
+   - **Clean Cross-Chapter References**: Always cite other chapters using explicit, descriptive titles (e.g. 'Chapter 8, Execution Virtualization and Sandboxing') rather than raw unresolved references.
 """
 
 

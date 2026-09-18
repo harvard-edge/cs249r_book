@@ -64,14 +64,14 @@ To design reliable, high-performance agent infrastructure, systems engineers mus
 
 To bridge the gap between machine learning concepts and systems engineering primitives, @tbl-vol3-ml-systems-rosetta establishes the operational mappings used throughout this book.
 
-| Machine Learning View                  | Systems Architecture View                                           | Architectural Consequence                                                                             |     |                                                                                                    |
-|:---------------------------------------|:--------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------|-----|----------------------------------------------------------------------------------------------------|
-| **Input Prompt**                       | Staged Context Buffer in Host Memory Escrow                         | Requires explicit serialization; the model has zero access to live host memory or filesystems.        |     |                                                                                                    |
-| **`model.generate()`**                 | Autoregressive Decode Loop (Serial GEMV memory sweep)               | Iteratively sweeps gigabytes of parameter weights across the accelerator bus for every emitted token. |     |                                                                                                    |
-| **Unnormalized Logits ($\mathbf{z}$)** | High-dimensional output score buffer ($\mathbb{R}^{                 | \mathcal{V}                                                                                           | }$) | Massive bus traffic ($256\text{ KB/token}$); logit masking must execute on-device before sampling. |
-| **Hallucination**                      | Fail-Plausible Semantic Corruption across the Epistemic Gap         | Hardware cannot trap on false assertions; host runtime must verify invariants externally.             |     |                                                                                                    |
-| **Tool Calling**                       | Candidate string proposal held under Zero Ambient Authority ($A=0$) | The model cannot make system calls; host reference monitor must inspect, validate, and dispatch.      |     |                                                                                                    |
-| **`HTTP 200 OK` Response**             | Transport delivery acknowledgment                                   | Delivery Fallacy: Network packets arrived, but payload may be truncated, refused, or invalid.         |     |                                                                                                    |
+| Machine Learning View | Systems Architecture View | Architectural Consequence |
+| :--- | :--- | :--- |
+| **Input Prompt** | Staged Context Buffer in Host Memory Escrow | Requires explicit serialization; the model has zero access to live host memory or filesystems. |
+| **`model.generate()`** | Autoregressive Decode Loop (Serial GEMV memory sweep) | Iteratively sweeps gigabytes of parameter weights across the accelerator bus for every emitted token. |
+| **Unnormalized Logits ($\mathbf{z}$)** | High-dimensional output score buffer ($\mathbb{R}^{|\mathcal{V}|}$) | Massive bus traffic ($256\text{ KB/token}$); logit masking must execute on-device before sampling. |
+| **Hallucination** | Fail-Plausible Semantic Corruption across the Epistemic Gap | Hardware cannot trap on false assertions; host runtime must verify invariants externally. |
+| **Tool Calling** | Candidate string proposal held under Zero Ambient Authority ($A=0$) | The model cannot make system calls; host reference monitor must inspect, validate, and dispatch. |
+| **`HTTP 200 OK` Response** | Transport delivery acknowledgment | Delivery Fallacy: Network packets arrived, but payload may be truncated, refused, or invalid. |
 
 : **The Machine Learning vs. Systems Architecture Rosetta Stone**: Translating statistical model abstractions into physical operating systems primitives. {#tbl-vol3-ml-systems-rosetta}
 
@@ -240,14 +240,12 @@ Because the two spaces are followed by `def`, BPE merges the second space into `
 
 **Step 3: The Silicon Reality (Embedding Table Gather)**
 In hardware, token IDs index directly into the embedding matrix $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$:
-
 - In Case A, the accelerator gathers row 755: $\mathbf{e}_{755} = \mathbf{W}_{\text{embed}}[755, :]$.
 - In Case B, the accelerator gathers row 711: $\mathbf{e}_{711} = \mathbf{W}_{\text{embed}}[711, :]$.
 
 Vectors $\mathbf{e}_{755}$ and $\mathbf{e}_{711}$ are completely distinct rows in high-dimensional vector space ($\mathbb{R}^{d_{\text{model}}}$). The neural core receives no architectural signal indicating that token 711 represents the keyword `def` shifted by two spaces. To the transformer's attention heads, token 711 is an entirely different numerical entity with its own learned affinities.
 
 **Systems Consequences:**
-
 1. *Continuation Shifts and Syntax Hallucinations:* Because $\mathbf{e}_{755} \neq \mathbf{e}_{711}$, the model computes different attention activations at the decode boundary. An accidental trailing space or minor indentation discrepancy at the end of a prompt shifts downstream logits, potentially suppressing a valid syntax token or triggering an unexpected completion.
 2. *Identifier Splintering Latency:* Emitting `execute_transaction_with_retry` requires four sequential autoregressive decode steps (`"execute"`, `"_transaction"`, `"_with"`, `"_retry"`). Because each decode step requires a full sweep of all model parameters through the memory bus, identifier splintering directly inflates execution latency by $4\times$ compared to an atomic token.
 3. *Prefix Cache Invalidation:* In serving systems utilizing prefix caching (such as RadixAttention), KV cache blocks are indexed by exact token ID sequences. If a user or prompt template changes indentation or adds a single whitespace character, the resulting token IDs diverge immediately, invalidating the cached prefix and forcing an expensive full prompt prefill.
@@ -263,14 +261,14 @@ When autonomous systems invoke tools or exchange structured payloads (such as JS
 
 In `cl100k_base`, a raw newline is token 198 (`'\n'`), while a literal escaped newline sequence (`\n`) is mapped to single token 1734, and an escaped quote (`\"`) is token 2153. Although modern tokenizers assign dedicated IDs to common two-character escape sequences, serializing source code inside JSON envelopes inflicts severe token inflation by breaking natural multi-character subword merges. Across indentation boundaries, leading whitespace can no longer merge cleanly with adjacent keyword tokens; furthermore, structural quotes, escaped delimiters, and object framing expand the token footprint by 15 percent to over 40 percent (@tbl-token-compression-ratios).
 
-| Domain / Payload Type       | UTF-8 Bytes ($B$) | Chars ($C$) | Tokens ($N$) | Bytes/Token ($B/N$) | Chars/Token ($C/N$) | Systems Hazard Profile                               |
-|:----------------------------|:-----------------:|:-----------:|:------------:|:-------------------:|:-------------------:|:-----------------------------------------------------|
-| **English Technical Prose** |        261        |     261     |      38      |         6.87        |         6.87        | Stable compression; high subword coverage.           |
-| **Python Source Code**      |        478        |     478     |      99      |         4.83        |         4.83        | Identifier splintering; indentation fractures.       |
-| **Structured JSON RPC**     |        173        |     173     |      39      |         4.44        |         4.44        | Escaped delimiters and structural punctuation.       |
-| **Escaped Code in JSON**    |        247        |     247     |      63      |         3.92        |         3.92        | Escaped newlines (`\\n`) inflate token count by 43%. |
-| **Hex / Base64 / UUID**     |        138        |     138     |      79      |         1.75        |         1.75        | Low subword coverage; near character-level encoding. |
-| **CJK / Multilingual Text** |        212        |      72     |      80      |         2.65        |         0.90        | 3-byte UTF-8 expansion; 1 to 2 tokens per glyph.     |
+| Domain / Payload Type | UTF-8 Bytes ($B$) | Chars ($C$) | Tokens ($N$) | Bytes/Token ($B/N$) | Chars/Token ($C/N$) | Systems Hazard Profile |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **English Technical Prose** | 261 | 261 | 38 | 6.87 | 6.87 | Stable compression; high subword coverage. |
+| **Python Source Code** | 478 | 478 | 99 | 4.83 | 4.83 | Identifier splintering; indentation fractures. |
+| **Structured JSON RPC** | 173 | 173 | 39 | 4.44 | 4.44 | Escaped delimiters and structural punctuation. |
+| **Escaped Code in JSON** | 247 | 247 | 63 | 3.92 | 3.92 | Escaped newlines (`\\n`) inflate token count by 43%. |
+| **Hex / Base64 / UUID** | 138 | 138 | 79 | 1.75 | 1.75 | Low subword coverage; near character-level encoding. |
+| **CJK / Multilingual Text** | 212 | 72 | 80 | 2.65 | 0.90 | 3-byte UTF-8 expansion; 1 to 2 tokens per glyph. |
 
 : **Token compression ratios across computational domains**: Empirical character-to-token compression ratios measured using `cl100k_base` (`tiktoken` v0.9.0), demonstrating the 43 percent token inflation incurred by JSON string escaping. {#tbl-token-compression-ratios}
 
@@ -381,7 +379,6 @@ $$S_{\max}^{\text{FP8}} = \frac{6.0 \times 10^9\text{ bytes}}{163{,}840\text{ by
 Thus, isolated execution on an 80 GB card is physically bounded to contexts of $S \le 32{,}768$ ($32\text{k}$) tokens, where an FP8 KV cache consumes $\approx 5.37\text{ GB}$.
 
 To serve extended 128k contexts at 70B scale without crashing, systems architects must employ one of two production solutions:
-
 1. *Multi-GPU Tensor Parallelism (TP):* Shard the model and attention heads across multiple GPUs over high-speed NVLink. Across a 4-GPU cluster ($4 \times 80\text{ GB} = 320\text{ GB}$ aggregate HBM), each GPU holds only $17.5\text{ GB}$ of FP8 weights and $\approx 5.24\text{ GB}$ of FP8 KV cache, leaving over 55 GB of headroom per GPU for concurrent requests.
 2. *Expanded-Memory Accelerators:* Migrate to next-generation accelerators with expanded HBM capacity, such as the NVIDIA H200 (141 GB HBM3e) or NVIDIA B200 (180 GB HBM3e). On a 141 GB H200, 70 GB of weights leaves 71 GB of headroom, effortlessly accommodating 128k contexts while preserving capacity for multi-tenant batching.
 :::
@@ -509,7 +506,6 @@ The transformation executes across five sequential stages:
 3. **Thermal Simplex Scaling:** Logits are scaled by temperature $\tau \in (0, \infty)$:[^fn-softmax-temperature]
    $$\tilde{z}_{t, v} = \frac{z'''_{t, v}}{\tau}$$ {#eq-thermal-scaling}
    Borrowing from the Boltzmann distribution in statistical mechanics, modulating $\tau$ controls entropy on the probability simplex (@fig-temperature-simplex):
-
    - **Greedy Limit ($\tau \to 0^+$):** Thermal noise approaches zero, collapsing probability mass entirely onto the mode with the maximum logit:
      $$\lim_{\tau \to 0^+} Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \begin{cases} 1 & \text{if } v = \arg\max_{w \in \mathcal{V}} z'''_{t, w} \\ 0 & \text{otherwise} \end{cases}$$ {#eq-greedy-limit}
      (subject to floating-point drift in GPU parallel reduction trees[^fn-float-determinism]).
@@ -531,7 +527,6 @@ The transformation executes across five sequential stages:
 Consider an inference serving engine evaluating candidate next-token continuations for an autonomous agent executing administrative scripts. At decode step $t$, the neural core outputs raw logits $\mathbf{z} = [2.0, 1.0, 0.0]$ across a toy 3-token vocabulary $\mathcal{V} = \{v_1, v_2, v_3\}$ representing candidate bash actions `["read", "write", "delete"]`. Assume no repetition penalties or additive logit biases ($z''' = z$).
 
 Calculate the normalized probability distribution $Q(y)$ under three distinct runtime temperature configurations:
-
 1. Low temperature / greedy sharpening ($\tau = 0.2$)
 2. Baseline temperature ($\tau = 1.0$)
 3. High temperature / entropy dispersion ($\tau = 2.0$)
@@ -570,11 +565,11 @@ For each temperature setting $\tau$, compute the scaled logits $\tilde{z}_i = z_
 
 The comparative numerical shifts are summarized in @tbl-temperature-modulation:
 
-| Token Candidate    | Raw Logit $z_i$ | $\tau=0.2$ Prob ($Q$) | $\tau=1.0$ Prob ($Q$) | $\tau=2.0$ Prob ($Q$) |
-|:-------------------|:----------------|:----------------------|:----------------------|:----------------------|
-| $v_1$ (`"read"`)   | $2.0$           | **$99.33\%$**         | **$66.52\%$**         | **$50.65\%$**         |
-| $v_2$ (`"write"`)  | $1.0$           | $0.67\%$              | $24.47\%$             | $30.72\%$             |
-| $v_3$ (`"delete"`) | $0.0$           | $0.005\%$             | $9.00\%$              | $18.63\%$             |
+| Token Candidate | Raw Logit $z_i$ | $\tau=0.2$ Prob ($Q$) | $\tau=1.0$ Prob ($Q$) | $\tau=2.0$ Prob ($Q$) |
+| :--- | :--- | :--- | :--- | :--- |
+| $v_1$ (`"read"`) | $2.0$ | **$99.33\%$** | **$66.52\%$** | **$50.65\%$** |
+| $v_2$ (`"write"`) | $1.0$ | $0.67\%$ | $24.47\%$ | $30.72\%$ |
+| $v_3$ (`"delete"`) | $0.0$ | $0.005\%$ | $9.00\%$ | $18.63\%$ |
 : **Softmax temperature probability modulation**: Reshaping candidate token probabilities across greedy sharpening ($\tau=0.2$), baseline ($\tau=1.0$), and high entropy ($\tau=2.0$). {#tbl-temperature-modulation}
 
 **Systems insight**:
@@ -646,6 +641,7 @@ Under **Zero Ambient Authority ($A=0$)** in the H-S-A-C architectural taxonomy[^
 A common architectural fallacy in naive agent frameworks is relying on *stochastic self-assessment*—prompting the language model to verify its own proposals (for example, asking "Review the script above and confirm whether it is safe to execute"). This pattern fails on two fundamental systems and mathematical grounds:
 
 1. **Probabilistic Incompleteness (Self-Sampling is Not Verification):** If a model has a nonzero error probability $\epsilon = 1 - P(\text{correct} \mid \mathbf{y}) > 0$, evaluating a verification prompt $\mathbf{x}_{\text{ver}} = [\mathbf{x}, \mathbf{y}, \mathbf{p}_{\text{verify}}]$ yields an evaluation output $\mathbf{y}_{\text{eval}}$ sampled from the exact same parameter weights $\Theta$. If the model suffered from an epistemic blind spot or flawed training distribution when generating the code, the same biased distribution governs its critique. A probability distribution cannot provide independent mathematical verification of its own samples.
+
 2. **Attentional Confirmation Bias (Contextual Priming):**[^fn-attentional-bias] In plain English, the model becomes "hypnotized" by its own hallucinations. In the Transformer architecture, candidate tokens $\mathbf{y}$ reside in the Key-Value (KV) cache. In self-attention:
 $$\mathbf{A}_{t} = \text{softmax}\left(\frac{\mathbf{q}_t \mathbf{K}_{\le t}^\top}{\sqrt{d_{\text{head}}}}\right)$$ {#eq-attention-confirmation}
 the newly generated candidate tokens act as powerful contextual attractors during subsequent forward passes. Query vectors $\mathbf{q}_t$ attend heavily to the keys $\mathbf{K}_{\le t}$ of the candidate prefix. Because language models are trained to maintain narrative consistency, the core actively conditions on the premises established in its own speculative tokens. It tends to elaborate, rationalize, and defend its previous mistakes rather than identifying internal contradictions.
@@ -729,7 +725,6 @@ The host execution daemon inspects response envelope $\mathcal{E}_{\text{resp}} 
 
 3. **Capability and Policy Verification Gate ($\text{VerifyPolicy}(\mathbf{b}, \mathcal{P})$):**
    The host reference monitor walks AST $\mathcal{T}$ and checks every command node against security policy $\mathcal{P}_{\text{sandbox}}$:
-
    - Node 1 (`rm -rf /tmp/build_cache/*`): Target path `/tmp/build_cache/*` matches policy rule `ALLOW_WRITE /tmp/build_cache/**`. Capability check: **Passed**.
    - Node 2 (`rm -rf /var/log/journal/*`): Target path `/var/log/journal/*` falls outside the agent's allocated workspace. System policy enforces `DENY_DELETE /var/log/**` to protect persistent system audit trails and journal logs. Furthermore, the agent process runs without `CAP_DAC_OVERRIDE` Linux capabilities.
    - Safety Invariant Check: The security monitor enforces invariant $\text{Inv}_{\text{no\_system\_wildcard}}$, which forbids wildcard deletions on system-level paths.
@@ -777,13 +772,13 @@ This payload is structurally valid and passes any standard JSON schema parser. Y
 
 The runtime organizes external verification into hierarchical layers (@tbl-verification-layers).
 
-| Verification Layer                    | Evaluation Mechanism                                          | Evaluation Latency                        | Target Properties Verified                                 | Invariant Coverage Limits                                                            |
-|:--------------------------------------|:--------------------------------------------------------------|:------------------------------------------|:-----------------------------------------------------------|:-------------------------------------------------------------------------------------|
-| **1. Lexical & Syntactic (Unpacker)** | CFG parser, AST parser, JSON schema deserializer              | $< 5\text{ ms}$ (Host CPU)                | Grammar compliance, balanced delimiters, field types       | Verifies syntax only; zero guarantee of symbol existence, safety, or intent.         |
-| **2. Static Semantic**                | Type checkers (`mypy`, `tsc`), linters, symbol linkers        | $50\text{ ms} - 1\text{ s}$ (Host CPU)    | Scope validity, identifier resolution, type compatibility  | Detects undeclared symbols and type mismatches; cannot verify runtime values.        |
-| **3. Contractual & Invariant**        | Assertion checkers, contract verifiers, precondition monitors | $10\text{ ms} - 100\text{ ms}$ (Host CPU) | Invariant satisfaction, range constraints, loop bounds     | Proves local contracts; limited to explicitly formalized assertions.                 |
-| **4. Dynamic Behavioral**             | Unit test suites, integration test runners                    | $1\text{ s} - 60\text{ s}$ (Isolated env) | Input-output mapping, regression avoidance, error handling | Validates execution paths covered by test assertions; cannot certify untested paths. |
-| **5. Reference Monitor**              | Capability checkers, ACLs, read-only mounts                   | $< 1\text{ ms}$ (Kernel / Runtime)        | Least-privilege boundaries, permission enforcement         | Enforces access rights; zero awareness of application functional correctness.        |
+| Verification Layer | Evaluation Mechanism | Evaluation Latency | Target Properties Verified | Invariant Coverage Limits |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Lexical & Syntactic (Unpacker)** | CFG parser, AST parser, JSON schema deserializer | $< 5\text{ ms}$ (Host CPU) | Grammar compliance, balanced delimiters, field types | Verifies syntax only; zero guarantee of symbol existence, safety, or intent. |
+| **2. Static Semantic** | Type checkers (`mypy`, `tsc`), linters, symbol linkers | $50\text{ ms} - 1\text{ s}$ (Host CPU) | Scope validity, identifier resolution, type compatibility | Detects undeclared symbols and type mismatches; cannot verify runtime values. |
+| **3. Contractual & Invariant** | Assertion checkers, contract verifiers, precondition monitors | $10\text{ ms} - 100\text{ ms}$ (Host CPU) | Invariant satisfaction, range constraints, loop bounds | Proves local contracts; limited to explicitly formalized assertions. |
+| **4. Dynamic Behavioral** | Unit test suites, integration test runners | $1\text{ s} - 60\text{ s}$ (Isolated env) | Input-output mapping, regression avoidance, error handling | Validates execution paths covered by test assertions; cannot certify untested paths. |
+| **5. Reference Monitor** | Capability checkers, ACLs, read-only mounts | $< 1\text{ ms}$ (Kernel / Runtime) | Least-privilege boundaries, permission enforcement | Enforces access rights; zero awareness of application functional correctness. |
 : **Verification matrix**: Mapping output properties to external deterministic verification mechanisms and coverage limits. {#tbl-verification-layers}
 
 No single layer provides complete invariant coverage (@tbl-verification-layers). Schema parsing checks syntax without verifying process liveness or runtime safety. Dynamic testing evaluates execution against explicit assertions, reporting a standard POSIX exit status:
@@ -817,7 +812,6 @@ int status = ioctl(int fd, unsigned long request, void *argp);
 ```
 
 In these classical system calls, every argument serves as an indispensable systems barrier:
-
 - The file descriptor `fd` authenticates capabilities and bounds access scope;
 - The memory pointer `buf` targets an explicitly allocated, bounded destination in user virtual memory;
 - The byte count `count` establishes a rigid physical ceiling, preventing the kernel from overrunning user memory buffers;
@@ -879,7 +873,6 @@ Node C would grant the request a phantom 50 percent extra execution budget, hold
 
 **Queueing, Decode Iterations, and Orphan Execution Prevention:**
 Now trace what happens inside Node C's accelerator scheduler:
-
 - *Batch Queueing:* High cluster load holds the request in the scheduler's wait queue for $2{,}200\text{ ms}$. At dequeue time ($t_{\text{mono}}^{(C)} = 983.500\text{ s}$), the scheduler checks the deadline: $983.500\text{ s} < 986.125\text{ s}$. The request is still valid, but available execution time has shrunk to $986.125 - 983.500 = 2{,}625\text{ ms}$.
 - *Prefill Phase:* The prompt prefill GEMM executes in $325\text{ ms}$, concluding at $t_{\text{mono}}^{(C)} = 983.825\text{ s}$. Remaining decode budget: $2{,}625 - 325 = 2{,}300\text{ ms}$.
 - *Decode Phase:* The engine decodes tokens at an iteration latency of $15\text{ ms/token}$. The maximum number of tokens feasible within the deadline is $\lfloor 2{,}300 / 15 \rfloor = 153\text{ tokens}$.
@@ -957,15 +950,15 @@ $$S_{\text{class}} \in \{\texttt{COMPLETED}, \texttt{TRUNCATED}, \texttt{REJECTE
 
 @Tbl-vol3-invocation-status formalizes the mapping between primary outcome classes, reason codes, termination predicates, payload usability, and host runtime recovery responsibilities.
 
-| Primary Class ($S_{\text{class}}$) | Reason Codes ($\rho_{\text{code}}$)                                                                                                   | Termination Predicate                                                                                                                   | Payload Usability                                                                            | Host Runtime Recovery Action                                                                      |
-|:-----------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------|
-| **`COMPLETED`**                    | `STOP_DELIMITER_MATCHED`, `END_OF_SEQUENCE_TOKEN`                                                                                     | $\exists \mathbf{s} \in \mathcal{S}_{\text{stop}} \land K \le K_{\max} \land t \le t_{\text{deadline}}$                                 | Closed candidate sequence; structural well-formedness verified by grammar or external parser | Stage in host DRAM escrow; route to external verification perimeter.                              |
-| **`TRUNCATED`**                    | `STEP_BUDGET_EXHAUSTED`, `DEADLINE_EXPIRED`                                                                                           | $\forall \mathbf{s} \in \mathcal{S}_{\text{stop}} : \mathbf{s} \text{ not matched} \land (K = K_{\max} \lor t \ge t_{\text{deadline}})$ | Fractured prefix; open syntax, missing delimiters                                            | Quarantine payload in host DRAM; discard from actuation; evaluate budget reallocation.            |
-| **`REJECTED`**                     | `CONTEXT_OVERFLOW_EXCEEDED`, `CAPACITY_EXHAUSTED`, `SCHEMA_VALIDATION_FAILED`, `TOKENIZER_DIGEST_MISMATCH`, `UNSUPPORTED_ABI_VERSION` | Admission check failed before execution                                                                                                 | Zero candidate content ($\mathbf{y} = \emptyset$)                                            | Compact prompt context; correct schema parameters; shed load or back off; align tokenizer digest. |
-| **`CANCELLED`**                    | `CLIENT_SPECULATIVE_ABORT`, `CLIENT_DEADLINE_EXCEEDED`, `CLIENT_SUPERVISOR_SIGNAL`                                                    | Host issued `RST_STREAM` or `CANCELLED`                                                                                                 | Aborted partial prefix; invalid trailing state                                               | Reclaim GPU memory allocations; log telemetry; update supervisor state.                           |
-| **`FAULTED`**                      | `GRAMMAR_COMPILATION_ERROR`, `GRAMMAR_DEAD_END_EMPTY_VOCAB`, `DAEMON_OOM_CRASH`, `ACCELERATOR_KERNEL_FAULT`                           | Runtime exception, empty vocabulary mask, or crash                                                                                      | Corrupted, partial, or null payload                                                          | Quarantine payload; log daemon diagnostics; restart worker or debug grammar.                      |
-| **`REFUSED`**                      | `SAFETY_POLICY_TRIGGERED`, `CONTENT_FILTER_INTERCEPT`                                                                                 | Alignment policy interceptor triggered                                                                                                  | Diagnostic refusal message; zero candidate code                                              | Quarantine payload; log policy telemetry; escalate to human supervisor.                           |
-| **`TRANSPORT_FAILURE`**            | `SOCKET_RESET_PEER`, `STREAM_TIMEOUT`, `TLS_HANDSHAKE_FAILURE`                                                                        | Socket disconnect, TCP reset, or transport timeout                                                                                      | Null or corrupted transport frames                                                           | Log connection telemetry; reconnect with backoff or failover to healthy replica.                  |
+| Primary Class ($S_{\text{class}}$) | Reason Codes ($\rho_{\text{code}}$) | Termination Predicate | Payload Usability | Host Runtime Recovery Action |
+| :--- | :--- | :--- | :--- | :--- |
+| **`COMPLETED`** | `STOP_DELIMITER_MATCHED`, `END_OF_SEQUENCE_TOKEN` | $\exists \mathbf{s} \in \mathcal{S}_{\text{stop}} \land K \le K_{\max} \land t \le t_{\text{deadline}}$ | Closed candidate sequence; structural well-formedness verified by grammar or external parser | Stage in host DRAM escrow; route to external verification perimeter. |
+| **`TRUNCATED`** | `STEP_BUDGET_EXHAUSTED`, `DEADLINE_EXPIRED` | $\forall \mathbf{s} \in \mathcal{S}_{\text{stop}} : \mathbf{s} \text{ not matched} \land (K = K_{\max} \lor t \ge t_{\text{deadline}})$ | Fractured prefix; open syntax, missing delimiters | Quarantine payload in host DRAM; discard from actuation; evaluate budget reallocation. |
+| **`REJECTED`** | `CONTEXT_OVERFLOW_EXCEEDED`, `CAPACITY_EXHAUSTED`, `SCHEMA_VALIDATION_FAILED`, `TOKENIZER_DIGEST_MISMATCH`, `UNSUPPORTED_ABI_VERSION` | Admission check failed before execution | Zero candidate content ($\mathbf{y} = \emptyset$) | Compact prompt context; correct schema parameters; shed load or back off; align tokenizer digest. |
+| **`CANCELLED`** | `CLIENT_SPECULATIVE_ABORT`, `CLIENT_DEADLINE_EXCEEDED`, `CLIENT_SUPERVISOR_SIGNAL` | Host issued `RST_STREAM` or `CANCELLED` | Aborted partial prefix; invalid trailing state | Reclaim GPU memory allocations; log telemetry; update supervisor state. |
+| **`FAULTED`** | `GRAMMAR_COMPILATION_ERROR`, `GRAMMAR_DEAD_END_EMPTY_VOCAB`, `DAEMON_OOM_CRASH`, `ACCELERATOR_KERNEL_FAULT` | Runtime exception, empty vocabulary mask, or crash | Corrupted, partial, or null payload | Quarantine payload; log daemon diagnostics; restart worker or debug grammar. |
+| **`REFUSED`** | `SAFETY_POLICY_TRIGGERED`, `CONTENT_FILTER_INTERCEPT` | Alignment policy interceptor triggered | Diagnostic refusal message; zero candidate code | Quarantine payload; log policy telemetry; escalate to human supervisor. |
+| **`TRANSPORT_FAILURE`** | `SOCKET_RESET_PEER`, `STREAM_TIMEOUT`, `TLS_HANDSHAKE_FAILURE` | Socket disconnect, TCP reset, or transport timeout | Null or corrupted transport frames | Log connection telemetry; reconnect with backoff or failover to healthy replica. |
 : **The normalized status envelope**: Mapping primary outcome classes and reason codes to termination predicates, payload integrity, and host runtime recovery policies. {#tbl-vol3-invocation-status}
 
 ### Truncation Hazards and the DRAM Quarantining Invariant {#sec-vol3-processor-truncation-hazards}
@@ -1036,7 +1029,6 @@ Modern BPE tokenizers operate on raw bytes ($\Sigma_{\text{byte}} = \{0, \dots, 
 If an automaton evaluated character-level transitions naively, encountering an incomplete multibyte token would trigger an immediate syntax rejection. To bridge this byte-to-character impedance mismatch, the grammar engine compiles the target formal syntax down into a **Byte-level DFA (Byte-DFA)**.[^fn-unicode-buffering] A Byte-DFA lowers the input alphabet from characters down to the 256 physical byte values ($\Sigma_{\text{byte}} = \{0x00, \dots, 0xFF\}$). The transition function $\delta(q, b)$ operates byte-by-byte. To determine whether an entire candidate subword token $y \in \mathcal{V}$ is admissible at parser state $q_t$, the runtime extracts its raw byte sequence $s(y) = (b_1, b_2, \dots, b_k)$ and evaluates the extended transition function $\delta^*(q_t, s(y))$. If the Byte-DFA successfully consumes all $k$ bytes without transitioning into an error state, token $y$ is valid.
 
 To see this in practice across discrete decode steps:
-
 1. Suppose token $y_1$ emits the first two bytes of a 4-byte emoji: `[0xF0, 0x9F]`. Rather than rejecting the incomplete codepoint, the Byte-DFA transitions to an intermediate buffering sub-state $q_{\text{utf8\_cont\_2bytes}}$.
 2. At the next decode step $t+1$, the logit mask restricts the valid continuation set $\mathcal{V}_{\text{valid}}(q_{t+1})$ strictly to tokens whose leading bytes provide valid UTF-8 continuation bytes (`0x80` through `0xBF`).
 3. When token $y_2$ emits the remaining two bytes `[0x98, 0x80]`, the Byte-DFA consumes them, marks the 4-byte character as complete, and advances the grammar transition to its normal syntactic state.
@@ -1070,20 +1062,19 @@ The request begins at initial parser state $q_0$. According to the JSON specific
 **Candidate Tokens and Raw Logits**
 At decode step $t=1$, the neural core's unembedding projection computes unnormalized logits $\mathbf{z}_1 \in \mathbb{R}^{|\mathcal{V}|}$. Consider five representative candidate tokens in vocabulary $\mathcal{V}$ (@tbl-grammar-masking-step), assuming for pedagogical clarity a toy 5-token vocabulary (or that these five candidates account for the overwhelming majority of unconstrained probability mass):
 
-| Token Index ($i$) | Literal String | Byte Sequence (Hex)             | Raw Logit ($z_{1, i}$) | Unconstrained Probability ($P_{\text{raw}}$) |
-|:------------------|:---------------|:--------------------------------|:-----------------------|:---------------------------------------------|
-| $y_1$ (1024)      | `"{"`          | `0x7B`                          | $+4.2$                 | $1.28\%$                                     |
-| $y_2$ (2048)      | `"\n  {"`      | `0x0A 0x20, 0x20 0x7B`          | $+3.8$                 | $0.86\%$                                     |
-| $y_3$ (4096)      | `"Sure"`       | `0x53 0x75 0x72 0x65`           | $+8.5$                 | $94.55\%$                                    |
-| $y_4$ (1025)      | `"["`          | `0x5B`                          | $+2.1$                 | $0.16\%$                                     |
-| $y_5$ (8192)      | `"status"`     | `0x73 0x74 0x61 0x74 0x75 0x73` | $+5.1$                 | $3.15\%$                                     |
+| Token Index ($i$) | Literal String | Byte Sequence (Hex) | Raw Logit ($z_{1, i}$) | Unconstrained Probability ($P_{\text{raw}}$) |
+| :--- | :--- | :--- | :--- | :--- |
+| $y_1$ (1024) | `"{"` | `0x7B` | $+4.2$ | $1.28\%$ |
+| $y_2$ (2048) | `"\n  {"` | `0x0A 0x20, 0x20 0x7B` | $+3.8$ | $0.86\%$ |
+| $y_3$ (4096) | `"Sure"` | `0x53 0x75 0x72 0x65` | $+8.5$ | $94.55\%$ |
+| $y_4$ (1025) | `"["` | `0x5B` | $+2.1$ | $0.16\%$ |
+| $y_5$ (8192) | `"status"` | `0x73 0x74 0x61 0x74 0x75 0x73` | $+5.1$ | $3.15\%$ |
 : **Candidate tokens and Byte-DFA transitions at step $t=1$**: Raw logits and automaton-derived validity flags for a JSON object root. {#tbl-grammar-masking-step}
 
 *The Unconstrained Failure Mode:* Notice the raw logits. Because foundation models are trained predominantly on conversational dialogues, the neural core assigns its highest raw logit ($z = +8.5$) to token $y_3$ (`"Sure"`). In an unconstrained setting, the softmax probability of emitting `"Sure"` exceeds $94\%$. The model naturally wants to chatter (`"Sure, here is the requested JSON..."`), which immediately breaks downstream JSON parsers!
 
 **Step 1: Byte-DFA Evaluation and Bitmask Construction**
 The grammar engine tests each candidate against the Byte-DFA extended transition function $\delta^*(q_0, s(y))$:
-
 - **Token $y_1$ (`"{"`):** Consumes single byte `0x7B`. Transition: $\delta(q_0, \texttt{0x7B}) = q_{\text{in\_obj}}$. Valid! Bitmask bit $b_1 = 1$; additive mask $m_{1, 1} = 0$.
 - **Token $y_2$ (`"\n  {"`):** Consumes bytes `0x0A` (newline), `0x20` (space), `0x20` (space), and `0x7B` (`{`). The automaton loops on whitespace at $q_0$, then transitions on `0x7B` to $q_{\text{in\_obj}}$. Valid! Bitmask bit $b_2 = 1$; additive mask $m_{1, 2} = 0$.
 - **Token $y_3$ (`"Sure"`):** Consumes leading byte `0x53` ('S'). At state $q_0$, 'S' is neither whitespace nor `'{'`. Transition: $\delta(q_0, \texttt{0x53}) = \text{ERROR}$. Invalid! Bitmask bit $b_3 = 0$; additive mask $m_{1, 3} = -\infty$.
@@ -1094,7 +1085,6 @@ The grammar engine tests each candidate against the Byte-DFA extended transition
 The GPU masking kernel applies the additive mask $\tilde{z}_{1, i} = z_{1, i} + m_{1, i}$ directly in device memory:
 $$\tilde{\mathbf{z}}_1 = [+4.2, \ +3.8, \ -\infty, \ -\infty, \ -\infty]$$
 Evaluating the softmax kernel (@eq-grammar-softmax) over $\tilde{\mathbf{z}}_1$ assigns $\exp(-\infty) = 0$ to all invalid candidates:
-
 - $\exp(4.2) \approx 66.69$
 - $\exp(3.8) \approx 44.70$
 - $\exp(-\infty) = 0$
@@ -1305,12 +1295,12 @@ Each term reflects work performed at a distinct layer of the systems hierarchy:
 
 Depending on the operational characteristics of the agent task, the dominant contributor to $T_{\text{total}}$ shifts dramatically across prompt-dominated and decode-dominated workloads, as classified in @tbl-vol3-latency-regimes.
 
-| Workload Profile                 | Context Length ($M$)          | Generation Budget ($K_{\max}$) | Dominant Latency Phase                                         | Primary Hardware Bottleneck                       |
-|:---------------------------------|:------------------------------|:-------------------------------|:---------------------------------------------------------------|:--------------------------------------------------|
-| **Agent Reflex / Status Probe**  | Short ($M \le 10^3$)          | Ultra-short ($K \le 5$)        | $T_{\text{queue}} + T_{\text{CPU,prep}} + T_{\text{CPU,post}}$ | Host IPC and RPC network serialization            |
-| **Codebase Retrieval / Routing** | Long ($M \ge 32 \times 10^3$) | Short ($K \le 50$)             | $T_{\text{prefill}}$                                           | Accelerator compute throughput ($\text{TFLOP/s}$) |
-| **Speculative Code Synthesis**   | Short ($M \le 10^3$)          | Long ($K \ge 2 \times 10^3$)   | $T_{\text{decode}}$                                            | Accelerator memory bandwidth ($\text{GB/s}$)      |
-| **Full File Refactoring**        | Long ($M \ge 32 \times 10^3$) | Long ($K \ge 2 \times 10^3$)   | $T_{\text{prefill}} + T_{\text{decode}}$                       | Compound: Compute bound then memory bound         |
+| Workload Profile | Context Length ($M$) | Generation Budget ($K_{\max}$) | Dominant Latency Phase | Primary Hardware Bottleneck |
+| :--- | :--- | :--- | :--- | :--- |
+| **Agent Reflex / Status Probe** | Short ($M \le 10^3$) | Ultra-short ($K \le 5$) | $T_{\text{queue}} + T_{\text{CPU,prep}} + T_{\text{CPU,post}}$ | Host IPC and RPC network serialization |
+| **Codebase Retrieval / Routing** | Long ($M \ge 32 \times 10^3$) | Short ($K \le 50$) | $T_{\text{prefill}}$ | Accelerator compute throughput ($\text{TFLOP/s}$) |
+| **Speculative Code Synthesis** | Short ($M \le 10^3$) | Long ($K \ge 2 \times 10^3$) | $T_{\text{decode}}$ | Accelerator memory bandwidth ($\text{GB/s}$) |
+| **Full File Refactoring** | Long ($M \ge 32 \times 10^3$) | Long ($K \ge 2 \times 10^3$) | $T_{\text{prefill}} + T_{\text{decode}}$ | Compound: Compute bound then memory bound |
 : **Latency regimes across agent workloads**: Dominant latency phases and primary hardware bottlenecks across prompt length $M$ and generation ceiling $K_{\max}$. {#tbl-vol3-latency-regimes}
 
 ### Arithmetic Intensity and the Accelerator Roofline {#sec-vol3-processor-roofline}
@@ -1407,11 +1397,11 @@ for name, tflops, bw, prec in [("A100 SXM4 (FP16)", 312, 2.039, 2),
 
 Evaluating these relationships across contemporary accelerator generations reveals how memory bus bandwidth dictates decode performance (@tbl-vol3-roofline-hardware).
 
-| Accelerator Silicon  | Precision ($P$)         | Peak Compute ($\Pi$)     | Peak Memory Bandwidth ($\beta$) | Saturation Knee ($I_{\text{sat}}$) | 70B Decode Latency Floor ($T_{\text{step}}$) | Max Single-Stream Throughput |
-|:---------------------|:------------------------|:-------------------------|:--------------------------------|:-----------------------------------|:---------------------------------------------|:-----------------------------|
-| **NVIDIA A100 SXM4** | FP16 ($2\text{ Bytes}$) | $312\text{ TFLOP/s}$     | $2.04\text{ TB/s}$              | $153.0\text{ FLOP/Byte}$           | $85.8\text{ ms/token}$                       | $11.7\text{ tokens/s}$       |
-| **NVIDIA H100 SXM5** | FP8 ($1\text{ Byte}$)   | $1{,}979\text{ TFLOP/s}$ | $3.35\text{ TB/s}$              | $590.7\text{ FLOP/Byte}$           | $26.1\text{ ms/token}$                       | $38.3\text{ tokens/s}$       |
-| **NVIDIA B200**      | FP8 ($1\text{ Byte}$)   | $4{,}500\text{ TFLOP/s}$ | $8.00\text{ TB/s}$              | $562.5\text{ FLOP/Byte}$           | $10.9\text{ ms/token}$                       | $91.4\text{ tokens/s}$       |
+| Accelerator Silicon | Precision ($P$) | Peak Compute ($\Pi$) | Peak Memory Bandwidth ($\beta$) | Saturation Knee ($I_{\text{sat}}$) | 70B Decode Latency Floor ($T_{\text{step}}$) | Max Single-Stream Throughput |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **NVIDIA A100 SXM4** | FP16 ($2\text{ Bytes}$) | $312\text{ TFLOP/s}$ | $2.04\text{ TB/s}$ | $153.0\text{ FLOP/Byte}$ | $85.8\text{ ms/token}$ | $11.7\text{ tokens/s}$ |
+| **NVIDIA H100 SXM5** | FP8 ($1\text{ Byte}$) | $1{,}979\text{ TFLOP/s}$ | $3.35\text{ TB/s}$ | $590.7\text{ FLOP/Byte}$ | $26.1\text{ ms/token}$ | $38.3\text{ tokens/s}$ |
+| **NVIDIA B200** | FP8 ($1\text{ Byte}$) | $4{,}500\text{ TFLOP/s}$ | $8.00\text{ TB/s}$ | $562.5\text{ FLOP/Byte}$ | $10.9\text{ ms/token}$ | $91.4\text{ tokens/s}$ |
 : **Accelerator hardware Roofline parameters and 70B decode floors**: Physical compute and bandwidth limits across three accelerator generations, evaluating the memory-shuttle floor at an effective bus efficiency of $\eta_{\text{bw}} = 0.80$. {#tbl-vol3-roofline-hardware}
 
 ### Memory Traffic Bounds: Dense Parameters, Sparse MoE, and Service Batching {#sec-vol3-processor-traffic-bounds}
@@ -1699,7 +1689,6 @@ Crucially, each probe is executed as an independent atomic invocation ($H=1$); o
 Consider an agent runtime tasked with applying a 5-line bug fix to a 500-line Python module (`parser.py`). The runtime executes on an unquantized 70B parameter model (`Meta-Llama-3-70B-Instruct` in 16-bit BF16 precision, $|\Theta| = 140\text{ GB}$) served across a dual NVIDIA H100 SXM5 node ($TP=2$, aggregate memory bandwidth $\beta = 6{,}700\text{ GB/s}$). Operating at a standard sustained memory bus efficiency of $\eta_{\text{bw}} = 0.80$, effective bandwidth is $\beta_{\text{eff}} = 6{,}700 \times 0.80 = 5{,}360\text{ GB/s}$. Shuttling the $140\text{ GB}$ parameter tensor across the bus yields an average single-step decode latency of $T_{\text{step}} = 140 / 5{,}360 \approx 26.1\text{ ms} \approx 26.0\text{ ms}$ (a single-stream throughput of approximately $38.5\text{ tokens/s}$).
 
 Quantify the decode token count ($K$), decode serialization latency ($T_{\text{decode}}$), and total accelerator memory traffic ($D_{\text{HBM}}$) across three candidate interface paradigms:
-
 1. **Full-File Re-Emission (Native JSON)**: The model re-emits all 500 lines of code within a schema-constrained JSON string.
 2. **Native JSON Patch**: The model emits a structured JSON object containing tool metadata, line anchors, and a 5-line replacement string with escaped whitespace and quotes.
 3. **Targeted Search/Replace Block Diff**: The model emits a localized search/replace block containing the 5-line anchor and the 5-line replacement between standard delimiter fences.
@@ -1745,20 +1734,23 @@ In traditional software systems, whether a compiler emits an ELF binary or an as
 
 To characterize the architectural trade-offs across these interfaces, we analyze candidate interface contracts within a controlled benchmarking protocol. The protocol specifies a constant systems baseline: the model checkpoint (`Meta-Llama-3-70B-Instruct`), serving engine (vLLM v0.7.2, $TP=2$ on dual H100 SXM5 GPUs), sampling parameters ($\tau = 0.0$), and resource limits ($S_{\max} = 32{,}768$, $K_{\max} = 2{,}048$, $T_{\max} = 60.0\text{ s}$) evaluated across standardized repository repair fixtures.
 
-| Interface Paradigm                      | Prompt Tax ($\Delta M$)                                                         | Decode Tax ($\Delta K$)                                                    | Syntactic Validity ($R_{\text{syntax}}$)      | Primary Failure Mechanism                                                    | Host Verification & Recovery Overhead                                            | Verified Task Yield ($R_{\text{task}}$ under $K_{\max}$)                                             |                                                                             |                                                                                       |
-|:----------------------------------------|:--------------------------------------------------------------------------------|:---------------------------------------------------------------------------|:----------------------------------------------|:-----------------------------------------------------------------------------|:---------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
-| **Free-Form Markdown**                  | Minimal ($\Delta M \sim O(1)$, $\approx 20\text{--}50\text{ tok}$) $\downarrow$ | Preamble/fence bloat ($\approx 50\text{--}150\text{ tok}$) $\rightarrow$   | Probabilistic ($R_{\text{syntax}} < 1.0$)     | Code-fence fracture, regex truncation                                        | Heuristic regex repair; unparseable blocks discarded to quarantine               | Sub-optimal; conversational padding consumes budget; syntax fractures discard code                   |                                                                             |                                                                                       |
-| **Native JSON (Full File)**             | Moderate-High ($\Delta M \sim O(                                                | \mathcal{S}_{\text{schema}}                                                | )$) $\uparrow$                                | Catastrophic ($\Delta K \sim O(L_{\text{file}})$) $\uparrow\uparrow\uparrow$ | Guaranteed ($R_{\text{syntax}} \equiv 1.0$)                                      | Budget truncation ($K_{\max}$ exhaustion), high GEMV latency                                         | Irrecoverable under fixed $K_{\max}$; quarantined payload must be discarded | Severely compromised; large files systematically truncate; high memory-bus traffic    |
-| **Native JSON (Patch Schema)**          | High ($\Delta M \sim O(                                                         | \mathcal{S}_{\text{schema}}                                                | )$) $\uparrow\uparrow$                        | Moderate ($\Delta K \sim O(\text{hunk}) + \text{escapes}$) $\uparrow$        | Guaranteed ($R_{\text{syntax}} \equiv 1.0$)                                      | Schema forcing, escape syntax corruption                                                             | JSON string unescaping, schema validation, type coercion                    | Strong; bounded decode length prevents truncation, but prefill overhead inflates TTFT |
-| **Targeted Search/Replace Diff**        | Low ($\Delta M \sim O(1)$) $\downarrow$                                         | Minimal ($\Delta K \sim O(\text{delta})$) $\downarrow\downarrow$           | High but unmasked ($R_{\text{syntax}} < 1.0$) | Anchor drift (subword whitespace sampling divergence)                        | Exact substring match $\to$ fail-closed fuzzy match with uniqueness verification | Highest efficiency; maximizes payload share within $K_{\max}$; bounded strictly by anchor resolution |                                                                             |                                                                                       |
-| **Decomposed Probes (Inspect + Patch)** | Amortized across probes $\rightarrow$                                           | Minimal per probe ($\Delta K \sim O(\text{probe})$) $\downarrow\downarrow$ | Hybrid (schema probe + hunk diff)             | Anchor mismatch between probe and target state                               | Probe cache validation; base blob digest verification before commit              | Maximal under tight token budgets; decouples context localization from mutation                      |                                                                             |                                                                                       |
+| Interface Paradigm | Prompt Tax ($\Delta M$) | Decode Tax ($\Delta K$) | Syntactic Validity ($R_{\text{syntax}}$) | Primary Failure Mechanism | Host Verification & Recovery Overhead | Verified Task Yield ($R_{\text{task}}$ under $K_{\max}$) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Free-Form Markdown** | Minimal ($\Delta M \sim O(1)$, $\approx 20\text{--}50\text{ tok}$) $\downarrow$ | Preamble/fence bloat ($\approx 50\text{--}150\text{ tok}$) $\rightarrow$ | Probabilistic ($R_{\text{syntax}} < 1.0$) | Code-fence fracture, regex truncation | Heuristic regex repair; unparseable blocks discarded to quarantine | Sub-optimal; conversational padding consumes budget; syntax fractures discard code |
+| **Native JSON (Full File)** | Moderate-High ($\Delta M \sim O(|\mathcal{S}_{\text{schema}}|)$) $\uparrow$ | Catastrophic ($\Delta K \sim O(L_{\text{file}})$) $\uparrow\uparrow\uparrow$ | Guaranteed ($R_{\text{syntax}} \equiv 1.0$) | Budget truncation ($K_{\max}$ exhaustion), high GEMV latency | Irrecoverable under fixed $K_{\max}$; quarantined payload must be discarded | Severely compromised; large files systematically truncate; high memory-bus traffic |
+| **Native JSON (Patch Schema)** | High ($\Delta M \sim O(|\mathcal{S}_{\text{schema}}|)$) $\uparrow\uparrow$ | Moderate ($\Delta K \sim O(\text{hunk}) + \text{escapes}$) $\uparrow$ | Guaranteed ($R_{\text{syntax}} \equiv 1.0$) | Schema forcing, escape syntax corruption | JSON string unescaping, schema validation, type coercion | Strong; bounded decode length prevents truncation, but prefill overhead inflates TTFT |
+| **Targeted Search/Replace Diff** | Low ($\Delta M \sim O(1)$) $\downarrow$ | Minimal ($\Delta K \sim O(\text{delta})$) $\downarrow\downarrow$ | High but unmasked ($R_{\text{syntax}} < 1.0$) | Anchor drift (subword whitespace sampling divergence) | Exact substring match $\to$ fail-closed fuzzy match with uniqueness verification | Highest efficiency; maximizes payload share within $K_{\max}$; bounded strictly by anchor resolution |
+| **Decomposed Probes (Inspect + Patch)** | Amortized across probes $\rightarrow$ | Minimal per probe ($\Delta K \sim O(\text{probe})$) $\downarrow\downarrow$ | Hybrid (schema probe + hunk diff) | Anchor mismatch between probe and target state | Probe cache validation; base blob digest verification before commit | Maximal under tight token budgets; decouples context localization from mutation |
 : **Architectural Trade-Offs of Invocation Interface Contracts**: Comparison of candidate interface paradigms under an atomic invocation envelope ($H=1, A=0, S=\text{staged}, C=\text{external}$). While schema-constrained JSON guarantees syntactic validity ($R_{\text{syntax}} = 1.0$) through decode-time grammar logit masks, full-file re-emission induces catastrophic decode latency and budget truncations ($K_{\max}$ exhaustion). Targeted search/replace diffs and decomposed probes maximize available token capacity for semantic payloads while bounding host verification overhead. {#tbl-vol3-interface-evaluation tbl-colwidths="[15,11,13,12,18,17,14]"}
 
 The architectural comparison compiled in @tbl-vol3-interface-evaluation illuminates critical systems dynamics across the interface boundary:
 
 1. *The Fallacy of Full-File Re-Emission:* Native JSON requiring full-file re-emission achieves a perfect structural validity rate ($R_{\text{syntax}} = 1.0$) via GPU-side grammar masking. However, it achieves the lowest downstream verified task success ($R_{\text{task}}$). Re-emitting 500 lines of code to patch a five-line bug is the computational equivalent of re-typing an entire textbook just to fix a typo on page 42: not only does each re-typed line create an opportunity for new hallucinations or syntax truncation, but every token forces another full sweep of the model weights across the accelerator's memory bus. Generating an entire file causes decode length to routinely collide with the step ceiling $K_{\max} = 2{,}048$. The serving daemon halts execution mid-payload and returns a `TRUNCATED` status envelope. In accordance with runtime isolation invariants (@sec-vol3-processor-truncation-hazards), the quarantined partial payload must be dropped, resulting in a zero task score. Furthermore, re-emitting thousands of unchanged lines imposes severe latency penalties, executing serialized GEMV passes over accelerator HBM for zero semantic progress.
+
 2. *The Escape Tax of Structured Patching:* Structuring patches within a JSON schema (Native JSON Patch) prevents full-file bloat. However, it incurs high prefill prompt overhead ($\Delta M \approx 500\text{--}1{,}000\text{ tokens}$), which increases Time to First Token (TTFT) under batched serving queues. More critically, string-escaping bloat expands the token footprint of dense logic by $15\text{--}35\%$, leaving less effective capacity for problem-solving within fixed token budgets.
+
 3. *The Efficiency-Fragility Frontier:* The Search/Replace Diff interface establishes the Pareto frontier for compute and memory efficiency. By emitting only localized modifications, it minimizes decode token inflation ($\Delta K$) and serial decode duration. However, its structural validity is imperfect due to the absence of hardware-enforced grammars, and its task success is vulnerable to anchor drift. When the host diff engine is enhanced with a fail-closed fuzzy-matching algorithm for anchor identification, host runtime tolerance compensates for stochastic subword variation far more efficiently than rigid GPU-side token serialization.
+
 4. *Decomposed Probes as a Structural Solution:* By decoupling context inspection from code mutation into discrete, lightweight probes, the host runtime optimizes both prefill and decode budgets. Each probe operates with a minimal schema and a tight token ceiling, minimizing memory bandwidth pressure on the accelerator while ensuring that the host validates intermediate state before authorizing mutations.
 
 Evaluating processor interfaces confirms that no interface contract can compensate for the stochastic core's lack of ambient authority. Whether mediated by raw markdown, pushdown automata, or localized diff anchors, the emitted token stream remains an unprivileged candidate sequence. Invariant closure is strictly external: candidate outputs must be validated by deterministic host verification suites before any state mutations are committed. Treating syntax enforcement as a substitute for external deterministic verification misapprehends the execution boundary of the Stochastic Computer.
@@ -1890,7 +1882,6 @@ Construct grammar constraint automata strictly over UTF-8 byte sequences rather 
 When an automobile stops running on the highway, an experienced driver diagnoses *why* the vehicle stopped before taking action. If the engine stalled at a stoplight, turning the ignition key restarts the car immediately. But if the fuel tank is completely empty, cranking the starter motor ten times will not conjure gasoline—it simply burns out the starter motor and drains the battery! If a concrete police barricade blocks the road, honking your horn will not make the roadblock vanish. Yet many software engineers wrap every LLM call in a naive catch-all `for attempt in range(3): try ... except: sleep(1)` retry loop. If an invocation was severed because it hit its maximum token budget (`TRUNCATED`) under greedy decoding, resubmitting the identical request will run out of gas at the exact same token, burning GPU memory bandwidth for zero forward progress!
 
 Formally, the invocation contract establishes distinct outcome envelope classes: `COMPLETED`, `TRUNCATED`, `REFUSED`, `TRANSPORT_FAILURE`, `REJECTED`, `CANCELLED`, and `FAULTED`. Each maps to an entirely separate fault domain in the computer systems hierarchy. Collapsing these failure modes into a single catch-all `try/except` block that resubmits the request with uniform backoff induces severe, systemic failure modes:
-
 - Retrying a `TRUNCATED` invocation (step ceiling $K_{\max}$ exhausted before a stop delimiter) under deterministic greedy decoding ($\tau = 0$) deterministically reproduces the exact same truncation at token $K_{\max}$, burning memory bus bandwidth and tokens without progress.
 - Retrying a `REFUSED` invocation (safety policy suppression) without prompt context modification deterministically triggers an identical policy intercept.
 - Retrying a `REJECTED` invocation with reason `CONTEXT_OVERFLOW_EXCEEDED` (staged context $M + K_{\max} > S_{\max}$) fails immediately at admission before any forward pass can execute.
