@@ -4,7 +4,7 @@ module: 17_acceleration
 notebook: acceleration
 ---
 
-A Python matrix multiplication can spend much of its runtime interpreting loops. This module compares BLAS-backed multiplication with explicit tiling and compares two NumPy GELU implementations. These experiments expose execution overhead and memory reuse, while production kernel fusion provides a comparison beyond the NumPy implementation.
+A Python matrix multiplication can spend much of its runtime interpreting loops. This module compares BLAS-backed multiplication with explicit tiling, compares two NumPy GELU implementations, and rewrites Module 09's convolution loops as one matrix multiply. These experiments expose execution overhead and memory reuse, while production kernel fusion provides a comparison beyond the NumPy implementation.
 
 :::{.callout-note title="Module Info"}
 
@@ -14,6 +14,7 @@ A Python matrix multiplication can spend much of its runtime interpreting loops.
 
 - Tensor operations (Module 01) for understanding data structures
 - Neural network layers (Module 03) for knowing what to accelerate
+- The `Conv2d` layer (Module 09), which your im2col convolution must match
 - Training loops (Module 08) for understanding the performance context
 - Profiling tools (Module 14) for measuring acceleration gains
 
@@ -26,7 +27,7 @@ If you can multiply matrices and understand why matrix multiplication is expensi
 
 Matrix multiplication and element-wise activations stress different parts of a processor. Matrix multiplication can reuse each input many times; activations often do little arithmetic per array element.
 
-You will implement vectorized and tiled multiplication, then compare grouped and staged GELU expressions. NumPy still creates intermediate arrays in the grouped expression. Measure each implementation on your hardware; this module does not guarantee a particular speedup.
+You will implement vectorized and tiled multiplication, then compare grouped and staged GELU expressions. NumPy still creates intermediate arrays in the grouped expression. Last, you will lower a convolution to a single matrix multiply with im2col and measure what that costs in memory. Measure each implementation on your hardware; this module does not guarantee a particular speedup.
 
 ## Commands
 
@@ -38,6 +39,7 @@ You will implement vectorized and tiled multiplication, then compare grouped and
 
 - **Implement** vectorized matrix multiplication using optimized BLAS libraries for maximum throughput
 - **Distinguish** grouped NumPy expressions from native kernel fusion that can avoid intermediate arrays
+- **Lower** a convolution to one matrix multiply with im2col, and measure its speed against Module 09's loops and its memory cost
 - **Understand** the roofline model and arithmetic intensity to predict performance bottlenecks
 - **Analyze** production acceleration strategies for different deployment scenarios (edge, cloud, GPU)
 :::
@@ -57,6 +59,9 @@ output = vectorized_matmul(x, weights)  # Compare against Python loops
 
 # Grouped activation expression
 activated = fused_gelu(output)  # NumPy still creates temporary arrays
+
+# Convolution as one matrix multiply
+features = im2col_conv2d(images, conv.weight, conv.bias, padding=1)  # same output as conv(images)
 ```
 
 ### What you're not building yet
@@ -67,6 +72,7 @@ To keep this module focused, you will **not** implement:
 - Custom CPU assembly (BLAS libraries already provide this)
 - Automatic kernel fusion (compilers like XLA do this automatically)
 - Multi-threading control (NumPy handles this via OpenBLAS/MKL)
+- The backward pass through im2col (col2im); `im2col_conv2d` is inference-only, like the other helpers here
 
 **You are building the understanding.** Hardware-specific implementations come later.
 
@@ -84,6 +90,12 @@ To keep this module focused, you will **not** implement:
 
 `Tiled and vectorized results should match`
 :   From `test_unit_tiled_matmul`. Each tile product overwrote the output block. Accumulate across the `k` tiles: `C[i0:i1, j0:j1] += A_tile @ B_tile`.
+
+`Columns must be ordered (channel, kernel row, kernel column)`
+:   From `test_unit_im2col`. Your patches hold the right numbers in the wrong order, usually because the channel axis ended up last. Transpose the `(N, C, k, k, out_h, out_w)` array with `(0, 4, 5, 1, 2, 3)` so each row is flattened in the same order as `weight.reshape(out_ch, -1)`.
+
+`Differs from Conv2d by up to ...`
+:   From `test_unit_im2col_conv2d`. The shapes worked out but the values did not. Check that the flattened weight is transposed to `(C·k·k, out_ch)` before the multiply, and that the result is reshaped to `(N, out_h, out_w, out_ch)` and then transposed to put the channels second.
 
 ## Finished? Read why
 
