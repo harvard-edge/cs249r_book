@@ -331,9 +331,9 @@ def validate_4d_input(x, layer_name):
     if len(x.shape) == 3:
         raise ValueError(
             f"{layer_name} expected 4D input (batch, channels, height, width), got 3D: {x.shape}\n"
-            f"  Missing batch dimension\n"
-            f"  {layer_name} processes batches of images, not single images\n"
-            f"  Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
+            f"  One dimension is missing; which one depends on what the tensor holds\n"
+            f"  One image with {x.shape[0]} channels: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})\n"
+            f"  A batch of {x.shape[0]} single-channel images: x.reshape({x.shape[0]}, 1, {x.shape[1]}, {x.shape[2]})"
         )
     elif len(x.shape) == 2:
         raise ValueError(
