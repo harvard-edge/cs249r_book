@@ -14,15 +14,22 @@
 #   make help
 #
 # Diagram PDFs: the book borrows guide/tools/diagrams/svg-to-pdf.lua, which
-# rewrites .svg -> .pdf for the PDF format only, so sibling PDFs must exist.
-# `make -C ../guide figures` produces them.
+# rewrites .svg -> .pdf for the PDF format only, so every diagram under
+# assets/images/diagrams/ needs a sibling PDF. `make figures` produces them
+# with rsvg-convert (librsvg2-bin, from apt-requirements.txt); they are
+# gitignored build output.
 # =============================================================================
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 QUARTO := quarto
+RSVG := rsvg-convert
+RSVG_FLAGS := -f pdf --keep-aspect-ratio
+DIAGRAM_DIR := assets/images/diagrams
+SVGS := $(wildcard $(DIAGRAM_DIR)/*.svg)
+PDFS := $(SVGS:.svg=.pdf)
 
-.PHONY: help install-deps pdf
+.PHONY: help install-deps figures pdf
 
 help: ## Show this help.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -55,6 +62,11 @@ install-deps: ## Install system + LaTeX packages needed to build the PDF.
 	fi
 	@echo "  dependencies installed"
 
-pdf: ## Render the book.
-	@$(MAKE) -C ../guide figures
+$(DIAGRAM_DIR)/%.pdf: $(DIAGRAM_DIR)/%.svg
+	@command -v $(RSVG) >/dev/null 2>&1 || { echo "ERROR: $(RSVG) not found (brew install librsvg / apt-get install librsvg2-bin)"; exit 1; }
+	@$(RSVG) $(RSVG_FLAGS) -o $@ $<
+
+figures: $(PDFS) ## Convert the book's SVG diagrams to PDF for LaTeX.
+
+pdf: figures ## Render the book (HTML + PDF per _quarto.yml).
 	@$(QUARTO) render
