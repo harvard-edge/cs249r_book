@@ -184,29 +184,40 @@ local function module_checks(args, kwargs, meta)
     if name then units[#units + 1] = name:gsub("%s+$", "") end
   end
   local files = integration_tests(module)
-  local parts = {}
-  parts[#parts + 1] = "`tito module complete` gives two kinds of evidence. Inside the notebook, "
-    .. #units .. " unit tests each print a ✅ line as they pass: " .. table.concat(units, ", ") .. "."
-  if #files > 0 then
-    local paths = {}
-    for _, f in ipairs(files) do paths[#paths + 1] = "`tests/" .. module .. "/" .. f .. "`" end
-    parts[#parts + 1] = " After your code is exported, " .. count_tests(module, files)
-      .. " integration tests in " .. table.concat(paths, ", ")
-      .. " import it from the `tinytorch` package and check it together with the modules before it."
+  local out = {
+    "`tito module complete` stops at the first step that fails:",
+    "",
+    "1. the unit tests inside your notebook run;",
+    "2. your code is exported into `" .. export_target(lines) .. "`;",
+    "3. the integration tests run against that exported package, together with the modules before it;",
+    "4. the module is recorded as done, and `tito module status` shows it.",
+    "",
+    "**Unit tests in your notebook (" .. #units .. ").** Each prints a ✅ line when it passes.",
+    "",
+  }
+  out[#out + 1] = "::: {.unit-test-list}"
+  for _, u in ipairs(units) do
+    -- test names are labels, not code; escape Markdown so __init__ stays literal
+    out[#out + 1] = "- " .. u:gsub("([_*`])", "\\%1")
   end
-  local md = table.concat(parts) .. "\n"
+  out[#out + 1] = ":::"
+  if #files > 0 then
+    out[#out + 1] = ""
+    out[#out + 1] = "**Integration tests after export (" .. count_tests(module, files) .. ").**"
+    out[#out + 1] = ""
+    for _, f in ipairs(files) do out[#out + 1] = "- `tests/" .. module .. "/" .. f .. "`" end
+  end
   local nn = tonumber(module:match("^(%d%d)"))
   local ms = unlocked_milestones(nn)
   if #ms > 0 then
     local items = {}
     for _, m in ipairs(ms) do
-      items[#items + 1] = "[Milestone " .. m.id .. ", " .. m.name .. "](../milestones/" .. milestone_page(m.id) .. "), `tito milestone run " .. m.id .. "`"
+      items[#items + 1] = "[Milestone " .. m.id .. ", " .. m.name .. "](../milestones/" .. milestone_page(m.id) .. ") (`tito milestone run " .. m.id .. "`)"
     end
-    md = md .. "\nThis is the last module "
-      .. (#ms == 1 and "that milestone needs" or "those milestones need")
-      .. ", so completing it unlocks " .. table.concat(items, " and ") .. ".\n"
+    out[#out + 1] = ""
+    out[#out + 1] = "Completing this module unlocks " .. table.concat(items, " and ") .. "."
   end
-  return quarto.utils.string_to_blocks(md)
+  return quarto.utils.string_to_blocks(table.concat(out, "\n") .. "\n")
 end
 
 local BOOK_PDF = "https://mlsysbook.ai/tinytorch/assets/downloads/TinyTorch-Book.pdf"
@@ -239,36 +250,36 @@ local function what_you_write(args, kwargs, meta)
   if not quarto.doc.is_format("html") then return pandoc.Null() end
   local lines = read_source(meta_str(meta, "module"))
   local fns = student_functions(lines)
-  local rows = { "| You implement | What it does |", "|---|---|" }
+  local items = {}
   for _, f in ipairs(fns) do
-    rows[#rows + 1] = "| `" .. f.name .. "` | " .. f.doc:gsub("|", "\\|") .. " |"
+    items[#items + 1] = "`" .. f.name .. "`\n:   " .. f.doc
   end
   local count = #fns == 1 and "one function" or (#fns .. " functions")
-  local md = "The notebook arrives with the surrounding code already written. You write "
-    .. count .. ", marked `YOUR CODE HERE`:\n\n" .. table.concat(rows, "\n") .. "\n"
-  return quarto.utils.string_to_blocks(md)
+  local md = "The notebook arrives with the surrounding code already written and explained. You write "
+    .. count .. ", each marked `# YOUR CODE HERE` and followed by a test cell:\n\n"
+    .. table.concat(items, "\n\n") .. "\n"
+  local block = pandoc.Div(quarto.utils.string_to_blocks(md), pandoc.Attr("", {"what-you-write"}))
+  return block
 end
 
 local function module_workflow(args, kwargs, meta)
   if not quarto.doc.is_format("html") then return pandoc.Null() end
   local module = meta_str(meta, "module")
   local notebook = meta_str(meta, "notebook")
-  local lines = read_source(module)
   local nn = module:match("^(%d%d)")
   local md = table.concat({
     "```bash",
-    "tito module start " .. nn .. "      # create the notebook, open Jupyter Lab",
-    "tito module resume " .. nn .. "     # reopen it in a later session",
-    "tito module complete " .. nn .. "   # test, export, and record the module",
+    "# first time",
+    "tito module start " .. nn,
+    "",
+    "# later sessions",
+    "tito module resume " .. nn,
+    "",
+    "# when your tests pass",
+    "tito module complete " .. nn,
     "```",
     "",
-    "Your notebook is `modules/" .. module .. "/" .. notebook .. ".ipynb`. "
-      .. "`complete` stops at the first step that fails:",
-    "",
-    "1. the unit tests inside your notebook run;",
-    "2. your code is exported into `" .. export_target(lines) .. "`;",
-    "3. the integration tests in `tests/" .. module .. "/` run against that exported package;",
-    "4. the module is recorded as done, and `tito module status` shows it.",
+    "Your notebook is `modules/" .. module .. "/" .. notebook .. ".ipynb`.",
     "",
   }, "\n")
   return quarto.utils.string_to_blocks(md)
