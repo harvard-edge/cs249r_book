@@ -28,6 +28,10 @@ Packed INT8 weights can reduce weight storage relative to FP32, with an accuracy
 
 The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONNX Runtime use to fit models on phones, IoT boards, and edge hardware without ever touching the cloud.
 
+## Start and finish
+
+{{< module-workflow >}}
+
 ## Learning Objectives
 
 :::{.callout-tip title="By completing this module, you will:"}
@@ -41,29 +45,11 @@ The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONN
 
 ## What You'll Build
 
-
-
 ::: {#fig-15_quantization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Integer codes and execution storage.** Floating-point values map to affine integer codes and reconstruct through scale and zero point. Packed storage models one byte per code, but TinyTorch Tensor stores codes as float32 and QuantizedLinear uses float32 arithmetic." fig-alt="Floating-point values map to affine integer codes and reconstruct through scale and zero point. Packed storage models one byte per code, but TinyTorch Tensor stores codes as float32 and QuantizedLinear uses float32 arithmetic."}
 
 ![](../assets/images/diagrams/15_quantization-diag-1.svg)
 
 :::
-
-
-
-**Implementation roadmap:**
-
-@tbl-15-quantization-implementation-roadmap lays out the implementation in order, one part at a time.
-
-| Step | What You'll Implement | Key Concept |
-|------|----------------------|-------------|
-| 1 | `quantize_int8()` | Scale and zero-point calculation, INT8 mapping |
-| 2 | `dequantize_int8()` | FP32 restoration with quantization parameters |
-| 3 | `QuantizedLinear` | Linear layer with simulated quantized weights |
-| 4 | `calibrate()` | Input quantization optimization using sample data |
-| 5 | `quantize_model()` | Full model conversion and memory comparison |
-
-: **Implementation roadmap for INT8 quantization and QuantizedLinear.** {#tbl-15-quantization-implementation-roadmap}
 
 **The pattern you'll enable:**
 ```python
@@ -83,484 +69,30 @@ To keep this module focused, you will **not** implement:
 
 **You are building per-tensor asymmetric INT8 quantization.** Packed serialization and integer kernels require additional implementations.
 
-## API Reference
+## What you write
 
-These are the signatures you have to satisfy. Keep this section open in a side pane while you implement — it's the contract the tests check against.
+{{< what-you-write >}}
 
-### Core Functions
+## How you know it works
 
-```python
-quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]
-```
-Convert FP32 tensor to INT8 with calculated scale and zero-point.
+{{< module-checks >}}
 
-```python
-dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor
-```
-Restore INT8 tensor to FP32 using quantization parameters.
+## When it fails
 
-### QuantizedLinear Class
+{{< stub-failure >}}
 
-@tbl-15-quantization-qlinear-methods lists the methods and helpers you will implement.
+`Quantization error 0.166667 exceeds the INT8 bound scale/2 = 0.009804`
+:   From `test_unit_quantize_int8`. The range was taken from the data alone. Extend it to include 0.0 before computing the scale, so the zero point fits in the int8 range instead of being clipped.
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `__init__` | `__init__(linear_layer: Linear)` | Create quantized version of Linear layer |
-| `calibrate` | `calibrate(sample_inputs: List[Tensor])` | Optimize input quantization using sample data |
-| `forward` | `forward(x: Tensor) -> Tensor` | Compute output with quantized weights |
-| `memory_usage` | `memory_usage() -> Dict[str, float]` | Model packed storage savings |
+`ZeroDivisionError: float division by zero`
+:   From `test_unit_quantize_int8`. A constant tensor has no range, so the scale is zero. Handle `max == min` separately before dividing.
 
-: **Core methods on the QuantizedLinear class.** {#tbl-15-quantization-qlinear-methods}
+`Round-trip error too high: 0.38699349761009216`
+:   From `test_unit_dequantize_int8`. A zero-point sign is flipped. Quantize with `x / S + Z` and dequantize with `(q - Z) * S`.
 
-### Model Quantization
+## Finished? Read why
 
-@tbl-15-quantization-model-functions lists the methods and helpers you will implement.
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `quantize_model` | `quantize_model(model, calibration_data=None)` | Quantize all Linear layers in-place |
-| `analyze_model_sizes` | `analyze_model_sizes(original, quantized)` | Compare modeled packed sizes |
-
-: **Model-level quantization helper functions.** {#tbl-15-quantization-model-functions}
-
-### Quantizer Class
-
-```python
-Quantizer()
-```
-
-Object-oriented interface wrapping the standalone quantization functions. Provides a convenient API for milestone scripts and production workflows.
-
-@tbl-15-quantization-quantizer-api lists the methods and helpers you will implement.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `quantize_tensor` | `quantize_tensor(tensor: Tensor) -> Tuple[Tensor, float, int]` | Delegates to `quantize_int8()` |
-| `dequantize_tensor` | `dequantize_tensor(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor` | Delegates to `dequantize_int8()` |
-| `quantize_model` | `quantize_model(model, calibration_data=None) -> Dict[str, Any]` | Returns quantized parameter artifacts and packed size stats |
-
-: **Core static methods on the Quantizer convenience class.** {#tbl-15-quantization-quantizer-api}
-
-## Core Concepts
-
-Three ideas do all the work in this module: how much precision you actually need (range), how to map FP32 to INT8 without wasting it (scale and zero-point), and how to pick those parameters from real data (calibration). Get these right and the implementation almost writes itself.
-
-### Precision and Range
-
-FP32 represents about 4.3 billion distinct values across a range from 10⁻³⁸ to 10³⁸. For inference, that's spectacular overkill: trained weights almost always cluster in a tight band like [−3, 3], and the network's accuracy depends on patterns in those weights, not on the 23rd bit of mantissa. Small perturbations get absorbed.
-
-INT8 collapses that continuous range to 256 discrete levels (−128 to 127). The whole game is *which* 256. A tensor whose values live in [−0.5, 0.5] should not be quantized with the same step size as one whose values live in [−10, 10] — the first wastes precision, the second loses everything. Quantization is a per-tensor decision about where to spend resolution.
-
-The storage math is unforgiving. One FP32 parameter is 4 bytes; one INT8 parameter is 1 byte. A 100M-parameter model is the difference between 381 MB (FP32) and 95 MB (INT8). The 4× ratio is fixed because the bit-width ratio is fixed: 32 down to 8.
-
-Quantization preserves the dense matmul arithmetic count. A packed representation reduces bytes per weight, but total memory also includes activations, metadata, and other state. Integer instructions can improve throughput on suitable hardware; lane counts alone do not establish a runtime speedup. TinyTorch uses float32 arithmetic for this simulation.
-
-
-### Quantization Schemes
-
-Symmetric quantization uses a linear mapping where FP32 zero maps to INT8 zero (zero-point = 0). This simplifies hardware implementation and works well for weight distributions centered around zero. Asymmetric quantization allows the zero-point to shift, better capturing ranges like [0, 1] or [-1, 3] where the distribution is not symmetric.
-
-Your implementation uses asymmetric quantization for maximum flexibility:
-
-The code in @lst-15-quantize-int8 makes this concrete.
-
-```{python}
-#| label: lst-15-quantize-int8
-#| lst-cap: "**Asymmetric INT8 quantize function**. Handles constant edge cases, nudges range to straddle zero, then maps FP32 values into `[-128, 127]` with rounding and clipping."
-#| eval: false
-def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
-    """Quantize FP32 tensor to INT8 using asymmetric quantization."""
-    data = tensor.data
-    if data.size == 0 or not np.all(np.isfinite(data)):
-        raise ValueError("Quantization requires nonempty finite values")
-
-    # Step 1: Find dynamic range
-    min_val = float(np.min(data))
-    max_val = float(np.max(data))
-
-    # Step 2: Handle edge case (constant tensor)
-    if max_val == min_val:
-        c = min_val
-        if c == 0:
-            scale = 1.0
-            zero_point = 0
-        else:
-            zero_point = -1 if c > 0 else 1
-            scale = abs(c)
-        quantized_data = np.zeros_like(data, dtype=np.int8)
-        return Tensor(quantized_data), scale, zero_point
-
-    # Step 3: Nudge range to include zero (prevents zero-point clamping error)
-    min_val = min(min_val, 0.0)
-    max_val = max(max_val, 0.0)
-
-    # Step 4: Calculate scale and zero_point
-    scale = (max_val - min_val) / (INT8_RANGE - 1)
-    zero_point = int(np.round(INT8_MIN_VALUE - min_val / scale))
-    zero_point = int(np.clip(zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
-
-    # Step 5: Apply quantization formula
-    quantized_data = np.round(data / scale + zero_point)
-    quantized_data = np.clip(quantized_data, INT8_MIN_VALUE, INT8_MAX_VALUE).astype(np.int8)
-
-    return Tensor(quantized_data), scale, zero_point
-```
-
-The algorithm finds the minimum and maximum values in the tensor, then calculates a scale that maps this range to [-128, 127]. The zero-point determines which INT8 value represents FP32 zero, ensuring minimal quantization error at zero (important for ReLU activations and sparse patterns).
-
-### Scale and Zero-Point
-
-The scale parameter determines how large each INT8 step is in FP32 space. A scale of 0.01 means each INT8 increment represents 0.01 in the original FP32 values. Smaller scales provide finer precision but can only represent a narrower range; larger scales cover wider ranges but sacrifice precision.
-
-The zero-point is an integer offset that shifts the quantization range. For a symmetric distribution like [-2, 2], the zero-point is 0, mapping FP32 zero to INT8 zero. For an asymmetric range like [-1, 3], the zero-point is -64, ensuring the quantization levels are distributed optimally across the actual data range.
-
-Here's how dequantization reverses the process:
-
-```python
-def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
-    """Dequantize INT8 tensor back to FP32."""
-    dequantized_data = (q_tensor.data.astype(np.float32) - zero_point) * scale
-    return Tensor(dequantized_data)
-```
-
-The formula `(quantized - zero_point) × scale` inverts the quantization mapping. If you quantized 1.5 to INT8 value 50 with scale 0.02 and zero-point -25, dequantization computes `(50 - (-25)) × 0.02 = 1.5`. The round-trip isn't perfect due to quantization being lossy compression, but the error is bounded by the scale value.
-
-### Post-Training Quantization
-
-Post-training quantization (PTQ) takes a *trained* FP32 model and quantizes it after the fact — no gradient updates, no extra epochs, no labels required. That's the approach you build here. (The alternative, *quantization-aware training*, simulates quantization noise during the training loop so the model learns to be robust to it; TinyTorch does not build it.) `QuantizedLinear` wraps an existing `Linear` and quantizes its weights immediately, deferring activation quantization until calibration:
-
-The code in @lst-15-quantized-linear-init makes this concrete.
-
-```{python}
-#| label: lst-15-quantized-linear-init
-#| lst-cap: "**QuantizedLinear constructor**. Wraps a trained Linear layer, quantizes weights and biases immediately, and reserves input quantization parameters for calibration."
-#| eval: false
-class QuantizedLinear:
-    """Quantized version of Linear layer using INT8 arithmetic."""
-
-    def __init__(self, linear_layer: Linear):
-        """Create quantized version of existing linear layer."""
-        self.original_layer = linear_layer
-
-        # Quantize weights
-        self.q_weight, self.weight_scale, self.weight_zero_point = quantize_int8(linear_layer.weight)
-
-        # Quantize bias if it exists
-        if linear_layer.bias is not None:
-            self.q_bias, self.bias_scale, self.bias_zero_point = quantize_int8(linear_layer.bias)
-        else:
-            self.q_bias = None
-            self.bias_scale = None
-            self.bias_zero_point = None
-
-        # Store input quantization parameters (set during calibration)
-        self.input_scale = None
-        self.input_zero_point = None
-```
-
-During inference, the forward pass dequantizes weights on-the-fly, performs the standard FP32 matrix multiplication, and returns FP32 outputs. While this educational approach clarifies the math, production implementations keep the data in 8-bit format entirely, leveraging specialized INT8 GEMM (general matrix multiply) hardware instructions for maximum speed:
-
-The code in @lst-15-quantized-linear-forward makes this concrete.
-
-```{python}
-#| label: lst-15-quantized-linear-forward
-#| lst-cap: "**QuantizedLinear forward pass**. Dequantizes weights and bias on the fly for the matmul. Production kernels skip this step and run the matmul directly in INT8."
-#| eval: false
-def forward(self, x: Tensor) -> Tensor:
-    """Forward pass with quantized computation."""
-    # Round input onto calibrated grid if calibrated
-    if self.input_scale is not None:
-        if not np.all(np.isfinite(x.data)):
-            raise ValueError("QuantizedLinear forward requires finite input values")
-        q_x = np.clip(
-            np.round(x.data.astype(np.float64) / self.input_scale + self.input_zero_point),
-            INT8_MIN_VALUE, INT8_MAX_VALUE,
-        )
-        x = dequantize_int8(Tensor(q_x), self.input_scale, self.input_zero_point)
-
-    # Dequantize weights
-    weight_fp32 = dequantize_int8(self.q_weight, self.weight_scale, self.weight_zero_point)
-
-    # Perform computation (same as original layer)
-    result = x.matmul(weight_fp32)
-
-    # Add bias if it exists
-    if self.q_bias is not None:
-        bias_fp32 = dequantize_int8(self.q_bias, self.bias_scale, self.bias_zero_point)
-        result = Tensor(result.data + bias_fp32.data)
-
-    return result
-```
-
-### Calibration Strategy
-
-Weights are easy: their values are fixed, so you can compute scale and zero-point from the tensor itself. Activations are not — their range depends on what data flows through the network. Calibration solves this by running a small batch of representative inputs through the layer and recording the activation distribution, then fitting scale and zero-point to *that*:
-
-The code in @lst-15-calibrate makes this concrete.
-
-```{python}
-#| label: lst-15-calibrate
-#| lst-cap: "**Activation calibration**. Aggregates sample inputs to fit input scale and zero-point from an empirical activation range before inference."
-#| eval: false
-def calibrate(self, sample_inputs: List[Tensor]):
-    """Calibrate input quantization parameters using sample data."""
-    # Collect all input values
-    all_values = []
-    for inp in sample_inputs:
-        all_values.extend(inp.data.flatten())
-
-    all_values = np.array(all_values)
-
-    # Calculate input quantization parameters
-    min_val = float(np.min(all_values))
-    max_val = float(np.max(all_values))
-
-    if abs(max_val - min_val) < EPSILON:
-        self.input_scale = 1.0
-        self.input_zero_point = 0
-    else:
-        self.input_scale = (max_val - min_val) / (INT8_RANGE - 1)
-        self.input_zero_point = int(np.round(INT8_MIN_VALUE - min_val / self.input_scale))
-        self.input_zero_point = np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE)
-```
-
-Calibration typically requires 100-1000 representative samples. Too few samples might miss important distribution characteristics; too many waste time with diminishing returns. The goal is capturing the typical range of activations the model will see during inference.
-
-## Production Context
-
-### Your Implementation vs. PyTorch
-
-Your quantizer implements the same arithmetic PyTorch ships in production. The differences are at the edges: production supports more *schemes* (per-channel, INT4, mixed precision) and runs on dedicated *kernels* (FBGEMM, QNNPACK) that exploit INT8 hardware instructions you didn't build. The math in the middle is identical.
-
-@tbl-15-quantization-vs-pytorch places your implementation side by side with the production reference for direct comparison.
-
-| Feature | Your Implementation | PyTorch Quantization |
-|---------|---------------------|----------------------|
-| **Algorithm** | Asymmetric INT8 quantization | Multiple schemes (INT8, INT4, FP16, mixed) |
-| **Calibration** | Min/max statistics | MinMax, histogram, percentile observers |
-| **Backend** | NumPy (FP32 compute) | INT8 GEMM kernels (FBGEMM, QNNPACK) |
-| **Speed** | Float32 simulation; measure runtime | Depends on integer kernels and workload |
-| **Memory** | Float32 arrays; packed bytes modeled | Packed weights plus metadata and runtime state |
-| **Granularity** | Per-tensor | Per-tensor, per-channel, per-group |
-
-: **Feature comparison between TinyTorch quantizer and PyTorch Quantization.** {#tbl-15-quantization-vs-pytorch}
-
-### Code Comparison
-
-The following comparison shows quantization in TinyTorch versus PyTorch. The APIs are remarkably similar, reflecting the universal nature of the quantization problem.
-
-::: {.panel-tabset}
-## Your TinyTorch
-```python
-from tinytorch.perf.quantization import quantize_model, QuantizedLinear
-from tinytorch.core.layers import Linear, Sequential
-
-# Create model
-model = Sequential(
-    Linear(784, 128),
-    Linear(128, 10)
-)
-
-# Quantize to INT8
-calibration_data = [sample_batch1, sample_batch2, ...]
-quantize_model(model, calibration_data)
-
-# Use quantized model
-output = model.forward(x)  # Simulated quantization in float32
-```
-
-## PyTorch
-```python
-import torch
-import torch.quantization as quantization
-
-# Create model
-model = torch.nn.Sequential(
-    torch.nn.Linear(784, 128),
-    torch.nn.Linear(128, 10)
-)
-
-# Quantize to INT8
-model.qconfig = quantization.get_default_qconfig('fbgemm')
-model_prepared = quantization.prepare(model)
-# Run calibration
-for batch in calibration_data:
-    model_prepared(batch)
-model_quantized = quantization.convert(model_prepared)
-
-# Use quantized model
-output = model_quantized(x)  # Backend determines storage and execution
-```
-:::
-
-Let's walk through the key differences:
-
-- **Line 1-2 (Import)**: TinyTorch uses `quantize_model()` function; PyTorch uses `torch.quantization` module with prepare/convert API.
-- **Lines 4-7 (Model creation)**: Both create identical model architectures. The layer APIs are the same.
-- **Lines 9-11 (Quantization)**: TinyTorch uses one-step `quantize_model()` with calibration data. PyTorch uses three-step API: configure (`qconfig`), prepare (insert observers), convert (replace with quantized ops).
-- **Lines 13 (Calibration)**: TinyTorch passes calibration data as argument; PyTorch requires explicit calibration loop with forward passes.
-- **Lines 15-16 (Inference)**: Both use standard forward pass. The quantized weights are transparent to the user.
-
-:::{.callout-tip title="What's Identical"}
-
-The core quantization mathematics: scale calculation, zero-point mapping, INT8 range clipping. When you debug PyTorch quantization errors, you'll understand exactly what's happening because you implemented the same algorithms.
-:::
-
-### Why Quantization Matters at Scale
-
-Packed weight bytes are one part of deployment memory. Activations, caches, biases, metadata, and allocator overhead also contribute. A smaller weight representation helps only when it addresses the binding constraint; measure memory, accuracy, and latency separately. TinyTorch’s reports model packed weights, while its Tensor arrays remain float32.
-
-## Check Your Understanding
-
-:::{.callout-tip title="Check Your Understanding — Quantization"}
-Before moving on, verify you can articulate each of the following:
-
-- [ ] Why packed INT8 weights use fewer bytes while the dense matmul arithmetic count stays unchanged.
-- [ ] How asymmetric quantization picks scale and zero-point from a tensor's min/max, and why that choice bounds the round-trip error by ±scale/2.
-- [ ] Why activation quantization needs calibration data but weight quantization does not.
-- [ ] Why SIMD lane counts alone cannot predict model latency.
-
-If any of these feels fuzzy, revisit the Core Concepts section (especially Scale and Zero-Point and Calibration Strategy) before moving on.
-:::
-
-Five questions to lock in the trade-offs — memory, precision, calibration, I/O, and hardware. Work them out on paper before unfolding the answers.
-
-**Q1: Memory Calculation**
-
-A neural network has three Linear layers: 784→256, 256→128, 128→10. For a hypothetical packed representation that quantizes both weights and biases, compare FP32 and INT8 bytes. Ignore metadata. TinyTorch keeps float32 arrays and retains floating-point biases.
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-**Parameter count:**
-
-- Layer 1: (784 × 256) + 256 = 200,960
-- Layer 2: (256 × 128) + 128 = 32,896
-- Layer 3: (128 × 10) + 10 = 1,290
-- **Total: 235,146 parameters**
-
-**Memory usage:**
-
-- FP32: 235,146 × 4 bytes = **940,584 bytes ≈ 0.90 MB**
-- INT8: 235,146 × 1 byte = **235,146 bytes ≈ 0.22 MB**
-- **Savings: 0.67 MB (75% reduction, 4× compression)**
-
-The ratio is identical for a model 1000× larger — that's the point.
-:::
-
-**Q2: Quantization Error Bound**
-
-For FP32 weights uniformly distributed in [-0.5, 0.5], what is the maximum quantization error after INT8 quantization? What is the signal-to-noise ratio in decibels?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-**Quantization error:**
-
-- Range: 0.5 − (−0.5) = 1.0
-- Scale: 1.0 / 255 = **0.003922**
-- Max error: scale / 2 = **±0.001961** (half a step)
-
-**Signal-to-noise ratio:**
-
-- SNR = 20 × log₁₀(signal_range / quantization_step)
-- SNR = 20 × log₁₀(1.0 / 0.003922)
-- SNR = 20 × log₁₀(255)
-- SNR ≈ **48 dB**
-
-Neural networks typically need >40 dB, so INT8 has comfortable headroom. The rule of thumb — 6 dB per bit — comes straight out of this calculation: every extra bit doubles the number of levels, and 20·log₁₀(2) ≈ 6 dB.
-:::
-
-**Q3: Calibration Strategy**
-
-You're quantizing a model for deployment. You have 100,000 calibration samples available. How many should you use, and why? What's the trade-off?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-**Recommended: 100–1000 samples** (typically 500).
-
-**Reasoning:**
-
-- **Too few (<100)**: risks missing outliers, producing a scale that clips real activations.
-- **Too many (>1000)**: diminishing returns; you're recomputing the same min/max.
-- **Sweet spot (100–1000)**: captures the distribution and finishes in seconds.
-
-**Trade-off analysis:**
-
-- 10 samples: ~1 s, may miss distribution tails → noticeable accuracy drop
-- 100 samples: ~5 s, good representation → 98% accuracy
-- 1000 samples: ~30 s, comprehensive → 98.5% accuracy
-- 10000 samples: ~5 min, overkill → 98.6% accuracy
-
-**Conclusion**: accuracy plateaus around 100–1000 samples. Spend more only when the cost of an error is huge (medical, autonomous vehicles).
-:::
-
-**Q4: Memory Bandwidth Impact**
-
-A model has 100M parameters. Loading from SSD to RAM at 500 MB/s, how long does loading take for FP32 vs INT8? How does this affect user experience?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-**Loading time:**
-
-- FP32 size: 100M × 4 bytes = 381 MB
-- INT8 size: 100M × 1 byte = 95 MB
-- FP32 load time: 381 MB / 500 MB/s = **0.8 seconds**
-- INT8 load time: 95 MB / 500 MB/s = **0.19 seconds**
-- **Ideal transfer-only ratio: about 4×**
-
-**User experience impact:**
-
-- Mobile app launch: 0.8 seconds → 0.19 seconds (**0.6s faster startup**)
-- Cloud inference: transfer time is one component of cold-start latency; initialization and conversion add work
-- Model updates: 381 MB download → 95 MB download (**75% less data over the wire**)
-
-**Key insight**: packed weights reduce the bytes to transfer. Total loading and cold-start time also include fixed overhead, metadata, and conversion.
-:::
-
-**Q5: Hardware Acceleration**
-
-Modern CPUs have AVX-512 VNNI instructions that can perform INT8 matrix multiply. How many INT8 operations fit in one 512-bit SIMD register vs FP32? Why might actual speedup be less than this ratio?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-**SIMD capacity:**
-
-- 512-bit register with FP32: 512 / 32 = **16 values**
-- 512-bit register with INT8: 512 / 8 = **64 values**
-- **Lane-count ratio: 64 / 16 = 4×**
-
-This counts values that fit in a register, not completed operations per second. Instruction semantics, accumulation width, conversion overhead, memory traffic, and non-matmul work determine the measured speedup.
-
-
-:::
-
-## Key Takeaways
-
-- **Packed bytes differ from runtime bytes:** INT8 codes model one quarter of FP32 weight storage, excluding metadata. TinyTorch stores those codes in float32 arrays.
-- **Scale and zero-point are per-tensor decisions:** a single tensor with a poorly fit scale wastes resolution or clips values; calibration makes this data-driven instead of guessed.
-- **Weights quantize statically, activations quantize with calibration:** weights are fixed after training; activations depend on input distribution and need 100–1000 representative samples.
-- **Hardware matters:** integer kernels, conversion overhead, and the workload determine whether quantization improves latency.
-
-**Coming next:** Module 16 attacks a different axis — instead of shrinking each weight, it removes weights entirely via pruning. Dense masking and simulated quantization do not automatically reduce the allocated bytes.
-
-## Further Reading
-
-For students who want to understand the academic foundations and production implementations of quantization:
-
-### Seminal Papers
-
-- **Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference** - Jacob et al. (2018). The foundational paper for symmetric INT8 quantization used in TensorFlow Lite. Introduces quantized training and deployment. [arXiv:1712.05877](https://arxiv.org/abs/1712.05877)
-
-- **Mixed Precision Training** - Micikevicius et al. (2018). NVIDIA's approach to training with FP16/FP32 mixed precision, reducing memory and increasing speed. Concepts extend to INT8 quantization. [arXiv:1710.03740](https://arxiv.org/abs/1710.03740)
-
-- **Data-Free Quantization Through Weight Equalization and Bias Correction** - Nagel et al. (2019). Techniques for quantizing models without calibration data, using statistical properties of weights. [arXiv:1906.04721](https://arxiv.org/abs/1906.04721)
-
-- **ZeroQ: A Novel Zero Shot Quantization Framework** - Cai et al. (2020). Shows how to quantize models without any calibration data by generating synthetic inputs. [arXiv:2001.00281](https://arxiv.org/abs/2001.00281)
-
-### Additional Resources
-
-- **Blog post**: "[Quantization in PyTorch](https://pytorch.org/blog/introduction-to-quantization-on-pytorch/)" - Official PyTorch quantization tutorial covering eager mode and FX graph mode quantization
-- **Documentation**: [TensorFlow Lite Post-Training Quantization](https://www.tensorflow.org/lite/performance/post_training_quantization) - Production quantization techniques for mobile deployment
-- **Survey**: "A Survey of Quantization Methods for Efficient Neural Network Inference" - Gholami et al. (2021) - Comprehensive overview of quantization research. [arXiv:2103.13630](https://arxiv.org/abs/2103.13630)
+{{< book-chapter >}}
 
 ## What's Next
 
@@ -577,16 +109,3 @@ You have mapped weights onto a quantization grid. Module 16 changes which weight
 | **20: Capstone** | Deploy the full optimized pipeline | prune → quantize → accelerate → deploy |
 
 : **How quantization stacks with compression, acceleration, and capstone modules.** {#tbl-15-quantization-downstream-usage}
-
-## Get Started
-
-:::{.callout-tip title="Interactive Options"}
-
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
-- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
-:::
-
-:::{.callout-warning title="Save Your Progress"}
-
-Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
-:::

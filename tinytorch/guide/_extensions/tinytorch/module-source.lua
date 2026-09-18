@@ -3,6 +3,8 @@
 --
 --   {{< what-you-write >}}   table of the functions the student implements
 --   {{< module-workflow >}}  start / resume / complete commands for this module
+--   {{< module-checks >}}    the tests `complete` runs, and the milestone it unlocks
+--   {{< book-chapter >}}     pointer to the companion book chapter, by its real title
 --
 -- Both read `module` (e.g. 01_tensor) and `notebook` (e.g. tensor) from the
 -- page front matter, the same keys module-header uses.
@@ -89,6 +91,150 @@ local function export_target(lines)
   error("tinytorch shortcode: no '#| default_exp' line in module source")
 end
 
+
+local function read_lines(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local lines = {}
+  for line in f:lines() do lines[#lines + 1] = line end
+  f:close()
+  return lines
+end
+
+local function tinytorch_root()
+  return pandoc.path.join({ quarto.project.directory, ".." })
+end
+
+-- The files `tito module complete` hands to pytest, chosen by the same rule as
+-- tito/commands/module/workflow.py (_run_integration_tests).
+local function integration_tests(module)
+  local dir = pandoc.path.join({ tinytorch_root(), "tests", module })
+  local ok, entries = pcall(pandoc.system.list_directory, dir)
+  if not ok then return {} end
+  table.sort(entries)
+  local primary = "test_" .. module .. "_progressive.py"
+  for _, e in ipairs(entries) do
+    if e == primary then return { e } end
+  end
+  local picked = {}
+  for _, e in ipairs(entries) do
+    if e:match("^test_.*_progressive%.py$") then picked[#picked + 1] = e end
+  end
+  if #picked > 0 then return picked end
+  for _, e in ipairs(entries) do
+    if e:match("^test_.*%.py$") then picked[#picked + 1] = e end
+  end
+  return picked
+end
+
+local function count_tests(module, files)
+  local n = 0
+  for _, f in ipairs(files) do
+    for _, l in ipairs(read_lines(pandoc.path.join({ tinytorch_root(), "tests", module, f })) or {}) do
+      if l:match("^%s*def test_") then n = n + 1 end
+    end
+  end
+  return n
+end
+
+-- Milestones whose highest required module is this one, parsed from the
+-- top-level "required_modules" of each entry in tito/commands/milestone.py.
+local function unlocked_milestones(module_number)
+  local lines = read_lines(pandoc.path.join({ tinytorch_root(), "tito", "commands", "milestone.py" }))
+  if not lines then error("tinytorch shortcode: cannot read tito/commands/milestone.py") end
+  local found, current, name = {}, nil, nil
+  for _, l in ipairs(lines) do
+    local id = l:match('^    "(%d%d)": {')
+    if id then current, name = id, nil end
+    if current then
+      local nm = l:match('^        "name": "(.-)"')
+      if nm then name = nm end
+      local req = l:match('^        "required_modules": %[(.-)%]')
+      if req then
+        local maxm = 0
+        for d in req:gmatch("%d+") do maxm = math.max(maxm, tonumber(d)) end
+        if maxm == module_number then found[#found + 1] = { id = current, name = name } end
+        current = nil
+      end
+    end
+  end
+  return found
+end
+
+
+local function milestone_page(id)
+  local dir = pandoc.path.join({ quarto.project.directory, "milestones" })
+  local ok, entries = pcall(pandoc.system.list_directory, dir)
+  if ok then
+    table.sort(entries)
+    for _, e in ipairs(entries) do
+      if e:match("^" .. id .. "_.*%.qmd$") then return e end
+    end
+  end
+  error("tinytorch shortcode: no site page for milestone " .. id)
+end
+
+local function module_checks(args, kwargs, meta)
+  if not quarto.doc.is_format("html") then return pandoc.Null() end
+  local module = meta_str(meta, "module")
+  local lines = read_source(module)
+  local units = {}
+  for _, l in ipairs(lines) do
+    local name = l:match("^### 🧪 Unit Test: (.+)$")
+    if name then units[#units + 1] = name:gsub("%s+$", "") end
+  end
+  local files = integration_tests(module)
+  local parts = {}
+  parts[#parts + 1] = "`tito module complete` gives two kinds of evidence. Inside the notebook, "
+    .. #units .. " unit tests each print a ✅ line as they pass: " .. table.concat(units, ", ") .. "."
+  if #files > 0 then
+    local paths = {}
+    for _, f in ipairs(files) do paths[#paths + 1] = "`tests/" .. module .. "/" .. f .. "`" end
+    parts[#parts + 1] = " After your code is exported, " .. count_tests(module, files)
+      .. " integration tests in " .. table.concat(paths, ", ")
+      .. " import it from the `tinytorch` package and check it together with the modules before it."
+  end
+  local md = table.concat(parts) .. "\n"
+  local nn = tonumber(module:match("^(%d%d)"))
+  local ms = unlocked_milestones(nn)
+  if #ms > 0 then
+    local items = {}
+    for _, m in ipairs(ms) do
+      items[#items + 1] = "[Milestone " .. m.id .. ", " .. m.name .. "](../milestones/" .. milestone_page(m.id) .. "), `tito milestone run " .. m.id .. "`"
+    end
+    md = md .. "\nThis is the last module "
+      .. (#ms == 1 and "that milestone needs" or "those milestones need")
+      .. ", so completing it unlocks " .. table.concat(items, " and ") .. ".\n"
+  end
+  return quarto.utils.string_to_blocks(md)
+end
+
+local BOOK_PDF = "https://mlsysbook.ai/tinytorch/assets/downloads/TinyTorch-Book.pdf"
+
+local function book_chapter(args, kwargs, meta)
+  if not quarto.doc.is_format("html") then return pandoc.Null() end
+  local module = meta_str(meta, "module")
+  local nn = module:match("^(%d%d)")
+  local dir = pandoc.path.join({ tinytorch_root(), "book" })
+  local ok, entries = pcall(pandoc.system.list_directory, dir)
+  if not ok then error("tinytorch shortcode: cannot list " .. dir) end
+  table.sort(entries)
+  local title
+  for _, e in ipairs(entries) do
+    if e:match("^" .. nn .. "_.*%.qmd$") then
+      local first = (read_lines(pandoc.path.join({ dir, e })) or {})[1] or ""
+      title = first:match("^#%s+(.-)%s*{") or first:match("^#%s+(.-)%s*$")
+      break
+    end
+  end
+  if not title then error("tinytorch shortcode: no book chapter for module " .. nn) end
+  local md = "The reasoning behind this module (why it is built this way, what it costs, "
+    .. "and how production frameworks differ) is the chapter *" .. title
+    .. "* in the companion book, [*TinyTorch: From Tensors to Transformers*](" .. BOOK_PDF .. ") (PDF). "
+    .. "The book prints complete reference implementations, so read it after you finish the module, not while you are working on it.\n"
+  return quarto.utils.string_to_blocks(md)
+end
+
 local function what_you_write(args, kwargs, meta)
   if not quarto.doc.is_format("html") then return pandoc.Null() end
   local lines = read_source(meta_str(meta, "module"))
@@ -128,7 +274,18 @@ local function module_workflow(args, kwargs, meta)
   return quarto.utils.string_to_blocks(md)
 end
 
+local function stub_failure(args, kwargs, meta)
+  if not quarto.doc.is_format("html") then return pandoc.Null() end
+  return quarto.utils.string_to_blocks(
+    "A bare `NotImplementedError` with no message means a cell reached a function you have not written yet: "
+    .. "the notebook ships each one as `# YOUR CODE HERE` followed by `raise NotImplementedError()`. "
+    .. "The messages below are ones this module actually prints when an implementation is present but wrong.\n")
+end
+
 return {
   ["what-you-write"] = what_you_write,
   ["module-workflow"] = module_workflow,
+  ["module-checks"] = module_checks,
+  ["book-chapter"] = book_chapter,
+  ["stub-failure"] = stub_failure,
 }

@@ -55,269 +55,28 @@ A `Tensor` carries its values, its shape, and the gradient state later modules f
 
 {{< what-you-write >}}
 
-**The pattern you'll enable:**
-```python
-# Computing predictions from data
-output = x.matmul(W) + b  # Matrix multiplication + bias (used in every neural network)
-```
+## How you know it works
 
-### What You're NOT Building
+{{< module-checks >}}
 
-To keep this module focused, you will **not** implement:
+## When it fails
 
-- GPU support (NumPy runs on CPU only)
-- Automatic differentiation
-- Hundreds of tensor operations (PyTorch has 2000+, you'll build ~15 core ones)
-- Memory optimization tricks (PyTorch uses lazy evaluation, memory pools, etc.)
+{{< stub-failure >}}
 
-**You are building the conceptual foundation.**
+`AttributeError: 'Tensor' object has no attribute 'shape'`
+:   From every unit test. `__init__` stored the array but not its metadata. Set `self.shape`, `self.size`, and `self.dtype` from `self.data` in the constructor; every later operation reads them.
 
-## API Reference
+`assert scalar.dtype == np.float32`
+:   From `test_unit_tensor_creation`. `__init__` kept NumPy's default dtype, so integer input stays integer. Convert with `np.array(data, dtype=np.float32)`.
 
-This section provides a quick reference for the Tensor class you'll build. Think of it as your cheat sheet while implementing and debugging. Each method is documented with its signature and expected behavior.
+`assert np.array_equal(result.data, expected)`
+:   From `test_unit_matrix_multiplication`. `MatMul.forward` is not computing row-times-column. Entry `(i, j)` is the dot product of row `i` of `a` with column `j` of `b`, that is `a[i, :]` and `b[:, j]`; an elementwise `a * b` or `b[j, :]` fails here.
 
-### Constructor
+## Finished? Read why
 
-```python
-Tensor(data)
-```
-- `data`: list, numpy array, or scalar
+{{< book-chapter >}}
 
-### Properties
-
-Your Tensor wraps a NumPy array and exposes several properties that describe its structure. These properties are read-only and computed from the underlying data.
-
-The properties you expose are summarised in @tbl-01-tensor-properties.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `data` | `np.ndarray` | Underlying NumPy array |
-| `shape` | `tuple` | Dimensions, e.g., `(2, 3)` |
-| `size` | `int` | Total number of elements |
-| `dtype` | `np.dtype` | Data type (float32) |
-
-: **Read-only properties exposed by the Tensor class.** {#tbl-01-tensor-properties}
-
-### Arithmetic Operations
-
-Python lets you override operators like `+` and `*` by implementing special methods. When you write `x + y`, Python calls `x.__add__(y)`. Your implementations should handle both Tensor-Tensor operations and Tensor-scalar operations, letting NumPy's broadcasting do the heavy lifting.
-
-The dunder methods you override map one-to-one onto Python operators, as @tbl-01-tensor-arithmetic-dunders shows.
-
-| Operation | Method | Example |
-|-----------|--------|---------|
-| Addition | `__add__` | `x + y` or `x + 2` |
-| Subtraction | `__sub__` | `x - y` |
-| Multiplication | `__mul__` | `x * y` |
-| Division | `__truediv__` | `x / y` |
-
-: **Arithmetic dunder methods and their Python operator equivalents.** {#tbl-01-tensor-arithmetic-dunders}
-
-### Matrix & Shape Operations
-
-These methods transform tensors without changing their data (for views) or perform mathematical operations that produce new data (for matmul).
-
-@tbl-01-tensor-matrix-shape-ops lists the shape-transforming methods.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `matmul` | `matmul(other) -> Tensor` | Matrix multiplication |
-| `reshape` | `reshape(*shape) -> Tensor` | Change shape (-1 to infer) |
-| `transpose` | `transpose(dim0=None, dim1=None) -> Tensor` | Swap dimensions (defaults to last two) |
-
-: **Matrix and shape manipulation methods on Tensor.** {#tbl-01-tensor-matrix-shape-ops}
-
-### Reductions
-
-Reduction operations collapse one or more dimensions by aggregating values. The `axis` parameter controls which dimension gets collapsed. If `axis=None`, all dimensions collapse to a single scalar.
-
-@tbl-01-tensor-reductions lists the reduction methods and their axis semantics.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `sum` | `sum(axis=None, keepdims=False) -> Tensor` | Sum elements |
-| `mean` | `mean(axis=None, keepdims=False) -> Tensor` | Average elements |
-| `max` | `max(axis=None, keepdims=False) -> Tensor` | Maximum element |
-
-: **Reduction methods that collapse tensor dimensions.** {#tbl-01-tensor-reductions}
-
-## Common Errors & Debugging
-
-Five errors account for almost every confused half-hour you will spend in this module. Read them now so you recognize them when they appear, instead of debugging them blind.
-
-### Shape Mismatch in matmul
-
-**Error**: `ValueError: shapes (2,3) and (2,2) not aligned`
-
-Matrix multiplication requires the inner dimensions to match. If you're multiplying `(M, K)` by `(K, N)`, both K values must be equal. The error above happens when trying to multiply a (2,3) matrix by a (2,2) matrix: 3 ≠ 2.
-
-**Fix**: Check your shapes. The rule is `a.shape[-1]` must equal `b.shape[-2]`.
-
-### Broadcasting Failures
-
-**Error**: `ValueError: operands could not be broadcast together`
-
-Broadcasting fails when shapes can't be aligned according to the rules. Remember: compare right to left, and dimensions must be equal or one must be 1.
-
-**Examples**:
-- `(2,3) + (3,)` ✓ works - 3 matches 3, and the missing dimension becomes 1
-- `(2,3) + (2,)` ✗ fails - comparing right to left: 3 ≠ 2
-
-**Fix**: Reshape to make dimensions compatible: `vector.reshape(-1, 1)` or `vector.reshape(1, -1)`
-
-### Reshape Size Mismatch
-
-**Error**: `ValueError: cannot reshape array of size X into shape Y`
-
-Reshape only rearranges elements; it can't create or destroy them. If you have 12 elements, you can reshape to (3, 4) or (2, 6) or (2, 2, 3), but not to (5, 5).
-
-**Fix**: Ensure `np.prod(old_shape) == np.prod(new_shape)`
-
-### Missing Attributes
-
-**Error**: `AttributeError: 'Tensor' has no attribute 'shape'`
-
-Your `__init__` method needs to set all required attributes. If you forget to set `self.shape`, any code that accesses `tensor.shape` will fail.
-
-**Fix**: Add `self.shape = self.data.shape` in your constructor
-
-### Type Errors in Arithmetic
-
-**Error**: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'int'`
-
-Your arithmetic methods need to handle both Tensor and scalar operands. When someone writes `x + 2`, your `__add__` receives the integer 2, not a Tensor.
-
-**Fix**: Check for scalars: `if isinstance(other, (int, float)): ...`
-
-::: {.panel-tabset}
-
-## Your TinyTorch
-```python
-from tinytorch.core.tensor import Tensor
-
-x = Tensor([[1, 2], [3, 4]])
-y = x + 2
-z = x.matmul(w)
-loss = z.mean()
-```
-
-## PyTorch
-```python
-import torch
-
-x = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
-y = x + 2
-z = x @ w
-loss = z.mean()
-```
-:::
-
-Let's walk through each line to understand the comparison:
-
-- **Line 1 (Import)**: Both frameworks use a simple import. TinyTorch exposes `Tensor` from `core.tensor`; PyTorch uses `torch.tensor()` as a factory function.
-- **Line 3 (Creation)**: TinyTorch automatically enforces `float32` precision across all inputs; PyTorch defaults to int64 for integers and requires explicit `dtype=torch.float32`. This explicitness matters for performance tuning in production.
-- **Line 4 (Broadcasting)**: Both handle `x + 2` identically, broadcasting the scalar across all elements. Same semantics, same result.
-- **Line 5 (Matrix multiply)**: Both TinyTorch and PyTorch support the `.matmul()` method and the infix `@` operator via `__matmul__`.
-- **Line 6 (Reduction)**: Both use `.mean()` to reduce the tensor to a scalar. Reductions like this are fundamental to computing loss values.
-
-:::{.callout-tip title="What's Identical"}
-
-Broadcasting rules, shape semantics, and API design patterns. When you debug PyTorch shape errors, you'll understand exactly what's happening because you built the same abstractions.
-:::
-
-## Where this is explained
-
-This page is the trailhead: what you are building, the API you will fill in, and
-how to start. The reasoning behind it, why a transpose is a stride swap, what
-broadcasting costs, and what a reduction does to a shape, is **Chapter 1,
-Tensors and Strided Memory**, in the companion textbook.
-
-Read it here: [TinyTorch: From Tensors to Transformers](https://mlsysbook.ai/tinytorch/assets/downloads/TinyTorch-Book.pdf) (PDF).
-
-## Check Your Understanding
-
-:::{.callout-tip title="Check Your Understanding — Tensor"}
-Before moving on, verify you can articulate each of the following:
-
-- [ ] Why pure NumPy `reshape` is an O(1) metadata update while `transpose` breaks contiguity, and why TinyTorch copies on wrap to guarantee referential safety.
-- [ ] How right-to-left broadcasting lets `(32, 1, 768) + (512, 768)` produce `(32, 512, 768)` without materializing a tiled copy.
-- [ ] Why matmul is O(n^3) — and why doubling matrix size multiplies runtime by 8x, not 4x.
-- [ ] The memory distinction between native views (shared buffer) and TinyTorch copies (fresh allocation), and why accidental in-place mutation corrupts autograd graphs.
-- [ ] How an image batch of 32 × 3 × 224 × 224 lands at ~18.4 MB in float32, and why batch size is the first knob to turn when the GPU runs Out of Memory (OOM).
-
-If any of these feels fuzzy, the book chapter works through each of them (broadcasting, views versus copies, matrix multiplication, and complexity) before you move on.
-:::
-
-The collapsible Q&A below works through each of these in depth — skim the ones that still feel fuzzy.
-
-**Q1: Memory Calculation**
-
-A batch of 32 RGB images (224×224 pixels) stored as float32. How much memory?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-32 × 3 × 224 × 224 × 4 = **19,267,584 bytes ≈ 18.4 MB**
-
-Double the batch, double the memory — which is why batch size is the first knob people turn when training runs out of GPU memory.
-:::
-
-**Q2: Broadcasting Savings**
-
-Adding a vector `(768,)` to a 3D tensor `(32, 512, 768)`. How much memory does broadcasting save?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-Without broadcasting: 32 × 512 × 768 × 4 = **48.0 MB**
-
-With broadcasting: 768 × 4 = **3 KB**
-
-Savings: **~48 MB per operation**. A transformer layer performs hundreds of broadcasts per forward pass; the cost of getting this wrong scales with the model.
-:::
-
-**Q3: Matmul Scaling**
-
-If a 1000×1000 matmul takes 100ms, how long will 2000×2000 take?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-Matmul is O(n³). Doubling n → 2³ = **8x longer** → ~800ms
-
-This is why matrix size matters so much for transformer scaling!
-:::
-
-**Q4: Shape Prediction**
-
-What's the output shape of `(32, 1, 768) + (512, 768)`?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-Broadcasting aligns right-to-left:
-- `(32,   1, 768)`
-- `(    512, 768)`
-
-Result: **(32, 512, 768)**
-
-The 1 broadcasts to 512, and 32 is prepended.
-:::
-
-**Q5: Views vs Copies in TinyTorch**
-
-You reshape a 1GB tensor, then modify one element in the reshaped version. What happens to the original tensor in TinyTorch vs PyTorch?
-
-:::{.callout-tip collapse="true" title="Answer"}
-
-**In PyTorch / pure NumPy (Views)**: The original tensor IS modified because `view()` or `reshape()` shares the underlying buffer.
-
-**In TinyTorch (Constructor Copy)**: The original tensor is **NOT** modified. TinyTorch's `Tensor` constructor deliberately copies NumPy arrays into fresh `float32` buffers upon wrapping.
-
-This deliberate trade-off trades a small memory allocation overhead to guarantee referential safety across operations:
-
-- **Safety** — Avoids unintended graph mutations during backward passes.
-- **Independence** — Intermediate layer outputs are immutable snapshots.
-- **Trade-off** — Reshape incurs an $O(n)$ copy on wrap rather than an $O(1)$ stride metadata update.
-:::
-
-## What's Next?
+## What's Next
 
 You now have the universal carrier of every value the rest of the framework will ever compute. A `Tensor` holds the data, knows its shape, and supports the arithmetic that linear algebra and eventually backpropagation depend on.
 
