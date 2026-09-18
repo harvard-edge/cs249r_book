@@ -140,27 +140,35 @@ class TinyTorchCLI:
 
     def _generate_welcome_text(self) -> str:
         """Generate dynamic welcome text for interactive mode."""
+        from rich.text import Text
         lines = []
+        # Pad by visible width: the commands carry Rich markup tags of different
+        # lengths, so padding the raw string misaligns the description column.
+        width = max(Text.from_markup(cmd).cell_len
+                    for section in self.welcome_sections.values() for cmd, _ in section)
+
+        def pad(cmd: str) -> str:
+            return " " * (width - Text.from_markup(cmd).cell_len)
 
         # Quick Start
         lines.append(f"[{Theme.SECTION}]Quick Start:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['quick_start']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         # Track Progress
         lines.append(f"\n[{Theme.SECTION}]Track Progress:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['track_progress']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         # Community
         lines.append(f"\n[{Theme.SECTION}]Community:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['community']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         # Help & Docs
         lines.append(f"\n[{Theme.SECTION}]Help & Docs:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['help_docs']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         return "\n".join(lines)
 
