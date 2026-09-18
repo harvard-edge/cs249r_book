@@ -113,7 +113,7 @@ To eliminate semantic drift into NLP linguistics, conversational prompt engineer
 | **Token / BPE** | String tokens $w_i \in \mathcal{W}$; "Subwords that help the model understand words" | Tensors of `int32` indices. Statistical byte compression algorithm causing boundary fragmentation, byte-level syntax fractures, and variable char-to-token ratios ($1.8\text{--}4.2$). Memory allocated strictly in integer token blocks. |
 | **Autoregressive Decoding** | Sampling $y_t \sim P(y_t \mid y_{<t})$; "Generating text step-by-step" | Iterative causal execution loop where token $t+1$ depends on token $t$. GEMV arithmetic intensity collapses to $I_{\text{decode}} \approx 2/P\text{ FLOP/byte}$. Unbatched $B=1$ serialization wall: entire weight tensor $\Theta$ shuttled from HBM for every token generated. |
 | **Attention / KV State** | Attention matrix $A = \text{softmax}(QK^T/\sqrt{d})$; "Focusing on relevant information" | Dynamic activation tensor cached in HBM. Memory consumption: $\text{Mem}_{\text{token}} = 2 L H_{\text{kv}} d_{\text{head}} P$ bytes/token. Managed via PagedAttention virtual memory tables with fixed page size (16 tokens) to eliminate external fragmentation. |
-| **Chain-of-Thought / Reasoning** | Trajectory $\tau = (s_0, a_0, \dots)$; "Prompting the model to think step-by-step" | Allocating inference-time compute budget ($K_{\text{delib}}$ tokens). Physical cost: $2 N_{\text{params}} K_{\text{delib}}$ FLOPs and $K_{\text{delib}} \cdot (N_{\text{params}} P / B_{\text{mem}})$ seconds of serialized memory bus occupation. Explores search trees before committing external state mutations. |
+| **Chain-of-Thought / Reasoning** | Trajectory $\tau = (s_0, a_0, \dots)$; "Prompting the model to think step-by-step" | Allocating inference-time compute budget ($K_{\text{delib}}$ tokens). Physical cost: $2 N_{\text{params}} K_{\text{delib}}$ FLOPs and $K_{\text{delib}} \cdot (N_{\text{params}} P / \text{BW}_{\text{mem}})$ seconds of serialized memory bus occupation. Explores search trees before committing external state mutations. |
 | **Temperature / Logit Sampling** | Softmax policy $\pi_\theta(a|s) = \frac{\exp(Q(s,a)/\tau)}{\sum \exp}$; "Controlling model creativity" | Scaling unnormalized logit vectors $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$ by scalar $1/\tau$ prior to GPU categorical reduction. $\tau \to 0$ collapses probability to deterministic argmax mode. Low-temperature sampling reduces entropy; temperature scaling does not alter model capability or memory bandwidth. |
 | **Tool Calling / Function Calling** | Action space $\mathcal{A}$; "Teaching the model to use APIs" | Typed RPC over IPC socket crossing an unprivileged boundary into an isolated runtime. Incurs data marshalling overhead ($T_{\text{serialize}}$), process spawn latency ($T_{\text{spawn}}$), and bounded stdout/stderr pipe buffer capture ($64\text{ KiB}$). |
 | **Agent Sandboxing / Security** | "System prompt telling the agent to be safe" | OS-level capability isolation (Principle of Least Privilege). Hardware virtualization (MicroVMs via Firecracker/gVisor), Linux cgroups (memory/CPU limits), seccomp-bpf syscall filters, and copy-on-write filesystems. |
@@ -211,13 +211,30 @@ Textbook chapters must be grounded in **concrete systems engineering realities**
 When drafting, revising, or reviewing any chapter in Volume III, follow this four-stage pipeline:
 
 1. **Anchor:** Identify the chapter's canonical systems scenario, physical hardware footprint, and baseline H-S-A-C coordinate.
-2. **Translate:** Pass all planned concepts through the *Systems Engineering Translation Lexicon* (Section 5) to replace NLP vocabulary with systems realities.
+2. **Translate:** Pass all planned concepts through the *Systems Engineering Translation Lexicon* (Section 5) and the *Agentic Systems Notation* (`books/vol3/frontmatter/_notation_agentic.qmd`) to replace NLP vocabulary with systems realities and canonical mathematical symbols.
 3. **Execute the Four Questions:** Verify that each section addresses Interface/Authority, Physical State/Placement, Roofline/Cost Bottleneck, and Failure/Mechanical Invariant Closure.
-4. **Audit:** Pass generated sections through the *Deterministic Review Gates* (Section 11) before merging.
+4. **Audit:** Pass generated sections through the *Three-Filter Acceptance Test* and deterministic project review gates (`.claude/rules/`) before merging.
 
 ### 10. Sectional Drafting & Context Staging Protocol
 
 To maintain maximum depth, technical rigor, and systems focus, every chapter section must be drafted via an **individual model call** with the systems engineering lens, then stitched together into the chapter manuscript (`chapter.qmd`).
+
+#### The Three-Filter Acceptance Test for Generated Prose
+
+Every section and paragraph drafted for Volume III must strictly satisfy three gates:
+1. 🛑 **Filter 1 (The Anti-NLP Gate):** Does this text discuss prompt wording tricks ("let's think step by step"), conversational chatbot banter, persona roleplay, human dialogue flows, or subjective "LLM-as-a-judge" evaluation?
+   - **Action:** If YES, REJECT immediately. Re-anchor in runtime state machines, typed RPC schemas, deterministic compilers, and POSIX exit codes.
+2. 🛑 **Filter 2 (The Anti-Silicon Gate):** Does this text dump raw GPU hardware specs prematurely without systems context, pretend attention heads are literal x86 ALUs/registers, treat token IDs as machine opcodes, or dive into transistor/warp microarchitecture with no software control lever?
+   - **Action:** If YES, REJECT immediately. Re-anchor in the software systems layer (the Agent OS control plane, host runtime, memory allocation, and container/microVM sandboxing).
+3. ✅ **Filter 3 (The Systems Engineering Gate):** Does this text define an explicit interface contract, an operational trade-off, a physical latency/memory cost, an error boundary, or an external mechanical verification protocol?
+   - **Action:** MUST BE YES.
+
+#### The Metaphor Boundary Directive
+
+The unifying concept of *The Stochastic Computer* is a **software-level functional architecture**, not a physical silicon blueprint:
+- The foundation model functions as an unprivileged, non-deterministic execution core evaluated under Zero Ambient Authority.
+- Hardware analogies (ALU, registers, bus lines) must only be used as illustrative bridges with the qualifier: *"At the software architecture layer..."* or *"Functionally analogous to..."*
+- Token IDs are discrete integer indices and embedding lookup gathers, **never** executable machine opcodes. The model possesses no instruction decoder, program counter, or hardware register file.
 
 #### The Structural & Depth Contract Architecture (No Rigid Word Budget Locks)
 
@@ -246,9 +263,11 @@ Instead of arbitrary word counts, every body section specification is governed b
 3. **Concrete Exit Criteria:** What the student must be able to calculate, design, or mechanically verify after completing the section.
 
 #### The Core Sectional Directives:
-0. **The Single-Paragraph Purpose Law (Frontmatter Invariant):**
-   - The `Purpose` section of EVERY chapter must consist of **exactly ONE single, unbroken, dense paragraph** (150–220 words) immediately following the italicized governing systems question.
-   - It must never be split into multiple paragraphs. Like Chapter 01's canonical model, it defines the systems confrontation, the architectural role of the subsystem within the Stochastic Computer, and the core invariant/trade-off, then transitions directly into the `::: {.callout-learning-objectives}`.
+0. **The Chapter Purpose Law (The Core Question + Why It Matters):**
+   - The `Purpose` block of EVERY chapter must strictly follow the canonical two-tier structure:
+     - `**The Core Question:** *[Exactly one sharp, italicized systems provocation]*`
+     - `**Why It Matters:** *[Exactly ONE single, unbroken, dense systems confrontation paragraph (150–220 words) defining the architectural stakes, failure modes, and runtime invariants]*`
+   - It must never be split into multiple paragraphs or list items. It defines the systems confrontation and transitions directly into the `::: {.callout-learning-objectives}`.
 1. **The Section .1 Law (Unbroken Introduction):**
    - Section .1 of every chapter (e.g., Section 2.1, Section 3.1) must **never have subsections (`###`)**.
    - It is an unbroken stage-setting narrative that establishes the chapter's core paradigm, defines the operational boundary (e.g., the tripartite architecture), anchors the component in the 4D H-S-A-C coordinate space, and delivers an explicit causal bridge to Section .2.
@@ -564,7 +583,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Structural Invariant:** **NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 5 beats.**
 - **The Single Key Point:** The transition from conversational chatbots to autonomous agents marks the fundamental systems shift from advisory text generation to delegated, closed-loop task execution; because foundation models possess zero execution authority, agency is a property of the whole computer system, not the neural model.
 - **Curricular Placement:** Serves as the opening landing of the entire volume, bridging the engineer's prior knowledge of passive model serving to stateful, closed-loop agentic execution.
-- **What to Cover (Positive Scope & Systems Mechanics across the 5 Beats):**
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *Beat 1 (The Inflection Point: From Chat to Delegation):* Tracing the evolution from Software 2.0 pattern recognition and conversational chatbots to delegated operational execution. Chatbots provide advice, leaving humans to manually read codebases, run compilers, debug test failures, and deploy patches. The "Agentic Systems Moment" occurs the instant we instruct the machine not merely to explain how to complete a task, but to autonomously execute it to an accepted, verified deliverable.
   - *Beat 2 (The Central Systems Paradox: The Unprivileged Predictor):* The foundational systems tension: foundation models possess zero ambient authority, direct environment access, or execution capability. The model is an unprivileged probability distribution estimator running on matrix accelerators; it evaluates integer tokens and emits candidate strings into an output buffer. It cannot open file descriptors, issue syscalls, ping network sockets, or inspect system clocks. Emitting text that resembles a solution alters zero external state.
   - *Beat 3 (The Open-Loop Failure Wall):* Why executing generated plans open-loop fails in production. In extended multi-step tasks, independent errors compound exponentially: $P(\text{success}) \le (1 - \epsilon)^N$. Over a 20-step execution trajectory, a $95\%$ per-step accuracy ($\epsilon = 0.05$) drops whole-task success below $36\%$. Open-loop generation is blind: it cannot observe environmental resistance, detect tool timeouts, or recover from intermediate errors.
@@ -572,6 +591,11 @@ Every chapter transition in this book is governed by an explicit handoff:
     $$\text{Task Goal } g, \text{ Context } x_t \xrightarrow{\text{Propose}} \text{Candidate Action } a_t \xrightarrow{\text{Runtime Gate}} \text{Sandboxed Execution } e(a_t) \xrightarrow{\text{Observe}} o_{t+1} \xrightarrow{\text{Evaluate}} \text{Evidence } E$$
     The runtime intercepts the candidate action, executes it inside an isolated sandbox, captures structured execution telemetry (stdout, stderr, exit codes), and appends real-world observations back into the context for iterative repair. Edsger Dijkstra's 1970 testing principle (*"Program testing can be used to show the presence of bugs, but never to show their absence"*): passing test suites (`exit code 0`) provide verifiable empirical evidence under isolated conditions, distinguishing observed evidence from unverified verbal claims of completion.
   - *Beat 5 (The Foundational Thesis of the Volume):* **Agency is a property of the whole computer system, not the neural model.** The foundation model is simply the stochastic processor core; reliability, safety, fault tolerance, and resource efficiency must be engineered into the operating system, memory, peripheral, and verification layers surrounding it.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** derive Byte-Pair Encoding (BPE), logit sampling, or autoregressive attention math (Deferred exclusively to Chapter 02: The Stochastic Processor Core).
+  - 🛑 **DO NOT** detail container, cgroup, or hypervisor virtualization architectures (Deferred exclusively to Chapter 08: Virtualization & Sandboxing).
+  - 🛑 **DO NOT** discuss multi-agent delegation or swarms (Deferred exclusively to Chapter 15: Multi-Agent Fleets).
+  - 🛑 **DO NOT** open with a toy parser bug script; ground the discussion in foundational systems architecture and Dijkstra's testing principle.
 - **Visuals & Tables:**
   - Figure: `@fig-closed-loop-architecture [insert link here: books/vol3/01_introduction/images/svg/closed_loop_architecture.svg]` (Proposal $\to$ Runtime Mediation $\to$ Sandbox Dispatch $\to$ Observation Capture $\to$ Verified Patch).
 - **Seminal Literature:**
@@ -580,24 +604,30 @@ Every chapter transition in this book is governed by an explicit handoff:
   - Carlos Jimenez et al. (2024, SWE-bench: Can Language Models Resolve Real-World GitHub Issues?).
 - **Causal Bridge to 1.2:** How did machine learning systems evolve from optimizing isolated tensor operations to managing these closed-loop trajectories?
 
-#### Section 1.2: From Tensors to Trajectories
+#### Section 1.2: From Tensors to Trajectories [core]
 - **Heading & Anchor:** `## From Tensors to Trajectories {#sec-vol3-intro-evolution-of-ml-systems}`
 - **The Single Key Point:** Machine learning systems have evolved across three distinct epochs—single-node tensor math, distributed cluster serving, and stateful trajectories—stretching execution units across ten orders of temporal magnitude.
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Evolution of ML systems from single-node tensor accelerators and continuous batching serving clusters to stateful, multi-turn trajectories.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Engineer's Prior Knowledge (Bridging Foundations without Volume Names):* The systems engineer arrives with a firm grasp of core machine learning systems: training and serving models on single accelerators (managing high-bandwidth memory, fused GEMM kernels, and Roofline boundaries), and scaling out across distributed clusters (orchestrating tensor parallelism, high-speed interconnects, and continuous batching for high-throughput serving).
   - *The Passive Request Boundary:* A conventional model-serving request begins with an input and returns a prediction or generated sequence. The service may perform many autoregressive forward steps, while an external client owns any subsequent action.
   - *The Stateful Trajectory Era:* Tasks such as repository repair and multi-step research require a sequence of model invocations, tool operations, observations, and acceptance checks. That extended **trajectory** becomes the systems management unit.
   - *The Temporal Stretching of Execution Units:*
     - Machine instructions ($10^{-9}\text{ s}$) $\to$ OS threads/processes ($10^{-6}\text{ s}$) $\to$ RPC/REST requests ($10^{-3}\text{ s}$) $\to$ Stateless LLM inference ($10^{-1}\text{ s}$) $\to$ Autonomous trajectories ($10^1\text{ to }10^4\text{ s}$).
   - *Why Passive Models Hit an Open-Loop Systems Ceiling:* In open-loop generation, errors compound exponentially ($P(\text{success}) \le (1-\epsilon)^N$); agentic systems trade test-time compute for sample efficiency via closed-loop feedback.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** write historical essays on 1940s vacuum tube computing; use EDSAC purely to anchor the temporal stretching of execution units.
+  - 🛑 **DO NOT** re-derive Rooflines, FLOP counts, or GPU memory bandwidth equations from Volume I/II (Reserved for Section 2.7).
+  - 🛑 **DO NOT** discuss PagedAttention block tables or KV cache memory swapping (Deferred to Chapter 05).
 - **Visuals & Tables:**
   - Figure: `@fig-evolution-execution-units [insert link here: books/vol3/01_introduction/images/svg/evolution_execution_units_v2.svg]` (Chronological and temporal timeline from 1949 EDSAC subroutines to modern trajectories across 10 orders of magnitude).
 - **Causal Bridge to 1.3:** How does this temporal expansion transform the fundamental software engineering contract?
 
-#### Section 1.3: Software 1.0, 2.0, and 3.0
+#### Section 1.3: Software 1.0, 2.0, and 3.0 [core]
 - **Heading & Anchor:** `## Software 1.0, 2.0, and 3.0 {#sec-vol3-intro-the-tripartite-systems-comparison}`
 - **The Single Key Point:** Agentic ML systems represent Software 3.0: a hybrid computing paradigm where stochastic neural policies act as high-level controllers governing deterministic Software 1.0 effectors and operating system primitives.
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Theoretical framing establishing Software 3.0 as a hybrid computing paradigm.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Tripartite Evolution:*
     - *Software 1.0 (Classical Code):* Explicit human-authored instructions, deterministic branching, program counters/stacks, compiler type safety.
     - *Software 2.0 (Neural Weights):* Optimization over continuous parameters via SGD (Karpathy 2017), GPU tensor graphs, stateless feedforward inference.
@@ -611,16 +641,22 @@ Every chapter transition in this book is governed by an explicit handoff:
     6. Hardware bottleneck (memory bus vs. Roofline compute/bandwidth vs. KV cache capacity and Tool-Wait stranding).
     7. Side effects (syscall mutations vs. pure tensor math vs. irreversible real-world external mutations).
     8. Correctness guarantees (formal verification vs. generalization bounds vs. deterministic runtime verification enclaves).
+  - *The Hybrid Systems Stance:* Why Software 3.0 does not discard Software 1.0, but builds a deterministic OS harness around stochastic policies.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** teach neural network training algorithms, backpropagation, or gradient descent (Volume I material).
+  - 🛑 **DO NOT** discuss LLM prompt tuning or prompt template syntax (Banned NLP trap).
+  - 🛑 **DO NOT** dive into low-level Linux kernel code or x86 assembly.
 - **Visuals & Tables:**
   - Table: `@tbl-tripartite-comparison` (The 8-dimension comparative taxonomy of Software 1.0, Software 2.0, and Software 3.0).
 - **Seminal Literature:**
   - Andrej Karpathy (2017, *Software 2.0*).
 - **Causal Bridge to 1.4:** With Software 3.0 established as a distinct systems paradigm, what is its formal engineering definition?
 
-#### Section 1.4: Defining Agentic Systems
+#### Section 1.4: Defining Agentic Systems [core]
 - **Heading & Anchor:** `## Defining Agentic Systems {#sec-vol3-intro-formal-definition-of-an}`
 - **The Single Key Point:** An agentic machine learning system is formally defined as an autonomous, stateful closed-loop control system embedded within a deterministic runtime harness that manages context memory, tool actuation, and invariant verification.
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Formal definitions, trajectory scope boundaries, and macro-efficiency versus micro-efficiency metrics.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Formal Systems Definition (`@dfn-agentic-ml-system`):*
     - Autonomous, stateful computing systems employing a learned foundation model $\pi_\theta$ as their central decision-making policy, embedded within a deterministic runtime harness.
     - Significance: Inverting request-response serving into long-horizon trajectories; optimizing for macro-efficiency ($/task, energy/task) rather than micro-efficiency (FLOPs/token).
@@ -633,15 +669,20 @@ Every chapter transition in this book is governed by an explicit handoff:
     - Micro-efficiency (FLOPs/token, tokens/sec) optimizes a model invocation or serving step; macro-efficiency measures accepted task outcomes over the trajectory.
     - Macro-efficiency measures energy, dollars, and **Trajectory Goodput** ($\mathcal{G}$)—the fraction of resources spent on tokens that directly produce verified task completions:
       $$\mathcal{G} = \frac{\sum_{i \in \mathcal{T}_{\text{success}}} R_i}{\sum_{j \in \mathcal{T}_{\text{all}}} R_j}$$
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** implement ACB scheduling algorithms or priority queues (Deferred to Chapter 09).
+  - 🛑 **DO NOT** discuss commercial LLM pricing or token billing APIs (Deferred to Chapter 17).
+  - 🛑 **DO NOT** treat agents as chatbot API loops or LangChain wrappers.
 - **Visuals & Tables:**
   - Callout: `@dfn-agentic-ml-system` (Formal systems definition box).
   - Figure: `@fig-trajectory-systems-boundary [insert link here: books/vol3/01_introduction/images/svg/trajectory_systems_boundary.svg]` (The trajectory as the primary systems management boundary).
 - **Causal Bridge to 1.5:** What are the formal mathematical and algorithmic primitives that govern this trajectory execution cycle?
 
-#### Section 1.5: The Closed-Loop Trajectory
+#### Section 1.5: The Closed-Loop Trajectory [core]
 - **Heading & Anchor:** `## The Closed-Loop Trajectory {#sec-vol3-intro-trajectory-engine}`
 - **The Single Key Point:** Autonomous agency is an iterative, closed-loop trajectory of discrete, typed state transitions, governed by six core primitives and a structured execution lifecycle.
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Algorithmic primitives and state-transition lifecycle of the closed-loop execution engine.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Six Primitives:*
     1. *Goal ($g$):* The delegated objective and intended outcome.
     2. *Context ($c_t$):* The staged sequence of prompt instructions, recent observations, and working memory.
@@ -650,7 +691,7 @@ Every chapter transition in this book is governed by an explicit handoff:
     5. *Runtime Dispatch ($D(a_{\text{perm}}) \to o_{t+1}$):* Executing authorized actions against external interfaces.
     6. *Observation ($o_{t+1}$):* Capturing partial, noisy, and potentially stale environment state.
   - *The Mathematical Trajectory:*
-    $$\\tau = \\big( (a_0, o_1, v_1), (a_1, o_2, v_2), \\dots, (a_{N-1}, o_N, v_N) \\big)$$
+    $$\tau = \big( (a_0, o_1, v_1), (a_1, o_2, v_2), \dots, (a_{N-1}, o_N, v_N) \big)$$
     where $a_t$ is the executed action, $o_{t+1}$ is the environment observation, and $v_{t+1}$ is the verification evidence.
   - *The Six-Phase Loop:*
     1. Continuation check and context assembly.
@@ -660,23 +701,32 @@ Every chapter transition in this book is governed by an explicit handoff:
     5. Observation capture.
     6. Completion assessment.
   - *Transient Pauses vs. Terminal States:* Clarification pauses (awaiting operator input) and supervisory handoffs vs. terminal budget exhaustion.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** discuss prompting strategies or chain-of-thought prompt templates (ReAct is cited for its execution loop, not prompt engineering).
+  - 🛑 **DO NOT** detail Unix domain sockets or IPC streaming buffers (Deferred to Chapter 07).
+  - 🛑 **DO NOT** implement Write-Ahead Logging (WAL) or snapshot storage (Deferred to Chapter 10).
 - **Visuals & Tables:**
   - State machine diagram of the 6-phase trajectory execution loop.
 - **Seminal Literature:**
   - Shunyu Yao et al. (2023, *ReAct: Synergizing Reasoning and Acting in Language Models*).
 - **Causal Bridge to 1.6:** When this closed loop runs with a neural core, what unique failure modes emerge that break classical fault tolerance?
 
-#### Section 1.6: The Fail-Plausible Fault Model
+#### Section 1.6: The Fail-Plausible Fault Model [core]
 - **Heading & Anchor:** `## The Fail-Plausible Fault Model {#sec-vol3-intro-fail-plausible}`
 - **The Single Key Point:** Neural execution cores violate classical fault tolerance: they do not crash when confused (Fail-Stop), but emit syntactically flawless, highly confident, yet semantically broken code that exits with code 0 (Fail-Plausible).
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Failure taxonomy establishing the core reliability challenge of stochastic computer systems.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *Taxonomy of Systems Failures:*
     - *Fail-Stop (Schlichting & Schneider 1983):* Components fail by halting; non-faulty components detect the crash immediately via timeouts or exit codes.
     - *Byzantine Faults (Lamport et al. 1982):* Arbitrary or malicious failure modes where components lie or send conflicting data.
     - *Fail-Plausible Faults:* The model succeeds syntactically (valid JSON, valid AST, exit code 0) while violating semantic invariants.
-  - *The Illusion of Coherence:* Language models optimize statistical likelihood, not objective truth; high confidence ($T \\to 0$) does not correlate with semantic correctness.
+  - *The Illusion of Coherence:* Language models optimize statistical likelihood, not objective truth; high confidence ($T \to 0$) does not correlate with semantic correctness.
   - *Context Poisoning Amplification:* Appending raw fail-plausible error dumps to the context creates attentional sinks, causing the model to attend to its own mistakes as historical ground truth.
   - *Where Requests Lose the Trajectory:* The six scope mismatches of stateless containers (cost accumulation, memory span, persisting authority, semantic recovery, causal evidence, physical placement).
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** implement distributed Saga compensating transactions or circuit breakers (Deferred to Chapter 11).
+  - 🛑 **DO NOT** design reinforcement learning reward penalties (Deferred to Chapter 14).
+  - 🛑 **DO NOT** use anthropomorphic terms ("the model gets confused", "the agent realizes its mistake").
 - **Visuals & Tables:**
   - Figure: `@fig-fault-models-fail-plausible [insert link here: books/vol3/01_introduction/images/svg/fault_models_fail_plausible.svg]` (Fail-Stop vs. Byzantine vs. Fail-Plausible).
   - Figure: `@fig-request-scope-mismatches [insert link here: books/vol3/01_introduction/images/svg/request_scope_mismatches.svg]` (The Six Scope Mismatches).
@@ -685,14 +735,19 @@ Every chapter transition in this book is governed by an explicit handoff:
   - Leslie Lamport, Robert Shostak, & Marshall Pease (1982, *The Byzantine Generals Problem*).
 - **Causal Bridge to 1.7:** Because the model can fail plausibly, what foundational systems principle governs how the runtime enforces safety?
 
-#### Section 1.7: The Invariant Closure Principle
+#### Section 1.7: The Invariant Closure Principle [core]
 - **Heading & Anchor:** `## The Invariant Closure Principle {#sec-vol3-intro-invariant-closure}`
 - **The Single Key Point:** Any invariant that must hold with certainty ($P = 1.0$) across an autonomous trajectory cannot rely on model self-regulation; it must be closed at the deterministic runtime, sandbox, or OS layer below the neural policy.
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Foundational security and verification doctrine governing the entire volume.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *Inverting Saltzer's End-to-End Argument (Saltzer et al. 1984):* Classical systems state that lower layers shouldn't enforce application semantics. In agentic systems, because the top-level application is an unconstrained stochastic neural policy, that policy cannot be trusted to guarantee its own correctness, security, or resource boundaries.
   - *The Formal Invariant Closure Principle (`@pri-invariant-closure`):*
     - Mechanical enforcement below the model: filesystem boundaries enforced by Linux namespaces/seccomp, budgets enforced by token bucket controllers, syntax enforced by CFG logit masks.
   - *Creating the Deterministic Envelope:* The runtime provides the immutable safety walls within which the stochastic policy can freely explore and deliberate.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** implement grammar-constrained decode bitmasks or state automata (Deferred to Chapter 02).
+  - 🛑 **DO NOT** detail seccomp-bpf system call filters or Linux namespace mounts (Deferred to Chapter 08).
+  - 🛑 **DO NOT** discuss formal safety cases and release assurance (Deferred to Chapter 18).
 - **Visuals & Tables:**
   - Callout: `@pri-invariant-closure` (The Invariant Closure Principle).
   - Architectural Diagram: Invariant Closure below the Model (Prompt-level request vs. Runtime-level enforcement).
@@ -700,10 +755,11 @@ Every chapter transition in this book is governed by an explicit handoff:
   - Jerome H. Saltzer, David P. Reed, & David D. Clark (1984, *End-to-End Arguments in System Design*).
 - **Causal Bridge to 1.8:** To enforce invariant closure effectively, how must systems engineers specify tasks and bound their operating envelopes?
 
-#### Section 1.8: The Task Specification Contract
+#### Section 1.8: The Task Specification Contract [core]
 - **Heading & Anchor:** `## The Task Specification Contract {#sec-vol3-intro-task-contract}`
 - **The Single Key Point:** Operational reliability requires translating ambiguous natural-language requests into formal 5-part task contracts and evaluating them against the Four Engineering Dimensions.
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Engineering requirements, operating envelopes, and duration accounting for agentic tasks.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *The 5-Part Task Specification Contract:*
     1. *Goal:* Clear, declarative objective with unambiguous scope boundaries.
     2. *Environment:* The explicit virtualized environment, repository version, and dependencies.
@@ -716,18 +772,27 @@ Every chapter transition in this book is governed by an explicit handoff:
     3. *Permitted Authority:* Read-only analysis vs. reversible local mutation vs. irreversible production commit.
     4. *Completion Evidence:* Syntactic pass vs. mechanical test exit code 0 vs. formal property proof.
   - *Amdahl's Speedup for Trajectories:* Demonstrating that accelerating model generation yields diminishing returns when tool wait and runtime latency dominate.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** specify JSON-RPC tool schemas or MCP protocol wire frames (Deferred to Chapter 07).
+  - 🛑 **DO NOT** design benchmark suites like SWE-bench or WebArena (Deferred to Chapter 16).
+  - 🛑 **DO NOT** discuss multi-agent task envelopes (Deferred to Chapter 15).
 - **Visuals & Tables:**
   - Table: The 5-Part Task Specification Contract Template.
   - Equations: Serial Duration Accounting and Amdahl Speedup for Trajectories.
 - **Causal Bridge to 1.9:** How do we map these contracts, invariants, and execution loops into a unified computer architecture?
 
-#### Section 1.9: The Stochastic Computer
+#### Section 1.9: The Stochastic Computer [core]
 - **Heading & Anchor:** `## The Stochastic Computer {#sec-vol3-intro-stochastic-computer}`
 - **The Single Key Point:** The Stochastic Computer is a software-level functional architecture: learned computation, state, controlled interaction, and supervision form the live loop; training and fleet operations improve and operate it across tasks.
-- **Points to explain (paragraph-by-paragraph):**
-  - *Live functional responsibilities:* The model service performs learned computation; the runtime selects context and durable evidence; typed interfaces mediate effects; the supervisor owns lifecycle, budgets, and completion.
-  - *Cross-task activities:* Policy adaptation changes future proposal distributions, and fleet operations coordinate and measure many trajectories. Neither is a literal chip component.
-  - *Limits of the analogy:* Retain classical systems questions about state, cost, authority, and failure without equating context with registers, KV state with L2 cache, or tool calls with bus instructions.
+- **Curricular Placement:** Unifying architectural blueprint of Volume III, defining functional components and subsystem ownership.
+- **What to Cover (Positive Scope & Systems Mechanics):**
+  - *The Live Functional Architecture:* Stochastic Processor Core (unprivileged learned compute), Context Memory & KV Hierarchy (working set and physical cache), Peripherals & Sandboxing (mediated tool dispatch), Agent OS (control plane, WAL, Sagas).
+  - *Across-Task Lifecycle Infrastructure:* Trajectory Data Flywheel, Policy Compiler (SFT/RLVR), Distributed Fleet Operations.
+  - *The Limits of the Silicon Metaphor:* Clarifying that the Stochastic Computer is a software functional architecture, not a physical chip; rejecting forced 1-to-1 mappings of transformers to CPUs or tokens to opcodes.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** dive into hardware silicon design, transistor gates, or GPU warp schedulers.
+  - 🛑 **DO NOT** detail individual subsystem mechanics (each subsystem receives its dedicated chapter in Parts I–VII).
+  - 🛑 **DO NOT** introduce speculative neuromorphic or quantum hardware.
 - **Visuals & Tables:**
   - Table: responsibility, owner, input, output, and verification boundary for each live component; replace one-to-one silicon mappings.
   - Figure: The Functional Architecture of the Stochastic Computer [insert link here: books/vol3/01_introduction/images/svg/stochastic_computer_architecture.svg], revised around the execution loop.
@@ -735,10 +800,11 @@ Every chapter transition in this book is governed by an explicit handoff:
   - John von Neumann (1945, *First Draft of a Report on the EDVAC*).
 - **Causal Bridge to 1.10:** How does this book guide the reader through the construction and mastery of the Stochastic Computer?
 
-#### Section 1.10: Book Organization
+#### Section 1.10: Book Organization [core]
 - **Heading & Anchor:** `## Book Organization {#sec-vol3-intro-book-organization}`
 - **The Single Key Point:** The seven Parts are a causal teaching sequence from one invocation to a complete trajectory, not a count of hardware-equivalent subsystems.
-- **Points to explain (paragraph-by-paragraph):**
+- **Curricular Placement:** Curricular roadmap, causal progression, and role-based reading paths across the seven Parts.
+- **What to Cover (Positive Scope & Systems Mechanics):**
   - *The Seven Architectural Parts:*
     1. *Introduction:* Chapter 01 (Whole-system trajectory architecture).
     2. *Part I: The Stochastic Processor:* Chapters 02–03 (Invocation contracts, syntax masking, deliberation).
@@ -749,7 +815,10 @@ Every chapter transition in this book is governed by an explicit handoff:
     7. *Part VI: Distributed Fleets & Operations:* Chapters 15–17 (Multi-agent topologies, tracing, cost engineering).
     8. *Part VII: Synthesis:* Chapter 18 (Capstone architecture and safety case).
   - *Pedagogical Reading Paths (`@tbl-pedagogical-paths`):* Tailored curricula for Infrastructure Engineers, Model Researchers, and Platform Architects.
-  - *The Handoff to Part I:* Transitioning from whole-system architecture to the computational core.
+  - *The Causal Spine:* Transition from the whole-system bookend into the computational core of Part I.
+- **What NOT to Cover (Negative Scope & Forward Deferrals):**
+  - 🛑 **DO NOT** summarize the entire contents of later chapters in detail; provide high-level systems routing only.
+  - 🛑 **DO NOT** repeat the foundational definitions established in Sections 1.1–1.9.
 - **Visuals & Tables:**
   - Table: `@tbl-pedagogical-paths` (Tailored reading paths).
   - Figure: `@fig-subsystem-dependency-tree [insert link here: books/vol3/18_conclusion/images/svg/mlsys_curriculum_arc.svg]` (Causal spine).
