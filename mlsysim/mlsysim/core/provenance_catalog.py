@@ -440,6 +440,20 @@ INDUSTRIAL_AMR = _est(
     verified="2026-09-15",
 )
 
+WAREHOUSE_AMR = _est(
+    "prov:warehouse-amr-300kg",
+    "Representative warehouse fulfillment AMR class profile (300 kg gross mass)",
+    notes="300 kg mass, 1.5 m/s max velocity, 2.0 m/s^2 emergency braking deceleration (Chapter 4 watchdog model).",
+    verified="2026-09-18",
+)
+
+HEAVY_AMR = _est(
+    "prov:heavy-amr-250kg",
+    "Representative heavy industrial logistics AMR class profile (250 kg mass)",
+    notes="250 kg mass, 1.8 m/s cruise velocity, 2.0 m/s^2 braking deceleration (Chapter 1 model).",
+    verified="2026-09-18",
+)
+
 AUTONOMOUS_VEHICLE_ROBOTAXI = _est(
     "prov:autonomous-vehicle-robotaxi",
     "Representative Level 4 robotaxi class profile (not a single vehicle)",

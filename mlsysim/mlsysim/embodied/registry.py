@@ -128,6 +128,34 @@ class AMRs(Registry):
         metadata=Metadata(provenance=pc.INDUSTRIAL_AMR),
     )
 
+    WarehouseAMR = EmbodiedPlatform(
+        name="Warehouse Fulfillment AMR",
+        archetype="Class 1: Industrial Mobility",
+        mass=300.0 * ureg.kg,
+        payload_capacity=1000.0 * ureg.kg,
+        max_velocity=1.5 * (ureg.meter / ureg.second),
+        max_acceleration=2.0 * (ureg.meter / ureg.second**2),
+        control_frequency=100.0 * ureg.Hz,
+        nominal_power=600.0 * ureg.watt,
+        transmission="Differential dual-drive in-wheel brushless motors",
+        compute_soc=Hardware.Edge.JetsonAGXOrin,
+        metadata=Metadata(provenance=pc.WAREHOUSE_AMR),
+    )
+
+    HeavyAMR = EmbodiedPlatform(
+        name="Heavy Logistics AMR",
+        archetype="Class 1: Industrial Mobility",
+        mass=250.0 * ureg.kg,
+        payload_capacity=800.0 * ureg.kg,
+        max_velocity=1.8 * (ureg.meter / ureg.second),
+        max_acceleration=2.0 * (ureg.meter / ureg.second**2),
+        control_frequency=100.0 * ureg.Hz,
+        nominal_power=550.0 * ureg.watt,
+        transmission="Differential drive with planetary reduction",
+        compute_soc=Hardware.Edge.JetsonAGXOrin,
+        metadata=Metadata(provenance=pc.HEAVY_AMR),
+    )
+
 
 class Vehicles(Registry):
     """Autonomous driving vehicles and robotaxis (Class 1: Heavy Mobility)."""
