@@ -1,0 +1,98 @@
+<!-- SECTION_START: 1.11 (#sec-vol3-intro-fallacies) -->
+## Fallacies and Pitfalls {#sec-vol3-intro-fallacies}
+
+Following the pedagogical tradition of computer systems engineering [@patterson2017hardware], we conclude this foundational chapter by cataloging the common fallacies and engineering pitfalls that compromise real-world agentic systems.
+
+::: {#fal-context-memory .callout-warning appearance="simple"}
+### Fallacy: A massive token context window eliminates the need for hierarchical memory architectures. {.unnumbered}
+
+**Fallacy:** *Supporting context windows of one million or more tokens renders external vector databases, working-set compaction, and memory hierarchies obsolete.*
+
+A larger supported context window does not make every historical token useful for the next execution step. Ingesting massive raw token streams incurs severe systems penalties:
+* Prefill latency scales super-linearly with context length, delaying Time to First Token (TTFT).
+* Storing multi-gigabyte KV-cache activations per session exhausts scarce accelerator HBM, reducing serving concurrency.
+* Statistically, autoregressive attention degrades across long spans—a phenomenon known as the "lost-in-the-middle" effect—causing the model to overlook critical invariants buried in bloated logs.
+
+A production agent operating system requires an explicit working-set policy: compacting intermediate traces, evicting stale observations, and retrieving external artifacts on demand. The engineering problem is to assign information an explicit lifetime, owner, refresh policy, and eviction cost, rather than dumping raw history into a flat context window.
+:::
+
+::: {#pit-tool-wait-hbm .callout-caution appearance="simple"}
+### Pitfall: Holding accelerator memory allocated during blocking tool executions. {.unnumbered}
+
+**Pitfall:** *Leaving an agent's KV-cache resident in GPU memory while awaiting long-running tool execution.*
+
+An external tool invocation—such as compiling a software repository, executing an end-to-end integration test suite, or awaiting human approval—often spans seconds or minutes. In contrast, a forward inference step completes in tens of milliseconds.
+
+If the agent runtime blocks a scarce accelerator worker while an external tool executes, GPU utilization collapses. Furthermore, holding gigabytes of KV-cache allocations in accelerator HBM across a 60-second tool wait strands memory that could otherwise serve dozens of concurrent inference requests—incurring a massive *Tool-Wait Memory Tax*.
+
+Systems engineers must decouple tool execution from model serving: dispatching tools asynchronously, paging or offloading idle KV-caches to host system DRAM or NVMe storage, and rehydrating state only when the tool completes.
+:::
+
+::: {#fal-verbal-completion .callout-warning appearance="simple"}
+### Fallacy: A coherent model proposal provides sufficient assurance that a delegated task is complete. {.unnumbered}
+
+**Fallacy:** *An agent has successfully completed its task when it outputs: "I have resolved the issue, and all requirements have been met."*
+
+Under the fail-plausible fault model, a model's verbal confidence correlates poorly with physical operational correctness. When encountering ambiguous errors or edge cases, autoregressive models generate syntactically fluent, semantically persuasive rationalizations that mask silent corruption. An agent tasked with passing a unit test suite may simply comment out failing assertions or force return codes to 0.
+
+Relying on model plausibility rather than external evidence produces catastrophic failures. Reliable trajectories demand the Invariant Closure Principle: task completion can only be certified by deterministic, independent runtime verification harnesses operating entirely outside the model's discretion against sealed verifiers.
+:::
+
+::: {#pit-unbounded-retries .callout-caution appearance="simple"}
+### Pitfall: Relying on unbounded in-context retries when tool invocations fail. {.unnumbered}
+
+**Pitfall:** *Appending raw stack traces to the prompt and repeatedly asking the model to retry after a failed tool call.*
+
+When a model generates an invalid tool call—such as malformed JSON arguments, an invalid file path, or a compilation error—the naive reaction is to append the raw error traceback to the context window and re-invoke the model.
+
+This practice induces severe **context poisoning**. Because autoregressive transformers compute self-attention across the entire context history, injecting verbose failure traces creates attentional sinks that drag subsequent generations toward the erroneous pattern. Conditioned on its own failed attempts, the model enters a degenerative attractor state: hallucinating nonexistent flags, repeating the identical error with cosmetic whitespace tweaks, or thrashing between two incorrect states.
+
+Repeated retries rapidly inflate context memory, exhaust token budgets, and waste compute. Runtimes must replace naive retries with architectural safeguards: enforcing JSON grammar at the logit level, rolling back context to pre-fault checkpoints, distilling raw errors into structured diagnostics, and backtracking along alternative action paths using search algorithms.
+:::
+
+::: {#fal-agent-superiority .callout-warning appearance="simple"}
+### Fallacy: Model-directed loops are inherently superior to deterministic workflows whenever environments vary. {.unnumbered}
+
+**Fallacy:** *Any complex automation task is better solved by granting full autonomy to a foundation model rather than writing deterministic code.*
+
+Deterministic Software 1.0 workflows are predictable, auditable, microsecond-fast, and computationally inexpensive. Conventional distributed controllers handle environmental variation routinely through structured retries, circuit breakers, and state machines.
+
+Consider our running configuration parser defect: if a deterministic script can execute a static linter, reformat the file, and run the test suite in 50 milliseconds at zero inference cost with 100 percent reproducibility, delegating that step to an autonomous multi-turn model loop—consuming 30 seconds, 12,000 tokens, and \$0.15 of GPU compute while introducing an 18 percent failure risk—is an architectural anti-pattern.
+
+A model-directed agentic loop is an expensive, non-deterministic control mechanism that should only be deployed when the task demands flexible planning, unstructured semantic interpretation, or dynamic error synthesis that deterministic code cannot express. If a procedure can be codified as a deterministic DAG, wrapping it in an autonomous model loop adds latency, cost, and failure modes without delivering operational value. Runtimes must rigorously benchmark agentic loops against deterministic baselines under identical task contracts.
+:::
+
+::: {#pit-accounting-boundary .callout-caution appearance="simple"}
+### Pitfall: Measuring system cost by evaluating only the resource consumption of successful final trajectories. {.unnumbered}
+
+**Pitfall:** *Reporting agent cost as the average token expenditure of successful runs, ignoring failed trajectories and human interventions.*
+
+Measuring only successful trajectories produces a distorted view of economic viability. If an agent system attempts 100 tasks at \$2.00 per attempt, but succeeds on only 20 tasks, the true operational cost per successful outcome is not \$2.00—it is \$10.00!
+
+Furthermore, if those 20 "successful" tasks required human operators to intervene, resolve ambiguous tool errors, or fix broken git states, the true cost must include human labor. Systems architects must draw the accounting boundary around *all* attempted trajectories, failed rollbacks, stranded compute, and supervisory interventions to measure true **Task Yield** ($Y_{\text{task}}$) and **Trajectory Goodput** ($\mathcal{G}$).
+:::
+
+## Summary {#sec-vol3-intro-summary}
+
+Building dependable autonomous agents requires moving past conversational chatbot paradigms and establishing a rigorous systems engineering discipline. Agency is not an intrinsic property of neural weights; it is an emergent capability of the complete computing system.
+
+The foundation model functions as an unprivileged, non-deterministic execution engine evaluated under zero ambient authority. Left unconstrained, its non-deterministic nature and fail-plausible fault model lead inevitably to compounding errors and silent state corruption.
+
+To transform raw token prediction into dependable operational execution, systems engineers must construct the **Stochastic Computer**: an accountable systems architecture that wraps the neural core in deterministic operating system sandboxes, enforces invariant closure outside the model's discretion using sealed verifiers, coordinates hierarchical memory across high-bandwidth accelerators and host storage, and evaluates workloads across the H-S-A-C taxonomy.
+
+::: {.callout-takeaways title="Core Systems Principles of Agentic Systems"}
+1. **The Trajectory is the Management Unit:** Systems infrastructure must shift from optimizing stateless token requests ($10^{-1}\text{ s}$) to scheduling, isolating, checkpointing, and verifying stateful multi-turn trajectories ($10^1\text{ to }10^4\text{ s}$).
+2. **The Invariant Closure Principle:** Any safety property, permission boundary, or correctness criterion must be enforced by deterministic systems operating outside and below the model's sphere of discretion, verified against tamper-proof sealed verifiers.
+3. **The Fail-Plausible Fault Model:** Foundation models operate within the arbitrary-fault (Byzantine) envelope, failing plausibly by emitting syntactically valid, semantically persuasive text that reports success while masking broken state.
+4. **The Bipartite State Hierarchy:** Execution state is split across logical context and physical KV-caches in accelerator memory, coupled to external mutable filesystems and databases on the host.
+5. **The Tool-Wait Memory Tax:** Runtimes must decouple asynchronous tool execution from scarce GPU memory to prevent stranding high-bandwidth memory during extended environmental latency.
+6. **The H-S-A-C Workload Envelope:** Workload complexity across the Stochastic Computer is formally governed by four orthogonal dimensions: Horizon ($H$), State Complexity ($S$), Authority ($A$), and Invariant Closure ($C$).
+7. **Macro-Efficiency Dictates Viability:** Optimizing micro-efficiency (FLOPs/token) is futile if agents fail tasks; architectures must be optimized for Task Yield ($Y_{\text{task}}$) and Trajectory Goodput ($\mathcal{G}$)—the fraction of resources directly producing verified task completions.
+:::
+
+::: {.callout-chapter-connection title="From Architectural Foundations to Stochastic Silicon"}
+Having established the systems architecture of the Stochastic Computer, we now begin its systematic construction.
+
+In **Part I: The Stochastic Processor**, we zoom in to inspect the computational engine of our machine. In **Chapter 02: The Stochastic Processor Core**, we strip away anthropomorphic illusions of "reasoning" and analyze a single foundation-model invocation through the lens of computer architecture: examining token serialization, autoregressive decode loops, typed invocation contracts, grammar-constrained logit masking, and the physical Roofline ceilings of matrix accelerators.
+:::
+<!-- SECTION_END: 1.11 -->

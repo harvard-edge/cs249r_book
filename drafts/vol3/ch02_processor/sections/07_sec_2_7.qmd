@@ -1,192 +1,201 @@
 ## The Cost of an Invocation {#sec-vol3-processor-cost}
 
-Every invocation of a stochastic processor core exacts a physical toll on accelerator hardware, translating probability distribution evaluations into memory bus transactions, thermal dissipation, and wall-clock delay. The total elapsed wall-clock latency, $T_{\text{call}}$, decomposes across physical and software subsystems:
+Every invocation of the stochastic processor core consumes physical resources—accelerator memory bus bandwidth, arithmetic execution units, host CPU cycles, and serving queue capacity—that govern the latency and monetary cost of an agent's execution trajectory. In a classical operating system, the instruction set architecture exposes instructions with predictable clock-cycle costs: a register add executes in a single cycle, an L1 cache hit resolves in several nanoseconds, and a main memory fault traps for hundreds of cycles. In contrast, an agent runtime issuing a request to a foundation model encounters a bimodal execution regime where processing the staged prompt context and emitting successive output tokens exercise fundamentally different physical hardware bottlenecks.
 
-$$T_{\text{call}} = T_{\text{queue}} + T_{\text{transport}} + T_{\text{prefill}} + \sum_{t=1}^K T_{\text{step}}(M + t) + T_{\text{validate}}$$ {#eq-vol3-call-latency}
+Under the computational scope of an atomic invocation ($H=1, S=\text{staged}, A=0, C=\text{external}$), the stochastic core evaluates a candidate proposal without ambient authority. Yet generating that proposal incurs non-trivial physical expenditure. Accurately budgeting for agent task completion requires decomposing end-to-end invocation latency into its constituent systems stages, quantifying the operational arithmetic intensity of neural execution against the physical Roofline of accelerator silicon, and characterizing the memory-traffic lower bounds that dictate decode throughput.
 
-where $T_{\text{queue}}$ is host runtime scheduling delay; $T_{\text{transport}}$ is streaming RPC transport; $T_{\text{prefill}}$ is accelerator time to ingest prompt context $\mathbf{x}_{1:M}$; $\sum_{t=1}^K T_{\text{step}}(M + t)$ is iterative autoregressive generation of $K$ candidate tokens; and $T_{\text{validate}}$ is deterministic verification (AST parsing, schema validation, test execution).
+### The Latency Decomposition and Invocation Critical Path {#sec-vol3-processor-latency-breakdown}
 
-Consider our repair agent diagnosing the configuration parser defect. The runtime stages an input context of $M = 40{,}000$ tokens (ASTs, logs, test traces, source files). From this context, the neural core emits an edit tool call of $K = 200$ tokens. Although the output sequence is under $0.5\%$ of total tokens, execution spans two radically different physical regimes.
+When the host runtime dispatches a qualified request tuple $\mathcal{C}_{\text{req}}$ across the RPC boundary to the inference service daemon, the wall-clock duration of the call spans five distinct, non-overlapping systems phases:
 
-### Prefill versus Decode: The Roofline Disparity and Activation Ceilings
+$$T_{\text{total}} = T_{\text{CPU,prep}} + T_{\text{queue}} + T_{\text{prefill}} + T_{\text{decode}} + T_{\text{CPU,post}}$$
 
-Accelerator execution is characterized by the Roofline Model [@williams2009], relating attainable throughput to operational arithmetic intensity:
+Each term reflects work performed at a distinct layer of the systems hierarchy:
 
-$$I = \frac{\text{Floating-Point Operations (FLOPs)}}{\text{DRAM Bytes Transferred Across Memory Bus}}$$ {#eq-vol3-arithmetic-intensity}
+1. **Host Context Preparation ($T_{\text{CPU,prep}}$):** The host runtime executes user-space CPU instructions to assemble prompt templates, pack system instructions, tokenize input strings into integer identifier vectors $\mathbf{x} \in \mathcal{V}^M$ via Byte-Pair Encoding, serialize the request payload into protocol buffers or JSON, and dispatch it across the RPC boundary.
+2. **Admission Queueing ($T_{\text{queue}}$):** The request arrives at the inference service daemon and enters an admission queue.[^fn-queue-latency] Under high multi-tenant concurrency or accelerator memory pressure, the request waits until the serving scheduler allocates active memory pages and schedules the job into an execution batch.
+3. **Prompt Prefill Ingestion ($T_{\text{prefill}}$):** The accelerator processes all $M$ prompt tokens in parallel. The neural core performs tensor contractions across all input positions simultaneously, populating the initial Key ($\mathbf{K}$) and Value ($\mathbf{V}$) states across all transformer layers. The latency of this phase determines the *Time to First Token* (TTFT).
+4. **Autoregressive Token Decode ($T_{\text{decode}}$):** The engine executes an iterative serving loop emitting $K$ successive tokens:
+   $$T_{\text{decode}} = \sum_{t=1}^K T_{\text{step}}(t)$$
+   Because token $y_t$ cannot be computed until token $y_{t-1}$ is sampled and appended to the context state, these $K$ steps form an irreducibly serial causal dependency chain.
+5. **Host Post-Processing ($T_{\text{CPU,post}}$):** The host runtime receives the raw output token stream, detokenizes integer IDs back into UTF-8 strings, validates grammar and schema adherence, executes JSON parsing, and constructs the normalized seven-outcome status envelope ($\mathcal{E}_{\text{resp}}$).
 
-An accelerator architecture possesses a hardware saturation threshold known as the machine balance:
+[^fn-queue-latency]: **Admission Queueing Delay**: In multi-tenant serving engines, $T_{\text{queue}}$ reflects the time an admission tuple waits in the serving daemon's FIFO or priority queue before accelerator memory is allocated and scheduled into a forward-pass batch. Under high service load, queueing delay exhibits heavy-tailed p99 spikes that dominate invocation latency, forcing host runtimes to budget for tail queueing rather than median accelerator execution time. \index{Admission Queueing Delay}\index{Latency!queueing}
 
-$$I_{\text{sat}} = \frac{\Pi_{\text{peak}}}{\beta_{\text{mem}}}$$ {#eq-vol3-machine-balance}
+Depending on the operational characteristics of the agent task, the dominant contributor to $T_{\text{total}}$ shifts dramatically across prompt-dominated and decode-dominated workloads, as classified in @tbl-vol3-latency-regimes.
 
-where $\Pi_{\text{peak}}$ denotes peak compute throughput ($\text{FLOP/s}$), and $\beta_{\text{mem}}$ represents high-bandwidth memory (HBM) bandwidth ($\text{bytes/s}$). Workloads with $I \ge I_{\text{sat}}$ sit on the compute-bound plateau. Workloads with $I < I_{\text{sat}}$ reside on the memory-bandwidth-bound boundary, where compute pipelines stall waiting for memory transfers (@fig-prefill-vs-decode).
-
-![Arithmetic intensity across prefill and decode execution phases on the accelerator Roofline model. Compute-bound prefill saturates execution pipelines, whereas decode stalls on memory bandwidth.](images/svg/prefill_vs_decode_v2.svg){#fig-prefill-vs-decode width="95%"}
-
-#### Prefill Arithmetic Intensity and Activation Traffic
-
-During prefill ($T_{\text{prefill}}$), the core processes all $M$ prompt tokens concurrently. Because the causal attention mask permits parallel ingestion, projecting input tokens through linear layers maps directly to General Matrix-Matrix Multiplication (GEMM).
-
-For a linear projection $\mathbf{Y} = \mathbf{X} \mathbf{W}$ ($\mathbf{X} \in \mathbb{R}^{M \times d}, \mathbf{W} \in \mathbb{R}^{d \times d'}$), the layer requires $2 M d d'$ FLOPs. Accounting for all bus traffic—reading weights ($P d d'$ bytes), reading inputs ($P M d$ bytes), and writing outputs ($P M d'$ bytes) at precision $P$ (e.g., $P = 2$ for FP16/BF16):
-
-$$I_{\text{layer}}(M) = \frac{2 M d d'}{P [d d' + M (d + d')]} = \frac{2}{P \left[ \frac{1}{M} + \frac{1}{d} + \frac{1}{d'} \right]}$$ {#eq-vol3-layer-intensity}
-
-As prompt length $M$ increases from $1$ to $40{,}000$, arithmetic intensity rises from $I \approx 1\text{ FLOP/byte}$ to an asymptotic ceiling:
-
-$$I_{\max} = \frac{2}{P \left( \frac{1}{d} + \frac{1}{d'} \right)} \approx \frac{d}{2P} \quad (\text{for } d = d')$$
-
-For a model with hidden dimension $d = 8192$ at FP16 ($P = 2$), operational intensity saturates at $I_{\max} \approx 2{,}048\text{ FLOP/byte}$. Intermediate activations in SwiGLU blocks ($\frac{8}{3}d \approx 28{,}672$) generate over $2.29\text{ GiB}$ per tensor, while writing the Key-Value (KV) cache for $M = 40{,}000$ tokens incurs $13.1\text{ GB}$ of DRAM traffic. Comparing $I_{\max} \approx 2{,}048\text{ FLOP/byte}$ against hardware machine balance (@tbl-hardware-balance) confirms that $I_{\text{prefill}} \gg I_{\text{sat}}$: prefill operates deep within the compute-bound plateau.
-
-::: {#tbl-hardware-balance}
-| Hardware Platform | Precision Format | Peak Compute ($\Pi_{\text{peak}}$) | Memory Bandwidth ($\beta_{\text{mem}}$) | Machine Balance ($I_{\text{sat}}$) |
+| Workload Profile | Context Length ($M$) | Generation Budget ($K_{\max}$) | Dominant Latency Phase | Primary Hardware Bottleneck |
 | :--- | :--- | :--- | :--- | :--- |
-| **NVIDIA H100 SXM5** [@choquette2023] | FP16 / BF16 | $989.5\text{ TFLOP/s}$ | $3{,}350\text{ GB/s}$ | $295.4\text{ FLOP/byte}$ |
-| **NVIDIA B200** [@nvidia2024blackwell] | FP16 / BF16 | $2{,}250.0\text{ TFLOP/s}$ | $8{,}000\text{ GB/s}$ | $281.3\text{ FLOP/byte}$ |
-| **Apple M4 Max** | FP16 | $104.0\text{ TFLOP/s}$ | $546\text{ GB/s}$ | $190.5\text{ FLOP/byte}$ |
+| **Agent Reflex / Status Probe** | Short ($M \le 10^3$) | Ultra-short ($K \le 5$) | $T_{\text{queue}} + T_{\text{CPU,prep}} + T_{\text{CPU,post}}$ | Host IPC and RPC network serialization |
+| **Codebase Retrieval / Routing** | Long ($M \ge 32 \times 10^3$) | Short ($K \le 50$) | $T_{\text{prefill}}$ | Accelerator compute throughput ($\text{TFLOP/s}$) |
+| **Speculative Code Synthesis** | Short ($M \le 10^3$) | Long ($K \ge 2 \times 10^3$) | $T_{\text{decode}}$ | Accelerator memory bandwidth ($\text{GB/s}$) |
+| **Full File Refactoring** | Long ($M \ge 32 \times 10^3$) | Long ($K \ge 2 \times 10^3$) | $T_{\text{prefill}} + T_{\text{decode}}$ | Compound: Compute bound then memory bound |
+: **Latency regimes across agent workloads**: Dominant latency phases and primary hardware bottlenecks across prompt length $M$ and generation ceiling $K_{\max}$. {#tbl-vol3-latency-regimes}
 
-: Hardware balance and arithmetic intensity saturation thresholds across representative accelerator platforms. {#tbl-hardware-balance}
+### Arithmetic Intensity and the Accelerator Roofline {#sec-vol3-processor-roofline}
+
+The stark latency difference between prompt prefill and token decode is governed by the physical principle of **operational arithmetic intensity** ($I$), defined by the Williams, Waterman, and Patterson Roofline model [@williams2009] as the ratio of floating-point operations executed to memory traffic transferred across the accelerator memory bus:
+
+$$I = \frac{\text{FLOPs}}{\text{Bytes Transferred from Memory}} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+
+An accelerator architecture possesses two fundamental hardware ceilings: its peak arithmetic processing throughput $\Pi$ (measured in floating-point operations per second, $\text{FLOP/s}$) and its peak memory bus bandwidth $\beta$ (measured in bytes per second, $\text{Byte/s}$). The quotient of these limits defines the **saturation operational intensity** ($I_{\text{sat}}$):[^fn-roofline-knee]
+
+$$I_{\text{sat}} = \frac{\Pi}{\beta}$$
+
+If a workload's arithmetic intensity satisfies $I \ge I_{\text{sat}}$, the computation is **compute-bound**: arithmetic execution units are fully saturated, and throughput is bounded by $\Pi$. If $I < I_{\text{sat}}$, the computation is **memory-bandwidth-bound**: arithmetic units sit idle waiting for weights or activation tensors to transit the memory bus, and throughput is strictly limited by $\beta \cdot I$.
+
+[^fn-roofline-knee]: **Saturation Operational Intensity**: Formulated by Williams, Waterman, and Patterson [@williams2009], the saturation operational intensity $I_{\text{sat}} = \Pi / \beta$ marks the architectural inflection point where memory bandwidth ceases to constrain throughput. On modern accelerator silicon with specialized matrix cores, $I_{\text{sat}}$ typically ranges from $250$ to over $550\text{ FLOP/Byte}$, meaning that algorithms lacking extensive data reuse cannot exploit the peak compute capacity of the processor. \index{Saturation Operational Intensity}\index{Roofline Model!saturation knee}
+
+In dense autoregressive transformer architectures, the feed-forward and projection linear layers contribute approximately $2|\Theta|\text{ FLOPs}$ per token forward step. This factor of 2 originates in physical hardware arithmetic.[^fn-fma-ops] Across transformer architectures, over $98\%$ of dense parameters reside in linear projection weight matrices: the attention projections ($\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V, \mathbf{W}_O$) and the feed-forward network projections ($\mathbf{W}_{\text{gate}}, \mathbf{W}_{\text{up}}, \mathbf{W}_{\text{down}}$). For each token, evaluating these linear layers requires computing vector-matrix multiplications where every parameter element multiplies an activation scalar and accumulates into a partial sum. Accelerator execution units evaluate this via Fused Multiply-Add (FMA) instructions:
+
+$$\text{accumulator} \leftarrow \text{accumulator} + (\text{weight} \times \text{activation})$$
+
+Each FMA constitutes exactly two floating-point operations: one multiplication and one addition. Because every dense parameter participates in exactly one FMA per forward token step, evaluating the linear projections consumes approximately $2|\Theta|\text{ FLOPs/token}$. While self-attention introduces additional $O(M^2)$ operations during prompt prefill and $O(S)$ operations during decode to evaluate attention scores and context sums, at typical sequence lengths the linear projection contractions dominate overall arithmetic operations. Non-linear operations—including layer normalizations, rotary positional embeddings, and activation functions—scale only with the hidden dimension $d_{\text{model}}$ rather than parameter count $|\Theta| \sim O(d_{\text{model}}^2)$, contributing less than $1\text{--}2\%$ of total computation.
+
+[^fn-fma-ops]: **Fused Multiply-Add Operation**: Standard linear algebra floating-point units implement vector dot products using fused multiply-add (FMA) instructions, which compute $a \leftarrow a + (b \times c)$ in a single hardware cycle with a single rounding step. Counting each FMA as two floating-point operations (one multiply and one accumulate) establishes the standard $2|\Theta|$ operational factor across matrix multiplication kernels in high-performance computing and neural network accelerators. \index{Fused Multiply-Add}\index{Hardware!fused multiply-add}
+
+During prompt prefill, the serving engine ingests all $M$ staged tokens concurrently. Parameter weights $\Theta$ are fetched from High Bandwidth Memory (HBM) into on-chip cache registers once and reused across all $M$ token positions via General Matrix-Matrix Multiplication (GEMM). The resulting operational arithmetic intensity scales directly with prompt length:
+
+$$I_{\text{prefill}} \approx \frac{2 M |\Theta|}{P |\Theta| + \text{Mem}_{\text{KV}}(M)} \approx \frac{2M}{P} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+
+where $P$ is the storage precision in bytes per parameter ($P=2$ for 16-bit precision; $P=1$ for 8-bit precision). For long staged contexts ($M \ge 2{,}048$), $I_{\text{prefill}}$ reaches thousands of $\text{FLOP/Byte}$, easily surpassing $I_{\text{sat}}$ and driving the accelerator firmly onto its compute-bound plateau.
+
+During autoregressive decode, this computational structure collapses. Generating token $y_t$ requires multiplying the single new token activation vector by the parameter matrices via General Matrix-Vector Multiplication (GEMV). At an isolated per-trajectory batch size of $B=1$, the engine must stream the entire parameter tensor $\Theta$ across the memory bus simply to advance one token:
+
+$$I_{\text{decode}}(t) = \frac{2|\Theta|}{P|\Theta| + \text{Mem}_{\text{KV}}(M+t)}$$
+
+At modest context lengths, parameter traffic $P|\Theta|$ overwhelmingly dominates the denominator, causing decode operational intensity to collapse to a context-independent floor:
+
+$$I_{\text{decode}} \approx \frac{2}{P} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+
+For 16-bit floating-point weights ($P=2\text{ Bytes}$), $I_{\text{decode}} \approx 1.0\text{ FLOP/Byte}$. For 8-bit quantized parameters ($P=1\text{ Byte}$), $I_{\text{decode}} \approx 2.0\text{ FLOP/Byte}$. Compared against modern accelerator silicon featuring saturation knees of $I_{\text{sat}} \approx 250\text{--}600\text{ FLOP/Byte}$, single-sequence autoregressive decode operates hundreds of times below the saturation threshold, trapped deep within the memory-bandwidth-bound regime (@fig-prefill-vs-decode).
+
+::: {#fig-prefill-vs-decode fig-cap="**Operational Roofline of Prefill Versus Decode**: Arithmetic intensity regimes comparing compute-bound prompt prefill with memory-bandwidth-bound autoregressive decoding." fig-alt="Operational Roofline comparing prompt prefill and token decode regimes against saturation knees."}
+![](images/svg/prefill_vs_decode_v2.svg){width="100%"}
 :::
 
-#### Accounting for $O(M^2)$ Attention Compute
+```python
+# │ MLSysIM LEGO Roofline Cell: Invocation Latency & Saturation Intensity
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Goal: Derive operational intensity knees and single-token decode floors
+# │       directly from verified accelerator specifications in MLSysIM.
+# └─────────────────────────────────────────────────────────────────────────────
+import mlsysim
 
-A common systems error is modeling prefill compute purely as linear projections ($2 |\Theta| M$). While linear projections scale as $O(M)$, self-attention scales as $O(M^2)$:
+def compute_roofline_metrics(name: str, pi_tflops: float, bw_tb_s: float,
+                             params_b: float, precision_bytes: float,
+                             eta_bw: float = 0.80):
+    pi = pi_tflops * 1e12          # Peak compute capacity (FLOP/s)
+    beta = bw_tb_s * 1e12          # Peak physical memory bandwidth (Bytes/s)
+    beta_eff = beta * eta_bw       # Effective realized memory bandwidth (Bytes/s)
+    i_sat = pi / beta              # Saturation intensity knee (FLOP/Byte)
 
-$$\text{FLOPs}_{\text{prefill}} = 2 |\Theta| M + 2 L H_Q M^2 d_{\text{head}}$$ {#eq-vol3-prefill-flops-full}
+    # Low-batch decode (B=1): Operational intensity collapses to ~ 2 / P
+    i_decode = 2.0 / precision_bytes
 
-where $L$ is transformer layers, $H_Q$ is query heads, and $d_{\text{head}}$ is head dimension. For Llama-3-70B ($L = 80, H_Q = 64, d_{\text{head}} = 128$) at $M = 40{,}000$ tokens, linear projections require $5.60\text{ PFLOPs}$, while causal self-attention adds $2.10\text{ PFLOPs}$ ($37.5\%$ additional compute). Total prefill reaches $7.70\text{ PFLOPs}$. Omitting attention understates prefill latency by over a third.
+    # Parameter memory sweep lower bound
+    model_bytes = params_b * 1e9 * precision_bytes
+    t_step_peak_ms = (model_bytes / beta) * 1e3
+    t_step_eff_ms = (model_bytes / beta_eff) * 1e3
+    tok_per_sec_eff = 1e3 / t_step_eff_ms
 
-### The Memory Shuttle Problem and the Single-Agent Serialization Wall
+    print(f"[{name}]")
+    print(f"  Saturation Knee (I_sat) : {i_sat:.1f} FLOP/Byte")
+    print(f"  Decode Intensity (B=1)  : {i_decode:.1f} FLOP/Byte (Under-saturation: {i_sat/i_decode:.1f}x)")
+    print(f"  Peak Weight Floor       : {t_step_peak_ms:.2f} ms/token ({1e3/t_step_peak_ms:.1f} tok/s)")
+    print(f"  Effective Floor (η={eta_bw:.2f}): {t_step_eff_ms:.2f} ms/token ({tok_per_sec_eff:.1f} tok/s)")
 
-Once generation begins ($T_{\text{step}}$), execution undergoes a phase change. Emitting token $t+1$ requires the causal output of token $t$. At step $t$, the input activation collapses to a single token vector $\mathbf{x}_t \in \mathbb{R}^{1 \times d}$.
+# Hardware Baselines from MLSysIM Registry
+h100 = mlsysim.Hardware.Cloud.H100
+b200 = mlsysim.Hardware.Cloud.B200
+a100 = mlsysim.Hardware.Cloud.A100
 
-Linear algebra transitions from matrix-matrix multiplication (GEMM) to matrix-vector multiplication (GEMV). Generating one token still demands $2 |\Theta|$ FLOPs. However, to execute them, the accelerator must stream the entire parameter tensor $\Theta$ from DRAM into SRAM, alongside reading historical KV activations:
-
-$$I_{\text{decode}}(t) = \frac{2 |\Theta| + 4 L H_Q (M + t) d_{\text{head}}}{P |\Theta| + \text{Mem}_{\text{KV}}(M + t)} \le \frac{2}{P}$$ {#eq-vol3-decode-intensity}
-
-For 16-bit weights ($P = 2$), intensity collapses to $I_{\text{decode}} \le 1\text{ FLOP/byte}$. On an accelerator where $I_{\text{sat}} \approx 295\text{ FLOP/byte}$, generation operates nearly three orders of magnitude below balance: tensor cores sit starved of operands for $>99\%$ of the cycle, stalled on the memory bus.
-
-#### On-Chip SRAM Limits and the Shuttle Floor
-
-This structural starvation is the **Memory Shuttle Problem**. Modern accelerator silicon integrates only $\sim 100\text{ MB}$ of total on-chip SRAM, while a 70B model requires $140\text{ GB}$ of weights—over a thousand times larger. For every token emitted, the entire weight tensor must be streamed from HBM into SRAM, multiplied against the single activation, and evicted.
-
-#### Reference Accelerator Cluster and Real Bus Utilization
-
-Consider our reference deployment: dual-GPU Tensor Parallelism ($TP=2$) across two NVIDIA H100 SXM5 accelerators connected via NVLink 4 ($900\text{ GB/s}$ bidirectional per GPU).
-
-- **Aggregate HBM3 Capacity:** $2 \times 80\text{ GB} = 160\text{ GB}$.
-- **Weight Footprint:** $140\text{ GB}$ at FP16 ($70\text{ GB}$ per GPU).
-- **Theoretical Peak Bandwidth:** $2 \times 3{,}350\text{ GB/s} = 6{,}700\text{ GB/s}$.
-- **Real Bus Efficiency ($\eta_{\text{bus}}$):** Due to DRAM refresh cycles, read-write turnarounds, bank conflicts, and ECC, tuned GEMV kernels achieve $\eta_{\text{bus}} \approx 80\%$, yielding effective streaming bandwidth:
-  $$\beta_{\text{eff}} = 0.80 \times 6{,}700\text{ GB/s} = 5{,}360\text{ GB/s}$$
-
-The weight shuttle transfer floor per token is:
-
-$$T_{\text{shuttle}} = \frac{140\text{ GB}}{5{,}360\text{ GB/s}} \approx 26.1\text{ ms/token} \quad (\approx 38.3\text{ tokens/s})$$
-
-#### The Complete Dynamic Decode Step Formulation
-
-Decode latency grows with context length $M + t$ and includes network and driver overheads:
-
-$$T_{\text{step}}(t) = \frac{\text{Footprint}_{\Theta}}{\beta_{\text{eff}}} + \frac{2 L H_{\text{kv}} d_{\text{head}} P (M + t)}{\beta_{\text{eff}}} + 2 L \cdot \tau_{\text{NVLink}}(d_{\text{model}}) + \tau_{\text{launch}}$$ {#eq-vol3-dynamic-decode-step}
-
-where:
-1. **Weight Shuttle:** $\frac{140\text{ GB}}{5{,}360\text{ GB/s}} \approx 26.1\text{ ms}$.
-2. **KV Cache Read Overhead:** At $M = 40{,}000$, fetching the $13.1\text{ GB}$ KV cache across $5{,}360\text{ GB/s}$ adds:
-   $$\Delta T_{\text{KV}} = \frac{13.1\text{ GB}}{5{,}360\text{ GB/s}} \approx 2.44\text{ ms per token}$$
-3. **NVLink Synchronization Latency ($\tau_{\text{NVLink}}$):** Megatron-style TP requires two All-Reduce calls per layer ($160$ sequential All-Reduces for $L = 80$). In decode ($B=1$), the tiny $16\text{ KiB}$ payload makes NVLink latency-bound ($\approx 3.0\,\mu\text{s}$ per call):
-   $$160 \times 3.0\,\mu\text{s} \approx 0.48\text{ ms}$$
-4. **Driver Kernel Launch Latency ($\tau_{\text{launch}}$):** Captured inside **CUDA Graphs**, launch overhead is amortized to $< 5\,\mu\text{s}$.
-
-Generating a token at position $M = 40{,}000$ requires:
-
-$$T_{\text{step}} = 26.1\text{ ms} + 2.44\text{ ms} + 0.48\text{ ms} + 0.005\text{ ms} \approx 29.0\text{ ms/token} \quad (\approx 34.5\text{ tokens/s})$$
-
-Generating $K = 200$ tokens takes $200 \times 29.0\text{ ms} \approx 5.80\text{ seconds}$. Meanwhile, prefill over $7.70\text{ PFLOPs}$ at $70\%$ Model Flops Utilization ($1{,}385\text{ TFLOP/s}$ effective):
-
-$$T_{\text{prefill}} = \frac{7.70 \times 10^{15}\text{ FLOPs}}{1.385 \times 10^{15}\text{ FLOP/s}} \approx 5.56\text{ seconds}$$
-
-In this cold invocation, prefill ($5.56\text{ s}$) and decode ($5.80\text{ s}$) contribute equally to the $11.36$-second execution time.
-
-::: {#tbl-vol3-latency-regimes}
-| Context Regime | Workload Characteristics | Primary System Bottleneck | Dominant Optimization Strategy |
-| :--- | :--- | :--- | :--- |
-| **Short $M$ / Short $K$** | Status pings, binary intent checks | RPC and queue transport overhead ($T_{\text{transport}} + T_{\text{queue}}$) | Connection pooling, collocated host runtimes |
-| **Short $M$ / Long $K$** | Code synthesis, greenfield generation | Memory bandwidth shuttle during decode ($I_{\text{decode}} \approx 1$) | Speculative decoding, parameter quantization |
-| **Long $M$ / Short $K$** | Repository triage, log failure diagnosis | Compute capacity during prefill ($2 \lvert \Theta \rvert M + \text{Attn}$) | Prefix KV-caching, chunked prefill |
-| **Long $M$ / Long $K$** | Full-file refactoring, end-to-end rewrite | Compound: Compute prefill followed by memory-stalled decode | Paged context tiering, asynchronous streaming |
-
-: Execution regimes, operational bottlenecks, and systems mitigations across input context ($M$) and generation ($K$) scales. {#tbl-vol3-latency-regimes}
-:::
-
-##### The Twin Pillars of Agent Latency: Prefix Caching and Speculative Decoding
-
-When the repair agent inspects a failed test run and issues a subsequent call (Turn 2), repository files and system prompts remain unchanged; only the compiler's error trace and scratchpad update. Re-transmitting the entire context forces the engine to re-evaluate the full prefill GEMM, squandering billions of FLOPs re-ingesting static context.
-
-To eliminate redundant compute, modern engines implement **Prefix Caching** via Radix Trees (@fig-radix-prefix-cache).
-
-::: {#fig-radix-prefix-cache}
-```
-+-----------------------------------------------------------------------------------+
-| Radix Tree Prefix Cache Hierarchy in Accelerator HBM                              |
-|                                                                                   |
-|  [ Cache Node A (Root): System Identity & Schema Contracts (Tokens 1..5,000) ]     |
-|                                      |                                            |
-|                                      v                                            |
-|  [ Cache Node B (Trunk): Repository AST & File Buffers (Tokens 5,001..38,000) ]   |
-|                         /                         \                               |
-|       Turn 1 Request   /                           \  Turn 2 Request              |
-|                       v                             v                             |
-|  [ Cache Node C (Turn 1 Leaf) ]             [ Cache Node D (Turn 2 Leaf) ]        |
-|    Test Run Log A (38,001..40,000)            Test Run Log B (38,001..40,200)     |
-|    ==> [Cache Hit / Retained]                 ==> [Cache Miss -> Compute Prefill] |
-+-----------------------------------------------------------------------------------+
+compute_roofline_metrics("NVIDIA H100 SXM5 (FP8)", pi_tflops=1979.0, bw_tb_s=3.35, params_b=70.0, precision_bytes=1.0)
+compute_roofline_metrics("NVIDIA B200 (FP8)", pi_tflops=4500.0, bw_tb_s=8.00, params_b=70.0, precision_bytes=1.0)
+compute_roofline_metrics("NVIDIA A100 (FP16)", pi_tflops=312.0, bw_tb_s=2.039, params_b=70.0, precision_bytes=2.0)
 ```
 
-Radix tree hierarchy for structural KV-cache prefix retention across sequential agent turns.
-:::
+### Memory Traffic Bounds: Dense Parameters, Sparse MoE, and Service Batching {#sec-vol3-processor-traffic-bounds}
 
-The engine maintains precomputed KV cache pages in HBM. On Turn 2, the scheduler traverses the Radix tree to match prompt prefix $\mathbf{x}_{1:M}$. Matching $38{,}000$ static tokens ($M_{\text{match}} = 38{,}000$) leaves only $2{,}000$ dynamic tokens for prefill:
+Because low-batch autoregressive decode is strictly memory-bandwidth bound, the theoretical lower bound on single-token decode latency is governed by the time required to transfer parameter bytes and accumulated KV cache state across the accelerator memory bus.
 
-$$T_{\text{prefill, Turn 2}} \approx \frac{2{,}000}{40{,}000} \times 5.56\text{ s} \approx 0.28\text{ seconds}$$
+Recall from @sec-vol3-processor-tokenization that the single-token KV cache memory footprint for a model with $L$ layers, $n_{\text{kv}}$ Key-Value heads, and head dimension $d_{\text{head}}$ stored at precision byte-width $b$ is:
 
-Prefix caching delivers a **$20\times$ local phase speedup**, collapsing prefill from $5.56\text{ s}$ to $0.28\text{ s}$.
+$$\text{Mem}_{\text{KV,token}} = 2 \cdot L \cdot (n_{\text{kv}} \cdot d_{\text{head}}) \cdot b \quad [\text{bytes/token}]$$
 
-#### How Prefix Caching Inverts Amdahl's Law
+At decode step $t$, computing attention for the newly generated token requires streaming the accumulated KV cache tensors for all preceding $M+t-1$ tokens from HBM into on-chip cache registers, alongside writing back the newly generated Key and Value vectors for step $t$. Consequently, total memory traffic across the bus during step $t$ is:
 
-Consider the latency breakdown for Turn 2:
-- **Prefill (Cached):** $0.28\text{ seconds}$
-- **Decode (300 tokens):** $300 \times 29.0\text{ ms} \approx 8.70\text{ seconds}$
-- **Total Turn Latency:** $0.28 + 8.70 = 8.98\text{ seconds}$ (Decode represents **$96.9\%$** of execution time).
+$$\text{Traffic}_{\text{decode}}(t) = P |\Theta| + (M+t) \cdot \text{Mem}_{\text{KV,token}}$$
 
-Once prefix caching succeeds, **Amdahl's Law is inverted**: decode dominates $>95\%$ of remaining execution time.
+Grounding this memory sweep in the accelerator's effective memory bus bandwidth $\beta_{\text{eff}}$, the physical lower bound for single-token decode step latency becomes:
 
-$$S_{\text{turn2}} = \frac{1}{(1 - 0.969) + \frac{0.969}{s_{\text{decode}}}}$$
+$$T_{\text{step,min}}(t) = \frac{\text{Traffic}_{\text{decode}}(t)}{\beta_{\text{eff}}} = \frac{P |\Theta| + (M+t) \cdot \text{Mem}_{\text{KV,token}}}{\beta_{\text{eff}}}$$
 
-Accelerating decode by $2.5\times$ ($s_{\text{decode}} = 2.5$) collapses total latency to:
+where $\beta_{\text{eff}} = \eta_{\text{bw}} \cdot \beta$ represents realized memory bandwidth. In physical silicon, the bus efficiency factor $\eta_{\text{bw}} \in [0.75, 0.85]$ accounts for memory controller arbitration, non-coalesced DRAM bursts, and channel bank conflicts.
 
-$$0.28\text{ s} + \frac{8.70\text{ s}}{2.5} = 3.76\text{ s} \quad (\mathbf{2.39\times \text{ global speedup}})$$
+When context length is modest ($M+t \ll |\Theta| / \text{Mem}_{\text{KV,token}}$), the parameter term $P|\Theta|$ dominates memory bus traffic, yielding the standard parameter-sweep latency floor:
 
-Prefix caching does not make decode optimization irrelevant—**it makes decode optimization mandatory.**
+$$T_{\text{step,min}} \approx \frac{P |\Theta|}{\beta_{\text{eff}}}$$
 
-#### Speculative Decoding: Defeating the Memory Shuttle at $B=1$
+Consider a 70-billion parameter dense model ($|\Theta| = 70 \times 10^9$). In unquantized 16-bit precision ($P=2$), weights consume $140\text{ GB}$ of memory—exceeding the $80\text{ GB}$ HBM3 capacity of a single NVIDIA H100 accelerator. On a single accelerator core, hosting this model requires FP8 quantization ($P=1$),[^fn-fp8-quant] which compresses the parameter footprint to $70\text{ GB}$, fitting within device memory. (Partitioning models across distributed accelerator interconnects is examined in @sec-vol3-multi-agent and @sec-vol3-tokenomics; our execution model here remains strictly bounded by the single core).
 
-To accelerate decode at single-agent batch size $B=1$, runtimes employ **Speculative Decoding** [@leviathan2023fast]:
+At peak memory bandwidth ($\beta = 3{,}350\text{ GB/s}$), the theoretical parameter-sweep limit is:
 
-1. **Draft Model Speculation:** A small draft model (e.g., Llama-3-8B at FP8, shuttle latency $\approx 1.5\text{ ms}$) speculatively generates $\gamma = 4\text{--}6$ candidate tokens.
-2. **Parallel Target Verification:** The 70B target model verifies all $\gamma$ candidate tokens in **a single forward pass**, converting memory-bound GEMV into compute-efficient GEMM ($M = \gamma$) and raising arithmetic intensity by $\gamma\times$.
-3. **Prompt-Lookup Decoding:** In coding workloads, $>70\%$ of patch tokens exist verbatim in the prompt. Prompt-lookup decoding [@promptlookup2023] matches n-grams against prompt context, proposing continuations with *zero extra weights*. With acceptance rates $\alpha > 0.75$, it delivers $2\times$ speedups at zero parameter cost.
+$$T_{\text{step,peak}} = \frac{70 \times 10^9\text{ Bytes}}{3{,}350 \times 10^9\text{ Bytes/s}} \approx 20.9\text{ ms/token} \quad (47.8\text{ tokens/s})$$
 
-Prefix caching eliminates the prefill wall; speculative decoding breaks the $B=1$ memory shuttle wall.
+Accounting for realistic bus efficiency ($\eta_{\text{bw}} = 0.80$, $\beta_{\text{eff}} = 2{,}680\text{ GB/s}$), the realized weight-read floor rises to:
 
-### Prefill-Decode Interference and Context Layout Stability
+$$T_{\text{step,min}} = \frac{70 \times 10^9\text{ Bytes}}{2{,}680 \times 10^9\text{ Bytes/s}} \approx 26.1\text{ ms/token} \quad (38.3\text{ tokens/s})$$
 
-When long prompt ingestion shares hardware with active decode streams, unchunked prefill can monopolize Tensor Cores, causing inter-token latency spikes. Serving engines mitigate this by slicing long prefills into bounded chunks (detailed in Chapter 5).
+On next-generation silicon such as the NVIDIA B200 ($180\text{ GB}$ HBM3e at $8{,}000\text{ GB/s}$), streaming an unquantized $140\text{ GB}$ FP16 model takes $17.5\text{ ms/token}$ at peak bandwidth ($21.9\text{ ms}$ at $\eta_{\text{bw}}=0.80$), while an FP8 quantized model ($70\text{ GB}$) executes in $8.75\text{ ms/token}$ ($10.9\text{ ms}$ at $\eta_{\text{bw}}=0.80$, yielding $91.4\text{ tokens/s}$).
 
-For the client agent runtime, prefix caching imposes a strict invariant: **Context Layout Stability**. Because prefix caches match tokens strictly from origin $\mathbf{x}_1$, prompts must follow a tiered layout:
+However, when an autonomous agent stages an extended context of $S = M+t = 128{,}000$ tokens (@sec-vol3-processor-tokenization), the KV cache adds $\approx 41.9\text{ GB}$ in FP16 or $\approx 21.0\text{ GB}$ in FP8 to the memory bus traffic on every decode step. As noted in @sec-vol3-processor-tokenization, storing 70 GB of FP8 weights alongside a 21 GB FP8 KV cache exceeds the physical 80 GB VRAM capacity of a single H100 ($70\text{ GB} + 21\text{ GB} = 91\text{ GB} > 80\text{ GB}$), requiring either multi-GPU tensor parallelism or larger memory architectures. On a single H100 card, execution is physically bounded to shorter contexts such as $S \le 32{,}768$ (where the FP8 KV cache consumes $\approx 5.37\text{ GB}$, fitting within 80 GB), adding $\approx 2.0\text{ ms/token}$ of memory traffic ($\approx 28.1\text{ ms/token}$ at $\eta_{\text{bw}}=0.80$). On an NVIDIA B200 ($180\text{ GB}$ HBM3e), an extended 128k context comfortably co-exists with model weights, where streaming the $21.0\text{ GB}$ KV cache across its $8{,}000\text{ GB/s}$ bus adds only $\approx 3.3\text{ ms/token}$ at $\eta_{\text{bw}}=0.80$, illustrating how expanded accelerator bandwidth cushions the memory-traffic expansion of long-horizon trajectories.
 
-1. **Static System Contracts (Root Tier):** Tool schemas and system identity ($\mathbf{x}_{1:j}$) pinned at the absolute head.
-2. **Repository Semantic State (Trunk Tier):** File buffers and project ASTs ($\mathbf{x}_{j+1:k}$) remaining invariant across turns.
-3. **Dynamic Observation Stream (Leaf Tier):** Per-turn tool receipts and diffs ($\mathbf{x}_{k+1:M}$) appended strictly at the tail.
+[^fn-fp8-quant]: **FP8 Parameter Formats**: Reduced-precision 8-bit floating-point formats (such as E4M3 and E5M2) halve the weight memory footprint and bus traffic relative to 16-bit half precision (FP16/BF16). However, because FP8 features a constrained dynamic range, inference engines maintain tensor-level or block-level scale factors, requiring accelerator matrix execution units to execute dequantization scaling dynamically without degrading numerical stability. \index{FP8 Quantization}\index{Precision!FP8}
 
-Injecting timestamps (`"Current Time: 14:22:01"`) at the head of a prompt alters token $\mathbf{x}_1$, invalidating every cached prefix page and forcing catastrophic prefill recomputation. Maintaining structural stability ensures maximal cache hits, keeping the system on the accelerated side of Amdahl's Law.
+#### Sparse Mixture-of-Experts and the Batching Collapse
 
-We now turn to empirical interface evaluation to compare competing processor contracts.
+Sparse Mixture-of-Experts (MoE) architectures decouple static parameter capacity from active per-token memory traffic.[^fn-moe-routing] In an MoE model, only a subset of expert feed-forward blocks $|\Theta_{\text{routed}}|$ are dynamically activated by a gating network for any given token, alongside shared attention parameters $|\Theta_{\text{shared}}|$:
+
+$$|\Theta_{\text{active}}| = |\Theta_{\text{shared}}| + |\Theta_{\text{routed}}|$$
+
+For an isolated agent sequence operating at batch size $B=1$, each token routes to a top-$k$ subset of experts (e.g., 2 out of 8 experts). Parameter memory traffic per decode step scales strictly with active parameters:
+
+$$\text{Traffic}_{\text{params}}(B=1) = P |\Theta_{\text{active}}|$$
+
+Because $|\Theta_{\text{active}}|$ represents only a fraction of total model weights $|\Theta_{\text{total}}|$, single-sequence decode latency drops substantially, allowing an MoE to deliver the decode speed of a compact model while retaining the expressiveness of a large parameter inventory.
+
+[^fn-moe-routing]: **Dynamic Expert Routing Overhead**: In sparse Mixture-of-Experts architectures, the gating network dynamically assigns token activations to a top-$k$ subset of feed-forward networks, introducing irregular memory gather operations and non-uniform memory access across the accelerator memory bus. At small batch sizes, this sparse activation bypasses unselected expert weights, but as concurrent requests disperse across distinct experts, memory traffic rapidly expands toward the full static parameter footprint. \index{Mixture-of-Experts}\index{Architecture!sparse MoE}
+
+However, this latency advantage is fragile and subject to the **MoE batching collapse**. When the inference service batches requests across multiple concurrent agent trajectories ($B > 1$), distinct tokens route to different experts across the model's layers. As batch size scales ($B \gg 1$), routing dispersion causes the union of activated experts across the batch to rapidly cover the entire expert inventory:
+
+$$\bigcup_{b=1}^B \text{Top-}k(b) = \{1, 2, \dots, E\}$$
+
+Once all $E$ experts are requested by at least one token in the batch, the accelerator memory bus must fetch *every single expert weight matrix* from HBM during that forward step. Consequently, total parameter memory traffic per step collapses from the sparse baseline back to the full static footprint:
+
+$$\text{Traffic}_{\text{params}}(B \gg 1) \to P |\Theta_{\text{total}}|$$
+
+While multi-tenant batching amortizes this $P |\Theta_{\text{total}}|$ traffic across $B$ tokens—improving aggregate service throughput—it eliminates the per-token memory traffic reduction of sparsity. For an agent runtime expecting low single-step decode latency, multi-tenant serving concurrency on an MoE core can unexpectedly push per-step latency from the sparse floor toward that of a monolithic dense model of size $|\Theta_{\text{total}}|$.
+
+#### Per-Trajectory Serialization vs. Service-Level Batching
+
+A fundamental systems tension governs invocation cost: the conflict between per-trajectory serial latency and multi-tenant service throughput. Along an individual agent trajectory, execution is strictly serial at two distinct granularities:
+
+1. **Intra-Invocation Serialization:** Autoregressive decode token $y_t$ depends causally on token $y_{t-1}$.
+2. **Inter-Invocation Serialization:** Trajectory step $n+1$ cannot be formulated or staged until step $n$'s candidate output has been returned, detokenized, validated, and evaluated by the host runtime.
+
+From the isolated perspective of a single agent trajectory, batch size is inherently $B=1$.
+
+However, a shared inference daemon serves independent requests from multiple concurrent agents simultaneously. When the engine batches $B$ independent requests during a single forward pass, parameter weights $\Theta$ are fetched from HBM once and reused across all $B$ tokens:
+
+$$I_{\text{decode}}(B) \approx \frac{2 B |\Theta|}{P |\Theta| + B \cdot \text{Mem}_{\text{KV}}} \approx \frac{2B}{P} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+
+Scaling batch size $B$ increases operational arithmetic intensity linearly, pushing the workload up the Roofline slope toward the compute-bound ceiling. While service-level batching amortizes hardware costs across the fleet, it does not compress the serialization latency of any individual agent trajectory. In fact, if high batch concurrency introduces queueing delays ($T_{\text{queue}}$) or memory bus contention, it inflates the end-to-end task completion time of individual agents.
+
+To mitigate these physical costs without violating modular systems boundaries, modern agent architectures exploit downstream execution levers:
+
+- **Radix-tree prefix caching** amortizes prompt prefill latency by sharing KV cache blocks across requests with common historical prefixes (detailed in @sec-vol3-kvcache-radix-tree).
+- **Speculative decoding** uses a fast, low-parameter draft model to propose candidate token sequences that are verified in parallel by the target core in a single compute-bound GEMM pass (detailed in @sec-vol3-tokenomics-speculative).
+- **Context layout stabilization** structures prompt context into static and dynamic tiers (Root $\to$ Trunk $\to$ Leaf) to maximize physical page reusability across successive turns (detailed in @sec-vol3-working-sets-staging).
+
+Given these output properties and physical costs, how should engineers evaluate competing interface designs?

@@ -1,136 +1,181 @@
 ## Constraining the Output Surface {#sec-vol3-processor-grammar-constrained}
 
-To prevent malformed syntax from destabilizing downstream systems, the host runtime intercepts the autoregressive generation loop before categorical sampling occurs. While an unconstrained stochastic processor emits arbitrary sequences across the vocabulary $\mathcal{V}_0$, host operating systems require structured interfaces—such as JSON payloads, SQL queries, or tool-invocation protocols—that satisfy rigid formal specifications.
+Unconstrained autoregressive generation samples tokens across an open vocabulary simplex $\Delta^{|\mathcal{V}|-1}$, treating every token with nonzero probability as an eligible continuation. When host systems interface with software compilers, database engines, or structured serialization protocols, they require strict compliance with formal grammars such as JSON, SQL, or Protocol Buffers. In an unconstrained execution regime, the stochastic processor core emits syntax errors with nonzero probability: missing delimiters, unescaped string literals, trailing commas, or type mismatches. If the host agent operating system relies exclusively on post-generation parsing to detect these structural defects, it expends significant compute on candidate sequences that are immediately discarded by downstream parsers, causing latency jitter and wasting finite context budgets. Constraining the output surface resolves this impedance mismatch by shifting syntax enforcement directly into the accelerator decode step, using formal language automata to dynamically prune the vocabulary before token selection occurs.
 
-Sampling tokens unconstrained and validating post hoc wastes token budgets and induces high retry latencies. Instead, the runtime enforces syntactic invariants directly during generation by projecting formal language constraints onto the processor's output distribution, guaranteeing that emitted sequences are parseable by construction.
+### Formal Language Automata and Decode-Time Logit Masking {#sec-vol3-grammar-automata}
 
-### Automata Compilation and Compressed Bitmask Masking
+Formalizing the output surface begins by expressing the target output syntax as a formal grammar $\mathcal{G} = \langle V_N, \Sigma, R, S \rangle$, where $V_N$ represents non-terminal syntactic variables, $\Sigma$ is the alphabet of terminal characters, $R$ is the set of production rules, and $S$ is the start symbol. Depending on the expressiveness required by the constraint, the host runtime compiles $\mathcal{G}$ into a concrete state machine:
 
-Grammar-constrained decoding transforms a formal specification into a state machine governing token selection at each decode step $t$. The runtime compiles structural contracts into one of two abstract machine classes:
+1. **Deterministic Finite Automata (DFAs):** Suitable for regular expressions, fixed-format tokens, and flat schema specifications without recursive nesting.
+2. **Pushdown Automata (PDAs):** Required for context-free grammars (CFGs) containing balanced brackets, recursive dictionaries, and nested arrays, where an auxiliary stack tracks nesting depth.[^fn-pushdown-automata]
 
-1. **Deterministic Finite Automata (DFAs):** For regular languages, including fixed regular expressions, bounded patterns, and flat key-value schemas.
-2. **Pushdown Automata (PDAs):** For context-free grammars (CFGs), including nested JSON objects, ASTs, and recursive expressions requiring a stack to match delimiters.
+[^fn-pushdown-automata]: **Pushdown Automata** (Historical / Context): Formal computational models equipped with stack memory, introduced in early automata theory to recognize context-free languages beyond the reach of finite state machines. In grammar-constrained decoding, PDAs track recursive delimiter nesting (such as nested JSON objects or AST nodes) during autoregressive generation. \index{Pushdown Automata}\index{Historical!Pushdown Automata}\index{Compilers!Context-Free Grammars}
 
-A systems challenge arises from the impedance mismatch between character-level grammar terminals ($\Sigma$) and the subword token vocabulary ($\mathcal{V}_0$). Formal grammars operate over single bytes or characters, whereas $\mathcal{V}_0$ consists of variable-length subwords. A single token may contain multiple character transitions (such as `",\n  \"path\":"`), or a single character may span multiple tokens in multi-byte UTF-8 sequences.
+A central systems challenge arises from the representation gap between the character-level alphabet $\Sigma_{\text{char}}$ evaluated by formal grammars and the subword token vocabulary $\mathcal{V}$ evaluated by the neural core. Modern Byte-Pair Encoding (BPE) tokenizers operate on raw bytes ($\Sigma_{\text{byte}} = \{0, \dots, 255\}$) rather than whole characters. In standard UTF-8 encoding, a single Unicode codepoint spans between 1 and 4 bytes. A subword token $y \in \mathcal{V}$ represents an arbitrary byte sequence $s(y) = b_1 b_2 \dots b_k \in \Sigma_{\text{byte}}^*$. Crucially, BPE token boundaries do not align with Unicode character boundaries: a token may terminate on an incomplete multibyte prefix (for example, emitting the first two bytes of a three-byte CJK character or a four-byte emoji).
 
-To bridge this mismatch efficiently, modern engines (such as XGrammar [@xgrammar2024], Outlines, and SGLang) precompute an index mapping automaton states to permissible vocabulary tokens. For each state $s$, the compiler determines valid continuation tokens:
+If an automaton evaluated character-level transitions naively, encountering an incomplete multibyte token would trigger an immediate syntax rejection. To bridge this byte-to-character impedance mismatch, the grammar engine must either lower the entire grammar $\mathcal{G}$ into a byte-level finite state machine, or maintain an intermediate byte-to-UTF-8 buffering state in the parser runtime.[^fn-unicode-buffering] When a candidate token ends on an incomplete multibyte sequence, the automaton transitions into an intermediate buffering sub-state. In this state, the valid continuation set is restricted strictly to tokens whose leading bytes provide valid UTF-8 continuation bytes (`0x80` through `0xBF`) that complete the codepoint, advancing the formal grammar transitions only when the full character has materialized.
 
-$$\mathcal{V}_{\text{valid}}(s) = \{ v \in \mathcal{V}_0 \mid \delta(s, \text{decode}(v)) \ne \bot \}$$
+[^fn-unicode-buffering]: **Multibyte UTF-8 Boundary Buffering** (Precision Qualifier): Because byte-level BPE tokenizers partition arbitrary UTF-8 byte streams, tokens frequently fracture multi-byte Unicode codepoints across discrete generation steps. Maintaining an intermediate byte-buffer state ensures that grammar transitions evaluate complete characters without rejecting valid partial byte prefixes. \index{UTF-8!multibyte boundaries}\index{Tokenizer!byte-level BPE}\index{Precision Qualifier!Unicode Buffering}
 
-In production engines, vocabulary indexing is compiled into a **compressed bitmask tensor**. For a vocabulary $|\mathcal{V}_0| = 128{,}000$, a bitmask requires:
+Let $\delta^*(q, s)$ denote the extended transition function mapping state configuration $q$ and byte sequence $s$ to a resulting configuration (or set of stack configurations in a PDA). The set of valid continuation tokens $\mathcal{V}_{\text{valid}}(q_t) \subseteq \mathcal{V}$ at generation step $t$ consists of all vocabulary tokens whose byte sequences yield a non-error configuration:
 
-$$\text{Bitmask Size} = \frac{128{,}000}{8\text{ bits/byte}} = 16\text{ KiB per state}$$
+$$\mathcal{V}_{\text{valid}}(q_t) = \{ y \in \mathcal{V} \mid \delta^*(q_t, s(y)) \neq \text{ERROR} \}$$ {#eq-valid-token-set}
 
-Fitting within accelerator L2 cache, the engine applies constraints with zero DRAM bus traffic. At decode step $t$, a fused GPU kernel reads the bitmask for current state $s_{t-1}$ and sets illegal token logits to $-\infty$ directly in SRAM:
+To enforce this constraint on accelerator hardware, the inference service intercepts the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ produced by the neural core's final unembedding projection before the sampling kernel executes. The service applies an elementwise additive logit mask $\mathbf{m}_t \in \{0, -\infty\}^{|\mathcal{V}|}$:
 
-$$z_{t, i}' = \begin{cases} z_{t, i} & \text{if bit } i \text{ is set in } \mathbf{B}(s_{t-1}) \\ -\infty & \text{if bit } i \text{ is clear} \end{cases}$$
+$$\tilde{z}_{t, i} = z_{t, i} + m_{t, i}, \quad \text{where } m_{t, i} = \begin{cases} 0 & \text{if } i \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } i \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$ {#eq-additive-logit-mask}
 
-The masked logits $\mathbf{z}_t'$ pass to softmax, computing categorical probabilities strictly over valid tokens:
+When the sampling kernel evaluates the softmax distribution over the adjusted logits $\tilde{\mathbf{z}}_t$, the probability assigned to any invalid token evaluates to $\exp(-\infty) = 0$:
 
-$$P(y_t = v \mid \mathbf{y}_{<t}, \mathbf{x}) = \frac{\exp(z_{t, v}')}{\sum_{w \in \mathcal{V}_{\text{valid}}(s_{t-1})} \exp(z_{t, w}')}$$
+$$P(y_t = i \mid \mathbf{x}, y_{<t}) = \frac{\exp(\tilde{z}_{t, i} / \tau)}{\sum_{j \in \mathcal{V}_{\text{valid}}(q_t)} \exp(\tilde{z}_{t, j} / \tau)}$$ {#eq-grammar-softmax}
 
-Tokens that would transition to an illegal state receive zero probability.
+Here, temperature parameter $\tau$ scales relative likelihoods, but normalization is restricted entirely to the admissible support $\mathcal{V}_{\text{valid}}(q_t)$. Invalid tokens have zero probability of emission. Once a valid token $y_t$ is sampled, the automaton transitions deterministically to its next configuration $q_{t+1} = \delta^*(q_t, s(y_t))$, updating the valid token set for step $t+1$.
 
-![Architectural flow of grammar-constrained decoding via decode-time logit masking.](images/svg/grammar_constrained_decoding_fsm.svg){#fig-grammar-constrained-decoding width="100%"}
+To avoid re-evaluating raw strings through the automaton on every decode step, high-performance runtimes precompute a subword prefix trie over vocabulary $\mathcal{V}$.[^fn-bpe-subword-prefix] Traversing the prefix trie against the grammar automaton ahead of time yields static lookup tables mapping state identifier $q_t$ directly to its admissible token bitmask.
 
-#### CUDA Graph Compatibility and Jump-Forward Decoding
+[^fn-bpe-subword-prefix]: **Subword Prefix Trie** (Clarification): A trie indexing all multi-byte subwords in a tokenizer vocabulary, used to evaluate character-level automaton transitions across discrete token boundaries ahead of time, avoiding string re-parsing during the decode loop. \index{Subword Prefix Trie}\index{Clarification!Subword Prefix Trie}\index{Automata!prefix trie}
 
-Early implementations executed dynamic tensor allocations on the CPU per step. In production runtimes, this pattern breaks performance:
+#### The Fatal DFA Dead-End and Recovery Protocol {#sec-vol3-grammar-dead-end}
 
-1. **CUDA Graph Compatibility:** Modern engines capture decode iterations in **CUDA Graphs** to eliminate the $2\text{--}5\,\mu\text{s}$ per-kernel launch overhead across 80 transformer layers ($>2.4\text{ ms}$ CPU latency per token). Variable-length allocations break CUDA Graph capture, degrading decode throughput by $3\times$ to $5\times$. Precompiled bitmasks preserve static tensor shapes, executing seamlessly within captured graphs.
-2. **Jump-Forward Decoding:** When an FSM traverses deterministic syntax tokens (such as JSON keys `",\n  \"path\": \""`), there is exactly *one* valid continuation. The engine bypasses accelerator forward passes entirely, directly appending static tokens to the KV cache and accelerating structured generation by $20\%$ to $40\%$.
+A critical edge case in grammar-constrained decoding is the *DFA dead-end*: a generation state $q_t$ from which no vocabulary token provides a valid continuation, resulting in an empty admissible set:
 
-### The Syntactic Divide: Structural Invariants vs. Semantic Validity
+$$\mathcal{V}_{\text{valid}}(q_t) = \emptyset$$ {#eq-dead-end-condition}
 
-Grammar-constrained decoding guarantees syntactic conformance, but provides no verification of semantic correctness or operational safety. Systems engineers must maintain a strict boundary between *syntactic validity* (conformance to grammar rules) and *semantic validity* (correctness within the execution environment).
+Because byte-level BPE includes all 256 individual byte octets in its base vocabulary, a bridging byte sequence always theoretically exists. However, dead-end states occur in practice when a formal grammar specification contains internal contradictions (reaching a non-accepting state with no outgoing transitions), when the grammar masks end-of-sequence delimiters before reaching an accepting termination, or when a high-performance regex compiler restricts transitions to multi-character subwords that overshoot permitted paths while inadvertently pruning the single-byte fallback tokens.
 
-Consider patching the configuration parser defect via a JSON schema:
+If the serving engine evaluates @eq-additive-logit-mask when $\mathcal{V}_{\text{valid}}(q_t) = \emptyset$, every mask entry evaluates to $-\infty$, yielding an adjusted logit vector $\tilde{\mathbf{z}}_t = [-\infty, -\infty, \dots, -\infty]$. When the GPU sampling kernel evaluates the softmax denominator across this vector, every exponent evaluates to $\exp(-\infty) = 0$:
+
+$$\sum_{j=1}^{|\mathcal{V}|} \exp(\tilde{z}_{t, j} / \tau) = \sum_{j=1}^{|\mathcal{V}|} 0 = 0$$
+
+Computing $0 / 0$ generates IEEE 754 `NaN` (Not a Number) values across the entire probability distribution. If the sampling kernel attempts to select a token index from a distribution of `NaN`s, the operation produces undefined behavior: triggering GPU memory access violations, driver traps, or sampling index zero repeatedly, which corrupts the KV cache and crashes the inference engine.[^fn-grammar-dead-end]
+
+[^fn-grammar-dead-end]: **Grammar Dead-End Traps** (Caveat / Edge Case): An empty valid-token set $\mathcal{V}_{\text{valid}}(q_t) = \emptyset$ causes an all-$-\infty$ logit vector. Softmax normalization evaluates to $0/0$, generating `NaN` values that corrupt GPU memory and crash the serving daemon unless intercepted by an explicit pre-sampling check. \index{Grammar Dead-End}\index{Softmax!division by zero}\index{Caveat!Grammar Dead-End}\index{GPU!NaN corruption}
+
+To prevent catastrophic engine failure, dependable runtimes implement an explicit dead-end recovery protocol:
+
+1. **Pre-Sampling Population Verification:** Before launching the masking and softmax kernels, the engine evaluates whether $|\mathcal{V}_{\text{valid}}(q_t)| \ge 1$ (readily checked by testing if the active bitmask word reduction is nonzero).
+2. **Immediate Decode Abort:** If an empty valid set is detected ($|\mathcal{V}_{\text{valid}}(q_t)| = 0$), the serving engine immediately halts the autoregressive decode loop without invoking the softmax kernel.
+3. **Status Envelope Fault Dispatch:** The invocation terminates with the normalized status envelope $S_{\text{class}} = \texttt{FAULTED}$ and explicit sub-code `GRAMMAR_DEAD_END_EMPTY_VOCAB`, packaging diagnostic telemetry containing the active state $q_t$, prefix tokens $y_{<t}$, and grammar digest $\mathcal{G}_{\text{hash}}$.
+4. **Escrow Quarantining:** In accordance with the DRAM Quarantining Invariant (@eq-quarantine-invariant), the partial candidate sequence is quarantined in host memory escrow and prevented from entering downstream compilers or actuation pipelines.
+
+::: {#fig-grammar-constrained-decoding fig-cap="**Grammar-Constrained Decoding State Machine**: Dead-end trapping and automaton-derived bitmask intersection across decode steps." fig-alt="Grammar-constrained decoding state machine showing raw logits intersected with automaton bitmasks and dead-end trapping."}
+![](images/svg/grammar_constrained_decoding_fsm.svg){width="100%"}
+:::
+
+### Hardware Execution Topology: Bitmasks, Batching, and Graph Capture Friction {#sec-vol3-grammar-hardware-bitmasks}
+
+Frontier foundation models deploy large vocabularies to maximize compression fertility on source code and structured data—for example, Meta's Llama 3 specifies an official SKU constant of $|\mathcal{V}| = 128{,}256$ tokens, while other modern tokenizers range from $32{,}000$ to over $200{,}000$ tokens (such as OpenAI's `o200k_base`).[^fn-vocab-cardinality]
+
+[^fn-vocab-cardinality]: **Vocabulary Cardinality and Hardware Alignment** (Physical / Mathematical Detail): Expanding vocabulary cardinality from earlier 32k limits to over 100k tokens increases compression fertility on source code and structured JSON by 15 to 25 percent, reducing the serial decode steps $K$ required to emit a payload. High-performance serving kernels align vocabulary dimensions to multiples of 64 or 128 elements to maximize Tensor Core tile efficiency and memory transaction coalescing during the final unembedding projection $\mathbf{z}_t = \mathbf{h}_t \mathbf{W}_{\text{unembed}}$. \index{Vocabulary Cardinality}\index{Hardware!Tensor Core Alignment}\index{Tokenization!BPE vocabulary}
+
+This massive vocabulary exposes a severe systems bottleneck if logit masking is naively implemented across the host-device boundary. For $|\mathcal{V}| \approx 128\text{k}$, an unnormalized 32-bit single-precision float vector requires:
+
+$$\text{Logit Payload} = |\mathcal{V}| \times 4\text{ bytes} \approx 128{,}256 \times 4 \approx 513\text{ KB}$$
+
+Across a concurrent batch size of $B = 32$, shuttling raw logits to the host CPU for grammar filtering would transfer over $16\text{ MB}$ per decode step. While a modern PCIe or NVLink bus can serialize $16\text{ MB}$ in hundreds of microseconds, the fatal penalty is architectural: device-to-host transfers require explicit stream synchronization (`cudaMemcpyDeviceToHost`), which **breaks static CUDA Graph capture**, drains the GPU execution pipeline, and induces CPU-GPU synchronization bubbles at every single decode step.
+
+To preserve accelerator throughput, modern engines (such as Outlines [@willard2023outlines]) execute logit filtering entirely within device memory. The admissible token set $\mathcal{V}_{\text{valid}}(q_t)$ is encoded as a packed bitmask vector $\mathbf{b}_{q_t} \in \{0, 1\}^{|\mathcal{V}|}$. Each token index corresponds to a single bit: bit $i$ is set to $1$ if token $i$ is valid, and $0$ if invalid. Across a $128\text{k}$-token vocabulary, the physical memory footprint of a single bitmask is:
+
+$$\text{Bitmask Footprint} = \left\lceil \frac{|\mathcal{V}|}{8\text{ bits/byte}} \right\rceil \approx \frac{128{,}256}{8} = 16{,}032\text{ bytes} \approx 16\text{ KB}$$ {#eq-bitmask-footprint}
+
+where the constant divisor of 8 derives from the fundamental hardware ratio of 8 bits per byte.[^fn-bitmask-provenance] Furthermore, packed bits map cleanly into contiguous 32-bit words (`uint32_t`) or 64-bit words (`uint64_t`), matching the single instruction, multiple data (SIMD) register widths and warp execution strides of accelerator execution units.
+
+[^fn-bitmask-provenance]: **Bitmask Packing Density** (Physical / Mathematical Detail): Physical calculation of bit vector footprint where each token candidate is represented as a single binary flag packed into 8-bit unsigned integer words ($\lceil 128{,}256 \text{ tokens} / 8 \text{ bits/byte} \rceil = 16{,}032 \text{ bytes}$). \index{Bitmask Packing Density}\index{Physical!Bitmask Footprint}
+
+#### Batched Serving and Accelerator Cache Working Sets {#sec-vol3-grammar-batched-cache}
+
+In isolated single-sequence execution ($B = 1$), a $16\text{ KB}$ bitmask easily resides within the on-chip cache of modern accelerators (for instance, the NVIDIA H100 provides $50\text{ MB}$ of dedicated L2 cache; the B200 provides $60\text{ MB}$). However, real-world inference engines operate in batched serving regimes ($B > 1$). Under continuous batching, each sequence $b \in \{1, \dots, B\}$ is executing an independent request: each request may enforce a distinct grammar $\mathcal{G}^{(b)}$, or occupy an entirely disparate state $q_t^{(b)}$ along its syntax trajectory.
+
+At generation step $t$, the logit masking kernel cannot broadcast a single bitmask; it must execute a gather operation, loading $B$ distinct $16\text{ KB}$ bitmasks corresponding to the active states $\langle q_t^{(1)}, q_t^{(2)}, \dots, q_t^{(B)} \rangle$:
+
+$$\text{Active Bitmask Working Set} = B \times \frac{|\mathcal{V}|}{8} = B \times 16\text{ KB}$$ {#eq-batched-mask-footprint}
+
+For $B = 32$, this working set consumes $512\text{ KB}$; for $B = 128$, it consumes $2\text{ MB}$; for $B = 512$, it reaches $8\text{ MB}$. While an $8\text{ MB}$ bitmask footprint appears small relative to a $50\text{ MB}$ physical L2 cache, the accelerator L2 cache is simultaneously under severe contention from competing systems workloads: it must buffer active Key-Value cache lines, model parameter tiles streamed during matrix-vector evaluation, and intermediate activation tensors.
+
+When an inference daemon serves hundreds of concurrent requests across heterogeneous schemas with large transition tables, the working set of DFA bitmasks and state lookup structures competes directly with the KV cache for L2 cache lines.[^fn-batched-dfa-cache] If the aggregate working set exceeds cache capacity, cache thrashing forces bitmask loads to fall back to off-chip High Bandwidth Memory (HBM), adding memory bandwidth overhead to an already memory-bandwidth-bound decode phase.
+
+[^fn-batched-dfa-cache]: **Batched Automaton Working Set** (Systems Consequence): In batched serving ($B > 1$), the logit masking kernel gathers $B$ distinct $16\text{ KB}$ bitmasks across disparate DFA states. The resulting multi-megabyte working set contends with active KV cache lines and parameter streaming in accelerator L2 cache, inducing cache thrashing if state transitions are not co-located. \index{Batched Automaton Working Set}\index{Hardware!L2 Cache Residency}\index{Systems Consequence!L2 Thrashing}
+
+#### The Friction Between Static Graph Capture and Dynamic Constraints {#sec-vol3-grammar-graph-friction}
+
+High-performance inference engines use static execution graphs (such as CUDA Graphs) to eliminate CPU kernel launch overhead ($5\text{--}15\,\mu\text{s}$ per kernel launch) during the iterative decode loop. Graph capture requires an immutable execution topology: fixed kernel grids, static memory addresses, and invariant buffer shapes replayed repeatedly without host CPU intervention.
+
+Early analyses suggested that grammar logit masking integrates seamlessly with static graphs due to the fixed shape of the bitmask tensor ($[B, \lceil |\mathcal{V}| / 32 \rceil]$). In production runtimes, however, grammar constraints introduce severe friction with graph capture:
+
+1. **Host Synchronization Hazards:** If automaton state transitions or trie traversals are computed on the host CPU, the engine must transfer the emitted token $y_t$ to host memory and synchronize the stream (`cudaStreamSynchronize`). This CPU-GPU synchronization immediately invalidates graph capture, forcing the serving engine to drop out of static graph replay into high-overhead eager launches.
+2. **Continuous Batching Memory Fragmentation:** Modern engines employ continuous (iteration-level) batching, where sequences arrive and retire dynamically at every iteration. Replaying a static CUDA Graph requires fixed batch slots and pre-allocated memory pointers. If a slot's grammar changes between steps (e.g., a new request with a distinct schema enters slot $b$), the engine must re-bind bitmask buffer addresses on the device without triggering a CPU-side graph recapture.
+3. **Automata Complexity Divergence:** While regular expressions and flat DFAs can be evaluated on-device using fixed-size transition matrices, context-free grammars (PDAs) require dynamic stack manipulation. Managing variable-depth pushdown stacks within parallel GPU thread blocks introduces warp divergence and irregular memory accesses that resist static kernel scheduling.[^fn-cuda-graph-invariance]
+
+[^fn-cuda-graph-invariance]: **Static Graph Capture Friction** (Caveat / Edge Case): While static bitmask tensors match CUDA Graph shape requirements, dynamic PDA stack manipulation and CPU-side state transitions break graph capture. High-throughput serving engines often restrict static graph execution to regular expressions and flat DFAs, falling back to eager execution for recursive context-free grammars. \index{CUDA Graph Invariance}\index{Caveat!CUDA Graph Invariance}\index{Continuous Batching!Graph Friction}
+
+To balance latency and flexibility, production architectures partition grammar execution: flat DFAs and regex constraints are captured into static execution graphs using pre-allocated, device-resident bitmask pools, whereas complex recursive CFGs fall back to eager kernel dispatch or asynchronous device-side state machines.
+
+### The Syntactic Divide and Pathological Schema Forcing {#sec-vol3-grammar-syntactic-divide}
+
+While grammar-constrained decoding provides mathematical guarantees over structural form, systems designers must not mistake structural validity for operational correctness or semantic safety. This fundamental boundary is known as the **Syntactic Divide**.[^fn-actuation-boundary]
+
+[^fn-actuation-boundary]: **Syntactic versus Semantic Authority** (Systems Consequence): The architectural separation ensuring that structural parse validation is never confused with execution permission. The stochastic processor core operates under Zero Ambient Authority ($A=0$); invariant closure is strictly external ($C=\text{external}$) and cannot be satisfied by decode-time syntax filters. \index{Syntactic vs. Semantic Authority}\index{Systems Consequence!Actuation Boundary}\index{Security!Zero Ambient Authority}
+
+A grammar mask operates solely on formal language syntax: it verifies that braces balance, that string literals terminate with matching quotation marks, and that numerical fields contain digits rather than alphabetic characters. The grammar engine has zero awareness of the host operating environment, zero visibility into filesystems, and zero capability to evaluate operational safety. The stochastic processor core operates under Zero Ambient Authority ($A=0$); a candidate proposal emitted under a grammar mask can be syntactically immaculate while remaining functionally destructive or logically absurd.
+
+Consider an agent runtime executing a file modification task under a JSON Schema constraint defining a structured file-patch command:
 
 ```json
 {
   "type": "object",
   "properties": {
-    "path": { "type": "string" },
-    "search": { "type": "string" },
-    "replace": { "type": "string" }
+    "target_path": { "type": "string" },
+    "line_number": { "type": "integer" },
+    "replacement": { "type": "string" }
   },
-  "required": ["path", "search", "replace"],
-  "additionalProperties": false
+  "required": ["target_path", "line_number", "replacement"]
 }
 ```
 
-The compiled grammar mask guarantees balanced braces, valid field names, and escaped literals, preventing JSON parser crashes. However, it cannot evaluate operational state:
+The inference engine guarantees that emitted tokens parse cleanly into a JSON object conforming to this schema. However, the grammar engine cannot prevent the core from emitting:
 
-1. **Path Existence:** The mask permits `"path": "config/nonexistent_parser.py"`, triggering a `FileNotFoundError`.
-2. **Search Target Alignment:** The mask permits `"search": "def parse_timeout(s):"`. If the file contains `def parse_timeout(timeout_str: str):`, the patcher fails to locate the target block.
-3. **Semantic Integrity:** The mask permits `"replace": "round(int(seconds) * 1000)"`, which compiles cleanly but fails to fix the truncation defect.
-
-```
-Syntactic Boundary (Closed by Automaton)
-[ Valid JSON Encoding ] ---> [ Strict Schema Fields ] ---> [ Balanced Braces ]
------------------------------------------------------------------------------
-Semantic Boundary (Unverified by Automaton)
-[ File Path Exists? ]   ---> [ Patch String Matches? ] ---> [ Defect Resolved? ]
+```json
+{
+  "target_path": "/etc/passwd",
+  "line_number": -42,
+  "replacement": "root::0:0:root:/root:/bin/bash"
+}
 ```
 
-A grammar mask provides invariant closure only over deserialization. All substantive operational invariants—file existence, semantic correctness, and safety—must be verified by external deterministic tooling.
+From the perspective of the grammar mask, this sequence is 100 percent valid: all keys are present, types match the schema, and delimiters are properly closed. Downstream JSON parsers return an exit code of success (`0`). Yet if the host runtime treats syntactic validity as an authorization to act, it risks modifying sensitive system credentials or referencing invalid line numbers. Structural adherence guarantees parseability; invariant closure requires external validation against the real system ($C=\text{external}$).
 
-### The Hazard of Schema Forcing and Induced Hallucination
+#### Pathological Schema Forcing (The Illusion of Certainty) {#sec-vol3-grammar-schema-forcing}
 
-When the host constrains the processor's output, it alters the conditional distribution over future tokens. If the schema lacks expressive branches for uncertainty or failure, logit masking introduces *schema forcing*.
+An even more dangerous operational failure is **Pathological Schema Forcing**. Autoregressive generation samples from the conditional probability distribution over the staged context $\mathbf{x}$. When a grammar mask restricts vocabulary support to a tiny fraction $\mathcal{V}_{\text{valid}}(q_t)$, it redistributes the model's unnormalized probability mass exclusively across that narrow support. If the true underlying distribution assigns virtually zero probability mass to any syntactically legal continuation—such as when the context contains incomplete information, contradictions, or unresolvable ambiguities—the mask forces the core to sample from a degenerate distribution.
 
-Setting invalid logits to $-\infty$ acts as a hard conditioning operator. If valid tokens hold near-zero probability mass under the unconstrained distribution:
+Mathematically, let $P_{\text{unconstrained}}(y_t \in \mathcal{V}_{\text{valid}}(q_t) \mid \mathbf{x}, y_{<t}) = \sum_{j \in \mathcal{V}_{\text{valid}}(q_t)} P(j)$ represent the total probability mass allocated to the valid subset. When the context provides insufficient evidence for the required schema fields, this aggregate mass can drop precipitously:
 
-$$\sum_{v \in \mathcal{V}_{\text{valid}}} P_{\text{unconstrained}}(v \mid \mathbf{y}_{<t}, \mathbf{x}) = \epsilon \ll 10^{-4}$$
+$$\sum_{j \in \mathcal{V}_{\text{valid}}(q_t)} P(y_t = j \mid \mathbf{x}, y_{<t}) < \epsilon, \quad \text{where } \epsilon \ll 10^{-3}$$ {#eq-residual-probability-mass}
 
-the softmax normalization forces the sampler to draw exclusively from this low-probability subset. The processor cannot refuse or report uncertainty; it is compelled to sample from the constrained subset, producing fabricated tokens.
+The logit mask forces $-\infty$ onto all other tokens, and softmax renormalizes this infinitesimal residual mass to $1.0$:
 
-Consider querying a model for a service's database connection limit under a schema mandating an integer:
+$$P_{\text{forced}}(y_t = i \mid \mathbf{x}, y_{<t}) = \frac{P(y_t = i \mid \mathbf{x}, y_{<t})}{\sum_{j \in \mathcal{V}_{\text{valid}}(q_t)} P(y_t = j \mid \mathbf{x}, y_{<t})}$$ {#eq-schema-forced-distribution}
+
+This creates a severe failure mode: **fail-plausible semantic corruption**. In an unconstrained setting, when a foundation model encounters missing information or ambiguity, it allocates its probability mass to descriptive natural-language tokens explaining the missing parameters (e.g., `"Error: target environment not specified in task instructions"`). Under strict grammar logit masking, however, those descriptive tokens are assigned $-\infty$. The remaining less than 0.1 percent of residual probability mass is renormalized across the permissible schema fields. The core selects among them with artificial sampling certainty, emitting a syntactically flawless payload that fabricates a critical configuration value out of thin air.
+
+For example, if an invocation schema mandates an enumeration field restricted to `{"environment": "production" | "staging" | "testing"}` in a context where the target environment was never specified, the unconstrained model might place over 99.9 percent of its probability mass on clarifying questions or error explanations. Under logit masking, those descriptive tokens are masked out. The model is forced to choose between `"production"`, `"staging"`, and `"testing"`. It emits `"production"` with 100 percent normalized confidence, hallucinating a critical systems parameter because the grammar gave it no legal tokens to admit uncertainty.
+
+To mitigate pathological schema forcing, agent architectures must enforce a strict design rule: **every constrained grammar must provide explicit failure and escape channels**.[^fn-schema-escape-channels] Schemas must incorporate nullable fields, dedicated `"UNKNOWN"` or `"UNRESOLVED"` enumeration variants, and optional free-form error strings:
 
 ```json
 {
   "type": "object",
   "properties": {
-    "connection_limit": { "type": "integer" }
+    "status": { "type": "string", "enum": ["SUCCESS", "AMBIGUOUS", "ERROR"] },
+    "environment": { "type": ["string", "null"], "enum": ["production", "staging", "testing", null] },
+    "error_details": { "type": ["string", "null"] }
   },
-  "required": ["connection_limit"],
-  "additionalProperties": false
+  "required": ["status"]
 }
 ```
 
-If the repository does not define a static limit, an unconstrained core might emit: `"Connection limit is dynamically allocated."` Under the constrained schema, alphabetic tokens are masked to $-\infty$; the automaton permits only digits `0`--`9`. The sampler draws from residual probabilities, emitting `{"connection_limit": 100}`. The host receives syntactically valid JSON containing an entirely hallucinated threshold.
+[^fn-schema-escape-channels]: **Grammar Escape Channels** (Clarification): Architectural provisions in schema design (such as nullable fields, error enums, and free-form diagnostic strings) that ensure the valid token set $\mathcal{V}_{\text{valid}}$ always contains paths for the model to report ambiguity, preventing logit masks from acting as hallucination amplifiers. \index{Grammar Escape Channels}\index{Pathological Schema Forcing}\index{Clarification!Escape Channels}
 
-To prevent schema forcing, schemas must be designed as discriminated unions with explicit failure and refusal branches:
+By ensuring that $\mathcal{V}_{\text{valid}}(q_t)$ always contains admissible paths for signaling missing parameters or unresolved context, the host runtime prevents grammar masks from acting as hallucination amplifiers, preserving the integrity of downstream execution perimeters.
 
-```json
-{
-  "oneOf": [
-    {
-      "type": "object",
-      "properties": {
-        "status": { "const": "success" },
-        "connection_limit": { "type": "integer" }
-      },
-      "required": ["status", "connection_limit"]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "status": { "const": "not_found" },
-        "reason": { "type": "string" }
-      },
-      "required": ["status", "reason"]
-    }
-  ]
-}
-```
-
-### Native Tool Calling and Action Envelopes
-
-Early frameworks attempted to resolve structural constraints using "scratchpad-first JSON"—injecting an unconstrained string property like `"thought"` as the first key of a JSON schema. As shown in Section 2.2, stringifying reasoning within JSON inflicts a $15\%$ to $35\%$ token inflation penalty due to character escaping.
-
-Modern production runtimes resolve this via **Native Tool Calling**:
-1. **Decoupled Reasoning Channels:** The core generates unconstrained deliberation tokens in a dedicated thought channel *outside* the schema envelope, preserving high-frequency BPE merges without escaping backslashes or quotes.
-2. **Grammar-Masked Action Envelope:** Once deliberation completes, the model emits a control token activating the grammar FSM for the tool schema, generating arguments under compressed bitmask constraints.
-
-Even with structurally valid sequences, generating tokens expends physical hardware resources. Understanding these costs requires analyzing the physical memory bus and compute balance.
+Even when a candidate is structurally valid, what physical hardware resources were expended to generate it?

@@ -1,143 +1,124 @@
 ## Candidate Sequences Versus Valid Conclusions {#sec-vol3-processor-continuations}
 
-A high-probability, fluent sequence of emitted tokens establishes nothing about the operational state or logical validity of an underlying computer system. In an autoregressive foundation-model core parameterized by weights $\Theta$, the decoding loop evaluates a conditional probability distribution over vocabulary $\mathcal{V}$:
+A sequence probability $\log P(\mathbf{y} \mid \mathbf{x}) = \sum_{t=1}^K \log P(y_t \mid \mathbf{x}, y_{<t})$ guarantees only statistical typicality under weights $\Theta$. Unlike an arithmetic logic unit (ALU) that enforces deterministic register mutations, the stochastic core evaluates conditional distributions over subword tokens without internal representations of physical state or invariants. Conflating likelihood with operational validity is the primary failure mode of naive agent engineering: cross-entropy optimizes typicality, not constraint satisfaction. The host must treat all emissions as unprivileged candidate hypotheses, enforcing invariant closure through an external verification perimeter.
 
-$$P(\mathbf{y} \mid \mathbf{x}; \Theta) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, y_{<t}; \Theta)$$
+### Likelihood, Fluency, and the Epistemic Gap {#sec-vol3-epistemic-gap}
 
-The value $P(\mathbf{y} \mid \mathbf{x}; \Theta)$ measures statistical typicality within the training distribution; it does not compute a proof, verify system state, or establish empirical truth. When an agentic architecture treats an emitted sequence as an authorized action without external mechanical confirmation, it confuses statistical density with operational correctness.
+Autoregressive generation decouples lexical fluency from operational correctness: Transformers capture surface grammar, emitting high-probability sequences detached from physical systems state.
 
-In classical computing, an instruction set architecture (ISA) provides deterministic state transitions: an ALU adding two integers produces a result guaranteed by circuit invariants, setting hardware flags on overflow (`EFLAGS.OF`). In contrast, a stochastic processor core maps staged context $\mathbf{x} \in \mathcal{V}^M$ to candidate sequence $\mathbf{y} \in \mathcal{V}^K$ through non-linear matrix transforms. The core provides no hardware interrupt or fault signal when output diverges from physical reality. The host must treat all candidate sequences strictly as unverified hypotheses.
+Consider an agent runtime generating an administrative storage patch:
 
-### The Decoupling of Sequence Likelihood and Operational Truth {#sec-vol3-likelihood-truth-gap}
-
-This disconnect stems from the autoregressive objective. During decoding, token $y_t$ is sampled from logits $\mathbf{z}_t = \mathbf{W}_U \mathbf{h}_t \in \mathbb{R}^{|\mathcal{V}|}$ via softmax:
-
-$$P(y_t = v \mid \mathbf{x}, y_{<t}) = \frac{\exp(z_{t, v} / \tau)}{\sum_{j=1}^{|\mathcal{V}|} \exp(z_{t, j} / \tau)}$$
-
-When $\tau \to 0$ (greedy decoding), the core selects the mode at every step, minimizing cross-entropy loss against the training manifold. However, statistical frequency often decouples from algorithmic precision.
-
-Consider the configuration parser defect from Section 2.1:
-
-```python
-# config_parser.py (Defective Implementation)
-def parse_timeout(timeout_str: str) -> int:
-    seconds = float(timeout_str.rstrip("s"))
-    return int(seconds) * 1000  # "2.5s" -> 2.5 -> int(2.5) * 1000 = 2000ms (expected 2500ms)
+```bash
+# Generated candidate sequence at the mode of the conditional distribution
+ceph-volume lvm create --data /dev/nvme0n1 --block-db /dev/nvme0n2
+mount -t xfs -o noatime,nodiratime /dev/ceph-vg/ceph-lv /mnt/data
+systemctl restart ceph-osd@0
 ```
 
-Conditioned on diagnostic logs containing `"timeout"`, the core emits a candidate patch with high confidence (log-likelihood $\ge -0.08$ nats/token):
+To a parser, this sequence is flawless: flags and mount options satisfy POSIX and systemd conventions. Yet if `/dev/nvme0n2` is absent from `/sys/block` or the host lacks logical volume management, execution corrupts storage.
 
-```text
-The intermittent latency occurs because the operating system kernel is dropping
-epoll events under high file-descriptor contention. The socket timeout handler
-fails to register SIGALRM, causing the event loop to block indefinitely on
-unresponsive upstream connections. To fix this, update the epoll flags in
-network_driver.c to include EPOLLET (edge-triggered mode).
-```
+This disconnect illustrates *fail-plausible semantic corruption*:[^fn-fail-plausible] statistical sequence predictors satisfy surface syntax while violating operational constraints, matching passive training weights rather than live kernel device tables.
 
-The sequence is grammatically pristine and authoritatively uses Linux networking terminology (`epoll`, `SIGALRM`, `EPOLLET`), yet is entirely counterfactual. The failure has zero connection to POSIX signals; it is a five-hundred-millisecond arithmetic truncation. Attention heads associative with `"timeout"` guided decoding into a high-likelihood basin divorced from repository state. High sequence likelihood guarantees fluent syntax, but provides zero guarantee of execution validity.
+[^fn-fail-plausible]: **Fail-Plausible Semantic Corruption**: The failure mode wherein stochastic emissions conform to surface syntax yet harbor fatal semantic contradictions undetectable by lexical inspection alone. \index{Fail-Plausible Semantic Corruption!systems failure}
 
-### Zero Ambient Authority and Sandboxed Execution {#sec-vol3-zero-authority-boundary}
+The cross-entropy objective clarifies why this gap persists across scale:
 
-To preserve system integrity, agentic architectures must enforce **Zero Ambient Authority**: a stochastic processor core must never possess authority to mutate external state directly. The core functions as an untrusted, unprivileged **Byzantine execution unit** whose outputs exist solely as passive data symbols in DRAM (@fig-verification-perimeter).
+$$\mathcal{L}(\Theta) = -\mathbb{E}_{(\mathbf{x}, \mathbf{y}) \sim \mathcal{D}_{\text{train}}}\left[ \sum_{t=1}^K \log P(y_t \mid \mathbf{x}, y_{<t}; \Theta) \right]$$ {#eq-cross-entropy-gap}
 
-::: {#fig-verification-perimeter}
-```
-+-----------------------------------------------------------------------------------+
-| INFERENCE ENGINE (Neural Core)                                                    |
-|                                                                                   |
-|  [ Autoregressive Token Generation ] ===> UNPRIVILEGED ESCROW BUFFER              |
-|  Emits: `edit_file(path="config_parser.py", ...)` - Passive data symbols in DRAM  |
-|                                                   - Zero capability for syscalls  |
-+---------------------------------------------------|-------------------------------+
-                                                    |
-                                                    | Transfer to Host Runtime Memory
-                                                    v
-+-----------------------------------------------------------------------------------+
-| HOST AGENT RUNTIME (Privileged Supervisor - Ring 0)                               |
-|                                                                                   |
-|  TWO-PHASE SPECULATIVE PROPOSAL (Candidate Escrow & Mechanical Verification)       |
-|  Phase 1: Escrow Candidate Proposal in Isolated Ephemeral Worktree                |
-|                                                                                   |
-|  +-----------------------------------------------------------------------------+  |
-|  | THE EXTERNAL VERIFICATION PERIMETER (Deterministic Runtime)                 |  |
-|  |  1. AST / Lexical Parser     ==> Rejects malformed syntax                   |  |
-|  |  2. Static Type Checker      ==> Rejects mismatched signatures              |  |
-|  |  3. Automated Test Runner    ==> Evaluates Unit / Regression Checks         |  |
-|  |     [DETERMINISTIC ORACLE]   ==> Compares behavior against known assertions |  |
-|  |     [OUT-OF-BAND SUITE]      ==> Hidden evaluation fixtures held external   |  |
-|  |  4. Capability Monitor       ==> Validates cryptographic authorization      |  |
-|  +-----------------------------------------------------------------------------+  |
-|            |                                                                      |
-|            v (Phase 2: Verified Commit Only upon Exit Code 0)                     |
-|  +-----------------------------------------------------------------------------+  |
-|  | External Environment (Live Repository, Production Database, Remote RPC)     |  |
-|  +-----------------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------------+
-```
+Minimizing $\mathcal{L}(\Theta)$ replicates regularities from $\mathcal{D}_{\text{train}}$, including hallucinations and obsolete APIs. Likelihood certifies resemblance to training data, not compilation, bounded termination, or referential integrity.
 
-Two-phase speculative proposal and verification perimeter under Zero Ambient Authority.
+### Zero Ambient Authority and the Limits of Self-Assessment {#sec-vol3-zero-ambient-authority}
+
+Under *Zero Ambient Authority* ($A=0$ in the H-S-A-C taxonomy),[^fn-ambient-authority] the neural core possesses zero default rights: no file descriptors, execution contexts, clock access, or peripheral mappings. Emitting `rm -rf /` or `DROP TABLE accounts;` alters zero disk sectors; candidates remain passive arrays in host DRAM. Authority resides exclusively in the host reference monitor, which parses strings, validates schemas, checks invariants against ground truth, and gates actuation.
+
+[^fn-ambient-authority]: **Zero Ambient Authority**: Formalized in modern object-capability literature [@miller2003; @miller2006robust] building upon @saltzer1975's principle of least privilege, zero ambient authority dictates that a computational component possesses no default rights to access ambient system resources, requiring explicit, unforgeable capabilities for every privileged operation. \index{Zero Ambient Authority!security}
+
+Relying on *stochastic self-assessment*—prompting the core to verify its own proposals—fails on two grounds:
+
+1. **Probabilistic Incompleteness:** Because error probability $\epsilon = 1 - P(\text{correct} \mid \mathbf{y}) > 0$, evaluating prompt $\mathbf{x}_{\text{ver}} = [\mathbf{x}, \mathbf{y}, \mathbf{p}_{\text{verify}}]$ yields $\mathbf{y}_{\text{eval}}$ sampled from identical parameters $\Theta$; a distribution cannot independently verify its own samples.
+2. **Attentional Confirmation Bias:**[^fn-attentional-bias] Candidate tokens $\mathbf{y}$ reside in the Key-Value cache. In self-attention:
+$$\mathbf{A}_{t} = \text{softmax}\left(\frac{\mathbf{q}_t \mathbf{K}_{\le t}^\top}{\sqrt{d_{\text{head}}}}\right)$$ {#eq-attention-confirmation}
+the newly generated candidate tokens act as strong contextual attractors during iterative forward passes. Learned attention weights cause subsequent queries to condition heavily upon the premises established in the candidate prefix, making the core tend to elaborate and rationalize its own hallucinations rather than recognize internal contradictions.
+
+[^fn-attentional-bias]: **Attentional Contextual Priming**: The mechanistic tendency in autoregressive architectures where tokens generated during an initial candidate pass act as high-affinity contextual attractors during subsequent self-verification steps. \index{Attentional Contextual Priming!verification limits}
+
+Stochastic self-evaluation cannot close invariants ($P < 1.0$). Closure is strictly external ($C = \text{external}$), requiring deterministic compilers, type checkers, and reference monitors.
+
+### The Two-Phase Speculative Proposal Pattern and Verification Coverage {#sec-vol3-speculative-proposal}
+
+The runtime bridges stochastic generation and stateful execution via the *Two-Phase Speculative Proposal Pattern*[^fn-speculative-escrow] (@fig-verification-closure), isolating synthesis from state mutation through memory escrow and sequential verification.
+
+[^fn-speculative-escrow]: **Memory Escrow**: A quarantined staging buffer allocated in host physical memory where unverified candidate sequences reside prior to external verification. \index{Memory Escrow!quarantine}
+
+::: {#fig-verification-closure fig-cap="**Verification Closure Lifecycle**: Two-phase speculative proposal and five-layer external verification lifecycle isolating candidate tokens in host DRAM memory escrow until deterministic clearance." fig-alt="Conceptual proposal versus external verification lifecycle across host DRAM memory escrow and five verification layers."}
+![](images/svg/verification_closure_lifecycle.svg){width="100%"}
 :::
 
-State mutation follows a two-phase pattern:
+The lifecycle proceeds through two disjoint phases:
 
-1. **Speculative Proposal:** The core generates a candidate patch into host DRAM escrow. Zero environmental mutation occurs.
-2. **Mechanical Verification and Commit/Rollback:** The host runtime applies candidate changes to an isolated ephemeral worktree and runs deterministic test runners. If tests fail, the candidate is discarded; only upon exit code 0 does the host commit changes to target storage.
+1. **Phase 1 (Speculative Generation & Escrow):** Context $\mathbf{x}$ decodes into host DRAM buffer $\mathcal{B}_{\text{escrow}}$, isolated from storage, networks, and IPC.
+2. **Phase 2 (Deterministic Invariant Verification):** Escrowed tokens route through sequential verification gates; any failure triggers quarantine.
 
-To prevent **Oracle Poisoning**—models modifying test assertions to force exit code 0—test suites are maintained external to candidate proposal context and verified by host runtime inspection (virtualization and sandbox containment mechanisms are developed in Chapter 8).
+#### The Host DRAM Quarantine Invariant {#sec-vol3-quarantine-invariant}
 
-### Mechanical Invariant Closure and the External Verification Perimeter {#sec-vol3-external-verification}
+Under the *DRAM Quarantine Invariant*, candidate $\mathbf{y} \in \mathcal{V}^K$ in escrow buffer $\mathcal{B}_{\text{escrow}}$ with response envelope $\mathcal{E}_{\text{resp}} = \langle S, \mathbf{y}, \mu, \tau_{\text{term}} \rangle$ cannot enter actuation pipelines unless the release gate evaluates to true. For detokenized byte stream $\mathbf{b} = \text{Detokenize}(\mathbf{y})$, grammar $\mathcal{G}$, and host security policy $\mathcal{P}$:
 
-A critical vulnerability is *stochastic self-verification*—the belief that a core can verify its own outputs by appending prompts like `"Verify the analysis above"`. If flawed sequence $\mathbf{y}$ is fed back into context, its tokens act as attentional anchors in the KV cache, reinforcing the probability basin and driving $P(\text{"Correct"} \mid \mathbf{x}', \mathbf{y}) \to 1.0$.
+$$\text{Release}(\mathbf{y}) \iff (S = \texttt{COMPLETED}) \land \text{WellFormed}(\mathbf{b}, \mathcal{G}) \land \text{EscrowIsolated}(\mathbf{y}) \land \text{VerifyPolicy}(\mathbf{b}, \mathcal{P})$$ {#eq-release-gate-predicate}
 
-Invariant closure must be *mechanical and external*. An invariant is closed only when a deterministic oracle evaluates candidate $\mathbf{y}$ against ground truth and returns binary status $V \in \{0, 1\}$.
+Release requires four jointly sufficient preconditions:
 
-::: {#fig-verification-closure}
+1. **Status Completeness ($S = \texttt{COMPLETED}$):** Decoding reached $y_K \in \mathcal{S}_{\text{stop}}$ via suffix-matching across token boundaries within $K \le K_{\max}, T \le T_{\max}$. Statuses $\texttt{TRUNCATED}$, $\texttt{REFUSED}$, $\texttt{TRANSPORT\_FAILURE}$, $\texttt{REJECTED}$, $\texttt{CANCELLED}$, and $\texttt{FAULTED}$ block release.
+2. **Structural Well-Formedness ($\text{WellFormed}(\mathbf{b}, \mathcal{G})$):** Payload $\mathbf{b}$ parses under grammar $\mathcal{G}$ into syntax tree $\mathcal{T} = \text{Parse}(\mathbf{b}, \mathcal{G})$.
+3. **Escrow Isolation ($\text{EscrowIsolated}(\mathbf{y})$):** Tokens resided in host DRAM under zero ambient authority ($A=0$), causing zero side effects.
+4. **Policy Verification ($\text{VerifyPolicy}(\mathbf{b}, \mathcal{P})$):** Proposed actions satisfy policy $\mathcal{P}$ and capability bounds.
+
+Failing any precondition enforces quarantine:
+
+$$\text{Quarantine}(\mathbf{y}) \iff \neg \text{Release}(\mathbf{y})$$ {#eq-quarantine-predicate}
+
+$$\forall \mathcal{E}_{\text{resp}}, \quad \left( S \ne \texttt{COMPLETED} \lor \neg \text{WellFormed}(\mathbf{b}, \mathcal{G}) \lor \neg \text{VerifyPolicy}(\mathbf{b}, \mathcal{P}) \right) \implies \mathbf{y} \notin \text{ActuationPipeline}$$ {#eq-quarantine-enforcement}
+
+#### Reconciling Host Parsing with Decode-Time Logit Masking {#sec-vol3-host-gpu-parsing-reconciliation}
+
+Inference engines can enforce grammar constraints via *decode-time logit masking*, compiling schemas into finite-state automata to mask invalid transitions at step $t$. Host CPU parsing (Layer 1) remains mandatory for two reasons:
+
+1. **Escrow Unpacking and Deserialization:** Accelerator masking operates on token IDs in GPU memory. Host Layer 1 performs BPE byte-level reassembly across split UTF-8 boundaries, parses byte stream $\mathbf{b}$ into syntax tree $\mathcal{T}$, and allocates native typed data.
+2. **Defense-in-Depth and Fallback:** Remote endpoints and truncations ($K = K_{\max}$) lack masking guarantees. When grammar DFAs reach an empty continuation set ($\mathcal{V}_{\text{valid}} = \emptyset$), masking all logits to $-\infty$ triggers a softmax NaN collapse; the runtime must intercept this condition, emit primary status $S = \texttt{FAULTED}$ with reason code $\texttt{GRAMMAR\_DEAD\_END\_EMPTY\_VOCAB}$, and quarantine the payload.
+
+#### Decoupling Syntactic Validity from Semantic Authority {#sec-vol3-syntactic-vs-authority}
+
+Conflating syntactic validity with operational authority is a fatal vulnerability: schema compliance conveys **zero authority** to execute.
+
+Consider a candidate tool call:
+
+```json
+{
+  "action": "filesystem_format",
+  "device": "/dev/sda1",
+  "filesystem": "ext4",
+  "force": true
+}
 ```
-Stochastic Self-Evaluation (Unsound - Fails to Close Invariants):
-Context [x] ---> [ Neural Core ] ---> Candidate [y] (Flawed)
-                      ^                    |
-                      |                    v
-                      +--- [ "Are you sure?" ] <--- (Attentional reinforcement; P < 1.0)
 
-Deterministic Mechanical Verification (Sound - Enforces Invariant Closure):
-Context [x] ---> [ Neural Core ] ---> Candidate [y] (Unverified Proposal)
-                                           |
-                                           v
-                             +---------------------------+
-                             | Host Verification Engine  |
-                             | - AST / Syntax Validation |
-                             | - Compiler / Typechecker  |
-                             | - Automated Test Runner   |
-                             +---------------------------+
-                                    |             |
-                            Exit 0  |             | Non-zero Exit / Assertion Error
-                                    v             v
-                             Commit State    Reject & Rollback
-```
+This payload is structurally valid, yet executing it unvetted formats `/dev/sda1`. Syntactic validity provides readability; semantic authority requires reference monitor authorization, verifying unforgeable capabilities for `/dev/sda1`, mount states, and system integrity.
 
-Contrast between unsound stochastic self-evaluation and sound deterministic verification.
-:::
+#### The Verification Matrix and Invariant Coverage Limits {#sec-vol3-verification-matrix}
 
-The host runtime implements this external verification perimeter by routing candidate sequences through four progressive layers of deterministic filtering (@tbl-verification-layers).
+The runtime organizes verification into hierarchical layers (@tbl-verification-layers).
 
-::: {#tbl-verification-layers}
-| Output Property | Verification Mechanism | Latency / Overhead | Hardware / OS Boundary | Target Failure Mode |
+| Verification Layer | Evaluation Mechanism | Evaluation Latency | Target Properties Verified | Invariant Coverage Limits |
 | :--- | :--- | :--- | :--- | :--- |
-| **Syntactic Validity** | Grammar Mask / AST Parser | $10\,\mu\text{s} - 2\,\text{ms}$ | Host User-space (`libc`) | Malformed tokens, invalid JSON, broken grammar |
-| **Schema Adherence** | Type Envelope / Protobuf Parser | $50\,\mu\text{s} - 5\,\text{ms}$ | Host User-space Runtime | Missing keys, wrong field types, extraneous fields |
-| **Static Semantics** | Compiler / Static Analyzer (`tsc`, `mypy`) | $100\,\text{ms} - 3\,\text{s}$ | Host Process Boundary | Undefined symbols, signature mismatch, type errors |
-| **Dynamic Semantics** | Unit / Regression Suite (`pytest`) | $200\,\text{ms} - 30\,\text{s}$ | Host Process / Ephemeral Worktree | Logic defects, arithmetic truncation, regressions |
-| **Execution Authority** | Capability Gate / Reference Monitor | $1\,\mu\text{s} - 500\,\mu\text{s}$ | Operating System Access Control | Privilege escalation, unauthorized RPC execution |
+| **1. Lexical & Syntactic (Unpacker)** | CFG parser, AST parser, JSON schema deserializer | $< 5\text{ ms}$ (Host CPU) | Grammar compliance, balanced delimiters, field types | Verifies syntax only; zero guarantee of symbol existence, safety, or intent. |
+| **2. Static Semantic** | Type checkers (`mypy`, `tsc`), linters, symbol linkers | $50\text{ ms} - 1\text{ s}$ (Host CPU) | Scope validity, identifier resolution, type compatibility | Detects undeclared symbols and type mismatches; cannot verify runtime values. |
+| **3. Contractual & Invariant** | Assertion checkers, contract verifiers, precondition monitors | $10\text{ ms} - 100\text{ ms}$ (Host CPU) | Invariant satisfaction, range constraints, loop bounds | Proves local contracts; limited to explicitly formalized assertions. |
+| **4. Dynamic Behavioral** | Unit test suites, integration test runners | $1\text{ s} - 60\text{ s}$ (Isolated env) | Input-output mapping, regression avoidance, error handling | Validates execution paths covered by test assertions; cannot certify untested paths. |
+| **5. Reference Monitor** | Capability checkers, ACLs, read-only mounts | $< 1\text{ ms}$ (Kernel / Runtime) | Least-privilege boundaries, permission enforcement | Enforces access rights; zero awareness of application functional correctness. |
+: **Verification matrix**: Mapping output properties to external deterministic verification mechanisms and coverage limits. {#tbl-verification-layers}
 
-: Progressive layers of the host external verification perimeter. {#tbl-verification-layers}
-:::
+No single layer provides complete coverage (@tbl-verification-layers). Schema parsing checks syntax without verifying process liveness. Dynamic testing evaluates execution against explicit assertions, reporting a POSIX exit status:
 
-This architectural division highlights the fundamental difference in failure models between classical and stochastic compute:
+$$\text{Status} = \begin{cases} 0 & \text{if all asserted invariants evaluate to TRUE} \\ \ne 0 & \text{if an assertion violation or runtime fault occurs} \end{cases}$$ {#eq-exit-status}
 
-- Classical deterministic systems **fail-stop**: An illegal memory access triggers an MMU exception and raises `SIGSEGV`; an arithmetic division by zero halts the ALU; an invalid instruction raises an illegal opcode fault (`UD2`). Execution halts immediately rather than continuing in an invalid state.
-- Stochastic processors **fail-plausibly**: A stochastic core does not halt when its emitted continuation is logically or operationally invalid. It generates syntactically pristine, highly confident, grammatically persuasive candidate sequences that mimic correct answers.
+An exit status of `0` certifies only that exercised paths satisfied asserted predicates. Unlike stochastic self-assessment, verified invariants close deterministically with probability $1.0$ within test harness scope.
 
-Because a stochastic core fails plausibly, the external verification perimeter serves as the critical translation layer. It intercepts plausible counterfactual proposals, subjects them to rigid deterministic execution, and converts stochastic failure modes into clean, fail-stop status signals.
-
-To operationalize this verification perimeter across continuous workflows, the host formalizes the interaction into an asynchronous, typed invocation contract.
+Separating unprivileged generation from external verification transforms the stochastic core into an unprivileged execution engine. The host runtime must formalize processor invocations through an explicit protocol that detects when proposals fail or truncate.

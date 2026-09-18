@@ -92,6 +92,7 @@ class ChapterManifest:
     fallacies_raw: str
     summary_raw: str
     curricular_compass: str = ""
+    raw_outline_text: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -271,6 +272,7 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
         fallacies_raw=fallacies_raw,
         summary_raw=summary_raw,
         curricular_compass=curricular_compass,
+        raw_outline_text=matched_part,
     )
 
 
@@ -341,6 +343,18 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
    - ❌ **NEVER claim stochastic self-verification:** "The model checks its own answer to ensure correctness."
      -> *Write:* "Stochastic self-evaluation cannot close invariants ($P < 1.0$); invariant closure requires external deterministic execution (compilers, test runners, exit codes)."
    - ❌ **NEVER call tokens 'micro-instructions' or 'opcodes':** Tokens are discrete integer data symbols and embedding gather addresses; the neural core has no opcode decoder or register file.
+
+9. VOLUME 1 FIVE-TYPE FOOTNOTE TAXONOMY WITH INDEXED TERMS:
+   When introducing foundational systems concepts, specialized hardware terminology, or historical context, provide rigorous footnotes formatted with indexed terms:
+   - Footnote format: `[^fn-label]` in text, followed by:
+     `[^fn-label]: **Term** (Etymology/Category): Definition and systems context. \index{Term}\index{Category!Subterm}`
+   - Categories:
+     1. Clarification (term definition, scope boundary)
+     2. Historical / Context (etymology, early systems origins, seminal paper context)
+     3. Caveat / Edge Case (subtle hardware or kernel behavior, exception cases)
+     4. Cross-Reference (connections across chapters or volumes)
+     5. Physical / Mathematical Detail (minor derivation step, unit conversion)
+   - Every footnote MUST include at least one `\index{...}` command on its core technical term for the book index.
 """
 
 
@@ -553,15 +567,34 @@ def compose_step_prompt(
             f"Draft the Chapter {manifest.number} Opening Frontmatter:\n"
             f"Target Budget: 250 words (Range: 200–300 words).\n\n"
             f"MANDATORY STRUCTURAL INVARIANT (THE SINGLE-PARAGRAPH PURPOSE LAW):\n"
-            f"- Under `## Purpose {{.unnumbered .unlisted}}`, provide the italicized governing question `_{manifest.governing_question}_`.\n"
+            f"- Under `## Purpose {{.unnumbered .unlisted}}`, include `\\begin{{marginfigure}}\n\\mlagentstack{{0}}{{0}}{{0}}{{0}}{{0}}{{100}}\n\\end{{marginfigure}}`.\n"
+            f"- Follow with the italicized governing question `_{manifest.governing_question}_`.\n"
             f"- Follow immediately with EXACTLY ONE single, cohesive, authoritative paragraph (150–220 words) expanding on: {manifest.purpose}.\n"
             f"- ZERO internal paragraph breaks. It must be an unbroken single paragraph defining the systems confrontation, the architectural role of the subsystem, and the governing invariant/trade-off.\n"
-            f"- Follow immediately with `::: {{.callout-learning-objectives}}`.\n\n"
+            f"- Follow with PDF conditional page break and `::: {{.callout-learning-objectives}}`.\n\n"
             f"Required Output Format:\n"
             f"# {manifest.title} {{#sec-vol3-{manifest.slug}}}\n\n"
+            f"::: {{layout-narrow}}\n"
+            f"::: {{.column-margin}}\n\n"
+            f"\\chapterminitoc\n\n"
+            f":::\n\n"
+            f"::: {{.content-visible when-format=\"pdf\"}}\n"
+            f"\\noindent\n"
+            f"![](images/png/cover_{manifest.slug}_blueprint_labeled_print.png){{fig-alt=\"Blueprint for {manifest.title}.\"}}\n"
+            f":::\n\n"
+            f"::: {{.content-visible unless-format=\"pdf\"}}\n"
+            f"![](images/webp/cover_{manifest.slug}_blueprint_labeled.webp){{fig-alt=\"Blueprint for {manifest.title}.\"}}\n"
+            f":::\n\n"
+            f":::\n\n"
             f"## Purpose {{.unnumbered .unlisted}}\n\n"
+            f"\\begin{{marginfigure}}\n"
+            f"\\mlagentstack{{0}}{{0}}{{0}}{{0}}{{0}}{{100}}\n"
+            f"\\end{{marginfigure}}\n\n"
             f"_{manifest.governing_question}_\n\n"
             f"[Single unbroken 150-220 word purpose paragraph]\n\n"
+            f"::: {{.content-visible when-format=\"pdf\"}}\n\n"
+            f"\\newpage\n\n"
+            f":::\n\n"
             f"::: {{.callout-learning-objectives}}\n\n"
             + "\n".join(f"- {o}" for o in manifest.objectives)
             + "\n\n:::\n\n"
@@ -584,17 +617,21 @@ def compose_step_prompt(
                 f"### Task: Author Section {sec.section_num}: {sec.title}\n"
                 f"Target Budget: {sec.budget_target} words (Strict Range: {sec.budget_range[0]}–{sec.budget_range[1]} words).\n\n"
                 f"**MANDATORY STRUCTURAL INVARIANT (THE SECTION .1 LAW):**\n"
-                f"**ABSOLUTELY NO SUBSECTIONS (ZERO `###` HEADINGS). ZERO BULLET LISTS.**\n"
-                f"Section .1 must be an unbroken, cohesive 4-beat narrative stage-setter:\n"
-                f"  - Beat 1 (Architectural Stage-Setting, ~200–250w): Situate subsystem within The Stochastic Computer; define host runtime vs unprivileged component boundary; map baseline H-S-A-C coordinate without re-deriving Chapter 1.\n"
-                f"  - Beat 2 (Canonical Systems Incident, ~250–300w): Ground directly in the Canonical Systems Scenario: {manifest.canonical_scenario}. Include concrete code or failure trace.\n"
-                f"  - Beat 3 (The Systems Confrontation, ~250–300w): Expose why the failure occurred by contrasting classical deterministic computing with stochastic processor realities (fail-plausible semantic corruption, zero ambient authority).\n"
-                f"  - Beat 4 (Computational Boundary & Analytical Handoff, ~200–250w): Formulate interface contract and resource ceilings ($K_{{\\max}}, T_{{\\max}}$), concluding with an unbroken prose bridge directly posing the first mechanistic question for Section {manifest.sections[1].section_num if len(manifest.sections) > 1 else 'next'}.\n\n"
+                f"**ABSOLUTELY NO SUBSECTIONS (ZERO `###` HEADINGS). ZERO BULLET LISTS (NO `-`, `*`, OR NUMBERED LISTS).**\n"
+                f"Section .1 must be an unbroken, cohesive narrative stage-setter composed entirely of standard flowing prose paragraphs:\n"
+                f"  - Architectural Stage-Setting: Contrast the deterministic classical CPU with the unprivileged stochastic processor core operating under zero ambient authority.\n"
+                f"  - Situate within The Stochastic Computer: define the 3-tier boundary (Host Agent Runtime, Inference Service Daemon, Neural Core) using flowing prose (do NOT use numbered or bulleted lists).\n"
+                f"  - Baseline H-S-A-C Coordinate: Map ($H=1, S=\\text{{staged}}, A=0, C=\\text{{external}}$) without re-deriving Chapter 1. MUST include the H-S-A-C compact margin locator right alongside the coordinate introduction:\n"
+                f"    ::: {{.column-margin}}\n"
+                f"    ![](images/svg/option1_hsac_compact.svg){{width=\"100%\" fig-alt=\"H-S-A-C workload diamond with four vertices labeled H, S, A, and C. The H (Horizon) node is highlighted in purple for H=1; the S, A, and C nodes are shown in gray, marking the single-invocation processor boundary.\"}}\n\n"
+                f"    *The stochastic processor operates at the single-step baseline ($H=1, A=0$).*\n"
+                f"    :::\n"
+                f"  - Systems Confrontation: The candidate proposal disconnect, fail-plausible execution, resource ceilings ($K_{{\\max}}, T_{{\\max}}$), and external invariant closure.\n"
+                f"  - Conclude with an unbroken prose bridge directly posing the first mechanistic question for Section {manifest.sections[1].section_num if len(manifest.sections) > 1 else '2.2'}.\n\n"
                 f"**Heading & Anchor:** `{sec.heading_anchor}`\n"
-                f"**Single Key Point:** {sec.key_point}\n"
-                f"**Concrete Systems Hook:**\n{sec.hook}\n\n"
+                f"**Single Key Point:** {sec.key_point}\n\n"
                 f"{negative_scope}\n"
-                f"**Points to explain:**\n{sec.points}\n\n"
+                f"**Points to explain (from Master Outline):**\n{sec.points}\n\n"
                 f"**Visuals to reference:**\n{sec.visuals or 'None specified'}\n\n"
                 f"**Causal Bridge to conclude with:**\n{sec.causal_bridge}\n\n"
                 "Output ONLY the Quarto markdown text. No backtick code fences wrapping the entire response."
@@ -636,21 +673,43 @@ def compose_step_prompt(
             "Output ONLY the Quarto markdown text. No backtick code fences wrapping the entire response."
         )
     else:
-        # Summary and Takeaways
+        # Summary and Takeaways (Volume 1 Canonical Pattern)
         task_parts.append(
             f"### Task: Author Chapter {manifest.number} Summary, Takeaways, and Chapter Connection\n"
             f"Target Budget: 500 words (Strict Range: 450–600 words).\n\n"
             f"**Heading & Anchor:** `## Summary {{#sec-vol3-{manifest.slug}-summary}}`\n\n"
             f"**Outline Specification:**\n{manifest.summary_raw}\n\n"
-            f"**REQUIRED STRUCTURE:**\n"
-            f"1. 2–3 paragraphs of authoritative synthesis summarizing the chapter's conceptual journey.\n"
-            f"2. `::: {{.callout-takeaways title=\"Core Systems Principles of {manifest.title}\"}}` containing numbered durable laws.\n"
-            f"3. `::: {{.callout-chapter-connection title=\"...\"}}` containing the forward handoff to the next chapter.\n\n"
+            f"**REQUIRED STRUCTURE (VOLUME 1 CANONICAL PATTERN):**\n"
+            f"1. Return to the governing question hook from the opening Purpose section, answering it decisively with the chapter's conceptual findings.\n"
+            f"2. `::: {{.callout-takeaways title=\"Key Takeaways\"}}` containing 3–5 bold-lead takeaways summarizing the durable engineering laws established in this chapter.\n"
+            f"3. Post-takeaway synthesis paragraph connecting the takeaways into a cohesive architectural principle.\n"
+            f"4. `::: {{.callout-chapter-connection title=\"What's Next: Inference-Time Deliberation\"}}` containing the conceptual bridge to test-time search and deliberation without using clumsy meta-phrases like 'In Chapter 3'.\n\n"
             "Output ONLY the Quarto markdown text. No backtick code fences wrapping the entire response."
         )
 
     task_instruction = "".join(task_parts)
-    return f"{TIER_1_SYSTEMS_ENGINE}\n\n{tier_2}\n\n{tier_3}\n\n{tier_4}\n\n{task_instruction}"
+
+    outline_block = ""
+    if manifest.raw_outline_text:
+        outline_block = (
+            "================================================================================\n"
+            f"AUTHORITATIVE MASTER BLUEPRINT FOR CHAPTER {manifest.number}: {manifest.title}\n"
+            "(SOURCE OF TRUTH: books/vol3/MASTER_TEXTBOOK_OUTLINE_V2.md)\n"
+            "================================================================================\n"
+            f"{manifest.raw_outline_text}\n\n"
+            "================================================================================\n"
+            "AUTHOR META-DIRECTIVE (READ AND ABSORB BEFORE AUTHORING):\n"
+            "================================================================================\n"
+            f"You have been provided with the complete, unabridged Master Blueprint for Chapter {manifest.number} above.\n"
+            "Now that you understand the entire curricular arc, pedagogical progression, and architectural constraints:\n"
+            "1. Read the corresponding section specification in the outline that is directly relevant to the section you are developing below.\n"
+            "2. Ground the narrative in authentic systems engineering realities (formal interface contracts, typed parameter specifications, POSIX exit codes, tokenizer AST splits, physical memory bus bandwidth and arithmetic intensity, fail-plausible semantic corruption) rather than synthetic scenario scripts.\n"
+            "3. Enforce all boilerplate directives: MIT Press tone, active voice, 5-type footnote taxonomy with indexed terms (`\\index{...}`), no anthropomorphism, zero ambient authority, and external invariant closure.\n"
+            "4. Strictly obey all negative scope boundaries—do NOT cannibalize topics assigned to subsequent sections or chapters.\n"
+            "================================================================================\n\n"
+        )
+
+    return f"{TIER_1_SYSTEMS_ENGINE}\n\n{outline_block}{tier_2}\n\n{tier_3}\n\n{tier_4}\n\n{task_instruction}"
 
 
 # ==============================================================================
@@ -671,17 +730,38 @@ def run_review_gates(content: str, step_info: Dict[str, Any], is_sec1: bool = Fa
     lines = content.splitlines()
     words = len(content.split())
 
+    # Gate 0.1: gate_minimum_length (Undergeneration Guard)
+    min_words = 150 if step_info.get("step_index") == 0 else 400
+    if words < min_words:
+        results.append(GateResult(
+            passed=False,
+            gate_name="gate_minimum_length",
+            message=f"FAILED: Output severely truncated or empty ({words} words vs minimum {min_words} words).",
+            details={"words": words, "min_words": min_words},
+        ))
+    else:
+        results.append(GateResult(
+            passed=True,
+            gate_name="gate_minimum_length",
+            message=f"PASSED: Word count {words} satisfies minimum length {min_words}.",
+        ))
+
     # Gate 0: gate_purpose_single_paragraph (For Step 0 Frontmatter)
     if step_info.get("step_index") == 0:
         purpose_m = re.search(r"## Purpose [^\n]+\n+(.*?)(?=::: \{\.callout-learning-objectives\}|\Z)", content, re.DOTALL)
         if purpose_m:
             p_text = purpose_m.group(1).strip()
-            p_paras = [p.strip() for p in p_text.split("\n\n") if p.strip() and not (p.strip().startswith("_") and p.strip().endswith("_"))]
+            p_paras = [
+                p.strip() for p in p_text.split("\n\n")
+                if p.strip()
+                and not (p.strip().startswith("_") and p.strip().endswith("_"))
+                and not p.strip().startswith(("\\begin", "\\end", "\\newpage", ":::", "!["))
+            ]
             if len(p_paras) > 1:
                 results.append(GateResult(
                     passed=False,
                     gate_name="gate_purpose_single_paragraph",
-                    message=f"FAILED: Purpose contains {len(p_paras)} paragraphs. The Single-Paragraph Purpose Law requires exactly ONE cohesive paragraph.",
+                    message=f"FAILED: Purpose contains {len(p_paras)} prose paragraphs. The Single-Paragraph Purpose Law requires exactly ONE cohesive paragraph.",
                     details={"paragraphs": len(p_paras)},
                 ))
             else:
@@ -697,6 +777,7 @@ def run_review_gates(content: str, step_info: Dict[str, Any], is_sec1: bool = Fa
     if is_sec1:
         subsections = [line for line in lines if re.match(r"^###\s+", line)]
         bullet_lists = [line for line in lines if re.match(r"^\s*[-*]\s+", line)]
+        numbered_lists = [line for line in lines if re.match(r"^\s*\d+\.\s+", line)]
         if subsections:
             results.append(GateResult(
                 passed=False,
@@ -704,18 +785,18 @@ def run_review_gates(content: str, step_info: Dict[str, Any], is_sec1: bool = Fa
                 message=f"FAILED: Found {len(subsections)} '###' subsections in Section .1. Section .1 must be completely unbroken prose!",
                 details={"subsections": subsections},
             ))
-        elif len(bullet_lists) > 3:  # allow max 1 brief inline 3-item list if necessary, but flag more
+        elif bullet_lists or numbered_lists:
             results.append(GateResult(
                 passed=False,
                 gate_name="gate_section1_unbroken",
-                message=f"FAILED: Found {len(bullet_lists)} bullet items in Section .1. Section .1 must be unbroken prose narrative without bullet lists.",
-                details={"bullet_count": len(bullet_lists)},
+                message=f"FAILED: Found {len(bullet_lists)} bullet items and {len(numbered_lists)} numbered list items in Section .1. Section .1 must be unbroken prose narrative without list syntax.",
+                details={"bullet_count": len(bullet_lists), "numbered_count": len(numbered_lists)},
             ))
         else:
             results.append(GateResult(
                 passed=True,
                 gate_name="gate_section1_unbroken",
-                message="PASSED: Zero '###' subsections in Section .1.",
+                message="PASSED: Zero '###' subsections and zero lists in Section .1.",
             ))
     else:
         results.append(GateResult(passed=True, gate_name="gate_section1_unbroken", message="N/A for non-Section .1"))
@@ -1008,11 +1089,13 @@ def execute_llm_call(
         )
 
     if backend == "agy":
-        cmd = ["agy", "-p", prompt, "--dangerously-skip-permissions", "--print-timeout", f"{timeout}s"]
+        cmd = ["agy", "-p", prompt, "--disable-slash-commands", "--dangerously-skip-permissions", "--print-timeout", f"{timeout}s"]
         if model:
             cmd.extend(["--model", model])
     elif backend == "claude":
-        cmd = ["claude", "-p", prompt]
+        cmd = ["claude", "-p", prompt, "--dangerously-skip-permissions"]
+        if model:
+            cmd.extend(["--model", model])
     else:
         raise ValueError(f"Unsupported backend: {backend}")
 
@@ -1028,6 +1111,11 @@ def execute_llm_call(
         raise RuntimeError(f"{backend} failed (code {proc.returncode}): {proc.stderr}")
 
     out = proc.stdout.strip()
+    # Strip CLI warnings and connector notices if present
+    out = re.sub(r"^Ignoring \d+ permissions\.allow entries[^\n]*\n?", "", out).strip()
+    out = re.sub(r"Separately, the claude\.ai [^\n]* connector[^\n]*\n?", "", out).strip()
+    # Strip <thinking>...</thinking> if present
+    out = re.sub(r"<thinking>.*?</thinking>", "", out, flags=re.DOTALL).strip()
     # Strip markdown code wrappers if model emitted ```markdown ... ```
     if out.startswith("```markdown") and out.endswith("```"):
         out = out[len("```markdown"): -3].strip()
@@ -1054,6 +1142,7 @@ def generate_with_review_and_repair(
     critical_failures = [
         g for g in gate_results
         if not g.passed and g.gate_name in [
+            "gate_minimum_length",
             "gate_purpose_single_paragraph",
             "gate_section1_unbroken",
             "gate_anti_anthropomorphism",
@@ -1281,6 +1370,17 @@ def load_state(ch_dir: Path) -> Dict[str, Any]:
                 step["word_count"] = words
                 step["completed_at"] = datetime.now().isoformat()
                 updated = True
+            elif words < 150 and step.get("status") == "completed":
+                step["status"] = "pending"
+                step["word_count"] = 0
+                step["completed_at"] = None
+                updated = True
+        else:
+            if step.get("status") == "completed":
+                step["status"] = "pending"
+                step["word_count"] = 0
+                step["completed_at"] = None
+                updated = True
     if updated:
         save_state(ch_dir, state)
     return state
@@ -1497,6 +1597,16 @@ def assemble_chapter(ch_dir: Path) -> Path:
     assembled_file.write_text(full_text, encoding="utf-8")
     words = len(full_text.split())
     print(f"\n[Assembly] Compiled {len(blocks)} parts into {assembled_file.name} ({words:,} total words)")
+
+    # Stage to canonical book directory: books/vol3/<ch_num>_<slug>/<ch_num>_<slug>.qmd
+    ch_num = str(state.get("chapter_number", "02")).zfill(2)
+    slug = state.get("slug", "processor")
+    target_ch_dir = REPO_ROOT / "books" / "vol3" / f"{ch_num}_{slug}"
+    target_ch_dir.mkdir(parents=True, exist_ok=True)
+    target_qmd = target_ch_dir / f"{ch_num}_{slug}.qmd"
+    target_qmd.write_text(full_text, encoding="utf-8")
+    print(f"[Assembly] Staged assembled draft to {target_qmd.relative_to(REPO_ROOT)}")
+
     return assembled_file
 
 

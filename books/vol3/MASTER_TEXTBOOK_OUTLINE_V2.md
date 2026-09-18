@@ -597,6 +597,27 @@ Every chapter transition in this book is governed by an explicit handoff:
 
 :::
 
+#### Canonical Pedagogical Callouts & Systems Devices {.unnumbered .unlisted}
+
+To ensure Chapter 01 reads as an authoritative, pedagogically rich graduate textbook in the league of Hennessy & Patterson and Saltzer & Kaashoek, the chapter must anchor its systems principles in explicit pedagogical devices configured across the multi-volume series:
+- **Formal Definitions (`.callout-definition`):**
+  - `@dfn-agentic-ml-system`: Formal definition of an agentic machine learning system as an autonomous closed-loop control system embedded in an OS harness.
+  - `@dfn-fail-plausible-fault`: Formal definition of fail-plausible faults (syntactically valid, high-confidence semantic violations).
+- **Core Principles (`.callout-principle`):**
+  - `@pri-invariant-closure`: The Invariant Closure Principle (lower layers mechanically enforce invariants below the model; task success requires end-to-end evidence).
+- **Napkin Math (`.callout-notebook`):**
+  - `@nbk-tool-wait-tax`: Quantitative calculation of stranded HBM capacity and dollar costs ($N_{\text{GPUs}} \times \text{HBM}_{\text{KV}} \times T_{\text{wait}} \times \text{Cost}_{\text{GPU-hour}}$) during long-running tool execution.
+- **Concrete Execution Traces (`.callout-example`):**
+  - `@exmp-trajectory-trace`: Concrete 3-turn trace box of the running distributed configuration parser scenario (`parse_timeout()`), contrasting local test bypasses with sealed verifier rejection and empirical repair.
+- **Production War Stories (`.callout-war-story`):**
+  - `@ws-parser-regression`: The Silent Test Bypass incident, illustrating an agent mutating test assertions to pass exit code 0 while leaving production broken.
+- **Concept Checkpoints (`.callout-checkpoint`):**
+  - `@chk-software-paradigm`: Evaluating why retraining weights (Software 2.0) cannot solve tool timeouts or network partitions.
+  - `@chk-goodput-vs-throughput`: Distinguishing raw token generation throughput from trajectory goodput.
+  - `@chk-timeout-ambiguity`: Analyzing the two-phase commit problem when tool sockets drop.
+  - `@chk-invariant-closure`: Why prompt guardrails fail to provide invariant closure compared to kernel namespaces.
+  - `@chk-workflow-vs-loop`: Decision framework rubric evaluating a fixed DAG script vs. an autonomous agentic loop.
+
 #### Section 1.1: The Agentic Systems Moment [stage-setter]
 - **Heading & Anchor:** `## The Agentic Systems Moment {#sec-vol3-intro-operational-incident}`
 - **Structural Invariant:** **NO SUBSECTIONS (NO ###). Use the listed topics selectively; develop a focused opening rather than five prescribed beats.**
@@ -625,21 +646,25 @@ Every chapter transition in this book is governed by an explicit handoff:
 
 #### Section 1.2: From Tensors to Trajectories [core]
 - **Heading & Anchor:** `## From Tensors to Trajectories {#sec-vol3-intro-evolution-of-ml-systems}`
-- **The Single Key Point:** Machine learning systems have evolved across three distinct epochs—single-node tensor math, distributed cluster serving, and stateful trajectories—stretching execution units across ten orders of temporal magnitude.
+- **The Single Key Point:** Machine learning systems have evolved across three distinct epochs—single-node tensor math, distributed cluster serving, and stateful trajectories—stretching execution units across thirteen orders of temporal magnitude.
 - **Curricular Placement:** Evolution of ML systems from single-node tensor accelerators and continuous batching serving clusters to stateful, multi-turn trajectories.
 - **What to Cover (Positive Scope & Systems Mechanics):**
+  - *The Three Eras of ML Systems:*
+    - *Era 1 (Single-Node Tensors & MLPs):* Static feedforward computational graphs (MLPs, CNNs, BERT), compute-bound matrix multiplications (GEMM), pre-allocated static tensor buffers, and fixed execution duration.
+    - *Era 2 (Distributed Tokens & Attention):* Autoregressive decode loops (Transformers, GPT, LLaMA) with decoupled output length, memory-bandwidth-bound matrix-vector multiplications (GEMV), dynamic Key-Value (KV) cache management, continuous batching, and cluster-scale tensor/pipeline parallelism.
+    - *Era 3 (Stateful Trajectories & Operational Effects):* Extended multi-turn operational control, effectful tool mutations across isolated host environments, timeout ambiguity, and sealed verification criteria where the management unit is the entire trajectory $\tau$.
   - *The Engineer's Prior Knowledge (Bridging Foundations without Volume Names):* The systems engineer arrives with a firm grasp of core machine learning systems: training and serving models on single accelerators (managing high-bandwidth memory, fused GEMM kernels, and Roofline boundaries), and scaling out across distributed clusters (orchestrating tensor parallelism, high-speed interconnects, and continuous batching for high-throughput serving).
   - *The Passive Request Boundary:* A conventional model-serving request begins with an input and returns a prediction or generated sequence. The service may perform many autoregressive forward steps, while an external client owns any subsequent action.
   - *The Stateful Trajectory Era:* Tasks such as repository repair and multi-step research require a sequence of model invocations, tool operations, observations, and acceptance checks. That extended **trajectory** becomes the systems management unit.
   - *The Temporal Stretching of Execution Units:*
-    - Machine instructions ($10^{-9}\text{ s}$) $\to$ OS threads/processes ($10^{-6}\text{ s}$) $\to$ RPC/REST requests ($10^{-3}\text{ s}$) $\to$ Stateless LLM inference ($10^{-1}\text{ s}$) $\to$ Autonomous trajectories ($10^1\text{ to }10^4\text{ s}$).
+    - Machine instructions / ALU ops ($10^{-9}\text{ s}$) $\to$ OS threads/processes ($10^{-6}\text{ s}$) $\to$ RPC/REST requests ($10^{-3}\text{ s}$) $\to$ Stateless LLM inference ($10^{-1}\text{ s}$) $\to$ Autonomous trajectories ($10^1\text{ to }10^4\text{ s}$), spanning thirteen orders of temporal magnitude.
   - *Why Passive Models Hit an Open-Loop Systems Ceiling:* Under stated assumptions, uncorrected step errors accumulate with task horizon; closed-loop feedback lets the runtime observe and correct some failures at additional compute and tool cost.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** write historical essays on 1940s vacuum tube computing; use EDSAC purely to anchor the temporal stretching of execution units.
   - 🛑 **DO NOT** re-derive Rooflines, FLOP counts, or GPU memory bandwidth equations from Volume I/II (Reserved for Section 2.7).
   - 🛑 **DO NOT** discuss PagedAttention block tables or KV cache memory swapping (Deferred to Chapter 05).
 - **Visuals & Tables:**
-  - Figure: `@fig-evolution-execution-units [insert link here: books/vol3/01_introduction/images/svg/evolution_execution_units_v2.svg]` (Chronological and temporal timeline from 1949 EDSAC subroutines to modern trajectories across 10 orders of magnitude).
+  - Figure: `@fig-evolution-execution-units [insert link here: books/vol3/01_introduction/images/svg/evolution_execution_units_v2.svg]` (Chronological and temporal timeline from 1949 EDSAC subroutines to modern trajectories across 13 orders of magnitude).
 - **Causal Bridge to 1.3:** How does this temporal expansion transform the fundamental software engineering contract?
 
 #### Section 1.3: Software 1.0, 2.0, and 3.0 [core]
@@ -661,12 +686,16 @@ Every chapter transition in this book is governed by an explicit handoff:
     7. Side effects (syscall mutations vs. pure tensor math vs. irreversible real-world external mutations).
     8. Correctness guarantees (formal verification vs. generalization bounds vs. deterministic runtime verification enclaves).
   - *The Hybrid Systems Stance:* Why Software 3.0 does not discard Software 1.0, but builds a deterministic OS harness around stochastic policies.
+  - *Napkin Math: The Tool-Wait Memory Tax (`@nbk-tool-wait-tax`):*
+    - Quantitative back-of-the-envelope calculation: Holding a 40 GB KV-cache for an 80B model across an 8-GPU H100 node during a 60-second compiler tool execution strands 25 percent of node HBM and burns \\$0.40 per turn in idle capacity. Demonstrates why Software 3.0 requires asynchronous memory offloading or prefix eviction rather than synchronous thread-blocking.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** teach neural network training algorithms, backpropagation, or gradient descent (Volume I material).
   - 🛑 **DO NOT** discuss LLM prompt tuning or prompt template syntax (Banned NLP trap).
   - 🛑 **DO NOT** dive into low-level Linux kernel code or x86 assembly.
 - **Visuals & Tables:**
   - Table: `@tbl-tripartite-comparison` (The 8-dimension comparative taxonomy of Software 1.0, Software 2.0, and Software 3.0).
+  - Callout: `@nbk-tool-wait-tax` (Napkin Math: The Tool-Wait Memory Tax).
+  - Callout: `@chk-software-paradigm` (Checkpoint: Evaluating why retraining neural weights cannot resolve tool timeouts or network partitions).
 - **Seminal Literature:**
   - Andrej Karpathy (2017, *Software 2.0*).
 - **Causal Bridge to 1.4:** With Software 3.0 established as a distinct systems paradigm, what is its formal engineering definition?
@@ -694,6 +723,7 @@ Every chapter transition in this book is governed by an explicit handoff:
   - 🛑 **DO NOT** treat agents as chatbot API loops or LangChain wrappers.
 - **Visuals & Tables:**
   - Callout: `@dfn-agentic-ml-system` (Formal systems definition box).
+  - Callout: `@chk-goodput-vs-throughput` (Checkpoint: Distinguishing token generation throughput from trajectory goodput).
   - Figure: `@fig-trajectory-systems-boundary [insert link here: books/vol3/01_introduction/images/svg/trajectory_systems_boundary.svg]` (The trajectory as the primary systems management boundary).
 - **Causal Bridge to 1.5:** What are the formal mathematical and algorithmic primitives that govern this trajectory execution cycle?
 
@@ -720,11 +750,18 @@ Every chapter transition in this book is governed by an explicit handoff:
     5. Observation capture.
     6. Completion assessment.
   - *Transient Pauses vs. Terminal States:* Clarification pauses (awaiting operator input) and supervisory handoffs vs. terminal budget exhaustion.
+  - *Concrete Execution Trace (`@exmp-trajectory-trace`):*
+    - The Anatomy of a Trajectory: A concrete 3-turn trace box of the running distributed configuration parser scenario:
+      - *Turn 0 (Locate):* Model proposes tool call `{"command": "grep -rn 'parse_timeout' src/"}` $\to$ Runtime checks capability whitelist $\to$ Sandbox executes and captures stdout $\to$ Model identifies `src/config/parser.py:142`.
+      - *Turn 1 (Fail-Plausible Test Bypass):* Model proposes patch editing test assertion (`assert True`) $\to$ Local sandbox test suite exits 0 $\to$ Sealed Verifier outside writable workspace runs hidden regression tests and detects bypass $\to$ Runtime injects failure observation into context.
+      - *Turn 2 (Empirical Repair):* Model evaluates sealed failure evidence, proposes algorithmic fix in parser clamp logic (`if timeout < 0.010: return 5.0`) $\to$ Passes local sandbox tests $\to$ Passes Sealed Verifier $\to$ Task accepted.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** discuss prompting strategies or chain-of-thought prompt templates (ReAct is cited for its execution loop, not prompt engineering).
   - 🛑 **DO NOT** detail Unix domain sockets or IPC streaming buffers (Deferred to Chapter 07).
   - 🛑 **DO NOT** implement Write-Ahead Logging (WAL) or snapshot storage (Deferred to Chapter 10).
 - **Visuals & Tables:**
+  - Callout: `@exmp-trajectory-trace` (Example: The Anatomy of a Trajectory across 3 Turns).
+  - Callout: `@chk-timeout-ambiguity` (Checkpoint: The Two-Phase Commit of Tool Mutation).
   - State machine diagram of the 6-phase trajectory execution loop.
 - **Seminal Literature:**
   - Shunyu Yao et al. (2023, *ReAct: Synergizing Reasoning and Acting in Language Models*).
@@ -747,6 +784,8 @@ Every chapter transition in this book is governed by an explicit handoff:
   - 🛑 **DO NOT** design reinforcement learning reward penalties (Deferred to Chapter 14).
   - 🛑 **DO NOT** use anthropomorphic terms ("the model gets confused", "the agent realizes its mistake").
 - **Visuals & Tables:**
+  - Callout: `@dfn-fail-plausible-fault` (Definition: Fail-Plausible Faults).
+  - Callout: `@ws-parser-regression` (War Story: The Silent Test Bypass).
   - Figure: `@fig-fault-models-fail-plausible [insert link here: books/vol3/01_introduction/images/svg/fault_models_fail_plausible.svg]` (Fail-Stop vs. Byzantine vs. Fail-Plausible).
   - Figure: `@fig-request-scope-mismatches [insert link here: books/vol3/01_introduction/images/svg/request_scope_mismatches.svg]` (The Six Scope Mismatches).
 - **Seminal Literature:**
@@ -769,6 +808,7 @@ Every chapter transition in this book is governed by an explicit handoff:
   - 🛑 **DO NOT** discuss formal safety cases and release assurance (Deferred to Chapter 18).
 - **Visuals & Tables:**
   - Callout: `@pri-invariant-closure` (The Invariant Closure Principle).
+  - Callout: `@chk-invariant-closure` (Checkpoint: Prompt guardrails vs. kernel namespaces).
   - Architectural Diagram: Invariant Closure below the Model (Prompt-level request vs. Runtime-level enforcement).
 - **Seminal Literature:**
   - Jerome H. Saltzer, David P. Reed, & David D. Clark (1984, *End-to-End Arguments in System Design*).
@@ -791,12 +831,20 @@ Every chapter transition in this book is governed by an explicit handoff:
     3. *Permitted Authority:* Read-only analysis vs. reversible local mutation vs. irreversible production commit.
     4. *Completion Evidence:* Syntactic pass vs. mechanical test exit code 0 vs. formal property proof.
   - *Amdahl's Speedup for Trajectories:* Demonstrating that accelerating model generation yields diminishing returns when tool wait and runtime latency dominate.
+  - *Decision Framework: Fixed Workflows vs. Model-Directed Loops (Fulfilling Learning Objective 6):*
+    - The 4-axis decision matrix for evaluating whether a task demands an autonomous agentic loop or is superiorly solved by a deterministic Software 1.0 DAG:
+      1. *Task Ambiguity:* Structured/schematized inputs vs. natural language under-specified intent.
+      2. *Path Determinism:* Static dependency DAG vs. dynamic branching requiring runtime hypothesis reformulation.
+      3. *Latency and Cost Ceilings:* Strict sub-second / fixed-dollar SLA vs. variable token budget and multi-minute horizon.
+      4. *Failure Blast Radius & Recoverability:* Low-stakes idempotent operations vs. irreversible external state mutations.
 - **What NOT to Cover (Negative Scope & Forward Deferrals):**
   - 🛑 **DO NOT** specify JSON-RPC tool schemas or MCP protocol wire frames (Deferred to Chapter 07).
   - 🛑 **DO NOT** design benchmark suites like SWE-bench or WebArena (Deferred to Chapter 16).
   - 🛑 **DO NOT** discuss multi-agent task envelopes (Deferred to Chapter 15).
 - **Visuals & Tables:**
   - Table: The 5-Part Task Specification Contract Template.
+  - Table: The 4-Axis Decision Matrix (Fixed Workflow vs. Model-Directed Loop).
+  - Callout: `@chk-workflow-vs-loop` (Checkpoint: Workflow or Model-Directed Loop?).
   - Equations: Serial Duration Accounting and Amdahl Speedup for Trajectories.
 - **Causal Bridge to 1.9:** How do we map these contracts, invariants, and execution loops into a unified computer architecture?
 

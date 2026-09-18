@@ -1,0 +1,58 @@
+<!-- SECTION_START: 1.2 (#sec-vol3-intro-evolution-of-ml-systems) -->
+## From Tensors to Trajectories {#sec-vol3-intro-evolution-of-ml-systems}
+
+To understand how agency became an operating system property, we must trace how machine learning systems evolved over the past decade. The systems engineer arrives at this book with a solid grasp of core machine learning infrastructure: optimizing kernel execution on single accelerators by managing memory hierarchies, fusing general matrix multiplication (GEMM) operations, and saturating Roofline ceilings; and scaling out across distributed clusters by orchestrating tensor parallelism, high-speed interconnect fabrics, and continuous batching schedulers.
+
+Yet across both regimes, the fundamental unit of systems management remained unchanged: the **stateless inference request**. The emergence of agentic execution does not discard this hardware foundation; rather, it stretches the execution boundary across thirteen orders of temporal magnitude, establishing the **stateful trajectory** as the primary abstraction of computing systems.
+
+### The Three Eras of Machine Learning Systems
+
+The historical trajectory of machine learning systems unfolds across three distinct architectural epochs, each defined by what the system managed, what hardware bounded its performance, and where its execution boundary was drawn:
+
+1. **The Single-Node Acceleration Era (Tensors):** The initial challenge of deep learning was computational density. Systems engineering focused on single-node execution: mapping multidimensional tensor graphs onto specialized systolic arrays and single instruction, multiple data (SIMD) vector units. The dominant engineering challenges were kernel fusion, operator compilation, and managing the memory shuttle between off-chip HBM and on-chip SRAM. The unit of work was the **tensor operation**, executing on illustrative timescales of microseconds to milliseconds ($10^{-6}\text{ to }10^{-3}\text{ s}$).
+2. **The Distributed Serving Era (Tokens):** As model scale expanded from millions of parameters to hundreds of billions, models outgrew the physical memory capacity of individual accelerators. Systems engineering expanded to cluster-level orchestration: partitioning model weights across tensor, pipeline, and expert parallel topologies. Inference serving evolved from static batching to dynamic iteration-level continuous batching, maximizing token throughput while managing dynamic Key-Value (KV) cache allocations across distributed HBM. The unit of work was the **token generation request**, executing on timescales of hundreds of milliseconds to seconds ($10^{-1}\text{ to }10^0\text{ s}$).
+3. **The Agentic Systems Era (Trajectories):** The emergence of delegated execution shifts the systems boundary from serving tokens to governing autonomous tasks. In this regime, an application is no longer an isolated query-response interaction. It is an extended, stateful, multi-turn sequence of model deliberations, tool invocations, environment state mutations, and empirical verification assertions. The unit of work is the **trajectory**, executing on timescales of seconds to hours ($10^1\text{ to }10^4\text{ s}$).
+
+### The Passive Request Boundary
+
+Throughout the first two eras, systems operated under an unstated invariant: the **passive request boundary**. When an external client submits a payload to an inference service, the serving engine ingests the prompt tokens, executes parallel prefill to populate its KV cache, and runs iterative autoregressive decode steps until a stop token is emitted.
+
+Once the final token is serialized to the response stream, the service reclaims ephemeral activation memory and considers the transaction complete. The serving system bears zero responsibility for downstream execution. If the generated text contains invalid syntax, references a deprecated API endpoint, or proposes an incorrect database query, the serving layer remains completely unaware. Correctness, validation, error recovery, and environmental side-effects are pushed entirely onto the external caller.
+
+This passive boundary creates an operational barrier for complex workloads. In our running configuration parser scenario, if a model emits a patch that introduces a subtle deadlock under high network concurrency, a single forward pass cannot verify the failure. Real-world tasks resist one-shot generation because software environments are partially observable, tool outputs are non-deterministic, and requirements reveal themselves dynamically through execution feedback.
+
+### The Temporal Stretching of Execution Units
+
+The transition from passive model serving to autonomous task execution fundamentally alters the time horizons over which computer systems must maintain state, schedule resources, and isolate faults. In classical computing systems, the hierarchy of execution units expanded over decades across well-understood orders of magnitude:
+
+$$\begin{aligned}
+\text{Machine Instruction (ALU Opcode)} &\sim 10^{-9}\text{ s} \quad (1\text{ ns}) \\
+\text{Operating System Thread / Context Switch} &\sim 10^{-6}\text{ s} \quad (1\text{ }\mu\text{s}) \\
+\text{Network RPC / Microservice Call} &\sim 10^{-3}\text{ s} \quad (1\text{ ms}) \\
+\text{Stateless LLM Forward Step (Single Token)} &\sim 10^{-2}\text{ to } 10^{-1}\text{ s} \quad (10\text{ to }100\text{ ms}) \\
+\text{Conversational LLM Request (Full Stream)} &\sim 10^0\text{ s} \quad (1\text{ s}) \\
+\text{Autonomous Agent Trajectory (Task Execution)} &\sim 10^1\text{ to } 10^4\text{ s} \quad (10\text{ s to several hours})
+\end{aligned}$$
+
+An autonomous agent trajectory stretches the execution unit across **thirteen orders of temporal magnitude** relative to the underlying physical clock cycles that power it. When an execution unit spans hundreds or thousands of seconds, classical systems assumptions collapse:
+
+* **Memory Residency:** In a millisecond RPC, holding memory allocations in hardware registers or fast SRAM is standard practice. In an agent trajectory spanning an hour, stranding expensive accelerator HBM while the agent waits on an external compiler or human approval incurs prohibitive economic costs—a failure mode formalized in this book as the *Tool-Wait Memory Tax*.
+* **Fault Containment:** In a stateless request, an unhandled exception or malformed token sequence triggers a clean process restart or request retry. In an extended trajectory where intermediate steps have already mutated external databases, Git branches, and file systems, a mid-flight crash leaves the host environment in an inconsistent state. The runtime cannot simply restart; it requires explicit compensation and checkpoint-recovery semantics.
+* **Failure Compounding:** In an open-loop system, uncorrected step errors accumulate geometrically with horizon length. To survive over extended execution horizons, the system must transition from open-loop generation to closed-loop observation, repair, and verification.
+
+### The Trajectory as the Systems Management Unit
+
+Because operational work cannot be completed in an isolated forward pass, the fundamental unit of systems design in Software 3.0 is the **trajectory** $\tau$. Formally, an execution trajectory is an ordered sequence of stateful execution tuples recorded across discrete turns $t \in \{0, 1, \dots, N-1\}$:
+
+$$\tau = \big( (a_{\text{prop}}^{(0)}, a_0, o_1, v_1), (a_{\text{prop}}^{(1)}, a_1, o_2, v_2), \dots, (a_{\text{prop}}^{(N-1)}, a_{N-1}, o_N, v_N) \big)$$
+
+where:
+* $a_{\text{prop}}^{(t)}$ is the unprivileged candidate proposal emitted by the stochastic processor core.
+* $a_t = \Gamma(a_{\text{prop}}^{(t)})$ is the authorized, validated action dispatched to the environment (or a synthetic error payload if authorization failed).
+* $o_{t+1}$ is the structured empirical observation captured from the isolated execution sandbox (standard output, standard error, exit codes, file diffs).
+* $v_{t+1}$ is the empirical verification evidence evaluated by the runtime's independent verification harness.
+
+The trajectory is the unifying thread that ties the entire stochastic computer together. It serves as the logical instruction trace of the agent, the audit log for transactional recovery, the working set that must be paged across the memory hierarchy, and the training dataset that will be compiled back into model weights via offline reinforcement learning.
+
+By elevating the trajectory to the primary systems abstraction, we redefine the engineering challenge. The core question is no longer merely: *How quickly can our accelerators generate individual tokens?* The question becomes: *How do we architect an accountable computer system capable of scheduling, isolating, checkpointing, and verifying an entire stateful trajectory across non-deterministic execution horizons?*
+<!-- SECTION_END: 1.2 -->

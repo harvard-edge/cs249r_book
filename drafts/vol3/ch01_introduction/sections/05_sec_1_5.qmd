@@ -1,0 +1,57 @@
+<!-- SECTION_START: 1.5 (#sec-vol3-intro-trajectory-engine) -->
+## The Closed-Loop Trajectory {#sec-vol3-intro-trajectory-engine}
+
+At the heart of every agentic system lies an execution engine that drives the closed-loop control cycle. While early literature popularized this interaction through prompt-level formulations like ReAct [@yao2023react], systems engineering requires viewing the closed loop not as a prompting technique, but as a formal state-transition lifecycle.
+
+Autonomous agency is an iterative trajectory of discrete, typed state transitions, governed by six foundational primitives and orchestrated by a deterministic runtime harness.
+
+### The Six Systems Primitives
+
+To construct an execution engine, we formalize the six core computational primitives that participate in every execution step:
+
+1. **The Goal ($g$):** The immutable, declarative specification of the delegated task. The goal defines the target condition, environment invariants, and acceptance criteria. While intermediate instructions drift across turns, the goal remains constant in the agent's context or system register, anchoring the entire trajectory.
+2. **The Context ($c_t$):** The logical sequence of tokens staged into the model's working memory at turn $t$. The context includes the system contract, active tool schemas, the task goal, and a curated sliding window of past actions and environmental observations:
+   $$c_t = \big( g, \mathcal{S}, (a_{\text{prop}}^{(0)}, a_0, o_1), \dots, (a_{\text{prop}}^{(t-1)}, a_{t-1}, o_t) \big)$$
+   where $\mathcal{S}$ represents the static system definition and tool capability catalog.
+3. **The Model Invocation ($M(c_t) \to a_{\text{prop}}^{(t)}$):** The unprivileged forward evaluation of the stochastic processor core. Given context $c_t$, the model samples next tokens autoregressively from its learned distribution, emitting a candidate action proposal $a_{\text{prop}}^{(t)}$. At this stage, $a_{\text{prop}}^{(t)}$ is merely an in-memory string buffer with zero execution authority.
+4. **The Action Authorization Gate ($\Gamma(a_{\text{prop}}^{(t)}) \to a_{\text{perm}}^{(t)}$):** The deterministic security and validity filter enforced by the host runtime. The gate parses the candidate string against registered tool schemas, validates argument types, checks capability permissions, and verifies resource rate limits. If the proposal violates schema or security constraints, the gate rejects it locally without invoking the underlying system, returning a structured diagnostic back to the context.
+5. **The Runtime Dispatch ($D(a_{\text{perm}}^{(t)}) \to o_{t+1}$):** The privileged execution of the validated action against the target environment. The host runtime dispatches the call across system boundaries—invoking a local shell inside a container sandbox, executing a transaction against a database engine, or dispatching an HTTP request over a network socket.
+6. **The Observation ($o_{t+1}$):** The empirical feedback captured by the runtime from the environment following dispatch. Observations include standard output, standard error, exit codes, process execution latencies, and file diffs. The runtime normalizes, truncates, and formats this raw telemetry into a structured payload ready for context staging.
+
+### The Trajectory State Machine
+
+The interaction of these six primitives forms the formal execution trajectory $\tau$:
+
+$$\tau = \big( (a_{\text{prop}}^{(0)}, a_0, o_1, v_1), (a_{\text{prop}}^{(1)}, a_1, o_2, v_2), \dots, (a_{\text{prop}}^{(N-1)}, a_{N-1}, o_N, v_N) \big)$$
+
+The execution engine advances through a six-phase state machine at each turn $t$ (@tbl-six-phase-lifecycle).
+
+::: {#tbl-six-phase-lifecycle}
+| Phase | State Name | Systems Operation | Guard Condition / Exit Criteria |
+| :--- | :--- | :--- | :--- |
+| **Phase 1** | Continuation Check | Inspect ACB quotas: token count $K_t < K_{\max}$, wall clock $T_t < T_{\max}$, step $t < N_{\max}$ | Budget exceeded $\to$ Abort; Healthy $\to$ Phase 2 |
+| **Phase 2** | Context Assembly | Evict stale observations, compress working set, serialize schema definitions into $c_t$ | Fits within hardware context window $S_{\max}$ |
+| **Phase 3** | Core Invocation | Dispatch $c_t$ to inference service; stream autoregressive tokens to generate $a_{\text{prop}}^{(t)}$ | Stop token emitted or generation quota exhausted |
+| **Phase 4** | Action Authorization | Validate schema syntax, match capabilities, enforce POSIX sandbox permissions | Invalid syntax/perms $\to$ Schema Fault; Valid $\to$ Phase 5 |
+| **Phase 5** | Sandbox Dispatch | Execute $a_{\text{perm}}^{(t)}$ inside isolated container/microVM; capture stdout, stderr, exit code | Process completion or execution timeout |
+| **Phase 6** | Verification & Assessment | Evaluate deterministic test assertions ($v_{t+1}$); inspect for terminal completion call | Invariant satisfied $\to$ Terminate; Incomplete $\to$ Turn $t+1$ |
+
+The Six-Phase Trajectory Execution Lifecycle: The deterministic state machine executed by the host runtime on every turn.
+:::
+
+### Transient Pauses, Timeouts, and Terminal States
+
+A dependable runtime must distinguish between **transient execution pauses**, **ambiguous timeouts**, and **terminal states**:
+
+* **Transient Execution Pauses:**
+  * *Tool-Wait Pauses:* When dispatching a long-running external job—such as running a full integration regression suite in our configuration parser scenario—the agent runtime transitions the trajectory into a `BLOCKED_ON_IO` state. The runtime frees physical compute workers, marks the ACB as asleep, and registers an asynchronous callback handler.
+  * *Supervisory Clarification Pauses:* If the model encounters an ambiguous task boundary or requires elevated human authorization (such as modifying production access controls), the engine enters a `WAIT_HUMAN_APPROVAL` state. The trajectory's state is serialized to durable storage until input is received.
+* **The Timeout and Commit Ambiguity Hazard:**
+  * In distributed systems, a timeout does not imply that an operation failed to execute; an external process or RPC may have committed its mutation before the network connection dropped. If an agent naively retries an ambiguous action—such as issuing a non-idempotent database update or Git commit—it risks duplicate state mutations. Runtimes must require **idempotency keys** and perform explicit state reconciliation before issuing retries after a timeout.
+* **Terminal States:**
+  * *Verified Success (`TERMINATED_SUCCESS`):* The model signals completion, and the host runtime's independent verification harness confirms that all required post-conditions and test assertions pass.
+  * *Budget Exhaustion (`TERMINATED_QUOTA_EXCEEDED`):* The trajectory reaches its limit on wall-clock time, token expenditure, or iteration count without satisfying completion criteria.
+  * *Security Fault (`TERMINATED_SECURITY_FAULT`):* The agent attempts an unauthorized privilege escalation, repeatedly violates sandbox policies, or damages environment integrity beyond recovery.
+
+When this closed loop runs smoothly, an agent can systematically search solution spaces, repair compilation errors, and complete complex operational workflows. However, because the core decision engine inside this loop is a non-deterministic neural model rather than a deterministic CPU, the execution engine faces failure modes that defy classical systems assumptions.
+<!-- SECTION_END: 1.5 -->
