@@ -118,5 +118,12 @@ class TestReleaseTierCLI:
             timeout=60,
             env=env,
         )
+        if tier == "challenge":
+            # No src/ module marks a role="challenge" region yet, so the challenge
+            # tier would equal the instructor tier and ship full solutions. The
+            # CLI refuses instead (2026-09-17); this asserts the refusal.
+            assert res.returncode != 0, "challenge tier must refuse a module with no challenge regions"
+            assert "Refusing to stage --tier challenge" in res.stdout + res.stderr
+            return
         assert res.returncode == 0, f"Generate failed for tier {tier}:\n{res.stderr}\n{res.stdout}"
         assert "Staged" in res.stdout
