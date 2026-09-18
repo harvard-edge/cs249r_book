@@ -85,6 +85,12 @@ $$|x - \hat{x}| \le \frac{S}{2} = \frac{x_{\max} - x_{\min}}{510}$$
 
 The bound describes individual values inside the observed range, with an additional floating-point rounding error in the implementation. It does not bound the model's prediction error, nor does it apply to later inputs outside a frozen calibration range. Within its scope, it is about $0.2\%$ of the zero-inclusive range, regardless of the tensor's size. The bound is also the warning. It is relative to the range, not to $x$. A weight of $0.001$ in a tensor whose values span $[-1, 1]$ is rounded to the grid step $S \approx 0.0078$, and comes back as $0$. Small values in a tensor with one large outlier are where quantization loses information.
 
+A signal-to-noise ratio turns the per-value bound into one number for the whole tensor. If rounding errors are spread evenly across $[-S/2, S/2]$, their root-mean-square value is $S/\sqrt{12}$. A signal that fills the range uniformly has root-mean-square value $(x_{\max} - x_{\min})/\sqrt{12}$, and the ratio of the two, expressed in decibels, is
+
+$$\text{SNR} = 20 \log_{10} \frac{x_{\max} - x_{\min}}{S} = 20 \log_{10} \left(2^b - 1\right) \approx 6.02\,b \ \text{dB}$$
+
+for a grid of $b$ bits. Eight bits give $20 \log_{10} 255 \approx 48.1$ dB, and each added bit adds about 6 dB, because it doubles the number of steps. The figure is a ceiling, not a prediction. Real weight tensors cluster near zero rather than filling their range, so their signal power falls below the uniform case while the noise, which is set by the step, does not; one outlier that stretches the range lowers the ratio for every other value. How much ratio a given model can tolerate is a property of that model, and only an accuracy measurement settles it.
+
 This mapping is called **asymmetric** because the grid does not have to be centered on zero; it is the form Module 15 uses. The **symmetric** special case takes $x_{\min} = -x_{\max}$, so that $Z = 0$ and the formulas lose a term; it wastes codes when a tensor is all positive, which is why the general form earns its extra integer. A tensor of all one value has no range at all, and the module handles it with a separate branch that encodes every element as code $0$ and lets $Z$ and $S$ carry the constant.
 
 ![**Affine quantization grid and zero-point alignment**: Continuous float32 values across dynamic range $[x_{\min}, x_{\max}]$ are discretized into 256 uniform integer bins ($q \in [-128, 127]$). Scale $S$ specifies step size, zero-point $Z$ aligns real value $0.0$ to an exact integer code, and clamping prevents out-of-range overflow, bounding reconstruction error to $\le S/2$.](assets/images/diagrams/15_affine-quantization-grid.svg){#fig-affine-quantization-grid fig-alt="Diagram showing continuous float32 dynamic range mapped into 256 discrete int8 bins with scale S, zero point Z, and reconstruction error bounds."}
@@ -397,6 +403,12 @@ Three things are worth looking for in your own work. When a quantized model lose
 `QuantizedLinear` snapshots weight and bias codes at construction. Calibration changes only its input-grid state; forward reconstructs the operands, multiplies in float32, and returns a new output. `quantize_model` replaces layers in container order, using inference-mode activations from the already converted prefix to calibrate each replacement. The separate integer trace explains how scales can be factored out of dot products, but it is not the module's execution path. Packed code bytes and metadata are modeled; the Tensor arrays still occupy float32 storage. @sec-compression changes the other factor in the storage calculation, the number of entries a layer needs, rather than the precision of each entry.
 
 ---
+
+## Further reading
+
+- Jacob et al. (2018), [Quantization and training of neural networks for efficient integer-arithmetic-only inference](https://arxiv.org/abs/1712.05877), *CVPR*. The affine scheme with a scale and zero point that this chapter implements, and the integer arithmetic it enables.
+- Nagel et al. (2021), [A white paper on neural network quantization](https://arxiv.org/abs/2106.08295), *arXiv*. Post-training quantization in practice, including per-channel scales and outliers.
+- Gholami et al. (2021), [A survey of quantization methods for efficient neural network inference](https://arxiv.org/abs/2103.13630), *arXiv*. The wider design space, from uniform grids to mixed precision.
 
 ## Exercises
 

@@ -156,6 +156,16 @@ $$\operatorname{GELU}_{\text{TinyTorch}}(x) = x\,\sigma(1.702x).$$
 
 At $x=-1$, the gate is about $0.1542$, giving an output of $-0.1542$. At $x=1$, it is about $0.8458$, giving $0.8458$. Negative inputs can therefore affect the next layer, unlike ReLU's zero branch. Very negative inputs still produce outputs close to zero, so smoothness does not promise strong responsiveness everywhere. The approximation also differs from exact GELU, whose outputs at $-1$ and $1$ are about $-0.1587$ and $0.8413$. The worked trace follows the sigmoid form that the code actually computes.
 
+### Which activation goes last
+
+Hidden layers need a nonlinearity. The last layer needs whatever form the loss expects, which depends on the task more than on any activation's merits.
+
+- **Regression.** Leave the output linear. A target can be any real number, and @sec-losses's mean squared error compares raw outputs with it.
+- **One yes-or-no label.** End with a sigmoid, so the output is one probability in $(0, 1)$. TinyTorch's `BinaryCrossEntropyLoss` expects exactly that, and clips it away from 0 and 1 before taking logarithms.
+- **One label among many.** Return the raw scores, the **logits**, and let the loss normalize them. TinyTorch's `CrossEntropyLoss` applies a max-shifted log-softmax internally, which stays finite where exponentiating first would overflow. Apply softmax yourself only when a caller needs probabilities, at inference time.
+
+The third rule is the one that fails quietly. A model that ends in softmax and trains with `CrossEntropyLoss` runs without an error, because the loss simply treats the probabilities as logits and normalizes them again. Every score it sees then lies between 0 and 1, so the correct class can never pull far ahead. With ten classes, the best the loss can reach is $-\ln\big(e / (e + 9)\big) \approx 1.46$, however well the model separates the classes.
+
 ---
 
 ## The Code
@@ -360,6 +370,11 @@ The numerical mechanisms are small but consequential. ReLU keeps positives and z
 @sec-layers adds the tensors an activation does not own: trainable weights and biases. Its containers can compose those layers with the activation wrappers because both accept a Tensor, return a Tensor, and answer `parameters()`. The next design problem is collecting the trainable values and choosing their initial scale.
 
 ---
+
+## Further reading
+
+- Glorot, Bordes, and Bengio (2011), [Deep sparse rectifier neural networks](https://proceedings.mlr.press/v15/glorot11a.html), *AISTATS*. The case for ReLU in deep networks, including the exact zeros this chapter's ReLU produces.
+- Hendrycks and Gimpel (2016), [Gaussian error linear units (GELUs)](https://arxiv.org/abs/1606.08415), *arXiv*. The source of GELU and of the tanh approximation the module implements.
 
 ## Exercises
 

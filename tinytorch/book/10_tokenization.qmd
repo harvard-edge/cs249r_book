@@ -256,6 +256,8 @@ The comparison suggests where to reduce repeated work. Our encoder does repeated
 In production systems, tokenizing gigabytes of training data in Python with string loops is a major bottleneck. Modern libraries such as HuggingFace `tokenizers` are implemented in Rust: they memory-map the input text files, use lock-free trie structures or hash tables for fast merge rank lookups, and tokenize across all available CPU cores in parallel via Rayon. During autoregressive inference, the tokenizer also handles incremental streaming decoding without reparsing the entire historical token sequence.
 :::
 
+Reserved tokens are the other difference worth naming. TinyTorch reserves one, `<UNK>` at ID 0. Production vocabularies usually reserve a few more, for jobs the merge rules cannot express: a padding token that fills shorter sequences so a batch forms a rectangle, beginning- and end-of-sequence tokens that mark document boundaries, and in chat models, tokens that separate turns. Each is a row of the embedding table and a column of the output layer like any other ID, so it costs parameters and must be learned. Each also needs a rule outside the tokenizer. The loss must skip padding positions, and a generation loop must know which ID means stop. @sec-milestone-2 shows the cost of leaving one out: concatenating sentences with no end-of-sequence token teaches the model to run from one sentence straight into the next.
+
 The invariant that reaches the model is more important than either optimization. ID 22 denotes `low</w>` in our trace; another tokenizer can assign that same number to unrelated text. Keeping all IDs in range prevents an indexing error, but it does not detect a mismatched vocabulary. The alphabet, preprocessing, reserved tokens, ID mappings, and ordered merges must travel together with the model. Likewise, changing the vocabulary requires reconsidering the model's input and output dimensions. A model's context limit counts tokens rather than words, so the same amount of text can occupy different fractions of that limit under different segmentations.
 
 ---
@@ -267,6 +269,12 @@ Module 10 turns strings into stable integer sequences without tensors or gradien
 `encode` uses that fixed state: split, mark word endings, replay merges, then look up IDs. `decode` joins their strings and normalizes whitespace. Known characters survive in new words and new word positions; unseen characters become `<UNK>`. The alphabet determines coverage, while the learned rules determine segmentation. A byte alphabet and whitespace-preserving preprocessing address separate limitations of this reference. @sec-embeddings accepts the resulting IDs and builds the missing numerical operation: selecting a learned vector for each ID, then representing where that token occurs in the sequence.
 
 ---
+
+## Further reading
+
+- Sennrich, Haddow, and Birch (2016), [Neural machine translation of rare words with subword units](https://arxiv.org/abs/1508.07909), *ACL*. Byte-pair encoding adapted to text, the algorithm this chapter implements.
+- Radford et al. (2019), [Language models are unsupervised multitask learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf), *OpenAI*. GPT-2, including the byte-level base alphabet in the production comparison above.
+- Kudo and Richardson (2018), [SentencePiece: a simple and language independent subword tokenizer and detokenizer for neural text processing](https://arxiv.org/abs/1808.06226), *EMNLP*. Tokenizing raw text, whitespace included, without a language-specific splitting step.
 
 ## Exercises
 
