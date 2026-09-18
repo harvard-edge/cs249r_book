@@ -1,14 +1,14 @@
 ## Tokens as the Processor Interface {#sec-vol3-processor-tokenization}
 
-A classical CPU interfaces with system memory and peripherals through standardized binary encodings defined by an Instruction Set Architecture (ISA). In an x86-64 or ARM processor, the hardware instruction decoder unpacks binary machine words into discrete opcodes, register specifiers, and immediate memory offsets; execution units operate directly on binary integers and IEEE 754 floating-point words. In contrast, the stochastic processor core possesses no hardware instruction decoder, no binary registers, and no native awareness of text strings, programming language grammars, or ASCII characters. Its physical computational substrate consists of continuous tensor contractions executed across multi-dimensional vector spaces.
+A classical CPU interfaces with system memory and peripherals through standardized binary encodings defined by an Instruction Set Architecture (ISA). In an x86-64 or ARM processor, the hardware instruction decoder unpacks binary machine words into discrete opcodes, register specifiers, and immediate memory offsets; execution units operate directly on binary integers and IEEE 754 floating-point words. In contrast, a foundation model possesses no hardware instruction decoder, no binary registers, and no native awareness of text strings, programming language grammars, or ASCII characters. Its physical computational substrate consists of continuous tensor contractions executed across multi-dimensional vector spaces.
 
-To bridge external symbolic text with continuous neural state, the system relies on the *tokenizer*. The tokenizer serves as the fundamental hardware-software Application Binary Interface (ABI) of the stochastic computer. It establishes a deterministic, bidirectional mapping between variable-length UTF-8 byte sequences $\Sigma^*$ and discrete integer identifiers drawn from a bounded vocabulary $\mathcal{V}$:
+To bridge external symbolic text with continuous neural state, the system relies on the *tokenizer*. The tokenizer serves as the fundamental hardware-software serializer (Application Binary Interface) of the system. It establishes a deterministic, bidirectional mapping between variable-length UTF-8 byte sequences $\Sigma^*$ and discrete integer identifiers drawn from a bounded vocabulary $\mathcal{V}$:
 
 $$\mathcal{T}: \Sigma^* \to \mathcal{V}^*, \quad \mathcal{T}^{-1}: \mathcal{V}^* \to \Sigma^*$$
 
-where $|\mathcal{V}|$ denotes the total vocabulary cardinality. These discrete *token IDs* constitute the raw data currency and execution primitives of the stochastic computer.
+where $|\mathcal{V}|$ denotes the total vocabulary cardinality (typically between $32{,}000$ and $128{,}000$ tokens). These discrete *token IDs* constitute the raw data currency and execution primitives of the foundation model.
 
-### Subword Tokenization and Discrete Model Representation
+### The Lexing Boundary: Why Neural Networks Cannot Read Strings
 
 To an engineer designing a runtime, the choice of token representation presents a classic systems trade-off between dictionary size and sequence length. Two naive approaches immediately fail at scale:
 
@@ -30,24 +30,21 @@ Byte-level BPE [@radford2019language] remaps octets to printable Unicode, mappin
 
 [^fn-whitespace-prefix]: **Whitespace Prefix Encodings**: Because BPE vocabularies encode leading whitespace directly into subword identifiers, modifying indentation or trimming trailing whitespace fundamentally alters downstream token IDs, embedding vector lookups, and continuation probabilities. \index{Whitespace Encoding}\index{Tokenizer!Whitespace Prefix}
 
-In silicon, token ID $x_i \in \{0, \dots, |\mathcal{V}|-1\}$ indexes row $x_i$ in embedding table $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$, where $d_{\text{model}}$ is hidden dimension. For prompt $\mathbf{x} = (x_1, x_2, \dots, x_M)$, the accelerator gathers the embedding rows:
+### The Silicon Mechanism: Embedding Table Gather
+
+In hardware, token IDs do not participate in arithmetic operations directly. Instead, token ID $x_i \in \{0, \dots, |\mathcal{V}|-1\}$ serves as a physical row index into the model's *embedding table* $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$, where $d_{\text{model}}$ is the model's hidden dimension (e.g., $4{,}096$ or $8{,}192$ floats).
+
+When a host runtime submits an input prompt consisting of $M$ staged token integers $\mathbf{x} = (x_1, x_2, \dots, x_M)$, the accelerator executes an embedding gather kernel:
 
 $$\mathbf{E} = \mathbf{W}_{\text{embed}}[\mathbf{x}, :] = \begin{bmatrix} \mathbf{W}_{\text{embed}}[x_1, :] \\ \mathbf{W}_{\text{embed}}[x_2, :] \\ \vdots \\ \mathbf{W}_{\text{embed}}[x_M, :] \end{bmatrix} \in \mathbb{R}^{M \times d_{\text{model}}}$$
 
-Each row occupies $d_{\text{model}} \cdot b$ bytes in device memory (parameter byte-width $b$, e.g., $b=2$ for 16-bit BF16), staged into SRAM via coalesced transactions.
+Each row occupies $d_{\text{model}} \cdot b$ bytes in device memory, where $b$ is the parameter byte-width (e.g., $b=2$ bytes for 16-bit BF16/FP16). The memory controller gathers these rows from High-Bandwidth Memory (HBM) into on-chip SRAM via coalesced memory transactions. Once gathered, this dense matrix $\mathbf{E}$ enters the transformer's attention layers as the initial activation state.
 
-#### The Architectural Boundary: Who Owns Tokenization?
-
-The boundary between Host Agent Runtime (Tier 1) and Inference Service Daemon (Tier 2) dictates RPC payload contracts:
-
-1. **Managed Text RPC (Service-Side Tokenization):** The host sends raw UTF-8 strings. Context budgeting ($M \le S_{\max} - K_{\max}$) requires client-side token counting; regex or version drift between host and server causes count mismatch, risking admission rejection.
-2. **Deterministic Token-ID RPC (Host-Side Tokenization with Pinned Digest):** The host tokenizes locally on CPU, dispatching token IDs $\mathbf{x} \in \mathcal{V}^*$ alongside a cryptographic *tokenizer hash digest* (SHA-256 of vocabulary and merge tables). The daemon validates this digest during admission control, preventing silent vocabulary misalignment.
-
-### The AST Impedance Mismatch and Serialization Overhead
+### The AST Impedance Mismatch
 
 In electrical engineering, an *impedance mismatch* between a signal source and its transmission line reflects energy backward, corrupting the transmitted waveform. In systems architecture, an impedance mismatch occurs when two adjacent abstraction layers operate on fundamentally incompatible data representations.
 
-Compilers (such as GCC, Clang, or CPython) parse source code into ASTs. A compiler's front-end lexical analyzer (lexer) scans characters using formal language grammars, isolating keywords (`def`, `class`), identifiers (`get_user_id`), operators, and structural indentation tokens (`INDENT`, `DEDENT`). To the compiler, `def` is an identical semantic keyword regardless of whether it begins at column 0 or is indented inside a nested class.
+Compilers (such as GCC, Clang, or CPython) parse source code into Abstract Syntax Trees (ASTs). A compiler's front-end lexical analyzer (lexer) scans characters using formal language grammars, isolating keywords (`def`, `class`), identifiers (`get_user_id`), operators, and structural indentation tokens (`INDENT`, `DEDENT`). To the compiler, `def` is an identical semantic keyword regardless of whether it begins at column 0 or is indented inside a nested class.
 
 BPE tokenizers, in contrast, optimize purely for statistical byte entropy across unstructured training corpora. They possess zero awareness of grammar productions, lexical specifications, or AST node boundaries. This divergence creates an *AST impedance mismatch* (@fig-token-ast-mismatch).
 
@@ -55,14 +52,14 @@ BPE tokenizers, in contrast, optimize purely for statistical byte entropy across
 ![](images/svg/token_ast_mismatch.svg){width="100%"}
 :::
 
-This mismatch produces three primary failure modes:
+This mismatch produces three primary systems failure modes:
 
-1. **Syntactic Boundary Blindness:** Indentation whitespace fuses with subsequent characters. In `cl100k_base`, unindented `def` is token 755 (`"def"`), but two leading spaces yield token 220 (`" "`) and token 711 (`" def"`):
+1. **Syntactic Boundary Blindness:** Indentation whitespace fuses with subsequent characters. In the OpenAI `cl100k_base` vocabulary, unindented `def` is token 755 (`"def"`), but two leading spaces yield token 220 (`"  "`) and token 711 (`" def"`):
    ```text
    def get_user_id():    -> [755: "def"] [636: " get"] [3398: "_user"] [851: "_id"] [4658: "():"]
-     def get_user_id():  -> [220: " "] [711: " def"] [636: " get"] [3398: "_user"] [851: "_id"] [4658: "():"]
+     def get_user_id():  -> [220: "  "] [711: " def"] [636: " get"] [3398: "_user"] [851: "_id"] [4658: "():"]
    ```
-   Tokens 755 and 711 have independent embeddings and logits; trailing prompt whitespace shifts continuation probabilities, suppressing valid completions.
+   Tokens 755 and 711 have independent rows in $\mathbf{W}_{\text{embed}}$ and independent output logits; trailing prompt whitespace shifts continuation probabilities, suppressing valid completions.
 2. **Identifier Splintering:** Identifiers fracture into subwords; `execute_transaction_with_retry` splits into four tokens in `cl100k_base` (`[10469: "execute"]`, `[29984: "_transaction"]`, `[6753: "_with"]`, `[63845: "_retry"]`), compounding autoregressive decode latency.
 3. **Lexical Asymmetry:** The mapping $\mathcal{T}$ is non-monotonic: snake_case `get_user_id` consumes three tokens (`["get", "_user", "_id"]`), while camelCase `getUserID` consumes two (`["getUser", "ID"]`), imposing unequal compute on equivalent semantics.
 
@@ -119,9 +116,9 @@ Vectors $\mathbf{e}_{755}$ and $\mathbf{e}_{711}$ are completely distinct rows i
 3. *Prefix Cache Invalidation:* In serving systems utilizing prefix caching (such as RadixAttention), KV cache blocks are indexed by exact token ID sequences. If a user or prompt template changes indentation or adds a single whitespace character, the resulting token IDs diverge immediately, invalidating the cached prefix and forcing an expensive full prompt prefill.
 :::
 
-#### The Serialization Overhead Tax
+### The Serialization Tax on Structured Tool Calls
 
-When serializing tool arguments into structured formats (JSON/YAML), punctuation marks, quotes (`"`), backslashes (`\`), braces, and escape sequences compress poorly:
+When autonomous systems invoke tools or exchange structured payloads (such as JSON or YAML), punctuation marks, quotes (`"`), backslashes (`\`), braces, and escape sequences compress poorly:
 
 ```json
 {"tool": "filesystem_write", "parameters": {"path": "/var/log/sys.log", "content": "error: connection reset\n"}}
@@ -137,24 +134,25 @@ In `cl100k_base`, a raw newline is token 198 (`'\n'`), while a literal escaped n
 | **Escaped Code in JSON** | 247 | 247 | 63 | 3.92 | 3.92 | Escaped newlines (`\\n`) inflate token count by 43%. |
 | **Hex / Base64 / UUID** | 138 | 138 | 79 | 1.75 | 1.75 | Low subword coverage; near character-level encoding. |
 | **CJK / Multilingual Text** | 212 | 72 | 80 | 2.65 | 0.90 | 3-byte UTF-8 expansion; 1 to 2 tokens per glyph. |
-: **Token compression ratios across computational domains**: Empirical character-to-token compression ratios measured using \texttt{cl100k\_base} (\texttt{tiktoken} v0.9.0), demonstrating the 43 percent token inflation incurred by JSON string escaping. {#tbl-token-compression-ratios}
 
-### Context Capacity, Budget Enforcement, and the KV Cache Footprint
+: **Token compression ratios across computational domains**: Empirical character-to-token compression ratios measured using `cl100k_base` (`tiktoken` v0.9.0), demonstrating the 43 percent token inflation incurred by JSON string escaping. {#tbl-token-compression-ratios}
 
-The processor operates within context ceiling $S_{\max}$, bounding sequence length:
+### Context Capacity and Budget Enforcement: Why Character Counts Lie
+
+The stochastic processor operates within a strict maximum context ceiling $S_{\max}$, bounding total sequence length:
 
 $$M + K \le S_{\max}$$
 
-where $M$ is prompt length and $K$ is generated output length. Relying on character heuristics ($1\text{ token} \approx 4\text{ characters}$)[^fn-char-heuristic] fails across code, JSON, and hashes where compression drops below two bytes per token.
+where $M$ is the prompt length and $K$ is the generated output length. In software systems engineering, relying on character-based heuristics ($1\text{ token} \approx 4\text{ characters}$)[^fn-char-heuristic] is fatal. As shown in @tbl-token-compression-ratios, in indented source code, JSON envelopes, and cryptographic hashes, compression collapses to fewer than two bytes per token. A 100,000-character code context may consume over 35,000 tokens rather than the 25,000 predicted by naive rules of thumb.
 
 [^fn-char-heuristic]: **Token Compression Ratio**: The standard heuristic $1\text{ token} \approx 4\text{ characters}$ fails for indented code, JSON, and hashes, where compression collapses below two bytes per token, doubling context memory demand. \index{Token Compression Ratio}\index{Context Window!Compression Ratio}
 
-#### Input Overflow and Budget Enforcement
+#### Input Overflow and Step Ceilings
 
-Context capacity requires explicit lifecycle governance under the normalized seven-outcome status envelope taxonomy ($\texttt{COMPLETED}$, $\texttt{TRUNCATED}$, $\texttt{REFUSED}$, $\texttt{TRANSPORT\_FAILURE}$, $\texttt{REJECTED}$, $\texttt{CANCELLED}$, $\texttt{FAULTED}$):
+To prevent unrecoverable runtime crashes, the host operating runtime enforces explicit admission and budget control:
 
-1. **Input Overflow Policy:** If $M > S_{\max}$ or $M + K_{\max} > S_{\max}$ under default admission policy $\pi_{\text{overflow}} = \texttt{REJECT}$, the runtime rejects admission before dispatching compute, returning primary status $\texttt{REJECTED}$ with reason code $\texttt{CONTEXT\_OVERFLOW\_EXCEEDED}$; silent truncation discards instructions, destroying determinism.
-2. **Output Step Ceiling:** For $M < S_{\max}$, the runtime sets generation ceiling $K_{\max} \le S_{\max} - M$. If decoding reaches $K_{\max}$ without a delimiter or matching suffix stop sequence, execution halts with:
+1. **Input Overflow Rejection:** If $M > S_{\max}$ or $M + K_{\max} > S_{\max}$, the runtime rejects admission before dispatching compute to the accelerator, returning primary status `REJECTED` with reason code `CONTEXT_OVERFLOW_EXCEEDED`. Silently truncating the prompt is dangerous: dropping earlier instructions destroys task determinism.
+2. **Output Step Ceilings:** For valid inputs ($M < S_{\max}$), the runtime sets an explicit generation ceiling $K_{\max} \le S_{\max} - M$. If autoregressive decoding reaches $K_{\max}$ without generating a stop token, execution halts immediately with:
    $$\text{Status} = \texttt{TRUNCATED}, \quad \text{Reason} = \texttt{STEP\_BUDGET\_EXHAUSTED}$$
 
 Because subwords lack AST awareness, truncation severs output mid-statement:
@@ -171,17 +169,17 @@ Severing generation at step $K_{\max}$ drops rollback logic and unclosed syntax.
 
 $$\forall \mathcal{E}_{\text{resp}}, \quad S \neq \texttt{COMPLETED} \implies \mathbf{y} \notin \text{ActuationPipeline}$$
 
-#### The Single-Token KV Cache Memory Footprint
+### The Memory Cost of Tokens: The KV Cache Footprint
 
-While token IDs define logical length $S = M + K$, accelerator memory is dominated by intermediate attention state. In an autoregressive model, generating each new token requires computing attention against all previous tokens. To avoid recomputing Key and Value activations for prior tokens $\tau \le t$ at step $t$ (which would inflict a quadratic $O(t^2)$ recomputation penalty at every step), the serving engine caches them in accelerator HBM as the *Key-Value (KV) cache*.[^fn-kv-footprint]
+While token IDs define the logical sequence length $S = M + K$, accelerator physical memory is dominated by intermediate attention state. In an autoregressive model, generating each new token requires computing attention against all previous tokens. To avoid recomputing Key and Value activations for prior tokens $\tau \le t$ at step $t$ (which would inflict a quadratic $O(t^2)$ recomputation penalty at every step), the serving engine caches them in accelerator HBM as the *Key-Value (KV) cache*.[^fn-kv-footprint]
 
 [^fn-kv-footprint]: **KV Cache Memory Footprint**: In multi-query and grouped-query attention ($n_{\text{kv}} \ll n_{\text{heads}}$), shared KV heads reduce single-token footprint $4\times$ to $8\times$. At scale, ephemeral KV allocations still exceed parameter weights. \index{Key-Value Cache}\index{Inference Engine!KV Cache Footprint}
 
-For $L$ layers, Key-Value heads $n_{\text{kv}}$, and head dimension $d_{\text{head}}$, channel dimension is $H_{\text{kv}} = n_{\text{kv}} \cdot d_{\text{head}}$ ($H_{\text{kv}} = d_{\text{model}}$ in Multi-Head Attention; $n_{\text{kv}} \ll n_{\text{heads}}$ in Grouped-Query Attention). Storing Key vector $\mathbf{k} \in \mathbb{R}^{H_{\text{kv}}}$ and Value vector $\mathbf{v} \in \mathbb{R}^{H_{\text{kv}}}$ per layer yields $2 \cdot L \cdot H_{\text{kv}}$ scalars. At byte-width $b$ ($b=2$ for 16-bit BF16/FP16; $b=1$ for 8-bit FP8), the single-token footprint is:
+For $L$ transformer layers, Key-Value heads $n_{\text{kv}}$, and head dimension $d_{\text{head}}$, the total channel dimension per token is $H_{\text{kv}} = n_{\text{kv}} \cdot d_{\text{head}}$. In modern Grouped-Query Attention (GQA), $n_{\text{kv}} \ll n_{\text{heads}}$ (for example, 8 KV heads compared to 64 Query heads). Storing a Key vector $\mathbf{k} \in \mathbb{R}^{H_{\text{kv}}}$ and a Value vector $\mathbf{v} \in \mathbb{R}^{H_{\text{kv}}}$ per layer yields $2 \cdot L \cdot H_{\text{kv}}$ scalars. At scalar byte-width $b$ ($b=2$ for 16-bit BF16/FP16; $b=1$ for 8-bit FP8), the single-token memory footprint is:
 
 $$\text{Mem}_{\text{KV,token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot b = 2 \cdot L \cdot (n_{\text{kv}} \cdot d_{\text{head}}) \cdot b \quad \text{bytes/token}$$
 
-Across sequence length $S = M + K$, total sequence KV cache memory scales linearly:
+Across total sequence length $S = M + K$, the KV cache memory scales strictly linearly:
 
 $$\text{Mem}_{\text{KV}}(\text{seq}) = S \cdot \text{Mem}_{\text{KV,token}} = 2 \cdot L \cdot n_{\text{kv}} \cdot d_{\text{head}} \cdot b \cdot (M + K)$$
 
@@ -189,7 +187,7 @@ For a 70-billion parameter model (such as Llama-3-70B) utilizing Grouped-Query A
 
 $$\text{Mem}_{\text{KV,token}} = 2 \times 80 \times 1024 \times 2 = 327{,}680\text{ bytes} \approx 328\text{ KB/token}$$
 
-At extended context $S = 128{,}000$ tokens, a single invocation's KV cache consumes:
+At an extended context of $S = 128{,}000$ tokens, a single invocation's KV cache consumes:
 
 $$\text{Mem}_{\text{KV}}(\text{seq}) = 128{,}000 \times 327{,}680\text{ bytes} \approx 41.94\text{ GB}$$
 
@@ -250,6 +248,6 @@ To serve extended 128k contexts at 70B scale without crashing, systems architect
 2. *Expanded-Memory Accelerators:* Migrate to next-generation accelerators with expanded HBM capacity, such as the NVIDIA H200 (141 GB HBM3e) or NVIDIA B200 (180 GB HBM3e). On a 141 GB H200, 70 GB of weights leaves 71 GB of headroom, effortlessly accommodating 128k contexts while preserving capacity for multi-tenant batching.
 :::
 
-This steep memory scaling makes context capacity the primary physical constraint on concurrency, motivating paged attention virtual memory architectures and prefix-sharing techniques (detailed in @sec-vol3-kvcache-radix-tree).
+This steep memory scaling makes context capacity the primary physical constraint on concurrency, motivating paged attention virtual memory architectures and prefix-sharing techniques (detailed in Chapter 5).
 
-Once staged as an integer token array, how does the processor compute its candidate output?
+Once staged as an integer token array and loaded into accelerator memory, how does the processor actually compute its candidate output?
