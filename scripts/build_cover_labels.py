@@ -50,12 +50,11 @@ VOL3_CHAPTERS = [
         'prefix': 'introduction',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'stochastic processor core', 'pill': (240, 240), 'targ': (620, 330), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'l1 sram ring buffer', 'pill': (240, 440), 'targ': (590, 430), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'isolated actuation bus', 'pill': (240, 620), 'targ': (480, 520), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'glowing sensory visor', 'pill': (680, 80), 'targ': (680, 220), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'hbm3e memory stacks', 'pill': (1160, 220), 'targ': (760, 360), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'l2 paged block cache', 'pill': (1180, 420), 'targ': (815, 385), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'stochastic processor socket', 'pill': (680, 80), 'targ': (695, 200), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'isolated actuation interface', 'pill': (240, 220), 'targ': (490, 360), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'l2 paged block cache', 'pill': (240, 440), 'targ': (680, 440), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'l1 sram buffer ring', 'pill': (240, 620), 'targ': (560, 550), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'hbm3e memory stacks', 'pill': (1160, 320), 'targ': (820, 380), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'pcie tool expansion bus', 'pill': (1160, 620), 'targ': (880, 550), 'border': '#D97706', 'color': '#D97706'},
         ]
     },
@@ -77,12 +76,12 @@ VOL3_CHAPTERS = [
         'prefix': 'deliberation',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'laser rollout drafting stylus', 'pill': (240, 340), 'targ': (550, 360), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'root decision state', 'pill': (240, 560), 'targ': (590, 420), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'deliberation tree architect', 'pill': (660, 80), 'targ': (580, 240), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'laser rollout drafting stylus', 'pill': (240, 320), 'targ': (575, 350), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'root decision state', 'pill': (240, 540), 'targ': (595, 425), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'optimal high-reward trajectory', 'pill': (1180, 220), 'targ': (740, 330), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'pruned dead-end branch', 'pill': (1180, 440), 'targ': (840, 430), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'speculative tree expansion', 'pill': (1160, 640), 'targ': (880, 510), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'speculative tree expansion', 'pill': (1160, 640), 'targ': (780, 470), 'border': '#D97706', 'color': '#D97706'},
         ]
     },
     {
@@ -90,11 +89,11 @@ VOL3_CHAPTERS = [
         'prefix': 'working_sets',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'permanent attention sink tokens', 'pill': (260, 180), 'targ': (640, 390), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'permanent attention sink tokens', 'pill': (260, 200), 'targ': (480, 405), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'rotating context carousel', 'pill': (240, 420), 'targ': (530, 440), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'working set budget boundary', 'pill': (240, 620), 'targ': (480, 540), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'quadratic attention envelope', 'pill': (1160, 200), 'targ': (800, 300), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'active sliding window tokens', 'pill': (1180, 420), 'targ': (770, 390), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'active sliding window tokens', 'pill': (1180, 420), 'targ': (880, 320), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'eviction discharge chute', 'pill': (1160, 640), 'targ': (870, 470), 'border': '#9B2226', 'color': '#9B2226'},
         ]
     },
@@ -116,12 +115,12 @@ VOL3_CHAPTERS = [
         'prefix': 'episodic_memory',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'nearest-neighbor query prism', 'pill': (240, 300), 'targ': (590, 370), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'approximate search agent', 'pill': (240, 540), 'targ': (520, 430), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'semantic similarity vector beam', 'pill': (660, 80), 'targ': (660, 340), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'clustered memory hierarchy', 'pill': (1180, 220), 'targ': (820, 200), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': '3d hnsw vector embedding lattice', 'pill': (1180, 440), 'targ': (840, 340), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'persistent episodic plinth', 'pill': (1180, 640), 'targ': (760, 560), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'nearest-neighbor query prism', 'pill': (240, 220), 'targ': (505, 420), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'semantic similarity query beam', 'pill': (240, 360), 'targ': (470, 480), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'approximate search agent', 'pill': (240, 540), 'targ': (380, 520), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'clustered memory hierarchy', 'pill': (1180, 200), 'targ': (750, 220), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': '3d hnsw vector embedding lattice', 'pill': (1180, 440), 'targ': (780, 480), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'persistent episodic plinth', 'pill': (1160, 700), 'targ': (680, 720), 'border': '#2EC4B6', 'color': '#2EC4B6'},
         ]
     },
     {
@@ -170,7 +169,7 @@ VOL3_CHAPTERS = [
         'labels': [
             {'text': 'state escrow capsule', 'pill': (700, 80), 'targ': (705, 140), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'asynchronous pause barrier', 'pill': (240, 320), 'targ': (530, 480), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'optical interrupt tripwire', 'pill': (240, 540), 'targ': (580, 490), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'continuous execution pipeline', 'pill': (240, 540), 'targ': (440, 640), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'preempted agent worker', 'pill': (1180, 220), 'targ': (740, 290), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'frozen in-flight token bubbles', 'pill': (1180, 420), 'targ': (893, 310), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'human authorization checkpoint', 'pill': (1180, 620), 'targ': (710, 520), 'border': '#D97706', 'color': '#D97706'},
@@ -181,11 +180,11 @@ VOL3_CHAPTERS = [
         'prefix': 'scheduling',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': 'latency-critical prefill train', 'pill': (240, 300), 'targ': (520, 420), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'anti-starvation bypass switch', 'pill': (240, 540), 'targ': (620, 460), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'latency-critical prefill train', 'pill': (240, 240), 'targ': (520, 420), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'anti-starvation bypass switch', 'pill': (240, 480), 'targ': (620, 460), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'cluster switchyard operator', 'pill': (660, 80), 'targ': (640, 350), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'throughput-bound decode train', 'pill': (1180, 220), 'targ': (820, 410), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'preemption railway switch', 'pill': (1180, 440), 'targ': (720, 430), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'switchyard preemption lever', 'pill': (1180, 440), 'targ': (775, 415), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'cxl memory-pool ballast', 'pill': (1180, 640), 'targ': (650, 550), 'border': '#2EC4B6', 'color': '#2EC4B6'},
         ]
     },
@@ -235,10 +234,10 @@ VOL3_CHAPTERS = [
         'labels': [
             {'text': 'elevated coordinator bot', 'pill': (660, 80), 'targ': (820, 230), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'circulating token packets', 'pill': (240, 340), 'targ': (495, 436), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'specialized worker consoles', 'pill': (240, 560), 'targ': (400, 490), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'specialized worker console', 'pill': (240, 560), 'targ': (410, 490), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'central consensus core', 'pill': (1180, 220), 'targ': (680, 370), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'circular optical ring bus', 'pill': (1180, 440), 'targ': (750, 450), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'state synchronization broadcast', 'pill': (1180, 640), 'targ': (720, 530), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'circular optical ring bus', 'pill': (1180, 440), 'targ': (840, 470), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'state synchronization ring', 'pill': (1180, 640), 'targ': (700, 620), 'border': '#2EC4B6', 'color': '#2EC4B6'},
         ]
     },
     {
@@ -246,12 +245,12 @@ VOL3_CHAPTERS = [
         'prefix': 'observability',
         'font': FONT_ARIAL_BOLD,
         'labels': [
-            {'text': '3d trajectory ribbon span', 'pill': (240, 160), 'targ': (540, 150), 'border': '#2EC4B6', 'color': '#2EC4B6'},
-            {'text': 'distributed tracer bot', 'pill': (240, 380), 'targ': (578, 434), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'telemetry flight recorder box', 'pill': (240, 600), 'targ': (720, 480), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': '3d trajectory trace ribbon', 'pill': (240, 240), 'targ': (480, 220), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'distributed tracer bot', 'pill': (240, 480), 'targ': (578, 434), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'execution anomaly spike', 'pill': (830, 70), 'targ': (830, 175), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'checkpoint milestone beacon', 'pill': (1180, 240), 'targ': (695, 282), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'latency flame-graph tier', 'pill': (1180, 460), 'targ': (820, 380), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'latency flame-graph span', 'pill': (1180, 440), 'targ': (880, 360), 'border': '#2EC4B6', 'color': '#2EC4B6'},
+            {'text': 'telemetry flight recorder box', 'pill': (1180, 640), 'targ': (800, 480), 'border': '#0090B0', 'color': '#0090B0'},
         ]
     },
     {
@@ -296,7 +295,7 @@ VOL4_CHAPTERS = [
             {'text': 'causal boundary', 'pill': (890, 220), 'targ': (890, 560), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'nervous system', 'pill': (695, 360), 'targ': (695, 520), 'border': '#1A4D3E', 'color': '#1A4D3E'},
             {'text': 'body', 'pill': (1150, 170), 'targ': (1150, 320), 'border': '#1A4D3E', 'color': '#1A4D3E'},
-            {'text': 'sensor feedback', 'pill': (480, 700), 'targ': (480, 650), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+            {'text': 'sensor feedback return', 'pill': (480, 700), 'targ': (480, 560), 'border': '#1A4D3E', 'color': '#1A4D3E'},
         ]
     },
     {
@@ -390,8 +389,8 @@ VOL4_CHAPTERS = [
             {'text': 'micro-lidar point cloud', 'pill': (880, 80), 'targ': (720, 230), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'metrology step artifact', 'pill': (200, 260), 'targ': (550, 360), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'extrinsic calibration frame', 'pill': (220, 500), 'targ': (635, 415), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'latency drift vector', 'pill': (480, 720), 'targ': (690, 525), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'spatial covariance ellipsoid', 'pill': (1160, 600), 'targ': (850, 480), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'latency drift vector', 'pill': (480, 720), 'targ': (712, 545), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'spatial covariance ellipsoid', 'pill': (1160, 600), 'targ': (840, 510), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'edge preprocessor box', 'pill': (1160, 340), 'targ': (980, 400), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
@@ -432,7 +431,7 @@ VOL4_CHAPTERS = [
             {'text': 'spatial obstacle ring', 'pill': (740, 80), 'targ': (730, 170), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'prospective waypoint chunk', 'pill': (1180, 180), 'targ': (880, 205), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'hover-recovery stopping suffix', 'pill': (1180, 360), 'targ': (1010, 260), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'terminal landing perch', 'pill': (1180, 540), 'targ': (1020, 360), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'terminal landing perch', 'pill': (1180, 540), 'targ': (1040, 480), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
     {
@@ -453,8 +452,8 @@ VOL4_CHAPTERS = [
         'prefix': 'placement',
         'font': FONT_HELVETICA,
         'labels': [
-            {'text': '3d memory stacks', 'pill': (140, 100), 'targ': (218, 294), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'cognitive npu cluster', 'pill': (180, 280), 'targ': (368, 344), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': '3d memory stacks', 'pill': (160, 140), 'targ': (270, 240), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'cognitive npu cluster', 'pill': (180, 340), 'targ': (520, 350), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'thermal dissipation fins', 'pill': (360, 60), 'targ': (468, 144), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'deterministic mcu enclave', 'pill': (1160, 260), 'targ': (925, 356), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'shared crossbar bus', 'pill': (380, 720), 'targ': (538, 464), 'border': '#D97706', 'color': '#D97706'},
