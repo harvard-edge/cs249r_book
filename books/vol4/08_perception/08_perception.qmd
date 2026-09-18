@@ -82,6 +82,10 @@ That evidence begins where physical energy converts into digital data. From tran
 
 By the time the perception stage yields an observation tensor, $75\text{ ms}$ of total latency have accumulated between photon capture and model consumption. Over that $75\text{ ms}$ window, the vehicle has traversed $0.15\text{ m}$ of physical space. If the perception stage hands downstream components an object detection bounding box without an explicit timestamp and a calibrated spatial transform, a downstream planner will evaluate that obstacle relative to the current position of the chassis, assuming the obstacle sits $0.15\text{ m}$ closer or further than its true coordinate. Downstream software cannot safely consume a perception output that does not explicitly declare when it was captured, what coordinate system it references, and how wide its error distribution remains.
 
+::: {.column-margin .margin-pointer}
+↰ **Prerequisite:** Transduction freshness and sensor measurement aging are derived in @sec-body-measurement-freshness.
+:::
+
 ::: {#dfn-perception-spatial-information-age .callout-definition title="Spatial information age"}
 
 ***Spatial information age***\index{Spatial information age!definition}\index{Information age!definition} ($\tau_{\text{age}}$) is the total elapsed physical time between the physical energy integration midpoint ($t_{\text{exp}}/2$) at the transducer and the downstream consumption of the resulting observation tensor by a state estimator or control policy.
@@ -104,8 +108,10 @@ At the open-loop gain crossover frequency $\omega_c$ (the frequency where open-l
 $$\text{PM}_{\text{effective}} = \text{PM}_{\text{nom}} - \omega_c \tau_{\text{age}}$$ {#eq-percep-phase-margin-loss}
 As governed by @eq-percep-phase-margin-loss, if the cumulative perception information age satisfies $\tau_{\text{age}} \ge \frac{\text{PM}_{\text{nom}}}{\omega_c}$, the effective phase margin drops below zero. The closed-loop poles cross the imaginary axis into the right half-plane, transforming stabilizing negative feedback into destructive physical limit cycles and high-frequency actuator chatter. A machine learning engineer who reduces perception latency from $80\text{ ms}$ to $40\text{ ms}$ is not merely speeding up software; they are restoring $0.040 \cdot \omega_c$ radians of phase margin to the physical control plant.
 
-::: {.column-margin .margin-pointer}
-↰ **Prerequisite:** Transduction freshness and sensor measurement aging are derived in @sec-body-measurement-freshness.
+::: {.column-margin}
+![](images/svg/margin_phase_margin_erosion_knee.svg){width="100%" fig-alt="Knee curve showing phase margin eroding linearly with perception age until reaching instability at seventy-eight milliseconds."}
+
+*Past critical perception age, phase margin erodes to zero, triggering closed-loop instability.*
 :::
 
 Resolving this physical dilemma requires transforming raw electrical transduction into grounded, verifiable spatial claims. This chapter unfolds that transformation across eight subsequent sections:
@@ -419,6 +425,12 @@ Sensor resolution, frame rate, and channel count are safety parameters, not perc
 :::
 
 In machine learning pipelines, engineering teams routinely increase camera resolution or add sensor modalities to improve open-loop model accuracy. In a physical machine, every additional pixel, bit of quantization depth, and exposure frame is an unavoidable withdrawal from the memory bandwidth budget\index{Memory!bandwidth budget} that pays for timely refusal. Consider an autonomous machine upgrading its surround perception suite from 4 synchronized $1080\text{p}$ cameras ($1920 \times 1080$, 12-bit raw packed into $1.5\text{ B/px}$) to $4\text{K}$ cameras ($3840 \times 2160$, 12-bit raw) at $30\text{ Hz}$. A hardware trigger strobes all four sensors simultaneously, causing their readout DMA bursts to hit host LPDDR5 DRAM concurrently over a $16.0\text{ ms}$ window. The safety enforcement monitor executes at $1\text{ kHz}$ ($T_{\text{enforce}} = 1000\,\mu\text{s}$), with an idle-bus execution time of $t_{\text{exec}} = 150\,\mu\text{s}$ (leaving timing slack $S = 850\,\mu\text{s}$). The memory controller provides an effective service rate of $R_{\text{arb}} = 20.0\text{ GB/s}$ ($20{,}000\text{ MB/s}$) under sustained write contention. For $1080\text{p}$, each frame occupies $3.11\text{ MB}$, yielding a combined burst volume of $V_{\text{burst, 1080p}} = 12.44\text{ MB}$ and a contention stall of $\Delta t_{\text{stall, 1080p}} = 12.44\text{ MB} / (20{,}000\text{ MB/s}) = 622\,\mu\text{s}$. Total execution time is $150\,\mu\text{s} + 622\,\mu\text{s} = 772\,\mu\text{s} \le 1000\,\mu\text{s}$, safely within the enforcement deadline. Upgrading four cameras to $4\text{K}$ quadruples the burst volume to $V_{\text{burst, 4K}} = 49.76\text{ MB}$ per exposure. That single change pushes the worst-case memory stall to $\Delta t_{\text{stall, 4K}} = 2488\,\mu\text{s}$, swelling total execution time to $2638\,\mu\text{s}$. This overruns the $1000\,\mu\text{s}$ period by 164 percent and drops two consecutive safety enforcement cycles. The higher-resolution image may produce a more confident detection in the learned model, but it removes the machine's guarantee of stopping in time.[^fn-std-iso-mpam] The growth in that budget line is steep. @Fig-perception-bandwidth-scaling traces two decades of sensor ingress, and the raw data rate rose by nearly two orders of magnitude, which is why a resolution increase justified on perception grounds must still be paid for out of the safety path's timing margin.
+
+::: {.column-margin}
+![](images/svg/margin_dma_ingress_slack_envelope.svg){width="100%" fig-alt="Budget envelope showing four-camera 4K DMA burst exhausting 850-microsecond timing slack and stalling the memory controller."}
+
+*Upgrading cameras from 1080p to 4K burns through safety timing slack, dropping control cycles.*
+:::
 
 The competition for memory bandwidth also creates a reverse failure mode that corrupts perception itself. In modern embedded edge SoCs, CPU cores, GPU/NPU accelerators, and camera input hardware share a single physical DRAM pool across a **Unified Memory Architecture (UMA)** crossbar interconnect. When deep vision transformers execute dense matrix multiplications or multi-head attention kernels, the accelerator generates saturating read bursts across the interconnect crossbar. If the system crossbar lacks strict hardware Quality of Service (QoS) priorities, incoming pixel streams stall at the silicon boundary. The MIPI CSI-2 host controller relies on a small on-die SRAM FIFO buffer (typically $4\text{--}16\text{ KB}$) to hold serialized scanlines before draining them into DRAM via DMA. When accelerator memory traffic delays these DMA writes, the hardware FIFO buffer fills within microseconds. The receiver asserts an unrecoverable `FIFO_OVERRUN` hardware interrupt and drops scanlines or truncates the frame (`FRAME_DROP`). For a downstream visual-inertial odometry estimator or end-to-end policy, a dropped frame is not a minor rendering glitch; it instantaneously doubles the effective sampling interval to $2 T_{\text{sample}}$, introducing an abrupt step loss in phase margin and blinding the vehicle during high-speed transit.
 

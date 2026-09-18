@@ -63,6 +63,12 @@ Within the four-tier physical AI systems architecture, the memory stage highligh
 
 Crucially, memory operates directly across the **proposal-permission boundary**.[^fn-mem-dual-brain] The unprivileged application processor (Linux MPU) maintains high-dimensional spatial belief structures, occupancy voxels, and coordinate transform trees. However, because the MPU experiences unpredictable scheduling jitter, memory bus contention, and inference latency, it cannot be trusted to self-report temporal freshness. The real-time safety processor (MCU) acts as the permission referee, evaluating every candidate motion proposal against independent hardware timers. The moment an unrefreshed belief breaches task safety margins, the nervous system revokes execution permission unilaterally.
 
+::: {.column-margin}
+![](images/svg/spa_locator_sp.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Sense-Plan belief edge."}
+
+*The Sense $\cap$ Plan belief interface: preserving spatial object state under line-of-sight occlusions.*
+:::
+
 [^fn-mem-dual-brain]: **Dual-brain spatial partitioning**\index{Architecture!dual-brain}: The dual-brain architecture assigns high-dimensional spatial mapping (OctoMap, VDB voxels, factor graphs) to Linux application processor (MPU) cores while reserving deterministic hardware countdown timers and barrier evaluations for the real-time microcontroller (MCU). Isolating the real-time MCU on a dedicated silicon core guarantees that memory bus saturation or garbage-collection pauses on the MPU cannot delay emergency brake actuation. See @sec-brain-embodied for the foundational interface specifications governing this boundary.
 
 Consider an analytical example of a manipulator tasked with touching a workpiece and regulating contact force against a moving assembly fixture. The fixture drifts relative to the robot base at a bounded velocity of at most $20\text{ mm/s}$. The tooling compliance of $1\text{ mm/N}$ permits an allowable positioning error of $2\text{ mm}$ before generating a $2\text{ N}$ reaction force that overloads the wrist sensor. Dividing the allowable error by the maximum drift velocity yields an operational lifetime of $100\text{ ms}$, calculated as $2\text{ mm} / (20\text{ mm/s}) = 0.100\text{ s}$. For the first $50\text{ ms}$ after the camera captures an image, the physical position of the workpiece remains safely within the tolerance window. At $100\text{ ms}$, the unobserved displacement reaches the outer boundary of the error budget. At $101\text{ ms}$, without a new measurement to constrain the state, the unobserved drift exceeds mechanical tolerance; relying on the stored coordinate will cause the tool to collide violently with the fixture rather than softly touch it.
@@ -189,6 +195,12 @@ Beyond discrete kinematic frames, an embodied agent must also maintain continuou
 
 Crucially, as the ray traverses free space from the sensor to the obstacle, the pipeline asserts **negative evidence**\index{Negative evidence} to clear unoccupied voxels. At the terminal measurement point where the obstacle is detected, positive evidence is integrated.[^fn-math-voxel-raycast] This active assertion of negative evidence along sensor sightlines is the exact computational mechanism that invalidates phantom obstacle tracks when dynamic objects leave a region, pruning ghost tracks without waiting for passive timeout decay.
 
+::: {.column-margin}
+![](images/svg/margin_active_negative_evidence_chain.svg){width="100%" fig-alt="Causal chain showing raycast through free space to surface hit, evicting ghost obstacles."}
+
+*Active negative evidence along sightlines clears phantom obstacles without waiting for timeout decay.*
+:::
+
 [^fn-math-voxel-raycast]: **Voxel traversal and log-odds updates**\index{Algorithm!3D-DDA traversal}: The 3D Differential Digital Analyzer (3D-DDA) evaluates ray-voxel intersections along optical sightlines in discrete volumetric grids. Traversed voxels in front of measured surfaces receive negative occupancy log-odds updates to clear transient obstacles, while voxels intersecting measured surface returns receive positive updates. This active clearing prevents ghost obstacles from permanently corrupting traversability graphs after dynamic obstacles depart. For the complete derivation of recursive log-odds Bayesian mapping, see @sec-appendix-ml.
 
 ::: {#fig-09-octomap-volumetric-mapping fig-env="figure" fig-pos="t" fig-cap="**Probabilistic Octree Volumetric Mapping**: A corridor traversal reconstructed from raw point cloud into a probabilistic octree and then into explicit free, occupied, and unknown space [@hornung2013octomap]. The third panel is what distinguishes spatial memory from an accumulated point cloud, because raycasting records evidence of emptiness along sightlines, letting the map actively retire a phantom obstacle track instead of waiting for a timeout to expire it. (Credit: Hornung et al. / Autonomous Intelligent Systems Lab, University of Freiburg, CC BY 3.0)." fig-alt="Probabilistic 3D Volumetric Mapping and Hierarchical Octree Space Subdivision. Empirical 3D spatial memory representation reconstructed from a physical mobile robot traversing an indoor corridor with a tilting LiDAR scanner [@hornung2013octomap]. (a) Raw 3D point cloud acquired during robot motion, subject to sensor noise and finite field-of-view occlusions. (b) Volumetric OctoMap voxel representation modeling 3D space as an 8-ary hierarchical tree, where occupied volumes are probabilistically updated and stored across variable resolutions. (c) Explicit free-space raycasting and lossless octree pruning, differentiating verified traversable space (white voxels) from occupied obstacles (dark voxels) and unobserved unknown regions. By maintaining explicit free-space evidence along sensor sightlines, spatial memory actively invalidates phantom obstacle tracks without waiting for arbitrary software timeouts. (Credit: Hornung et al. / Autonomous Intelligent Systems Lab, University of Freiburg, CC BY 3.0)."}
@@ -196,12 +208,6 @@ Crucially, as the ray traverses free space from the sensor to the obstacle, the 
 :::
 
 For closed-loop trajectory optimization and reactive grasping, discrete occupancy grids are insufficient because binary or log-odds voxels lack continuous spatial derivatives. Physical AI systems employ **truncated signed distance fields (TSDFs)**\index{Truncated signed distance field} [@curless1996volumetric; @newcombe2011kinectfusion; @oleynikova2017voxblox]. Rather than recording discrete binary occupancy, each voxel $\mathbf{v} \in \mathbb{R}^3$ in the scene volume maintains a continuous metric distance $D(\mathbf{v}) \in [-\mu, +\mu]$ to the nearest physical surface along the sensor ray, alongside an accumulated observation weight $W(\mathbf{v}) \in [0, W_{\max}]$.
-
-::: {.column-margin}
-![](images/svg/spa_locator_sp.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Sense-Plan belief edge."}
-
-*The Sense $\cap$ Plan belief interface: preserving spatial object state under line-of-sight occlusions.*
-:::
 
 To understand how spatial memory fuses streaming depth frames into a persistent geometric model, trace the mathematical update executed for each voxel $\mathbf{v}$ when a camera at pose $\mathbf{T}_{\text{base}}^{\text{cam}} \in SE(3)$ captures a calibrated depth frame $Z_{\text{meas}}(u, v)$:
 
@@ -397,6 +403,12 @@ Before examining raycasting algorithms and VLA attention buffer bounds, verify y
 :::
 
 To integrate incoming sensory point clouds while actively evicting stale obstacle geometry, the spatial memory engine executes the structured raycast update detailed in @algo-volumetric-tsdf-raycast.
+
+::: {.column-margin}
+![](images/svg/margin_volumetric_raycasting_bandwidth_ladder.svg){width="100%" fig-alt="Vertical ladder comparing SoC bus limit against dense TSDF and sparse VDB memory bandwidth."}
+
+*Dense TSDF raycasting consumes 86 percent of SoC bandwidth, while sparse VDB cuts bus traffic 1000-fold.*
+:::
 
 ```pseudocode
 #| label: algo-volumetric-tsdf-raycast

@@ -367,6 +367,12 @@ During a high-speed precision assembly cycle, a 6-axis articulated industrial ro
 
 An actuator contract cannot be specified in terms of digital setpoints. It must be written at the physical interface in terms of delivered force, torque, or mass flow, response latency, slew rate limits, and output error. A digital setpoint is merely a software request; physical action is bounded by winding inductance, bus voltage ceilings, magnetic saturation, and transmission elasticity.
 
+::: {.column-margin}
+![](images/svg/spa_locator_a.svg){width="100%" fig-alt="S·P·A locator triad with the Act node highlighted."}
+
+*The Act axis: non-smooth contact mechanics, reflected inertia, and thermal dissipation.*
+:::
+
 The delay between commanding a torque and delivering it at the motor shaft begins in the stator windings. Because motor coils possess physical inductance, current cannot change instantaneously. When a voltage is applied, current (and therefore torque) ramps up smoothly, governed by the electrical time constant of the motor (the complete differential derivation of the electrical RL time constant is detailed in @sec-appendix-systems). For a typical robotic joint actuator, delivering 95 percent of the target torque might take nearly 10 milliseconds. If an upstream policy assumes torque appears instantaneously, this interval passes as unguided drift and phase erosion before the arm can initiate corrective acceleration or braking.
 
 In modern robotic actuators, this electromagnetic torque is synthesized through Field-Oriented Control (FOC) executing on dedicated real-time drive silicon at $10\text{--}25\text{ kHz}$.[^fn-hw-foc-current] From a systems perspective, the governing intuition is straightforward: driving current through the stator windings produces electromagnetic Lorentz torque in direct proportion to current ($\tau = K_t I$). However, even when an upstream policy issues an instantaneous torque request, the rate at which coil current can ramp up is physically constrained by the available DC bus voltage headroom:
@@ -379,12 +385,6 @@ Even after the electrical rise time elapses, delivered torque is bounded by hard
 $$\tau_{\text{out, max}} = \eta N K_t I_{\text{max}}$$
 
 When a high-level policy demands $120\text{ N}\cdot\text{m}$ of braking torque to avoid an obstacle, it assumes the motor drive will deliver it. But on real hardware, inverter current limits ($I_{\max} = 25\text{ A}$) and gear efficiency cap peak output torque at $85\text{ N}\cdot\text{m}$. The missing $35\text{ N}\cdot\text{m}$ is silently clipped at the power stage. Because the software planner remains unaware of the current clamp, the machine's actual stopping distance expands beyond its calculated safety boundary.
-
-::: {.column-margin}
-![](images/svg/spa_locator_a.svg){width="100%" fig-alt="S·P·A locator triad with the Act node highlighted."}
-
-*The Act axis: non-smooth contact mechanics, reflected inertia, and thermal dissipation.*
-:::
 
 Transmissions introduce a severe mechanical asymmetry that software planners routinely ignore. To deliver high torque from a compact motor, robot joints rely on gear reductions with ratios $N$ ranging from $50:1$ to $160:1$. While gear reduction scales delivered torque linearly by $N$, it forces the motor rotor to spin $N$ times faster than the joint.
 
@@ -399,6 +399,12 @@ $$ \ddot{q} = \frac{N \tau_{\text{motor}}}{J_{\text{load}} + N^2 J_{\text{rotor}
 Differentiating with respect to gear ratio $N$ reveals that peak joint acceleration occurs at the **inertia matching ratio**:
 $$ N^* = \sqrt{\frac{J_{\text{load}}}{J_{\text{rotor}}}} $$
 When $N < N^*$, joint acceleration is torque-limited. When $N > N^*$, counter-intuitively, increasing the gear ratio *decreases* delivered joint acceleration, because the motor spends the majority of its electromagnetic torque accelerating its own spinning rotor rather than moving the robot's physical link.
+
+::: {.column-margin}
+![](images/svg/margin_reflected_rotor_inertia_knee.svg){width="100%" fig-alt="Two-tone curve of joint acceleration versus gear ratio peaking at thirty-nine then dropping sharply into a shaded red rotor-inertia-dominated regime."}
+
+*Past the inertia-matching ratio, gearing chokes delivered joint acceleration.*
+:::
 
 Because the actuator cannot instantly deliver the massive torque needed to spin up this amplified inertia, the reflected inertia acts as a dynamic mechanical low-pass filter—smearing the software's sharp, instantaneous command into a sluggish, delayed physical response. This delivered output motion severely lags behind the policy's candidate setpoint, injecting unmodeled phase lag that erodes feedback stability, excites structural resonance, and spikes mechanical stress across the gear teeth. Motion-profile filtering (such as quintic polynomial splines or S-curve rate limiters) must be enforced by the real-time microcontroller to guarantee that requested joint acceleration $\ddot{q}$ remains within the current and voltage envelopes of the hardware [@lynch2017modern].
 
@@ -602,6 +608,12 @@ When bus voltage crosses an undervoltage threshold under peak acceleration, the 
 Power removal is an unmanaged state transition rather than an automatic return to safety. Engineers frequently assume that dropping bus power or tripping an undervoltage circuit brings a machine to a safe halt. In physical reality, cutting electrical power leaves an actuator in one of three unpowered states, namely free coasting, phase-short dynamic braking, or spring-engaged mechanical braking. Each state enforces a distinct mechanical behavior. An electromechanical friction brake requires $30\text{ ms}$ to $80\text{ ms}$ for its mechanical spring to overcome magnetic coil decay and engage its friction pads, during which gravity accelerates an overhead arm downward. Phase-short dynamic braking acts like viscous fluid damping, providing resistance proportional to velocity but generating zero holding torque at zero speed. Free coasting simply allows gravity to accelerate unconstrained joints without any resistance. The actual trajectory a machine follows after an electrical cutoff must be measured under full mechanical payload rather than deduced from circuit diagrams. The choice of which safe fallback state the machine should enter belongs to system safety architecture in @sec-enforcement, but the physical dynamics of an unpowered joint are unalterable mechanical constraints of the body.
 
 For the physical AI systems engineer, power integrity is a foundational architectural constraint bridging software planning and electrical physics. Rather than treating power rails as infinite voltage sources, the engineer must enforce coordinated power budgets and current slew-rate limits across compute accelerators and motor drives. The deterministic real-time safety layer must arbitrate simultaneous multi-axis acceleration commands to prevent compound $dI/dt$ transients, while dynamic brake choppers protect inverter electronics from regenerative feedback during emergency stops. Crucially, because power loss leaves actuators in unpowered physical states governed by gravity and momentum, the engineer must empirically characterize every unpowered fallback trajectory under full mechanical payload, ensuring that electrical trips resolve into controlled, predictable deceleration rather than unguided kinetic collisions. Characterizing these dynamic electrical and mechanical failure boundaries cannot rely on nominal catalog specs or idealized CAD models; it demands disciplined bench measurement.
+
+::: {.column-margin}
+![](images/svg/margin_pdn_voltage_droop_envelope.svg){width="100%" fig-alt="Horizontal budget envelope showing nominal 48V rail, 41V brownout floor, and a 12.8V transient droop plunging the rail into an undervoltage reset."}
+
+*Transient current surges burn through voltage headroom into unrecoverable brownout resets.*
+:::
 
 To quantify the coupled dynamics of rail collapse and regenerative energy feedback, consider an electrical power integrity budget for a mobile delivery robot (\ref{exmp-body-dc-bus-power-integrity}).
 

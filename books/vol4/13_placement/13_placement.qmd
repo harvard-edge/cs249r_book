@@ -108,9 +108,9 @@ To assign concrete performance numbers, these functions must be mapped onto phys
 In an analytical evaluation of the unloaded system, the computational budgets appear generous. In the enforcement path on the real-time MCU, reading four pressure sensors over a high-speed peripheral bus requires $40\,\mu\text{s}$, evaluating the constraint envelope and computing the actuator signal takes $80\,\mu\text{s}$, and writing the resulting register values to the motor controller timer takes $15\,\mu\text{s}$. The total unloaded execution demand is $135\,\mu\text{s}$. Against the $400\,\mu\text{s}$ computational deadline mandated by the $1.0\text{ ms}$ physical cycle (which reserves $600\,\mu\text{s}$ for servo motor settling), the enforcement path exhibits an unloaded slack of $265\,\mu\text{s}$. In the proposal path on the Linux MPU, a policy requiring $3.2\text{ GFLOP}$ per step executes on an accelerator capable of $2.0\text{ TFLOPS}$ sustained throughput, yielding an inference time of $1.6\text{ ms}$. Adding $0.8\text{ ms}$ for tensor formatting and $0.1\text{ ms}$ to publish the proposal to the shared ring buffer, the proposal path requires $2.5\text{ ms}$ of computation per $50\text{ ms}$ cycle, leaving $47.5\text{ ms}$ of unloaded slack. Evaluated in isolation, both loops operate with comfortable margins.
 
 ::: {.column-margin}
-![](images/svg/spa_locator_core.svg){width="100%" fig-alt="S·P·A locator triad highlighting the central causal core."}
+![](images/svg/margin_execution_determinism_ladder.svg){width="100%" fig-alt="Vertical ladder comparing execution jitter from fifty nanoseconds in lockstep microcontrollers to over twenty milliseconds in Linux."}
 
-*The silicon substrate: co-locating Sense, Plan, and Act across shared heterogeneous System-on-Chip crossbars.*
+*Execution jitter spans five orders of magnitude between lockstep microcontrollers and preemptible Linux.*
 :::
 
 Assigning these tasks to separate processor cores does not establish independent failure domains if the underlying silicon infrastructure remains shared.[^fn-std-cast-32a] While the real-time core executes instructions independently from the application processor, both cores rely on common hardware services:
@@ -200,6 +200,12 @@ ax.margins(x=0.12)
 fig.tight_layout()
 ```
 
+:::
+
+::: {.column-margin}
+![](images/svg/spa_locator_core.svg){width="100%" fig-alt="S·P·A locator triad highlighting the central causal core."}
+
+*The silicon substrate: co-locating Sense, Plan, and Act across shared heterogeneous System-on-Chip crossbars.*
 :::
 
 The latency experienced by the enforcement path depends directly on the longest uninterrupted burst permitted on the shared interconnect and the internal banking dynamics of the DRAM subsystem (@fig-13-soc-contention-droop a). In this analytical system, the neural accelerator transfers weights in $256\text{ kB}$ tiles. Across a $12.8\text{ GB/s}$ interface, an uninterrupted $256\text{ kB}$ burst occupies the physical bus for $20.0\,\mu\text{s}$. When the on-chip interconnect uses packet-atomic non-preemptive arbitration (meaning a transfer cannot be paused mid-flight, even if a late-arriving request carries high-priority AMBA AXI Quality-of-Service `AxQOS` tags), an enforcement request that arrives immediately after a tile transfer begins must wait the full $20.0\,\mu\text{s}$ transfer duration. Contention is further compounded inside the dynamic memory controller. Dynamic random-access memory is physically organized into independent banks, where each bank contains a two-dimensional array of storage cells managed by a single row buffer. When an access targets a row already loaded into the buffer (a **row-buffer hit**\index{Row-buffer hit}), data is transferred in column access time ($t_{\text{CAS}} \approx 14\text{ ns}$). If an access targets a different row in the same bank (a **bank conflict**\index{Bank conflict} or **row-buffer miss**\index{Row-buffer miss}), the controller must first restore and close the open row by precharging the bank ($t_{\text{RP}} \approx 14\text{ ns}$), activate the newly requested row ($t_{\text{RCD}} \approx 14\text{ ns}$), and execute the column read ($t_{\text{CAS}} \approx 14\text{ ns}$), tripling baseline access latency.
@@ -498,6 +504,12 @@ Measuring end-to-end latency across the complete control loop conceals the physi
 Coupling mechanisms compound across physical, electrical, and logical domains, requiring a full factorial experimental matrix. The evaluation sweeps across cold junction conditions ($T_j = 35^\circ\text{C}$) and warm junction conditions ($T_j = 85^\circ\text{C}$), an idle proposal path versus a saturated proposal engine executing maximum-batch inference, diagnostic circular logging disabled versus streaming at full non-volatile memory bandwidth, and nominal tracking commands versus boundary-violating commands that trigger refusal routines. Testing refusal paths under full stress is mandatory because executing a safe clamping trajectory or entering emergency shutdown involves cold branch paths, non-cached error-handling code, and secondary bus transactions that never execute during steady-state flow regulation.
 
 Consider an analytical example of a flow regulation processor evaluated across $10^7$ control cycles. In the baseline configuration with an idle proposal path and a cold die at $T_j = 35^\circ\text{C}$, the enforcement path exhibits tight timing bounds, with a median latency $P_{50} = 1.8\text{ ms}$, a ninety-ninth percentile $P_{99} = 2.4\text{ ms}$, and a maximum observed excursion of $2.9\text{ ms}$, well below the $9.0\text{ ms}$ falsification threshold. When the proposal path runs sustained vision-language inference with full diagnostic logging active on a warm die at $T_j = 85^\circ\text{C}$, shared cache evictions\index{Cache!eviction} and memory bus arbitration\index{Bus arbitration!memory} expand the distribution. In this loaded state, median latency increases to $P_{50} = 4.6\text{ ms}$, while the tail latency reaches $P_{99} = 8.1\text{ ms}$ and $P_{99.9} = 9.7\text{ ms}$, with a worst-case peak excursion of $11.4\text{ ms}$. Although the median remains within the acceptable window, the $P_{99.9}$ metric and the peak excursion cross the $9.0\text{ ms}$ threshold, refuting the independence hypothesis. Reporting average execution time or passing percentiles obscures the reality that one out of every thousand cycles violates the physical deadline and risks fluid overpressure.
+
+::: {.column-margin}
+![](images/svg/margin_memory_contention_tail_hockey_stick_knee.svg){width="100%" fig-alt="Hockey stick knee curve showing P99.9 tail latency breaching the 9.0-millisecond threshold under memory contention."}
+
+*Under memory bus contention, P99.9 tail latency breaches the 9.0-millisecond threshold, refuting independence.*
+:::
 
 Completing millions of test cycles without a timing violation does not prove absolute independence. It proves only that interference remained below the falsification threshold across the specific trajectory of states exercised during that test window. A rigorous verification report presents the full empirical latency distribution, the maximum observed excursion, the exact sample count, the total test duration, and the explicit list of unexercised operational conditions. Operating states excluded from the bench setup, including electromagnetic interference from nearby pump motors, degraded power supply rails, and silicon aging effects, remain unverified risks rather than proven boundaries.[^fn-hw-silicon-aging]
 

@@ -82,6 +82,12 @@ Crucially, a deployed policy does not actuate motors directly in an unconstraine
 
 [^fn-training-proposal-permission]: **Proposal-permission architecture**\index{Proposal-permission architecture!enforcer}: Decoupling unconstrained policy inference from physical execution guarantees safety invariants without retraining neural weights. The deterministic filter evaluates policy commands against control barrier certificates and dynamic friction limits before writing to actuator registers. If a proposed action violates kinematic bounds, the enforcer projects the command onto the boundary of the safe set within a single control tick.
 
+::: {.column-margin}
+![](images/svg/spa_locator_pa.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Plan-Act motion edge."}
+
+*The Plan $\cap$ Act motion interface: grounding learned policy tokens into continuous physical trajectories.*
+:::
+
 Navigating these trades requires structuring policy synthesis as an end-to-end systems engineering workflow. This chapter develops that workflow across seven progressive stages:
 
 We begin in @sec-training-synthesis-regimes by systematically evaluating the four primary policy synthesis regimes—behavioral cloning, offline RL, sim-to-real RL, and residual fine-tuning—analyzing the twin failure modes of imitation (multimodality and compounding covariate error), examining how expressive action decoder paradigms (Gaussian mixture models, implicit energy-based models, continuous trajectory diffusion, and latent-variable action chunking) resolve these limits, and using offline RL as a natural bridge into trial-based learning. In @sec-training-learning-by-trial, we analyze trial-based reinforcement learning, exploring reward formulation, temporal credit assignment across physical horizons, and value overestimation in offline datasets. We then turn to simulation in @sec-training-simulator-component, treating the physics engine as an engineered system component and examining numerical integrators, contact solver approximations, and massively parallel GPU rollouts. In @sec-training-sim-to-real-gap, we deconstruct the sim-to-real reality gap into its constitutive physical mechanisms—actuator transport delays, friction hysteresis, structural compliance, and contact restitution—and establish the mathematical limits of domain randomization. Moving from simulation to hardware, @sec-training-real-machine-tuning establishes principles for real-machine fine-tuning and residual policy learning, demonstrating how to adapt policies on physical mechanisms while bounding parameter drift and preventing mechanical damage. In @sec-training-failure-modes, we diagnose common training failure modes, from reward hacking to high-frequency torque chatter. In @sec-training-policy-manifest, we formalize the policy manifest, establishing an auditable specification contract that links training data coverage, simulation bounds, and runtime safety envelopes. Finally, @sec-training-fallacies-pitfalls and @sec-training-summary conclude with practical training fallacies and core architectural takeaways.
@@ -345,13 +351,13 @@ class ActionChunkDenoisingCadence:
     async_slack_str = fmt_latency(async_slack, unit=millisecond, precision=1)
 ```
 
-::: {.column-margin}
-![](images/svg/spa_locator_pa.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Plan-Act motion edge."}
-
-*The Plan $\cap$ Act motion interface: grounding learned policy tokens into continuous physical trajectories.*
-:::
-
 To see how diffusion denoising interacts with real-time execution deadlines (@fig-diffusion-denoising-process), consider an embedded edge deployment on an NVIDIA Jetson AGX Orin controlling a 7-DoF manipulator arm with a two-finger gripper ($D_a = 8$). The policy generates continuous action trajectory chunks across a horizon of $H = 16$ timesteps ($320\text{ ms}$ at $50\text{ Hz}$) using a 1D Temporal Convolutional U-Net backbone containing $M_{\text{weights}} = 48\times 10^6$ parameters ($96\text{ MB}$ at FP16). The edge SoC provides unified memory bandwidth $BW_{\text{mem}} = 204.8\text{ GB/s}$ and dense compute $C_{\text{peak}} = 40\text{ TFLOPs}$. Analyzing this compute pipeline reveals three distinct timing phases:
+
+::: {.column-margin}
+![](images/svg/margin_generative_inference_deadlines_envelope.svg){width="100%" fig-alt="Budget envelope comparing flow matching and DDIM inference against a twenty-millisecond real-time deadline."}
+
+*Diffusion denoising overruns real-time feedback deadlines while two-step flow matching preserves timing slack.*
+:::
 
 1. **Perception backbone latency**:
    The dual-camera visual feature extractor processes two synchronized $224 \times 224$ RGB streams (wrist-mounted and over-the-shoulder), executing convolutional or vision transformer feature extraction to produce conditioning embedding $\mathbf{E}_t$. This visual stage requires $t_{\text{vis}} =$ `{python} ActionChunkDenoisingCadence.t_vis_str` per planning cycle. Because visual features are extracted once per action chunk before denoising begins, $t_{\text{vis}}$ establishes a fixed latency baseline regardless of the diffusion sampling schedule.
@@ -403,6 +409,12 @@ Factoring in the reset phase reveals the true temporal bottleneck of physical ex
 :::
 
 Converting that same sample count into physical fatigue metrics demonstrates why time is often not the primary limiting constraint. In our analytical example, an 8-second contact sequence operating under a $100\text{ Hz}$ inner control loop executes 800 torque commands per trial, subjecting each joint to approximately $k = 4$ reciprocating load cycles. Across $N = 10^6$ trials, the drivetrain accumulates $4.0 \times 10^6$ bidirectional load reversals. If the joint relies on a standard strain-wave gear with a manufacturer-specified fatigue life of $L_{10} = 1.5 \times 10^6\text{ cycles}$ at rated output torque (the ISO 281 metric indicating when 10 percent of units are statistically expected to fail),[^fn-hw-bearing-life] the training campaign consumes the certified operational life of nearly three full gearheads per articulated joint before the policy learns to seat the door latch or complete the harness routing. Simultaneously, one million physical contact events crush compliant silicone gripper pads, abrade surface-wiping elastomeric squeegees, generate micro-notches in aluminum alignment jigs, and cycle electrical wiring looms toward fatigue fracture. At an average electrical power demand of $350\text{ W}$ per test bench, executing $1.2 \times 10^7\text{ s}$ of automated trials draws $1167\text{ kWh}$ of electrical energy, transforming policy training into an industrial-scale manufacturing operation.
+
+::: {.column-margin}
+![](images/svg/margin_mechanical_fatigue_ladder.svg){width="100%" fig-alt="Vertical ladder comparing RL trial cycles against mechanical gearhead and tendon cable fatigue lives."}
+
+*Real-world reinforcement learning exploration rapidly exhausts mechanical gearhead and cable fatigue lifespans.*
+:::
 
 [^fn-hw-bearing-life]: **$L_{10}$ Mechanical Fatigue Life**\index{Hardware wear!$L_{10}$ bearing life}: The ISO 281 rating defining the operating hours or revolution cycles that 90 percent of identical bearings or strain-wave gearheads complete before initial rolling contact fatigue flaking occurs. Aggressive RL exploration consumes this rating orders of magnitude faster than steady industrial cycles.
 
@@ -539,8 +551,10 @@ When transferred to physical hardware—where a machined steel or aluminum fixtu
 
 On physical hardware, however, the rigid aluminum and steel fixture limits deformation before structural bottoming to $\delta_{\text{real}} = 0.060\text{ mm}$, decelerating the mass in only $\Delta t_{\text{real}} \approx 0.40\text{ ms}$. True physical peak contact force spikes to $F_{\text{peak,real}} = \frac{\pi}{2} (m v_z / \Delta t_{\text{real}}) \approx 3770\text{ N}$—a $40.0\times$ discrepancy that exceeds the sensor rating by over $15\times$, permanently buckling the internal strain-gauge flexures, shearing mechanical dowel pins, and tripping motor driver overcurrent protection. Preventing this destruction requires independent nervous system safeguards: a real-time MCU approach velocity governor enforcing $v_{\text{max}}(z) \le \sqrt{2 a_{\text{max}} z}$, and a $1000\text{ Hz}$ force-derivative tripwire detecting $dF/dt > 5.0\times 10^3\text{ N/s}$ to clamp dynamic brakes within $1.0\text{ ms}$.
 
-::: {.column-margin .margin-pointer}
-⇄ **Contrast:** Simulated penalty spring deformation ($2.4\text{ mm}$) contrasts with the non-smooth Coulomb friction cones analyzed in @sec-body-actuator-limits.
+::: {.column-margin}
+![](images/svg/margin_contact_stiffness_cliff_knee.svg){width="100%" fig-alt="Knee curve showing simulation penalty spring force capping at 94 Newtons while physical rigid contact spikes to 3770 Newtons."}
+
+*Rigid steel contact spikes real impact force 40-fold higher than compliant simulator springs.*
 :::
 
 ::: {#chk-training-sim2real-contact-impulse .callout-checkpoint title="Sim-to-real contact impulse discrepancy"}
@@ -552,6 +566,10 @@ On physical hardware, however, the rigid aluminum and steel fixture limits defor
 For a machine that regulates motion and then touches a surface, the fidelity of the simulator cannot be evaluated through the internal mathematics of its contact solver. It must be budgeted through observable mechanical quantities, specifically contact onset timing, peak normal force, total transferred impulse, tangential slip distance, and contact release delay. Consider an analytical example of a robotic end-effector approaching a rigid workpiece at $0.20\text{ m/s}$. In a standard penalty-based physics engine using a discrete time step of $2.0\text{ ms}$, the collision resolves across a single time step, producing a simulated peak force of $450\text{ N}$ and an impulse of $0.90\text{ N}\cdot\text{s}$. On physical hardware, contact pad deformation and structural compliance distribute that same momentum transfer over $18\text{ ms}$, yielding a true peak force of $85\text{ N}$ with an impulse of $0.88\text{ N}\cdot\text{s}$. The integrated impulse matches within 2.2 percent, but the peak force differs by more than a factor of five. A policy that learned to detect contact onset from the sharp simulated force spike will fail to trigger on physical hardware, continuing to push until the drive motors hit current limits.
 
 Candidate omissions must be identified and cataloged based on the dynamics required by the task. Dry Coulomb friction discontinuities at zero velocity, nonlinear structural compliance, gearbox backlash, voltage saturation under high back-EMF, bus transport delays, and sensor packet loss represent standard omissions in rigid-body physics engines. A policy that operates purely at high continuous velocity may tolerate coarse friction models because the system never lingers near the zero-velocity stiction threshold. Conversely, a policy that regulates force while holding a static contact will enter uncontrolled limit-cycle oscillations if static friction, stick-slip transitions, and actuator deadbands are omitted from the simulator.
+
+::: {.column-margin .margin-pointer}
+⇄ **Contrast:** Simulated penalty spring deformation ($2.4\text{ mm}$) contrasts with the non-smooth Coulomb friction cones analyzed in @sec-body-actuator-limits.
+:::
 
 Establishing the validity of a simulator component requires **paired probing**\index{Paired probing!simulator validation}. The engineer applies identical open-loop command sequences to both the simulator and the physical hardware, measuring the difference between the resulting state trajectories against explicit error budgets. For a regulating actuator, injecting a step torque command of $1.5\text{ N}\cdot\text{m}$ into both systems yields concrete comparative metrics. If the simulator predicts a position settling time of $40\text{ ms}$ with zero overshoot, while the physical drive exhibits a $110\text{ ms}$ settling time and a $2.2\text{ mm}$ position overshoot due to unmodeled stator heating and structural flexure, the discrepancy is budgeted directly in milliseconds and millimeters. When a measured difference exceeds the allowable tolerance for the operational envelope, the simulator is formally defective for that training task.
 
