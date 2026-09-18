@@ -27,7 +27,7 @@ If you can multiply matrices and understand why matrix multiplication is expensi
 
 Matrix multiplication and element-wise activations stress different parts of a processor. Matrix multiplication can reuse each input many times; activations often do little arithmetic per array element.
 
-You will implement vectorized and tiled multiplication, then compare grouped and staged GELU expressions. NumPy still creates intermediate arrays in the grouped expression. Last, you will lower a convolution to a single matrix multiply with im2col and measure what that costs in memory. Measure each implementation on your hardware; this module does not guarantee a particular speedup.
+You will implement vectorized and tiled multiplication, then compare grouped and staged GELU expressions. NumPy still creates intermediate arrays in the grouped expression. Last, you will lower a convolution to a single matrix multiply with im2col, write its backward pass with col2im so it can train, and measure what that costs in memory. Measure each implementation on your hardware; this module does not guarantee a particular speedup.
 
 ## Commands
 
@@ -39,7 +39,7 @@ You will implement vectorized and tiled multiplication, then compare grouped and
 
 - **Implement** vectorized matrix multiplication using optimized BLAS libraries for maximum throughput
 - **Distinguish** grouped NumPy expressions from native kernel fusion that can avoid intermediate arrays
-- **Lower** a convolution to one matrix multiply with im2col, and measure its speed against Module 09's loops and its memory cost
+- **Lower** a convolution to one matrix multiply with im2col, write its backward pass with col2im, and measure its speed against Module 09's loops and its memory cost
 - **Understand** the roofline model and arithmetic intensity to predict performance bottlenecks
 - **Analyze** production acceleration strategies for different deployment scenarios (edge, cloud, GPU)
 :::
@@ -62,6 +62,10 @@ activated = fused_gelu(output)  # NumPy still creates temporary arrays
 
 # Convolution as one matrix multiply
 features = im2col_conv2d(images, conv.weight, conv.bias, padding=1)  # same output as conv(images)
+
+# ...and one you can train through
+out = Im2colConv2dFunction.apply(images, conv.weight, conv.bias, stride=1, padding=1)
+loss.backward()  # gradients match Conv2d's, via two matmuls and col2im
 ```
 
 ### What you're not building yet
@@ -72,7 +76,6 @@ To keep this module focused, you will **not** implement:
 - Custom CPU assembly (BLAS libraries already provide this)
 - Automatic kernel fusion (compilers like XLA do this automatically)
 - Multi-threading control (NumPy handles this via OpenBLAS/MKL)
-- The backward pass through im2col (col2im); `im2col_conv2d` is inference-only, like the other helpers here
 
 **You are building the understanding.** Hardware-specific implementations come later.
 
@@ -96,6 +99,12 @@ To keep this module focused, you will **not** implement:
 
 `Differs from Conv2d by up to ...`
 :   From `test_unit_im2col_conv2d`. The shapes worked out but the values did not. Check that the flattened weight is transposed to `(C·k·k, out_ch)` before the multiply, and that the result is reshaped to `(N, out_h, out_w, out_ch)` and then transposed to put the channels second.
+
+`Overlapping patches must add up`
+:   From `test_unit_col2im`. Your col2im assigns each patch gradient with `=` instead of adding it with `+=`, so a pixel covered by several patches keeps only the last one's gradient.
+
+`weight gradient differs from Conv2d by up to ...`
+:   From `test_unit_im2col_conv2d_function`. `self.cols.T @ G` has shape `(C·k·k, out_ch)`; transpose it before reshaping to `(out_ch, C, k, k)`. If the input gradient is the one that differs, check that `grad_output` was moved to `(N, out_h, out_w, out_ch)` before flattening.
 
 ## Finished? Read why
 

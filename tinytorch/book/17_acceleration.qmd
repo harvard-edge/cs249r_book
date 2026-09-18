@@ -225,7 +225,7 @@ The six-axis buffer `cols` has shape $(N, C, K, K, H_{\text{out}}, W_{\text{out}
 
 {{< include _listings/17_acceleration/im2col_conv2d.qmd >}}
 
-`im2col_conv2d` is the convolution in three steps. It builds the patch matrix, multiplies it by the transposed filter matrix with the `vectorized_matmul` from earlier in the module, and moves the channel axis from last to second. It reads `.data` and wraps the result in a new `Tensor`, like the other helpers in this chapter, so it computes Module 09's forward pass but records no backward path. Training through it would need col2im, which scatters each patch gradient back into the pixels it was copied from.
+`im2col_conv2d` is the convolution in three steps. It builds the patch matrix, multiplies it by the transposed filter matrix with the `vectorized_matmul` from earlier in the module, and moves the channel axis from last to second. It reads `.data` and wraps the result in a new `Tensor`, like the other helpers in this chapter, so it computes Module 09's forward pass but records no backward path.
 
 ::: {#lst-acceleration-im2col-check lst-pos="H" lst-cap="**The loops are the reference**: The matrix-multiply convolution must reproduce Module 09's output before its timing means anything."}
 ```python
@@ -240,6 +240,20 @@ np.testing.assert_allclose(im2col_conv2d(x, conv.weight, conv.bias, padding=1).d
 :::
 
 The module's analysis cell times both versions on two layers. On my machine, a $2 \times 3 \to 16$ layer on $16 \times 16$ images takes 34.4 ms through the loops and 0.044 ms through im2col, and a $2 \times 16 \to 32$ layer takes 339 ms against 0.096 ms, about 780 and 3,500 times faster. The patch matrix is 9.0 times the size of the input in both cases, as the storage count in @sec-convolutions predicted. Neither version does less arithmetic; the difference is whether the multiply-adds run in the interpreter or inside one library call.
+
+### Training through im2col
+
+A convolution that only runs forward can evaluate a CNN but not train one. In matrix form the forward pass is $Y = X_{\text{col}} W + b$, with $X_{\text{col}}$ the patch matrix and $W$ the flattened filters. Writing $G$ for the output gradient in the same row layout, the matrix-multiply rule from @sec-autograd gives $\partial W = X_{\text{col}}^{\top} G$ and $\partial X_{\text{col}} = G W^{\top}$, two matrix multiplies of the same size as the forward pass, and $\partial b$ is a column sum of $G$. The one step that is not a matrix multiply turns $\partial X_{\text{col}}$ into a gradient for the image. Every pixel was copied into several rows, so its gradient is the sum of the gradients of its copies. That is col2im.
+
+{{< include _listings/17_acceleration/col2im.qmd >}}
+
+`col2im` walks the same kernel offsets and strided slices as `im2col`, with the copy turned into `+=`. Within one offset the slice touches each pixel at most once, so the in-place add is safe; across offsets, the adds are what combine overlapping patches. Assignment instead of addition would keep only the last patch's gradient for each pixel, and the unit test catches it by sending a gradient of one from every patch entry and checking that the $3 \times 3$ example comes back as the coverage counts `[[1,2,1],[2,4,2],[1,2,1]]`. A second test checks the defining property of a transpose, $\langle \text{im2col}(x), c\rangle = \langle x, \text{col2im}(c)\rangle$, for random $x$ and $c$ with stride and padding.
+
+`Im2colConv2dFunction` puts the three gradients into the same `Function` shape as Module 09's `Conv2dFunction`. Its forward pass saves the patch matrix and the flattened filters; its backward pass uses them.
+
+{{< include _listings/17_acceleration/Im2colConv2dFunction_backward.qmd >}}
+
+Keeping `self.cols` alive until backward holds the $K^2$-times-larger buffer for every convolution in a model until its gradient is computed. Rebuilding it from the saved input would trade that memory for a second `im2col`. The unit test compares all three gradients with Module 09's loops on the same weights, and the module test checks that one SGD step moves the weights the same way on both paths. On my machine a full training step on the $2 \times 16 \to 32$ layer takes 1,201 ms through the loops and 0.25 ms through `Im2colConv2dFunction`, about 4,800 times faster.
 
 ---
 
@@ -410,7 +424,7 @@ Tiling and fusion also consume resources. Larger blocks require more working sto
 
 `tiled_matmul` allocates a zero accumulator and adds one block product per shared-dimension tile. Before each inner iteration, the accumulator contains every earlier contribution; after the final iteration, it contains the complete product. Partial tiles change slice sizes, not that invariant. The returned Tensor owns a copy of the accumulator. Timing this mechanism against one `vectorized_matmul` call exposes the cost of Python blocking around library arithmetic.
 
-`im2col` copies $K^2$ strided slices into a patch matrix whose columns follow the order in which a filter flattens, and `im2col_conv2d` turns Module 09's seven loops into one call to `vectorized_matmul`. It reproduces `Conv2d` exactly, pays for it with a patch matrix about $K^2$ times the input, and like the other helpers here stops at the forward pass.
+`im2col` copies $K^2$ strided slices into a patch matrix whose columns follow the order in which a filter flattens, and `im2col_conv2d` turns Module 09's seven loops into one call to `vectorized_matmul`. It reproduces `Conv2d` exactly and pays for it with a patch matrix about $K^2$ times the input. `col2im` reverses the copy with an accumulation, and `Im2colConv2dFunction` combines the two into a convolution that trains through two matrix multiplies and a scatter-add, with gradients that match Module 09's loops.
 
 @sec-memoization moves from data reused inside one operation to results reused across calls. During text generation, earlier keys and values can remain valid when one new token arrives. A cache makes that lifetime explicit and introduces a new obligation: reuse only state that belongs to the current generation.
 
@@ -432,4 +446,4 @@ Tiling and fusion also consume resources. Larger blocks require more working sto
 
 4. **Size the tile.** For a cache budget of 32,768 bytes, check which of $T=16,32,64$ satisfy the three-block storage estimate. Compare the actual tiled result with `vectorized_matmul` for a $(13,7)$ by $(7,5)$ product at each size. Then time a larger fixed workload and explain why fitting the estimate alone does not identify the fastest size.
 
-5. **Write col2im.** `im2col_conv2d` has no backward pass. Given the gradient with respect to its output, write the gradient with respect to the weights as one matrix multiply, and the gradient with respect to the patch matrix as another. Then write `col2im`, which adds each row of the patch gradient back into the pixels it came from, and check the result against Module 09's `Conv2d.backward` on a small input. Explain why col2im is an accumulation rather than a copy.
+5. **Recompute instead of saving.** `Im2colConv2dFunction` keeps the patch matrix from forward to backward. Change it to save only the input and rebuild `cols` in `backward`. Check that the gradients still match `Conv2d`, then measure the time per training step and the peak memory of both versions on a layer large enough for the difference to show. State which you would choose for a deep CNN on a device with little memory.
