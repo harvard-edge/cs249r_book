@@ -93,7 +93,7 @@ To govern this unprivileged, fail-plausible processing element without sacrifici
 
 1. **Tier 1: Host Agent Runtime (The Operating System Supervisor).** Operating in user-space CPU host memory (DRAM), the runtime acts as the supervisory kernel of the agent. It manages end-to-end task orchestration, retrieves external context, compiles structural output schemas into formal grammar automata, stages prompt context into memory escrow, enforces resource limits ($K_{\max}$ token budgets and $T_{\max}$ wall-clock deadlines), and mediates all external tool execution.
 2. **Tier 2: Inference Service Daemon (The Hardware Controller and Device Driver).** Operating as the accelerator driver and execution engine (such as vLLM, TensorRT-LLM, or TGI), the daemon manages physical accelerator resources. It schedules incoming request queues, converts raw UTF-8 byte streams into discrete token IDs, manages the dynamic allocation of Key-Value (KV) cache buffers in high-bandwidth device memory, executes batching schedules, and applies decode-time logit masks during token sampling.
-3. **Tier 3: Neural Execution Core (The Hardware ALU).** Operating directly on accelerator silicon (such as GPU Streaming Multiprocessors or TPU Matrix Multiply Units), the core consists of static parameter tensors $\Theta$. It executes dense linear algebra: compute-bound General Matrix Multiply (GEMM) kernels during prompt prefill and memory-bandwidth-bound General Matrix-Vector Multiply (GEMV) kernels during autoregressive token generation.
+3. **Tier 3: Neural Execution Core (The Hardware ALU).** Operating directly on accelerator silicon (such as GPU Streaming Multiprocessors or TPU Matrix Multiply Units), the core consists of static parameter tensors $\Theta$. It executes dense linear algebra: compute-bound General Matrix Multiply (GEMM) kernels during prompt prefill (processing an $M \times d_{\text{model}}$ matrix of all prompt tokens concurrently) and memory-bandwidth-bound General Matrix-Vector Multiply (GEMV) kernels during autoregressive token generation (processing a $1 \times d_{\text{model}}$ vector per step, sweeping all parameter weights across the bus for each emitted token).
 
 ::: {#fig-stochastic-processor-core fig-cap="**Three-Tier Invocation Lifecycle**: Boundary separation between host runtime, inference service daemon, and neural execution core across staging, generation, and verification phases." fig-alt="The three-tier invocation lifecycle showing host runtime, inference service, and neural core."}
 ![](images/svg/invocation_lifecycle.svg){width="100%"}
@@ -119,7 +119,7 @@ $$64 \times 40 \times 256\text{ KB} \approx 655.4\text{ MB/s}$$
 
 of continuous bus traffic. While modern PCIe buses offer gigabytes per second of raw throughput, streaming hundreds of megabytes of fine-grained logit buffers every second introduces severe bus contention, CPU interrupt overhead, and pipeline synchronization stalls.
 
-Consequently, the host agent runtime never pulls raw logit vectors across the interconnect. Instead, Tier 1 compiles high-level structural constraints (such as JSON schemas or regex patterns) into compact formal automata (such as Deterministic Finite Automata) and delegates them down to Tier 2. The inference service daemon executes logit masking directly within accelerator high-bandwidth memory (HBM), setting illegal token coordinates to $-\infty$ in a single GPU kernel launch before sampling. Only the resulting 4-byte sampled token ID is transferred back across the bus to the host runtime.
+Consequently, the host agent runtime never pulls raw logit vectors across the interconnect. Instead, Tier 1 compiles high-level structural constraints (such as JSON schemas or regex patterns) into compact formal automata (such as Deterministic Finite Automata) and delegates them down to Tier 2. Under the hood, the grammar engine maps DFA character-level transitions to the model's subword token vocabulary, determining ahead of time exactly which token IDs produce valid character continuations from the current DFA state. The inference service daemon executes logit masking directly within accelerator high-bandwidth memory (HBM), setting illegal token coordinates to $-\infty$ in a single GPU kernel launch before sampling. Only the resulting 4-byte sampled token ID is transferred back across the bus to the host runtime.
 
 ### The Host Reference Monitor and the Delivery Fallacy
 
@@ -310,7 +310,7 @@ While token IDs define the logical sequence length $S = M + K$, accelerator phys
 
 [^fn-kv-footprint]: **KV Cache Memory Footprint**: In multi-query and grouped-query attention ($n_{\text{kv}} \ll n_{\text{heads}}$), shared KV heads reduce single-token footprint $4\times$ to $8\times$. At scale, ephemeral KV allocations still exceed parameter weights. \index{Key-Value Cache}\index{Inference Engine!KV Cache Footprint}
 
-For $L$ transformer layers, Key-Value heads $n_{\text{kv}}$, and head dimension $d_{\text{head}}$, the total channel dimension per token is $H_{\text{kv}} = n_{\text{kv}} \cdot d_{\text{head}}$. In modern Grouped-Query Attention (GQA), $n_{\text{kv}} \ll n_{\text{heads}}$ (for example, 8 KV heads compared to 64 Query heads). Storing a Key vector $\mathbf{k} \in \mathbb{R}^{H_{\text{kv}}}$ and a Value vector $\mathbf{v} \in \mathbb{R}^{H_{\text{kv}}}$ per layer yields $2 \cdot L \cdot H_{\text{kv}}$ scalars. At scalar byte-width $b$ ($b=2$ for 16-bit BF16/FP16; $b=1$ for 8-bit FP8), the single-token memory footprint is:
+For $L$ transformer layers, Key-Value heads $n_{\text{kv}}$, and head dimension $d_{\text{head}}$, the total channel dimension per token is $H_{\text{kv}} = n_{\text{kv}} \cdot d_{\text{head}}$. In modern Grouped-Query Attention (GQA), $n_{\text{kv}} \ll n_{\text{heads}}$ (for example, 8 KV heads shared among 64 Query heads, slashing KV cache memory by $8\times$ compared to standard multi-head attention). Storing a Key vector $\mathbf{k} \in \mathbb{R}^{H_{\text{kv}}}$ and a Value vector $\mathbf{v} \in \mathbb{R}^{H_{\text{kv}}}$ per layer yields $2 \cdot L \cdot H_{\text{kv}}$ scalars. At scalar byte-width $b$ ($b=2$ for 16-bit BF16/FP16; $b=1$ for 8-bit FP8), the single-token memory footprint is:
 
 $$\text{Mem}_{\text{KV,token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot b = 2 \cdot L \cdot (n_{\text{kv}} \cdot d_{\text{head}}) \cdot b \quad \text{bytes/token}$$
 
@@ -389,120 +389,137 @@ Once staged as an integer token array and loaded into accelerator memory, how do
 
 ## Next-Token Computation {#sec-vol3-processor-autoregressive}
 
-To understand how an agent interacts with an accelerator, a systems programmer must first unlearn a classical hardware assumption: an accelerator running a large language model is not an arithmetic logic unit executing a sequence of instructions in hardware, nor does it compile a user prompt into a closed-form program. At the execution boundary, the stochastic processor core is a statistical sequence continuation engine. It evaluates conditional probability distributions over discrete token sequences via continuous tensor transformations on hardware accelerators (GPUs or TPUs), mutating no architected registers, allocating no operating system memory, and modifying zero persistent state. The host runtime must drive the model through an iterative control loop—termed *autoregressive generation*—to produce candidate output sequences token by token.
+When a software engineer invokes an LLM through an API call such as `response = client.chat.completions.create(...)`, the interface presents the illusion of a standard remote function call: the client sends a staged prompt string, waits for processing, and receives a completed text response. To someone trained on traditional database query engines or compiler pipelines, it is tempting to imagine that the accelerator compiles the prompt into an internal query plan and executes an end-to-end routine that outputs the entire response buffer in a single atomic pass.
 
-In plain English, **autoregressive causal serialization** means that token generation is fundamentally sequential: to generate token 50, the model must already know tokens 1 through 49. There is no mathematical shortcut, speculative pipeline bypass, or parallel trick that allows a single sequence trajectory to compute future tokens in parallel before earlier tokens are emitted. In an out-of-order CPU, independent instructions can be scheduled concurrently across execution units. In an autoregressive language model, however, every step has an unavoidable loop-carried data dependency: the token chosen at step $t-1$ becomes the input context for step $t$.
+The physical reality on accelerator silicon is fundamentally different. If an inference server receives a $2{,}000$-token prompt, its accelerator can process all $2{,}000$ tokens simultaneously during initial prefill in under 50 milliseconds. Yet generating a mere $200$-token response from that prompt often requires 3 to 5 seconds—nearly two orders of magnitude longer per token.
 
-Formally, the processor models output sequence $\mathbf{y}_{1:K} = (y_1, \dots, y_K)$ conditioned on prompt $\mathbf{x} = (x_1, \dots, x_M)$ via the probability chain rule:
+This stark performance asymmetry stems from a foundational architectural constraint: an accelerator executing a large language model is not an atomic function evaluator, but an *autoregressive sequence continuation engine*. It generates candidate sequences one token at a time through an iterative, loop-carried execution cycle. Understanding this execution cycle is essential for systems engineers designing high-throughput serving runtimes, agent control planes, and latency-sensitive user interfaces.
+
+### Autoregressive Factorization and the Causal Loop
+
+The mathematical principle governing foundation model generation is **autoregressive causal factorization**. Given an input prompt consisting of $M$ staged tokens $\mathbf{x} = (x_1, \dots, x_M)$, the model defines a probability distribution over an output continuation $\mathbf{y}_{1:K} = (y_1, \dots, y_K)$ by decomposing the joint sequence probability using the chain rule of probability:
 
 $$P(\mathbf{y}_{1:K} \mid \mathbf{x}) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, \mathbf{y}_{<t})$$ {#eq-autoregressive-factorization}
 
-where $\mathbf{y}_{<t} = (y_1, \dots, y_{t-1})$ is the prefix before step $t$ ($\mathbf{y}_{<1} = \emptyset$).[^fn-autoregressive-factorization] Sequence generation is thus an iterative serving control loop managed by host software rather than an atomic hardware execution primitive.
+where $\mathbf{y}_{<t} = (y_1, \dots, y_{t-1})$ represents the generated prefix prior to step $t$, with $\mathbf{y}_{<1} = \emptyset$.[^fn-autoregressive-factorization]
 
-[^fn-autoregressive-factorization]: **Autoregressive Factorization**: Chain rule decomposition enforcing strict conditioning on past history without acausal leakage. \index{Autoregressive Factorization}\index{Inference Engine!Autoregressive Decoding}
+[^fn-autoregressive-factorization]: **Autoregressive Factorization** (Statistical Sequence Modeling): The mathematical decomposition of a joint probability distribution over a discrete sequence into an ordered product of conditional univariate distributions. In transformer serving systems, this factorization imposes an absolute sequential dependency on generation: no output token can be evaluated until all preceding tokens have been materialized. \index{Autoregressive Factorization}\index{Inference Engine!Autoregressive Decoding}
 
-### Autoregressive Factorization and the Decoupling Principle {#sec-vol3-autoregressive-decoupling}
-
-The host runtime must enforce the *Decoupling Principle*: conditional likelihood $P_\Theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t})$ is completely decoupled from operational correctness and execution validity. In classical systems, if a compiler outputs an ELF binary, the code adheres to an Application Binary Interface (ABI) and type system; if a POSIX kernel accepts a system call, it guarantees state invariants. In an LLM-based processor, however, model weights $\Theta$ are optimized over a static text corpus $\mathcal{D}_{\text{train}}$ via empirical risk minimization (minimizing cross-entropy loss):
-
-$$\min_\Theta \mathbb{E}_{(\mathbf{x}, \mathbf{y}) \sim \mathcal{D}_{\text{train}}} \left[ -\sum_{t=1}^K \log P_\Theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t}) \right]$$ {#eq-cross-entropy-objective}
-
-This objective means that probability $P_\Theta(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t})$ quantifies only the **statistical typicality** of subword token $v$ continuing prefix $[\mathbf{x}, \mathbf{y}_{<t}]$ in the training corpus $\mathcal{D}_{\text{train}}$. In other words, it measures how familiar or expected that token looked to human authors and code repositories in the past. The neural network possesses no runtime model of host environments: it has no awareness of open Linux file descriptors, no live view into `/sys` or `/proc`, and no mechanism to verify whether a target directory exists. If $\mathcal{V}_{\text{valid}}(s_{\text{host}}) \subset \mathcal{V}$ denotes the subset of continuation tokens that preserve physical system invariants in host state $s_{\text{host}}$:
-
-$$P_\Theta(y_t \in \mathcal{V}_{\text{valid}}(s_{\text{host}}) \mid \mathbf{x}, \mathbf{y}_{<t}) \not\equiv 1$$ {#eq-validity-divergence}
-
-The most probable continuation (the statistical mode) can directly violate host validity:
-
-$$\arg\max_{v \in \mathcal{V}} P_\Theta(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) \notin \mathcal{V}_{\text{valid}}(s_{\text{host}}) \quad \text{with nonzero measure.}$$ {#eq-modal-invalidity}
-
-Likelihood reflects training-set typicality, providing zero architectural certification that emitted code compiles, terminates, or satisfies security boundaries.
-
-### The Atomic Forward Step and the Serving Control Loop {#sec-vol3-forward-step-loop}
-
-To see what happens down at the metal during inference, consider what a single **atomic forward step** actually computes. The neural core mapping $f_\Theta$ takes the entire accumulated token sequence $[\mathbf{x}, \mathbf{y}_{<t}]$, projects it through layers of attention and feed-forward networks, and produces a hidden activation vector $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ representing the final position. It then multiplies $\mathbf{h}_t$ by the unembedding matrix $\mathbf{W}_U \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$ to yield raw scores known as **logits** $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$:
-
-$$\mathbf{z}_t = \mathbf{W}_U \mathbf{h}_t = f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$$ {#eq-forward-step}
-
-where $|\mathcal{V}|$ is the vocabulary cardinality (typically 32,000 to 128,000 discrete token IDs).
-
-At this exact point, *accelerator hardware execution halts*. The GPU cores do not select the next token, do not append it to a string, and do not advance a hardware program counter; they simply write the logit vector $\mathbf{z}_t$ into device High Bandwidth Memory (HBM). To advance the trajectory, an external software process—the inference serving engine (such as vLLM, TensorRT-LLM, or llama.cpp) running on the host CPU—must drive an external control loop (@fig-autoregressive-loop) across four explicit phases:
-
-1. **Logit Evaluation:** Dispatching compute kernels to evaluate $f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$ and write raw logits $\mathbf{z}_t$ to accelerator device memory.
-2. **Decoding and Sampling:** Executing a sampling kernel (on the GPU or host CPU) that transforms raw logits into a probability distribution and draws a discrete token ID $\hat{y}_t \in \mathcal{V}$.
-3. **State Mutation:** Escrowing token $\hat{y}_t$ in host memory and updating the accelerator's ephemeral Key-Value (KV) cache (@sec-vol3-virtual-memory). The KV cache stores the computed key and value activation tensors for all preceding tokens in GPU memory, ensuring the accelerator does not wastefully recompute attention history from scratch on the next step.
-4. **Predicate Verification:** Evaluating whether sequence generation should stop against the halt predicate:
-
-$$\text{Halt}(t) \iff (\hat{y}_t \in \mathcal{S}_{\text{stop}}) \lor (t \ge K_{\max})$$ {#eq-halt-predicate}
-
-where $\mathcal{S}_{\text{stop}} \subset \mathcal{V}^*$ represents terminal delimiter sequences (such as `<|endoftext|>`, `\nObservation:`, or specialized tool-call end markers) and $K_{\max}$ is the step ceiling enforced by the host runtime to prevent infinite loops and runaway compute spend. Because subword tokenizers (such as Byte-Pair Encoding) can fracture multi-character delimiters across arbitrary subword boundaries, robust termination requires sequence suffix-matching stop condition checks over rolling sliding-window tail buffers rather than simple scalar integer equality (@sec-vol3-processor-contract).
-
-::: {#fig-autoregressive-loop fig-cap="**Autoregressive Serialization Loop**: Causal dependency chain across serving daemon and neural core boundaries during token decoding." fig-alt="Autoregressive serialization loop showing the boundary between the inference daemon and the neural core."}
-![](images/svg/autoregressive_serialization_loop.svg){width="100%"}
-:::
-
-Unlike classical CPUs with autonomous instruction fetch and program counters, the neural core cannot self-advance. The inference service daemon must supervise each forward pass across the accelerator memory bus while enforcing host execution bounds.
-
-### The Causal Serialization Barrier {#sec-vol3-causal-serialization}
-
-The difference in performance between ingesting a prompt and generating a response stems from the **causal serialization barrier**. During prompt prefill, the accelerator receives the entire staged prompt $\mathbf{x} = (x_1, \dots, x_M)$ simultaneously. Because all $M$ tokens are known in advance, the hardware can evaluate them concurrently using a causal attention mask:
-
-$$\mathbf{M}_{\text{causal}}(i, j) = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases}$$ {#eq-causal-mask}
-
-where $-\infty$ ensures that after exponentiation in the attention softmax ($e^{-\infty} = 0$), position $i$ attends only to previous positions $j \le i$ and receives zero attention weight from future positions $j > i$.[^fn-causal-masking] Dense GEMM operations achieve high arithmetic intensity (compute operations per byte of memory transferred), saturating GPU tensor cores.
-
-[^fn-causal-masking]: **Causal Masking**: Upper-triangular mask zeroing future query-key affinities during parallel prefill, enforcing autoregressive factorization. \index{Causal Masking}\index{Attention!Causal Mask}
-
-During decode, however, this spatial parallelism collapses. The system encounters an inescapable dependency: token $y_t$ depends strictly on preceding token $y_{t-1}$:
+This factorization imposes an inescapable, loop-carried data dependency: the probability distribution for token $y_t$ depends strictly on the exact token chosen at step $t-1$:
 
 $$\text{Dependency}(y_t) = \{\mathbf{x}, y_1, y_2, \dots, y_{t-2}, y_{t-1}\}$$ {#eq-decode-dependency}
 
-While tensor arithmetic within a single forward step executes across thousands of GPU worker threads in parallel, the token generation sequence along an individual trajectory forms an irreducibly serial chain. Generating $K$ tokens requires launching $K$ successive forward passes, bounding per-trajectory latency by $K$ sequential memory bus sweeps (@sec-vol3-processor-cost). Multi-tenant continuous batching ($B > 1$) amortizes the memory bandwidth of reading model weights across concurrent user requests, maximizing server throughput, but leaves individual trajectory latency completely serialized.
+To appreciate the systems implications of this dependency, contrast the autoregressive loop with the execution model of a classical superscalar out-of-order CPU (such as an Intel x86-64 or ARM Neoverse core). In a modern CPU pipeline, hardware schedulers leverage *Instruction-Level Parallelism* (ILP): if instruction $B$ does not depend on the register outputs of instruction $A$, hardware register renaming and reservation stations can dispatch both instructions concurrently across parallel execution ports. When branches occur, branch predictors allow the CPU to speculatively execute dozens of instructions ahead of the current program counter.
 
-### Decoding Policies and the Sampling Transformation {#sec-vol3-sampling-transforms}
+In an autoregressive language model, however, no such speculative shortcut exists along a single sequence trajectory. The model cannot compute step 50 before step 49 has been sampled, because the continuous hidden activation vector at step 50 is an attention-weighted combination over the Key and Value representations of all previous tokens—including token 49. Every output token requires a distinct, sequential forward pass through the entire neural network.
+
+The contrast between prompt ingestion (*prefill*) and response generation (*decode*) illustrates this boundary:
+
+- **Prefill (Parallel Computation):** During prompt ingestion, all $M$ prompt tokens are known in advance. The accelerator evaluates all $M$ positions concurrently within a single forward pass as an $M \times d_{\text{model}}$ matrix-matrix multiplication (GEMM). To prevent earlier tokens from attending to later tokens, the attention mechanism applies an upper-triangular *causal attention mask* $\mathbf{M}_{\text{causal}}$:
+  $$\mathbf{M}_{\text{causal}}(i, j) = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases}$$ {#eq-causal-mask}
+  Because $-\infty$ evaluates to zero after exponentiation in the attention softmax ($e^{-\infty} = 0$), position $i$ receives attention weight only from positions $j \le i$.[^fn-causal-masking] Because all $M$ tokens are processed together, the model weights loaded into accelerator SRAM can be reused across all $M$ tokens. This high arithmetic intensity (FLOPs per byte transferred) fully saturates parallel tensor cores, making prefill compute-bound.
+- **Decode (Serial Iteration):** During generation, spatial parallelism collapses along the trajectory dimension. Generating $K$ tokens requires launching $K$ successive forward passes across the accelerator bus. Each step evaluates only a single token vector ($1 \times d_{\text{model}}$) through a matrix-vector multiplication (GEMV). Because generating that single token requires streaming all tens of gigabytes of model parameters from High-Bandwidth Memory (HBM) into on-chip cache, arithmetic intensity collapses to near zero. Generation becomes strictly memory-bandwidth bound: the tensor cores sit mostly idle, waiting on the physical speed of the memory bus.
+
+[^fn-causal-masking]: **Causal Masking** (Transformer Architecture): An upper-triangular masking matrix enforced in self-attention layers that zeros out attention weights from subsequent sequence positions. This ensures that during parallel training and prefill, positions can only incorporate information from preceding context, strictly preserving the autoregressive property. \index{Causal Masking}\index{Attention!Causal Mask}
+
+### The Iterative Serving Execution Cycle
+
+Because the neural core possesses no autonomous program counter, it cannot drive its own iteration. When an accelerator finishes a single forward pass, it evaluates the final layer's *unembedding projection*—multiplying the final hidden activation vector $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ by unembedding weight matrix $\mathbf{W}_U \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$—to yield a vector of raw, unnormalized scores called **logits** $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$:
+
+$$\mathbf{z}_t = \mathbf{W}_U \mathbf{h}_t = f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$$ {#eq-forward-step}
+
+where $|\mathcal{V}|$ is the vocabulary cardinality (typically $32{,}000$ to $128{,}000$ distinct token identifiers).
+
+At this exact moment, accelerator silicon execution halts. The GPU hardware does not pick the next token, does not append characters to an output string, and does not advance an instruction pointer. It simply deposits the float logit vector $\mathbf{z}_t$ into device High-Bandwidth Memory (HBM).
+
+To advance generation, an external host software process—the *inference serving engine* (such as vLLM, TensorRT-LLM, or llama.cpp)—must supervise an explicit 4-phase execution cycle (@fig-autoregressive-loop):
+
+1. **Forward Evaluation:** The serving engine dispatches compute kernels to evaluate $f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$ on the accelerator, producing logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$.
+2. **Decoding and Sampling:** A sampling kernel transforms raw logits $\mathbf{z}_t$ into an emission distribution $Q(y_t)$ and draws a discrete token identifier $\hat{y}_t \in \mathcal{V}$.
+3. **State Mutation:** The serving daemon escrows token $\hat{y}_t$ in host memory and commits its corresponding Key and Value projection vectors into the accelerator's Key-Value (KV) cache (@sec-vol3-processor-tokenization), ensuring previous attention states do not need to be recomputed on subsequent iterations.
+4. **Predicate Verification:** The host runtime tests whether sequence generation should terminate by evaluating the halt predicate:
+   $$\text{Halt}(t) \iff \text{SuffixMatch}(\mathbf{y}_{\le t}, \mathcal{S}_{\text{stop}}) \lor (t \ge K_{\max})$$ {#eq-halt-predicate}
+   where $\mathcal{S}_{\text{stop}} \subset \mathcal{V}^*$ denotes a set of terminal delimiter sequences and $K_{\max}$ represents the maximum token step ceiling configured by the host agent runtime.
+
+::: {#fig-autoregressive-loop fig-cap="**Autoregressive Serialization Loop**: Causal dependency chain across the inference serving daemon and accelerator neural core during iterative token decoding." fig-alt="Autoregressive serialization loop illustrating the four-phase boundary between the inference daemon and the neural core."}
+![](images/svg/autoregressive_serialization_loop.svg){width="100%"}
+:::
+
+In software, this 4-phase execution cycle is implemented directly within the inference service daemon's engine loop. @lst-autoregressive-decode-loop illustrates a production-style serving loop in Python, demonstrating how the host runtime drives the accelerator, mutates state, and enforces stop conditions.
+
+::: {#lst-autoregressive-decode-loop lst-cap="**Autoregressive Generation Loop**: Python implementation executing the four-phase serving cycle across the inference daemon and accelerator boundary."}
+```python
+def autoregressive_decode(model, prompt_tokens, stop_tokens, max_new_tokens=512, tau=0.7):
+    """Iterative serving loop across the 4-phase execution cycle."""
+    tokens = list(prompt_tokens)
+    
+    # Phase 0: Prefill prompt tokens and initialize KV cache
+    logits, kv_cache = model.prefill(tokens)
+
+    for step in range(max_new_tokens):
+        # Phase 1 & 2: Forward evaluation and logit sampling
+        probs = softmax(logits / max(tau, 1e-5))
+        next_token = sample_categorical(probs)  # argmax if tau -> 0
+        tokens.append(next_token)
+
+        # Phase 3: State mutation (append token KV vectors to accelerator cache)
+        logits, kv_cache = model.decode_step(next_token, kv_cache)
+
+        # Phase 4: Predicate verification (evaluate halt condition)
+        if next_token in stop_tokens or matches_stop_suffix(tokens):
+            break
+
+    return tokens
+```
+:::
+
+Notice the suffix-matching logic in Phase 4 of @lst-autoregressive-decode-loop. Because Byte-Pair Encoding splits text based on statistical byte entropy rather than syntax rules (@sec-vol3-processor-tokenization), a multi-character stop delimiter such as `"\nObservation:"` or `"```"` can be fractured across multiple subword token IDs. For instance, the token following a newline may incorporate the first few letters of the delimiter (such as token `"Obs"`), while subsequent letters form another token (`"ervation"`). Consequently, an inference engine cannot rely solely on checking individual token IDs against a static set of integer scalars. It must maintain a rolling suffix buffer of recently decoded characters, verifying whether the tail of the emitted string matches any configured stop delimiter $\mathcal{S}_{\text{stop}}$.
+
+### Reshaping Probability on the Vocabulary Simplex
 
 The raw logits $\mathbf{z}_t = f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$ produced by the neural core define the model's base parameter distribution via the standard softmax function:
 
 $$P_\Theta(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \frac{\exp(z_{t, v})}{\sum_{w \in \mathcal{V}} \exp(z_{t, w})}$$ {#eq-base-parameter-likelihood}
 
-However, inference engines rarely sample directly from this raw distribution. Instead, the serving runtime reshapes $\mathbf{z}_t$ through a **decoding policy** $\pi_{\text{decode}}$ parameterized by an execution tuple:[^fn-sampling-transforms]
+However, inference serving engines rarely sample directly from this raw distribution. Instead, the serving runtime reshapes $\mathbf{z}_t$ through a **decoding policy** parameterized by an execution tuple:[^fn-sampling-transforms]
 
 $$\Pi_{\text{sample}} = \langle \tau, k, p, \alpha_{\text{rep}}, \alpha_{\text{pres}}, \alpha_{\text{freq}}, \mathbf{b}, \sigma \rangle$$ {#eq-sampling-policy-tuple}
 
-where $\tau$ is temperature, $k$ is the top-$k$ truncation limit, $p$ is the nucleus (top-$p$) cumulative probability threshold, $\alpha_{\text{rep}}$ is repetition penalty, $\alpha_{\text{pres}}$ and $\alpha_{\text{freq}}$ are presence and frequency penalties, $\mathbf{b} \in \mathbb{R}^{|\mathcal{V}|}$ is an additive logit bias vector, and $\sigma \in \mathbb{Z}^+$ is the pseudo-random number generator (PRNG) seed.
+where $\tau$ is softmax temperature, $k$ is the top-$k$ truncation threshold, $p$ is the nucleus (top-$p$) cumulative probability threshold, $\alpha_{\text{rep}}$ is the repetition penalty, $\alpha_{\text{pres}}$ and $\alpha_{\text{freq}}$ are presence and frequency penalties, $\mathbf{b} \in \mathbb{R}^{|\mathcal{V}|}$ is an additive logit bias vector, and $\sigma \in \mathbb{Z}^+$ is the pseudo-random number generator (PRNG) seed.
 
-[^fn-sampling-transforms]: **Sampling Transformation**: Runtime modification of logits into an emission distribution via penalties and truncation without modifying weights $\Theta$. \index{Sampling Transformation}\index{Inference Engine!Decoding Policy}
+[^fn-sampling-transforms]: **Sampling Transformation** (Runtime Decoding Policy): The algorithmic modification of raw neural network logits into an operational emission distribution on the probability simplex. Managed entirely by the host serving runtime without altering underlying parameter weights $\Theta$, the decoding policy governs the trade-off between modal determinism and stochastic diversity. \index{Sampling Transformation}\index{Inference Engine!Decoding Policy}
 
-This sampling pipeline maps raw unnormalized scores into an **emission distribution** $Q(y_t \mid \mathbf{x}, \mathbf{y}_{<t}; \Pi_{\text{sample}})$ residing on the probability simplex $\Delta^{|\mathcal{V}|-1}$ (the mathematical space of all valid categorical probability distributions where all elements are non-negative and sum to $1.0$):
+This sampling pipeline maps raw unnormalized scores into an **emission distribution** $Q(y_t \mid \mathbf{x}, \mathbf{y}_{<t}; \Pi_{\text{sample}})$ residing on the probability simplex $\Delta^{|\mathcal{V}|-1}$ (the mathematical space of categorical probability distributions where all elements are non-negative and sum to $1.0$):
 
 $$\Delta^{|\mathcal{V}|-1} = \left\{ \mathbf{q} \in \mathbb{R}^{|\mathcal{V}|} \;\middle|\; \sum_{v=1}^{|\mathcal{V}|} q_v = 1, \; q_v \ge 0 \right\}$$ {#eq-prob-simplex}
 
 The transformation executes across five sequential stages:
 
-1. **Repetition and Frequency Penalties:** The runtime tracks token occurrence counts $c_v(t) = \sum_{j=1}^{t-1} \mathbb{I}(y_j = v)$ in the generated prefix. It applies multiplicative attenuation ($\alpha_{\text{rep}} \ge 1.0$) to penalize tokens that have already appeared, preventing repetitive loops:
+1. **Repetition and Frequency Attenuation:** The runtime tracks token occurrence frequencies $c_v(t) = \sum_{j=1}^{t-1} \mathbb{I}(y_j = v)$ within the generated prefix. It applies multiplicative attenuation ($\alpha_{\text{rep}} \ge 1.0$) to penalize tokens that have already been emitted, suppressing repetitive loops:
    $$z'_{t, v} = \begin{cases} z_{t, v} / \alpha_{\text{rep}} & \text{if } c_v(t) > 0 \text{ and } z_{t, v} > 0 \\ z_{t, v} \cdot \alpha_{\text{rep}} & \text{if } c_v(t) > 0 \text{ and } z_{t, v} \le 0 \\ z_{t, v} & \text{if } c_v(t) = 0 \end{cases}$$ {#eq-repetition-penalty}
-   and incorporates additive presence and frequency offsets:
+   Notice the sign-dependent branching in @eq-repetition-penalty: if a previously emitted token has a positive logit ($z > 0$), dividing by $\alpha_{\text{rep}} > 1.0$ reduces its score toward zero. If its logit is negative ($z \le 0$), multiplying by $\alpha_{\text{rep}}$ drives it further negative (for example, $-2.0 \times 1.2 = -2.4$), ensuring that repeated tokens are consistently suppressed regardless of logit sign. Additive presence and frequency offsets are then applied:
    $$z''_{t, v} = z'_{t, v} - \alpha_{\text{pres}} \cdot \mathbb{I}(c_v(t) > 0) - \alpha_{\text{freq}} \cdot c_v(t)$$ {#eq-additive-penalties}
 
-2. **Logit Biasing:** Additive bias vector $\mathbf{b} \in [-\infty, +\infty)^{|\mathcal{V}|}$ manually inflates or masks specific tokens (for example, setting $b_v = -\infty$ to forbid banned tokens or grammar-violating keywords):
+2. **Logit Biasing:** An additive bias vector $\mathbf{b} \in [-\infty, +\infty)^{|\mathcal{V}|}$ inflates or suppresses specific token coordinates. Setting $b_v = -\infty$ strictly forbids token $v$ from being selected, a mechanism leveraged by grammar-constrained decoding engines (@sec-vol3-processor-grammar-constrained):
    $$z'''_{t, v} = z''_{t, v} + b_v$$ {#eq-logit-biasing}
 
 3. **Thermal Simplex Scaling:** Logits are scaled by temperature $\tau \in (0, \infty)$:[^fn-softmax-temperature]
    $$\tilde{z}_{t, v} = \frac{z'''_{t, v}}{\tau}$$ {#eq-thermal-scaling}
    Borrowing from the Boltzmann distribution in statistical mechanics, modulating $\tau$ controls entropy on the probability simplex (@fig-temperature-simplex):
    - **Greedy Limit ($\tau \to 0^+$):** Thermal noise approaches zero, collapsing probability mass entirely onto the mode with the maximum logit:
-   $$\lim_{\tau \to 0^+} Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \begin{cases} 1 & \text{if } v = \arg\max_{w \in \mathcal{V}} z'''_{t, w} \\ 0 & \text{otherwise} \end{cases}$$ {#eq-greedy-limit}
-   (subject to floating-point drift during GPU reduction operations[^fn-float-determinism]).
+     $$\lim_{\tau \to 0^+} Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \begin{cases} 1 & \text{if } v = \arg\max_{w \in \mathcal{V}} z'''_{t, w} \\ 0 & \text{otherwise} \end{cases}$$ {#eq-greedy-limit}
+     (subject to floating-point drift in GPU parallel reduction trees[^fn-float-determinism]).
    - **Balanced Sampling ($0.2 \le \tau \le 0.8$):** Provides smooth exploration while retaining modal preference.
    - **High-Entropy Limit ($\tau \to \infty$):** High thermal noise washes away differences between logits, dispersing probability mass toward a uniform distribution:
-   $$\lim_{\tau \to \infty} Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \frac{1}{|\mathcal{V}|}$$ {#eq-uniform-limit}
+     $$\lim_{\tau \to \infty} Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \frac{1}{|\mathcal{V}|}$$ {#eq-uniform-limit}
 
-[^fn-softmax-temperature]: **Temperature Scaling**: Dispersion coefficient $\tau$ reshaping categorical entropy on the vocabulary simplex. \index{Temperature Scaling}\index{Sampling!Temperature}
+[^fn-softmax-temperature]: **Temperature Scaling** (Statistical Mechanics / Logit Calibration): A dispersion parameter $\tau$ that scales logit magnitudes prior to the softmax transformation. Derived from statistical mechanics ($P(E) \propto e^{-E / k_B T}$), temperature modulates the sharpness or entropy of the resulting categorical distribution without changing the rank order of candidate tokens. \index{Temperature Scaling}\index{Sampling!Temperature}
+
+[^fn-float-determinism]: **Floating-Point Non-Determinism** (GPU Reduction Trees): In parallel GPU reduction kernels, floating-point addition is non-associative: $(a + b) + c \neq a + (b + c)$. Variations in thread scheduling, warp arrival order, or block sizes across runs can alter the least significant bits of logit values, occasionally causing ties or near-ties to flip even under greedy sampling ($\tau=0$). \index{IEEE 754!Non-Associative Addition}\index{Determinism!Floating-Point Drift}
 
 ::: {#fig-temperature-simplex fig-cap="**Thermal Scaling on the Probability Simplex**: Softmax temperature modulation across greedy collapse, balanced sampling, and uniform entropy limits." fig-alt="Thermal scaling of logit distributions on the vocabulary simplex, showing greedy collapse, balanced sampling, and uniform entropy limits."}
 ![](images/svg/temperature_simplex_scaling.svg){width="100%"}
 :::
-
-[^fn-float-determinism]: **Non-Associative Reduction**: Floating-point non-associativity ($(a + b) + c \neq a + (b + c)$) in GPU reduction trees can cause greedy argmax drift across different kernel tile sizes or hardware schedules. \index{IEEE 754!Non-Associative Addition}\index{Determinism!Floating-Point Drift}
 
 ::: {.callout-note title="Worked Example: Tracing the Softmax Temperature Transformation on a 3-Token Logit Vector"}
 
@@ -521,12 +538,12 @@ For each temperature setting $\tau$, compute the scaled logits $\tilde{z}_i = z_
 
 *Case 1: Low Temperature ($\tau = 0.2$)*
 - Scaled logits: $\tilde{\mathbf{z}} = [2.0 / 0.2, 1.0 / 0.2, 0.0 / 0.2] = [10.0, 5.0, 0.0]$
-- Exponentials: $e^{10.0} \approx 22026.47$, $e^{5.0} \approx 148.41$, $e^{0.0} = 1.00$
-- Normalization sum: $Z = 22026.47 + 148.41 + 1.00 = 22175.88$
+- Exponentials: $e^{10.0} \approx 22{,}026.47$, $e^{5.0} \approx 148.41$, $e^{0.0} = 1.00$
+- Normalization sum: $Z = 22{,}026.47 + 148.41 + 1.00 = 22{,}175.88$
 - Probabilities:
-  $$P(v_1) = \frac{22026.47}{22175.88} \approx 0.9933 \quad (99.33\%)$$
-  $$P(v_2) = \frac{148.41}{22175.88} \approx 0.0067 \quad (0.67\%)$$
-  $$P(v_3) = \frac{1.00}{22175.88} \approx 0.000045 \quad (0.005\%)$$
+  $$P(v_1) = \frac{22{,}026.47}{22{,}175.88} \approx 0.9933 \quad (99.33\%)$$
+  $$P(v_2) = \frac{148.41}{22{,}175.88} \approx 0.0067 \quad (0.67\%)$$
+  $$P(v_3) = \frac{1.00}{22{,}175.88} \approx 0.000045 \quad (0.005\%)$$
 
 *Case 2: Baseline Temperature ($\tau = 1.0$)*
 - Scaled logits: $\tilde{\mathbf{z}} = [2.0 / 1.0, 1.0 / 1.0, 0.0 / 1.0] = [2.0, 1.0, 0.0]$
@@ -566,15 +583,15 @@ At $\tau = 1.0$, the distribution mirrors the training distribution, but present
    $$\mathcal{V}^{(k)} = \operatorname{argtopk}_{v \in \mathcal{V}}(\tilde{z}_{t, v}, k)$$ {#eq-topk-truncation}
    or nucleus (top-$p$) filtering:
    $$\mathcal{V}^{(p)} = \arg\min_{\mathcal{U} \subseteq \mathcal{V}^{(k)}} \left\{ |\mathcal{U}| \;\middle|\; \sum_{u \in \mathcal{U}} \frac{\exp(\tilde{z}_{t, u})}{\sum_{w \in \mathcal{V}^{(k)}} \exp(\tilde{z}_{t, w})} \ge p \right\}$$ {#eq-nucleus-truncation}
-   masking coordinates outside $\mathcal{V}_{\text{active}} = \mathcal{V}^{(p)}$ to $-\infty$. Top-$k$ sets a hard ceiling on the number of candidate tokens, whereas nucleus (top-$p$) dynamically adjusts the candidate pool size based on the model's confidence, expanding the pool when uncertain and contracting it to a few tokens when confident.
+   masking coordinates outside $\mathcal{V}_{\text{active}} = \mathcal{V}^{(p)}$ to $-\infty$. In algorithmic terms, nucleus filtering sorts candidate tokens by descending probability, computes their cumulative sum, and selects the minimal prefix of tokens whose cumulative probability meets or exceeds threshold $p$, masking all remaining tokens. Top-$k$ sets a hard ceiling on the number of candidate tokens, whereas nucleus (top-$p$) dynamically adjusts the candidate pool size based on the model's confidence, expanding the pool when uncertain and contracting it to a few tokens when confident.
 
 5. **Categorical Draw with PRNG Seeding:** Normalizing active logits yields the final emission distribution:
+   $$Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}; \Pi_{\text{sample}}) = \begin{cases} \frac{\exp(\tilde{z}_{t, v})}{\sum_{u \in \mathcal{V}_{\text{active}}} \exp(\tilde{z}_{t, u})} & \text{if } v \in \mathcal{V}_{\text{active}} \\ 0 & \text{otherwise} \end{cases}$$ {#eq-emission-distribution}
+   The sampled token $\hat{y}_t \sim Q$ is drawn via a pseudo-random number generator initialized with seed $\sigma$.
 
-$$Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}; \Pi_{\text{sample}}) = \begin{cases} \frac{\exp(\tilde{z}_{t, v})}{\sum_{u \in \mathcal{V}_{\text{active}}} \exp(\tilde{z}_{t, u})} & \text{if } v \in \mathcal{V}_{\text{active}} \\ 0 & \text{otherwise} \end{cases}$$ {#eq-emission-distribution}
+Crucially, the emission distribution $Q(y_t)$ is a mutable Tier 2 software configuration managed by the inference host runtime; the underlying parameter distribution $P_\Theta(y_t)$ is an immutable Tier 3 physical property baked into accelerator weights. An engineer can alter temperature, top-$p$, or logit biases on a per-request basis without modifying a single weight on the accelerator.
 
-The sampled token $\hat{y}_t \sim Q$ is drawn via a pseudo-random number generator initialized with seed $\sigma$.
-
-Crucially, the emission distribution $Q(y_t)$ is a mutable Tier 2 software configuration managed by the inference host runtime; the underlying parameter distribution $P_\Theta(y_t)$ is an immutable Tier 3 physical property baked into GPU HBM weights. An engineer can alter temperature, top-$p$, or logit biases on a per-request basis without touching a single weight on the accelerator. Runtimes must never confuse high emission probability $Q(y_t)$ with operational validity. If the processor emits a high-probability, fluent sequence of tokens, what does that establish about the real system?
+If the serving engine repeatedly executes this loop and produces a fluent, high-probability sequence of tokens, what does that establish about the real system? Does high statistical likelihood under the model's parameters guarantee that the generated code compiles, or that an emitted tool call is safe to execute?
 
 ## Candidate Sequences Versus Valid Conclusions {#sec-vol3-processor-continuations}
 
@@ -617,7 +634,7 @@ To an operating systems student, the principle of least privilege and capability
 
 Consider an unprivileged user-space process running in Ring 3 with an empty file descriptor table and no root capabilities. If that process computes the string `"rm -rf /"`, zero files are deleted. A string residing in user memory has zero ambient authority to touch hardware. The CPU does not alter disk sectors unless the process invokes a system call, and the operating system kernel explicitly validates privileges before performing the write.
 
-Under **Zero Ambient Authority ($A=0$)** in the H-S-A-C taxonomy,[^fn-ambient-authority] the neural processor core is treated exactly like that unprivileged process: it possesses zero default rights. The neural core has no open file descriptors, no execution contexts, no system clock access, and no peripheral device mappings. When the core generates tokens representing `rm -rf /` or `DROP TABLE accounts;`, it alters exactly zero disk sectors; the candidate tokens remain passive integers stored in host DRAM. Authority resides exclusively in the host **reference monitor**—an external supervisor that intercepts candidate strings, validates schemas, verifies capabilities and invariants against live ground truth, and gates actuation.
+Under **Zero Ambient Authority ($A=0$)** in the H-S-A-C architectural taxonomy[^fn-ambient-authority]—where Horizon $H=1$ denotes a single-turn invocation, State $S=\text{staged}$ denotes an immutable context buffer held in host memory escrow, Authority $A=0$ denotes zero ambient privileges, and Closure $C=\text{external}$ denotes external deterministic verification—the neural processor core is treated exactly like that unprivileged process: it possesses zero default rights. The neural core has no open file descriptors, no execution contexts, no system clock access, and no peripheral device mappings. When the core generates tokens representing `rm -rf /` or `DROP TABLE accounts;`, it alters exactly zero disk sectors; the candidate tokens remain passive integers stored in host DRAM. Authority resides exclusively in the host **reference monitor**—an external supervisor that intercepts candidate strings, validates schemas, verifies capabilities and invariants against live ground truth, and gates actuation.
 
 [^fn-ambient-authority]: **Zero Ambient Authority**: Formalized in modern object-capability literature [@miller2003; @miller2006robust] building upon @saltzer1975's principle of least privilege, zero ambient authority dictates that a computational component possesses no default rights to access ambient system resources, requiring explicit, unforgeable capabilities for every privileged operation. \index{Zero Ambient Authority!security}
 
@@ -876,9 +893,11 @@ $$\exists \mathbf{s} \in \mathcal{S}_{\text{stop}} \quad \text{such that} \quad 
 
 In systems where stop delimiters are declared as raw UTF-8 strings rather than pre-tokenized integer arrays, suffix matching is evaluated incrementally over the detokenized byte stream of recent tokens.
 
-Once a terminal delimiter sequence $\mathbf{s}$ is matched, the engine applies the contract's delimiter retention policy $\delta_{\text{stop}}$ to construct candidate sequence $\mathbf{y}$:
+Once a terminal delimiter sequence $\mathbf{s}$ is matched, the engine applies the contract's delimiter retention policy $\delta_{\text{stop}}$ to construct candidate sequence $\mathbf{y}$. If matching operates in discrete token-space ($\mathbf{s} \in \mathcal{V}^*$, where $L = |\mathbf{s}|$ is an integer count of tokens):
 
 $$\mathbf{y} = \begin{cases} y_{1 : t - L} & \text{if } \delta_{\text{stop}} = \texttt{STRIP} \\ y_{1 : t} & \text{if } \delta_{\text{stop}} = \texttt{RETAIN} \end{cases}$$ {#eq-delimiter-retention}
+
+If matching operates in byte-space over an incremental character stream (where a multi-character delimiter may start mid-token), stripping slices the raw byte buffer at the exact byte offset of the delimiter prefix before final UTF-8 string delivery to host memory escrow.
 
 Specifying $\delta_{\text{stop}}$ explicitly is critical for downstream consumers. For structured JSON tool invocations, retaining control tokens (such as `</tool_call>` or `<|im_end|>`) in the returned payload introduces trailing non-JSON characters that cause strict JSON deserializers and AST parsers to throw exceptions. Conversely, for code generation tasks emitting markdown blocks or unified diffs, retaining closing fences (such as `"\n```\n"`) preserves grammatical completeness for downstream compilers and file utilities.
 
@@ -984,7 +1003,7 @@ Enforcing this invariant prevents corrupted sequences from mutating repository s
 
 - When $S_{\text{class}} = \texttt{TRUNCATED}$ with code `STEP_BUDGET_EXHAUSTED`, blindly retrying the same prompt with the identical step ceiling guarantees another truncation. The host runtime must either expand $K_{\max}$, partition the task into smaller sub-goals, or prompt for a more compact representation.
 - When $S_{\text{class}} = \texttt{REFUSED}$, expanding token budgets or deadlines does nothing; the policy interceptor will suppress generation identically. The task must be escalated to a human supervisor or re-scoped.
-- When $S_{\text{class}} = \texttt{REJECTED}$ with `CONTEXT_OVERFLOW_EXCEEDED`, the prompt exceeds hardware context limits; the host runtime must trigger working set compaction or eviction algorithms (topics explored in @sec-vol3-working-sets).
+- When $S_{\text{class}} = \texttt{REJECTED}$ with `CONTEXT_OVERFLOW_EXCEEDED`, the prompt exceeds hardware context limits; the host runtime must trigger working set compaction or eviction algorithms (topics explored in Chapter 4, "Context-Window Working Memory").
 - When $S_{\text{class}} = \texttt{FAULTED}$ with `GRAMMAR_DEAD_END_EMPTY_VOCAB`, the grammar constraint is over-constrained and must be debugged.
 - When $S_{\text{class}} = \texttt{TRANSPORT\_FAILURE}$, network retries with exponential backoff or failover to a healthy replica are appropriate.
 
@@ -992,7 +1011,7 @@ By governing model invocations through explicit request parameters, absolute dea
 
 ## Constraining the Output Surface {#sec-vol3-processor-grammar-constrained}
 
-Unconstrained autoregressive generation samples tokens across an open vocabulary simplex $\Delta^{|\mathcal{V}|-1}$, treating every token with nonzero probability as an eligible continuation. When host systems interface with software compilers, database engines, or structured serialization protocols, they require strict compliance with formal grammars such as JSON, SQL, or Protocol Buffers. In an unconstrained execution regime, the stochastic processor core emits syntax errors with nonzero probability: missing delimiters, unescaped string literals, trailing commas, or type mismatches. If the host agent operating system relies exclusively on post-generation parsing to detect these structural defects, it expends significant compute on candidate sequences that are immediately discarded by downstream parsers, causing latency jitter and wasting finite context budgets. Constraining the output surface resolves this impedance mismatch by shifting syntax enforcement directly into the accelerator decode step, using formal language automata to dynamically prune the vocabulary before token selection occurs.
+Unconstrained autoregressive generation samples tokens across an open vocabulary probability simplex $\Delta^{|\mathcal{V}|-1}$ (the normalized vector space where all token probabilities are non-negative and sum to $1.0$), treating every token with nonzero probability as an eligible continuation. When host systems interface with software compilers, database engines, or structured serialization protocols, they require strict compliance with formal grammars such as JSON, SQL, or Protocol Buffers. In an unconstrained execution regime, the stochastic processor core emits syntax errors with nonzero probability: missing delimiters, unescaped string literals, trailing commas, or type mismatches. If the host agent operating system relies exclusively on post-generation parsing to detect these structural defects, it expends significant compute on candidate sequences that are immediately discarded by downstream parsers, causing latency jitter and wasting finite context budgets. Constraining the output surface resolves this impedance mismatch by shifting syntax enforcement directly into the accelerator decode step, using formal language automata to dynamically prune the vocabulary before token selection occurs.
 
 ### Formal Language Automata and Decode-Time Logit Masking {#sec-vol3-grammar-automata}
 
@@ -1007,7 +1026,12 @@ A central systems challenge arises from the representation gap between the chara
 
 Modern BPE tokenizers operate on raw bytes ($\Sigma_{\text{byte}} = \{0, \dots, 255\}$) rather than whole characters. In standard UTF-8 encoding, a single Unicode codepoint spans between 1 and 4 bytes. A subword token $y \in \mathcal{V}$ represents an arbitrary byte sequence $s(y) = b_1 b_2 \dots b_k \in \Sigma_{\text{byte}}^*$. A single token might represent three whole characters (`"def"`), an opening delimiter preceded by indentation (`"\n  {"`), or an incomplete slice of a multibyte sequence (such as the first two bytes of a three-byte CJK character or a four-byte emoji).
 
-If an automaton evaluated character-level transitions naively, encountering an incomplete multibyte token would trigger an immediate syntax rejection. To bridge this byte-to-character impedance mismatch, the grammar engine compiles the target formal syntax down into a **Byte-level DFA (Byte-DFA)**.[^fn-unicode-buffering] A Byte-DFA lowers the input alphabet from characters down to the 256 physical byte values ($\Sigma_{\text{byte}} = \{0x00, \dots, 0xFF\}$). The transition function $\delta(q, b)$ operates byte-by-byte. To determine whether an entire candidate subword token $y \in \mathcal{V}$ is admissible at parser state $q_t$, the runtime extracts its raw byte sequence $s(y) = (b_1, b_2, \dots, b_k)$ and evaluates the extended transition function $\delta^*(q_t, s(y))$. If the Byte-DFA successfully consumes all $k$ bytes without transitioning into an error state, token $y$ is valid. Alternatively, the engine maintains an intermediate multibyte buffering sub-state in the parser runtime: when a candidate token ends on an incomplete multibyte sequence, the valid continuation set is restricted strictly to tokens whose leading bytes provide valid UTF-8 continuation bytes (`0x80` through `0xBF`), advancing the formal grammar transitions only when the full character has materialized.
+If an automaton evaluated character-level transitions naively, encountering an incomplete multibyte token would trigger an immediate syntax rejection. To bridge this byte-to-character impedance mismatch, the grammar engine compiles the target formal syntax down into a **Byte-level DFA (Byte-DFA)**.[^fn-unicode-buffering] A Byte-DFA lowers the input alphabet from characters down to the 256 physical byte values ($\Sigma_{\text{byte}} = \{0x00, \dots, 0xFF\}$). The transition function $\delta(q, b)$ operates byte-by-byte. To determine whether an entire candidate subword token $y \in \mathcal{V}$ is admissible at parser state $q_t$, the runtime extracts its raw byte sequence $s(y) = (b_1, b_2, \dots, b_k)$ and evaluates the extended transition function $\delta^*(q_t, s(y))$. If the Byte-DFA successfully consumes all $k$ bytes without transitioning into an error state, token $y$ is valid.
+
+To see this in practice across discrete decode steps:
+1. Suppose token $y_1$ emits the first two bytes of a 4-byte emoji: `[0xF0, 0x9F]`. Rather than rejecting the incomplete codepoint, the Byte-DFA transitions to an intermediate buffering sub-state $q_{\text{utf8\_cont\_2bytes}}$.
+2. At the next decode step $t+1$, the logit mask restricts the valid continuation set $\mathcal{V}_{\text{valid}}(q_{t+1})$ strictly to tokens whose leading bytes provide valid UTF-8 continuation bytes (`0x80` through `0xBF`).
+3. When token $y_2$ emits the remaining two bytes `[0x98, 0x80]`, the Byte-DFA consumes them, marks the 4-byte character as complete, and advances the grammar transition to its normal syntactic state.
 
 [^fn-unicode-buffering]: **Multibyte UTF-8 Boundary Buffering** (Precision Qualifier): Because byte-level BPE tokenizers partition arbitrary UTF-8 byte streams, tokens frequently fracture multi-byte Unicode codepoints across discrete generation steps. Maintaining an intermediate byte-buffer state ensures that grammar transitions evaluate complete characters without rejecting valid partial byte prefixes. \index{UTF-8!multibyte boundaries}\index{Tokenizer!byte-level BPE}\index{Precision Qualifier!Unicode Buffering}
 
@@ -1036,7 +1060,7 @@ To see how formal language automata enforce structural syntax directly within ac
 The request begins at initial parser state $q_0$. According to the JSON specification, a valid JSON object must begin with optional whitespace followed by an opening brace `'{'`. Any token that emits alphanumeric text, quotation marks, or closing braces at this step violates JSON syntax.
 
 **Candidate Tokens and Raw Logits**
-At decode step $t=1$, the neural core's unembedding projection computes unnormalized logits $\mathbf{z}_1 \in \mathbb{R}^{|\mathcal{V}|}$. Consider five representative candidate tokens in vocabulary $\mathcal{V}$ (@tbl-grammar-masking-step):
+At decode step $t=1$, the neural core's unembedding projection computes unnormalized logits $\mathbf{z}_1 \in \mathbb{R}^{|\mathcal{V}|}$. Consider five representative candidate tokens in vocabulary $\mathcal{V}$ (@tbl-grammar-masking-step), assuming for pedagogical clarity a toy 5-token vocabulary (or that these five candidates account for the overwhelming majority of unconstrained probability mass):
 
 | Token Index ($i$) | Literal String | Byte Sequence (Hex) | Raw Logit ($z_{1, i}$) | Unconstrained Probability ($P_{\text{raw}}$) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1147,9 +1171,9 @@ CUDA Graphs eliminate this bottleneck by "recording" the entire sequence of GPU 
 
 However, CUDA Graph capture imposes a strict physical systems contract: **absolute immutability**. Every memory address, tensor buffer pointer, kernel grid dimension, and execution dependency must remain 100 percent static across all graph replays. The term **CUDA Graph capture friction** describes the severe architectural clash between this rigid, pre-recorded GPU execution pipeline and the dynamic, data-dependent requirements of grammar-constrained decoding:
 
-1. **Host-Device Synchronization Hazards:** If automaton state transitions or trie traversals are computed on the host CPU, the engine must copy the newly sampled token $y_t$ over PCIe/NVLink to host DRAM and call `cudaStreamSynchronize()`. This explicit CPU-GPU synchronization immediately invalidates static graph capture, forcing the serving engine to drop out of static graph replay into high-overhead eager launches, inducing pipeline-draining CPU-GPU synchronization bubbles at every single decode step.
-2. **Continuous Batching Memory Pointer Churn:** Modern engines employ continuous (iteration-level) batching, where requests finish and new requests arrive dynamically at every iteration. Replaying a static CUDA Graph requires fixed batch slots and static memory buffers. If a finished request in batch slot $b$ is replaced by a new request enforcing a completely distinct schema, the engine must update bitmask buffer addresses on the device without triggering an expensive CPU-side graph recapture (which costs milliseconds of pipeline stalls).
-3. **Automata Complexity Divergence (Warp Divergence):** While regular expressions and flat DFAs can be evaluated on-device using fixed-size transition matrices, context-free grammars (PDAs) require dynamic stack manipulation to track nested brackets and braces. Parallel GPU threads within a warp (32 threads executing in lockstep SIMD fashion) experience severe warp divergence when different requests in a batch require different pushdown stack depths. Variable-depth stack manipulation introduces irregular memory accesses that resist static kernel scheduling.[^fn-cuda-graph-invariance]
+1. **Host-Device Synchronization Hazards (Graph Invalidation):** If automaton state transitions or trie traversals are computed on the host CPU, the engine must copy the newly sampled token $y_t$ over PCIe/NVLink to host DRAM and call `cudaStreamSynchronize()`. This explicit CPU-GPU synchronization immediately invalidates static graph capture, forcing the serving engine to drop out of static graph replay into high-overhead eager launches, inducing pipeline-draining CPU-GPU synchronization bubbles at every single decode step.
+2. **Continuous Batching Memory Pointer Churn (Graph Recapture Overhead):** Modern engines employ continuous (iteration-level) batching, where requests finish and new requests arrive dynamically at every iteration. Replaying a static CUDA Graph requires fixed batch slots and static memory buffers. If a finished request in batch slot $b$ is replaced by a new request enforcing a completely distinct schema, the engine must update bitmask buffer addresses on the device without triggering an expensive CPU-side graph recapture (which costs milliseconds of pipeline stalls).
+3. **Automata Complexity Divergence (Warp Divergence Slowdown):** While regular expressions and flat DFAs can be evaluated on-device using fixed-size transition matrices, context-free grammars (PDAs) require dynamic stack manipulation to track nested brackets and braces. Even if captured into a static graph, parallel GPU threads within a warp (32 threads executing in lockstep SIMD fashion) experience severe warp divergence when different requests in a batch require different pushdown stack depths. Variable-depth stack manipulation introduces irregular branch serialization and uncoalesced memory accesses that dramatically degrade kernel execution throughput.[^fn-cuda-graph-invariance]
 
 [^fn-cuda-graph-invariance]: **Static Graph Capture Friction** (Caveat / Edge Case): While static bitmask tensors match CUDA Graph shape requirements, dynamic PDA stack manipulation and CPU-side state transitions break graph capture. High-throughput serving engines often restrict static graph execution to regular expressions and flat DFAs, falling back to eager execution for recursive context-free grammars. \index{CUDA Graph Invariance}\index{Caveat!CUDA Graph Invariance}\index{Continuous Batching!Graph Friction}
 
@@ -1249,7 +1273,7 @@ Even when a candidate is structurally valid, what physical hardware resources we
 
 Every invocation of the stochastic processor core consumes physical resources—accelerator memory bus bandwidth, arithmetic execution units, host CPU cycles, and serving queue capacity—that govern the latency and monetary cost of an agent's execution trajectory. In a classical operating system, the instruction set architecture exposes instructions with predictable clock-cycle costs: a register add executes in a single cycle, an L1 cache hit resolves in several nanoseconds, and a main memory fault traps for hundreds of cycles. In contrast, an agent runtime issuing a request to a foundation model encounters a bimodal execution regime where processing the staged prompt context and emitting successive output tokens exercise fundamentally different physical hardware bottlenecks.
 
-Under the computational scope of an atomic invocation ($H=1, S=\text{staged}, A=0, C=\text{external}$), the stochastic core evaluates a candidate proposal without ambient authority. Yet generating that proposal incurs non-trivial physical expenditure. Accurately budgeting for agent task completion requires decomposing end-to-end invocation latency into its constituent systems stages, quantifying the operational arithmetic intensity of neural execution against the physical Roofline of accelerator silicon, and characterizing the memory-traffic lower bounds that dictate decode throughput.
+Under the computational scope of an atomic invocation ($H=1, S=\text{staged}, A=0, C=\text{external}$, where a single-turn request maps staged context to a candidate proposal under zero ambient authority with external verification), the stochastic core evaluates a candidate proposal without ambient authority. Yet generating that proposal incurs non-trivial physical expenditure. Accurately budgeting for agent task completion requires decomposing end-to-end invocation latency into its constituent systems stages, quantifying the operational arithmetic intensity of neural execution against the physical Roofline of accelerator silicon, and characterizing the memory-traffic lower bounds that dictate decode throughput.
 
 ### The Latency Decomposition and Invocation Critical Path {#sec-vol3-processor-latency-breakdown}
 
@@ -1496,9 +1520,9 @@ Scaling batch size $B$ increases operational arithmetic intensity linearly, push
 
 To mitigate these physical costs without violating modular systems boundaries, modern agent architectures exploit downstream execution levers:
 
-- **Radix-tree prefix caching** amortizes prompt prefill latency by sharing KV cache blocks across requests with common historical prefixes (detailed in @sec-vol3-kvcache-radix-tree).
-- **Speculative decoding** uses a fast, low-parameter draft model to propose candidate token sequences that are verified in parallel by the target core in a single compute-bound GEMM pass (detailed in @sec-vol3-tokenomics-speculative).
-- **Context layout stabilization** structures prompt context into static and dynamic tiers (Root $\to$ Trunk $\to$ Leaf) to maximize physical page reusability across successive turns (detailed in @sec-vol3-working-sets-staging).
+- **Radix-tree prefix caching** amortizes prompt prefill latency by sharing KV cache blocks across requests with common historical prefixes (detailed in Chapter 5, "Inference Serving Runtimes").
+- **Speculative decoding** uses a fast, low-parameter draft model to propose candidate token sequences that are verified in parallel by the target core in a single compute-bound GEMM pass (detailed in Chapter 5, "Inference Serving Runtimes").
+- **Context layout stabilization** structures prompt context into static and dynamic tiers (Root $\to$ Trunk $\to$ Leaf) to maximize physical page reusability across successive turns (detailed in Chapter 4, "Context-Window Working Memory").
 
 Given these output properties and physical costs, how should engineers evaluate competing interface designs?
 
@@ -1535,7 +1559,7 @@ $$T_{\text{total}} = \text{TTFT} + \sum_{t=2}^{K_{\text{payload}} + \Delta K} T_
 
 The truncation rate, $R_{\text{trunc}} \in [0, 1]$, measures the frequency with which the serving engine severs output generation upon hitting the step ceiling $K_{\max}$ without emitting an authorized stop delimiter $\mathcal{S}_{\text{stop}}$, returning a `TRUNCATED` status envelope. When an interface inflates $\Delta K$, generation risks exhausting $K_{\max}$, transforming a potentially valid payload into quarantined buffer state.
 
-Finally, the downstream verified task success rate, $R_{\text{task}} \in [0, 1]$, represents the ultimate systems invariant: the fraction of invocations whose candidate payload, upon host ingestion, passes deterministic external verification tests ($\text{ExitCode} = 0$) within an isolated verification environment (formal virtualization mechanisms and execution sandboxes are deferred to @sec-vol3-virtualization).
+Finally, the downstream verified task success rate, $R_{\text{task}} \in [0, 1]$, represents the ultimate systems invariant: the fraction of invocations whose candidate payload, upon host ingestion, passes deterministic external verification tests ($\text{ExitCode} = 0$) within an isolated verification environment (formal virtualization mechanisms and execution sandboxes are deferred to Chapter 8, "Execution Virtualization and Sandboxing").
 
 Crucially, $R_{\text{syntax}}$ and $R_{\text{task}}$ diverge sharply in production. To build concrete systems intuition, consider a student taking a history exam in French: if the student writes a grammatically flawless essay in French that completely answers the wrong exam question, they will receive an A in grammar from the language instructor, but an F on the test from the history professor!
 
@@ -1657,12 +1681,12 @@ To transcend the trade-offs between monolithic full-file re-emission and unconst
 1. **Inspection Probe:** A read-only invocation queries a specific symbol, AST node, or file range using a minimal schema, bounding decode output to under 64 tokens ($K_{\max} \le 64$).
 2. **Mutation Probe:** Having established precise line ranges and verified base file digests in host memory, the host issues a second probe requesting a targeted search/replace hunk anchored strictly to the verified snippet.
 
-Crucially, each probe is executed as an independent atomic invocation ($H=1$); orchestrating multiple probes across an iterative trajectory is the domain of @sec-vol3-deliberation ("Inference-Time Deliberation"). Under equal total compute and token budgets, decomposed probes bound prefill overhead $\Delta M$, minimize decode step counts $\Delta K$, and eliminate the catastrophic truncation failure mode of full-file re-emission, maximizing verified task yield.
+Crucially, each probe is executed as an independent atomic invocation ($H=1$); orchestrating multiple probes across an iterative trajectory is the domain of Chapter 3 ("Inference-Time Deliberation"). Under equal total compute and token budgets, decomposed probes bound prefill overhead $\Delta M$, minimize decode step counts $\Delta K$, and eliminate the catastrophic truncation failure mode of full-file re-emission, maximizing verified task yield.
 
 ::: {.callout-note title="Worked Example: Sizing the Token Overhead Tax Across Edit Paradigms"}
 
 **Problem**:
-Consider an agent runtime tasked with applying a 5-line bug fix to a 500-line Python module (`parser.py`). The runtime executes on an unquantized 70B parameter model (`Meta-Llama-3-70B-Instruct` in 16-bit BF16 precision, $|\Theta| = 140\text{ GB}$) served across a dual NVIDIA H100 SXM5 node ($TP=2$, aggregate memory bandwidth $\beta = 6{,}700\text{ GB/s}$). Profiling reveals an average single-stream decode throughput of approximately $38.5\text{ tokens/s}$, corresponding to a single-step decode latency of $T_{\text{step}} \approx 26.0\text{ ms}$.
+Consider an agent runtime tasked with applying a 5-line bug fix to a 500-line Python module (`parser.py`). The runtime executes on an unquantized 70B parameter model (`Meta-Llama-3-70B-Instruct` in 16-bit BF16 precision, $|\Theta| = 140\text{ GB}$) served across a dual NVIDIA H100 SXM5 node ($TP=2$, aggregate memory bandwidth $\beta = 6{,}700\text{ GB/s}$). Operating at a standard sustained memory bus efficiency of $\eta_{\text{bw}} = 0.80$, effective bandwidth is $\beta_{\text{eff}} = 6{,}700 \times 0.80 = 5{,}360\text{ GB/s}$. Shuttling the $140\text{ GB}$ parameter tensor across the bus yields an average single-step decode latency of $T_{\text{step}} = 140 / 5{,}360 \approx 26.1\text{ ms} \approx 26.0\text{ ms}$ (a single-stream throughput of approximately $38.5\text{ tokens/s}$).
 
 Quantify the decode token count ($K$), decode serialization latency ($T_{\text{decode}}$), and total accelerator memory traffic ($D_{\text{HBM}}$) across three candidate interface paradigms:
 1. **Full-File Re-Emission (Native JSON)**: The model re-emits all 500 lines of code within a schema-constrained JSON string.
@@ -1696,10 +1720,10 @@ $$D_{\text{HBM}} = K \cdot |\Theta|$$
 *3. Targeted Search/Replace Block Diff:*
 - **Token Count ($K$):** The model emits only the file path header, delimiter sentinels (`<<<<<<< SEARCH`, `=======`, `>>>>>>> REPLACE`), the 5-line search anchor, and the 5-line replacement snippet, totaling $K \approx 75\text{ tokens}$.
 - **Decode Latency ($T_{\text{decode}}$):**
-  $$T_{\text{decode}} = 75\text{ tokens} \times 0.026\text{ s/token} \approx 1.95\text{ s} \approx 1.8\text{ s}$$
+  $$T_{\text{decode}} = 75\text{ tokens} \times 0.026\text{ s/token} \approx 1.95\text{ s} \approx 2.0\text{ s}$$
 - **Accelerator Memory Traffic ($D_{\text{HBM}}$):**
   $$D_{\text{HBM}} = 75 \times 140\text{ GB} = 10{,}500\text{ GB} = 10.5\text{ TB}$$
-- **SLA & Invariant Assessment:** Optimal operating point. The diff consumes less than $4\%$ of the token budget ($75 \ll 2{,}048$) and completes in under 2 seconds ($1.8\text{ s} \ll 60\text{ s}$). Compared to full-file re-emission, targeted search/replace achieves a **$36\times$ reduction in decode latency** and eliminates **$339.5\text{ TB}$ of wasteful GPU memory bus traffic**.
+- **SLA & Invariant Assessment:** Optimal operating point. The diff consumes less than $4\%$ of the token budget ($75 \ll 2{,}048$) and completes in approximately two seconds ($1.95\text{ s} \ll 60\text{ s}$). Compared to full-file re-emission, targeted search/replace achieves a **$33\times$ reduction in decode latency** ($65.0\text{ s} / 1.95\text{ s} \approx 33.3\times$) and eliminates **$339.5\text{ TB}$ of wasteful GPU memory bus traffic**.
 
 **Systems insight**:
 In traditional software systems, whether a compiler emits an ELF binary or an assembly listing affects compilation time by a few milliseconds. In the Stochastic Computer, *the output interface format directly governs physical memory bus saturation*. Because autoregressive token generation is bottlenecked by the speed at which weights can be read from High Bandwidth Memory, every non-payload token emitted forces an entire memory sweep of the 70B parameter tensor. Structuring the invocation interface to emit minimal localized deltas rather than monolithic files is not a syntactic preference—it is the difference between a responsive, sub-2-second systems transaction and an unusable, SLA-violating timeout.
@@ -1877,7 +1901,7 @@ Implement an Outcome-Discriminated Status Dispatcher in the host agent runtime, 
 
 Deconstructing these fallacies and pitfalls replaces conversational intuitions with the concrete systems mechanics of an unprivileged, statistical execution engine. By recognizing the physical reality of autoregressive memory bandwidth, establishing strict status-discriminated contracts, enforcing byte-level grammar constraints, and maintaining external verification perimeters under zero ambient authority, systems architects can safely integrate the stochastic processor core into reliable agent computing platforms.
 
-[^fn-moe-routing-dispersion]: **Expert Routing Dispersion** (Theoretical Bound): In sparse Mixture-of-Experts architectures, the probability that an expert remains unselected across a batch of size $B$ decays as $(1 - k/E)^B$, forcing high-batch serving engines to load all expert weights into accelerator cache despite sparse per-token routing. \index{Expert Routing Dispersion}\index{Theoretical Bound!MoE Batch Dispersion}
+[^fn-moe-routing-dispersion]: **Expert Routing Dispersion** (Theoretical Bound): In sparse Mixture-of-Experts architectures, the probability that an individual expert remains unselected across a batch of size $B$ decays as $(1 - k/E)^B$. The independent approximation $[1 - (1-k/E)^B]^E \approx (0.98998)^8 \approx 92.27\%$ provides a close upper bound, while exact coupon-collector inclusion-exclusion over multi-expert draws yields $\approx 92.11\%$ at $B=16$, forcing high-batch serving engines to load all expert weights into accelerator cache despite sparse per-token routing. \index{Expert Routing Dispersion}\index{Theoretical Bound!MoE Batch Dispersion}
 [^fn-iteration-latency-jitter]: **Iteration-Level Latency Jitter** (Caveat / Edge Case): In iteration-level continuous batching schedulers, decode step latency $T_{\text{step}}$ fluctuates dynamically at each token step due to interleaved prefill chunks, dynamic batch re-sizing, and KV-cache allocation stalls. \index{Iteration-Level Latency Jitter}\index{Caveat!Continuous Batching Jitter}
 [^fn-nan-softmax-collapse]: **Softmax Underflow and NaN Collapse** (Implementation Detail): When an empty valid token set ($\mathcal{V}_{\text{valid}} = \emptyset$) forces all unnormalized logits to $-\infty$, the denominator $\sum_j e^{-\infty} = 0$ results in a $0/0$ floating-point division exception that produces IEEE 754 NaN values across the tensor pipeline. \index{Softmax Underflow}\index{Implementation Detail!NaN Collapse}
 [^fn-constraint-dead-end]: **Grammar Constraint Dead-End** (Caveat / Edge Case): A condition in grammar-constrained decoding where the intersection of syntactically legal automaton transitions and the model vocabulary prefix trie is empty ($\mathcal{V}_{\text{valid}} = \emptyset$), forcing an abrupt termination of the decode loop. \index{Grammar Constraint Dead-End}\index{Caveat!Grammar Dead-End}
@@ -1906,7 +1930,7 @@ These systems principles define the boundary of an atomic model call. The host o
 
 An atomic model invocation operates strictly at Horizon $H=1$, evaluating a single staged context to yield a single candidate output. When that candidate sequence exhibits logical contradictions, encounters budget truncation, or fails deterministic validation checks, the host runtime cannot achieve task completion through simple, unguided prompt re-issuance. Resubmitting an identical or superficially rephrased request leaves the system vulnerable to the same statistical sampling traps and context biases.
 
-Transforming stochastic candidate emissions into dependable systems outcomes requires scaling execution beyond a single forward pass. @Sec-vol3-deliberation introduces *inference-time deliberation*: the architectural layer wherein the host runtime orchestrates structured candidate search trees, process verifiers, and environmental feedback loops to systematically explore alternative execution paths. Managing these deliberative rollouts in turn requires the runtime to deliberately stage, prune, and compact prompt context across decision steps—a memory discipline that matures into formal context-window working memory management (@sec-vol3-working-sets)—while maintaining the host reference monitor's strict boundary between candidate generation and authoritative execution.
+Transforming stochastic candidate emissions into dependable systems outcomes requires scaling execution beyond a single forward pass. Chapter 3 ("Inference-Time Deliberation") introduces *inference-time deliberation*: the architectural layer wherein the host runtime orchestrates structured candidate search trees, process verifiers, and environmental feedback loops to systematically explore alternative execution paths. Managing these deliberative rollouts in turn requires the runtime to deliberately stage, prune, and compact prompt context across decision steps—a memory discipline that matures into formal context-window working memory management (Chapter 4, "Context-Window Working Memory")—while maintaining the host reference monitor's strict boundary between candidate generation and authoritative execution.
 
 :::
 

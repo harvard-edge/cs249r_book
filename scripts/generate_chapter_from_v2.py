@@ -186,15 +186,15 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
         # Clean title of any bracketed budget: e.g. "Title [Budget: 1,000 words ...]"
         clean_sec_title = re.sub(r"\s*\[Budget:.*?\]", "", raw_sec_title).strip()
 
-        # Budgets
+        # Structure defaults
         is_sec1 = sec_num.endswith(".1")
         if is_sec1:
-            budget_tgt = 1000
-            budget_rng = (850, 1150)
-            struct_inv = "NO SUBSECTIONS (NO ###). Unbroken narrative prose across the 4 beats. Zero bullet lists."
+            budget_tgt = 1200
+            budget_rng = (900, 1600)
+            struct_inv = "Use 2–3 clean, scannable ### subheadings to structure the conceptual contrast, the systems boundary, and the failure modes. Conclude with an unbroken prose bridge directly posing the first mechanistic question for Section .2."
         else:
-            budget_tgt = 1400
-            budget_rng = (1200, 1600)
+            budget_tgt = 1500
+            budget_rng = (1100, 2000)
             struct_inv = "2–3 ### subsections. Analytical mechanics, physical equations, concrete metrics, ending with explicit Causal Bridge."
 
         heading_anchor_m = re.search(r"-\s+\*\*Heading & Anchor:\*\*\s*`?([^`\n]+)`?", b)
@@ -280,35 +280,64 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
 # 3. 4-TIER BOUNDED CONTEXT PROMPT COMPOSER
 # ==============================================================================
 
-TIER_1_SYSTEMS_ENGINE = r"""You are an author of the premier graduate-level computer systems textbook:
+TIER_1_SYSTEMS_ENGINE = r"""You are an author of the premier senior-undergraduate and introductory graduate computer systems textbook:
 'The Stochastic Computer: Agentic Machine Learning Systems' (Volume III).
-Your voice and architectural rigor mirror Hennessy & Patterson's 'Computer Architecture: A Quantitative Approach'
-and Saltzer & Kaashoek's 'Principles of Computer System Design'.
+Your voice, pedagogical clarity, and architectural rigor mirror Saltzer & Kaashoek's 'Principles of Computer System Design'
+and Hennessy & Patterson's 'Computer Architecture: A Quantitative Approach'.
 
 ================================================================================
 TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
 ================================================================================
 
-1. THE CENTRAL PARADIGM (The Stochastic Computer):
-   - The foundation model is an unprivileged **Stochastic Processor Core**: an execution unit that evaluates conditional probability distributions and emits candidate token sequences under **Zero Ambient Authority**.
-   - The surrounding software architecture is the **Host Operating System / Agent Runtime**: managing the context memory hierarchy, peripheral actuation interfaces, execution contracts, and deterministic verification.
-   - The model's outputs are passive data symbols (unverified hypotheses), NOT authorized actions. Invariant closure is strictly external.
+1. AUDIENCE & PEDAGOGICAL STANCE:
+   - Target Reader: Senior CS/CE undergraduate or Master's student. Assume an average, solid student aiming to become a professional AI systems engineer.
+   - Presumed Student Background: Familiar with Python, standard data structures (trees, hash maps, queues), basic Operating Systems (processes, virtual memory, syscalls, filesystems, concurrency, client-server RPCs), and introductory Deep Learning (tensors, matrix multiplication, softmax, loss functions, transformers).
+   - Knowledge Gaps to Bridge: Do NOT assume the student is a superstar genius or already knows low-level GPU microarchitecture, proprietary cluster interconnect fabrics, or esoteric chip physics. Every advanced systems concept MUST be built up from familiar software systems intuition first.
+   - Pedagogical Mission: Train the reader to think like a systems architect who builds robust, dependable software runtimes around non-deterministic foundation models.
+   - Speak AUTHENTIC MACHINE LEARNING SYSTEMS LANGUAGE: Large Language Model (LLM), tokens, Byte-Pair Encoding (BPE), embedding tables, autoregressive decode loop, logits, softmax, KV cache, prefill, decode, inference engines (vLLM, TensorRT-LLM), and host agent runtimes.
+   - Do NOT force a literal silicon straightjacket: do not pretend an attention head is an x86 ALU, that tokens are "machine opcodes", or that prompt text is an "instruction register".
 
-2. THE SYSTEMS ENGINEERING SWEET SPOT (Pedagogical Exposition):
-   - **Teach How to Think About the System:** Focus on conceptual systems architecture—abstractions, control loops, interfaces, contracts, state boundaries, failure domains, and verification perimeters.
-   - **Concept First, Progressive Grounding Second:** Open with the systems problem, computational interface, or control loop. Ground progressively into physical constraints (latency, memory bounds, serialization limits) as the argument develops.
-   - **No Math Vomit:** Do NOT get bogged down in gratuitous Greek-letter calculus or abstract set-theoretic proofs. The student needs systems insight, not an optimization proof.
-   - **No Premature Hardware Vomit:** Do NOT open sections with hardware silicon acronym dumps (HBM, PCIe, NVLink, SRAM) or recite GPU marketing datasheets.
-   - **The Law of Constant Provenance:** NEVER drop an unexplained constant or coefficient (e.g., $2$, $4$, $d_{\text{head}}$) into an equation without a one-sentence physical derivation in the immediate text. (e.g., the factor of 2 in $2|\Theta|M$ is 1 multiply + 1 accumulate in fused multiply-add arithmetic; the factor of 2 in KV cache accounts for storing Key $\mathbf{K}$ and Value $\mathbf{V}$ tensors).
+2. STANDALONE STAGE-SETTER (.1) VS. REAL MECHANICS (.2 ONWARDS):
+   - Section .1 (The Standalone Stage-Setter & Chapter Introduction):
+     * Serves as the conceptual foundation and stage-setter for the entire chapter.
+     * Accessible and engaging: frames the governing systems dilemma, contrasts classical deterministic systems with unprivileged stochastic generation, establishes the 3-tier boundary (Host Runtime, Inference Service, Neural Core), and introduces fail-stop vs. fail-plausible execution.
+     * Uses 2–3 clean, scannable `###` subheadings to provide clear cognitive road signs.
+     * Concludes with an unbroken prose bridge directly posing the first mechanistic systems question for Section .2.
+   - Section .2 Onwards (The Real Technical Mechanics):
+     * This is where the concrete engineering and mathematical mechanics live!
+     * Each subsequent section dives deep into ONE specific subsystem, interface, or cost model.
+     * Follows the 4-step scaffolding ladder: Dilemma -> Systems Intuition -> Concrete Code/Artifact -> Grounded Math.
 
-3. DUAL-TOPOLOGY EXECUTION TIERS:
+3. HIGHER-LEVEL ARCHITECTURAL INTUITION (THE SEVEN SUBSYSTEM LENSES):
+   Use high-level, intuitive computer systems analogies that students immediately grasp:
+   - Part I (Chapters 2–3 — Processing Element & Deliberation): Treat the LLM as an unprivileged coprocessor / processing element evaluating probability distributions under zero ambient authority. Deliberation (search, Best-of-N, MCTS) is test-time compute allocation and speculative branch exploration.
+   - Part II (Chapters 4–6 — Working Sets, Physical Memory & Storage): Treat the context window and KV cache as a multi-tier memory hierarchy: prompt context is the logical working set; GPU KV cache is physical page-table managed device memory (PagedAttention); external stores (vector DBs, files, Git) are persistent secondary storage with cache invalidation and freshness challenges.
+   - Part III (Chapters 7–8 — Tool Actuation & Sandboxing): Treat tools as peripheral devices and mediated system calls (syscalls). The unprivileged model proposes an RPC payload; the host runtime acts as reference monitor, validating parameters and dispatching execution into isolated sandboxes (containers, microVMs, seccomp-bpf, namespaces).
+   - Part IV (Chapters 9–11 — The Agent Operating System): Treat the host runtime as an operating system kernel managing long-horizon processes via Agent Control Blocks (ACBs), priority scheduling, Write-Ahead Logging (WAL) state persistence, and distributed saga compensation.
+   - Part V (Chapters 12–14 — The Policy Compiler): Treat adaptation (SFT & RLVR) as an offline policy compiler specializing model weights from verified traces using test suites as reward oracles.
+   - Part VI (Chapters 15–17 — Distributed Fleets & Operations): Treat multi-agent systems as distributed concurrent processes with communication costs and contention; distributed tracing as telemetry; and capacity economics as cost per accepted deliverable.
+   - Part VII (Chapter 18 — System Synthesis): Synthesize all subsystems into an end-to-end verifiable computer.
+
+3. THE 4-STEP PEDAGOGICAL SCAFFOLDING LADDER:
+   Every section should flow naturally through this progression:
+   1. The Governing Systems Dilemma / Observable Failure: Open with a concrete systems problem an engineer or student can picture.
+   2. The Systems / Architecture Intuition (The Rosetta Stone): Translate the ML mechanism into concepts known from classical computer systems.
+   3. The Concrete Artifact: Anchor in a typed Python @dataclass, C struct, AST trace, or clear comparison table BEFORE formulas.
+   4. Grounded Systems Math & Physical Provenance: Walk through equations step-by-step with explicit units. Adhere to The Law of Constant Provenance: never drop an unexplained constant without physical explanation in text.
+
+4. FREEDOM, FLEXIBILITY, AND PEDAGOGICAL BREATHING ROOM:
+   - NO RIGID WORD CAPS: Let the text breathe naturally without arbitrary word ceilings or floors. Substantive engineering depth takes precedence over word targets.
+   - STRUCTURAL HIERARCHY: Every section (including Section .1) should use 2–3 clean, scannable `###` subheadings to provide cognitive road signs.
+   - Rich visual, tabular, and worked example callouts (`::: {.callout-note title="Worked Example..."}`).
+
+5. DUAL-TOPOLOGY EXECUTION TIERS:
    Maintain a strict boundary between execution tiers:
    - **Tier 1 (Host Agent OS):** User-space CPU runtime. Owns task orchestration, compiles grammars (DFAs/PDAs), stages prompt context, manages tool actuation, evaluates deterministic test suites in isolated sandboxes, and verifies exit codes.
    - **Tier 2 (Inference Service Daemon):** GPU-side serving runtime (e.g., vLLM, TensorRT-LLM). Manages PagedAttention KV cache page tables, schedules batched forward passes, executes fused CUDA kernels, and performs decode-time logit masking in device memory so vocabulary vectors ($100\text{k+}$ floats) never transit PCIe.
    - **Tier 3 (Neural Core):** Parameter tensors $\Theta$. Executes tensor contractions on accelerator Tensor Cores under zero ambient authority.
    - *Never blur the boundary:* The Host OS compiles the grammar $\mathcal{G}$, but the Inference Engine executes logit masking on GPU device memory.
 
-4. NORMALIZED STATUS ENVELOPE & ENUM LOCKING:
+6. NORMALIZED STATUS ENVELOPE & ENUM LOCKING:
    All processor invocations return a normalized 4-outcome status envelope. Always use these exact uppercase enumeration names:
    - `COMPLETED`: Normal termination via stop token or delimiter within token budget.
    - `TRUNCATED`: Severed at step ceiling $K_{\max}$ without emission of stop token. Payload must be quarantined.
@@ -316,16 +345,16 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
    - `TRANSPORT_FAILURE`: Communication or socket error (timeout, connection reset, OOM crash).
    ❌ BANNED DRIFT: Never use informal synonyms (`Incomplete`, `Failed`, `Refusal`). Always use `COMPLETED`, `TRUNCATED`, `REFUSED`, `TRANSPORT_FAILURE`.
 
-5. PHYSICAL HARDWARE BASELINE RIGOR:
+7. PHYSICAL HARDWARE BASELINE RIGOR:
    - Base all quantitative examples on physical reality. An unquantized 70B FP16 model ($140\text{ GB}$) exceeds a single $80\text{ GB}$ H100 GPU and requires either Tensor Parallelism across 2 GPUs ($TP=2$ over NVLink, aggregate bandwidth $6{,}700\text{ GB/s}$), FP8 quantization ($70\text{ GB}$ on a single H100 at $3{,}350\text{ GB/s} \to 20.9\text{ ms}$ decode floor), or next-gen hardware (B200 with $192\text{ GB}$ at $8{,}000\text{ GB/s}$).
    - When deriving decode operational arithmetic intensity, include the active KV cache traffic $\text{Mem}_{\text{KV}}(M+t)$ shuttled from HBM alongside weights $\Theta$:
      $$I_{\text{decode}}(t) = \frac{2|\Theta|}{P|\Theta| + \text{Mem}_{\text{KV}}(M+t)}$$
 
-6. SECURITY & SPECULATIVE EXECUTION RIGOR:
+8. SECURITY & SPECULATIVE EXECUTION RIGOR:
    - State mutation follows **Speculative Execution with Sandboxed Verification and Rollback**: candidate sequences are staged in escrow, tested in disposable sandboxes, and committed only upon zero exit codes.
    - Defense against **Oracle Poisoning**: All test fixtures, linters, and verification assertions must be mounted as strictly read-only (`ro`), kept in isolated out-of-tree directories, and executed with sanitized `PYTHONPATH` so untrusted code proposals cannot mutate their own verifiers.
 
-7. STRICT SCOPE OWNERSHIP & ARCHITECTURAL MODULARITY:
+9. STRICT SCOPE OWNERSHIP & ARCHITECTURAL MODULARITY:
    - **Every section answers exactly ONE clean, distinct architectural question** in the subsystem's journey without anticipating or cannibalizing adjacent sections.
    - **Strict Subsystem Separation of Concerns:**
      * Dedicated Hardware Cost Home: Roofline models, GEMM vs GEMV arithmetic intensity, memory bus shuttles, and hardware balance tables belong exclusively in dedicated cost/capacity sections (never in data representation, execution loop, or protocol sections).
@@ -334,7 +363,7 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
      * Memory Hierarchy: Virtual memory paging (PagedAttention), fragmentation, and prefix caching belong in context memory sections.
    - **Adhere Strictly to Assigned Negative Scopes:** Follow all negative constraints in the section specification. If a concept belongs to an adjacent section or chapter, bridge to it cleanly without pre-empting its mathematical derivations or mechanisms.
 
-8. LINGUISTIC AND PEDAGOGICAL INTEGRITY:
+10. LINGUISTIC AND PEDAGOGICAL INTEGRITY:
    - **American English Spelling:** Use -ize, -or, center, defense, meter, labeled, modeled throughout.
    - ❌ **NEVER use anthropomorphic phrasing:** "the model thinks", "the model decides", "the agent realizes its mistake", "the model gets confused".
      -> *Write:* "the neural core evaluates", "the runtime detects an invariant violation", "attentional errors cascade across historical context".
@@ -344,7 +373,7 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
      -> *Write:* "Stochastic self-evaluation cannot close invariants ($P < 1.0$); invariant closure requires external deterministic execution (compilers, test runners, exit codes)."
    - ❌ **NEVER call tokens 'micro-instructions' or 'opcodes':** Tokens are discrete integer data symbols and embedding gather addresses; the neural core has no opcode decoder or register file.
 
-9. VOLUME 1 FIVE-TYPE FOOTNOTE TAXONOMY WITH INDEXED TERMS:
+11. VOLUME 1 FIVE-TYPE FOOTNOTE TAXONOMY WITH INDEXED TERMS:
    When introducing foundational systems concepts, specialized hardware terminology, or historical context, provide rigorous footnotes formatted with indexed terms:
    - Footnote format: `[^fn-label]` in text, followed by:
      `[^fn-label]: **Term** (Etymology/Category): Definition and systems context. \index{Term}\index{Category!Subterm}`
@@ -615,19 +644,13 @@ def compose_step_prompt(
         if is_sec1:
             task_parts.append(
                 f"### Task: Author Section {sec.section_num}: {sec.title}\n"
-                f"Target Budget: {sec.budget_target} words (Strict Range: {sec.budget_range[0]}–{sec.budget_range[1]} words).\n\n"
-                f"**MANDATORY STRUCTURAL INVARIANT (THE SECTION .1 LAW):**\n"
-                f"**ABSOLUTELY NO SUBSECTIONS (ZERO `###` HEADINGS). ZERO BULLET LISTS (NO `-`, `*`, OR NUMBERED LISTS).**\n"
-                f"Section .1 must be an unbroken, cohesive narrative stage-setter composed entirely of standard flowing prose paragraphs:\n"
-                f"  - Architectural Stage-Setting: Contrast the deterministic classical CPU with the unprivileged stochastic processor core operating under zero ambient authority.\n"
-                f"  - Situate within The Stochastic Computer: define the 3-tier boundary (Host Agent Runtime, Inference Service Daemon, Neural Core) using flowing prose (do NOT use numbered or bulleted lists).\n"
-                f"  - Baseline H-S-A-C Coordinate: Map ($H=1, S=\\text{{staged}}, A=0, C=\\text{{external}}$) without re-deriving Chapter 1. MUST include the H-S-A-C compact margin locator right alongside the coordinate introduction:\n"
-                f"    ::: {{.column-margin}}\n"
-                f"    ![](images/svg/option1_hsac_compact.svg){{width=\"100%\" fig-alt=\"H-S-A-C workload diamond with four vertices labeled H, S, A, and C. The H (Horizon) node is highlighted in purple for H=1; the S, A, and C nodes are shown in gray, marking the single-invocation processor boundary.\"}}\n\n"
-                f"    *The stochastic processor operates at the single-step baseline ($H=1, A=0$).*\n"
-                f"    :::\n"
+                f"Target Depth: Substantive and thorough exposition for senior CS/CE undergraduates. Let the text breathe naturally without arbitrary word caps.\n\n"
+                f"**STRUCTURAL INVARIANT (SECTION .1 ROAD SIGNS):**\n"
+                f"Use 2–3 clean, scannable `###` subheadings to structure the conceptual contrast, the systems boundary, and the failure modes.\n"
+                f"  - Architectural Stage-Setting: Contrast deterministic classical systems with the unprivileged generative model operating under zero ambient authority.\n"
+                f"  - Situate within The Stochastic Computer: define the functional boundary between the host agent runtime and the underlying execution engine.\n"
                 f"  - Systems Confrontation: The candidate proposal disconnect, fail-plausible execution, resource ceilings ($K_{{\\max}}, T_{{\\max}}$), and external invariant closure.\n"
-                f"  - Conclude with an unbroken prose bridge directly posing the first mechanistic question for Section {manifest.sections[1].section_num if len(manifest.sections) > 1 else '2.2'}.\n\n"
+                f"  - Conclude with an unbroken prose bridge directly posing the first mechanistic question for Section {manifest.sections[1].section_num if len(manifest.sections) > 1 else 'X.2'}.\n\n"
                 f"**Heading & Anchor:** `{sec.heading_anchor}`\n"
                 f"**Single Key Point:** {sec.key_point}\n\n"
                 f"{negative_scope}\n"
@@ -639,9 +662,9 @@ def compose_step_prompt(
         else:
             task_parts.append(
                 f"### Task: Author Section {sec.section_num}: {sec.title}\n"
-                f"Target Budget: {sec.budget_target} words (Strict Range: {sec.budget_range[0]}–{sec.budget_range[1]} words).\n\n"
+                f"Target Depth: Substantive and thorough exposition for senior CS/CE undergraduates. Let the text breathe naturally without arbitrary word caps.\n\n"
                 f"**STRUCTURAL INVARIANT:**\n"
-                f"Must contain 2–3 `###` subsections. Unpack rigorous analytical mechanics, physical hardware equations, and concrete failure traces.\n\n"
+                f"Must contain 2–3 clean `###` subsections. Unpack rigorous analytical mechanics, concrete data structures, and failure traces.\n\n"
                 f"**Heading & Anchor:** `{sec.heading_anchor}`\n"
                 f"**Single Key Point:** {sec.key_point}\n"
                 f"**Concrete Systems Hook:**\n{sec.hook}\n\n"
@@ -655,7 +678,7 @@ def compose_step_prompt(
         # Fallacies and Pitfalls
         task_parts.append(
             f"### Task: Author Chapter {manifest.number} Fallacies and Pitfalls\n"
-            f"Target Budget: 800 words (Strict Range: 700–950 words).\n\n"
+            f"Target Depth: Rigorous and thorough analysis of 2 Fallacies and 2 Pitfalls.\n\n"
             f"**Heading & Anchor:** `## Fallacies and Pitfalls {{#sec-vol3-{manifest.slug}-fallacies}}`\n\n"
             f"**Outline Specification:**\n{manifest.fallacies_raw}\n\n"
             f"**REQUIRED STRUCTURE:**\n"
@@ -676,7 +699,7 @@ def compose_step_prompt(
         # Summary and Takeaways (Volume 1 Canonical Pattern)
         task_parts.append(
             f"### Task: Author Chapter {manifest.number} Summary, Takeaways, and Chapter Connection\n"
-            f"Target Budget: 500 words (Strict Range: 450–600 words).\n\n"
+            f"Target Depth: Comprehensive chapter synthesis and takeaways.\n\n"
             f"**Heading & Anchor:** `## Summary {{#sec-vol3-{manifest.slug}-summary}}`\n\n"
             f"**Outline Specification:**\n{manifest.summary_raw}\n\n"
             f"**REQUIRED STRUCTURE (VOLUME 1 CANONICAL PATTERN):**\n"
@@ -688,6 +711,25 @@ def compose_step_prompt(
         )
 
     task_instruction = "".join(task_parts)
+
+    # Full Chapter Road Map to orient the student and generator
+    chapter_map_parts = [
+        "================================================================================\n",
+        f"FULL CHAPTER ROAD MAP: CHAPTER {manifest.number} ({manifest.title})\n",
+        "================================================================================\n",
+        f"Chapter Governing Question: {manifest.governing_question}\n",
+        f"Chapter Core Takeaway: {manifest.core_takeaway}\n\n",
+        "Progressive Section Path:\n",
+    ]
+    for s_idx, s in enumerate(manifest.sections, start=1):
+        if s_idx == step_idx:
+            chapter_map_parts.append(f"  👉 [CURRENT STEP {s_idx}] Section {s.section_num}: {s.title} ({s.key_point})\n")
+        elif s_idx < step_idx:
+            chapter_map_parts.append(f"  ✅ [COMPLETED STEP {s_idx}] Section {s.section_num}: {s.title}\n")
+        else:
+            chapter_map_parts.append(f"  ⏳ [UPCOMING STEP {s_idx}] Section {s.section_num}: {s.title}\n")
+    chapter_map_parts.append("================================================================================\n\n")
+    chapter_map = "".join(chapter_map_parts)
 
     outline_block = ""
     if manifest.raw_outline_text:
@@ -709,7 +751,7 @@ def compose_step_prompt(
             "================================================================================\n\n"
         )
 
-    return f"{TIER_1_SYSTEMS_ENGINE}\n\n{outline_block}{tier_2}\n\n{tier_3}\n\n{tier_4}\n\n{task_instruction}"
+    return f"{TIER_1_SYSTEMS_ENGINE}\n\n{chapter_map}{outline_block}{tier_2}\n\n{tier_3}\n\n{tier_4}\n\n{task_instruction}"
 
 
 # ==============================================================================
@@ -773,33 +815,22 @@ def run_review_gates(content: str, step_info: Dict[str, Any], is_sec1: bool = Fa
         else:
             results.append(GateResult(passed=True, gate_name="gate_purpose_single_paragraph", message="Purpose block not matched."))
 
-    # Gate 1: gate_section1_unbroken (Structural Invariant)
-    if is_sec1:
-        subsections = [line for line in lines if re.match(r"^###\s+", line)]
-        bullet_lists = [line for line in lines if re.match(r"^\s*[-*]\s+", line)]
-        numbered_lists = [line for line in lines if re.match(r"^\s*\d+\.\s+", line)]
-        if subsections:
-            results.append(GateResult(
-                passed=False,
-                gate_name="gate_section1_unbroken",
-                message=f"FAILED: Found {len(subsections)} '###' subsections in Section .1. Section .1 must be completely unbroken prose!",
-                details={"subsections": subsections},
-            ))
-        elif bullet_lists or numbered_lists:
-            results.append(GateResult(
-                passed=False,
-                gate_name="gate_section1_unbroken",
-                message=f"FAILED: Found {len(bullet_lists)} bullet items and {len(numbered_lists)} numbered list items in Section .1. Section .1 must be unbroken prose narrative without list syntax.",
-                details={"bullet_count": len(bullet_lists), "numbered_count": len(numbered_lists)},
-            ))
-        else:
-            results.append(GateResult(
-                passed=True,
-                gate_name="gate_section1_unbroken",
-                message="PASSED: Zero '###' subsections and zero lists in Section .1.",
-            ))
+    # Gate 1: gate_subsections (Structural Scaffolding)
+    # Ensure clean section structure with 2–4 ### subsections to organize the narrative
+    subsections = [line for line in lines if re.match(r"^###\s+", line)]
+    if len(subsections) < 2 and words >= 800:
+        results.append(GateResult(
+            passed=True,
+            gate_name="gate_subsections",
+            message=f"NOTICE: Found {len(subsections)} '###' subsections. Recommended: 2–4 clean, scannable '###' subsections for structured readability.",
+            details={"subsections": subsections},
+        ))
     else:
-        results.append(GateResult(passed=True, gate_name="gate_section1_unbroken", message="N/A for non-Section .1"))
+        results.append(GateResult(
+            passed=True,
+            gate_name="gate_subsections",
+            message=f"PASSED: Found {len(subsections)} clean '###' subsections.",
+        ))
 
     # Gate 2: gate_anti_anthropomorphism (Linguistic Purity)
     banned_patterns = [
@@ -1144,7 +1175,6 @@ def generate_with_review_and_repair(
         if not g.passed and g.gate_name in [
             "gate_minimum_length",
             "gate_purpose_single_paragraph",
-            "gate_section1_unbroken",
             "gate_anti_anthropomorphism",
             "gate_no_micro_instructions",
             "gate_status_envelope_drift",
@@ -1169,13 +1199,7 @@ def generate_with_review_and_repair(
             "Your previous draft failed our strict textbook review gates with the following errors:\n"
             f"{error_msgs}\n\n"
             "CRITICAL INSTRUCTIONS FOR REPAIR:\n"
-        )
-        if is_sec1:
-            repair_prompt += (
-                "1. If 'gate_section1_unbroken' failed: REMOVE ALL `###` SUBHEADINGS AND BULLET LISTS COMPLETELY. "
-                "Section .1 must be an unbroken, cohesive 4-beat narrative essay without any subheadings.\n"
-            )
-        repair_prompt += (
+            "1. Maintain clean section structure with 2–3 scannable `###` subheadings.\n"
             "2. If 'gate_anti_anthropomorphism' failed: Remove any phrasing like 'model thinks', 'model decides', 'let's think step by step', or 'model verifies its own answer'.\n"
             "3. If 'gate_status_envelope_drift' failed: Lock status envelope enumeration names strictly to `COMPLETED`, `TRUNCATED`, `REFUSED`, `TRANSPORT_FAILURE`. Remove drifted names like `Incomplete`, `Refusal`, `Failed`.\n"
             "4. If 'gate_no_opening_hardware_dump' failed: Rephrase the opening sentence. NEVER lead with hardware acronyms (HBM, PCIe, NVLink, SRAM). Open with the conceptual systems architecture, computational interface, or control loop.\n"
@@ -1192,7 +1216,6 @@ def generate_with_review_and_repair(
         critical_failures = [
             g for g in gate_results
             if not g.passed and g.gate_name in [
-                "gate_section1_unbroken",
                 "gate_anti_anthropomorphism",
                 "gate_no_micro_instructions",
                 "gate_status_envelope_drift",
@@ -1201,16 +1224,6 @@ def generate_with_review_and_repair(
                 "gate_anti_recap",
             ]
         ]
-
-    # Fallback cleanup if Section .1 still has subheadings in emergency
-    if is_sec1 and any(not g.passed and g.gate_name == "gate_section1_unbroken" for g in gate_results):
-        cleaned_lines = []
-        for line in content.splitlines():
-            if line.startswith("### "):
-                continue  # strip illegal subheading
-            cleaned_lines.append(line)
-        content = "\n".join(cleaned_lines)
-        gate_results = run_review_gates(content, step_info, is_sec1=is_sec1)
 
     return content, gate_results
 
@@ -1626,8 +1639,8 @@ def validate_assembled_chapter(ch_dir: Path) -> Dict[str, Any]:
     if sec1_match:
         sec1_text = sec1_match.group(1)
         subheadings = re.findall(r"^###\s+.*", sec1_text, re.MULTILINE)
-        if subheadings:
-            issues.append(f"CRITICAL: Section .1 contains {len(subheadings)} '###' subheadings in assembled draft!")
+        if len(subheadings) < 2 and len(sec1_text.split()) >= 800:
+            issues.append(f"NOTICE: Section .1 contains {len(subheadings)} '###' subheadings (recommended: 2–3 clean subheadings).")
 
     # Check balanced div fences
     div_count = text.count(":::")
