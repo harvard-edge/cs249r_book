@@ -49,7 +49,7 @@ Every section across every chapter should flow naturally through a 4-step pedago
 
 ### 4. Freedom, Flexibility, and Pedagogical Breathing Room
 - **Eliminate Rigid Word Caps:** Word count ceilings must never force the model or author into compressed, unreadable jargon walls. Let the text breathe naturally. Complex distributed subsystems (e.g., KV-Cache Hierarchy, Sagas, RLVR) will naturally require more depth, while focused conceptual modules remain lean.
-- **Encourage Structural Hierarchy (`###` Subheadings):** Every section (including Section .1 of every chapter) should use clean, scannable `###` subheadings to provide cognitive road signs and separate distinct architectural concepts.
+- **Structural Hierarchy Across Sections (.1 as Unbroken Intro vs. .2+ Mechanics):** Section .1 of every chapter is an unbroken, cohesive introduction with **zero subsections (no `###`)** and **no bulleted outline**—it sets the stage, establishes the computational boundary, and presents the core systems dilemma. From Section .2 onwards, every substantive technical section must use 2–4 clean, scannable `###` subheadings to structure technical progression and separate distinct architectural concepts.
 - **Rich Visual and Tabular Anchors:** Make liberal use of Rosetta Stone comparison tables, architectural sequence diagrams, and worked example callouts (`::: {.callout-note title="Worked Example..."}`) to demonstrate failure modes and quantitative derivations.
 
 #### The Engineer's Napkin Estimate
@@ -253,8 +253,8 @@ To ensure natural narrative flow and intellectual depth, **all rigid word budget
 ##### Structural Role Hierarchy (The Four Section Types):
 
 1. **`[stage-setter]` (Section .1 only):**
-   - Introduce the chapter's governing problem and establish the operational boundary needed to understand its first mechanism.
-   - **Structural Invariants:** Use 2–3 clean, scannable `###` subheadings to separate the conceptual contrast (e.g. classical systems vs generative models), the systems boundary (e.g. runtime vs accelerator), and the failure modes. Include a Rosetta Stone table or sequence diagram. End with a natural causal bridge to the first mechanism in Section .2.
+   - Introduce the chapter's governing dilemma and establish the operational boundary needed to understand its first mechanism.
+   - **Structural Invariants:** Strictly an unbroken narrative arc with **zero subsections (NO `###`)** and **no bulleted outline**. It introduces the chapter's central dilemma, contrasts classical systems assumptions with generative models, establishes the operational boundary (e.g., host runtime vs. inference daemon vs. silicon), and includes a Systems Rosetta Stone table. Concludes with an unbroken prose bridge directly motivating the first mechanism in Section .2.
 2. **`[core]` (Foundational Mechanics & Derivations):**
    - Load-bearing technical sections developing the mechanism and trade-off owned by the section. Follow the 4-step scaffolding ladder (Dilemma → Intuition → Artifact/Code → Math). Include a derivation, table, or Pint-typed MLSysIM LEGO cell when it helps students reason about a measurable quantity.
    - **Structural Invariants:** Use 2–3 `###` subsections to structure the technical progression; end with the causal consequence that motivates the next section.
@@ -278,9 +278,10 @@ Instead of arbitrary word counts, every body section specification is governed b
      - `**The Core Question:** *[Exactly one sharp, italicized systems provocation]*`
      - `**Why It Matters:** *[A concise paragraph explaining the architectural stakes and the consequence of getting the decision wrong]*`
    - Keep the Purpose focused on the chapter's question. Let its length follow the complexity of the question, then transition into the `::: {.callout-learning-objectives}`.
-1. **The Section .1 Stage-Setting Law:**
-   - Section .1 of every chapter (e.g., Section 2.1, Section 3.1) sets the stage by contrasting classical systems assumptions with generative models, situating the subsystem within the whole machine, and establishing the operational boundary.
-   - Use clean, scannable `###` subheadings and tabular comparisons (such as a Systems Rosetta Stone) to make the boundary immediately clear to an undergraduate reader.
+1. **The Section .1 Stage-Setting Law (Zero Subsections):**
+   - Section .1 of every chapter (e.g., Section 2.1, Section 3.1) must **never have subsections (`###`)** or bulleted outlines.
+   - It is a cohesive, standalone chapter introduction and stage-setter designed for senior undergraduate and introductory graduate students. It sets the stage, frames the governing systems dilemma, contrasts classical deterministic systems with unprivileged stochastic generation, establishes the multi-tier operational boundary, and includes tabular comparisons (such as the Systems Rosetta Stone).
+   - Detailed technical mechanics, formal algorithms, code artifacts, and mathematical derivations start strictly in Section .2 onwards.
    - Conclude with an unbroken prose bridge directly posing the first mechanistic question for Section .2.
 2. **Context Staging for Section $k$ (Preventing Context Pollution & Recap Bloat):**
    - **DO NOT** stage the entire preceding chapter text into the drafting prompt. Staging full preceding sections causes attentional dilution, lost-in-the-middle degradation, and triggers repetitive recaps ("As we saw in the previous section...").

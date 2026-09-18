@@ -49,8 +49,6 @@ Classical operating systems rely on deterministic, fail-stop processors: instruc
 
 ## A Model Call in the Stochastic Computer {#sec-vol3-processor-role}
 
-### The Large Language Model as a Processing Element
-
 When software engineers build autonomous agents, the Large Language Model (LLM) sits at the center of the system as its primary *processing element*.
 
 To an application developer, calling an LLM often looks like an ordinary web service request: the application sends a prompt string over an HTTP connection, waits a moment, and receives a generated text completion. But beneath that simple API abstraction lies a complex hardware-software systems stack. When an agent invokes a model, it is not calling a passive library; it is dispatching computation to a massive neural coprocessor running across specialized accelerator hardware.
@@ -75,8 +73,6 @@ To bridge the gap between machine learning concepts and systems engineering prim
 
 : **The Machine Learning vs. Systems Architecture Rosetta Stone**: Translating statistical model abstractions into physical operating systems primitives. {#tbl-vol3-ml-systems-rosetta}
 
-### The Systems Challenge: Fail-Stop vs. Fail-Plausible Execution
-
 This architectural boundary exposes the central reliability challenge of using an LLM in software systems. Classical computer dependability relies heavily on the *fail-stop* model [@schlichting1983failstop], wherein a processor either executes instructions strictly according to specification or immediately halts upon internal fault.[^fn-fail-stop] In an x86 or ARM CPU, invalid memory accesses trigger hardware page faults, illegal opcodes raise exceptions, and execution halts synchronously before corrupted state can propagate.
 
 [^fn-fail-stop]: **Fail-Stop Model** (Historical / Fault Tolerance): A dependability model introduced by @schlichting1983failstop where a processing element operates strictly according to specification or halts upon internal failure. LLMs violate this model at the semantic level by continuing to generate syntactically well-formed sequences when operational validity has collapsed. \index{Fail-Stop Model}\index{Historical!Fail-Stop Model}\index{Fault Tolerance!Fail-Stop Model}
@@ -87,8 +83,6 @@ This fail-plausible nature stems from an unbridgeable *epistemic gap*—the divi
 
 Consequently, the host software system must treat every model output not as an executed command or an established truth, but as an unverified candidate proposal held in *memory escrow*—a passive host-memory staging buffer—whose validity must be established entirely outside the model.
 
-### The Three-Tier Systems Boundary: Runtime, Driver, and Silicon
-
 To govern this unprivileged, fail-plausible processing element without sacrificing systems integrity, production architectures partition execution across a three-tier operational boundary (@fig-stochastic-processor-core). This hierarchy mirrors the classical division between user applications, operating system drivers, and raw hardware execution units:
 
 1. **Tier 1: Host Agent Runtime (The Operating System Supervisor).** Operating in user-space CPU host memory (DRAM), the runtime acts as the supervisory kernel of the agent. It manages end-to-end task orchestration, retrieves external context, compiles structural output schemas into formal grammar automata, stages prompt context into memory escrow, enforces resource limits ($K_{\max}$ token budgets and $T_{\max}$ wall-clock deadlines), and mediates all external tool execution.
@@ -98,8 +92,6 @@ To govern this unprivileged, fail-plausible processing element without sacrifici
 ::: {#fig-stochastic-processor-core fig-cap="**Three-Tier Invocation Lifecycle**: Boundary separation between host runtime, inference service daemon, and neural execution core across staging, generation, and verification phases." fig-alt="The three-tier invocation lifecycle showing host runtime, inference service, and neural core."}
 ![](images/svg/invocation_lifecycle.svg){width="100%"}
 :::
-
-### The Interconnect Bottleneck: Why Logit Processing Belongs on the Accelerator
 
 Crucially, the neural core does not emit human-readable text or discrete token IDs directly. Instead, its final linear layer (the *unembedding layer*) projects internal hidden activation vectors $\mathbf{h} \in \mathbb{R}^{d_{\text{model}}}$ into raw, unnormalized *logit vectors* $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$, where $|\mathcal{V}|$ represents the total vocabulary cardinality (often ranging from $32{,}000$ to over $128{,}000$ tokens). A logit is an unscaled real number representing the model's raw affinity score for each possible vocabulary token.
 
@@ -120,8 +112,6 @@ $$64 \times 40 \times 256\text{ KB} \approx 655.4\text{ MB/s}$$
 of continuous bus traffic. While modern PCIe buses offer gigabytes per second of raw throughput, streaming hundreds of megabytes of fine-grained logit buffers every second introduces severe bus contention, CPU interrupt overhead, and pipeline synchronization stalls.
 
 Consequently, the host agent runtime never pulls raw logit vectors across the interconnect. Instead, Tier 1 compiles high-level structural constraints (such as JSON schemas or regex patterns) into compact formal automata (such as Deterministic Finite Automata) and delegates them down to Tier 2. Under the hood, the grammar engine maps DFA character-level transitions to the model's subword token vocabulary, determining ahead of time exactly which token IDs produce valid character continuations from the current DFA state. The inference service daemon executes logit masking directly within accelerator high-bandwidth memory (HBM), setting illegal token coordinates to $-\infty$ in a single GPU kernel launch before sampling. Only the resulting 4-byte sampled token ID is transferred back across the bus to the host runtime.
-
-### The Host Reference Monitor and the Delivery Fallacy
 
 Conversely, the inference service daemon treats candidate token streams strictly as passive payload data; it neither evaluates whether emitted code compiles nor grants execution privileges. The boundary between proposing a candidate symbol sequence and authorizing an environmental mutation remains absolute. The host agent runtime acts as an authoritative, tamper-proof *reference monitor* [@anderson1972computer; @saltzer1975], mediating every interaction between unprivileged candidate token buffers and physical host resources.[^fn-reference-monitor]
 

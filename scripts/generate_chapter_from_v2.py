@@ -301,11 +301,12 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
    - Section .1 (The Standalone Stage-Setter & Chapter Introduction):
      * Serves as the conceptual foundation and stage-setter for the entire chapter.
      * Accessible and engaging: frames the governing systems dilemma, contrasts classical deterministic systems with unprivileged stochastic generation, establishes the 3-tier boundary (Host Runtime, Inference Service, Neural Core), and introduces fail-stop vs. fail-plausible execution.
-     * Uses 2–3 clean, scannable `###` subheadings to provide clear cognitive road signs.
+     * ZERO SUBSECTIONS (NO `###`) & NO BULLETED OUTLINES: Must be an unbroken, cohesive narrative arc with zero subsections. Do not break the introduction into mini-sections or an outline. Use bold topic sentences to lead into paragraphs if needed, but keep the narrative flowing continuously.
      * Concludes with an unbroken prose bridge directly posing the first mechanistic systems question for Section .2.
    - Section .2 Onwards (The Real Technical Mechanics):
-     * This is where the concrete engineering and mathematical mechanics live!
+     * This is where the concrete engineering, code artifacts, and mathematical mechanics live!
      * Each subsequent section dives deep into ONE specific subsystem, interface, or cost model.
+     * Uses 2–4 clean, scannable `###` subheadings to structure the technical progression.
      * Follows the 4-step scaffolding ladder: Dilemma -> Systems Intuition -> Concrete Code/Artifact -> Grounded Math.
 
 3. HIGHER-LEVEL ARCHITECTURAL INTUITION (THE SEVEN SUBSYSTEM LENSES):
@@ -327,7 +328,7 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
 
 4. FREEDOM, FLEXIBILITY, AND PEDAGOGICAL BREATHING ROOM:
    - NO RIGID WORD CAPS: Let the text breathe naturally without arbitrary word ceilings or floors. Substantive engineering depth takes precedence over word targets.
-   - STRUCTURAL HIERARCHY: Every section (including Section .1) should use 2–3 clean, scannable `###` subheadings to provide cognitive road signs.
+   - STRUCTURAL HIERARCHY: Section .1 must have ZERO subsections (NO `###`) and NO bulleted outline; all substantive sections from Section .2 onwards must use 2–4 clean, scannable `###` subheadings to provide cognitive road signs.
    - Rich visual, tabular, and worked example callouts (`::: {.callout-note title="Worked Example..."}`).
 
 5. DUAL-TOPOLOGY EXECUTION TIERS:
@@ -656,10 +657,11 @@ def compose_step_prompt(
             task_parts.append(
                 f"### Task: Author Section {sec.section_num}: {sec.title}\n"
                 f"Target Depth: Substantive and thorough exposition for senior CS/CE undergraduates. Let the text breathe naturally without arbitrary word caps.\n\n"
-                f"**STRUCTURAL INVARIANT (SECTION .1 ROAD SIGNS):**\n"
-                f"Use 2–3 clean, scannable `###` subheadings to structure the conceptual contrast, the systems boundary, and the failure modes.\n"
+                f"**STRUCTURAL INVARIANT (SECTION .1 UNBROKEN STAGE-SETTER):**\n"
+                f"Section .1 must have ZERO subsections (NO `###`) and NO bulleted outlines. It is an unbroken, cohesive introduction to the chapter as a whole.\n"
+                f"Use bold topic sentences to lead into thematic beats if helpful, but preserve a continuous, flowing narrative arc:\n"
                 f"  - Architectural Stage-Setting: Contrast deterministic classical systems with the unprivileged generative model operating under zero ambient authority.\n"
-                f"  - Situate within The Stochastic Computer: define the functional boundary between the host agent runtime and the underlying execution engine.\n"
+                f"  - Situate within The Stochastic Computer: define the functional boundary between the host agent runtime, inference service daemon, and neural execution core (reference the Systems Rosetta Stone table).\n"
                 f"  - Systems Confrontation: The candidate proposal disconnect, fail-plausible execution, resource ceilings ($K_{{\\max}}, T_{{\\max}}$), and external invariant closure.\n"
                 f"  - Conclude with an unbroken prose bridge directly posing the first mechanistic question for Section {manifest.sections[1].section_num if len(manifest.sections) > 1 else 'X.2'}.\n\n"
                 f"**Heading & Anchor:** `{sec.heading_anchor}`\n"
@@ -827,21 +829,37 @@ def run_review_gates(content: str, step_info: Dict[str, Any], is_sec1: bool = Fa
             results.append(GateResult(passed=True, gate_name="gate_purpose_single_paragraph", message="Purpose block not matched."))
 
     # Gate 1: gate_subsections (Structural Scaffolding)
-    # Ensure clean section structure with 2–4 ### subsections to organize the narrative
+    # Section .1 MUST be an unbroken narrative stage-setter with ZERO subsections (no '###').
+    # Body sections (.2 onwards) MUST use 2–4 clean '###' subsections to structure technical progression.
     subsections = [line for line in lines if re.match(r"^###\s+", line)]
-    if len(subsections) < 2 and words >= 800:
-        results.append(GateResult(
-            passed=True,
-            gate_name="gate_subsections",
-            message=f"NOTICE: Found {len(subsections)} '###' subsections. Recommended: 2–4 clean, scannable '###' subsections for structured readability.",
-            details={"subsections": subsections},
-        ))
+    if is_sec1:
+        if subsections:
+            results.append(GateResult(
+                passed=False,
+                gate_name="gate_subsections",
+                message=f"FAILED: Found {len(subsections)} '###' subsections in Section .1. Section .1 must be an unbroken narrative stage-setter with ZERO subsections (no '###')!",
+                details={"subsections": subsections},
+            ))
+        else:
+            results.append(GateResult(
+                passed=True,
+                gate_name="gate_subsections",
+                message="PASSED: Zero '###' subsections in Section .1 (unbroken stage-setter).",
+            ))
     else:
-        results.append(GateResult(
-            passed=True,
-            gate_name="gate_subsections",
-            message=f"PASSED: Found {len(subsections)} clean '###' subsections.",
-        ))
+        if len(subsections) < 2 and words >= 800:
+            results.append(GateResult(
+                passed=False,
+                gate_name="gate_subsections",
+                message=f"FAILED: Found {len(subsections)} '###' subsections. Body sections (.2 onwards) must use 2–4 clean, scannable '###' subsections to structure technical progression.",
+                details={"subsections": subsections},
+            ))
+        else:
+            results.append(GateResult(
+                passed=True,
+                gate_name="gate_subsections",
+                message=f"PASSED: Found {len(subsections)} clean '###' subsections.",
+            ))
 
     # Gate 2: gate_anti_anthropomorphism (Linguistic Purity)
     banned_patterns = [
@@ -1650,8 +1668,8 @@ def validate_assembled_chapter(ch_dir: Path) -> Dict[str, Any]:
     if sec1_match:
         sec1_text = sec1_match.group(1)
         subheadings = re.findall(r"^###\s+.*", sec1_text, re.MULTILINE)
-        if len(subheadings) < 2 and len(sec1_text.split()) >= 800:
-            issues.append(f"NOTICE: Section .1 contains {len(subheadings)} '###' subheadings (recommended: 2–3 clean subheadings).")
+        if subheadings:
+            issues.append(f"CRITICAL: Section .1 contains {len(subheadings)} '###' subheadings in assembled draft! Section .1 must be an unbroken narrative stage-setter with ZERO subsections (no '###').")
 
     # Check balanced div fences
     div_count = text.count(":::")
