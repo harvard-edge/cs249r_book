@@ -7,14 +7,14 @@
 :::
 
 
-Visual and spatial data exhibit two fundamental physical properties: spatial locality and translation equivariance. Neighboring pixels share strong local correlations, and a visual feature—such as an edge, corner, or texture—maintains identical semantic meaning regardless of where it appears in an image. Fully connected dense layers completely ignore this spatial structure: flattening an image into a 1D vector requires millions of redundant parameters that overfit and fail to generalize across spatial shifts.
+Visual and spatial data exhibit two fundamental physical properties: spatial locality and translation equivariance. Neighboring pixels share strong local correlations, and a visual feature—such as an edge, corner, or texture—maintains identical semantic meaning regardless of where it appears in an image. Fully connected dense layers ignore this spatial structure. Flattening an image into a 1D vector gives every pixel its own weight to every hidden unit, so the parameter count grows with image size and a feature learned in one place must be learned again in another.
 
-From a framework and systems standpoint, convolutional layers solve this by sliding compact, weight-shared receptive field kernels across 2D spatial dimensions. However, implementing 2D sliding convolutions using naive nested loops results in 6-deep nested loops that thrash CPU/GPU caches and run disastrously slowly. The systems architect must resolve key implementation challenges:
+From a framework and systems standpoint, convolutional layers solve this by sliding compact, weight-shared receptive field kernels across 2D spatial dimensions. The direct implementation is a set of nested loops that performs each multiply-add as a separate scalar operation, which is easy to verify and slow to run. The systems architect must resolve key implementation challenges:
 1. **The `im2col` lowering transformation**: Rearranging overlapping 2D image patches into matrix rows or columns, lowering the spatial convolution into a single high-performance BLAS matrix multiplication (GEMM) at the cost of temporary memory duplication.
 2. **Padding and stride geometry**: Calculating exact output spatial feature map dimensions while maintaining boundary information.
-3. **Autograd gradient routing**: Propagating gradients through shared kernel weights and routing spatial derivatives back to input feature maps via transposed convolution routines (`col2im`).
+3. **Autograd gradient routing**: Accumulating gradients into shared kernel weights from every position they touched, and scattering each output gradient back onto the input pixels its window covered.
 
-This chapter expands TinyTorch into spatial representation learning, implementing 2D convolutions, max pooling, and the `im2col` engine within our modular autograd framework.
+This chapter expands TinyTorch into spatial representation learning. It implements 2D convolution and max pooling as direct loops inside the autograd framework, then lowers the convolution to a matrix multiply with `im2col` in a book-only model that the loop version checks.
 
 ::: {#fig-conv-topology fig-cap="**One filter, four windows**: The highlighted input patch supplies the first output. Moving the same kernel across the remaining positions produces the other three values." fig-alt="A four-by-four grid containing 1 through 16, a three-by-three all-ones kernel, and a two-by-two output containing 54, 63, 90, and 99. The upper-left input patch and output are highlighted."}
 ![](assets/images/diagrams/09_convolutions-diag-1.svg)

@@ -7,14 +7,14 @@
 :::
 
 
-In modern deep learning execution, arithmetic operations like addition, scaling, and non-linear activations execute on compute units in fractions of a microsecond. However, in eager execution runtimes, chaining separate operations forces intermediate tensors to make round-trip journeys across the slow off-chip memory bus (DRAM/HBM), incurring devastating latency and memory bandwidth overhead.
+Elementwise operations such as addition, scaling, and activation functions do little arithmetic per value. In an eager runtime that executes one operation at a time, each operation writes a full intermediate array that the next one reads back, so a chain of them can spend more time moving arrays through memory than computing on them.
 
-From a framework and systems standpoint, **operator fusion** is the primary compiler optimization used to break the memory bandwidth wall:
-1. **Eliminating memory round-trips**: Combining sequential elementwise operations (such as linear bias addition followed by GELU activation) into a single compiled kernel execution pass.
-2. **On-chip register reuse**: Retaining intermediate values in ultra-fast on-chip processor registers or SRAM rather than allocating temporary tensors in global DRAM.
-3. **The memory traffic ledger**: Quantifying exact memory traffic reductions, proving how fusing an 8-operation GELU expression slashes DRAM bytes moved by up to $9\times$.
+From a framework and systems standpoint, **operator fusion** and **tiling** are the two standard answers, one reducing intermediate arrays and the other reusing data while it is still close to the processor:
+1. **Eliminating memory round-trips**: Combining sequential elementwise operations into one pass, as a compiled kernel would, so intermediates need not be written out and read back.
+2. **Reuse before eviction**: Keeping values in registers or cache while they are still needed, which a compiled kernel or a tiled loop can arrange and a sequence of NumPy calls cannot guarantee.
+3. **The memory traffic ledger**: Counting logical array reads and writes, which for the eight-operation GELU come to nine times those of an ideal single pass. That ratio compares two models; it is not the measured traffic of either NumPy helper.
 
-This chapter implements TinyTorch's operator fusion engine, demonstrating how kernel fusion transforms memory-bound operator sequences into peak hardware performance.
+This chapter writes a GELU expressed with fewer temporary Tensors and a tiled matrix multiply in NumPy, then times both. The names describe how each computation is expressed; only the timing says what changed.
 
 ::: {#fig-kernel-fusion fig-env="figure" fig-pos="htb" fig-cap="**Three NumPy execution paths**: Vectorized multiplication delegates to a library, the GELU helpers retain different intermediate arrays, and tiled multiplication explicitly accumulates block products. Every comparison checks values before measuring time." fig-alt="Three boxes labeled vectorized matmul, GELU expressions, and tiled matmul point to a shared output-check and measurement box."}
 ![](assets/images/diagrams/17_acceleration-diag-1.svg)

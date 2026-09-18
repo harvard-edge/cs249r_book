@@ -7,14 +7,14 @@
 :::
 
 
-Autoregressive text generation produces output one token at a time: each generated token is appended to the context, and the extended sequence is passed back to the model. In a naive implementation, generating $S$ tokens requires re-running attention across all preceding tokens at every single step, creating an $O(S^2)$ computational disaster where 99% of operations redundantly recompute identical key and value representations.
+Autoregressive text generation produces output one token at a time: each generated token is appended to the context, and the extended sequence is passed back to the model. In a naive implementation, every step reruns the model over the whole prefix, recomputing the keys and values of tokens whose keys and values have not changed. Over $S$ generated tokens, the projection work grows as $O(S^2)$ and the attention scores as $O(S^3)$.
 
-From a systems and framework perspective, the **Key-Value (KV) cache** is the essential serving optimization that eliminates this recomputation:
+From a systems and framework perspective, the **Key-Value (KV) cache** removes that recomputation:
 1. **Static buffer pre-allocation**: Pre-allocating persistent tensor memory buffers for attention keys and values up to the maximum sequence length, avoiding costly dynamic reallocations.
 2. **Moving write cursor**: Incrementing a sequential write pointer to store only the new token's key and value projections during each decode step.
-3. **Asymptotic step reduction**: Transforming per-token attention computation from $O(S)$ back down to $O(1)$, unlocking massive serving speedups for long context windows.
+3. **Asymptotic step reduction**: Cutting each step's projection work from $t$ rows to one and its score work from $t^2$ entries to $t$. Decode does not become constant-time, because each new token still attends over every cached position.
 
-This chapter constructs TinyTorch's KV cache subsystem, proving mathematical equivalence with full-prefix attention while demonstrating dramatic reductions in generation latency.
+This chapter constructs TinyTorch's KV cache, checks that cached and full-prefix attention agree within floating-point tolerance, and then measures generation time for both.
 
 ::: {#fig-kv-cache fig-env="figure" fig-pos="htb" fig-cap="**The KV cache**: Each step writes one new key and value per head and layer, then attends over the growing prefix. Reserved capacity stays fixed while the number of keys read increases." fig-alt="A current-token box points to static per-layer key and value buffers. A row of slots marks earlier positions, a highlighted current position, and unused capacity. Lower boxes show the attention equation and cache memory formula."}
 ![](assets/images/diagrams/18_memoization-diag-1.svg)
