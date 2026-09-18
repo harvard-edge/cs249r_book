@@ -21,24 +21,37 @@ class DatasetProfile(BaseModel):
     image_width: Optional[int] = None
     image_height: Optional[int] = None
     image_channels: Optional[int] = None
+    episodes: Optional[Quantity] = None
+    total_duration: Optional[Quantity] = None
+    embodiments: Optional[int] = None
+    tasks: Optional[int] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
-    @field_validator("training_examples", "full_examples", "validation_examples", "test_examples", mode="after")
+    @field_validator("training_examples", "full_examples", "validation_examples", "test_examples", "episodes", mode="after")
     @classmethod
     def _validate_example_counts(cls, v, info):
+        if v is None:
+            return v
         return require_unit_family(v, ureg.count, info.field_name, "count")
 
-    @field_validator("sample_duration", mode="after")
+    @field_validator("sample_duration", "total_duration", mode="after")
     @classmethod
     def _validate_sample_duration(cls, v, info):
+        if v is None:
+            return v
         return require_dimensionality(v, ureg.second, info.field_name)
 
     @field_validator("sample_rate", mode="after")
     @classmethod
     def _validate_sample_rate(cls, v, info):
+        if v is None:
+            return v
         return require_dimensionality(v, 1 / ureg.second, info.field_name)
 
     @field_validator("sample_width", mode="after")
     @classmethod
     def _validate_sample_width(cls, v, info):
+        if v is None:
+            return v
         return require_unit_family(v, ureg.byte, info.field_name, "data")
+

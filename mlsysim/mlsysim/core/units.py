@@ -279,3 +279,22 @@ feet = ureg.foot
 megabit = ureg.megabit
 gigabit = ureg.gigabit
 terabit = ureg.terabit
+
+# --- Electrical & Kinematic Units (Physical AI / Embodied) ---
+volt = ureg.volt
+V = ureg.volt
+millivolt = ureg.millivolt
+mV = ureg.millivolt
+ampere = ureg.ampere
+A = ureg.ampere
+milliampere = ureg.milliampere
+mA = ureg.milliampere
+ohm = ureg.ohm
+milliohm = ureg.milliohm
+newton = ureg.newton
+N = ureg.newton
+radian = ureg.radian
+rad = ureg.radian
+hertz = ureg.hertz
+Hz = ureg.hertz
+

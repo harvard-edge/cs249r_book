@@ -92,6 +92,13 @@ from .robotics import (
     calc_actuator_thermal_power,
     calc_action_chunk_cadence,
     calc_reflected_inertia,
+    calc_spatial_information_age_displacement,
+    calc_empirical_testing_exposure,
+    calc_dense_voxel_grid_memory,
+    calc_3dgs_memory_footprint,
+    calc_voltage_droop,
+    calc_cbf_safety_margin,
+    calc_action_chunk_streaming_amortization,
 )
 
 from .quantities import (
@@ -177,6 +184,13 @@ __all__ = [
     "calc_actuator_thermal_power",
     "calc_action_chunk_cadence",
     "calc_reflected_inertia",
+    "calc_spatial_information_age_displacement",
+    "calc_empirical_testing_exposure",
+    "calc_dense_voxel_grid_memory",
+    "calc_3dgs_memory_footprint",
+    "calc_voltage_droop",
+    "calc_cbf_safety_margin",
+    "calc_action_chunk_streaming_amortization",
     "transfer_time",
     "compute_time",
     "energy_from_power",

@@ -16,6 +16,13 @@ from mlsysim.physics.robotics import (
     calc_actuator_thermal_power,
     calc_action_chunk_cadence,
     calc_reflected_inertia,
+    calc_spatial_information_age_displacement,
+    calc_empirical_testing_exposure,
+    calc_dense_voxel_grid_memory,
+    calc_3dgs_memory_footprint,
+    calc_voltage_droop,
+    calc_cbf_safety_margin,
+    calc_action_chunk_streaming_amortization,
 )
 
 
@@ -124,3 +131,71 @@ def test_action_chunk_cadence():
     assert cadence["chunk_duration"].to("ms").magnitude == pytest.approx(640.0)
     assert cadence["brain_period"].to("ms").magnitude == pytest.approx(200.0)
     assert cadence["headroom_factor"] == pytest.approx(3.2)
+
+
+def test_spatial_information_age_displacement():
+    dx = calc_spatial_information_age_displacement(
+        velocity=Q_("1.5 m/s"),
+        information_age=Q_("60 ms"),
+    )
+    assert dx.to("cm").magnitude == pytest.approx(9.0)
+
+
+def test_empirical_testing_exposure():
+    # Target failure rate: 10^-6 per hour
+    # 95% confidence: T = -ln(0.05) / 10^-6 = 2.99573e6 hours ≈ 342.0 years
+    hours = calc_empirical_testing_exposure(target_hazard_rate=Q_("1e-6 / hr"), confidence=0.95)
+    assert hours.to("hr").magnitude == pytest.approx(2.99573e6, rel=0.01)
+    years = hours.to("hr").magnitude / (24 * 365.25)
+    assert years == pytest.approx(341.73, rel=0.01)
+
+
+def test_dense_voxel_grid_memory():
+    # 512^3 * 4 bytes = 536,870,912 bytes = 512 MiB = 536.87 MB
+    mem = calc_dense_voxel_grid_memory(voxels_per_dim=512, bytes_per_voxel=4)
+    assert mem.to("MiB").magnitude == pytest.approx(512.0)
+    assert mem.to("MB").magnitude == pytest.approx(536.87, rel=0.01)
+
+
+def test_3dgs_memory_footprint():
+    # 1,000,000 gaussians * 56 bytes = 56,000,000 bytes = 56 MB
+    mem = calc_3dgs_memory_footprint(num_gaussians=1_000_000, bytes_per_gaussian=56)
+    assert mem.to("MB").magnitude == pytest.approx(56.0)
+
+
+def test_voltage_droop():
+    # 50 A draw through 40 mOhm internal resistance = 2.0 V droop
+    droop = calc_voltage_droop(current=Q_("50 A"), internal_resistance=Q_("40 mohm"))
+    assert droop.to("V").magnitude == pytest.approx(2.0)
+
+
+def test_cbf_safety_margin():
+    # Safe candidate
+    res_safe = calc_cbf_safety_margin(h_val=1.0, l_f_h=-0.5, l_g_h=1.0, u_cmd=2.0, alpha_coeff=1.0)
+    assert res_safe["psi"] == pytest.approx(2.5)
+    assert res_safe["is_safe"] is True
+
+    # Unsafe candidate
+    res_unsafe = calc_cbf_safety_margin(h_val=1.0, l_f_h=-0.5, l_g_h=1.0, u_cmd=-3.0, alpha_coeff=1.0)
+    assert res_unsafe["psi"] == pytest.approx(-2.5)
+    assert res_unsafe["is_safe"] is False
+
+
+def test_action_chunk_streaming_amortization():
+    # OpenVLA-7B (14 GB) on Jetson AGX Orin (204.8 GB/s), eta=0.70, chunk H=16
+    res = calc_action_chunk_streaming_amortization(
+        model_weight_memory=Q_("14 GB"),
+        memory_bandwidth=Q_("204.8 GB/s"),
+        chunk_horizon=16,
+        bus_efficiency=0.70,
+    )
+    # b_sustained = 143.36 GB/s
+    assert res["b_sustained"].to("GB/s").magnitude == pytest.approx(143.36, rel=0.01)
+    # t_stream = 14 / 143.36 = 0.097656 s = 97.66 ms
+    assert res["t_stream"].to("ms").magnitude == pytest.approx(97.66, rel=0.01)
+    # f_single = 10.24 Hz
+    assert res["f_single"].to("Hz").magnitude == pytest.approx(10.24, rel=0.01)
+    # tau_step = 6.10 ms
+    assert res["tau_step"].to("ms").magnitude == pytest.approx(6.10, rel=0.01)
+    # f_effective = 163.84 Hz
+    assert res["f_effective"].to("Hz").magnitude == pytest.approx(163.84, rel=0.01)

@@ -468,6 +468,101 @@ UNITREE_H1_HUMANOID = _est(
     verified="2026-09-15",
 )
 
+UBER_ATG_VOLVO_XC90 = _lit(
+    "prov:uber-atg-volvo-xc90",
+    "NTSB Highway Accident Report: Collision Between a Self-Driving Car and a Pedestrian, Tempe, Arizona, March 18, 2018 (NTSB/HAR-19/03)",
+    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
+    verified="2026-09-18",
+    notes="Modified 2017 Volvo XC90 test vehicle operated by Uber ATG. Tested suppression delay 1.2 s, braking deceleration capacity up to 8.0 m/s^2.",
+)
+
+ALOHA_BIMANUAL_MANIPULATOR = _lit(
+    "prov:aloha-bimanual-manipulator",
+    "Zhao et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+    url="https://arxiv.org/abs/2304.13705",
+    verified="2026-09-18",
+    notes="ALOHA dual ViperX 300 6-DOF arms with leader-follower teleoperation, 50 Hz control loop, 14 total DOFs.",
+)
+
+DED_MELT_POOL_PROCESS = _est(
+    "prov:ded-melt-pool-process",
+    "Representative laser directed energy deposition (DED) additive manufacturing testbed",
+    verified="2026-09-18",
+    notes="High-speed coaxially monitored melt pool process with 1000 Hz closed-loop control.",
+)
+
+SONY_IMX477 = _ds(
+    "prov:sony-imx477",
+    "Sony IMX477 Diagonal 7.857 mm (Type 1/2.3) 12.3MP CMOS Image Sensor Datasheet",
+    "https://www.sony-semicon.com",
+    verified="2026-09-18",
+    notes="Rolling shutter CMOS sensor with 4056x3040 resolution, MIPI CSI-2 2-lane/4-lane interface.",
+)
+
+SONY_IMX296 = _ds(
+    "prov:sony-imx296",
+    "Sony IMX296LLR/LQR Diagonal 6.3 mm (Type 1/2.9) 1.58MP Global Shutter CMOS Sensor",
+    "https://www.sony-semicon.com",
+    verified="2026-09-18",
+    notes="Global shutter CMOS sensor with 1440x1080 resolution, sub-10ms latency profile for robotics.",
+)
+
+INTEL_REALSENSE_D435I = _ds(
+    "prov:intel-realsense-d435i",
+    "Intel RealSense Depth Camera D435i Datasheet",
+    "https://www.intelrealsense.com/depth-camera-d435i/",
+    verified="2026-09-18",
+    notes="Active IR stereo depth camera with integrated Bosch BMI055/BMI088 IMU, 90 fps depth stream.",
+)
+
+OUSTER_OS1_64 = _ds(
+    "prov:ouster-os1-64",
+    "Ouster OS1 Mid-Range High-Resolution Imaging LiDAR Datasheet",
+    "https://ouster.com/products/hardware/os1-lidar-sensor",
+    verified="2026-09-18",
+    notes="64-channel digital LiDAR with 120m range, 10-20 Hz configurable spin rate.",
+)
+
+BOSCH_BMI088 = _ds(
+    "prov:bosch-bmi088",
+    "Bosch Sensortec BMI088 High-Performance 6-Axis Inertial Measurement Unit Datasheet",
+    "https://www.bosch-sensortec.com/products/motion-sensors/imus/bmi088/",
+    verified="2026-09-18",
+    notes="Automotive and robotics grade 6-DoF IMU with 1000 Hz gyroscope and 1600 Hz accelerometer update rates.",
+)
+
+HARMONIC_DRIVE_CSG = _ds(
+    "prov:harmonic-drive-csg",
+    "Harmonic Drive CSG Series High Torque Component Sets and Gearhead Catalog",
+    "https://www.harmonicdrive.net",
+    verified="2026-09-18",
+    notes="Zero-backlash strain wave gearhead for robotic joints with ratios from 50:1 to 160:1.",
+)
+
+UNITREE_M107_MOTOR = _ds(
+    "prov:unitree-m107-motor",
+    "Unitree M107 High Torque Joint Motor Technical Specifications",
+    "https://www.unitree.com",
+    verified="2026-09-18",
+    notes="Planetary/QDD joint motor providing 360 N*m peak torque used in humanoid hip and knee joints.",
+)
+
+TMOTOR_AK80_9 = _ds(
+    "prov:tmotor-ak80-9",
+    "T-Motor AK80-9 Dynamic Actuator Specifications",
+    "https://store.tmotor.com",
+    verified="2026-09-18",
+    notes="9:1 planetary quasi-direct-drive actuator for dynamic legged robotics.",
+)
+
+DYNAMIXEL_XM430 = _ds(
+    "prov:dynamixel-xm430-w350",
+    "ROBOTIS DYNAMIXEL XM430-W350-T/R E-Manual",
+    "https://emanual.robotis.com/docs/en/dxl/x/xm430-w350/",
+    verified="2026-09-18",
+    notes="Integrated robot actuator with contactless absolute encoder, TTL/RS-485 multidrop bus.",
+)
+
 GOOGLE_CORAL = _ds(
     "prov:google-coral-edge-tpu",
     "Google Coral Edge TPU product documentation",
@@ -617,6 +712,38 @@ MNIST_DATASET = _lit(
     "prov:mnist-1998",
     "LeCun et al. (1998), Gradient-Based Learning Applied to Document Recognition",
     url="http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf",
+)
+
+OPEN_X_EMBODIMENT_DATASET = _lit(
+    "prov:open-x-embodiment-2023",
+    "Open X-Embodiment Collaboration et al. (2023), Open X-Embodiment: Robotic Learning Datasets and RT-X Models",
+    url="https://arxiv.org/abs/2310.08864",
+    verified="2026-09-18",
+    notes="1M+ robot trajectories across 22 embodiments and 527 tasks.",
+)
+
+DROID_DATASET = _lit(
+    "prov:droid-dataset-2024",
+    "Khazatsky et al. (2024), DROID: A Large-Scale In-The-Wild Robot Manipulation Dataset",
+    url="https://arxiv.org/abs/2403.12945",
+    verified="2026-09-18",
+    notes="76k demonstration trajectories, 350 hours of Franka interaction data across diverse household and industrial environments.",
+)
+
+BRIDGE_DATA_V2_DATASET = _lit(
+    "prov:bridge-data-v2-2023",
+    "Walke et al. (2023), BridgeData V2: A Dataset for Robot Manipulation at Scale",
+    url="https://arxiv.org/abs/2308.08451",
+    verified="2026-09-18",
+    notes="60k trajectories across 24 environments for visual-motor skill learning with WidowX 250.",
+)
+
+ALOHA_BIMANUAL_DATASET = _lit(
+    "prov:aloha-bimanual-dataset-2023",
+    "Zhao et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+    url="https://arxiv.org/abs/2304.13705",
+    verified="2026-09-18",
+    notes="Fine-grained bimanual teleoperated demonstration dataset for insertion, threading, and slotting.",
 )
 
 DEPLOYMENT_ENVELOPES = _est(
