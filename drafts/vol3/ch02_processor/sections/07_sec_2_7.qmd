@@ -34,39 +34,71 @@ Depending on the operational characteristics of the agent task, the dominant con
 
 ### Arithmetic Intensity and the Accelerator Roofline {#sec-vol3-processor-roofline}
 
-The stark latency difference between prompt prefill and token decode is governed by the physical principle of **operational arithmetic intensity** ($I$), defined by the Williams, Waterman, and Patterson Roofline model [@williams2009] as the ratio of floating-point operations executed to memory traffic transferred across the accelerator memory bus:
+Why does ingesting a 10,000-token prompt take less than a hundred milliseconds, while emitting 500 output tokens can take ten seconds? The answer lies not in software implementation, but in the physical anatomy of modern accelerator silicon.
 
-$$I = \frac{\text{FLOPs}}{\text{Bytes Transferred from Memory}} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+#### The Physical Mental Model: A Sports Car Engine Fed by a Narrow Straw
 
-An accelerator architecture possesses two fundamental hardware ceilings: its peak arithmetic processing throughput $\Pi$ (measured in floating-point operations per second, $\text{FLOP/s}$) and its peak memory bus bandwidth $\beta$ (measured in bytes per second, $\text{Byte/s}$). The quotient of these limits defines the **saturation operational intensity** ($I_{\text{sat}}$):[^fn-roofline-knee]
+To understand modern accelerator execution, consider a physical analogy: **a Formula 1 sports car engine fueled through a narrow soda straw**.
 
-$$I_{\text{sat}} = \frac{\Pi}{\beta}$$
+Modern accelerator silicon (such as an NVIDIA H100 or B200) pairs an enormous compute engine—specialized matrix execution units (Tensor Cores) capable of nearly two quadrillion floating-point operations per second ($1{,}979\text{ TFLOP/s}$ in FP8)—with off-chip High Bandwidth Memory (HBM3) connected via a physical bus operating at $3.35\text{ TB/s}$. Relative to the engine's ravenous arithmetic appetite, this memory bus is an extraordinarily narrow straw.
 
-If a workload's arithmetic intensity satisfies $I \ge I_{\text{sat}}$, the computation is **compute-bound**: arithmetic execution units are fully saturated, and throughput is bounded by $\Pi$. If $I < I_{\text{sat}}$, the computation is **memory-bandwidth-bound**: arithmetic units sit idle waiting for weights or activation tensors to transit the memory bus, and throughput is strictly limited by $\beta \cdot I$.
+To keep the compute engine firing at full throttle, the processor must reuse data repeatedly once fetched. The ratio of computation performed to data moved governs whether the engine achieves peak performance or starves:
 
-[^fn-roofline-knee]: **Saturation Operational Intensity**: Formulated by Williams, Waterman, and Patterson [@williams2009], the saturation operational intensity $I_{\text{sat}} = \Pi / \beta$ marks the architectural inflection point where memory bandwidth ceases to constrain throughput. On modern accelerator silicon with specialized matrix cores, $I_{\text{sat}}$ typically ranges from $250$ to over $550\text{ FLOP/Byte}$, meaning that algorithms lacking extensive data reuse cannot exploit the peak compute capacity of the processor. \index{Saturation Operational Intensity}\index{Roofline Model!saturation knee}
+- **In Prompt Prefill:** The engine ingests a bucket of $M$ tokens all at once. The runtime fetches the model's parameter weight matrices from HBM into on-chip cache and register files *once*, and then multiplies those same weights across all $M$ token vectors simultaneously via dense General Matrix-Matrix Multiplication (GEMM). Because every byte transferred from HBM is reused thousands of times, the engine runs wide open on its compute-bound plateau.
+- **In Autoregressive Decode:** The causal dependency chain forces the runtime to generate tokens strictly one by one ($y_t$ depends on $y_{t-1}$). To compute that single next token, the engine has only a single activation vector ($B=1$). Yet to multiply by that single vector via General Matrix-Vector Multiplication (GEMV), the memory controller must shuttle the **entire 70 GB model weight footprint** across the narrow HBM straw, perform just *two* arithmetic operations per parameter byte, and discard the weights until the next step! The sports car engine starves, spending over 99 percent of its clock cycles idling while waiting for the next parameter byte to trickle across the bus.
 
-In dense autoregressive transformer architectures, the feed-forward and projection linear layers contribute approximately $2|\Theta|\text{ FLOPs}$ per token forward step. This factor of 2 originates in physical hardware arithmetic.[^fn-fma-ops] Across transformer architectures, over $98\%$ of dense parameters reside in linear projection weight matrices: the attention projections ($\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V, \mathbf{W}_O$) and the feed-forward network projections ($\mathbf{W}_{\text{gate}}, \mathbf{W}_{\text{up}}, \mathbf{W}_{\text{down}}$). For each token, evaluating these linear layers requires computing vector-matrix multiplications where every parameter element multiplies an activation scalar and accumulates into a partial sum. Accelerator execution units evaluate this via Fused Multiply-Add (FMA) instructions:
+#### Formulating Operational Arithmetic Intensity
+
+To formalize this physical tension, computer architects employ the Williams, Waterman, and Patterson Roofline model [@williams2009]. The fundamental governing property is **operational arithmetic intensity** ($I$), defined as the number of floating-point operations executed per byte of memory traffic transferred across the accelerator memory bus:
+
+$$I = \frac{\text{Floating-Point Operations (FLOPs)}}{\text{Memory Traffic Transferred Across Bus (Bytes)}} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+
+An accelerator architecture possesses two immutable physical ceilings: its peak arithmetic processing throughput $\Pi$ (measured in floating-point operations per second, $\text{FLOP/s}$) and its peak memory bus bandwidth $\beta$ (measured in bytes per second, $\text{Byte/s}$). Dividing these two hardware limits yields the processor's architectural balance point, known as the **saturation operational intensity** ($I_{\text{sat}}$):[^fn-roofline-knee]
+
+$$I_{\text{sat}} = \frac{\Pi}{\beta} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+
+The saturation intensity defines two mutually exclusive physical operating regimes:
+
+1. **Compute-Bound Regime ($I \ge I_{\text{sat}}$):** When an algorithm executes more FLOPs per byte than the saturation threshold, the memory bus easily keeps pace. Arithmetic execution units are fully saturated, and operational throughput reaches the hardware ceiling $\Pi$.
+2. **Memory-Bandwidth-Bound Regime ($I < I_{\text{sat}}$):** When an algorithm lacks sufficient data reuse, memory bandwidth limits performance. Arithmetic execution units sit idle waiting for weights or activations to transit the memory bus. Attainable throughput collapses to the diagonal slope governed strictly by $\beta \cdot I$.
+
+[^fn-roofline-knee]: **Saturation Operational Intensity**: Formulated by Williams, Waterman, and Patterson [@williams2009], the saturation operational intensity $I_{\text{sat}} = \Pi / \beta$ marks the architectural inflection point where memory bandwidth ceases to constrain throughput. On modern accelerator silicon with specialized matrix cores, $I_{\text{sat}}$ typically ranges from $250$ to over $600\text{ FLOP/Byte}$, meaning that algorithms lacking extensive data reuse cannot exploit the peak compute capacity of the processor. \index{Saturation Operational Intensity}\index{Roofline Model!saturation knee}
+
+#### Why Linear Projections Require $2|\Theta|$ Operations Per Token
+
+Before evaluating the arithmetic intensity of prefill and decode, we must quantify the arithmetic workload of an LLM forward step. Where does the computational workload of a transformer arise?
+
+In dense autoregressive transformer architectures, over $98\%$ of parameters reside in linear projection weight matrices: the query, key, value, and output projections ($\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V, \mathbf{W}_O$) in multi-head attention, and the gate, up, and down projections ($\mathbf{W}_{\text{gate}}, \mathbf{W}_{\text{up}}, \mathbf{W}_{\text{down}}$) in feed-forward network (FFN) blocks.
+
+Evaluating these linear projections requires computing vector-matrix products where each weight element multiplies an incoming activation scalar and accumulates into a partial sum. Modern accelerator floating-point units execute this contraction using Fused Multiply-Add (FMA) instructions:[^fn-fma-ops]
 
 $$\text{accumulator} \leftarrow \text{accumulator} + (\text{weight} \times \text{activation})$$
 
-Each FMA constitutes exactly two floating-point operations: one multiplication and one addition. Because every dense parameter participates in exactly one FMA per forward token step, evaluating the linear projections consumes approximately $2|\Theta|\text{ FLOPs/token}$. While self-attention introduces additional $O(M^2)$ operations during prompt prefill and $O(S)$ operations during decode to evaluate attention scores and context sums, at typical sequence lengths the linear projection contractions dominate overall arithmetic operations. Non-linear operations—including layer normalizations, rotary positional embeddings, and activation functions—scale only with the hidden dimension $d_{\text{model}}$ rather than parameter count $|\Theta| \sim O(d_{\text{model}}^2)$, contributing less than $1\text{--}2\%$ of total computation.
+Each FMA executes exactly two floating-point operations: one multiplication and one addition. Because every dense parameter in the model participates in exactly one FMA per token forward pass, evaluating the linear projections consumes:
+
+$$\text{Arithmetic Work per Token} \approx 2|\Theta| \quad \left[\frac{\text{FLOPs}}{\text{token}}\right]$$
+
+While self-attention introduces additional $O(M^2)$ operations during prompt prefill and $O(S)$ operations during decode to compute attention scores and context sums, at standard sequence lengths the linear projections overwhelmingly dominate arithmetic operations. Non-linear operations—including layer normalizations, rotary positional embeddings, and activation functions—scale only with the hidden dimension $d_{\text{model}} \ll d_{\text{model}}^2$, contributing less than $1\text{--}2\%$ of total computation.
 
 [^fn-fma-ops]: **Fused Multiply-Add Operation**: Standard linear algebra floating-point units implement vector dot products using fused multiply-add (FMA) instructions, which compute $a \leftarrow a + (b \times c)$ in a single hardware cycle with a single rounding step. Counting each FMA as two floating-point operations (one multiply and one accumulate) establishes the standard $2|\Theta|$ operational factor across matrix multiplication kernels in high-performance computing and neural network accelerators. \index{Fused Multiply-Add}\index{Hardware!fused multiply-add}
 
-During prompt prefill, the serving engine ingests all $M$ staged tokens concurrently. Parameter weights $\Theta$ are fetched from High Bandwidth Memory (HBM) into on-chip cache registers once and reused across all $M$ token positions via General Matrix-Matrix Multiplication (GEMM). The resulting operational arithmetic intensity scales directly with prompt length:
+#### Prefill Arithmetic Intensity: Pouring the Bucket
+
+During prompt prefill, the serving engine ingests all $M$ staged prompt tokens concurrently. Parameter weights $\Theta$ are fetched from HBM into on-chip SRAM cache and register files *once* and reused across all $M$ token positions via General Matrix-Matrix Multiplication (GEMM). The resulting operational arithmetic intensity scales directly with prompt length:
 
 $$I_{\text{prefill}} \approx \frac{2 M |\Theta|}{P |\Theta| + \text{Mem}_{\text{KV}}(M)} \approx \frac{2M}{P} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
 
-where $P$ is the storage precision in bytes per parameter ($P=2$ for 16-bit precision; $P=1$ for 8-bit precision). For long staged contexts ($M \ge 2{,}048$), $I_{\text{prefill}}$ reaches thousands of $\text{FLOP/Byte}$, easily surpassing $I_{\text{sat}}$ and driving the accelerator firmly onto its compute-bound plateau.
+where $P$ denotes parameter storage precision in bytes ($P=2$ for 16-bit FP16/BF16; $P=1$ for 8-bit FP8). For a prompt of $M = 2{,}048$ tokens evaluated in FP8 precision ($P=1$), $I_{\text{prefill}} \approx 2 \times 2{,}048 / 1 \approx 4{,}096\text{ FLOP/Byte}$. Because $4{,}096\text{ FLOP/Byte} \gg I_{\text{sat}} \approx 591\text{ FLOP/Byte}$, prompt prefill operates hundreds of percent above the saturation knee, driving the accelerator firmly onto its compute-bound plateau.
 
-During autoregressive decode, this computational structure collapses. Generating token $y_t$ requires multiplying the single new token activation vector by the parameter matrices via General Matrix-Vector Multiplication (GEMV). At an isolated per-trajectory batch size of $B=1$, the engine must stream the entire parameter tensor $\Theta$ across the memory bus simply to advance one token:
+#### Decode Arithmetic Intensity: Sucking Through the Straw
+
+During autoregressive decode, this computational structure completely collapses. Generating token $y_t$ requires multiplying the single new token activation vector by the parameter matrices via General Matrix-Vector Multiplication (GEMV). At an isolated per-trajectory batch size of $B=1$, the engine must stream the entire parameter tensor $\Theta$ across the memory bus simply to advance one token:
 
 $$I_{\text{decode}}(t) = \frac{2|\Theta|}{P|\Theta| + \text{Mem}_{\text{KV}}(M+t)}$$
 
 At modest context lengths, parameter traffic $P|\Theta|$ overwhelmingly dominates the denominator, causing decode operational intensity to collapse to a context-independent floor:
 
-$$I_{\text{decode}} \approx \frac{2}{P} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+$$I_{\text{decode}} \approx \frac{2|\Theta|}{P|\Theta|} = \frac{2}{P} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
 
 For 16-bit floating-point weights ($P=2\text{ Bytes}$), $I_{\text{decode}} \approx 1.0\text{ FLOP/Byte}$. For 8-bit quantized parameters ($P=1\text{ Byte}$), $I_{\text{decode}} \approx 2.0\text{ FLOP/Byte}$. Compared against modern accelerator silicon featuring saturation knees of $I_{\text{sat}} \approx 250\text{--}600\text{ FLOP/Byte}$, single-sequence autoregressive decode operates hundreds of times below the saturation threshold, trapped deep within the memory-bandwidth-bound regime (@fig-prefill-vs-decode).
 
@@ -74,46 +106,32 @@ For 16-bit floating-point weights ($P=2\text{ Bytes}$), $I_{\text{decode}} \appr
 ![](images/svg/prefill_vs_decode_v2.svg){width="100%"}
 :::
 
+The following Python snippet calculates the saturation knee, decode latency floor, and single-stream throughput directly from accelerator architectural specifications:
+
 ```python
-# │ MLSysIM LEGO Roofline Cell: Invocation Latency & Saturation Intensity
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Goal: Derive operational intensity knees and single-token decode floors
-# │       directly from verified accelerator specifications in MLSysIM.
-# └─────────────────────────────────────────────────────────────────────────────
-import mlsysim
+def roofline_decode(params_b, prec_bytes, bw_tb_s, tflops, eta=0.80):
+    """Compute saturation knee, single-token decode latency, and throughput floor."""
+    i_sat = (tflops * 1e12) / (bw_tb_s * 1e12)       # Saturation knee (FLOP/Byte)
+    bw_eff = bw_tb_s * 1e3 * eta                      # Effective memory bandwidth (GB/s)
+    t_step_ms = ((params_b * prec_bytes) / bw_eff) * 1e3  # Parameter transit time (ms)
+    return i_sat, t_step_ms, 1e3 / t_step_ms          # Returns (I_sat, ms/tok, tok/s)
 
-def compute_roofline_metrics(name: str, pi_tflops: float, bw_tb_s: float,
-                             params_b: float, precision_bytes: float,
-                             eta_bw: float = 0.80):
-    pi = pi_tflops * 1e12          # Peak compute capacity (FLOP/s)
-    beta = bw_tb_s * 1e12          # Peak physical memory bandwidth (Bytes/s)
-    beta_eff = beta * eta_bw       # Effective realized memory bandwidth (Bytes/s)
-    i_sat = pi / beta              # Saturation intensity knee (FLOP/Byte)
-
-    # Low-batch decode (B=1): Operational intensity collapses to ~ 2 / P
-    i_decode = 2.0 / precision_bytes
-
-    # Parameter memory sweep lower bound
-    model_bytes = params_b * 1e9 * precision_bytes
-    t_step_peak_ms = (model_bytes / beta) * 1e3
-    t_step_eff_ms = (model_bytes / beta_eff) * 1e3
-    tok_per_sec_eff = 1e3 / t_step_eff_ms
-
-    print(f"[{name}]")
-    print(f"  Saturation Knee (I_sat) : {i_sat:.1f} FLOP/Byte")
-    print(f"  Decode Intensity (B=1)  : {i_decode:.1f} FLOP/Byte (Under-saturation: {i_sat/i_decode:.1f}x)")
-    print(f"  Peak Weight Floor       : {t_step_peak_ms:.2f} ms/token ({1e3/t_step_peak_ms:.1f} tok/s)")
-    print(f"  Effective Floor (η={eta_bw:.2f}): {t_step_eff_ms:.2f} ms/token ({tok_per_sec_eff:.1f} tok/s)")
-
-# Hardware Baselines from MLSysIM Registry
-h100 = mlsysim.Hardware.Cloud.H100
-b200 = mlsysim.Hardware.Cloud.B200
-a100 = mlsysim.Hardware.Cloud.A100
-
-compute_roofline_metrics("NVIDIA H100 SXM5 (FP8)", pi_tflops=1979.0, bw_tb_s=3.35, params_b=70.0, precision_bytes=1.0)
-compute_roofline_metrics("NVIDIA B200 (FP8)", pi_tflops=4500.0, bw_tb_s=8.00, params_b=70.0, precision_bytes=1.0)
-compute_roofline_metrics("NVIDIA A100 (FP16)", pi_tflops=312.0, bw_tb_s=2.039, params_b=70.0, precision_bytes=2.0)
+# Example: 70B parameter model evaluated across standard accelerator platforms
+for name, tflops, bw, prec in [("A100 SXM4 (FP16)", 312, 2.039, 2),
+                               ("H100 SXM5 (FP8)",  1979, 3.35, 1),
+                               ("B200 (FP8)",       4500, 8.00, 1)]:
+    knee, lat_ms, tok_s = roofline_decode(70, prec, bw, tflops)
+    print(f"{name:18} | Knee: {knee:5.1f} FLOP/B | Latency: {lat_ms:5.2f} ms/tok | Speed: {tok_s:4.1f} tok/s")
 ```
+
+Evaluating these relationships across contemporary accelerator generations reveals how memory bus bandwidth dictates decode performance (@tbl-vol3-roofline-hardware).
+
+| Accelerator Silicon | Precision ($P$) | Peak Compute ($\Pi$) | Peak Memory Bandwidth ($\beta$) | Saturation Knee ($I_{\text{sat}}$) | 70B Decode Latency Floor ($T_{\text{step}}$) | Max Single-Stream Throughput |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **NVIDIA A100 SXM4** | FP16 ($2\text{ Bytes}$) | $312\text{ TFLOP/s}$ | $2.04\text{ TB/s}$ | $153.0\text{ FLOP/Byte}$ | $85.8\text{ ms/token}$ | $11.7\text{ tokens/s}$ |
+| **NVIDIA H100 SXM5** | FP8 ($1\text{ Byte}$) | $1{,}979\text{ TFLOP/s}$ | $3.35\text{ TB/s}$ | $590.7\text{ FLOP/Byte}$ | $26.1\text{ ms/token}$ | $38.3\text{ tokens/s}$ |
+| **NVIDIA B200** | FP8 ($1\text{ Byte}$) | $4{,}500\text{ TFLOP/s}$ | $8.00\text{ TB/s}$ | $562.5\text{ FLOP/Byte}$ | $10.9\text{ ms/token}$ | $91.4\text{ tokens/s}$ |
+: **Accelerator hardware Roofline parameters and 70B decode floors**: Physical compute and bandwidth limits across three accelerator generations, evaluating the memory-shuttle floor at an effective bus efficiency of $\eta_{\text{bw}} = 0.80$. {#tbl-vol3-roofline-hardware}
 
 ### Memory Traffic Bounds: Dense Parameters, Sparse MoE, and Service Batching {#sec-vol3-processor-traffic-bounds}
 
@@ -137,15 +155,33 @@ When context length is modest ($M+t \ll |\Theta| / \text{Mem}_{\text{KV,token}}$
 
 $$T_{\text{step,min}} \approx \frac{P |\Theta|}{\beta_{\text{eff}}}$$
 
-Consider a 70-billion parameter dense model ($|\Theta| = 70 \times 10^9$). In unquantized 16-bit precision ($P=2$), weights consume $140\text{ GB}$ of memory—exceeding the $80\text{ GB}$ HBM3 capacity of a single NVIDIA H100 accelerator. On a single accelerator core, hosting this model requires FP8 quantization ($P=1$),[^fn-fp8-quant] which compresses the parameter footprint to $70\text{ GB}$, fitting within device memory. (Partitioning models across distributed accelerator interconnects is examined in @sec-vol3-multi-agent and @sec-vol3-tokenomics; our execution model here remains strictly bounded by the single core).
+::: {.callout-note title="Worked Example: Sizing the H100 Parameter Shuttle Floor"}
+**Problem:**
+Calculate the theoretical minimum time required to decode a single token for a 70-billion parameter dense model ($|\Theta| = 70 \times 10^9$) stored in FP8 precision ($P=1\text{ byte}$) on a single NVIDIA H100 SXM5 accelerator (peak memory bandwidth $\beta = 3.35\text{ TB/s}$, realized bus efficiency $\eta_{\text{bw}} = 0.80$). Determine the maximum single-sequence generation throughput and evaluate tensor core utilization.
 
-At peak memory bandwidth ($\beta = 3{,}350\text{ GB/s}$), the theoretical parameter-sweep limit is:
+**Step 1: Model Memory Footprint Calculation**
+In FP8 precision, each parameter occupies exactly $P = 1\text{ byte}$. For a 70-billion parameter model:
+$$\text{Footprint} = |\Theta| \times P = 70 \times 10^9\text{ parameters} \times 1\text{ byte/parameter} = 70 \times 10^9\text{ bytes} \quad (70.0\text{ GB})$$
+(Note: In unquantized 16-bit precision with $P=2$, the $140\text{ GB}$ footprint exceeds the $80\text{ GB}$ capacity of a single H100, requiring either multi-GPU partitioning or FP8 quantization).[^fn-fp8-quant]
 
-$$T_{\text{step,peak}} = \frac{70 \times 10^9\text{ Bytes}}{3{,}350 \times 10^9\text{ Bytes/s}} \approx 20.9\text{ ms/token} \quad (47.8\text{ tokens/s})$$
+**Step 2: Effective Bus Bandwidth Calculation**
+Due to memory controller arbitration, DRAM refresh, and memory bank access patterns, physical HBM achieves approximately $80\%$ sustained bus efficiency ($\eta_{\text{bw}} = 0.80$):
+$$\beta_{\text{eff}} = \beta \times \eta_{\text{bw}} = 3{,}350\text{ GB/s} \times 0.80 = 2{,}680\text{ GB/s} = 2.68 \times 10^{12}\text{ bytes/s}$$
 
-Accounting for realistic bus efficiency ($\eta_{\text{bw}} = 0.80$, $\beta_{\text{eff}} = 2{,}680\text{ GB/s}$), the realized weight-read floor rises to:
+**Step 3: Decode Latency Floor and Generation Speed**
+At an isolated batch size of $B=1$, generating a single token requires shuttling the entire $70\text{ GB}$ parameter tensor across the memory bus:
+$$T_{\text{step,min}} = \frac{70 \times 10^9\text{ bytes}}{2{,}680 \times 10^9\text{ bytes/s}} \approx 0.02612\text{ seconds} \approx 26.1\text{ ms/token}$$
+Inverting this step latency yields the maximum single-stream decode throughput:
+$$\text{Throughput} = \frac{1}{T_{\text{step,min}}} = \frac{1}{0.02612\text{ s}} \approx 38.3\text{ tokens/s}$$
+(At theoretical peak bandwidth $\beta = 3{,}350\text{ GB/s}$, the latency is $20.9\text{ ms/token}$, or $47.8\text{ tokens/s}$).
 
-$$T_{\text{step,min}} = \frac{70 \times 10^9\text{ Bytes}}{2{,}680 \times 10^9\text{ Bytes/s}} \approx 26.1\text{ ms/token} \quad (38.3\text{ tokens/s})$$
+**Systems Takeaway:**
+To generate a single token, the H100 performs $2|\Theta| = 140 \times 10^9\text{ FLOPs}$ in $26.1\text{ ms}$, achieving an effective computational throughput of:
+$$\Pi_{\text{actual}} = \frac{140 \times 10^9\text{ FLOPs}}{0.02612\text{ s}} \approx 5.36 \times 10^{12}\text{ FLOP/s} = 5.36\text{ TFLOP/s}$$
+Because the H100 SXM5 Tensor Cores are physically capable of delivering $1{,}979\text{ TFLOP/s}$ in FP8 arithmetic, the execution units operate at an arithmetic efficiency of:
+$$\text{Utilization} = \frac{\Pi_{\text{actual}}}{\Pi_{\text{peak}}} = \frac{5.36\text{ TFLOP/s}}{1{,}979\text{ TFLOP/s}} \approx 0.27\%$$
+The tensor cores sit idle more than **$99.7\%$** of the time! No software trick, kernel compilation pass, or host-side optimization can overcome this bottleneck: single-user autoregressive decode latency is strictly and physically bounded by memory bandwidth.
+:::
 
 On next-generation silicon such as the NVIDIA B200 ($180\text{ GB}$ HBM3e at $8{,}000\text{ GB/s}$), streaming an unquantized $140\text{ GB}$ FP16 model takes $17.5\text{ ms/token}$ at peak bandwidth ($21.9\text{ ms}$ at $\eta_{\text{bw}}=0.80$), while an FP8 quantized model ($70\text{ GB}$) executes in $8.75\text{ ms/token}$ ($10.9\text{ ms}$ at $\eta_{\text{bw}}=0.80$, yielding $91.4\text{ tokens/s}$).
 
@@ -159,15 +195,34 @@ Sparse Mixture-of-Experts (MoE) architectures decouple static parameter capacity
 
 $$|\Theta_{\text{active}}| = |\Theta_{\text{shared}}| + |\Theta_{\text{routed}}|$$
 
-For an isolated agent sequence operating at batch size $B=1$, each token routes to a top-$k$ subset of experts (e.g., 2 out of 8 experts). Parameter memory traffic per decode step scales strictly with active parameters:
+For an isolated agent sequence operating at batch size $B=1$, each token routes to a top-$k$ subset of experts (e.g., $k=2$ out of $E=8$ total experts). Parameter memory traffic per decode step scales strictly with active parameters:
 
 $$\text{Traffic}_{\text{params}}(B=1) = P |\Theta_{\text{active}}|$$
 
-Because $|\Theta_{\text{active}}|$ represents only a fraction of total model weights $|\Theta_{\text{total}}|$, single-sequence decode latency drops substantially, allowing an MoE to deliver the decode speed of a compact model while retaining the expressiveness of a large parameter inventory.
+Because $|\Theta_{\text{active}}|$ represents only a fraction of total model weights $|\Theta_{\text{total}}|$, single-sequence decode latency drops substantially, allowing an MoE to deliver the decode speed of a compact model while retaining the expressiveness of a massive parameter inventory.
 
 [^fn-moe-routing]: **Dynamic Expert Routing Overhead**: In sparse Mixture-of-Experts architectures, the gating network dynamically assigns token activations to a top-$k$ subset of feed-forward networks, introducing irregular memory gather operations and non-uniform memory access across the accelerator memory bus. At small batch sizes, this sparse activation bypasses unselected expert weights, but as concurrent requests disperse across distinct experts, memory traffic rapidly expands toward the full static parameter footprint. \index{Mixture-of-Experts}\index{Architecture!sparse MoE}
 
-However, this latency advantage is fragile and subject to the **MoE batching collapse**. When the inference service batches requests across multiple concurrent agent trajectories ($B > 1$), distinct tokens route to different experts across the model's layers. As batch size scales ($B \gg 1$), routing dispersion causes the union of activated experts across the batch to rapidly cover the entire expert inventory:
+However, this latency advantage is fragile and subject to the **MoE batching collapse**. When the inference service batches requests across multiple concurrent agent trajectories ($B > 1$), distinct tokens route to different experts across the model's layers.
+
+To understand why batching destroys sparse memory efficiency, consider the classical **coupon collector's problem**. Suppose a breakfast cereal promotion places one of $E$ distinct coupons into each cereal box uniformly at random. If $B$ children independently buy cereal boxes—each drawing $k$ coupons—how many boxes must be purchased before the group collects the complete set of all $E$ coupons? Because coupon draws are independent, the number of distinct coupons collected rises rapidly with $B$.
+
+In an MoE serving engine, each token in the batch acts as a coupon collector drawing $k$ experts from the pool of $E$. If we assume for intuition that the gating network routes tokens across experts with roughly balanced probability, the probability that a specific expert $j$ is *not* selected by a given token is $(1 - k/E)$. For an independent batch of $B$ concurrent tokens, the probability that expert $j$ is bypassed by *every* token in the batch is:
+
+$$\mathbb{P}(\text{Expert } j \text{ is unselected}) = \left(1 - \frac{k}{E}\right)^B$$
+
+Consequently, the expected number of distinct experts activated across the batch is:
+
+$$\mathbb{E}[E_{\text{active}}] = E \cdot \left[1 - \left(1 - \frac{k}{E}\right)^B\right]$$
+
+Consider a standard 8-expert architecture with top-2 routing ($E=8, k=2$, so $k/E = 0.25$):
+
+- **At $B=1$ (Isolated Agent):** $\mathbb{E}[E_{\text{active}}] = 8 \cdot [1 - (0.75)^1] = 2.0\text{ experts}$. Exactly $25\%$ of expert parameters transit the memory bus.
+- **At $B=4$:** $\mathbb{E}[E_{\text{active}}] = 8 \cdot [1 - (0.75)^4] = 8 \cdot [1 - 0.316] \approx 5.47\text{ experts}$ ($68.4\%$ of expert memory traffic).
+- **At $B=8$:** $\mathbb{E}[E_{\text{active}}] = 8 \cdot [1 - (0.75)^8] = 8 \cdot [1 - 0.100] \approx 7.20\text{ experts}$ ($90.0\%$ of expert memory traffic).
+- **At $B=16$:** $\mathbb{E}[E_{\text{active}}] = 8 \cdot [1 - (0.75)^{16}] = 8 \cdot [1 - 0.010] \approx 7.92 \approx 8\text{ experts}$ ($99.0\%$ of expert memory traffic).
+
+By the time the serving engine batches just $B=16$ concurrent requests, the probability that any single expert sits idle drops to $1\%$. The union of activated experts across the batch covers the entire inventory:
 
 $$\bigcup_{b=1}^B \text{Top-}k(b) = \{1, 2, \dots, E\}$$
 

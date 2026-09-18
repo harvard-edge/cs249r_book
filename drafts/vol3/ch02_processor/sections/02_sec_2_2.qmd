@@ -1,27 +1,30 @@
 ## Tokens as the Processor Interface {#sec-vol3-processor-tokenization}
 
-A classical CPU interfaces with memory through binary encodings defined by an Instruction Set Architecture (ISA). In contrast, the stochastic processor core possesses no register file, instruction decoder, or hardware syntax awareness; its substrate consists of continuous tensor contractions over vector spaces.
+A classical CPU interfaces with system memory and peripherals through standardized binary encodings defined by an Instruction Set Architecture (ISA). In an x86-64 or ARM processor, the hardware instruction decoder unpacks binary machine words into discrete opcodes, register specifiers, and immediate memory offsets; execution units operate directly on binary integers and IEEE 754 floating-point words. In contrast, the stochastic processor core possesses no hardware instruction decoder, no binary registers, and no native awareness of text strings, programming language grammars, or ASCII characters. Its physical computational substrate consists of continuous tensor contractions executed across multi-dimensional vector spaces.
 
-The host agent runtime bridges external symbolic text with continuous neural state via the *tokenizer*, establishing a bidirectional mapping between UTF-8 byte sequences $\Sigma^*$ and discrete integer identifiers from bounded vocabulary $\mathcal{V}$:
+To bridge external symbolic text with continuous neural state, the system relies on the *tokenizer*. The tokenizer serves as the fundamental hardware-software Application Binary Interface (ABI) of the stochastic computer. It establishes a deterministic, bidirectional mapping between variable-length UTF-8 byte sequences $\Sigma^*$ and discrete integer identifiers drawn from a bounded vocabulary $\mathcal{V}$:
 
 $$\mathcal{T}: \Sigma^* \to \mathcal{V}^*, \quad \mathcal{T}^{-1}: \mathcal{V}^* \to \Sigma^*$$
 
-where $|\mathcal{V}|$ denotes vocabulary cardinality. Discrete *token IDs* constitute the raw data currency of the stochastic computer.
+where $|\mathcal{V}|$ denotes the total vocabulary cardinality. These discrete *token IDs* constitute the raw data currency and execution primitives of the stochastic computer.
 
 ### Subword Tokenization and Discrete Model Representation
 
-Word-level dictionaries fail on open vocabularies (variable names, hashes, timestamps), triggering fatal out-of-vocabulary ($OOV$) faults. Character-level tokenization eliminates $OOV$ errors but inflates sequence lengths $3\times$ to $5\times$, quadraticizing self-attention compute.
+To an engineer designing a runtime, the choice of token representation presents a classic systems trade-off between dictionary size and sequence length. Two naive approaches immediately fail at scale:
 
-Serving runtimes standardize on subword tokenization via Byte-Pair Encoding (BPE)[^fn-bpe-history], building a subword inventory offline:
+1. **Word-Level Dictionaries:** Mapping every distinct word to a unique integer ID is intuitive for standard prose (`"algorithm"`, `"network"`), but fails catastrophically on open-vocabulary technical domains. In software systems, codebases are populated by arbitrary variable names (`user_account_id_v2`), SHA-256 hashes (`e3b0c442...`), hexadecimal memory addresses, and timestamps. When a word-level tokenizer encounters an unseen identifier, it triggers a fatal Out-of-Vocabulary ($OOV$) exception or maps the symbol to an uninformative unknown token (`<unk>`), obliterating critical semantic distinctions.
+2. **Character-Level Tokenization:** Mapping each individual ASCII character or UTF-8 byte to a distinct token ID eliminates $OOV$ faults completely, as any text string can be decomposed into raw bytes. However, it inflates sequence lengths by $3\times$ to $5\times$. Because the computational and memory footprint of the transformer's self-attention mechanism scales quadratically with sequence length ($O(S^2)$), a $4\times$ increase in sequence length causes a $16\times$ explosion in attention compute and intermediate cache storage, severely degrading serving throughput.
 
-1. Base vocabulary $\mathcal{V}_0$ contains all 256 raw UTF-8 octets ($0x00$–$0xFF$) and control symbols (`<|im_start|>`, `<|endoftext|>`).
+Serving runtimes standardize on *subword tokenization* via Byte-Pair Encoding (BPE)[^fn-bpe-history]. BPE achieves the systems sweet spot: frequent words receive a single, atomic token ID, while rare words, variable names, and code identifiers fracture into smaller reusable subwords. The vocabulary is constructed offline across training corpora through a greedy compression algorithm:
+
+1. Base vocabulary $\mathcal{V}_0$ contains all 256 raw UTF-8 octets ($0x00$–$0xFF$) and special control symbols (`<|im_start|>`, `<|endoftext|>`).
 2. Pair co-occurrences are tallied across training corpora.
 3. The most frequent pair $(u, v)$ merges into atomic token $w = uv$, updating vocabulary: $\mathcal{V}_{k+1} = \mathcal{V}_k \cup \{w\}$, with merge rule $(u, v) \to w$ ranked by creation priority.
 4. Merges iterate until vocabulary cardinality reaches ceiling $|\mathcal{V}| \in [32{,}000, 131{,}072]$.
 
 [^fn-bpe-history]: **Byte-Pair Encoding** (historical data compression): Gage [@gage1994bpe] introduced BPE for compression; @sennrich2016subword adapted it to NLP to eliminate out-of-vocabulary exceptions. In stochastic processor cores, BPE forms the discrete data representation boundary, transforming byte streams into bounded integer vocabulary indices. \index{Byte-Pair Encoding}\index{Tokenizer!Byte-Pair Encoding}
 
-At runtime, BPE executes merge rules by priority rank over raw UTF-8 bytes rather than greedy longest-match prefixing. Because $\mathcal{V}_0$ contains all 256 octets, BPE serializes arbitrary byte streams without $OOV$ exceptions. Decoding maps token IDs to byte chunks concatenated into a raw buffer, performing byte-level reassembly of split multi-byte UTF-8 code points before string emission.
+At runtime, BPE executes merge rules by priority rank over raw UTF-8 bytes rather than greedy longest-match prefixing. Because base vocabulary $\mathcal{V}_0$ contains all 256 byte octets, BPE can serialize arbitrary byte streams, binary payloads, or malformed UTF-8 fragments without ever raising an $OOV$ exception. Decoding ($\mathcal{T}^{-1}$) maps token IDs to byte chunks concatenated into a raw buffer, performing byte-level reassembly of split multi-byte UTF-8 code points before string emission.
 
 Byte-level BPE [@radford2019language] remaps octets to printable Unicode, mapping space (`0x20`) to `'Ġ'` (U+0120); SentencePiece [@kudo2018sentencepiece] replaces whitespace with `'▁'` (U+2581). Merging whitespace with following characters makes tokenization sensitive to leading spaces: $\mathcal{T}(A) + \mathcal{T}(B) \neq \mathcal{T}(A + B)$.[^fn-whitespace-prefix]
 
@@ -42,7 +45,11 @@ The boundary between Host Agent Runtime (Tier 1) and Inference Service Daemon (T
 
 ### The AST Impedance Mismatch and Serialization Overhead
 
-Compilers parse source code into Abstract Syntax Trees (ASTs) isolating keywords (`def`, `class`), identifiers, and operators. BPE tokenizers optimize purely for statistical byte entropy, unaware of grammar productions, creating an *AST impedance mismatch* (@fig-token-ast-mismatch).
+In electrical engineering, an *impedance mismatch* between a signal source and its transmission line reflects energy backward, corrupting the transmitted waveform. In systems architecture, an impedance mismatch occurs when two adjacent abstraction layers operate on fundamentally incompatible data representations.
+
+Compilers (such as GCC, Clang, or CPython) parse source code into ASTs. A compiler's front-end lexical analyzer (lexer) scans characters using formal language grammars, isolating keywords (`def`, `class`), identifiers (`get_user_id`), operators, and structural indentation tokens (`INDENT`, `DEDENT`). To the compiler, `def` is an identical semantic keyword regardless of whether it begins at column 0 or is indented inside a nested class.
+
+BPE tokenizers, in contrast, optimize purely for statistical byte entropy across unstructured training corpora. They possess zero awareness of grammar productions, lexical specifications, or AST node boundaries. This divergence creates an *AST impedance mismatch* (@fig-token-ast-mismatch).
 
 ::: {#fig-token-ast-mismatch fig-cap="**Impedance Mismatch Between Compiler ASTs and Statistical BPE**: Comparison of compiler lexical analysis against subword tokenization under cl100k_base, highlighting identifier fragmentation and delimiter fusion." fig-alt="Comparison of compiler AST pipeline against subword BPE tokenization showing identifier splintering and delimiter fusion."}
 ![](images/svg/token_ast_mismatch.svg){width="100%"}
@@ -58,6 +65,59 @@ This mismatch produces three primary failure modes:
    Tokens 755 and 711 have independent embeddings and logits; trailing prompt whitespace shifts continuation probabilities, suppressing valid completions.
 2. **Identifier Splintering:** Identifiers fracture into subwords; `execute_transaction_with_retry` splits into four tokens in `cl100k_base` (`[10469: "execute"]`, `[29984: "_transaction"]`, `[6753: "_with"]`, `[63845: "_retry"]`), compounding autoregressive decode latency.
 3. **Lexical Asymmetry:** The mapping $\mathcal{T}$ is non-monotonic: snake_case `get_user_id` consumes three tokens (`["get", "_user", "_id"]`), while camelCase `getUserID` consumes two (`["getUser", "ID"]`), imposing unequal compute on equivalent semantics.
+
+::: {.callout-note title="Worked Example: Subword AST Impedance Mismatch in Python"}
+To observe the systems consequences of the AST impedance mismatch, trace how a Python function definition is processed by a compiler's lexical analyzer versus a modern BPE tokenizer (`cl100k_base`).
+
+**Input Code Snippet:**
+```python
+def get_user_id():
+```
+
+**Step 1: The Compiler's Lexical View**
+A Python lexer parses the input according to formal grammar rules into discrete lexical tokens:
+```text
+[TOKEN: KEYWORD     | Lexeme: "def"]
+[TOKEN: IDENTIFIER  | Lexeme: "get_user_id"]
+[TOKEN: DELIMITER   | Lexeme: "("]
+[TOKEN: DELIMITER   | Lexeme: ")"]
+[TOKEN: DELIMITER   | Lexeme: ":"]
+```
+If the function is indented by two leading spaces (e.g., as an inner method):
+```python
+  def get_user_id():
+```
+the lexer emits an explicit structural token `[TOKEN: INDENT | Spaces: 2]` followed by the exact same `[TOKEN: KEYWORD | Lexeme: "def"]`. In the compiler's symbol table, `def` remains an invariant keyword identifier, and `get_user_id` remains a single atomic symbol.
+
+**Step 2: The BPE Tokenizer's Statistical View**
+A subword BPE tokenizer evaluates the text without lexical rules, applying merge rules based on byte frequency:
+
+*Case A: Unindented (`def get_user_id():`)*
+```text
+Tokens:   [755,          636,          3398,         851,       4658]
+Chunks:   ["def",        " get",       "_user",      "_id",     "():"]
+```
+Notice that the leading space before `get` merges with `get`, and the snake_case identifier splinters into three subwords (`" get"`, `"_user"`, `"_id"`).
+
+*Case B: Indented with Two Spaces (`  def get_user_id():`)*
+```text
+Tokens:   [220,          711,          636,          3398,      851,       4658]
+Chunks:   ["  ",         " def",       " get",       "_user",   "_id",     "():"]
+```
+Because the two spaces are followed by `def`, BPE merges the second space into `def` (token 711: `" def"`), leaving the first space as a separate whitespace token (token 220: `"  "`).
+
+**Step 3: The Silicon Reality (Embedding Table Gather)**
+In hardware, token IDs index directly into the embedding matrix $\mathbf{W}_{\text{embed}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$:
+- In Case A, the accelerator gathers row 755: $\mathbf{e}_{755} = \mathbf{W}_{\text{embed}}[755, :]$.
+- In Case B, the accelerator gathers row 711: $\mathbf{e}_{711} = \mathbf{W}_{\text{embed}}[711, :]$.
+
+Vectors $\mathbf{e}_{755}$ and $\mathbf{e}_{711}$ are completely distinct rows in high-dimensional vector space ($\mathbb{R}^{d_{\text{model}}}$). The neural core receives no architectural signal indicating that token 711 represents the keyword `def` shifted by two spaces. To the transformer's attention heads, token 711 is an entirely different numerical entity with its own learned affinities.
+
+**Systems Consequences:**
+1. *Continuation Shifts and Syntax Hallucinations:* Because $\mathbf{e}_{755} \neq \mathbf{e}_{711}$, the neural core computes different attention activations at the decode boundary. An accidental trailing space or minor indentation discrepancy at the end of a prompt shifts downstream logits, potentially suppressing a valid syntax token or triggering an unexpected completion.
+2. *Identifier Splintering Latency:* Emitting `execute_transaction_with_retry` requires four sequential autoregressive decode steps (`"execute"`, `"_transaction"`, `"_with"`, `"_retry"`). Because each decode step requires a full sweep of all model parameters through the memory bus, identifier splintering directly inflates execution latency by $4\times$ compared to an atomic token.
+3. *Prefix Cache Invalidation:* In serving systems utilizing prefix caching (such as RadixAttention), KV cache blocks are indexed by exact token ID sequences. If a user or prompt template changes indentation or adds a single whitespace character, the resulting token IDs diverge immediately, invalidating the cached prefix and forcing an expensive full prompt prefill.
+:::
 
 #### The Serialization Overhead Tax
 
@@ -113,7 +173,7 @@ $$\forall \mathcal{E}_{\text{resp}}, \quad S \neq \texttt{COMPLETED} \implies \m
 
 #### The Single-Token KV Cache Memory Footprint
 
-While token IDs define logical length $S = M + K$, accelerator memory is dominated by intermediate attention state. To avoid recomputing Key and Value activations for prior tokens $\tau \le t$ at step $t$ ($O(t^2)$ operations), the engine caches them in high-bandwidth memory (HBM) as the *Key-Value (KV) cache*.[^fn-kv-footprint]
+While token IDs define logical length $S = M + K$, accelerator memory is dominated by intermediate attention state. In an autoregressive model, generating each new token requires computing attention against all previous tokens. To avoid recomputing Key and Value activations for prior tokens $\tau \le t$ at step $t$ (which would inflict a quadratic $O(t^2)$ recomputation penalty at every step), the serving engine caches them in accelerator HBM as the *Key-Value (KV) cache*.[^fn-kv-footprint]
 
 [^fn-kv-footprint]: **KV Cache Memory Footprint**: In multi-query and grouped-query attention ($n_{\text{kv}} \ll n_{\text{heads}}$), shared KV heads reduce single-token footprint $4\times$ to $8\times$. At scale, ephemeral KV allocations still exceed parameter weights. \index{Key-Value Cache}\index{Inference Engine!KV Cache Footprint}
 
@@ -133,6 +193,63 @@ At extended context $S = 128{,}000$ tokens, a single invocation's KV cache consu
 
 $$\text{Mem}_{\text{KV}}(\text{seq}) = 128{,}000 \times 327{,}680\text{ bytes} \approx 41.94\text{ GB}$$
 
-At 16-bit precision, a single 128k trajectory occupies $41.94\text{ GB}$ in device memory. On a single 80 GB H100 GPU hosting a 70B parameter model in FP8 (70 GB weights), an extended 128k context KV cache (even compressed to FP8 at $\approx 21.0\text{ GB}$) cannot fit simultaneously ($70\text{ GB} + 21\text{ GB} = 91\text{ GB} > 80\text{ GB}$). Accommodating extended 128k contexts at 70B scale requires either multi-accelerator tensor parallelism across multiple 80 GB GPUs or next-generation accelerators with expanded memory capacity (such as the 180 GB NVIDIA B200 SXM); on a standalone 80 GB card, isolated execution is physically bounded to shorter contexts such as $S \le 32{,}768$ tokens (where the FP8 KV cache consumes $\approx 5.37\text{ GB}$, fitting within the 10 GB headroom). This steep memory scaling makes context capacity the primary physical constraint on concurrency, motivating paged attention virtual memory architectures and prefix-sharing techniques (detailed in @sec-vol3-kvcache-radix-tree).
+::: {.callout-note title="Worked Example: Why a 128k Context Crashes an 80 GB GPU"}
+A systems engineer deploys an open-weights 70-billion parameter model (such as Llama-3-70B) on a single NVIDIA H100 SXM5 accelerator equipped with 80 GB of HBM3.
+
+To fit the model onto the card, the engineer quantizes the static parameter weights $\Theta$ to 8-bit floating point (FP8), reducing weight storage from 140 GB (in 16-bit BF16) down to 70 GB.
+To analyze an entire software repository in a single prompt, the engineer configures the serving engine with an extended context ceiling of $S = 128{,}000$ tokens ($128\text{k}$).
+
+Can this single 80 GB GPU successfully execute a 128k context invocation, or will it suffer an unrecoverable Out-of-Memory (OOM) crash?
+
+**Step 1: Calculate Static Parameter Weight Footprint**
+With 70 billion parameters stored in FP8 ($b_{\text{weight}} = 1\text{ byte}$ per parameter):
+$$\text{Mem}_{\text{weights}} = 70 \times 10^9 \text{ parameters} \times 1\text{ byte/parameter} = 70.0\text{ GB}$$
+
+Remaining physical HBM headroom on the 80 GB accelerator:
+$$\text{Headroom}_{\text{HBM}} = 80.0\text{ GB} - 70.0\text{ GB} = 10.0\text{ GB}$$
+
+*(Systems Reality Check: In production runtimes, the CUDA context, PyTorch/vLLM internal scratchpads, and intermediate activation tensors reserve an additional 2.0 to 4.0 GB of device memory, leaving at most 6.0 to 8.0 GB of net usable memory for KV caching).*
+
+**Step 2: Calculate Single-Token KV Cache Footprint in 16-bit Precision ($b=2$)**
+The Llama-3-70B architecture uses Grouped-Query Attention (GQA) with $L = 80$ layers, $n_{\text{kv}} = 8$ Key-Value heads, and head dimension $d_{\text{head}} = 128$.
+For each token, the accelerator stores both a Key vector $\mathbf{k}$ and a Value vector $\mathbf{v}$ across all layers:
+$$\text{Scalars}_{\text{token}} = 2 \times L \times (n_{\text{kv}} \times d_{\text{head}}) = 2 \times 80 \times (8 \times 128) = 163{,}840\text{ scalars/token}$$
+
+In standard 16-bit floating point (FP16 or BF16, $b=2\text{ bytes}$):
+$$\text{Mem}_{\text{KV,token}}^{\text{FP16}} = 163{,}840 \times 2\text{ bytes} = 327{,}680\text{ bytes/token} \approx 327.68\text{ KB/token}$$
+
+**Step 3: Total KV Cache Demand for 128k Tokens in FP16**
+For sequence length $S = 128{,}000$:
+$$\text{Mem}_{\text{KV}}^{\text{FP16}}(128\text{k}) = 128{,}000 \times 327{,}680\text{ bytes} = 41{,}943{,}040{,}000\text{ bytes} \approx 41.94\text{ GB}$$
+
+Total required accelerator memory:
+$$\text{Total Memory} = \text{Mem}_{\text{weights}} + \text{Mem}_{\text{KV}}^{\text{FP16}} = 70.0\text{ GB} + 41.94\text{ GB} = 111.94\text{ GB}$$
+
+**Result:** $111.94\text{ GB} > 80.0\text{ GB}$.
+The required memory exceeds the physical 80 GB capacity by $31.94\text{ GB}$. The serving engine crashes immediately with an unrecoverable CUDA Out-of-Memory (`CUDA: out of memory`) exception during prompt prefill.
+
+**Step 4: Attempting Mitigation via FP8 KV Cache Quantization ($b=1$)**
+To avert the crash, the engineer quantizes the KV cache to 8-bit floating point (FP8, $b=1\text{ byte}$ per scalar):
+$$\text{Mem}_{\text{KV,token}}^{\text{FP8}} = 163{,}840 \times 1\text{ byte} = 163{,}840\text{ bytes/token} \approx 163.84\text{ KB/token}$$
+$$\text{Mem}_{\text{KV}}^{\text{FP8}}(128\text{k}) = 128{,}000 \times 163{,}840\text{ bytes} = 20{,}971{,}520{,}000\text{ bytes} \approx 20.97\text{ GB}$$
+
+Total required accelerator memory in FP8:
+$$\text{Total Memory} = \text{Mem}_{\text{weights}} + \text{Mem}_{\text{KV}}^{\text{FP8}} = 70.0\text{ GB} + 20.97\text{ GB} = 90.97\text{ GB}$$
+
+**Result:** $90.97\text{ GB} > 80.0\text{ GB}$.
+Even with an FP8 KV cache, total memory demand ($90.97\text{ GB}$) exceeds the 80 GB ceiling by nearly $11\text{ GB}$. The KV cache alone ($20.97\text{ GB}$) is more than double the entire 10 GB headroom!
+
+**Step 5: Systems Architecture Solutions**
+What is the maximum context length ($S_{\max}$) that can safely run on a standalone 80 GB card?
+Assuming 6.0 GB of net usable headroom after deducting 4.0 GB for CUDA runtimes and activation scratchpads:
+$$S_{\max}^{\text{FP8}} = \frac{6.0 \times 10^9\text{ bytes}}{163{,}840\text{ bytes/token}} \approx 36{,}621\text{ tokens}$$
+Thus, isolated execution on an 80 GB card is physically bounded to contexts of $S \le 32{,}768$ ($32\text{k}$) tokens, where an FP8 KV cache consumes $\approx 5.37\text{ GB}$.
+
+To serve extended 128k contexts at 70B scale without crashing, systems architects must employ one of two production solutions:
+1. *Multi-GPU Tensor Parallelism (TP):* Shard the model and attention heads across multiple GPUs over high-speed NVLink. Across a 4-GPU cluster ($4 \times 80\text{ GB} = 320\text{ GB}$ aggregate HBM), each GPU holds only $17.5\text{ GB}$ of FP8 weights and $\approx 5.24\text{ GB}$ of FP8 KV cache, leaving over 55 GB of headroom per GPU for concurrent requests.
+2. *Expanded-Memory Accelerators:* Migrate to next-generation accelerators with expanded HBM capacity, such as the NVIDIA H200 (141 GB HBM3e) or NVIDIA B200 (180 GB HBM3e). On a 141 GB H200, 70 GB of weights leaves 71 GB of headroom, effortlessly accommodating 128k contexts while preserving capacity for multi-tenant batching.
+:::
+
+This steep memory scaling makes context capacity the primary physical constraint on concurrency, motivating paged attention virtual memory architectures and prefix-sharing techniques (detailed in @sec-vol3-kvcache-radix-tree).
 
 Once staged as an integer token array, how does the processor compute its candidate output?

@@ -1,103 +1,110 @@
 ## Next-Token Computation {#sec-vol3-processor-autoregressive}
 
-At the execution boundary, the stochastic processor core evaluates conditional probability distributions over discrete token sequences via continuous tensor transformations, mutating no registers or operating system state. The host runtime relies on autoregressive generation to iteratively produce candidate sequences.
+To understand how an agent interacts with an accelerator, a systems programmer must first unlearn a classical hardware assumption: an accelerator running a large language model is not an arithmetic logic unit executing a sequence of instructions in hardware, nor does it compile a user prompt into a closed-form program. At the execution boundary, the stochastic processor core is a statistical sequence continuation engine. It evaluates conditional probability distributions over discrete token sequences via continuous tensor transformations on hardware accelerators (GPUs or TPUs), mutating no architected registers, allocating no operating system memory, and modifying zero persistent state. The host runtime must drive the model through an iterative control loop—termed *autoregressive generation*—to produce candidate output sequences token by token.
 
-The processor models output sequence $\mathbf{y}_{1:K} = (y_1, \dots, y_K)$ conditioned on prompt $\mathbf{x} = (x_1, \dots, x_M)$ via the probability chain rule:
+In plain English, **autoregressive causal serialization** means that token generation is fundamentally sequential: to generate token 50, the model must already know tokens 1 through 49. There is no mathematical shortcut, speculative pipeline bypass, or parallel trick that allows a single sequence trajectory to compute future tokens in parallel before earlier tokens are emitted. In an out-of-order CPU, independent instructions can be scheduled concurrently across execution units. In an autoregressive language model, however, every step has an unavoidable loop-carried data dependency: the token chosen at step $t-1$ becomes the input context for step $t$.
+
+Formally, the processor models output sequence $\mathbf{y}_{1:K} = (y_1, \dots, y_K)$ conditioned on prompt $\mathbf{x} = (x_1, \dots, x_M)$ via the probability chain rule:
 
 $$P(\mathbf{y}_{1:K} \mid \mathbf{x}) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, \mathbf{y}_{<t})$$ {#eq-autoregressive-factorization}
 
-where $\mathbf{y}_{<t} = (y_1, \dots, y_{t-1})$ is the prefix before step $t$ ($\mathbf{y}_{<1} = \emptyset$).[^fn-autoregressive-factorization] Sequence generation is thus an iterative serving control loop rather than an atomic execution primitive.
+where $\mathbf{y}_{<t} = (y_1, \dots, y_{t-1})$ is the prefix before step $t$ ($\mathbf{y}_{<1} = \emptyset$).[^fn-autoregressive-factorization] Sequence generation is thus an iterative serving control loop managed by host software rather than an atomic hardware execution primitive.
 
 [^fn-autoregressive-factorization]: **Autoregressive Factorization**: Chain rule decomposition enforcing strict conditioning on past history without acausal leakage. \index{Autoregressive Factorization}\index{Inference Engine!Autoregressive Decoding}
 
 ### Autoregressive Factorization and the Decoupling Principle {#sec-vol3-autoregressive-decoupling}
 
-The host runtime enforces the *Decoupling Principle*: conditional likelihood $P_\Theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t})$ is decoupled from operational correctness and execution validity. Weights $\Theta$ are optimized over corpus $\mathcal{D}_{\text{train}}$ via empirical risk minimization:
+The host runtime must enforce the *Decoupling Principle*: conditional likelihood $P_\Theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t})$ is completely decoupled from operational correctness and execution validity. In classical systems, if a compiler outputs an ELF binary, the code adheres to an Application Binary Interface (ABI) and type system; if a POSIX kernel accepts a system call, it guarantees state invariants. In an LLM-based processor, however, model weights $\Theta$ are optimized over a static text corpus $\mathcal{D}_{\text{train}}$ via empirical risk minimization (minimizing cross-entropy loss):
 
 $$\min_\Theta \mathbb{E}_{(\mathbf{x}, \mathbf{y}) \sim \mathcal{D}_{\text{train}}} \left[ -\sum_{t=1}^K \log P_\Theta(y_t \mid \mathbf{x}, \mathbf{y}_{<t}) \right]$$ {#eq-cross-entropy-objective}
 
-Probability $P_\Theta(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t})$ quantifies only statistical typicality of subword $v$ continuing prefix $[\mathbf{x}, \mathbf{y}_{<t}]$ in $\mathcal{D}_{\text{train}}$, possessing no model of host environments. For continuation tokens $\mathcal{V}_{\text{valid}}(s_{\text{host}}) \subset \mathcal{V}$ preserving invariants in $s_{\text{host}}$:
+This objective means that probability $P_\Theta(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t})$ quantifies only the **statistical typicality** of subword token $v$ continuing prefix $[\mathbf{x}, \mathbf{y}_{<t}]$ in the training corpus $\mathcal{D}_{\text{train}}$. In other words, it measures how familiar or expected that token looked to human authors and code repositories in the past. The neural network possesses no runtime model of host environments: it has no awareness of open Linux file descriptors, no live view into `/sys` or `/proc`, and no mechanism to verify whether a target directory exists. If $\mathcal{V}_{\text{valid}}(s_{\text{host}}) \subset \mathcal{V}$ denotes the subset of continuation tokens that preserve physical system invariants in host state $s_{\text{host}}$:
 
 $$P_\Theta(y_t \in \mathcal{V}_{\text{valid}}(s_{\text{host}}) \mid \mathbf{x}, \mathbf{y}_{<t}) \not\equiv 1$$ {#eq-validity-divergence}
 
-The modal continuation can directly violate host validity:
+The most probable continuation (the statistical mode) can directly violate host validity:
 
 $$\arg\max_{v \in \mathcal{V}} P_\Theta(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) \notin \mathcal{V}_{\text{valid}}(s_{\text{host}}) \quad \text{with nonzero measure.}$$ {#eq-modal-invalidity}
 
-Likelihood reflects corpus typicality, providing zero certification that emitted code compiles, terminates, or satisfies security boundaries.
+Likelihood reflects training-set typicality, providing zero architectural certification that emitted code compiles, terminates, or satisfies security boundaries.
 
 ### The Atomic Forward Step and the Serving Control Loop {#sec-vol3-forward-step-loop}
 
-In an atomic forward step, neural core mapping $f_\Theta$ projects active sequence $[\mathbf{x}, \mathbf{y}_{<t}]$ through hidden activation $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ and unembedding matrix $\mathbf{W}_U \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$ to yield raw logits $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$:
+To see what happens down at the metal during inference, consider what a single **atomic forward step** actually computes. The neural core mapping $f_\Theta$ takes the entire accumulated token sequence $[\mathbf{x}, \mathbf{y}_{<t}]$, projects it through layers of attention and feed-forward networks, and produces a hidden activation vector $\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$ representing the final position. It then multiplies $\mathbf{h}_t$ by the unembedding matrix $\mathbf{W}_U \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$ to yield raw scores known as **logits** $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$:
 
 $$\mathbf{z}_t = \mathbf{W}_U \mathbf{h}_t = f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$$ {#eq-forward-step}
 
-where $|\mathcal{V}|$ is vocabulary cardinality. Core execution halts once $\mathbf{z}_t$ is written to device memory. The serving engine executes an external driving loop (@fig-autoregressive-loop) across four phases:
+where $|\mathcal{V}|$ is the vocabulary cardinality (typically 32,000 to 128,000 discrete token IDs).
 
-1. **Logit Evaluation:** Computing logits $\mathbf{z}_t$ on accelerator cores.
-2. **Decoding and Sampling:** Transforming logits to sample discrete token $\hat{y}_t \in \mathcal{V}$.
-3. **State Mutation:** Escrowing $\hat{y}_t$ in host memory and appending Key-Value activations to the ephemeral KV cache (detailed in @sec-vol3-virtual-memory).
-4. **Predicate Verification:** Evaluating termination against the halt predicate:
+At this exact point, *accelerator hardware execution halts*. The GPU cores do not select the next token, do not append it to a string, and do not advance a hardware program counter; they simply write the logit vector $\mathbf{z}_t$ into device High Bandwidth Memory (HBM). To advance the trajectory, an external software process—the inference serving engine (such as vLLM, TensorRT-LLM, or llama.cpp) running on the host CPU—must drive an external control loop (@fig-autoregressive-loop) across four explicit phases:
+
+1. **Logit Evaluation:** Dispatching compute kernels to evaluate $f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$ and write raw logits $\mathbf{z}_t$ to accelerator device memory.
+2. **Decoding and Sampling:** Executing a sampling kernel (on the GPU or host CPU) that transforms raw logits into a probability distribution and draws a discrete token ID $\hat{y}_t \in \mathcal{V}$.
+3. **State Mutation:** Escrowing token $\hat{y}_t$ in host memory and updating the accelerator's ephemeral Key-Value (KV) cache (@sec-vol3-virtual-memory). The KV cache stores the computed key and value activation tensors for all preceding tokens in GPU memory, ensuring the accelerator does not wastefully recompute attention history from scratch on the next step.
+4. **Predicate Verification:** Evaluating whether sequence generation should stop against the halt predicate:
 
 $$\text{Halt}(t) \iff (\hat{y}_t \in \mathcal{S}_{\text{stop}}) \lor (t \ge K_{\max})$$ {#eq-halt-predicate}
 
-where $\mathcal{S}_{\text{stop}} \subset \mathcal{V}^*$ represents terminal delimiter sequences and $K_{\max}$ is the step ceiling. Because subwords fracture delimiters, robust termination requires sequence suffix-matching stop condition checks over candidate tail buffers rather than scalar equality (@sec-vol3-processor-contract).
+where $\mathcal{S}_{\text{stop}} \subset \mathcal{V}^*$ represents terminal delimiter sequences (such as `<|endoftext|>`, `\nObservation:`, or specialized tool-call end markers) and $K_{\max}$ is the step ceiling enforced by the host runtime to prevent infinite loops and runaway compute spend. Because subword tokenizers (such as Byte-Pair Encoding) can fracture multi-character delimiters across arbitrary subword boundaries, robust termination requires sequence suffix-matching stop condition checks over rolling sliding-window tail buffers rather than simple scalar integer equality (@sec-vol3-processor-contract).
 
 ::: {#fig-autoregressive-loop fig-cap="**Autoregressive Serialization Loop**: Causal dependency chain across serving daemon and neural core boundaries during token decoding." fig-alt="Autoregressive serialization loop showing the boundary between the inference daemon and the neural core."}
 ![](images/svg/autoregressive_serialization_loop.svg){width="100%"}
 :::
 
-Unlike classical CPUs, the neural core cannot self-advance; the inference service daemon must drive each forward pass across the accelerator memory bus while the host runtime supervises execution bounds.
+Unlike classical CPUs with autonomous instruction fetch and program counters, the neural core cannot self-advance. The inference service daemon must supervise each forward pass across the accelerator memory bus while enforcing host execution bounds.
 
 ### The Causal Serialization Barrier {#sec-vol3-causal-serialization}
 
-During prompt prefill, the accelerator evaluates staged prompt $\mathbf{x} = (x_1, \dots, x_M)$ concurrently using causal mask:
+The difference in performance between ingesting a prompt and generating a response stems from the **causal serialization barrier**. During prompt prefill, the accelerator receives the entire staged prompt $\mathbf{x} = (x_1, \dots, x_M)$ simultaneously. Because all $M$ tokens are known in advance, the hardware can evaluate them concurrently using a causal attention mask:
 
 $$\mathbf{M}_{\text{causal}}(i, j) = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases}$$ {#eq-causal-mask}
 
-where $-\infty$ zeroes attention ahead of position $i$.[^fn-causal-masking] Dense GEMM operations achieve high utilization across all $M$ prompt tokens.
+where $-\infty$ ensures that after exponentiation in the attention softmax ($e^{-\infty} = 0$), position $i$ attends only to previous positions $j \le i$ and receives zero attention weight from future positions $j > i$.[^fn-causal-masking] Dense GEMM operations achieve high arithmetic intensity (compute operations per byte of memory transferred), saturating GPU tensor cores.
 
 [^fn-causal-masking]: **Causal Masking**: Upper-triangular mask zeroing future query-key affinities during parallel prefill, enforcing autoregressive factorization. \index{Causal Masking}\index{Attention!Causal Mask}
 
-During decode, spatial parallelism collapses because token $y_t$ depends strictly on preceding token $y_{t-1}$:
+During decode, however, this spatial parallelism collapses. The system encounters an inescapable dependency: token $y_t$ depends strictly on preceding token $y_{t-1}$:
 
 $$\text{Dependency}(y_t) = \{\mathbf{x}, y_1, y_2, \dots, y_{t-2}, y_{t-1}\}$$ {#eq-decode-dependency}
 
-While tensor operations within each decode step execute concurrently across GPU threads, the sequence of token steps along an individual trajectory forms an irreducibly serial chain, bounding per-trajectory latency by $K$ sequential memory bus sweeps (@sec-vol3-processor-cost). Multi-tenant batching ($B > 1$) amortizes parameter transfers across concurrent streams, but leaves individual trajectory serialization unchanged.
+While tensor arithmetic within a single forward step executes across thousands of GPU worker threads in parallel, the token generation sequence along an individual trajectory forms an irreducibly serial chain. Generating $K$ tokens requires launching $K$ successive forward passes, bounding per-trajectory latency by $K$ sequential memory bus sweeps (@sec-vol3-processor-cost). Multi-tenant continuous batching ($B > 1$) amortizes the memory bandwidth of reading model weights across concurrent user requests, maximizing server throughput, but leaves individual trajectory latency completely serialized.
 
 ### Decoding Policies and the Sampling Transformation {#sec-vol3-sampling-transforms}
 
-Raw logits $\mathbf{z}_t = f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$ define the model's base parameter distribution:
+The raw logits $\mathbf{z}_t = f_\Theta(\mathbf{x}, \mathbf{y}_{<t})$ produced by the neural core define the model's base parameter distribution via the standard softmax function:
 
 $$P_\Theta(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \frac{\exp(z_{t, v})}{\sum_{w \in \mathcal{V}} \exp(z_{t, w})}$$ {#eq-base-parameter-likelihood}
 
-The serving engine transforms $\mathbf{z}_t$ via decoding policy $\pi_{\text{decode}}$ parameterized by execution tuple:[^fn-sampling-transforms]
+However, inference engines rarely sample directly from this raw distribution. Instead, the serving runtime reshapes $\mathbf{z}_t$ through a **decoding policy** $\pi_{\text{decode}}$ parameterized by an execution tuple:[^fn-sampling-transforms]
 
 $$\Pi_{\text{sample}} = \langle \tau, k, p, \alpha_{\text{rep}}, \alpha_{\text{pres}}, \alpha_{\text{freq}}, \mathbf{b}, \sigma \rangle$$ {#eq-sampling-policy-tuple}
 
-where $\tau$ is temperature, $k$ is top-$k$ limit, $p$ is nucleus threshold, $\alpha_{\text{rep}}$ is repetition penalty, $\alpha_{\text{pres}}$ and $\alpha_{\text{freq}}$ are presence and frequency penalties, $\mathbf{b} \in \mathbb{R}^{|\mathcal{V}|}$ is additive logit bias, and $\sigma \in \mathbb{Z}^+$ is PRNG seed.
+where $\tau$ is temperature, $k$ is the top-$k$ truncation limit, $p$ is the nucleus (top-$p$) cumulative probability threshold, $\alpha_{\text{rep}}$ is repetition penalty, $\alpha_{\text{pres}}$ and $\alpha_{\text{freq}}$ are presence and frequency penalties, $\mathbf{b} \in \mathbb{R}^{|\mathcal{V}|}$ is an additive logit bias vector, and $\sigma \in \mathbb{Z}^+$ is the pseudo-random number generator (PRNG) seed.
 
 [^fn-sampling-transforms]: **Sampling Transformation**: Runtime modification of logits into an emission distribution via penalties and truncation without modifying weights $\Theta$. \index{Sampling Transformation}\index{Inference Engine!Decoding Policy}
 
-This pipeline constructs emission distribution $Q(y_t \mid \mathbf{x}, \mathbf{y}_{<t}; \Pi_{\text{sample}})$ on simplex $\Delta^{|\mathcal{V}|-1}$:
+This sampling pipeline maps raw unnormalized scores into an **emission distribution** $Q(y_t \mid \mathbf{x}, \mathbf{y}_{<t}; \Pi_{\text{sample}})$ residing on the probability simplex $\Delta^{|\mathcal{V}|-1}$ (the mathematical space of all valid categorical probability distributions where all elements are non-negative and sum to $1.0$):
 
 $$\Delta^{|\mathcal{V}|-1} = \left\{ \mathbf{q} \in \mathbb{R}^{|\mathcal{V}|} \;\middle|\; \sum_{v=1}^{|\mathcal{V}|} q_v = 1, \; q_v \ge 0 \right\}$$ {#eq-prob-simplex}
 
-The transformation executes across five stages:
+The transformation executes across five sequential stages:
 
-1. **Repetition Penalties:** Prefix counts $c_v(t) = \sum_{j=1}^{t-1} \mathbb{I}(y_j = v)$ drive multiplicative attenuation ($\alpha_{\text{rep}} \ge 1.0$):
+1. **Repetition and Frequency Penalties:** The runtime tracks token occurrence counts $c_v(t) = \sum_{j=1}^{t-1} \mathbb{I}(y_j = v)$ in the generated prefix. It applies multiplicative attenuation ($\alpha_{\text{rep}} \ge 1.0$) to penalize tokens that have already appeared, preventing repetitive loops:
    $$z'_{t, v} = \begin{cases} z_{t, v} / \alpha_{\text{rep}} & \text{if } c_v(t) > 0 \text{ and } z_{t, v} > 0 \\ z_{t, v} \cdot \alpha_{\text{rep}} & \text{if } c_v(t) > 0 \text{ and } z_{t, v} \le 0 \\ z_{t, v} & \text{if } c_v(t) = 0 \end{cases}$$ {#eq-repetition-penalty}
-   and additive presence/frequency offsets:
+   and incorporates additive presence and frequency offsets:
    $$z''_{t, v} = z'_{t, v} - \alpha_{\text{pres}} \cdot \mathbb{I}(c_v(t) > 0) - \alpha_{\text{freq}} \cdot c_v(t)$$ {#eq-additive-penalties}
 
-2. **Logit Biasing:** Additive bias $\mathbf{b} \in [-\infty, +\infty)^{|\mathcal{V}|}$ inflates or masks tokens:
+2. **Logit Biasing:** Additive bias vector $\mathbf{b} \in [-\infty, +\infty)^{|\mathcal{V}|}$ manually inflates or masks specific tokens (for example, setting $b_v = -\infty$ to forbid banned tokens or grammar-violating keywords):
    $$z'''_{t, v} = z''_{t, v} + b_v$$ {#eq-logit-biasing}
 
 3. **Thermal Simplex Scaling:** Logits are scaled by temperature $\tau \in (0, \infty)$:[^fn-softmax-temperature]
    $$\tilde{z}_{t, v} = \frac{z'''_{t, v}}{\tau}$$ {#eq-thermal-scaling}
-   Modulating $\tau$ defines three regimes (@fig-temperature-simplex): greedy limit ($\tau \to 0^+$), collapsing mass onto the argmax mode:
+   Borrowing from the Boltzmann distribution in statistical mechanics, modulating $\tau$ controls entropy on the probability simplex (@fig-temperature-simplex):
+   - **Greedy Limit ($\tau \to 0^+$):** Thermal noise approaches zero, collapsing probability mass entirely onto the mode with the maximum logit:
    $$\lim_{\tau \to 0^+} Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \begin{cases} 1 & \text{if } v = \arg\max_{w \in \mathcal{V}} z'''_{t, w} \\ 0 & \text{otherwise} \end{cases}$$ {#eq-greedy-limit}
-   (subject to floating-point drift[^fn-float-determinism]); balanced sampling ($0.2 \le \tau \le 0.8$); and high-entropy limit ($\tau \to \infty$):
+   (subject to floating-point drift during GPU reduction operations[^fn-float-determinism]).
+   - **Balanced Sampling ($0.2 \le \tau \le 0.8$):** Provides smooth exploration while retaining modal preference.
+   - **High-Entropy Limit ($\tau \to \infty$):** High thermal noise washes away differences between logits, dispersing probability mass toward a uniform distribution:
    $$\lim_{\tau \to \infty} Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}) = \frac{1}{|\mathcal{V}|}$$ {#eq-uniform-limit}
 
 [^fn-softmax-temperature]: **Temperature Scaling**: Dispersion coefficient $\tau$ reshaping categorical entropy on the vocabulary simplex. \index{Temperature Scaling}\index{Sampling!Temperature}
@@ -106,18 +113,76 @@ The transformation executes across five stages:
 ![](images/svg/temperature_simplex_scaling.svg){width="100%"}
 :::
 
-[^fn-float-determinism]: **Non-Associative Reduction**: Floating-point non-associativity ($(a + b) + c \neq a + (b + c)$) in GPU reduction trees can cause greedy argmax drift. \index{IEEE 754!Non-Associative Addition}\index{Determinism!Floating-Point Drift}
+[^fn-float-determinism]: **Non-Associative Reduction**: Floating-point non-associativity ($(a + b) + c \neq a + (b + c)$) in GPU reduction trees can cause greedy argmax drift across different kernel tile sizes or hardware schedules. \index{IEEE 754!Non-Associative Addition}\index{Determinism!Floating-Point Drift}
 
-4. **Support Truncation Filtering:** Restricts candidate selection to active subset $\mathcal{V}_{\text{active}} \subseteq \mathcal{V}$ via top-$k$:
+::: {.callout-note title="Worked Example: Tracing the Softmax Temperature Transformation on a 3-Token Logit Vector"}
+
+**Problem**:
+Consider an inference serving engine evaluating candidate next-token continuations for an autonomous agent executing administrative scripts. At decode step $t$, the neural core outputs raw logits $\mathbf{z} = [2.0, 1.0, 0.0]$ across a toy 3-token vocabulary $\mathcal{V} = \{v_1, v_2, v_3\}$ representing candidate bash actions `["read", "write", "delete"]`. Assume no repetition penalties or additive logit biases ($z''' = z$).
+
+Calculate the normalized probability distribution $Q(y)$ under three distinct runtime temperature configurations:
+1. Low temperature / greedy sharpening ($\tau = 0.2$)
+2. Baseline temperature ($\tau = 1.0$)
+3. High temperature / entropy dispersion ($\tau = 2.0$)
+
+Show step-by-step arithmetic and contrast the resulting systems implications for agent execution.
+
+**Solution**:
+For each temperature setting $\tau$, compute the scaled logits $\tilde{z}_i = z_i / \tau$, exponentiate each element $e^{\tilde{z}_i}$, calculate normalization sum $Z = \sum_{i=1}^3 e^{\tilde{z}_i}$, and compute final probabilities $P(v_i) = e^{\tilde{z}_i} / Z$.
+
+*Case 1: Low Temperature ($\tau = 0.2$)*
+- Scaled logits: $\tilde{\mathbf{z}} = [2.0 / 0.2, 1.0 / 0.2, 0.0 / 0.2] = [10.0, 5.0, 0.0]$
+- Exponentials: $e^{10.0} \approx 22026.47$, $e^{5.0} \approx 148.41$, $e^{0.0} = 1.00$
+- Normalization sum: $Z = 22026.47 + 148.41 + 1.00 = 22175.88$
+- Probabilities:
+  $$P(v_1) = \frac{22026.47}{22175.88} \approx 0.9933 \quad (99.33\%)$$
+  $$P(v_2) = \frac{148.41}{22175.88} \approx 0.0067 \quad (0.67\%)$$
+  $$P(v_3) = \frac{1.00}{22175.88} \approx 0.000045 \quad (0.005\%)$$
+
+*Case 2: Baseline Temperature ($\tau = 1.0$)*
+- Scaled logits: $\tilde{\mathbf{z}} = [2.0 / 1.0, 1.0 / 1.0, 0.0 / 1.0] = [2.0, 1.0, 0.0]$
+- Exponentials: $e^{2.0} \approx 7.389$, $e^{1.0} \approx 2.718$, $e^{0.0} = 1.000$
+- Normalization sum: $Z = 7.389 + 2.718 + 1.000 = 11.107$
+- Probabilities:
+  $$P(v_1) = \frac{7.389}{11.107} \approx 0.6652 \quad (66.52\%)$$
+  $$P(v_2) = \frac{2.718}{11.107} \approx 0.2447 \quad (24.47\%)$$
+  $$P(v_3) = \frac{1.000}{11.107} \approx 0.0900 \quad (9.00\%)$$
+
+*Case 3: High Temperature ($\tau = 2.0$)*
+- Scaled logits: $\tilde{\mathbf{z}} = [2.0 / 2.0, 1.0 / 2.0, 0.0 / 2.0] = [1.0, 0.5, 0.0]$
+- Exponentials: $e^{1.0} \approx 2.718$, $e^{0.5} \approx 1.649$, $e^{0.0} = 1.000$
+- Normalization sum: $Z = 2.718 + 1.649 + 1.000 = 5.367$
+- Probabilities:
+  $$P(v_1) = \frac{2.718}{5.367} \approx 0.5065 \quad (50.65\%)$$
+  $$P(v_2) = \frac{1.649}{5.367} \approx 0.3072 \quad (30.72\%)$$
+  $$P(v_3) = \frac{1.000}{5.367} \approx 0.1863 \quad (18.63\%)$$
+
+The comparative numerical shifts are summarized in @tbl-temperature-modulation:
+
+| Token Candidate | Raw Logit $z_i$ | $\tau=0.2$ Prob ($Q$) | $\tau=1.0$ Prob ($Q$) | $\tau=2.0$ Prob ($Q$) |
+| :--- | :--- | :--- | :--- | :--- |
+| $v_1$ (`"read"`) | $2.0$ | **$99.33\%$** | **$66.52\%$** | **$50.65\%$** |
+| $v_2$ (`"write"`) | $1.0$ | $0.67\%$ | $24.47\%$ | $30.72\%$ |
+| $v_3$ (`"delete"`) | $0.0$ | $0.005\%$ | $9.00\%$ | $18.63\%$ |
+: **Softmax temperature probability modulation**: Reshaping candidate token probabilities across greedy sharpening ($\tau=0.2$), baseline ($\tau=1.0$), and high entropy ($\tau=2.0$). {#tbl-temperature-modulation}
+
+**Systems insight**:
+At $\tau = 0.2$, dividing logits by a fraction scales their differences by $5\times$, exponentially crushing runner-up candidates and concentrating $99.33\%$ of the probability mass onto modal token $v_1$. In production agent runtimes executing deterministic tasks (such as emitting structured JSON or invoking strict tool schemas), setting $\tau \to 0$ suppresses sampling variance and eliminates syntax errors.
+
+At $\tau = 1.0$, the distribution mirrors the training distribution, but presents a cumulative $33.47\%$ chance of diverging from the mode. At $\tau = 2.0$, dividing logits by $2.0$ compresses score differences by half. Thermal entropy disperses probability mass toward the uniform distribution ($33.3\%$ per token), giving the destructive command $v_3$ (`"delete"`) an $18.63\%$ execution probability despite its lowest raw score. For this reason, agent runtimes strictly gate temperature based on task criticality, refusing elevated temperatures during tool-calling phases.
+
+:::
+
+4. **Support Truncation Filtering:** Restricts candidate selection to active subset $\mathcal{V}_{\text{active}} \subseteq \mathcal{V}$ via top-$k$ truncation:
    $$\mathcal{V}^{(k)} = \operatorname{argtopk}_{v \in \mathcal{V}}(\tilde{z}_{t, v}, k)$$ {#eq-topk-truncation}
    or nucleus (top-$p$) filtering:
    $$\mathcal{V}^{(p)} = \arg\min_{\mathcal{U} \subseteq \mathcal{V}^{(k)}} \left\{ |\mathcal{U}| \;\middle|\; \sum_{u \in \mathcal{U}} \frac{\exp(\tilde{z}_{t, u})}{\sum_{w \in \mathcal{V}^{(k)}} \exp(\tilde{z}_{t, w})} \ge p \right\}$$ {#eq-nucleus-truncation}
-   masking coordinates outside $\mathcal{V}_{\text{active}} = \mathcal{V}^{(p)}$ to $-\infty$.
+   masking coordinates outside $\mathcal{V}_{\text{active}} = \mathcal{V}^{(p)}$ to $-\infty$. Top-$k$ sets a hard ceiling on the number of candidate tokens, whereas nucleus (top-$p$) dynamically adjusts the candidate pool size based on the model's confidence, expanding the pool when uncertain and contracting it to a few tokens when confident.
 
-5. **Categorical Draw with PRNG Seeding:** Normalizing active logits yields emission distribution:
+5. **Categorical Draw with PRNG Seeding:** Normalizing active logits yields the final emission distribution:
 
 $$Q(y_t = v \mid \mathbf{x}, \mathbf{y}_{<t}; \Pi_{\text{sample}}) = \begin{cases} \frac{\exp(\tilde{z}_{t, v})}{\sum_{u \in \mathcal{V}_{\text{active}}} \exp(\tilde{z}_{t, u})} & \text{if } v \in \mathcal{V}_{\text{active}} \\ 0 & \text{otherwise} \end{cases}$$ {#eq-emission-distribution}
 
-Sampled token $\hat{y}_t \sim Q$ is drawn via PRNG initialized with seed $\sigma$.
+The sampled token $\hat{y}_t \sim Q$ is drawn via a pseudo-random number generator initialized with seed $\sigma$.
 
-Emission distribution $Q(y_t)$ is a Tier 2 software artifact; parameter distribution $P_\Theta(y_t)$ is an immutable Tier 3 property. Policy $\Pi_{\text{sample}}$ shifts the emission surface without altering weights $\Theta$. Runtimes must not confuse emission probability $Q(y_t)$ with operational validity. If the processor emits a high-probability, fluent sequence of tokens, what does that establish about the real system?
+Crucially, the emission distribution $Q(y_t)$ is a mutable Tier 2 software configuration managed by the inference host runtime; the underlying parameter distribution $P_\Theta(y_t)$ is an immutable Tier 3 physical property baked into GPU HBM weights. An engineer can alter temperature, top-$p$, or logit biases on a per-request basis without touching a single weight on the accelerator. Runtimes must never confuse high emission probability $Q(y_t)$ with operational validity. If the processor emits a high-probability, fluent sequence of tokens, what does that establish about the real system?
