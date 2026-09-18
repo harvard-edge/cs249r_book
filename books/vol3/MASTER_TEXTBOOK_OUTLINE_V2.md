@@ -8,7 +8,7 @@ This V2 preserves the organization of `MASTER_TEXTBOOK_OUTLINE.md`: a book-level
 
 ## Pedagogical Vision: A Systems Engineering Textbook for Agentic AI
 
-This textbook is written for **senior-level undergraduate and introductory graduate students in Computer Science and Computer Engineering** studying **Agentic Machine Learning Systems**. 
+This textbook is written for **senior-level undergraduate and introductory graduate students in Computer Science and Computer Engineering** studying **Agentic Machine Learning Systems**.
 
 Its intellectual posture is a direct hybrid of **Computer Architecture** (in the spirit of Hennessy & Patterson's *Computer Architecture: A Quantitative Approach*) and **Operating Systems** (in the spirit of Saltzer & Kaashoek's *Principles of Computer System Design* and Silberschatz et al.), written specifically for the era of generative foundation models.
 
@@ -27,7 +27,7 @@ To prevent content from drifting into either an abstract NLP linguistics tutoria
 - **Audience Stance (The Senior CS/CE Student):** The reader already understands operating systems basics (processes, virtual memory, syscalls, filesystems, and concurrency), compilers (lexing, ASTs, and grammars), and basic deep learning (transformers, attention, and matrix multiplication). We are not teaching introductory deep learning, and we do not recite GPU marketing datasheets. We teach how to engineer autonomous, verifiable, cost-effective agentic systems around generative models.
 - **Speak Authentic ML Systems Language, Not Forced Metaphors:**
   - Call native concepts by their real names: **Large Language Model (LLM), tokens, Byte-Pair Encoding (BPE), embedding tables, autoregressive decode loop, logits, softmax, KV cache, prefill, decode, inference engines (such as vLLM, TensorRT-LLM, TGI), and host agent runtimes**.
-  - Use computer architecture and operating systems principles as **pedagogical tools to build intuition**, not as a literal straightjacket. Do not pretend an attention head is an x86 ALU, that tokens are "machine opcodes", or that prompt text is a "hardware instruction register". 
+  - Use computer architecture and operating systems principles as **pedagogical tools to build intuition**, not as a literal straightjacket. Do not pretend an attention head is an x86 ALU, that tokens are "machine opcodes", or that prompt text is a "hardware instruction register".
   - Treat the LLM as a coprocessor: it has no program counter, no registers, no access to host memory, and no syscall interface. Emitted text is untrusted data held in memory escrow until an authoritative host supervisor verifies and acts on it.
 
 ### 2. Higher-Level Architectural Intuition: The Seven Subsystem Lenses (Applicable to Every Chapter)
@@ -253,7 +253,7 @@ To ensure natural narrative flow and intellectual depth, **all rigid word budget
 ##### Structural Role Hierarchy (The Four Section Types):
 
 1. **`[stage-setter]` (Section .1 only):**
-   - Introduce the chapter's governing problem and establish the operational boundary needed to understand its first mechanism. 
+   - Introduce the chapter's governing problem and establish the operational boundary needed to understand its first mechanism.
    - **Structural Invariants:** Use 2–3 clean, scannable `###` subheadings to separate the conceptual contrast (e.g. classical systems vs generative models), the systems boundary (e.g. runtime vs accelerator), and the failure modes. Include a Rosetta Stone table or sequence diagram. End with a natural causal bridge to the first mechanism in Section .2.
 2. **`[core]` (Foundational Mechanics & Derivations):**
    - Load-bearing technical sections developing the mechanism and trade-off owned by the section. Follow the 4-step scaffolding ladder (Dilemma → Intuition → Artifact/Code → Math). Include a derivation, table, or Pint-typed MLSysIM LEGO cell when it helps students reason about a measurable quantity.
