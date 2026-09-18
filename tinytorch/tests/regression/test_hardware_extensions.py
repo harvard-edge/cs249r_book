@@ -1,19 +1,22 @@
 """Tests and performance evaluations for TinyTorch Hardware Extensions.
 
 Verifies:
-1. C++ SIMD Matrix Multiplication (AVX2/NEON + OpenMP)
-2. OpenAI Triton Fused Bias + GELU Kernel (SRAM tiling + CPU reference fallback)
-3. Apple Metal / MPS Matrix Multiplication (Unified memory dispatch)
+1. C++ SIMD matrix multiply and fused bias + GELU (compiled on first use)
+2. Triton fused bias + GELU (NumPy fallback when there is no NVIDIA GPU)
+3. MPS matrix multiply (NumPy fallback without PyTorch or an Apple GPU)
 4. Numerical parity against NumPy reference
 5. Latency benchmarking and performance evaluation
 """
 
+import shutil
 import time
 import pytest
 import numpy as np
 from tinytorch.extensions import (
     has_simd_support,
     simd_matmul,
+    simd_fused_bias_gelu,
+    simd_build_info,
     has_triton_support,
     triton_fused_gelu,
     has_mps_support,
@@ -41,6 +44,27 @@ class TestHardwareExtensions:
             atol=1e-4,
             err_msg="SIMD GEMM output diverges from NumPy reference",
         )
+
+    @pytest.mark.skipif(shutil.which("c++") is None, reason="no C++ compiler on PATH")
+    def test_simd_library_builds(self):
+        """With a compiler present, the C++ path must really load, not fall back silently."""
+        assert has_simd_support(), simd_build_info().get("error")
+        info = simd_build_info()
+        assert info["threads"] >= 1
+
+    def test_simd_fused_bias_gelu_parity(self):
+        """C++ fused bias + GELU matches NumPy, including inputs large enough to
+        overflow exp(2z); the kernel used exp-based tanh and returned NaN there
+        before 2026-09-18."""
+        rng = np.random.default_rng(7)
+        X = (rng.standard_normal((32, 96)) * 40).astype(np.float32)
+        bias = rng.standard_normal((96,)).astype(np.float32)
+        u = X + bias
+        ref = 0.5 * u * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (u + 0.044715 * np.power(u, 3))))
+
+        out = simd_fused_bias_gelu(X, bias)
+        assert np.isfinite(out).all()
+        np.testing.assert_allclose(out, ref, rtol=1e-4, atol=1e-4)
 
     def test_simd_matmul_shape_mismatch(self):
         """Test that invalid inner dimensions raise ValueError."""
