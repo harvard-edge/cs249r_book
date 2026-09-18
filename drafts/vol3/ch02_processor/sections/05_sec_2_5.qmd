@@ -1,0 +1,182 @@
+## The Invocation Contract {#sec-vol3-processor-contract}
+
+Treating the foundation model as an unprivileged stochastic coprocessor requires a formal Application Binary Interface (ABI) and Remote Procedure Call (RPC) boundary between the host runtime and the neural core. In classical computer systems, physical execution units operate behind rigid, hardware-enforced instruction contracts: an arithmetic logic unit (ALU) either writes a mathematically determinate word into an architectural register, sets an arithmetic overflow flag, or raises a hardware trap. The execution unit cannot emit half an instruction or terminate mid-cycle without the control unit asserting a fault signal.
+
+By contrast, an autoregressive neural core emits a variable-length stream of discrete token identifiers over an inter-process communication (IPC) channel or network socket. In production agent infrastructure, this boundary is almost universally an **asynchronous streaming connection** (using HTTP/2 Server-Sent Events or gRPC bidirectional streams). Without an explicit invocation contract governing this exchange, the boundary degenerates into an unmonitored channel prone to silent payload corruption, non-deterministic latency spikes, and partial state mutation.
+
+```
++---------------------------------------------------------------------------------------+
+|                                HOST AGENT RUNTIME                                     |
+|                                                                                       |
+|   1. Assemble Request Tuple:                                                          |
+|      C_req = < x, Theta_id, K_max, T_max, S_stop, G >                                 |
++---------------------------------------------------------------------------------------+
+                                   |                  ^
+                 (a) Asynchronous  |                  |  (d) Streaming Token Deliveries
+                     gRPC / SSE    |                  |      & Early Abort Signal
+                     Dispatch      v                  |      (RST_STREAM on Syntax Fault)
++---------------------------------------------------------------------------------------+
+|                              INFERENCE ENGINE DAEMON                                  |
+|                                                                                       |
+|   2. Validate Pre-conditions (Context Allocation M + K_max <= S_max)                  |
+|   3. Initialize Timers (T_max Deadline) & Step Counters (k = 0 to K_max)              |
+|   4. PagedAttention Block Allocation & Continuous Batching Schedule                   |
+|                                                                                       |
+|      +-------------------------------------------------------------------------+      |
+|      |                        NEURAL CORE (Theta_id)                           |      |
+|      |                                                                         |      |
+|      |   (b) Evaluate Forward Pass: Logits z_t across Vocabulary V             |      |
+|      |   (c) Fused Bitmask & Sampling: y_t ~ Filter(z_t, G)                    |      |
+|      +-------------------------------------------------------------------------+      |
+|                                                                                       |
+|   5. Detect Termination Trigger:                                                      |
+|      - Token in S_stop?                   -->  Status: COMPLETED                      |
+|      - k == K_max (step bound reached)?   -->  Status: TRUNCATED                      |
+|      - Policy / Interceptor Blocked?      -->  Status: REFUSED                        |
+|      - Client Cancel / T_max / Crash?     -->  Status: TRANSPORT_FAILURE              |
++---------------------------------------------------------------------------------------+
+```
+: The Asynchronous Invocation Contract and Execution Boundary. {#fig-vol3-invocation-contract}
+
+Consider an autonomous maintenance agent dispatched to repair the configuration parser defect—specifically where an expression such as `int(seconds) * 1000` truncates floating-point intervals like `2.5s` to `2000ms`. The host runtime constructs the system prompt, stages the repository context, and commands the core to emit a multi-file unified diff updating `config_parser.py`, `service.py`, and `test_config.py`. As the stochastic core generates candidate tokens, decoding proceeds sequentially across time until the token count hits the pre-allocated generation ceiling $K_{\max} = 2048$. Decoding abruptly terminates mid-line inside `service.py`, leaving an unclosed parenthesis in a patch hunk. If the host runtime naïvely forwards this truncated byte sequence to the operating system's `git apply` tool, the utility fails with a corrupted patch error, leaves the working tree in an indeterminate state, and exhausts the agent's task retry budget.
+
+This failure illustrates a fundamental systems invariant: **a raw token stream is an unvalidated candidate hypothesis, not an authorized operation.** The host system must envelop the core in an explicit typed contract that bounds resource allocation and classifies execution outcomes before passing data to downstream actuators.
+
+### The Typed Invocation Specification {#sec-vol3-contract-spec}
+
+To insulate the host system from unconstrained generation, every invocation dispatched to the inference engine must be governed by a fully qualified request tuple:
+
+$$\mathcal{C}_{\text{req}} = \langle \mathbf{x}, \Theta_{\text{id}}, K_{\max}, T_{\max}, \mathcal{S}_{\text{stop}}, \mathcal{G} \rangle$$
+
+The elements of this contract define the computational envelope within which the stochastic core is permitted to execute:
+
+1. **Context Vector ($\mathbf{x}$):** An ordered sequence of prompt token identifiers $\mathbf{x} = [x_1, x_2, \dots, x_M] \in \mathcal{V}^M$ assembled in host memory. The runtime must verify the precondition $M + K_{\max} \le S_{\max}$, where $S_{\max}$ represents the physical sequence capacity of the target model architecture, guaranteeing that generating up to $K_{\max}$ tokens will not trigger mid-generation context window exhaustion.
+2. **Model Identifier ($\Theta_{\text{id}}$):** A cryptographically stable digest or URI designating the exact parameter checkpoint, layer configuration, and tokenizer vocabulary against which the context vector was encoded.
+3. **Generation Ceiling ($K_{\max}$):** The maximum number of autoregressive decoding steps the core may execute before mandatory preemption. This integer bound prevents unconstrained generation loops from consuming infinite inference capacity.
+4. **Wall-Clock Deadline ($T_{\max}$):** An absolute latency ceiling, measured in milliseconds, specifying when the host runtime will cancel the underlying socket connection. While $K_{\max}$ bounds execution along the discrete token axis, $T_{\max}$ bounds execution in continuous physical time, guarding the host event loop against scheduling delays, queue starvation, or deadlocked engine workers.
+5. **Stop Delimiters ($\mathcal{S}_{\text{stop}}$):** A set of terminal token sequences $\mathcal{S}_{\text{stop}} \subset \mathcal{V}^*$ that immediately halt the decode loop upon emission (e.g., `["\n```", "<|im_end|>", "\nclass "]`).
+6. **Structural Grammar ($\mathcal{G}$):** An optional formal grammar specification (such as a Context-Free Grammar or JSON Schema) supplied to the decoding layer to restrict candidate sampling to valid syntactic subsets.
+
+```python
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass(frozen=True)
+class InvocationRequest:
+    model_id: str                          # Target checkpoint (Theta_id)
+    input_tokens: list[int]                 # Context vector x in V^M
+    max_output_tokens: int                  # Discrete step bound K_max
+    timeout_ms: float                       # Wall-clock deadline T_max
+    temperature: float = 0.0                # Thermal scaling parameter tau
+    seed: Optional[int] = None              # Deterministic pseudorandom seed
+    stop_delimiters: tuple[str, ...] = ()   # Execution barriers S_stop
+    grammar_schema: Optional[str] = None    # Formal language constraint G
+```
+
+#### Streaming Token Consumption and Early Cancellation Signals
+
+In production agent architectures, the host runtime does not block idly while the inference engine generates hundreds of tokens. Invocations operate as asynchronous streams. The host runtime attaches a streaming AST parser to the incoming socket:
+
+- **Incremental Syntactic Validation:** As tokens arrive across the wire, the host parser validates tool names, file paths, and argument syntax on the fly.
+- **Early Abort Signals:** If the core begins generating an invalid tool name, references a nonexistent file path, or emits destructive shell commands within the initial 20 tokens, the host runtime does not wait for the remaining 2,000 tokens to complete. It sends an immediate cancellation frame (e.g., HTTP/2 `RST_STREAM` or gRPC `CANCELLED`). The inference daemon intercepts this signal, immediately halts the autoregressive loop, frees the associated PagedAttention KV cache blocks in accelerator memory, and prevents wasteful GPU memory shuttle cycles.
+
+### The Normalized Four-Outcome Status Envelope {#sec-vol3-contract-envelope}
+
+A prevalent anti-pattern in early agent designs was conflating transport-layer success with execution-layer completion. An HTTP `200 OK` status code establishes nothing more than that the remote web server received an HTTP payload, parsed the headers, and streamed serialized JSON bytes across a TCP socket. It provides zero information regarding whether the token budget was exhausted, whether an internal safety filter tripped, or whether the emitted string satisfies the syntax required by the host application.
+
+To achieve fault-tolerant operation, the host runtime must decouple the transport channel from the execution outcome by normalizing all core responses into a typed four-outcome status envelope:
+
+$$\mathcal{E}_{\text{resp}} = \langle S, \mathbf{y}, \mathcal{M}_{\text{usage}}, \mathcal{D}_{\text{diag}} \rangle$$
+
+where $S \in \{\texttt{COMPLETED}, \texttt{TRUNCATED}, \texttt{REFUSED}, \texttt{TRANSPORT\_FAILURE}\}$, $\mathbf{y} = [y_1, y_2, \dots, y_K]$ represents the emitted token sequence, $\mathcal{M}_{\text{usage}}$ records consumed resource metrics (prefill count $M$, decode count $K$, prefix cache hits, elapsed wall-clock latency), and $\mathcal{D}_{\text{diag}}$ provides diagnostic metadata (such as server error codes or filter classifications).
+
+::: {#tbl-vol3-invocation-status}
+| Status Class | Termination Predicate | Payload Usability | Host Runtime Handling / Recovery Action |
+| :--- | :--- | :--- | :--- |
+| **`COMPLETED`** | $y_K \in \mathcal{S}_{\text{stop}}$ or $y_K = \texttt{eos\_token}$ within budgets ($K \le K_{\max}$, $t \le T_{\max}$). | Valid candidate string. Complete structural unit. | Pass payload to deterministic verification pipeline (AST parser, compiler, test harness). |
+| **`TRUNCATED`** | Step budget exhausted ($K = K_{\max}$) prior to stop delimiter (`finish_reason == "length"`). | Corrupt, partial string. Unbalanced syntax, dangling control blocks. | **Quarantine immediately.** Discard partial payload from execution path. Dispatch continuation RPC or expand token budget. |
+| **`REFUSED`** | Safety classifier, policy interceptor, or decoding filter suppressed token emission. | Nil or explanatory error string. Zero structural progress. | Abort current task trajectory. Trigger fallback routing or request policy relaxation from orchestrator. |
+| **`TRANSPORT_FAILURE`** | Wall-clock deadline expired ($t \ge T_{\max}$), TCP reset, early cancellation, or HTTP 5xx error. | Nil. Stream terminated prematurely. | Trigger exponential backoff and retry policy; route to alternate inference worker node. |
+
+: Normalized Invocation Status Envelope Mapping. {#tbl-vol3-invocation-status}
+:::
+
+As systematized in @tbl-vol3-invocation-status, the four outcome classes map to fundamentally distinct failure domains:
+
+1. **`COMPLETED`:** The core satisfied the termination condition naturally by emitting a designated stop delimiter or the vocabulary end-of-sequence token ($\texttt{eos\_token}$) at step $K \le K_{\max}$. The emitted tokens represent a structurally intact candidate hypothesis ready for deterministic validation.
+2. **`TRUNCATED`:** The engine halted generation mechanically because the step counter hit the generation ceiling $K_{\max}$ (`finish_reason == "length"`). The payload is an incomplete prefix of an intended sequence; its closing delimiters are unclosed and AST syntax is almost certainly broken.
+3. **`REFUSED`:** An internal policy classifier or alignment interceptor within the inference engine preempted the core before or during decoding. The payload contains no usable domain symbols.
+4. **`TRANSPORT_FAILURE`:** The boundary failed prior to or during stream assembly, or exceeded the wall-clock deadline $T_{\max}$. This encompasses transport timeouts, TCP resets, worker crashes, or client-side cancellation aborts.
+
+```python
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional
+
+class InvocationStatus(Enum):
+    COMPLETED = "COMPLETED"
+    TRUNCATED = "TRUNCATED"
+    REFUSED = "REFUSED"
+    TRANSPORT_FAILURE = "TRANSPORT_FAILURE"
+
+@dataclass(frozen=True)
+class InvocationEnvelope:
+    status: InvocationStatus
+    output_tokens: list[int]                # Sequence y in V^K
+    output_text: str                        # Decoded UTF-8 string
+    prefill_tokens: int                     # Context size M
+    decode_tokens: int                      # Generated size K
+    cached_tokens: int = 0                  # Tokens hit in KV prefix cache
+    latency_ms: float = 0.0                 # Total wall-clock time
+    diagnostic_message: Optional[str] = None # Trace details on failure
+```
+
+When an agent runtime treats `status` as a first-class control variable, catastrophic silent errors are eliminated. Code that blindly deserializes `output_text` without asserting `status == InvocationStatus.COMPLETED` introduces fatal vulnerabilities into host actuation pipelines.
+
+### Truncation Hazards and Payload Quarantining {#sec-vol3-contract-quarantine}
+
+Among the non-completed outcomes, `TRUNCATED` represents the most insidious failure mode in autonomous systems. Unlike `TRANSPORT_FAILURE` or `REFUSED`—which surface cleanly as missing data—a `TRUNCATED` status returns an abundant, well-formed stream of text that appears plausible until its terminal boundary is examined.
+
+Consider the failure trace generated during the repair of the configuration parser defect. The host prompt directed the core to patch `config_parser.py` and `service.py`. The generation budget was capped at $K_{\max} = 128$ tokens for low-latency dispatch. The stochastic core emitted the diff shown in @fig-vol3-truncated-trace.
+
+::: {#fig-vol3-truncated-trace}
+```diff
+--- a/config_parser.py
++++ b/config_parser.py
+@@ -14,3 +14,3 @@
+ def parse_timeout(timeout_str: str) -> int:
+-    seconds = float(timeout_str.rstrip("s"))
+-    return int(seconds) * 1000
++    seconds = float(timeout_str.rstrip("s"))
++    return int(seconds * 1000)
+--- a/service.py
++++ b/service.py
+@@ -45,3 +45,4 @@
+ def init_client(timeout_str: str):
+-    timeout_ms = parse_timeout(timeout_str)
++    timeout_ms = parse_timeout(timeout_str)
++    if timeout_ms <= 0 or (timeout_ms > 60000 and not
+```
+
+Partial Diff Truncated at Step Ceiling $K_{\max} = 128$.
+:::
+
+At token 128, the engine's step counter reached $K_{\max}$, instantly freezing generation. The payload ends mid-line on `and not`. If this payload is processed by a naive agent runtime:
+
+1. **Parser Failure:** The `git apply` utility inspects the hunk headers, notices that the declared line count does not match the actual line count of the incomplete hunk, and rejects the entire patch with a non-zero exit code.
+2. **Partial State Mutation:** In toolchains that use permissive regex-based patch application rather than strict unified diff utilities, the runtime may apply the changes to `config_parser.py` while leaving `service.py` unmodified. The working tree is now in an inconsistent state: the parser accepts fractional seconds, but the client initialization logic remains unpatched.
+3. **AST Corruption:** If the target of generation was a raw source file rather than a diff, the truncated file contains unclosed string literals, unclosed parentheses, or unclosed control blocks. When the host language runtime attempts to compile the file, it encounters an unrecoverable syntax error.
+
+To protect host state against these failure modes, the runtime must enforce the **Truncation Quarantining Invariant**:
+
+$$\forall \mathcal{E}_{\text{resp}}, \quad S \neq \texttt{COMPLETED} \implies \mathbf{y} \notin \text{ActuationPipeline}$$
+
+Any payload marked with status `TRUNCATED` must be quarantined immediately in host memory and blocked from passing to compilers, test runners, shell environments, or filesystems.
+
+Once quarantined, the host runtime has two recovery pathways:
+* **State Continuation (Prefix Stitching):** The runtime can construct a follow-up request $\mathcal{C}_{\text{req}}'$ where the context vector is augmented with the partial output: $\mathbf{x}' = \mathbf{x} \circ \mathbf{y}$. The stochastic core is instructed to resume decoding from token $y_K$ onward until the natural stop delimiter is encountered. Because modern inference engines support prefix caching over static prompt segments, this continuation avoids recomputing the attention keys and values for $\mathbf{x}$, incurring computational cost only for the incremental tokens.
+* **Task Decomposition:** If an invocation repeatedly hits $K_{\max}$, the host runtime detects a structural planning failure: the requested generation task is too coarse for the allocated generation budget. The orchestrator must subdivide the task into atomic sub-goals (e.g., dispatching separate invocations to patch `config_parser.py` and `service.py` independently), ensuring that each sub-task's output length fits comfortably within $K_{\max}$.
+
+The invocation contract and normalized status envelope transform the stochastic core from an unpredictable streaming socket into a well-behaved coprocessor. Yet, while the contract protects the host runtime against resource exhaustion and truncated payloads, a `COMPLETED` envelope guarantees only that generation reached a terminal delimiter within budget—it provides no assurance that the emitted tokens form valid JSON, correct SQL, or compilable code.
+
+To prevent malformed syntax from wasting token budgets and execution cycles, modern runtimes intercept the generation loop directly at the decoding surface, constraining emitted tokens through compiled formal grammars.

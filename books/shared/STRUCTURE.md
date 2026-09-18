@@ -143,6 +143,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 | 15 | chapter | `15_multi_agent/15_multi_agent.qmd` |
 | 16 | chapter | `16_observability/16_observability.qmd` |
 | 17 | chapter | `17_tokenomics/17_tokenomics.qmd` |
+|  | part | `parts/part7_synthesis.qmd` |
 | 18 | chapter | `18_conclusion/18_conclusion.qmd` |
 | 19 | chapter | `appendices/app_a_reference_architecture.qmd` |
 | 20 | chapter | `appendices/app_b_tool_design.qmd` |
