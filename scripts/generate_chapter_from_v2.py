@@ -73,6 +73,7 @@ class SectionSpec:
     visuals: str
     literature: str
     causal_bridge: str
+    negative_scope: str = ""
 
 
 @dataclass
@@ -90,6 +91,7 @@ class ChapterManifest:
     sections: List[SectionSpec]
     fallacies_raw: str
     summary_raw: str
+    curricular_compass: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -154,6 +156,9 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
     curricular_m = re.search(r"-\s+\*\*Curricular Role.*?:\*\*\s*(.+?)(?=\n-|\n####|\Z)", matched_part, re.DOTALL)
     curricular_role = curricular_m.group(1).strip() if curricular_m else ""
 
+    compass_m = re.search(r"#### The Curricular Compass.*?\n```(.*?)```", matched_part, re.DOTALL)
+    curricular_compass = compass_m.group(1).strip() if compass_m else ""
+
     purpose_m = re.search(r"#### Purpose\s*\{[^}]*\}\s*(?:\[[^\]]*\])?\s*\n+(.+?)(?=\n::: \{\.callout-learning-objectives\}|\Z)", matched_part, re.DOTALL)
     purpose = purpose_m.group(1).strip() if purpose_m else ""
 
@@ -201,15 +206,22 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
         key_point_m = re.search(r"-\s+\*\*The Single Key Point:\*\*\s*(.+?)(?=\n-|\Z)", b, re.DOTALL)
         key_point = key_point_m.group(1).strip() if key_point_m else ""
 
-        hook_m = re.search(r"-\s+\*\*Concrete Systems Hook:\*\*\s*(.+?)(?=\n- \*\*Points|\Z)", b, re.DOTALL)
+        hook_m = re.search(r"-\s+\*\*Concrete Systems Hook:\*\*\s*(.+?)(?=\n-\s+\*\*(?:Points|What to Cover)|\Z)", b, re.DOTALL)
         hook = hook_m.group(1).strip() if hook_m else ""
 
         points_m = re.search(
-            r"-\s+\*\*Points to explain.*?:\*\*\s*(.+?)(?=\n- \*\*Visuals|\n- \*\*Seminal|\n- \*\*Causal|\Z)",
+            r"-\s+\*\*(?:What to Cover|Points to explain).*?:\*\*\s*(.+?)(?=\n-\s+\*\*What NOT to Cover|\n-\s+\*\*Visuals|\n-\s+\*\*Seminal|\n-\s+\*\*Causal|\Z)",
             b,
             re.DOTALL,
         )
         points = points_m.group(1).strip() if points_m else ""
+
+        neg_scope_m = re.search(
+            r"-\s+\*\*What NOT to Cover.*?:\*\*\s*(.+?)(?=\n-\s+\*\*Visuals|\n-\s+\*\*Seminal|\n-\s+\*\*Causal|\Z)",
+            b,
+            re.DOTALL,
+        )
+        neg_scope = neg_scope_m.group(1).strip() if neg_scope_m else ""
 
         visuals_m = re.search(r"-\s+\*\*Visuals & Tables:\*\*\s*(.+?)(?=\n- \*\*Seminal|\n- \*\*Causal|\Z)", b, re.DOTALL)
         visuals = visuals_m.group(1).strip() if visuals_m else ""
@@ -234,6 +246,7 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
                 visuals=visuals,
                 literature=lit,
                 causal_bridge=bridge,
+                negative_scope=neg_scope,
             )
         )
 
@@ -257,6 +270,7 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
         sections=sections,
         fallacies_raw=fallacies_raw,
         summary_raw=summary_raw,
+        curricular_compass=curricular_compass,
     )
 
 
@@ -454,11 +468,18 @@ def compose_step_prompt(
         f"  - Section {s.section_num}: {s.title} (Key Point: {s.key_point})"
         for s in manifest.sections
     )
+    compass_block = ""
+    if manifest.curricular_compass:
+        compass_block = (
+            "CURRICULAR COMPASS (WHERE WE ARE IN THE 18 CHAPTERS):\n"
+            f"```\n{manifest.curricular_compass}\n```\n\n"
+        )
     tier_2 = (
         "================================================================================\n"
         "TIER 2: CHAPTER GROUNDING BLUEPRINT (THE BIG PICTURE)\n"
         "================================================================================\n"
         f"{macro_map}\n\n"
+        f"{compass_block}"
         f"ACTIVE CHAPTER POSITION IN THE MACHINE ARCHITECTURE:\n"
         f"- Chapter {manifest.number}: {manifest.title}\n"
         f"- Chapter Anchor: #sec-vol3-{manifest.slug}\n"
@@ -549,6 +570,15 @@ def compose_step_prompt(
     elif 1 <= step_idx <= len(manifest.sections):
         sec = manifest.sections[step_idx - 1]
         is_sec1 = sec.section_num.endswith(".1")
+        sec_specific_scope = sec.negative_scope or SECTION_NEGATIVE_SCOPES.get(sec.section_num, "")
+        part_traps = get_part_traps(manifest.number)
+        negative_parts = []
+        if sec_specific_scope:
+            negative_parts.append(f"**NEGATIVE SCOPE BOUNDARIES (STRICTLY FORBIDDEN IN THIS SECTION):**\n{sec_specific_scope.strip()}")
+        if part_traps:
+            negative_parts.append(f"**PART-LEVEL NON-SYSTEMS TRAPS (STRICTLY FORBIDDEN):**\n{part_traps}")
+        negative_scope = ("\n\n" + "\n\n".join(negative_parts) + "\n") if negative_parts else ""
+
         if is_sec1:
             task_parts.append(
                 f"### Task: Author Section {sec.section_num}: {sec.title}\n"
@@ -563,21 +593,13 @@ def compose_step_prompt(
                 f"**Heading & Anchor:** `{sec.heading_anchor}`\n"
                 f"**Single Key Point:** {sec.key_point}\n"
                 f"**Concrete Systems Hook:**\n{sec.hook}\n\n"
+                f"{negative_scope}\n"
                 f"**Points to explain:**\n{sec.points}\n\n"
                 f"**Visuals to reference:**\n{sec.visuals or 'None specified'}\n\n"
                 f"**Causal Bridge to conclude with:**\n{sec.causal_bridge}\n\n"
                 "Output ONLY the Quarto markdown text. No backtick code fences wrapping the entire response."
             )
         else:
-            sec_specific_scope = SECTION_NEGATIVE_SCOPES.get(sec.section_num, "")
-            part_traps = get_part_traps(manifest.number)
-            negative_parts = []
-            if sec_specific_scope:
-                negative_parts.append(sec_specific_scope.strip())
-            if part_traps:
-                negative_parts.append(f"**PART-LEVEL NON-SYSTEMS TRAPS (STRICTLY FORBIDDEN):**\n{part_traps}")
-            negative_scope = ("\n\n" + "\n\n".join(negative_parts) + "\n") if negative_parts else ""
-
             task_parts.append(
                 f"### Task: Author Section {sec.section_num}: {sec.title}\n"
                 f"Target Budget: {sec.budget_target} words (Strict Range: {sec.budget_range[0]}–{sec.budget_range[1]} words).\n\n"
@@ -771,6 +793,61 @@ def run_review_gates(content: str, step_info: Dict[str, Any], is_sec1: bool = Fa
             passed=True,
             gate_name="gate_status_envelope_drift",
             message="PASSED: Status envelope uses locked enumeration symbols.",
+        ))
+
+    # Gate 2.8: gate_negative_scope (Prevent Downstream/Premature Architectural Leaks)
+    chapter_num = str(step_info.get("chapter_number", "")).zfill(2)
+    leaks_found = []
+
+    chapter_forbidden_rules = {
+        "02": [
+            (r"\b(microVMs?|Firecracker|cgroups?|seccomp|OverlayFS)\b", "Sandboxing/Virtualization leak (belongs to Chapter 08)"),
+            (r"\b(PagedAttention|virtual memory block tables?|swapping to host DRAM)\b", "KV-Cache Hierarchy leak (belongs to Chapter 05)"),
+            (r"\b(MCTS|Monte Carlo Tree Search|Process Reward Models?|PRMs?)\b", "Deliberation search leak (belongs to Chapter 03)"),
+        ],
+        "03": [
+            (r"\b(microVMs?|Firecracker|cgroups?|seccomp|OverlayFS)\b", "Sandboxing/Virtualization leak (belongs to Chapter 08)"),
+            (r"\b(PagedAttention|virtual memory block tables?)\b", "KV-Cache Hierarchy leak (belongs to Chapter 05)"),
+        ],
+        "04": [
+            (r"\b(microVMs?|Firecracker|cgroups?|seccomp|OverlayFS)\b", "Sandboxing/Virtualization leak (belongs to Chapter 08)"),
+            (r"\b(PagedAttention|virtual memory block tables?)\b", "KV-Cache Hierarchy leak (belongs to Chapter 05)"),
+        ],
+        "05": [
+            (r"\b(microVMs?|Firecracker|cgroups?|seccomp|OverlayFS)\b", "Sandboxing/Virtualization leak (belongs to Chapter 08)"),
+        ],
+        "06": [
+            (r"\b(microVMs?|Firecracker|cgroups?|seccomp|OverlayFS)\b", "Sandboxing/Virtualization leak (belongs to Chapter 08)"),
+        ],
+        "07": [
+            (r"\b(microVMs?|Firecracker|cgroups?|seccomp|OverlayFS)\b", "Sandboxing/Virtualization leak (belongs to Chapter 08)"),
+        ],
+    }
+
+    rules = chapter_forbidden_rules.get(chapter_num, [])
+    for pat, reason in rules:
+        matches = re.findall(pat, content, re.IGNORECASE)
+        if matches:
+            leaks_found.append(f"{reason}: {matches[:3]}")
+
+    sec_num = step_info.get("section_num", "")
+    if sec_num == "2.3" and re.search(r"\b(Roofline|arithmetic intensity\s*=\s*2/P)\b", content, re.IGNORECASE):
+        leaks_found.append("Roofline derivation leak in Sec 2.3 (belongs to Section 2.7)")
+    if sec_num == "2.5" and re.search(r"\b(2\s*L\s*H\s*d|Mem_\{?KV\}?)\b", content):
+        leaks_found.append("KV memory formula leak in Sec 2.5 (covered in Section 2.2)")
+
+    if leaks_found:
+        results.append(GateResult(
+            passed=False,
+            gate_name="gate_negative_scope",
+            message=f"FAILED: Found premature scope leaks / negative scope violations: {leaks_found}.",
+            details={"leaks": leaks_found},
+        ))
+    else:
+        results.append(GateResult(
+            passed=True,
+            gate_name="gate_negative_scope",
+            message="PASSED: No premature downstream scope leaks detected.",
         ))
 
     # Gate 3: gate_external_closure (Verification Boundary)
@@ -982,6 +1059,7 @@ def generate_with_review_and_repair(
             "gate_anti_anthropomorphism",
             "gate_no_micro_instructions",
             "gate_status_envelope_drift",
+            "gate_negative_scope",
             "gate_no_opening_hardware_dump",
             "gate_quarto_crossref",
             "gate_anti_recap",
@@ -1235,6 +1313,11 @@ def execute_step(
         return False
 
     step_info = state["steps"][step_idx]
+    step_info["chapter_number"] = manifest.number
+    if 1 <= step_idx <= len(manifest.sections):
+        sec = manifest.sections[step_idx - 1]
+        step_info["section_num"] = sec.section_num
+        step_info["negative_scope"] = sec.negative_scope
     target_file = sections_dir / step_info["file"]
     is_sec1 = (step_idx == 1)
 
@@ -1445,6 +1528,23 @@ def validate_assembled_chapter(ch_dir: Path) -> Dict[str, Any]:
     contractions = re.findall(r"\b(can't|won't|don't|doesn't|isn't|aren't|haven't|hasn't|it's)\b", text, re.IGNORECASE)
     if contractions:
         issues.append(f"Found {len(contractions)} contractions (American formal systems prose requires non-contracted forms).")
+
+    # Check for forbidden negative scope leaks
+    ch_match = re.search(r"ch(\d+)_", ch_dir.name)
+    ch_num = ch_match.group(1).zfill(2) if ch_match else ""
+    if ch_num in ["02", "03", "04", "05", "06", "07"]:
+        forbidden_patterns = [
+            (r"\b(microVMs?|Firecracker|cgroups?|seccomp|OverlayFS)\b", "Sandboxing/Virtualization leak (Chapter 08)")
+        ]
+        if ch_num in ["02", "03", "04"]:
+            forbidden_patterns.append((r"\b(PagedAttention|virtual memory block tables?)\b", "KV-Cache Hierarchy leak (Chapter 05)"))
+        if ch_num == "02":
+            forbidden_patterns.append((r"\b(MCTS|Monte Carlo Tree Search|Process Reward Models?|PRMs?)\b", "Deliberation search leak (Chapter 03)"))
+
+        for pat, desc in forbidden_patterns:
+            matches = re.findall(pat, text, re.IGNORECASE)
+            if matches:
+                issues.append(f"CRITICAL: Found forbidden {desc} in assembled draft: {matches[:5]}")
 
     report = {
         "chapter_dir": str(ch_dir),
