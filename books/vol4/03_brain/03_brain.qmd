@@ -31,6 +31,10 @@ _How does an autonomous agent deliberate over high-dimensional sensory tokens wi
 
 A robot operating among people must interpret changing surroundings and propose actions beyond a fixed sequence of programmed movements. Learned models extend that capability by connecting sensory observations with patterns acquired during training. Their usefulness does not establish that every proposal is physically feasible or that every inference will finish before the body needs its next command. Larger models consume memory bandwidth as well as arithmetic, and delays in moving their weights can leave a proposal based on an outdated view of the world. An incorrect proposal creates a separate problem even when it arrives on time. The architecture must therefore separate the brain's ability to suggest an action from permission to execute it. In physical AI systems architecture, the learned brain supplies candidate behavior while the nervous system retains control of timing and actuator authority, allowing adaptation within the measured limits of the physical body.
 
+::: {.column-margin .margin-pointer}
+↰ **Prerequisite:** Cognitive policy proposals remain unprivileged until verified by the safety enforcer derived in @sec-boundary-dual-brain.
+:::
+
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
@@ -223,6 +227,10 @@ As structured in modern embodied artificial intelligence (@fig-vla-taxonomy and 
    $$\boldsymbol{\tau} = \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) + \boldsymbol{\tau}_{\text{contact}}$$
    Because inertia $\mathbf{M}(\mathbf{q})$ and Coriolis forces $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}})$ vary non-linearly with instantaneous joint configuration and velocity, commanding open-loop torques from a slow $1\text{--}10\text{ Hz}$ neural model without high-frequency feedback guarantees dynamic instability—any minor model error, frictional variation, or unmodeled payload discrepancy causes the limb to accelerate wildly into joint limits. Kinematic setpoints, by contrast, specify an intended spatial path while delegating high-gain closed-loop torque synthesis to the deterministic $1000\text{ Hz}$ nervous system and $10\text{--}25\text{ kHz}$ field-oriented current loops. (Where specialized high-rate reinforcement learning policies operating at $100\text{--}500\text{ Hz}$ output torques directly, they remain strictly bounded by the microcontroller's microsecond passivity filters and energy-tank accumulators detailed in @sec-nervous-invariant-checking.)
 
+::: {.column-margin .margin-pointer}
+↳ **Downstream:** Zero-copy proposal passing between brain and nervous system relies on the lock-free buffers analyzed in @sec-nervous-cadences.
+:::
+
    Proposals are dispatched across lock-free shared memory to downstream real-time safety monitors on isolated microcontrollers (MCUs). These hardware-level watchdogs evaluate physical stopping distances, torque limits, and the actuator thermal envelopes detailed in @sec-body-thermal-duty-cycles at $1000\text{ Hz}$ before granting execution permission, ensuring that an algorithmic hallucination cannot command a motion that would physically damage the robot or its environment.[^fn-math-unprivileged-control]
 
 [^fn-math-unprivileged-control]: **Proposal-Permission Privilege Boundary**\index{Privilege boundary!unprivileged proposals}\index{Control barrier function!safety invariance}: Treating the neural policy as an unprivileged proposal generator isolates stochastic inference from actuator registers. Candidate trajectory setpoints $\mathbf{q}_{\text{ref}}(t)$ are continuously evaluated against forward-invariant Control Barrier Functions (CBFs) $h(\mathbf{x}) \ge 0$ on dedicated safety silicon, ensuring that kinematic exploration or perceptual hallucination cannot command setpoints that violate actuator limits or collision envelopes. Mathematical formulations of CBFs appear in @sec-appendix-control.
@@ -340,6 +348,10 @@ An intent lease specifies what operational goal to pursue, but it provides no co
 
 To understand how planning is executed on physical silicon, we must treat deep neural policies not as abstract mathematical functions, but as physical compute workloads running on embedded accelerators—such as a canonical high-performance heterogeneous edge SoC with integrated GPU tensor cores and dedicated deep learning accelerators—bounded by memory bus bandwidth, silicon thermals, and electrical power.
 
+::: {.column-margin .margin-pointer}
+↳ **Downstream:** High-throughput neural inference accelerators are isolated from deterministic cores in @sec-placement-two-paths-one-die.
+:::
+
 Consider what happens if a robot attempts to generate continuous motor actions one discrete step at a time through an autoregressive foundation model (such as a 7-billion parameter Vision-Language-Action network). In single-step autoregressive decoding, generating each individual action token requires the processor to stream every parameter of the multi-billion-parameter foundation model from external Dynamic Random-Access Memory (DRAM) across physical bus traces into on-chip registers. For detailed memory wall derivations and roofline hardware models, see @sec-appendix-systems.
 
 Executing neural policies token-by-token forces the processor to sweep gigabytes of weight matrices across the memory bus for every millisecond control step (see @fig-patterson-roofline) [@williams2009roofline]. This memory wall bottleneck[^fn-hw-dram-bandwidth] traps inference cadences at single-digit frequencies ($1\text{--}5\text{ Hz}$). If an embodied manipulator attempted to control moving mass at $5\text{ Hz}$, the actuators would stutter across discrete steps, inducing severe contact instability and mechanical chatter.
@@ -398,6 +410,10 @@ To guarantee smooth physical execution, systems implement **temporal ensembling*
 $$\mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}{\sum_{i=0}^{\min(t, H-1)} w_i}, \quad w_i = \exp(-m \cdot i)$$
 
 where $\mathbf{a}_{t \mid t-i}$ represents the action predicted for time step $t$ by the action chunk initiated at time $t-i$, and $m > 0$ is a tunable temporal discount factor. The resulting smoothed waypoints are interpolated via quintic ($C^2$) splines by the downstream real-time nervous system at $1000\text{ Hz}$, ensuring continuous positions, velocities, and accelerations across all actuator joints while preserving valid $SE(3)$ transformations via Lie algebra $\mathfrak{se}(3)$ exponential maps or Spherical Linear Interpolation to maintain orthonormal rotation matrices.
+
+::: {.column-margin .margin-pointer}
+↳ **Downstream:** Tokenized action proposals are mapped to continuous polynomial splines in @sec-planning-continuous-trajectories.
+:::
 
 ```{python}
 #| label: calc-brain-action-chunking-lpddr5
@@ -530,6 +546,10 @@ Memory contention escalates dramatically when multi-camera sensory feeds are ret
 
 Once synthesized, action chunks must be executed without allowing dynamic drift to breach physical tolerances. Consider a 7-DoF robotic manipulator picking components from a moving conveyor ($v_{\text{conveyor}} = 0.30\text{ m/s}$) with trajectory period $\Delta t = 20\text{ ms}$ ($50\text{ Hz}$) and policy inference latency $t_{\text{infer}} = 160\text{ ms}$. Sizing the chunk horizon to avoid actuator buffer starvation requires $H_{\min} = t_{\text{infer}} / \Delta t = 160 / 20 = 8\text{ steps}$; executing fewer steps forces the arm to halt mid-motion every cycle. Conversely, under conveyor belt slip accelerating target drift at $a_{\text{drift}} = 0.50\text{ m/s}^2$, open-loop execution over $H = 64$ steps ($T_{\text{chunk}} = 1.28\text{ s}$) accumulates spatial drift of $\Delta x_{\text{drift}} = \frac{1}{2} (0.50)(1.28)^2 \approx 0.410\text{ m} = 410\text{ mm}$—exceeding the gripper's $15\text{ mm}$ tolerance by a factor of 27.3 and causing collision. The maximum execution duration before drift breaches $15\text{ mm}$ is $T_{\max} = \sqrt{2 \Delta x_{\max} / a_{\text{drift}}} = \sqrt{2(0.015) / 0.50} \approx 0.245\text{ s} = 245\text{ ms}$, capping execution at $H_{\max} = 245 / 20 \approx 12\text{ steps}$. Sizing the execution window to $H_{\text{exec}} = 10\text{ steps}$ ($200\text{ ms}$, replanning at $5\text{ Hz}$) leaves a $40\text{ ms}$ inference safety margin while capping maximum drift at $\Delta x_{\text{drift}} = \frac{1}{2}(0.50)(0.20)^2 = 10.0\text{ mm} < 15\text{ mm}$. Sizing chunk horizons requires overlapping receded-horizon execution with temporal ensembling to balance closed-loop reactivity against smooth motor continuity.
 
+::: {.column-margin .margin-pointer}
+↳ **Downstream:** Bounded action chunk proposals are filtered against forward-invariant barriers in @sec-enforcement-safe-sets-conditional-permission.
+:::
+
 ::: {#chk-brain-soc-deliberation-limits .callout-checkpoint title="Edge SoC deliberation limits: Memory walls, KV cache, and dynamic drift"}
 
 Before analyzing end-to-end cognitive pipelines and runtime failure modes, verify your understanding of edge deliberation limits across memory and time:
@@ -628,6 +648,10 @@ Treating the learned brain as an unprivileged proposal generator guarantees that
 :::
 
 The complete operational loop spanning intent reasoning, action chunk synthesis, and deterministic safety arbitration is formalized in @algo-two-speed-brain.
+
+::: {.column-margin .margin-pointer}
+↰ **Prerequisite:** Spatial representation tokens in VLA backbones build upon the coordinate frames established in @sec-memory-spatial-state-schema.
+:::
 
 ```pseudocode
 #| label: algo-two-speed-brain

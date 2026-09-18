@@ -188,4 +188,5 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | backmatter | `backmatter/appendix_ml.qmd` |
 |  | backmatter | `backmatter/appendix_control.qmd` |
 |  | backmatter | `backmatter/appendix_systems.qmd` |
+|  | backmatter | `backmatter/appendix_spa.qmd` |
 |  | backmatter | `backmatter/glossary/glossary.qmd` |
