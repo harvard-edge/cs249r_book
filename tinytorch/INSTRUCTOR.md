@@ -68,11 +68,11 @@ In a standard course, students should build the foundational mechanisms without 
 
 ### **Hardware Extensions Track (`tinytorch.extensions`)**
 To expose students to production accelerator bridging without breaking the pure-NumPy curriculum:
-- **`simd_ops.py` / `cpp_simd_gemm.cpp`**: Native C++ SIMD vectorization with AVX2/NEON and OpenMP multithreading.
-- **`triton_gelu.py`**: OpenAI Triton GPU kernel with automatic SRAM block tiling (falls back gracefully to NumPy on CPU).
-- **`mps_ops.py`**: Apple Silicon Metal Performance Shaders unified-memory dispatch.
+- **`simd_ops.py` / `cpp_simd_gemm.cpp`**: C++ matrix multiply and fused bias + GELU, vectorized for AVX2/NEON and compiled on first use. Multithreaded only when an OpenMP runtime is present (on macOS, `brew install libomp`); `simd_build_info()` reports which build a student got.
+- **`triton_gelu.py`**: Triton kernel that fuses bias + GELU on an NVIDIA GPU; needs PyTorch and Triton, falls back to NumPy.
+- **`mps_ops.py`**: Matrix multiply on the Apple GPU through PyTorch's MPS backend; needs PyTorch, falls back to NumPy.
 
-Hardware extensions are completely optional and modular; they demonstrate real-world systems acceleration while preserving 100% CPU compatibility for autograding.
+Hardware extensions are optional and ungraded, and every one falls back to NumPy, so autograding never depends on them. The book's final chapter walks the code and measures each against NumPy.
 
 ### **1. Prepare Assignments**
 ```bash

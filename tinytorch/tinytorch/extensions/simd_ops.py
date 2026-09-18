@@ -39,10 +39,16 @@ def _openmp_flags():
 
 
 def _arch_flags():
-    """Let the compiler use the widest vector unit of the build machine."""
+    """Flags that let the compiler vectorize for the build machine."""
+    flags = []
     if platform.machine() in ("x86_64", "AMD64"):
-        return ["-mavx2", "-mfma"]
-    return []  # arm64: NEON is always on, -O3 vectorizes for it
+        flags += ["-mavx2", "-mfma"]  # arm64 needs nothing: NEON is always on
+    if platform.system() == "Darwin":
+        # A loop that calls std::tanh stays scalar unless the compiler has a
+        # vector tanh to call; Accelerate provides one. Without this the fused
+        # GELU runs about 7x slower (measured on an M5 Max, 2026-09-18).
+        flags += ["-fveclib=Accelerate", "-framework", "Accelerate"]
+    return flags
 
 
 def _compile():
@@ -111,7 +117,8 @@ def has_simd_support() -> bool:
 
 
 def simd_build_info() -> dict:
-    """What the build produced: whether OpenMP is on, how many threads, the compile command."""
+    """What the build produced: whether OpenMP is on, how many threads, and the
+    compile command (None when an earlier process built the library)."""
     compile_and_load_simd()
     return dict(_build_info)
 
