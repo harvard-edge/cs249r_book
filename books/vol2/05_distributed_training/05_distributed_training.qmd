@@ -657,15 +657,202 @@ The method parallels gradient accumulation, where a single device accumulates gr
 
 ### Data parallelism implementation {#sec-distributed-training-systems-systems-data-parallelism-implementation-fa03}
 
-The implementation details matter because the SGD equivalence only holds when each phase preserves the intended aggregate sampling and weighting, complete local gradient contributions, and a single synchronized update. The concrete workflow therefore traces the path from assigning local batches to synchronizing the computed gradients. Consider @fig-dist-train-data-parallelism: it traces the complete workflow from batch assignment through gradient aggregation, showing how each GPU processes its assigned batch before synchronization brings all gradients together for parameter updates.
+The implementation details matter because the SGD equivalence only holds when each phase preserves the intended aggregate sampling and weighting, complete local gradient contributions, and a single synchronized update. The concrete workflow therefore traces the path from assigning local batches to synchronizing the computed gradients. @Fig-dist-train-data-parallelism traces the five-stage data-parallel execution pipeline, illustrating how identical model replicas ingest disjoint batch shards, compute independent local gradients, and converge at a collective reduction barrier before executing uniform weight updates.
 
-::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) sample or partition the intended global batch, (2) assign local batches to GPUs, (3) compute forward and backward passes independently, (4) reduce weighted gradient contributions, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated." fig-alt="Flowchart showing a five-stage data-parallel workflow. Input data splits into four batches assigned to GPUs 0–3; each GPU performs a forward and backward pass, gradients synchronize and aggregate, and each model replica receives the same update."}
+::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) partition the global batch, (2) assign sharded mini-batches to individual GPUs, (3) compute independent forward and backward passes to produce local gradients $g_i$, (4) execute an AllReduce collective across the cluster to obtain the average gradient $\bar{g}$, and (5) update parameters identically across all devices. This strategy preserves the mathematical semantics of single-device SGD while distributing the compute burden." fig-alt="Five-stage data-parallel workflow diagram showing global batch partitioning, local forward and backward computation across four GPU swimlanes, centralized AllReduce collective synchronization, and synchronized parameter updates."}
 
-![](images/svg/data-parallel-flow.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  phase header/.style={
+    font=\bfseries\footnotesize,
+    text=NavyBlue,
+    align=center
+  },
+  batch box/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=OrangeLine,
+    fill=OrangeL,
+    line width=0.9pt,
+    align=center,
+    font=\footnotesize
+  },
+  mini box/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    draw=SteelBlue,
+    fill=LightBlue,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize
+  },
+  step box/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.7pt,
+    align=center,
+    font=\scriptsize
+  },
+  grad box/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=GreenFill,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize\bfseries,
+    text=DarkGreen
+  },
+  update box/.style={
+    rectangle,
+    rounded corners=4pt,
+    draw=SteelBlue,
+    fill=LightBlue!60,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize
+  }
+]
+
+  % Phase Columns & Headers
+  \node[phase header] at (0.8, 8.5) {1. Global\\[1pt]Batch};
+  \node[phase header] at (2.6, 8.5) {2. Sharded\\[1pt]Inputs};
+  \node[phase header] at (6.0, 8.5) {3. Local Compute\\[1pt](Forward / Backward per GPU)};
+  \node[phase header] at (10.4, 8.5) {4. Collective\\[1pt]Sync};
+  \node[phase header] at (14.2, 8.5) {5. Weight\\[1pt]Update};
+
+  % Vertical guide separators
+  \draw[dashed, gray!30, thin] (1.7, 8.9) -- (1.7, 0.4);
+  \draw[dashed, gray!30, thin] (3.6, 8.9) -- (3.6, 0.4);
+  \draw[dashed, gray!30, thin] (8.5, 8.9) -- (8.5, 0.4);
+  \draw[dashed, gray!30, thin] (12.3, 8.9) -- (12.3, 0.4);
+
+  % Phase 1: Global Batch
+  \node[batch box, minimum width=1.4cm, minimum height=4.8cm] (GB) at (0.8, 4.4) {
+    \textbf{Global}\\[2pt]
+    \textbf{Batch}\\[5pt]
+    \small $B = 128$\\[2pt]
+    \scriptsize samples
+  };
+
+  % 4 GPU Swimlanes
+  \foreach \i/\y in {0/6.8, 1/5.2, 2/3.6, 3/2.0} {
+
+    % Phase 2: Sharded Mini-batch
+    \node[mini box, minimum width=1.6cm, minimum height=0.95cm] (MB\i) at (2.6, \y) {
+      \textbf{Mini-batch \i}\\[1pt]
+      \tiny $B_i = 32$ samples
+    };
+
+    % Phase 3: GPU Compute Blocks
+    \node[anchor=south west, font=\tiny\bfseries, fill=NavyBlue, text=white, rounded corners=1.5pt, inner sep=1.5pt]
+      at (3.85, \y+0.32) {GPU \i};
+
+    \node[step box, draw=SteelBlue!80, fill=LightBlue, minimum width=1.05cm, minimum height=0.68cm] (FWD\i) at (4.45, \y) {
+      \textbf{\scriptsize Fwd}
+    };
+
+    \node[step box, draw=RedLine!70, fill=RedFill, minimum width=0.85cm, minimum height=0.68cm] (LOSS\i) at (5.6, \y) {
+      \textbf{\scriptsize Loss}
+    };
+
+    \node[step box, draw=OrangeLine!80, fill=OrangeL, minimum width=1.05cm, minimum height=0.68cm] (BWD\i) at (6.75, \y) {
+      \textbf{\scriptsize Bwd}
+    };
+
+    \node[grad box, minimum width=0.85cm, minimum height=0.68cm] (GRAD\i) at (7.95, \y) {
+      $g_\i$
+    };
+
+    \draw[->, line width=0.7pt, gray!70] (MB\i.east) -- (FWD\i.west);
+    \draw[->, line width=0.7pt, gray!70] (FWD\i.east) -- (LOSS\i.west);
+    \draw[->, line width=0.7pt, gray!70] (LOSS\i.east) -- (BWD\i.west);
+    \draw[->, line width=0.75pt, DarkGreen] (BWD\i.east) -- (GRAD\i.west);
+
+    % Phase 5: Weight Update Block
+    \node[update box, minimum width=2.5cm, minimum height=0.95cm] (UPD\i) at (14.2, \y) {
+      \textbf{GPU \i: Update}\\[1.5pt]
+      $\theta \leftarrow \theta - \eta \cdot \bar{g}$
+    };
+  }
+
+  % Connect Global Batch to Mini-batches
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB0.west);
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB1.west);
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB2.west);
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB3.west);
+
+  % Phase 4: AllReduce Collective Hub
+  \node[
+    rectangle,
+    rounded corners=6pt,
+    draw=DarkGreen,
+    fill=GreenFill!85,
+    line width=1.1pt,
+    inner sep=6pt,
+    align=center,
+    minimum width=3.4cm,
+    minimum height=3.8cm
+  ] (AR) at (10.4, 4.4) {
+    \textbf{\small AllReduce}\\[2pt]
+    \scriptsize Ring Topology\\[5pt]
+    \normalsize$\bar{g} = \frac{1}{N}\sum_{i=0}^{N-1} g_i$\\[5pt]
+    \scriptsize Comm Volume:\\[1pt]
+    $\frac{2(N-1)}{N}|P|$\\[6pt]
+    \begin{tikzpicture}
+      \draw[DarkGreen, line width=1.0pt] (0,0) circle (0.35cm);
+      \foreach \ang in {0, 90, 180, 270} {
+        \fill[DarkGreen] (\ang:0.35cm) circle (1.8pt);
+      }
+    \end{tikzpicture}
+  };
+
+  % Gradient arrows to AllReduce
+  \coordinate (ARin0) at ($(AR.north west)!0.18!(AR.south west)$);
+  \coordinate (ARin1) at ($(AR.north west)!0.38!(AR.south west)$);
+  \coordinate (ARin2) at ($(AR.north west)!0.62!(AR.south west)$);
+  \coordinate (ARin3) at ($(AR.north west)!0.82!(AR.south west)$);
+
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD0.east) -- ++(0.35, 0) |- (ARin0);
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD1.east) -- ++(0.5, 0) |- (ARin1);
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD2.east) -- ++(0.5, 0) |- (ARin2);
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD3.east) -- ++(0.35, 0) |- (ARin3);
+
+  % Synchronized gradient broadcast arrows to Updates
+  \coordinate (ARout0) at ($(AR.north east)!0.18!(AR.south east)$);
+  \coordinate (ARout1) at ($(AR.north east)!0.38!(AR.south east)$);
+  \coordinate (ARout2) at ($(AR.north east)!0.62!(AR.south east)$);
+  \coordinate (ARout3) at ($(AR.north east)!0.82!(AR.south east)$);
+
+  \draw[->, line width=0.9pt, SteelBlue] (ARout0) -- ++(0.35, 0) |- (UPD0.west);
+  \draw[->, line width=0.9pt, SteelBlue] (ARout1) -- ++(0.5, 0) |- (UPD1.west);
+  \draw[->, line width=0.9pt, SteelBlue] (ARout2) -- ++(0.5, 0) |- (UPD2.west);
+  \draw[->, line width=0.9pt, SteelBlue] (ARout3) -- ++(0.35, 0) |- (UPD3.west);
+
+  % Footer: Synchronization Invariant
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=DarkGreen!70,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    inner sep=5.5pt,
+    align=center,
+    text width=14.8cm
+  ] at (7.6, 0.7) {
+    \textbf{\footnotesize Exact Synchronization Invariant:}\;
+    \scriptsize Synchronized gradient averaging guarantees that all $N$ workers maintain identical parameters:\;
+    $\theta^{(t+1)}_0 = \theta^{(t+1)}_1 = \theta^{(t+1)}_2 = \theta^{(t+1)}_3$.
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
-The critical synchronization point is stage 4 (@fig-dist-train-data-parallelism): AllReduce must complete before any GPU can update parameters, making gradient communication the dominant bottleneck as the device count grows.
+The critical synchronization point occurs at stage 4 (@fig-dist-train-data-parallelism), where the AllReduce collective must complete across all worker ranks before any device executes its parameter update, establishing network bisection bandwidth as the binding scaling bottleneck.
 
 #### Dataset splitting {#sec-distributed-training-systems-systems-dataset-splitting-1edf}
 
