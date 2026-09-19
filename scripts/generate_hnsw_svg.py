@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Generate hnsw_hierarchical_routing.svg for Chapter 06"""
+
+svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 340" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: system-ui, -apple-system, sans-serif; font-weight: 700; font-size: 15px; fill: #0f172a; }
+      .sub-note { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #64748b; }
+      .layer-hdr { font-family: system-ui, -apple-system, sans-serif; font-weight: 700; font-size: 11px; }
+      .node-txt { font-family: ui-monospace, monospace; font-weight: 700; font-size: 11px; text-anchor: middle; }
+      .card-text { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #334155; }
+    </style>
+    <marker id="arr-h-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arr-down" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="1080" height="340" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+
+  <!-- Top Banner -->
+  <rect x="20" y="16" width="1040" height="40" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="35" y="41" class="title">HIERARCHICAL NAVIGABLE SMALL WORLD (HNSW) MULTI-SCALE ROUTING</text>
+  <text x="1045" y="41" class="sub-note" text-anchor="end">Logarithmic-Time Proximity Search via Multi-Layer Skip-Graph Topologies</text>
+
+  <!-- Layer 2: Sparse Highway -->
+  <g transform="translate(45, 75)">
+    <rect width="990" height="45" rx="6" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text x="20" y="27" class="layer-hdr" fill="#1e40af">Layer 2: Sparse Highway (Long-range jumps)</text>
+
+    <!-- v1 -->
+    <circle cx="450" cy="22.5" r="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+    <text x="450" y="26.5" class="node-txt" fill="#1e3a8a">v1</text>
+
+    <!-- v8 -->
+    <circle cx="950" cy="22.5" r="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+    <text x="950" y="26.5" class="node-txt" fill="#1e3a8a">v8</text>
+
+    <!-- Edge v1 -> v8 -->
+    <line x1="466" y1="22.5" x2="932" y2="22.5" stroke="#2563eb" stroke-width="2" marker-end="url(#arr-h-blue)"/>
+  </g>
+
+  <!-- Vertical connectors Layer 2 -> Layer 1 -->
+  <line x1="495" y1="120" x2="495" y2="138" stroke="#94a3b8" stroke-dasharray="3,3" stroke-width="1.5" marker-end="url(#arr-down)"/>
+  <line x1="995" y1="120" x2="995" y2="138" stroke="#94a3b8" stroke-dasharray="3,3" stroke-width="1.5" marker-end="url(#arr-down)"/>
+
+  <!-- Layer 1: Regional Mesh -->
+  <g transform="translate(45, 140)">
+    <rect width="990" height="45" rx="6" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text x="20" y="27" class="layer-hdr" fill="#6d28d9">Layer 1: Regional Mesh (Intermediate clustering)</text>
+
+    <!-- v1 -->
+    <circle cx="450" cy="22.5" r="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="450" y="26.5" class="node-txt" fill="#5b21b6">v1</text>
+
+    <!-- v4 -->
+    <circle cx="700" cy="22.5" r="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="700" y="26.5" class="node-txt" fill="#5b21b6">v4</text>
+
+    <!-- v8 -->
+    <circle cx="950" cy="22.5" r="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="950" y="26.5" class="node-txt" fill="#5b21b6">v8</text>
+
+    <!-- Edges -->
+    <line x1="466" y1="22.5" x2="682" y2="22.5" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-h-blue)"/>
+    <line x1="716" y1="22.5" x2="932" y2="22.5" stroke="#7c3aed" stroke-width="2" marker-end="url(#arr-h-blue)"/>
+  </g>
+
+  <!-- Vertical connectors Layer 1 -> Layer 0 -->
+  <line x1="495" y1="185" x2="495" y2="203" stroke="#94a3b8" stroke-dasharray="3,3" stroke-width="1.5" marker-end="url(#arr-down)"/>
+  <line x1="745" y1="185" x2="745" y2="203" stroke="#94a3b8" stroke-dasharray="3,3" stroke-width="1.5" marker-end="url(#arr-down)"/>
+  <line x1="995" y1="185" x2="995" y2="203" stroke="#94a3b8" stroke-dasharray="3,3" stroke-width="1.5" marker-end="url(#arr-down)"/>
+
+  <!-- Layer 0: Dense Base Graph -->
+  <g transform="translate(45, 205)">
+    <rect width="990" height="45" rx="6" fill="#ecfdf5" stroke="#a7f3d0"/>
+    <text x="20" y="27" class="layer-hdr" fill="#047857">Layer 0: Dense Base Graph (Beam search efSearch)</text>
+
+    <!-- Nodes v1 through v8: 450, 520, 590, 660, 730, 800, 875, 950 -->
+    <circle cx="450" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="2"/>
+    <text x="450" y="26.5" class="node-txt" fill="#065f46">v1</text>
+
+    <circle cx="520" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="1.5"/>
+    <text x="520" y="26.5" class="node-txt" fill="#065f46">v2</text>
+
+    <circle cx="590" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="1.5"/>
+    <text x="590" y="26.5" class="node-txt" fill="#065f46">v3</text>
+
+    <circle cx="660" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="2"/>
+    <text x="660" y="26.5" class="node-txt" fill="#065f46">v4</text>
+
+    <circle cx="730" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="1.5"/>
+    <text x="730" y="26.5" class="node-txt" fill="#065f46">v5</text>
+
+    <circle cx="800" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="1.5"/>
+    <text x="800" y="26.5" class="node-txt" fill="#065f46">v6</text>
+
+    <circle cx="875" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="1.5"/>
+    <text x="875" y="26.5" class="node-txt" fill="#065f46">v7</text>
+
+    <circle cx="950" cy="22.5" r="13" fill="#ffffff" stroke="#059669" stroke-width="2"/>
+    <text x="950" y="26.5" class="node-txt" fill="#065f46">v8</text>
+
+    <!-- Base Edges -->
+    <line x1="465" y1="22.5" x2="503" y2="22.5" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-h-blue)"/>
+    <line x1="535" y1="22.5" x2="573" y2="22.5" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-h-blue)"/>
+    <line x1="605" y1="22.5" x2="643" y2="22.5" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-h-blue)"/>
+    <line x1="675" y1="22.5" x2="713" y2="22.5" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-h-blue)"/>
+    <line x1="745" y1="22.5" x2="783" y2="22.5" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-h-blue)"/>
+    <line x1="815" y1="22.5" x2="858" y2="22.5" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-h-blue)"/>
+    <line x1="890" y1="22.5" x2="933" y2="22.5" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-h-blue)"/>
+  </g>
+
+  <!-- Bottom Invariant Card -->
+  <rect x="20" y="268" width="1040" height="56" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="35" y="291" class="card-text" font-weight="700" fill="#0f172a">Multi-Scale Routing Invariant:</text>
+  <text x="210" y="291" class="card-text">Greedy routing hops across sparse geometric highways in upper layers, descending vertically to Layer 0</text>
+  <text x="210" y="309" class="card-text">where bounded beam search (efSearch) explores local neighbors in empirical O(log N) query time.</text>
+</svg>"""
+
+out_path = "/Users/VJ/GitHub/MLSysBook-vol3/books/vol3/06_episodic_memory/images/svg/hnsw_hierarchical_routing.svg"
+with open(out_path, "w") as f:
+    f.write(svg_content)
+print("Wrote hnsw_hierarchical_routing.svg successfully")

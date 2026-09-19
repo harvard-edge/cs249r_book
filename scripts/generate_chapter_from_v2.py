@@ -93,6 +93,7 @@ class ChapterManifest:
     summary_raw: str
     curricular_compass: str = ""
     raw_outline_text: str = ""
+    tier_1_guidance: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -102,6 +103,7 @@ class ChapterManifest:
         sections = [SectionSpec(**s) for s in data.get("sections", [])]
         data_copy = dict(data)
         data_copy["sections"] = sections
+        data_copy.setdefault("tier_1_guidance", "")
         return cls(**data_copy)
 
 
@@ -116,6 +118,12 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
 
     content = outline_path.read_text(encoding="utf-8")
     target_num = chapter_num.zfill(2)
+
+    # Extract frontmatter before blueprints split marker as tier_1_guidance
+    split_marker = "# Detailed Chapter-by-Chapter Curricular Blueprints"
+    frontmatter = ""
+    if split_marker in content:
+        frontmatter = content.split(split_marker)[0].strip()
 
     # Split by chapter header
     parts = re.split(r"(?=### Chapter \d+:)", content)
@@ -273,6 +281,7 @@ def parse_chapter_v2(chapter_num: str, outline_path: Path = MASTER_OUTLINE_V2_PA
         summary_raw=summary_raw,
         curricular_compass=curricular_compass,
         raw_outline_text=matched_part,
+        tier_1_guidance=frontmatter,
     )
 
 
@@ -764,7 +773,8 @@ def compose_step_prompt(
             "================================================================================\n\n"
         )
 
-    return f"{TIER_1_SYSTEMS_ENGINE}\n\n{chapter_map}{outline_block}{tier_2}\n\n{tier_3}\n\n{tier_4}\n\n{task_instruction}"
+    tier_1 = manifest.tier_1_guidance if manifest.tier_1_guidance else TIER_1_SYSTEMS_ENGINE
+    return f"{tier_1}\n\n{chapter_map}{outline_block}{tier_2}\n\n{tier_3}\n\n{tier_4}\n\n{task_instruction}"
 
 
 # ==============================================================================
@@ -1294,15 +1304,18 @@ def extract_section_context(content: str) -> Dict[str, Any]:
 # 7. WORKSPACE & STEP MANAGEMENT
 # ==============================================================================
 
-def get_chapter_dir(chapter_num: str, slug: Optional[str] = None) -> Path:
+def get_chapter_dir(chapter_num: str, slug: Optional[str] = None, variant: Optional[str] = None) -> Path:
     ch_num = chapter_num.zfill(2)
     s = slug or SLUG_MAP.get(ch_num, f"chapter_{ch_num}")
+    if variant:
+        return DRAFTS_ROOT / f"ch{ch_num}_{s}_{variant}"
     return DRAFTS_ROOT / f"ch{ch_num}_{s}"
 
 
-def init_chapter_workspace(manifest: ChapterManifest, force: bool = False) -> Path:
+def init_chapter_workspace(manifest: ChapterManifest, ch_dir: Optional[Path] = None, force: bool = False) -> Path:
     """Initialize isolated draft workspace directory for a chapter."""
-    ch_dir = get_chapter_dir(manifest.number, manifest.slug)
+    if ch_dir is None:
+        ch_dir = get_chapter_dir(manifest.number, manifest.slug)
     ch_dir.mkdir(parents=True, exist_ok=True)
     sections_dir = ch_dir / "sections"
     sections_dir.mkdir(exist_ok=True)
@@ -1581,14 +1594,17 @@ def execute_step(
 
 def run_full_chapter(
     chapter_num: str,
+    outline_path: Path = MASTER_OUTLINE_V2_PATH,
+    variant: Optional[str] = None,
     backend: str = "agy",
     model: Optional[str] = None,
     force: bool = False,
     dry_run: bool = False,
 ) -> bool:
     """Execute all steps sequentially from Step 0 to Step N+2, then assemble."""
-    manifest = parse_chapter_v2(chapter_num)
-    ch_dir = init_chapter_workspace(manifest, force=force)
+    manifest = parse_chapter_v2(chapter_num, outline_path=outline_path)
+    ch_dir = get_chapter_dir(manifest.number, manifest.slug, variant=variant)
+    init_chapter_workspace(manifest, ch_dir=ch_dir, force=force)
     state = load_state(ch_dir)
 
     print("\n" + "=" * 80)
@@ -1724,6 +1740,8 @@ def main() -> int:
     parser.add_argument("--run-all", action="store_true", help="Execute all steps sequentially to completion.")
     parser.add_argument("--backend", choices=["agy", "claude", "mock"], default="agy", help="LLM backend.")
     parser.add_argument("--model", type=str, default="gemini-3.8-flash-high", help="Model override (default: gemini-3.8-flash-high).")
+    parser.add_argument("--outline", type=str, default=str(MASTER_OUTLINE_V2_PATH), help="Path to master outline file.")
+    parser.add_argument("--variant", type=str, default=None, help="Variant label (e.g. v3, v4, v5, v6, v7).")
     parser.add_argument("--assemble", action="store_true", help="Assemble existing section drafts into assembled_draft.qmd.")
     parser.add_argument("--validate", action="store_true", help="Audit existing assembled draft.")
     parser.add_argument("--force", action="store_true", help="Force overwrite of existing steps.")
@@ -1732,18 +1750,19 @@ def main() -> int:
 
     args = parser.parse_args()
     num = args.chapter.zfill(2)
+    outline_path = Path(args.outline).resolve()
 
     try:
-        manifest = parse_chapter_v2(num)
+        manifest = parse_chapter_v2(num, outline_path=outline_path)
     except Exception as e:
-        print(f"Error parsing chapter {num}: {e}")
+        print(f"Error parsing chapter {num} from {outline_path}: {e}")
         return 1
 
-    ch_dir = get_chapter_dir(num, manifest.slug)
+    ch_dir = get_chapter_dir(num, manifest.slug, variant=args.variant)
 
     if args.status:
         if not ch_dir.exists():
-            print(f"Chapter {num} ({manifest.slug}) workspace uninitialized.")
+            print(f"Chapter {num} ({manifest.slug}) workspace uninitialized at {ch_dir}.")
             return 0
         state = load_state(ch_dir)
         print("\n" + "=" * 70)
@@ -1773,7 +1792,7 @@ def main() -> int:
         return 0
 
     if args.step is not None:
-        init_chapter_workspace(manifest, force=args.force)
+        init_chapter_workspace(manifest, ch_dir=ch_dir, force=args.force)
         success = execute_step(
             ch_dir=ch_dir,
             step_idx=args.step,
@@ -1787,6 +1806,8 @@ def main() -> int:
     if args.run_all:
         success = run_full_chapter(
             chapter_num=num,
+            outline_path=outline_path,
+            variant=args.variant,
             backend=args.backend,
             model=args.model,
             force=args.force,
