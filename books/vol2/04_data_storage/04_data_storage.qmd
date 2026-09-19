@@ -3059,7 +3059,224 @@ The latency reduction from GDS matters most when the training pipeline is alread
 
 ::: {#fig-gds-path fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. GPUDirect Storage path**: The traditional path (top) requires two CPU-mediated payload copies. The GDS path (bottom) uses DMA to transfer data directly from NVMe to GPU memory, eliminating those bounce copies while retaining CPU submission and coordination." fig-alt="Diagram comparing traditional three-hop storage path with GDS direct DMA path from NVMe to GPU."}
 
-![](images/svg/gds-path.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  node_nvme/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=OrangeLine,
+    fill=OrangeL!50,
+    line width=0.8pt,
+    minimum width=2.45cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  },
+  node_ram/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue,
+    fill=LightBlue!50,
+    line width=0.8pt,
+    minimum width=2.65cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  },
+  node_cpu/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SlateLine!60,
+    fill=white,
+    line width=0.8pt,
+    minimum width=2.35cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  },
+  node_gpu/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    minimum width=2.45cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  }
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % =============================================================
+  % PART A: TRADITIONAL PATH (CPU BOUNCE BUFFER)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (0, 5.2)
+    {(a) Traditional Path: CPU Bounce Buffer};
+
+  \def\ya{3.8}
+
+  % 1. NVMe SSD
+  \node[node_nvme, minimum width=2.3cm] (a_nvme) at (-4.85, \ya) {
+    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{NVMe SSD}}\\[2pt]
+    \tiny\textcolor{TextDark}{7 GB/s seq read}
+  };
+
+  % 2. CPU RAM (Bounce Buffer)
+  \node[node_ram, minimum width=2.4cm] (a_ram) at (-1.65, \ya) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{CPU RAM}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{(Bounce Buffer)}\\[1.5pt]
+    \tiny\itshape\textcolor{DarkRed}{Extra copy here}
+  };
+
+  % 3. CPU (kernel involved)
+  \node[node_cpu, minimum width=2.3cm] (a_cpu) at (1.65, \ya) {
+    \textbf{\scriptsize\textcolor{TextDark}{CPU}}\\[2pt]
+    \tiny\textcolor{TextMuted}{kernel involved}
+  };
+
+  % 4. GPU HBM
+  \node[node_gpu, minimum width=2.3cm] (a_gpu) at (4.85, \ya) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{GPU HBM}}\\[2pt]
+    \tiny\textcolor{TextDark}{Training data}
+  };
+
+  % Arrows (now over ~1.0cm gaps)
+  \draw[->, line width=1.1pt, DarkRed]
+    (a_nvme.east) -- node[above, font=\tiny\bfseries, text=DarkRed] {PCIe} (a_ram.west);
+  \draw[->, line width=1.1pt, DarkRed]
+    (a_ram.east) -- node[above, font=\tiny\bfseries, text=DarkRed] {memcpy} (a_cpu.west);
+  \draw[->, line width=1.1pt, DarkRed]
+    (a_cpu.east) -- node[above, font=\tiny\bfseries, text=DarkRed] {PCIe} (a_gpu.west);
+
+  % Panel A Summary Banner
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=RedLine!70,
+    fill=RedFill!35,
+    line width=0.8pt,
+    minimum width=12.8cm,
+    minimum height=0.78cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (0, 2.75) {
+    \textbf{\scriptsize\textcolor{DarkRed}{2 PCIe crossings $+$ CPU memcpy overhead $+$ kernel context switches}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Data touches CPU memory before reaching GPU}
+  };
+
+
+  % =============================================================
+  % DIVIDER
+  % =============================================================
+  \draw[SlateLine!25, line width=0.7pt] (-6.4, 1.85) -- (6.4, 1.85);
+
+
+  % =============================================================
+  % PART B: GPUDIRECT STORAGE (CPU BYPASS)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (0, 1.35)
+    {(b) GPUDirect Storage: CPU Bypass};
+
+  \def\yb{-0.05}
+
+  % 1. NVMe SSD
+  \node[node_nvme, minimum width=2.3cm] (b_nvme) at (-4.85, \yb) {
+    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{NVMe SSD}}\\[2pt]
+    \tiny\textcolor{TextDark}{7 GB/s seq read}
+  };
+
+  % 4. GPU HBM
+  \node[node_gpu, minimum width=2.3cm] (b_gpu) at (4.85, \yb) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{GPU HBM}}\\[2pt]
+    \tiny\textcolor{TextDark}{Training data}
+  };
+
+  % Direct DMA Green Arrow
+  \draw[->, line width=1.4pt, DarkGreen]
+    (b_nvme.east) --
+    node[above=2pt, font=\scriptsize\bfseries, text=DarkGreen] {PCIe Direct DMA (GPU-initiated)}
+    (b_gpu.west);
+
+  % Bypassed CPU ghost box below arrow
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=SlateLine!40,
+    dashed,
+    fill=SlateFill!30,
+    line width=0.7pt,
+    minimum width=2.45cm,
+    minimum height=0.82cm,
+    align=center
+  ] at (0, -0.95) {
+    \textbf{\scriptsize\textcolor{TextMuted}{CPU}}\\[1.5pt]
+    \tiny\itshape\textcolor{TextMuted}{bypassed}
+  };
+
+  % Panel B Summary Banner
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=GreenLine,
+    fill=GreenFill!40,
+    line width=0.8pt,
+    minimum width=12.8cm,
+    minimum height=0.78cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (0, -1.8) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{1 PCIe crossing, no CPU involvement, no bounce buffer}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{GPU DMA engine reads directly from NVMe controller}
+  };
+
+
+  % =============================================================
+  % BOTTOM PERFORMANCE CARD
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=DarkRed,
+    fill=white,
+    line width=0.9pt,
+    minimum width=12.8cm,
+    minimum height=0.80cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (0, -2.85) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Performance Gain with GDS}}\\[2pt]
+    \fontsize{6.8pt}{8.5pt}\selectfont
+    \textcolor{TextDark}{75\% lower latency \quad$\vert$\quad 4$\times$ lower CPU time \quad$\vert$\quad No CPU-mediated copy}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
