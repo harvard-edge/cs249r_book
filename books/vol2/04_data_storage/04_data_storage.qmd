@@ -2556,7 +2556,203 @@ The primary weapon against data stalls is **Pipelining**\index{Pipelining!data l
 
 ::: {#fig-data-pipeline-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Pipelined data loading**: The CPU prepares batch $i+1$ while the GPU processes batch $i$. Pipelining hides storage latency, but only if the prefetch buffer is deep enough to absorb variance." fig-alt="Pipelining diagram showing CPU loading batches while GPU trains on previous batches."}
 
-![](images/svg/data-pipelining.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  read_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=DarkGreen,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    minimum height=0.62cm,
+    font=\scriptsize\bfseries,
+    text=DarkGreen,
+    inner sep=0pt
+  },
+  prep_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=OrangeLine,
+    fill=OrangeL!50,
+    line width=0.8pt,
+    minimum height=0.62cm,
+    font=\scriptsize\bfseries,
+    text=OrangeLine!90!black,
+    inner sep=0pt
+  },
+  train_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=SteelBlue,
+    fill=LightBlue!50,
+    line width=0.8pt,
+    minimum height=0.62cm,
+    font=\scriptsize\bfseries,
+    text=NavyBlue,
+    inner sep=0pt
+  },
+  idle_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=SlateLine!35,
+    dashed,
+    line width=0.6pt,
+    minimum height=0.62cm,
+    font=\tiny\itshape,
+    text=TextMuted,
+    inner sep=0pt
+  }
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  \def\wstg{1.8} % width of one stage
+
+  % =============================================================
+  % PART A: WITHOUT PREFETCHING (SEQUENTIAL)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (5.4, 6.2)
+    {Without Prefetching (Sequential)};
+
+  % Track Labels
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 5.2) {Storage};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 4.3) {CPU};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 3.4) {GPU};
+
+  % Storage Track (y = 5.2)
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (0.0, 5.2) {Read 1};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (\wstg, 5.2) {idle};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, 5.2) {Read 2};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (4*\wstg, 5.2) {idle};
+
+  % CPU Track (y = 4.3)
+  \node[idle_box, minimum width=\wstg cm, anchor=west] at (0.0, 4.3) {};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (\wstg, 4.3) {Prep 1};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (2*\wstg, 4.3) {};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (4*\wstg, 4.3) {Prep 2};
+  \node[idle_box, minimum width=\wstg cm, anchor=west] at (5*\wstg, 4.3) {};
+
+  % GPU Track (y = 3.4)
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (0.0, 3.4) {\textcolor{DarkRed!80}{GPU idle}};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, 3.4) {Train 1};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (3*\wstg, 3.4) {\textcolor{DarkRed!80}{GPU idle}};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (5*\wstg, 3.4) {Train 2};
+
+  % Timeline arrow
+  \draw[->, line width=0.8pt, SlateLine!50] (0.0, 2.75) -- (11.2, 2.75);
+  \node[anchor=west, font=\tiny, text=TextMuted] at (11.3, 2.75) {time};
+
+  % Sequential Span Bracket
+  \draw[line width=0.9pt, RedLine] (0.0, 2.35) -- (6*\wstg, 2.35);
+  \draw[line width=0.9pt, RedLine] (0.0, 2.2) -- (0.0, 2.5);
+  \draw[line width=0.9pt, RedLine] (6*\wstg, 2.2) -- (6*\wstg, 2.5);
+  \node[anchor=north, font=\scriptsize\bfseries, text=DarkRed] at (3*\wstg, 2.15)
+    {Total: 2 batches = 6 sequential stages};
+
+  % =============================================================
+  % DIVIDER
+  % =============================================================
+  \draw[SlateLine!25, line width=0.7pt] (-1.8, 1.45) -- (11.8, 1.45);
+
+  % =============================================================
+  % PART B: WITH PREFETCHING (ASYNC PIPELINE)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (5.4, 0.95)
+    {With Prefetching (Async Pipeline)};
+
+  % Track Labels
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 0.1) {Storage};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, -0.8) {CPU};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, -1.7) {GPU};
+
+  % Storage Track (y = 0.1)
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (0.0, 0.1) {Read 1};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (\wstg, 0.1) {Read 2};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, 0.1) {Read 3};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, 0.1) {Read 4};
+
+  % Prefetch depth badge at right of Storage
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=GreenFill!35,
+    line width=0.8pt,
+    minimum width=2.9cm,
+    minimum height=0.72cm,
+    anchor=west,
+    align=center
+  ] at (7.6, 0.1) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Prefetch depth = 2}}\\[1pt]
+    \tiny\textcolor{TextDark}{2 batches in flight}
+  };
+
+  % CPU Track (y = -0.8)
+  \node[idle_box, minimum width=\wstg cm, anchor=west] at (0.0, -0.8) {};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (\wstg, -0.8) {Prep 1};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, -0.8) {Prep 2};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, -0.8) {Prep 3};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (4*\wstg, -0.8) {Prep 4};
+
+  % GPU Track (y = -1.7)
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (0.0, -1.7) {\textcolor{TextMuted}{Ramp-up}};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, -1.7) {Train 1};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, -1.7) {Train 2};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (4*\wstg, -1.7) {Train 3};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (5*\wstg, -1.7) {Train 4};
+
+  % Timeline arrow
+  \draw[->, line width=0.8pt, SlateLine!50] (0.0, -2.35) -- (11.2, -2.35);
+  \node[anchor=west, font=\tiny, text=TextMuted] at (11.3, -2.35) {time};
+
+  % Pipelined Span Bracket
+  \draw[line width=0.9pt, DarkGreen] (0.0, -2.75) -- (6*\wstg, -2.75);
+  \draw[line width=0.9pt, DarkGreen] (0.0, -2.6) -- (0.0, -2.9);
+  \draw[line width=0.9pt, DarkGreen] (6*\wstg, -2.6) -- (6*\wstg, -2.9);
+  \node[anchor=north, font=\scriptsize\bfseries, text=DarkGreen] at (3*\wstg, -2.95)
+    {4 batches in time of $\sim$3 sequential; GPU never idles after ramp-up};
+
+  % =============================================================
+  % BOTTOM SUMMARY CARD
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=RedLine,
+    fill=RedFill!30,
+    line width=0.8pt,
+    minimum width=11.6cm,
+    minimum height=0.72cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (5.4, -3.55) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Overlap hides storage latency: the GPU processes while the next batch loads}}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
