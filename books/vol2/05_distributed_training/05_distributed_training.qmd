@@ -3959,7 +3959,179 @@ Sequential processing introduces device idle time, as each device must wait for 
 Pipeline parallelism extends layer-wise partitioning by introducing microbatching to reduce device idle time. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches, with overlapping execution across pipeline stages (@fig-pipeline-parallelism). In this schedule, each row represents a device processing model layers across microbatches, with forward activations flowing downstream and backward gradients propagating upstream. The overlap reduces, but does not eliminate, idle pipeline slots.
 
 ::: {#fig-pipeline-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Pipeline parallelism schedule**: A 4-stage pipeline processes 4 microbatches through forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) over time. Rows represent pipeline stages, and columns represent time steps. Staggering the work lets one stage process a microbatch while another handles an earlier or later microbatch, reducing idle time without eliminating the fill, drain, and dependency bubbles visible in the schedule." fig-alt="Pipeline schedule grid showing four stages processing four microbatches. Forward passes stagger diagonally across time, backward passes follow in reverse order, and blank cells show pipeline bubbles during fill, drain, and dependencies."}
-![](images/svg/pipeline-parallelism.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  cell/.style={
+    rounded corners=2.5pt,
+    line width=0.8pt,
+    minimum width=0.92cm,
+    minimum height=0.82cm,
+    align=center,
+    inner sep=1pt
+  },
+  fwd cell/.style={
+    cell,
+    draw=SteelBlue,
+    fill=LightBlue,
+    text=NavyBlue
+  },
+  bwd cell/.style={
+    cell,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen
+  },
+  idle cell/.style={
+    cell,
+    draw=CardBorder,
+    fill=gray!7,
+    text=TextMuted!60
+  }
+]
+
+  % Dimensions: 14 columns (t1 to t14), 4 rows (Stage 0 to Stage 3)
+  \def\colw{1.04}
+  \def\rowh{0.92}
+
+  % Column headers (Time steps)
+  \node[font=\bfseries\footnotesize, text=TextDark, anchor=east] at (-0.6, 0.45) {Stage};
+  \foreach \t in {1,...,14} {
+    \node[font=\bfseries\scriptsize, text=TextMuted] at ({(\t-1)*\colw}, 0.45) {$t_{\t}$};
+  }
+  % Time arrow
+  \draw[->, line width=0.8pt, TextMuted] (-0.3, 0.90) -- ({13*\colw + 0.3}, 0.90)
+    node[midway, above=2pt, font=\scriptsize\bfseries, text=TextMuted] {Execution Time ($t$) $\longrightarrow$};
+
+  % Row labels
+  \node[align=right, anchor=east] at (-0.6, {0 * -\rowh}) {
+    \textbf{\small Stage 0}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 0)}
+  };
+  \node[align=right, anchor=east] at (-0.6, {1 * -\rowh}) {
+    \textbf{\small Stage 1}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 1)}
+  };
+  \node[align=right, anchor=east] at (-0.6, {2 * -\rowh}) {
+    \textbf{\small Stage 2}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 2)}
+  };
+  \node[align=right, anchor=east] at (-0.6, {3 * -\rowh}) {
+    \textbf{\small Stage 3}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 3)}
+  };
+
+  % Grid Cells:
+  % Stage 0 (y=0)
+  \node[fwd cell] at ({0*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({1*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({2*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] at ({3*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \foreach \c in {4,5,6,7,8,9} {
+    \node[idle cell] at ({\c*\colw}, 0) {\tiny idle};
+  }
+  \node[bwd cell] at ({10*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({11*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({12*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({13*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+
+  % Stage 1 (y=-1*\rowh)
+  \node[idle cell] at ({0*\colw}, {-1*\rowh}) {\tiny idle};
+  \node[fwd cell] at ({1*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({2*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({3*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] at ({4*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \foreach \c in {5,6,7,8} {
+    \node[idle cell] at ({\c*\colw}, {-1*\rowh}) {\tiny idle};
+  }
+  \node[bwd cell] at ({9*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({10*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({11*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({12*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+  \node[idle cell] at ({13*\colw}, {-1*\rowh}) {\tiny idle};
+
+  % Stage 2 (y=-2*\rowh)
+  \node[idle cell] at ({0*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[idle cell] at ({1*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[fwd cell] at ({2*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({3*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({4*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] at ({5*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \node[idle cell] at ({6*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[idle cell] at ({7*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[bwd cell] at ({8*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({9*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({10*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({11*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+  \node[idle cell] at ({12*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[idle cell] at ({13*\colw}, {-2*\rowh}) {\tiny idle};
+
+  % Stage 3 (y=-3*\rowh)
+  \node[idle cell] at ({0*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({1*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({2*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[fwd cell] at ({3*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({4*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({5*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] (f3last) at ({6*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] (b3first) at ({7*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({8*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({9*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({10*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+  \node[idle cell] at ({11*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({12*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({13*\colw}, {-3*\rowh}) {\tiny idle};
+
+  % Brackets below schedule
+  % Startup bubble bracket (t1..t3 on Stage 3)
+  \draw[line width=1.0pt, RedLine] (-0.46, {-3*\rowh - 0.58}) -- ({2*\colw + 0.46}, {-3*\rowh - 0.58})
+    node[midway, below=3pt, font=\bfseries\scriptsize, text=RedLine] {Startup bubble ($p-1 = 3$ steps)};
+  \draw[line width=1.0pt, RedLine] (-0.46, {-3*\rowh - 0.48}) -- (-0.46, {-3*\rowh - 0.58});
+  \draw[line width=1.0pt, RedLine] ({2*\colw + 0.46}, {-3*\rowh - 0.48}) -- ({2*\colw + 0.46}, {-3*\rowh - 0.58});
+
+  % Drain bubble bracket (t12..t14 on Stage 3)
+  \draw[line width=1.0pt, RedLine] ({11*\colw - 0.46}, {-3*\rowh - 0.58}) -- ({13*\colw + 0.46}, {-3*\rowh - 0.58})
+    node[midway, below=3pt, font=\bfseries\scriptsize, text=RedLine] {Drain bubble ($p-1 = 3$ steps)};
+  \draw[line width=1.0pt, RedLine] ({11*\colw - 0.46}, {-3*\rowh - 0.48}) -- ({11*\colw - 0.46}, {-3*\rowh - 0.58});
+  \draw[line width=1.0pt, RedLine] ({13*\colw + 0.46}, {-3*\rowh - 0.48}) -- ({13*\colw + 0.46}, {-3*\rowh - 0.58});
+
+  % Bottom Panel: Legend and Bubble Formula Card
+  \node[
+    draw=CardBorder,
+    fill=CardFill,
+    rounded corners=5pt,
+    line width=0.8pt,
+    anchor=north,
+    minimum width=15.8cm,
+    minimum height=2.65cm
+  ] (card) at (5.95, {-3*\rowh - 1.25}) {};
+
+  % Inside Card: Legend row (precisely positioned)
+  \node[fwd cell, minimum width=0.65cm, minimum height=0.52cm] at ($(card.north west) + (1.2, -0.42)$) {\textbf{\tiny F}};
+  \node[anchor=west, font=\footnotesize, text=TextDark] at ($(card.north west) + (1.65, -0.42)$) {\textbf{Forward pass} ($F_{i,j}$)};
+
+  \node[bwd cell, minimum width=0.65cm, minimum height=0.52cm] at ($(card.north west) + (6.3, -0.42)$) {\textbf{\tiny B}};
+  \node[anchor=west, font=\footnotesize, text=TextDark] at ($(card.north west) + (6.75, -0.42)$) {\textbf{Backward pass} ($B_{i,j}$)};
+
+  \node[idle cell, minimum width=0.65cm, minimum height=0.52cm] at ($(card.north west) + (11.5, -0.42)$) {\tiny idle};
+  \node[anchor=west, font=\footnotesize, text=TextDark] at ($(card.north west) + (11.95, -0.42)$) {\textbf{Pipeline bubble} (idle slot)};
+
+  % Card horizontal divider
+  \draw[line width=0.5pt, CardBorder] ($(card.north west) + (0.5, -0.78)$) -- ($(card.north east) + (-0.5, -0.78)$);
+
+  % Formula header
+  \node[font=\bfseries\footnotesize, text=NavyBlue] at ($(card.north) + (0, -1.06)$) {
+    Synchronous Pipeline Bubble Fraction
+  };
+  \node[font=\small] at ($(card.north) + (0, -1.48)$) {
+    $\displaystyle\text{Bubble Fraction} = \frac{p-1}{p+m-1}$
+  };
+
+  % Explanatory caption
+  \node[font=\footnotesize, text=TextDark, align=center] at ($(card.north) + (0, -2.12)$) {
+    \textbf{Equal microbatches ($m = p = 4$):} $\frac{4-1}{4+4-1} = \frac{3}{7} \approx 42.9\%$ compute capacity lost to idle bubbles.\\
+    \textbf{Amortization via microbatch scaling ($m \gg p$):} With $m = 32 \implies \frac{3}{35} \approx 8.6\%$ bubble tax ($>4\times$ utilization gain).
+  };
+
+\end{tikzpicture}
+```
 :::
 
 ::: {#dfn-distributed-training-pipeline-parallelism .callout-definition title="Pipeline parallelism"}
