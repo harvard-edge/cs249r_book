@@ -5754,7 +5754,166 @@ The canonical 3D core does not exhaust the partitioning space. Sequence parallel
 @Fig-parallelism-flowchart converts the same filter into a decision tree. It begins with memory fit because capacity failure is nonnegotiable, then asks whether data scale alone justifies replication. The tree is intentionally simplified; hardware heterogeneity, communication bandwidth, and workload imbalance enter as second-order checks after the binding constraint has been identified.
 
 ::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision framework**: A systematic selection guide based on two key questions: Does the model state fit in single-device memory, and does the required data throughput justify multiple replicas? Models exceeding device memory require model parallelism or sharding; workloads whose model fits but whose throughput target exceeds one device benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance." fig-alt="Decision tree flowchart starting from Start. Diamond nodes ask about model memory fit and data-throughput pressure. Paths lead to four outcomes: Single Device Optimization, Data Parallelism, Model Parallelism, or Hybrid Parallelism."}
-![](images/svg/parallelism-flowchart.svg){width=100%}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  start_box/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=SteelBlue,
+    fill=white,
+    line width=0.9pt,
+    align=center,
+    inner sep=6pt,
+    minimum width=5.6cm
+  },
+  decision/.style={
+    diamond,
+    aspect=2.1,
+    draw=OrangeLine,
+    fill=OrangeL!60,
+    line width=0.9pt,
+    align=center,
+    inner sep=1.5pt,
+    font=\bfseries\scriptsize,
+    text=TextDark
+  },
+  badge_yes/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen,
+    font=\bfseries\tiny,
+    inner sep=2pt,
+    line width=0.6pt
+  },
+  badge_no/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=RedLine,
+    fill=RedFill,
+    text=RedLine,
+    font=\bfseries\tiny,
+    inner sep=2pt,
+    line width=0.6pt
+  },
+  res_card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    align=center,
+    inner sep=5pt,
+    minimum width=3.4cm
+  },
+  hero_card/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=SteelBlue,
+    fill=LightBlue!30,
+    line width=0.9pt,
+    align=center,
+    inner sep=7pt,
+    minimum width=18.0cm
+  }
+]
+
+  % -------------------------------------------------------------
+  % START NODE
+  % -------------------------------------------------------------
+  \node[start_box] (start) at (6.0, 7.8) {
+    \textbf{\small (Start) Workload Profile}\\[1pt]
+    \footnotesize\textcolor{TextMuted}{Characterize memory \& compute constraints}
+  };
+
+  % -------------------------------------------------------------
+  % ROOT DECISION: Model fits on 1 GPU?
+  % -------------------------------------------------------------
+  \node[decision, minimum width=3.6cm, minimum height=1.5cm] (d_mem) at (6.0, 5.8) {
+    Model fits\\on 1 GPU?
+  };
+  \draw[->, line width=0.9pt, SteelBlue] (start.south) -- (d_mem.north);
+
+  % -------------------------------------------------------------
+  % RIGHT BRANCH: DATA THROUGHPUT / REPLICATION
+  % -------------------------------------------------------------
+  \node[decision, minimum width=3.6cm, minimum height=1.5cm] (d_data) at (11.5, 5.8) {
+    Single GPU\\throughput OK?
+  };
+  \draw[->, line width=0.9pt, GreenLine] (d_mem.east) -- node[badge_yes, above=1pt] {Yes} (d_data.west);
+
+  % Single Device Card
+  \node[res_card, draw=DarkGreen, fill=GreenFill, text=DarkGreen] (c_single) at (11.5, 3.9) {
+    \textbf{\scriptsize Single Device}\\[2pt]
+    \tiny\textcolor{TextDark}{No parallelism required}
+  };
+  \draw[->, line width=0.9pt, GreenLine] (d_data.south) -- node[badge_yes, right=2pt] {Yes} (c_single.north);
+
+  % Data Parallelism Card
+  \node[res_card, draw=SteelBlue, fill=LightBlue, text=NavyBlue] (c_dp) at (11.5, 2.0) {
+    \textbf{\scriptsize Data Parallelism (DP)}\\[2pt]
+    \tiny\textcolor{TextDark}{Replicate weights, shard batch}
+  };
+  % No route from d_data to c_dp
+  \draw[->, line width=0.9pt, RedLine] (d_data.east) -- node[badge_no, above=1pt] {No} ++(1.4, 0) |- (c_dp.east);
+
+  % -------------------------------------------------------------
+  % LEFT BRANCH: MODEL PARALLELISM & SHARDING
+  % -------------------------------------------------------------
+  \node[decision, minimum width=3.4cm, minimum height=1.5cm] (d_pp) at (2.8, 3.9) {
+    Model depth\\exceeds 1 GPU?
+  };
+  % No route from d_mem to d_pp
+  \draw[->, line width=0.9pt, RedLine] (d_mem.west) -- node[badge_no, above=1pt] {No} ++(-1.6, 0) |- (d_pp.north);
+
+  % Pipeline Parallel Card
+  \node[res_card, draw=OrangeLine, fill=OrangeL, text=OrangeLine!80!black] (c_pp) at (-1.4, 3.9) {
+    \textbf{\scriptsize Pipeline Parallel (PP)}\\[2pt]
+    \tiny\textcolor{TextDark}{Stage across nodes (1F1B)}
+  };
+  \draw[->, line width=0.9pt, OrangeLine] (d_pp.west) -- node[badge_yes, above=1pt] {Yes} (c_pp.east);
+
+  % Decision: Single layer too large?
+  \node[decision, minimum width=3.4cm, minimum height=1.5cm] (d_tp) at (2.8, 2.0) {
+    Single layer\\too large?
+  };
+  \draw[->, line width=0.9pt, SteelBlue] (d_pp.south) -- node[badge_no, right=2pt] {No} (d_tp.north);
+
+  % Tensor Parallel Card
+  \node[res_card, draw=RedLine, fill=RedFill, text=RedLine] (c_tp) at (-1.4, 2.0) {
+    \textbf{\scriptsize Tensor Parallel (TP)}\\[2pt]
+    \tiny\textcolor{TextDark}{Intra-layer split (NVLink)}
+  };
+  \draw[->, line width=0.9pt, RedLine] (d_tp.west) -- node[badge_yes, above=1pt] {Yes} (c_tp.east);
+
+  % Sharded / FSDP Card
+  \node[res_card, draw=PurpleLine, fill=PurpleFill, text=PurpleLine] (c_fsdp) at (2.8, 0.3) {
+    \textbf{\scriptsize Sharded / FSDP}\\[2pt]
+    \tiny\textcolor{TextDark}{ZeRO parameter sharding}
+  };
+  \draw[->, line width=0.9pt, SteelBlue] (d_tp.south) -- node[badge_no, right=2pt] {No} (c_fsdp.north);
+
+  % -------------------------------------------------------------
+  % BOTTOM HERO CARD: 3D PARALLELISM
+  % -------------------------------------------------------------
+  \node[hero_card] (hero) at (5.05, -1.5) {
+    \textbf{\footnotesize Production Scale: 3D Parallelism ($\text{TP} \times \text{PP} \times \text{DP}$)}\\[3pt]
+    \scriptsize\textcolor{TextDark}{Compose Tensor (intra-node NVLink), Pipeline (inter-node), and Data Parallelism (cluster-wide)}
+  };
+
+  % Convergence lines from strategies to 3D Parallelism card
+  % PP drops straight down from outer margin
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_pp.west) -- ++(-0.5, 0) coordinate (p_pp_drop) -- (p_pp_drop |- hero.north);
+  % TP straight down
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_tp.south) -- (c_tp.south |- hero.north);
+  % FSDP straight down
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_fsdp.south) -- (c_fsdp.south |- hero.north);
+  % DP straight down
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_dp.south) -- (c_dp.south |- hero.north);
+
+\end{tikzpicture}
+```
 :::
 
 The table and flowchart are intentionally coarse, but their purpose is precise: identify the binding constraint before choosing the implementation stack.
