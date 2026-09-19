@@ -2130,7 +2130,7 @@ Flat collective algorithms assume that every link in the cluster delivers equal 
 
 : **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. Relative speed compares per-direction rates (NVLink's 450 GB/s one-way against InfiniBand's 50 GB/s per port); the bandwidth column shows NVLink's bidirectional datasheet total. {#tbl-bandwidth-hierarchy}
 
-A naive flat Ring AllReduce ignores this structure, potentially routing data across InfiniBand when NVLink would suffice and wasting the scarce inter-node bandwidth. **Hierarchical AllReduce**\index{Hierarchical AllReduce} decomposes the global operation into three phases that respect the bandwidth hierarchy, as shown in @fig-hierarchical-allreduce.
+A naive flat Ring AllReduce ignores this structure, routing data across InfiniBand when NVLink would suffice and saturating scarce inter-node bandwidth. **Hierarchical AllReduce**\index{Hierarchical AllReduce} decomposes the global operation into three phases that exploit the bandwidth hierarchy (@fig-hierarchical-allreduce).
 
 ::: {.column-margin}
 ```{=latex}
@@ -2143,11 +2143,198 @@ A naive flat Ring AllReduce ignores this structure, potentially routing data acr
 
 ::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), reducing inter-node traffic by a factor of $G$ (GPUs per node). Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The figure labels these phases by their NVLink/IB mechanics; the surrounding prose names the corresponding collective primitives." fig-alt="Two-node diagram with multiple GPUs per node. Intra-node NVLink arrows show Phase 1 (ring/ReduceScatter) and Phase 3 (ring/AllGather). Inter-node InfiniBand arrows show Phase 2 (cross-node AllReduce on the node shards)."}
 
-![](images/svg/hierarchical-allreduce.svg)
+```{.tikz}
+\begin{tikzpicture}[
+    font=\small\sffamily,
+    >=Stealth,
+    panel/.style={
+      draw=CanvasBorder,
+      fill=CanvasBg,
+      rounded corners=5pt,
+      line width=0.6pt,
+      inner sep=7pt
+    },
+    gpu box/.style={
+      draw=BlueLine,
+      fill=white,
+      line width=0.85pt,
+      rounded corners=3pt,
+      minimum width=1.25cm,
+      minimum height=1.15cm,
+      align=center
+    },
+    leader box/.style={
+      draw=OrangeLine,
+      fill=OrangeFill!75,
+      line width=1.1pt,
+      rounded corners=3pt,
+      minimum width=1.25cm,
+      minimum height=1.15cm,
+      align=center
+    },
+    step card/.style={
+      draw=CanvasBorder,
+      fill=white,
+      rounded corners=3pt,
+      line width=0.5pt,
+      inner sep=5pt
+    }
+  ]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfsetlayers{background,main}
+
+  % ========================================================
+  % TOP LEGEND BAR
+  % ========================================================
+  \node[draw=BlueLine, fill=BlueFill, rounded corners=3pt, font=\scriptsize\bfseries, text=BlueLine, inner sep=4pt] at (2.2, 8.4)
+    {Step 1: Intra-Node ReduceScatter};
+  \node[draw=OrangeLine, fill=OrangeFill, rounded corners=3pt, font=\scriptsize\bfseries, text=OrangeLine!90!black, inner sep=4pt] at (7.25, 8.4)
+    {Step 2: Inter-Node AllReduce (Leaders)};
+  \node[draw=GreenLine, fill=GreenFill, rounded corners=3pt, font=\scriptsize\bfseries, text=GreenLine, inner sep=4pt] at (12.3, 8.4)
+    {Step 3: Intra-Node AllGather};
+
+  % ========================================================
+  % STEP 2 BRIDGE (OPTICAL SPINAL FABRIC)
+  % ========================================================
+  \node[draw=OrangeLine, fill=OrangeFill!50, rounded corners=3pt, line width=0.9pt, font=\footnotesize\bfseries, text=OrangeLine!90!black, inner sep=5pt] (bridge) at (5.0, 7.55)
+    {Step 2: Optical Spine Fabric ($50\text{ GB/s} \cdot \frac{1}{G}\text{ Traffic}$)};
+
+  % ========================================================
+  % NODE 0 CONTAINER
+  % ========================================================
+  \begin{scope}[shift={(0, 1.8)}, local bounding box=node0]
+    % Header
+    \node[anchor=west, font=\bfseries\small, text=TextDark] at (0, 4.9) {Node 0 (8-GPU Server Chassis)};
+    \node[anchor=east, font=\scriptsize\bfseries, text=BlueLine] at (6.8, 4.9) {NVLink 4.0 Mesh};
+
+    % GPUs
+    \node[leader box] (g0) at (1.15, 3.65) {\textbf{G0}\\[1pt]\scriptsize\color{OrangeLine!90!black}\textbf{Leader}};
+    \node[gpu box, right=0.35cm of g0] (g1) {\textbf{G1}\\[1pt]\tiny\color{TextMuted}Rank 1};
+    \node[gpu box, right=0.35cm of g1] (g2) {\textbf{G2}\\[1pt]\tiny\color{TextMuted}Rank 2};
+    \node[gpu box, right=0.35cm of g2] (g3) {\textbf{G3}\\[1pt]\tiny\color{TextMuted}Rank 3};
+
+    % Ring links
+    \draw[->, BlueLine, line width=1.1pt] (g0.east) -- (g1.west);
+    \draw[->, BlueLine, line width=1.1pt] (g1.east) -- (g2.west);
+    \draw[->, BlueLine, line width=1.1pt] (g2.east) -- (g3.west);
+    \draw[->, BlueLine, line width=1.1pt, rounded corners=3pt] (g3.south) -- ++(0, -0.32) -| (g0.south);
+
+    \node[font=\tiny\bfseries, text=BlueLine] at ($(g1.south)!0.5!(g2.south) - (0, 0.44)$) {Intra-Node NVLink Ring (900 GB/s)};
+
+    % Step 1 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 2.35) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize Step 1: Intra-Node ReduceScatter}\\[1pt]
+        \tiny Ranks $0 \dots 7$ reduce partial gradients over 900 GB/s NVLink. G0 accumulates the fully reduced slice for rank index 0.
+      \end{minipage}
+    };
+
+    % Step 3 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 1.30) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize\color{GreenLine} Step 3: Intra-Node AllGather}\\[1pt]
+        \tiny\color{GreenLine!80!black} G0 receives global aggregate from optical fabric and broadcasts via NVLink AllGather to ranks $1 \dots 7$.
+      \end{minipage}
+    };
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(node0)] (p_node0) {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % NODE 1 CONTAINER
+  % ========================================================
+  \begin{scope}[shift={(7.4, 1.8)}, local bounding box=node1]
+    % Header
+    \node[anchor=west, font=\bfseries\small, text=TextDark] at (0, 4.9) {Node 1 (8-GPU Server Chassis)};
+    \node[anchor=east, font=\scriptsize\bfseries, text=BlueLine] at (6.8, 4.9) {NVLink 4.0 Mesh};
+
+    % GPUs
+    \node[leader box] (g4) at (1.15, 3.65) {\textbf{G4}\\[1pt]\scriptsize\color{OrangeLine!90!black}\textbf{Leader}};
+    \node[gpu box, right=0.35cm of g4] (g5) {\textbf{G5}\\[1pt]\tiny\color{TextMuted}Rank 5};
+    \node[gpu box, right=0.35cm of g5] (g6) {\textbf{G6}\\[1pt]\tiny\color{TextMuted}Rank 6};
+    \node[gpu box, right=0.35cm of g6] (g7) {\textbf{G7}\\[1pt]\tiny\color{TextMuted}Rank 7};
+
+    % Ring links
+    \draw[->, BlueLine, line width=1.1pt] (g4.east) -- (g5.west);
+    \draw[->, BlueLine, line width=1.1pt] (g5.east) -- (g6.west);
+    \draw[->, BlueLine, line width=1.1pt] (g6.east) -- (g7.west);
+    \draw[->, BlueLine, line width=1.1pt, rounded corners=3pt] (g7.south) -- ++(0, -0.32) -| (g4.south);
+
+    \node[font=\tiny\bfseries, text=BlueLine] at ($(g5.south)!0.5!(g6.south) - (0, 0.44)$) {Intra-Node NVLink Ring (900 GB/s)};
+
+    % Step 1 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 2.35) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize Step 1: Intra-Node ReduceScatter}\\[1pt]
+        \tiny Ranks $4 \dots 7$ reduce partial gradients over 900 GB/s NVLink. G4 accumulates the fully reduced slice for rank index 4.
+      \end{minipage}
+    };
+
+    % Step 3 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 1.30) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize\color{GreenLine} Step 3: Intra-Node AllGather}\\[1pt]
+        \tiny\color{GreenLine!80!black} G4 receives global aggregate from optical fabric and broadcasts via NVLink AllGather to ranks $5 \dots 7$.
+      \end{minipage}
+    };
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(node1)] (p_node1) {};
+  \end{pgfonlayer}
+
+  % Bridge connections: route up from the top edge of node0/node1 above G0/G4
+  \draw[<->, draw=OrangeLine, line width=1.3pt, dashed]
+    (g0.north |- p_node0.north) -- ++(0, 0.5) -| (bridge.west);
+  \draw[<->, draw=OrangeLine, line width=1.3pt, dashed]
+    (bridge.east) -| (g4.north |- p_node1.north);
+
+  % ========================================================
+  % BOTTOM ANALYTICAL PERFORMANCE CARD
+  % ========================================================
+  \begin{scope}[shift={(0, -1.9)}, local bounding box=boxCard]
+    \node[anchor=north west, font=\normalsize\bfseries, text=TextDark] at (0.1, 3.4)
+      {Hierarchical Traffic Scaling Advantage ($18\times$ Bandwidth Multiplier)};
+
+    % Bar 1: NVLink
+    \draw[fill=OrangeFill, draw=OrangeLine, line width=0.8pt, rounded corners=2pt]
+      (0.1, 2.4) rectangle (9.2, 2.8);
+    \node[anchor=west, font=\scriptsize\bfseries, text=OrangeLine!90!black] at (0.3, 2.6)
+      {Intra-Node NVLink 4.0: 900 GB/s Bidirectional};
+
+    % Bar 2: InfiniBand
+    \draw[fill=VioletFill, draw=VioletLine, line width=0.8pt, rounded corners=2pt]
+      (0.1, 1.85) rectangle (1.4, 2.25);
+    \node[anchor=west, font=\scriptsize\bfseries, text=VioletLine] at (1.55, 2.05)
+      {InfiniBand NDR: 50 GB/s per port (400 Gb/s)};
+
+    % Red Callout Gap Badge
+    \node[draw=RedLine, fill=RedFill, line width=1.1pt, rounded corners=4pt, align=center, inner sep=6pt] at (12.3, 2.32) {
+      \textbf{\large\color{RedLine} 18$\times$}\\[-2pt]
+      \scriptsize\bfseries\color{RedLine} Bandwidth Gap
+    };
+
+    % Explanatory text
+    \node[anchor=north west, text width=14.0cm, font=\footnotesize, text=TextDark] at (0.1, 1.6) {
+      \textbf{Traffic Elimination Law:} By completing the first reduction tier inside the node over 900 GB/s NVLink, inter-node traffic across optical switches drops by exactly $G\times$ ($8\times$), preventing bisection bandwidth exhaustion.\\[3pt]
+      \textbf{\color{GreenLine}NCCL Runtime Invariant:} Multi-node communication runtimes automatically decompose process-group collectives into this 3-step hierarchical pipeline.
+    };
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxCard)] {};
+  \end{pgfonlayer}
+
+\end{tikzpicture}
+```
 
 :::
 
-The three-phase decomposition in @fig-hierarchical-allreduce confines the expensive inter-node traffic to Phase 2, where each GPU transmits only $M/G$ bytes instead of $M$. With $G = 8$ GPUs per node (a typical DGX configuration), this reduces inter-node traffic by 8$\times$, effectively multiplying the scarce InfiniBand bandwidth by the number of GPUs per node.
+@Fig-hierarchical-allreduce illustrates how this three-phase decomposition confines expensive inter-node traffic to Phase 2, where each GPU transmits only $M/G$ bytes instead of $M$. With $G = 8$ GPUs per node (a standard DGX configuration), this reduces inter-node optical fabric traffic by an exact factor of $8\times$, effectively multiplying scarce InfiniBand bandwidth by the number of accelerators per chassis.
 
 The phases form one causal chain:
 
