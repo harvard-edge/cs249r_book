@@ -66,8 +66,8 @@ set -e  # Exit on any error
 #   TINYTORCH_BRANCH=dev curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 #   TINYTORCH_VERSION=0.1.5 TINYTORCH_BRANCH=feature/foo ./install.sh
 #   TINYTORCH_NON_INTERACTIVE=1 ./install.sh  # Skip all prompts (for CI)
-REPO_SHORT="harvard-edge/cs249r_book"
-REPO_URL="https://github.com/${REPO_SHORT}.git"
+REPO_SHORT="${TINYTORCH_REPO:-harvard-edge/cs249r_book}"
+REPO_URL="${TINYTORCH_REPO_URL:-https://github.com/${REPO_SHORT}.git}"
 TAGS_API="https://api.github.com/repos/${REPO_SHORT}/tags"
 TAG_PREFIX="tinytorch-v"
 BRANCH="${TINYTORCH_BRANCH:-main}"
@@ -358,7 +358,7 @@ get_python_cmd() {
         return 0
     fi
 
-    local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3.9" "python3" "python")
+    local candidates=("python3.14" "python3.13" "python3.12" "python3.11" "python3.10" "python3" "python")
 
     for cmd in "${candidates[@]}"; do
         if command_exists "$cmd"; then
@@ -664,14 +664,18 @@ do_install() {
     # REMOVE (dev-only):
     # -------------------------------------------------------------------------
     rm -rf "$INSTALL_DIR/paper" \
-           "$INSTALL_DIR/instructor" \
+           "$INSTALL_DIR/book" \
+           "$INSTALL_DIR/guide" \
+           "$INSTALL_DIR/quarto" \
            "$INSTALL_DIR/site" \
+           "$INSTALL_DIR/instructor" \
            "$INSTALL_DIR/scripts" \
            "$INSTALL_DIR/tools" \
            "$INSTALL_DIR/binder" \
            "$INSTALL_DIR/etc" \
            "$INSTALL_DIR/assignments" \
            "$INSTALL_DIR/benchmark_results" \
+           "$INSTALL_DIR/vscode-ext" \
            "$INSTALL_DIR/.git-hooks" \
            "$INSTALL_DIR/.vscode" \
            "$INSTALL_DIR/Makefile" \
@@ -681,11 +685,15 @@ do_install() {
            "$INSTALL_DIR/CONTRIBUTING.md" \
            "$INSTALL_DIR/INSTRUCTOR.md" \
            "$INSTALL_DIR/MANIFEST.in" \
+           "$INSTALL_DIR/MODULE_ANATOMY.md" \
+           "$INSTALL_DIR/NBGRADER_RELEASE_TIERS.md" \
+           "$INSTALL_DIR/nbgrader_validation_results.json" \
            "$INSTALL_DIR/.pre-commit-config.yaml" \
            "$INSTALL_DIR/.shared-ai-rules.md" \
            "$INSTALL_DIR/.tinyrc" \
            "$INSTALL_DIR/.editorconfig" \
            "$INSTALL_DIR/.gitattributes" \
+           "$INSTALL_DIR/.all-contributorsrc" \
            "$INSTALL_DIR/settings.json" \
            "$INSTALL_DIR/.tinytorch" \
            2>/dev/null || true
@@ -728,19 +736,22 @@ do_install() {
         exit 1
     fi
 
-    # Activate venv (handle Windows Git Bash vs Unix)
+    # Activate venv (handle Windows Git Bash vs Unix) and resolve venv python binary
+    local venv_python
     if [ -f ".venv/Scripts/activate" ]; then
         # Windows (Git Bash)
         source .venv/Scripts/activate
+        venv_python=".venv/Scripts/python.exe"
     else
         # macOS/Linux
         source .venv/bin/activate
+        venv_python=".venv/bin/python"
     fi
     print_success "Created virtual environment using $PYTHON_CMD"
 
     # -------------------------------------------------------------------------
     # Step 3: Install dependencies
-    # Uses $PYTHON_CMD -m pip for reliability (contributed by @rnjema)
+    # Uses isolated venv python for pip to avoid host PEP 668 restrictions
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[3/4]${NC} Installing dependencies..."
 
@@ -753,7 +764,7 @@ do_install() {
     pip_install_step() {
         local description="$1"
         shift
-        run_with_timeout "$PIP_INSTALL_TIMEOUT" "$PYTHON_CMD" -m pip "$@" -q 2>/dev/null &
+        run_with_timeout "$PIP_INSTALL_TIMEOUT" "$venv_python" -m pip "$@" -q 2>/dev/null &
         local step_pid=$!
         spin $step_pid "$description"
         wait $step_pid
@@ -769,7 +780,7 @@ do_install() {
             print_error "Failed: $description"
             echo "  Check your internet connection and try again. If it keeps failing,"
             echo "  re-run with pip's quiet flag removed to see the underlying error:"
-            echo "    $PYTHON_CMD -m pip $*"
+            echo "    $venv_python -m pip $*"
             exit 1
         fi
     }
