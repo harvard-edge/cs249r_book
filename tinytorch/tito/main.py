@@ -189,21 +189,20 @@ class TinyTorchCLI:
 
         welcome_text = f"""[{Theme.EMPHASIS}]🎓 LEARNING APPROACH[/{Theme.EMPHASIS}]
 
-Solutions are included in the notebooks. [bold]This is intentional![/bold]
+[bold]Don't import it. Build it.[/bold]
 
-The best way to learn:
-  [{Theme.SUCCESS}]1.[/{Theme.SUCCESS}] Read the module and run the code
-  [{Theme.SUCCESS}]2.[/{Theme.SUCCESS}] Study how the solutions work
-  [{Theme.SUCCESS}]3.[/{Theme.SUCCESS}] Try implementing from scratch
-     [{Theme.DIM}](reset with: tito module reset)[/{Theme.DIM}]
+The learning cycle for each module:
+  [{Theme.SUCCESS}]1.[/{Theme.SUCCESS}] Start a module: [{Theme.INFO}]tito module start 01[/{Theme.INFO}]
+  [{Theme.SUCCESS}]2.[/{Theme.SUCCESS}] Implement your code in the notebook ([{Theme.DIM}]# YOUR CODE HERE[/{Theme.DIM}])
+  [{Theme.SUCCESS}]3.[/{Theme.SUCCESS}] Test, export, and record progress: [{Theme.INFO}]tito module complete 01[/{Theme.INFO}]
 
-[{Theme.WARNING}]🐛 PRE-RELEASE:[/{Theme.WARNING}] We're looking for bugs and feedback!
-   Found something? → [{Theme.INFO}]github.com/harvard-edge/cs249r_book/discussions[/{Theme.INFO}]"""
+[{Theme.WARNING}]🐛 FEEDBACK:[/{Theme.WARNING}] Found an issue or have a suggestion?
+   Discussions → [{Theme.INFO}]github.com/harvard-edge/cs249r_book/discussions[/{Theme.INFO}]"""
 
         self.console.print()
         self.console.print(Panel(
             welcome_text,
-            title="[bold]Welcome to TinyTorch (Pre-release)[/bold]",
+            title="[bold]Welcome to TinyTorch[/bold]",
             border_style=Theme.BORDER_WELCOME,
             box=box.ROUNDED
         ))

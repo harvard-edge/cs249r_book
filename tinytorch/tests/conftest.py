@@ -508,7 +508,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 
 # =============================================================================
-# Custom Test Runner Command (for tito test)
+# Custom Test Runner Command (for tito dev test / tito module test)
 # =============================================================================
 
 def run_tests_with_rich_output(test_path: str = None, verbose: bool = True):
