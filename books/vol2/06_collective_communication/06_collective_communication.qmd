@@ -2466,10 +2466,186 @@ These three phases confine most traffic within each node before crossing the slo
 
 ### In-network reduction: SHARP and beyond {#sec-communication-sharp}
 
-The contrast in @fig-sharp-innetwork shows the next step: move the reduction work from endpoint GPUs into the switch application-specific integrated circuit (ASIC)\index{ASIC}\index{Application-Specific Integrated Circuit|see{ASIC}} so packets are aggregated while they traverse the fabric.
+@Fig-sharp-innetwork contrasts software-based tree AllReduce with in-switch hardware aggregation. In standard software tree AllReduce (panel a), worker GPUs stream complete gradient tensors up the fabric hierarchy to an assigned root GPU, concentrating arithmetic and PCIe bandwidth bottlenecks at that single endpoint before broadcasting results back down. In contrast, in-network reduction architectures such as NVIDIA's Scalable Hierarchical Aggregation and Reduction Protocol (SHARP) (panel b) offload associative reduction directly to switch application-specific integrated circuits (ASICs)\index{ASIC}\index{Application-Specific Integrated Circuit|see{ASIC}} at line rate, ensuring that only aggregated partial sums ascend to higher fabric tiers and completely eliminating the root GPU serialization penalty.
 
-::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-network reduction (SHARP)**: The left panel shows a traditional tree AllReduce that performs reduction at intermediate GPUs and pays repeated store-and-forward delays. The right panel moves those intermediate reductions into switch ASICs, aggregating partial sums as packets traverse the tree. This design avoids intermediate endpoint memory traffic and can reduce collective latency when aggregation cost is material." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
-![](images/svg/sharp-innetwork.svg){width=100%}
+::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-network reduction with SHARP vs. standard tree AllReduce**: Panel (a) illustrates standard tree AllReduce, where full gradient tensors from all worker GPUs traverse intermediate switches unaggregated, converging on a single root GPU that performs store-and-forward arithmetic over saturated PCIe links. Panel (b) illustrates NVIDIA SHARP in-network computing, where switch ASICs aggregate partial sums in flight at wire speed, transmitting only reduced payloads upward and eliminating intermediate host-memory round trips." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\small\sffamily,
+  >=Stealth,
+  header node/.style={
+    font=\bfseries\normalsize,
+    text=TextDark,
+    align=center
+  },
+  subhdr node/.style={
+    font=\scriptsize,
+    text=TextMuted,
+    align=center
+  },
+  banner node/.style={
+    rounded corners=3pt,
+    inner sep=5pt,
+    align=center,
+    font=\footnotesize,
+    text width=6.3cm,
+    line width=0.6pt
+  },
+  gpu node/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue,
+    fill=white,
+    line width=0.8pt,
+    align=center,
+    inner sep=3.5pt,
+    font=\footnotesize,
+    minimum width=1.35cm,
+    minimum height=1.05cm
+  },
+  root node/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=1pt,
+    align=center,
+    inner sep=5pt,
+    font=\footnotesize,
+    minimum width=3.4cm,
+    minimum height=1.2cm
+  },
+  switch node/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    align=center,
+    inner sep=4pt,
+    font=\footnotesize,
+    minimum width=2.5cm,
+    minimum height=1.2cm
+  },
+  badge node/.style={
+    rectangle,
+    rounded corners=2pt,
+    fill=DarkGreen,
+    text=white,
+    font=\scriptsize\bfseries,
+    inner sep=2.5pt,
+    minimum width=2.1cm
+  },
+  footer node/.style={
+    font=\scriptsize,
+    text=TextMuted,
+    align=center,
+    text width=6.8cm
+  }
+]
+
+% Left panel: (a) Standard Tree AllReduce
+\node[header node, text=RedLine] (hdrA) at (3.65, 9.3) {(a) Standard Tree AllReduce};
+\node[subhdr node] (subA) at (3.65, 8.85) {Full gradients traverse all switch tiers to Root GPU};
+
+\node[banner node, draw=RedLine!80, fill=RedFill] (bannerA) at (3.65, 7.8) {
+  \textbf{\textcolor{RedLine}{Bottleneck: Full Tensor Incast}}\\[1.5pt]
+  All $N$ workers stream full tensors to root\\
+  Root bandwidth saturation $= N \times \text{Bandwidth}$
+};
+
+% Root GPU
+\node[root node, draw=RedLine, fill=RedFill!60] (rootA) at (3.65, 5.75) {
+  \textbf{\textcolor{RedLine}{Root GPU (Worker 0)}}\\[1.5pt]
+  $\text{sum} = g_0 + g_1 + g_2 + g_3$\\[1.5pt]
+  \textit{\scriptsize\textcolor{RedLine}{Compute \& PCIe Bottleneck}}
+};
+
+% Switches Level 1
+\node[switch node, draw=SteelBlue!60, fill=LightBlue!70] (swA1) at (1.825, 3.3) {
+  \textbf{Switch L1-A}\\[2pt]
+  \scriptsize\textcolor{TextMuted}{Packet Forward Only}
+};
+\node[switch node, draw=SteelBlue!60, fill=LightBlue!70] (swA2) at (5.475, 3.3) {
+  \textbf{Switch L1-B}\\[2pt]
+  \scriptsize\textcolor{TextMuted}{Packet Forward Only}
+};
+
+% Leaf GPUs
+\node[gpu node] (gA0) at (1.0, 1.0) {\textbf{GPU 0}\\[1.5pt]\scriptsize$\text{grad} = g_0$};
+\node[gpu node] (gA1) at (2.65, 1.0) {\textbf{GPU 1}\\[1.5pt]\scriptsize$\text{grad} = g_1$};
+\node[gpu node] (gA2) at (4.65, 1.0) {\textbf{GPU 2}\\[1.5pt]\scriptsize$\text{grad} = g_2$};
+\node[gpu node] (gA3) at (6.3, 1.0) {\textbf{GPU 3}\\[1.5pt]\scriptsize$\text{grad} = g_3$};
+
+% Connections Panel A
+\draw[->, thick, RedLine] (gA0.north) -- (gA0.north |- swA1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_0\text{ (full)}$};
+\draw[->, thick, RedLine] (gA1.north) -- (gA1.north |- swA1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_1\text{ (full)}$};
+\draw[->, thick, RedLine] (gA2.north) -- (gA2.north |- swA2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_2\text{ (full)}$};
+\draw[->, thick, RedLine] (gA3.north) -- (gA3.north |- swA2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_3\text{ (full)}$};
+
+% Switch to Root (Upstream solid on outside, Downstream dashed on inside)
+\draw[->, thick, RedLine] ($(swA1.north)-(0.25,0)$) -- ($(rootA.south)-(1.15,0)$)
+  node[midway, left=2pt, font=\scriptsize\bfseries] {$g_0 + g_1$};
+\draw[<-, thick, dashed, RedLine!70] ($(swA1.north)+(0.35,0)$) -- ($(rootA.south)-(0.45,0)$);
+
+\draw[->, thick, RedLine] ($(swA2.north)+(0.25,0)$) -- ($(rootA.south)+(1.15,0)$)
+  node[midway, right=2pt, font=\scriptsize\bfseries] {$g_2 + g_3$};
+\draw[<-, thick, dashed, RedLine!70] ($(swA2.north)-(0.35,0)$) -- ($(rootA.south)+(0.45,0)$);
+
+\node[footer node] at (3.65, 0.05) {Upstream: 4 full tensors. Downstream: 4 broadcast copies.};
+
+% Divider
+\draw[dashed, CardBorder!90, line width=0.8pt] (7.3, -0.25) -- (7.3, 9.6);
+
+% Right panel: (b) SHARP In-Network Reduction
+\node[header node, text=DarkGreen] (hdrB) at (10.95, 9.3) {(b) SHARP In-Network Reduction};
+\node[subhdr node] (subB) at (10.95, 8.85) {Switch ASICs reduce inline; only aggregates traverse upwards};
+
+\node[banner node, draw=DarkGreen!80, fill=GreenFill] (bannerB) at (10.95, 7.8) {
+  \textbf{\textcolor{DarkGreen}{Optimization: Line-Rate In-Switch Reduction}}\\[1.5pt]
+  ASICs aggregate payloads inline at wire speed\\
+  $2\text{--}3\times$ AllReduce speedup on Quantum fabrics
+};
+
+% Root Switch (ASIC)
+\node[root node, draw=DarkGreen, fill=GreenFill!60] (rootB) at (10.95, 5.75) {
+  \textbf{\textcolor{DarkGreen}{Root Switch (ASIC)}}\\[1.5pt]
+  Aggregates Subtree Sums\\[1.5pt]
+  \scriptsize\textcolor{DarkGreen}{\textbf{Final sum:} $g_0 + g_1 + g_2 + g_3\,\text{\ding{51}}$}
+};
+
+% SHARP Switches Level 1
+\node[switch node, draw=DarkGreen, fill=GreenFill!35] (swB1) at (9.125, 3.3) {
+  \textbf{SHARP Switch A}\\[3pt]
+  \tikz\node[badge node] {ASIC REDUCE};
+};
+\node[switch node, draw=DarkGreen, fill=GreenFill!35] (swB2) at (12.775, 3.3) {
+  \textbf{SHARP Switch B}\\[3pt]
+  \tikz\node[badge node] {ASIC REDUCE};
+};
+
+% Leaf GPUs
+\node[gpu node] (gB0) at (8.3, 1.0) {\textbf{GPU 0}\\[1.5pt]\scriptsize$\text{grad} = g_0$};
+\node[gpu node] (gB1) at (9.95, 1.0) {\textbf{GPU 1}\\[1.5pt]\scriptsize$\text{grad} = g_1$};
+\node[gpu node] (gB2) at (11.95, 1.0) {\textbf{GPU 2}\\[1.5pt]\scriptsize$\text{grad} = g_2$};
+\node[gpu node] (gB3) at (13.6, 1.0) {\textbf{GPU 3}\\[1.5pt]\scriptsize$\text{grad} = g_3$};
+
+% Connections Panel B
+\draw[->, thick, DarkGreen] (gB0.north) -- (gB0.north |- swB1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_0$};
+\draw[->, thick, DarkGreen] (gB1.north) -- (gB1.north |- swB1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_1$};
+\draw[->, thick, DarkGreen] (gB2.north) -- (gB2.north |- swB2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_2$};
+\draw[->, thick, DarkGreen] (gB3.north) -- (gB3.north |- swB2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_3$};
+
+% Switch to Root (Upstream solid on outside, Downstream dashed on inside)
+\draw[->, thick, DarkGreen] ($(swB1.north)-(0.25,0)$) -- ($(rootB.south)-(1.15,0)$)
+  node[midway, left=2pt, font=\scriptsize\bfseries] {$(g_0 + g_1)\,\text{\ding{51}}$};
+\draw[<-, thick, dashed, DarkGreen!70] ($(swB1.north)+(0.35,0)$) -- ($(rootB.south)-(0.45,0)$);
+
+\draw[->, thick, DarkGreen] ($(swB2.north)+(0.25,0)$) -- ($(rootB.south)+(1.15,0)$)
+  node[midway, right=2pt, font=\scriptsize\bfseries] {$(g_2 + g_3)\,\text{\ding{51}}$};
+\draw[<-, thick, dashed, DarkGreen!70] ($(swB2.north)-(0.35,0)$) -- ($(rootB.south)+(0.45,0)$);
+
+\node[footer node] at (10.95, 0.05) {Only aggregated payloads cross the switch fabric; zero GPU root stall.};
+
+\end{tikzpicture}
+```
 :::
 
 Hierarchical AllReduce reduces the volume of cross-node traffic, but the aggregation still requires multiple network round-trips. NVIDIA's **Scalable Hierarchical Aggregation and Reduction Protocol (SHARP)**\index{SHARP!in-network reduction}[^fn-sharp-innetwork-aggregation] implements this idea: instead of gradients traveling to a destination GPU for summation, the InfiniBand switch aggregates partial sums as data packets pass through it.
