@@ -932,7 +932,7 @@ A calibrated collective model therefore records the operation, reduction datatyp
 
 ## Choosing the Vehicle: Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
-If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations, a vocabulary standardized by MPI and inherited by modern ML communication libraries [@mpiforum2015mpi31]. @Fig-collective-primitives-overview illustrates four of the central primitives in this vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Each panel reads as a before-and-after across the process group, with one row per rank: blue cells mark the input each rank starts with, green cells mark the result it ends with, and orange marks the AllToAll routing that shuffles unique data between every pair of ranks. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), are foundational building blocks defined in @sec-collective-communication-six-core-primitives-8a66 and used implicitly in the figure's compound patterns. @Sec-appdx-comm-foundations-collective-complexity formalizes the semantics and latency and bandwidth complexity of each primitive; the prose here introduces them through their workload use cases, and the reader who wants the formal complexity bounds before proceeding can establish them there first.
+If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations, a vocabulary standardized by MPI and inherited by modern ML communication libraries [@mpiforum2015mpi31]. @Fig-collective-primitives-overview illustrates four of the central primitives in this vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Each panel reads as a before-and-after across the process group, with one row per rank: blue cells mark the input each rank starts with, green cells mark the aggregated or reconstructed output tensors, and violet marks the AllToAll pairwise shuffle that transposes unique shards across all ranks. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), are foundational building blocks defined in @sec-collective-communication-six-core-primitives-8a66 and used implicitly in the compound patterns shown in the figure. @Sec-appdx-comm-foundations-collective-complexity formalizes the semantics and latency and bandwidth complexity of each primitive; the prose here introduces them through their workload use cases, and the reader who wants the formal complexity bounds before proceeding can establish them there first.
 
 ::: {#dfn-collective-communication-collective-operation .callout-definition title="Collective operation"}
 
@@ -945,7 +945,278 @@ If a GPU simply opens a socket and sends a massive gradient to another GPU, the 
 :::
 
 ::: {#fig-collective-primitives-overview fig-env="figure" fig-pos="htb" fig-cap="**Four central collective primitives**: Standardized patterns for group communication in distributed systems. (1) AllReduce: all aggregate and all receive the result. (2) AllGather: all send to all and concatenate. (3) ReduceScatter: all aggregate and results are distributed in shards. (4) AllToAll: every process sends unique data to every other process. The two foundational primitives Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0) compose the patterns shown here and are defined in the surrounding prose." fig-alt="Grid of 4 diagrams illustrating AllReduce, AllGather, ReduceScatter, and AllToAll communication patterns across a process group."}
-![](images/svg/collective-primitives-overview.svg)
+
+```{.tikz}
+\begin{tikzpicture}[
+    font=\small\sffamily,
+    >=Stealth,
+    panel/.style={
+      draw=CanvasBorder,
+      fill=CanvasBg,
+      rounded corners=5pt,
+      line width=0.6pt,
+      inner sep=8pt
+    },
+    in node/.style={
+      draw=BlueLine,
+      fill=white,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    out node green/.style={
+      draw=GreenLine,
+      fill=GreenFill!60,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    out node violet/.style={
+      draw=VioletLine,
+      fill=VioletFill!70,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    op orange/.style={
+      draw=OrangeLine,
+      fill=OrangeFill,
+      text=OrangeLine!90!black,
+      line width=0.9pt,
+      rounded corners=3.5pt,
+      font=\footnotesize\bfseries\sffamily,
+      inner sep=4pt,
+      text centered
+    },
+    op violet/.style={
+      draw=VioletLine,
+      fill=VioletFill,
+      text=VioletLine,
+      line width=0.9pt,
+      rounded corners=3.5pt,
+      font=\footnotesize\bfseries\sffamily,
+      inner sep=4pt,
+      text centered
+    },
+    wire in/.style={
+      draw=BlueLine!80!black,
+      line width=0.7pt
+    },
+    wire green/.style={
+      ->,
+      draw=GreenLine,
+      line width=0.8pt
+    },
+    wire violet/.style={
+      ->,
+      draw=VioletLine,
+      line width=0.8pt
+    }
+  ]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfsetlayers{background,main}
+
+  % ========================================================
+  % 1. TOP-LEFT: ALLREDUCE
+  % ========================================================
+  \begin{scope}[shift={(0, 5.0)}, local bounding box=boxAllReduce]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllReduce} \footnotesize(Sum Reduction)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=BlueLine] at (7.1, 4.35) {All Hold Total Sum};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Aggregates distributed arrays; all devices receive the identical sum.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=1.55cm] (ar_in0) at (0.95, 3.35) {G0: [ 1 ]};
+    \node[in node, minimum width=1.55cm] (ar_in1) at (0.95, 2.70) {G1: [ 2 ]};
+    \node[in node, minimum width=1.55cm] (ar_in2) at (0.95, 2.05) {G2: [ 3 ]};
+    \node[in node, minimum width=1.55cm] (ar_in3) at (0.95, 1.40) {G3: [ 4 ]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ar_op) at (3.55, 2.375) {AllReduce $\Sigma$};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=1.65cm] (ar_out0) at (6.15, 3.35) {G0: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out1) at (6.15, 2.70) {G1: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out2) at (6.15, 2.05) {G2: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out3) at (6.15, 1.40) {G3: [ \textbf{10} ]};
+
+    % Wires In -> Op
+    \draw[wire in] (ar_in0.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, 0.15)$);
+    \draw[wire in] (ar_in1.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, 0.05)$);
+    \draw[wire in] (ar_in2.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, -0.05)$);
+    \draw[wire in] (ar_in3.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ar_op.west)-(0.15,0)$) -- (ar_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ar_out_fork) at ($(ar_op.east)+(0.25,0)$);
+    \draw[wire green, -] (ar_op.east) -- (ar_out_fork);
+    \draw[wire green] (ar_out_fork) |- (ar_out0.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out1.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out2.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=TextDark] at (3.55, 0.95) {\textbf{Core Usage:} Data Parallel gradient synchronization (DDP)};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllReduce)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 2. TOP-RIGHT: ALLGATHER
+  % ========================================================
+  \begin{scope}[shift={(7.8, 5.0)}, local bounding box=boxAllGather]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllGather} \footnotesize(Concatenation)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=GreenLine] at (7.1, 4.35) {All Hold Full Tensor};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Collects partial shards from each device into the complete tensor.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=1.55cm] (ag_in0) at (0.95, 3.35) {G0: [ $a$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in1) at (0.95, 2.70) {G1: [ $b$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in2) at (0.95, 2.05) {G2: [ $c$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in3) at (0.95, 1.40) {G3: [ $d$ ]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ag_op) at (3.55, 2.375) {AllGather $\boxplus$};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=2.1cm] (ag_out0) at (6.05, 3.35) {G0: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out1) at (6.05, 2.70) {G1: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out2) at (6.05, 2.05) {G2: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out3) at (6.05, 1.40) {G3: [ $a, b, c, d$ ]};
+
+    % Wires In -> Op
+    \draw[wire in] (ag_in0.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, 0.15)$);
+    \draw[wire in] (ag_in1.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, 0.05)$);
+    \draw[wire in] (ag_in2.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, -0.05)$);
+    \draw[wire in] (ag_in3.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ag_op.west)-(0.15,0)$) -- (ag_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ag_out_fork) at ($(ag_op.east)+(0.25,0)$);
+    \draw[wire green, -] (ag_op.east) -- (ag_out_fork);
+    \draw[wire green] (ag_out_fork) |- (ag_out0.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out1.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out2.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=GreenLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO-3 parameter un-sharding};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllGather)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 3. BOTTOM-LEFT: REDUCESCATTER
+  % ========================================================
+  \begin{scope}[shift={(0, 0)}, local bounding box=boxReduceScatter]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small ReduceScatter} \footnotesize(Reduce-Scatter)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=OrangeLine] at (7.1, 4.35) {Unique Shard Each};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Reduces full arrays across devices, then scatters disjoint reduced slices.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=2.1cm] (rs_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
+    \node[in node, minimum width=2.1cm] (rs_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
+    \node[in node, minimum width=2.1cm] (rs_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
+    \node[in node, minimum width=2.1cm] (rs_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (rs_op) at (3.55, 2.375) {ReduceScatter};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=1.65cm] (rs_out0) at (6.15, 3.35) {G0: [ $\sum a$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out1) at (6.15, 2.70) {G1: [ $\sum b$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out2) at (6.15, 2.05) {G2: [ $\sum c$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out3) at (6.15, 1.40) {G3: [ $\sum d$ ]};
+
+    % Wires In -> Op
+    \draw[wire in] (rs_in0.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, 0.15)$);
+    \draw[wire in] (rs_in1.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, 0.05)$);
+    \draw[wire in] (rs_in2.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, -0.05)$);
+    \draw[wire in] (rs_in3.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(rs_op.west)-(0.15,0)$) -- (rs_op.west);
+
+    % Wires Op -> Out
+    \coordinate (rs_out_fork) at ($(rs_op.east)+(0.25,0)$);
+    \draw[wire green, -] (rs_op.east) -- (rs_out_fork);
+    \draw[wire green] (rs_out_fork) |- (rs_out0.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out1.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out2.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=OrangeLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO gradient reduction into sharded state};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxReduceScatter)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 4. BOTTOM-RIGHT: ALLTOALL
+  % ========================================================
+  \begin{scope}[shift={(7.8, 0)}, local bounding box=boxAllToAll]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllToAll} \footnotesize(Matrix Transpose)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=VioletLine] at (7.1, 4.35) {Pairwise Shuffle};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Each rank sends distinct shard $i$ to peer rank $i$ (transposition).};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=2.1cm] (ata_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
+    \node[in node, minimum width=2.1cm] (ata_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
+    \node[in node, minimum width=2.1cm] (ata_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
+    \node[in node, minimum width=2.1cm] (ata_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
+
+    % Central Operator
+    \node[op violet, minimum width=1.8cm, minimum height=0.75cm] (ata_op) at (3.55, 2.375) {AllToAll $\rightleftarrows$};
+
+    % Outputs (Violet)
+    \node[out node violet, minimum width=2.1cm] (ata_out0) at (6.05, 3.35) {G0: [$a_0,a_1,a_2,a_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out1) at (6.05, 2.70) {G1: [$b_0,b_1,b_2,b_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out2) at (6.05, 2.05) {G2: [$c_0,c_1,c_2,c_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out3) at (6.05, 1.40) {G3: [$d_0,d_1,d_2,d_3$]};
+
+    % Wires In -> Op
+    \draw[wire in] (ata_in0.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, 0.15)$);
+    \draw[wire in] (ata_in1.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, 0.05)$);
+    \draw[wire in] (ata_in2.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, -0.05)$);
+    \draw[wire in] (ata_in3.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ata_op.west)-(0.15,0)$) -- (ata_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ata_out_fork) at ($(ata_op.east)+(0.25,0)$);
+    \draw[wire violet, -] (ata_op.east) -- (ata_out_fork);
+    \draw[wire violet] (ata_out_fork) |- (ata_out0.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out1.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out2.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=VioletLine] at (3.55, 0.95) {\textbf{Core Usage:} MoE token dispatch \& combine routing};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllToAll)] {};
+  \end{pgfonlayer}
+
+\end{tikzpicture}
+```
 :::
 
 The primitive choice is the first scaling decision because it fixes which ranks must coordinate, which data must move, and which communication term will dominate. Different model architectures stress different operations, and selecting the wrong primitive for a workload creates unnecessary bottlenecks.
