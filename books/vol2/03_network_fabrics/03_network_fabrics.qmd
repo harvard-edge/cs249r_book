@@ -681,7 +681,216 @@ Achieving `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` and higher line rates 
 However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of three compared to NRZ, making the link highly susceptible to noise. Consequently, high-speed links operate near the physical limits of reliable detection and require **forward error correction (FEC)**\index{Forward Error Correction!definition}\index{FEC!definition} at the physical layer, commonly using Reed-Solomon RS(544,514)-family codes in high-speed Ethernet designs [@anslow2016rsFec; @ethernetAlliance2025roadmap]. FEC processing is an implementation-dependent latency term; IEEE 802.3df operator material treats roughly 100 ns of host KP4 FEC and hundreds of nanoseconds of end-to-end module latency as meaningful at AI/HPC fabric timescales [@yin2022fecRequirements]. For the 175B model training, which generates `{python} NetworkRunningExampleCluster.grad_gb_str` of gradient traffic per step across `{python} NetworkWireClusterRecap.n_gpus_str`, this latency floor is nonnegotiable. A packet crossing three switch hops in a fat-tree incurs a scenario budget of `{python} FECLatency.three_hop_low_ns_str`--`{python} FECLatency.three_hop_high_ns_str` of one-way FEC decoding and encoding latency, or `{python} FECLatency.round_trip_low_ns_str`--`{python} FECLatency.round_trip_high_ns_str` over a three-hop path in each direction. This "physics tax" sets a hard floor on the fabric's fixed startup latency, formalized in @sec-network-fabrics-performance-model as the $\alpha$ term, limiting the speed of latency-sensitive collectives like AllReduce regardless of software optimizations. @Fig-pam4-vs-nrz shows the signaling trade-off directly: PAM4 doubles the bits per symbol relative to NRZ, but the smaller voltage gaps reduce noise margin and make FEC part of the link's latency floor.
 
 ::: {#fig-pam4-vs-nrz fig-env="figure" fig-pos="htb" fig-cap="**From NRZ to PAM4 signaling**: To increase bandwidth without doubling clock frequency, high-speed interconnects moved from NRZ (2 voltage levels, 1 bit per symbol) to PAM4 (4 voltage levels, 2 bits per symbol). The trade-off is reduced noise margin: the 'eye' of the signal is smaller, necessitating forward error correction (FEC) and increasing the irreducible $\alpha$ latency of the fabric." fig-alt="Signal waveform comparison. NRZ shows two levels (0, 1). PAM4 shows four levels (00, 01, 10, 11). Shaded regions indicate the reduced noise margin in PAM4."}
-![](images/svg/pam4-vs-nrz.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  panel/.style={
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.8pt,
+    minimum width=6.9cm,
+    minimum height=5.8cm,
+    inner sep=0pt
+  },
+  card_spec/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=CardBorder,
+    fill=CardFill,
+    line width=0.6pt,
+    inner sep=5pt,
+    minimum width=6.3cm
+  },
+  header_badge/.style={
+    rectangle,
+    rounded corners=2pt,
+    text=white,
+    font=\bfseries\tiny,
+    inner xsep=4pt,
+    inner ysep=1.5pt
+  }
+]
+
+  % =============================================================
+  % LEFT PANEL: NRZ SIGNALING
+  % =============================================================
+  \def\xl{-3.6}
+  \node[panel] (p_nrz) at (\xl, 3.0) {};
+
+  % Header
+  \path[fill=LightBlue!60, rounded corners=4pt]
+    ($(p_nrz.north west)$) rectangle ($(p_nrz.north east) + (0, -0.45)$);
+  \path[fill=LightBlue!60]
+    ($(p_nrz.north west) + (0, -0.3)$) rectangle ($(p_nrz.north east) + (0, -0.45)$);
+  \draw[SteelBlue!40, line width=0.7pt]
+    ($(p_nrz.north west) + (0, -0.45)$) -- ($(p_nrz.north east) + (0, -0.45)$);
+
+  \node[anchor=west, font=\scriptsize\bfseries, text=SteelBlue] at ($(p_nrz.north west) + (0.3, -0.225)$)
+    {NRZ Signaling};
+  \node[header_badge, fill=SteelBlue, anchor=east] at ($(p_nrz.north east) + (-0.3, -0.225)$)
+    {2 Levels $\cdot$ 1 Bit/Baud};
+
+  % NRZ Waveform Area
+  \def\xorgl{-6.5}
+  \def\yorl{3.3}
+
+  % Grid Lines
+  \draw[GridLine, dashed] (\xorgl, \yorl + 0.8) -- ++(3.8, 0);
+  \draw[GridLine, dashed] (\xorgl, \yorl - 0.8) -- ++(3.8, 0);
+
+  % Axes: stops at +3.8 cm before the bracket
+  \draw[->, line width=0.6pt, SlateLine] (\xorgl, \yorl - 1.1) -- ++(0, 2.3) node[above, font=\tiny, text=TextMuted] {$V$};
+  \draw[->, line width=0.6pt, SlateLine] (\xorgl, \yorl) -- ++(3.85, 0) node[above, font=\tiny, text=TextMuted] {$t$};
+
+  % Voltage tick labels
+  \node[anchor=east, font=\tiny\bfseries, text=SteelBlue] at (\xorgl - 0.05, \yorl + 0.8) {$+V$};
+  \node[anchor=east, font=\tiny\bfseries, text=SteelBlue] at (\xorgl - 0.05, \yorl - 0.8) {$-V$};
+
+  % NRZ Waveform: 1, 0, 1, 0
+  \def\wint{0.82}
+  \coordinate (w0) at (\xorgl + 0.25, \yorl + 0.8);
+  \coordinate (w1) at ($(\xorgl + 0.25, \yorl + 0.8) + (\wint, 0)$);
+  \coordinate (w2) at ($(\xorgl + 0.25, \yorl - 0.8) + (\wint, 0)$);
+  \coordinate (w3) at ($(\xorgl + 0.25, \yorl - 0.8) + (2*\wint, 0)$);
+  \coordinate (w4) at ($(\xorgl + 0.25, \yorl + 0.8) + (2*\wint, 0)$);
+  \coordinate (w5) at ($(\xorgl + 0.25, \yorl + 0.8) + (3*\wint, 0)$);
+  \coordinate (w6) at ($(\xorgl + 0.25, \yorl - 0.8) + (3*\wint, 0)$);
+  \coordinate (w7) at ($(\xorgl + 0.25, \yorl - 0.8) + (4*\wint, 0)$);
+
+  \draw[line width=1.5pt, SteelBlue, line join=round]
+    (w0) -- (w1) -- (w2) -- (w3) -- (w4) -- (w5) -- (w6) -- (w7);
+
+  % Bit values
+  \node[font=\bfseries\tiny, text=NavyBlue] at ($(\xorgl + 0.25 + 0.5*\wint, \yorl + 1.05)$) {1};
+  \node[font=\bfseries\tiny, text=NavyBlue] at ($(\xorgl + 0.25 + 1.5*\wint, \yorl - 1.05)$) {0};
+  \node[font=\bfseries\tiny, text=NavyBlue] at ($(\xorgl + 0.25 + 2.5*\wint, \yorl + 1.05)$) {1};
+  \node[font=\bfseries\tiny, text=NavyBlue] at ($(\xorgl + 0.25 + 3.5*\wint, \yorl - 1.05)$) {0};
+
+  % Eye Height Callout Bracket
+  \draw[SteelBlue, line width=0.8pt, decorate, decoration={brace, amplitude=4pt, mirror}]
+    ($(\xorgl + 4.15, \yorl - 0.8)$) -- ($(\xorgl + 4.15, \yorl + 0.8)$)
+    node[midway, right=5pt, align=left, font=\tiny] {
+      \textbf{\textcolor{SteelBlue}{Eye: $2V$}}\\[1.5pt]
+      \textcolor{TextMuted}{Full margin}\\[1.5pt]
+      \textcolor{DarkGreen}{\textbf{No FEC}}
+    };
+
+  % Specs footer card
+  \node[card_spec, anchor=south] at (\xl, 0.3) {
+    \begin{minipage}{6.0cm}
+      \tiny
+      \textbf{Bit Density:} 1 bit per symbol (binary signaling)\\[1.5pt]
+      \textbf{Raw Error Rate:} $\text{BER} < 10^{-12}$ (clean detection, no FEC)\\[1.5pt]
+      \textbf{Latency Floor:} \textbf{\textcolor{DarkGreen}{5--10 ns}} PHY processing
+    \end{minipage}
+  };
+
+
+  % =============================================================
+  % RIGHT PANEL: PAM4 SIGNALING
+  % =============================================================
+  \def\xr{3.6}
+  \node[panel] (p_pam) at (\xr, 3.0) {};
+
+  % Header
+  \path[fill=OrangeL, rounded corners=4pt]
+    ($(p_pam.north west)$) rectangle ($(p_pam.north east) + (0, -0.45)$);
+  \path[fill=OrangeL]
+    ($(p_pam.north west) + (0, -0.3)$) rectangle ($(p_pam.north east) + (0, -0.45)$);
+  \draw[OrangeLine!40, line width=0.7pt]
+    ($(p_pam.north west) + (0, -0.45)$) -- ($(p_pam.north east) + (0, -0.45)$);
+
+  \node[anchor=west, font=\scriptsize\bfseries, text=OrangeLine!90!black] at ($(p_pam.north west) + (0.3, -0.225)$)
+    {PAM4 Signaling};
+  \node[header_badge, fill=OrangeLine, anchor=east] at ($(p_pam.north east) + (-0.3, -0.225)$)
+    {4 Levels $\cdot$ 2 Bits/Baud};
+
+  % PAM4 Waveform Area
+  \def\xorgr{0.7}
+  \def\yorr{3.3}
+
+  % 4 Voltage Levels: +3V (0.9cm), +1V (0.3cm), -1V (-0.3cm), -3V (-0.9cm)
+  \draw[GridLine, dashed] (\xorgr, \yorr + 0.9) -- ++(3.8, 0);
+  \draw[GridLine, dashed] (\xorgr, \yorr + 0.3) -- ++(3.8, 0);
+  \draw[GridLine, dashed] (\xorgr, \yorr - 0.3) -- ++(3.8, 0);
+  \draw[GridLine, dashed] (\xorgr, \yorr - 0.9) -- ++(3.8, 0);
+
+  % Axes: stops at +3.8 cm before the bracket
+  \draw[->, line width=0.6pt, SlateLine] (\xorgr, \yorr - 1.1) -- ++(0, 2.3) node[above, font=\tiny, text=TextMuted] {$V$};
+  \draw[->, line width=0.6pt, SlateLine] (\xorgr, \yorr) -- ++(3.85, 0) node[above, font=\tiny, text=TextMuted] {$t$};
+
+  % Voltage tick labels
+  \node[anchor=east, font=\tiny\bfseries, text=OrangeLine!90!black] at (\xorgr - 0.05, \yorr + 0.9) {$+3$};
+  \node[anchor=east, font=\tiny\bfseries, text=OrangeLine!90!black] at (\xorgr - 0.05, \yorr + 0.3) {$+1$};
+  \node[anchor=east, font=\tiny\bfseries, text=OrangeLine!90!black] at (\xorgr - 0.05, \yorr - 0.3) {$-1$};
+  \node[anchor=east, font=\tiny\bfseries, text=OrangeLine!90!black] at (\xorgr - 0.05, \yorr - 0.9) {$-3$};
+
+  % PAM4 Waveform: 11 (+3), 01 (-1), 10 (+1), 00 (-3)
+  \coordinate (u0) at (\xorgr + 0.25, \yorr + 0.9);
+  \coordinate (u1) at ($(\xorgr + 0.25, \yorr + 0.9) + (\wint, 0)$);
+  \coordinate (u2) at ($(\xorgr + 0.25, \yorr - 0.3) + (\wint, 0)$);
+  \coordinate (u3) at ($(\xorgr + 0.25, \yorr - 0.3) + (2*\wint, 0)$);
+  \coordinate (u4) at ($(\xorgr + 0.25, \yorr + 0.3) + (2*\wint, 0)$);
+  \coordinate (u5) at ($(\xorgr + 0.25, \yorr + 0.3) + (3*\wint, 0)$);
+  \coordinate (u6) at ($(\xorgr + 0.25, \yorr - 0.9) + (3*\wint, 0)$);
+  \coordinate (u7) at ($(\xorgr + 0.25, \yorr - 0.9) + (4*\wint, 0)$);
+
+  \draw[line width=1.5pt, OrangeLine, line join=round]
+    (u0) -- (u1) -- (u2) -- (u3) -- (u4) -- (u5) -- (u6) -- (u7);
+
+  % Bit pair values
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at ($(\xorgr + 0.25 + 0.5*\wint, \yorr + 1.15)$) {11};
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at ($(\xorgr + 0.25 + 1.5*\wint, \yorr - 0.05)$) {01};
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at ($(\xorgr + 0.25 + 2.5*\wint, \yorr + 0.55)$) {10};
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at ($(\xorgr + 0.25 + 3.5*\wint, \yorr - 1.15)$) {00};
+
+  % Reduced Eye Bracket
+  \draw[DarkRed, line width=0.8pt, decorate, decoration={brace, amplitude=4pt, mirror}]
+    ($(\xorgr + 4.15, \yorr - 0.3)$) -- ($(\xorgr + 4.15, \yorr + 0.3)$)
+    node[midway, right=5pt, align=left, font=\tiny] {
+      \textbf{\textcolor{DarkRed}{Eye: $\frac{2}{3}V$}}\\[1.5pt]
+      \textcolor{DarkRed}{$-9.5\text{ dB SNR}$}\\[1.5pt]
+      \textcolor{DarkRed}{\textbf{Needs FEC}}
+    };
+
+  % Specs footer card
+  \node[card_spec, anchor=south] at (\xr, 0.3) {
+    \begin{minipage}{6.0cm}
+      \tiny
+      \textbf{Bit Density:} 2 bits per symbol ($2\times$ throughput at same baud)\\[1.5pt]
+      \textbf{Raw Error Rate:} $\text{BER} \approx 10^{-4}$ (requires mandatory FEC)\\[1.5pt]
+      \textbf{Latency Floor:} \textbf{\textcolor{DarkRed}{+100--200 ns}} per hop (FEC encode/decode)
+    \end{minipage}
+  };
+
+
+  % =============================================================
+  % BOTTOM SUMMARY COMPARISON CARD
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=CardFill,
+    line width=0.8pt,
+    minimum width=14.0cm,
+    inner sep=6pt,
+    align=center,
+    anchor=north
+  ] at (0, -0.1) {
+    \textbf{\scriptsize Distributed Systems Trade-Off: Bandwidth Density vs.\ Collective Latency Floor}\\[2.5pt]
+    \begin{minipage}{13.5cm}
+      \tiny
+      \textbf{Bandwidth Doubling:} PAM4 delivers $2\times$ bits per baud, enabling 400G and 800G optical rails across standard data-center fiber infrastructure.\\[1.5pt]
+      \textbf{\textcolor{DarkRed}{Irreducible Latency Floor:}} The $\frac{1}{3}\times$ eye opening requires Reed-Solomon RS(544,514) FEC at each PHY layer, adding $100\text{--}200\text{ ns}$ per hop to the cluster's fixed $\alpha$ latency.
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 This signaling shift highlights a key architectural rule: doubling line rate without doubling clock frequency trades SNR for bandwidth, requiring forward error correction to operate near the channel limit.
