@@ -1035,7 +1035,180 @@ Stepping back from that specific cluster to the design space, @fig-coll-comm con
 
 ::: {#fig-coll-comm fig-env="figure" fig-pos="htb" fig-cap="**Gradient synchronization topologies**: The panels compare three communication patterns. (a) Ring AllReduce distributes bandwidth evenly across links but has linear latency scaling. (b) A parameter server centralizes traffic and creates a server bottleneck. (c) An All-to-All mesh completes an exchange in one communication round, but its link count grows quadratically, making the topology impractical beyond small groups." fig-alt="Three communication topology diagrams. (a) Ring AllReduce with 4 GPUs in circular topology. (b) Parameter Server with central PS node connected to 4 workers creating bottleneck. (c) All-to-All mesh with 4 GPUs fully connected by 6 links."}
 
-![](images/svg/gradient-sync-topologies.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  panel title/.style={
+    font=\bfseries\footnotesize,
+    text=TextDark,
+    align=center
+  },
+  node box/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize\bfseries,
+    inner sep=3pt
+  },
+  card/.style={
+    rectangle,
+    rounded corners=5pt,
+    line width=0.85pt,
+    inner sep=6pt,
+    align=left,
+    text width=4.3cm,
+    font=\scriptsize
+  },
+  status badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.65pt,
+    align=center,
+    font=\bfseries\scriptsize,
+    inner sep=3pt
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{VioletLine}{RGB}{125,45,150}
+  \definecolor{VioletL}{RGB}{248,240,252}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % VERTICAL SEPARATORS
+  % ===========================================================
+  \draw[dashed, gray!30, thin] (5.125, 7.8) -- (5.125, 0.1);
+  \draw[dashed, gray!30, thin] (10.275, 7.8) -- (10.275, 0.1);
+
+  % ===========================================================
+  % PANEL (a): RING ALLREDUCE
+  % ===========================================================
+  \node[panel title] at (2.55, 7.55) {\textbf{(a) Ring AllReduce}};
+
+  % 4 GPU Nodes: 0 -> 1 -> 2 -> 3 -> 0
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G0) at (1.4, 6.15) {GPU 0};
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G1) at (3.7, 6.15) {GPU 1};
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G2) at (3.7, 4.35) {GPU 2};
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G3) at (1.4, 4.35) {GPU 3};
+
+  % Clockwise ring arrows
+  \draw[->, line width=1.2pt, SteelBlue] (R_G0.east) -- (R_G1.west)
+    node[midway, above=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 0};
+  \draw[->, line width=1.2pt, SteelBlue] (R_G1.south) -- (R_G2.north)
+    node[midway, right=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 1};
+  \draw[->, line width=1.2pt, SteelBlue] (R_G2.west) -- (R_G3.east)
+    node[midway, below=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 2};
+  \draw[->, line width=1.2pt, SteelBlue] (R_G3.north) -- (R_G0.south)
+    node[midway, left=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 3};
+
+  % Card (a)
+  \node[card, draw=SteelBlue!80, fill=white, minimum height=2.45cm] (CARD_A) at (2.55, 2.05) {
+    \centering\textbf{\normalsize\textcolor{SteelBlue}{Bandwidth Optimal}}\\[5pt]
+    \raggedright
+    \textbf{Volume:} $\tfrac{2(N-1)}{N} M$ per GPU\\[3pt]
+    \textbf{Latency:} $2(N-1)$ network steps\\[3pt]
+    \textbf{BW Util.:} \textcolor{DarkGreen}{\textbf{$\approx 100\%$}} full bidirectional
+  };
+  \node[status badge, draw=SteelBlue, fill=LightBlue, text=SteelBlue, minimum width=4.3cm, minimum height=0.52cm] at (2.55, 0.45) {
+    \ding{51}\; Default for NCCL \& PyTorch DDP
+  };
+
+  % ===========================================================
+  % PANEL (b): PARAMETER SERVER
+  % ===========================================================
+  \node[panel title] at (7.7, 7.55) {\textbf{(b) Parameter Server}};
+
+  % Central Bottleneck Badge
+  \node[status badge, draw=RedLine, fill=RedFill, text=RedLine, font=\bfseries\tiny, inner sep=2pt] at (7.7, 7.12) {
+    Central Bottleneck
+  };
+
+  % Parameter Server Node
+  \node[node box, draw=RedLine, fill=RedFill, minimum width=2.4cm, minimum height=0.75cm] (PS) at (7.7, 6.15) {
+    \textbf{Parameter Server}
+  };
+
+  % 4 Workers
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W0) at (6.0, 4.35) {W0};
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W1) at (7.1, 4.35) {W1};
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W2) at (8.3, 4.35) {W2};
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W3) at (9.4, 4.35) {W3};
+
+  % Clean Bidirectional Push/Pull Links
+  \draw[<->, line width=1.1pt, RedLine!85] (W0.north) -- (PS.210);
+  \draw[<->, line width=1.1pt, RedLine!85] (W1.north) -- (PS.235);
+  \draw[<->, line width=1.1pt, RedLine!85] (W2.north) -- (PS.305);
+  \draw[<->, line width=1.1pt, RedLine!85] (W3.north) -- (PS.330);
+
+  % Flow Badges
+  \node[font=\tiny\bfseries, text=RedLine, fill=white, inner sep=1pt, rounded corners=1pt] at (6.25, 5.35) {push grads $\uparrow$};
+  \node[font=\tiny\bfseries, text=SteelBlue, fill=white, inner sep=1pt, rounded corners=1pt] at (9.15, 5.35) {pull params $\downarrow$};
+
+  % Card (b)
+  \node[card, draw=RedLine!80, fill=white, minimum height=2.45cm] (CARD_B) at (7.7, 2.05) {
+    \centering\textbf{\normalsize\textcolor{RedLine}{Centralized (Legacy)}}\\[5pt]
+    \raggedright
+    \textbf{Volume:} $2M$ per worker\\[3pt]
+    \textbf{Latency:} $\mathcal{O}(1)$ rounds (2 trips)\\[3pt]
+    \textbf{BW Util.:} \textcolor{RedLine}{\textbf{Limited}} by PS network NIC
+  };
+  \node[status badge, draw=RedLine, fill=RedFill, text=RedLine, minimum width=4.3cm, minimum height=0.52cm] at (7.7, 0.45) {
+    \ding{55}\; DistBelief / Parameter Server
+  };
+
+  % ===========================================================
+  % PANEL (c): ALL-TO-ALL MESH
+  % ===========================================================
+  \node[panel title] at (12.85, 7.55) {\textbf{(c) All-to-All Mesh}};
+
+  % 4 GPU Nodes in Grid
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G0) at (11.7, 6.15) {GPU 0};
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G1) at (14.0, 6.15) {GPU 1};
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G2) at (11.7, 4.35) {GPU 2};
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G3) at (14.0, 4.35) {GPU 3};
+
+  % All 6 Bidirectional Mesh Links
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G0) -- (M_G1);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G2) -- (M_G3);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G0) -- (M_G2);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G1) -- (M_G3);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G0) -- (M_G3);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G1) -- (M_G2);
+
+  % Link Count Badge in center
+  \node[status badge, draw=OrangeLine, fill=white, text=OrangeLine, font=\bfseries\tiny, inner sep=2pt] at (12.85, 5.25) {
+    $\binom{N}{2} = 6$ links
+  };
+
+  % Card (c)
+  \node[card, draw=OrangeLine!80, fill=white, minimum height=2.45cm] (CARD_C) at (12.85, 2.05) {
+    \centering\textbf{\normalsize\textcolor{OrangeLine}{Fully Connected Mesh}}\\[5pt]
+    \raggedright
+    \textbf{Volume:} $M(N-1)$ total network traffic\\[3pt]
+    \textbf{Latency:} $\mathcal{O}(1)$ rounds\\[3pt]
+    \textbf{BW Util.:} \textcolor{OrangeLine}{\textbf{$\mathcal{O}(N^2)$}} link explosion
+  };
+  \node[status badge, draw=OrangeLine, fill=OrangeL, text=OrangeLine, minimum width=4.3cm, minimum height=0.52cm] at (12.85, 0.45) {
+    \ding{55}\; Impractical beyond 8 nodes
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
