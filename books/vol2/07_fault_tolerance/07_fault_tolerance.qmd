@@ -5883,7 +5883,171 @@ Suppose a 1,024-GPU training job loses an 8-GPU node to a hardware fault, but th
 
 ::: {#fig-elastic-flow fig-env="figure" fig-pos="htb" fig-cap="**Elastic training recovery**: Unlike static training which aborts on failure, elastic training adapts. When a worker fails, the job pauses, redistributes the dataset and model shards across the remaining $N-1$ workers, and resumes training from the last consistent state. This capability transforms hard failures into temporary throughput degradations." fig-alt="Flowchart with 5 steps and decision diamond. Training on N workers flows to monitor alert diamond. On failure: pause training, rescale batch and learning rate to N-1 workers, resume training. Loop returns to monitoring. Annotation highlights key step."}
 
-![](images/svg/elastic-flow.svg)
+```{=latex}
+\begin{tikzpicture}[
+  >=Latex,
+  font=\sffamily
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{CardFill}{RGB}{248, 250, 252}
+  \providecolor{CardBorder}{RGB}{226, 232, 240}
+  \providecolor{TextDark}{RGB}{30, 41, 59}
+  \providecolor{TextMuted}{RGB}{100, 116, 139}
+  \providecolor{DarkAmber}{RGB}{146, 64, 14}
+  \providecolor{SlateGray}{RGB}{100, 116, 139}
+
+  % =========================================================================
+  % TIME AXIS ON LEFT
+  % =========================================================================
+  \draw[->, line width=1.0pt, SlateGray!60] (0.5, 13.0) -- (0.5, 0.6);
+  \node[rotate=90, font=\fontsize{7.5pt}{9pt}\selectfont\bfseries, text=SlateGray]
+    at (0.25, 6.8) {Time};
+
+  % =========================================================================
+  % PHASE 1: 4-NODE RING --- ALL HEALTHY
+  % =========================================================================
+  \node[font=\fontsize{9pt}{11pt}\selectfont\bfseries, text=DarkGreen]
+    at (7.2, 13.1) {Phase 1: 4-Node Ring --- All Healthy};
+
+  % 4 Nodes (x-centers: 2.85, 5.75, 8.65, 11.55)
+  \foreach \i/\x in {0/2.85, 1/5.75, 2/8.65, 3/11.55} {
+    \draw[rounded corners=3pt, line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
+      (\x - 1.05, 11.3) rectangle (\x + 1.05, 12.5);
+    \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=NavyBlue]
+      at (\x, 12.1) {Node \i};
+    \node[font=\fontsize{6.8pt}{8pt}\selectfont, text=SteelBlue]
+      at (\x, 11.65) {rank \i};
+  }
+
+  % Ring forward arrows
+  \draw[->, line width=1.0pt, NavyBlue] (3.90, 11.9) -- (4.70, 11.9);
+  \draw[->, line width=1.0pt, NavyBlue] (6.80, 11.9) -- (7.60, 11.9);
+  \draw[->, line width=1.0pt, NavyBlue] (9.70, 11.9) -- (10.50, 11.9);
+
+  % Ring return arrow: Node 3 bottom -> Node 0 bottom
+  \draw[->, line width=1.0pt, NavyBlue]
+    (11.55, 11.3) -- (11.55, 10.7) -- (2.85, 10.7) -- (2.85, 11.3);
+
+  % Phase 1 Metrics
+  \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkGreen]
+    at (12.9, 12.1) {AllReduce: active};
+  \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkGreen]
+    at (12.9, 11.65) {MFU: 82\%};
+
+  % Separator 1
+  \draw[dashed, line width=0.7pt, SlateGray!40] (1.0, 10.2) -- (15.2, 10.2);
+
+
+  % =========================================================================
+  % PHASE 2: NODE 3 FAILS --- JOB PAUSES
+  % =========================================================================
+  \node[font=\fontsize{9pt}{11pt}\selectfont\bfseries, text=DarkRed]
+    at (7.2, 9.7) {Phase 2: Node 3 Fails --- Job Pauses};
+
+  % Healthy Nodes 0..2
+  \foreach \i/\x in {0/2.85, 1/5.75, 2/8.65} {
+    \draw[rounded corners=3pt, line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
+      (\x - 1.05, 7.9) rectangle (\x + 1.05, 9.1);
+    \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=NavyBlue]
+      at (\x, 8.7) {Node \i};
+    \node[font=\fontsize{6.8pt}{8pt}\selectfont, text=SteelBlue]
+      at (\x, 8.25) {rank \i};
+  }
+
+  % Forward arrows 0->1 and 1->2
+  \draw[->, line width=1.0pt, NavyBlue] (3.90, 8.5) -- (4.70, 8.5);
+  \draw[->, line width=1.0pt, NavyBlue] (6.80, 8.5) -- (7.60, 8.5);
+
+  % Broken link to Node 3
+  \draw[->, dashed, line width=1.0pt, RedLine] (9.70, 8.5) -- (10.50, 8.5);
+  \node[above=2pt, font=\fontsize{6.5pt}{7.5pt}\selectfont\bfseries, text=DarkRed]
+    at (10.1, 8.5) {broken};
+
+  % Failed Node 3
+  \draw[rounded corners=3pt, line width=0.8pt, draw=SlateGray!60, fill=CardFill]
+    (10.5, 7.9) rectangle (12.6, 9.1);
+  \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=TextMuted]
+    at (11.55, 8.7) {Node 3};
+  \draw[line width=0.9pt, DarkRed!70] (11.0, 8.55) -- (12.1, 8.85);
+  \draw[line width=0.9pt, DarkRed!70] (11.0, 8.85) -- (12.1, 8.55);
+  \node[font=\fontsize{6.5pt}{8pt}\selectfont\bfseries, text=DarkRed]
+    at (11.55, 8.22) {FAILED};
+
+  % Status Cards below Phase 2
+  \draw[rounded corners=3pt, line width=0.8pt, draw=OrangeLine, fill=OrangeL!50]
+    (1.8, 6.6) rectangle (6.8, 7.35);
+  \node[font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkAmber]
+    at (4.3, 7.1) {Checkpoint loaded};
+  \node[font=\fontsize{6.0pt}{7.2pt}\selectfont, text=OrangeLine!90!black]
+    at (4.3, 6.78) {rollback to last consistent state};
+
+  \draw[rounded corners=3pt, line width=0.8pt, draw=RedLine, fill=RedFill!50]
+    (7.6, 6.6) rectangle (12.6, 7.35);
+  \node[font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkRed]
+    at (10.1, 7.1) {Training paused};
+  \node[font=\fontsize{6.0pt}{7.2pt}\selectfont, text=DarkRed]
+    at (10.1, 6.78) {Rendezvous barrier: ranks 0, 1, 2 wait};
+
+  % Separator 2
+  \draw[dashed, line width=0.7pt, SlateGray!40] (1.0, 6.1) -- (15.2, 6.1);
+
+
+  % =========================================================================
+  % PHASE 3: 3-NODE RING --- ELASTIC RECONFIGURATION
+  % =========================================================================
+  \node[font=\fontsize{9pt}{11pt}\selectfont\bfseries, text=DarkGreen]
+    at (7.2, 5.6) {Phase 3: 3-Node Ring --- Elastic Reconfiguration};
+
+  % 3 Reconfigured Nodes (x-centers: 3.95, 7.20, 10.45)
+  \foreach \i/\x in {0/3.95, 1/7.20, 2/10.45} {
+    \draw[rounded corners=3pt, line width=0.9pt, draw=SteelBlue, fill=LightBlue!40]
+      (\x - 1.15, 3.8) rectangle (\x + 1.15, 5.05);
+    \node[font=\fontsize{8.5pt}{10pt}\selectfont\bfseries, text=NavyBlue]
+      at (\x, 4.72) {Node \i};
+    \node[font=\fontsize{6.5pt}{7.5pt}\selectfont, text=SteelBlue]
+      at (\x, 4.38) {rank \i{} (new)};
+    \node[font=\fontsize{6.5pt}{7.5pt}\selectfont\bfseries, text=DarkGreen]
+      at (\x, 4.02) {shard +33\%};
+  }
+
+  % Forward arrows 0->1 and 1->2
+  \draw[->, line width=1.0pt, NavyBlue] (5.10, 4.42) -- (6.05, 4.42);
+  \draw[->, line width=1.0pt, NavyBlue] (8.35, 4.42) -- (9.30, 4.42);
+
+  % Ring return arrow: Node 2 bottom -> Node 0 bottom
+  \draw[->, line width=1.0pt, NavyBlue]
+    (10.45, 3.8) -- (10.45, 3.25) -- (3.95, 3.25) -- (3.95, 3.8);
+
+  % Phase 3 Metrics
+  \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkGreen]
+    at (12.0, 4.70) {AllReduce: active};
+  \node[anchor=west, font=\fontsize{7.2pt}{8.5pt}\selectfont\bfseries, text=DarkAmber]
+    at (12.0, 4.35) {MFU: $\approx$ 62\%};
+  \node[anchor=west, font=\fontsize{6.5pt}{8pt}\selectfont, text=TextMuted]
+    at (12.0, 4.00) {(75\% of prior)};
+
+  % Elastic Reconfiguration Annotation Card
+  \node[font=\fontsize{8pt}{9.5pt}\selectfont\bfseries, text=NavyBlue]
+    at (7.2, 2.5) {Elastic Reconfiguration};
+  \node[font=\fontsize{6.8pt}{8.2pt}\selectfont, text=TextDark]
+    at (7.2, 2.1) {Failed node's data shards redistributed across remaining 3 nodes};
+  \node[font=\fontsize{6.5pt}{7.8pt}\selectfont, text=TextMuted]
+    at (7.2, 1.7) {MFU drops $\sim$25\% ($W=3$ vs.\ $W=4$) but training continues --- no full restart required};
+
+\end{tikzpicture}
+```
 
 :::
 
