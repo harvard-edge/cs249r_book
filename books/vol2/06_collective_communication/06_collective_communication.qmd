@@ -2670,13 +2670,135 @@ The topology detection process begins with hardware enumeration. NCCL queries th
 
 #### Torus topology (TPU pods) {#sec-collective-communication-torus-topology-tpu-pods-68b2}
 
-The dimension-ordered reduction in @fig-torus-reduction shows why torus fabrics use the physical mesh directly instead of pretending the pod is a flat all-to-all network.
+@Fig-torus-reduction illustrates dimension-ordered reduction across a 2D torus mesh (a pedagogical projection of 3D Tensor Processing Unit (TPU)\index{TPU}\index{Tensor Processing Unit|see{TPU}} pods). Rather than treating the cluster as an unconstrained all-to-all fabric, the collective decomposes along coordinate axes: Phase 1 executes independent Ring AllReduces along each horizontal row in parallel, followed by Phase 2 executing independent Ring AllReduces along each vertical column. This axis-aligned schedule routes traffic exclusively across direct physical neighbor links, avoiding bisection congestion while reducing step latency from $2(N-1) = 30$ steps on a flat 16-node ring down to $2(X-1) + 2(Y-1) = 12$ steps ($2.5\times$ latency reduction).
 
-::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-ordered reduction on a torus topology**: In a 2D torus mesh (a simplified representation of 3D TPU pods), AllReduce proceeds in sequential steps along the X and Y dimensions. Reducing along one dimension at a time follows direct-neighbor links and can reduce contention relative to a topology-unaware schedule." fig-alt="2D grid diagram of nodes in a torus topology. Arrows show sequential reduction along X-axis rings, then Y-axis rings."}
-![](images/svg/torus-reduction.svg){width=100%}
+::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-ordered reduction on a torus topology**: In a 2D torus mesh ($4 \times 4$ node grid representing a simplified TPU pod slice), AllReduce proceeds sequentially along orthogonal dimensions. Phase 1 (orange) executes four parallel horizontal rings across the X dimension ($2(X-1) = 6$ steps). Phase 2 (violet) then executes four parallel vertical rings across the Y dimension ($2(Y-1) = 6$ steps) on the row-aggregated partial sums. Dashed links indicate torus wrap-around boundary connections. This dimension-ordered decomposition cuts step latency by $2.5\times$ relative to a 1D global ring while preserving the optimal $2M/\beta$ bandwidth volume invariant." fig-alt="2D grid diagram of 16 nodes in a 4x4 torus topology. Orange arrows show Phase 1 horizontal row rings, violet arrows show Phase 2 vertical column rings, and dashed lines trace wrap-around boundary links. Cards on the right detail step complexity and bandwidth invariance."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\small\sffamily,
+  >=Stealth,
+  node box/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue,
+    fill=white,
+    line width=0.85pt,
+    align=center,
+    inner sep=3pt,
+    font=\footnotesize,
+    minimum width=1.25cm,
+    minimum height=0.95cm
+  },
+  card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.7pt,
+    inner sep=6pt,
+    font=\footnotesize,
+    text width=6.2cm,
+    align=left
+  },
+  badge/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=DarkGreen!60,
+    fill=GreenFill,
+    text=DarkGreen,
+    font=\scriptsize\bfseries,
+    inner sep=3pt,
+    align=center
+  }
+]
+
+% 4x4 Torus Grid (x: 1.0, 2.7, 4.4, 6.1; y: 5.8, 4.2, 2.6, 1.0)
+\foreach \x/\col in {1.0/0, 2.7/1, 4.4/2, 6.1/3} {
+  \foreach \y/\row in {5.8/0, 4.2/1, 2.6/2, 1.0/3} {
+    \pgfmathtruncatemacro{\rank}{\row*4 + \col}
+    \node[node box] (n_\col_\row) at (\x, \y) {\textbf{Node(\col,\row)}\\[1.5pt]\scriptsize\textcolor{TextMuted}{rank \rank}};
+  }
+}
+
+% Direct Horizontal Arrows (Phase 1 - Orange)
+\foreach \row in {0, 1, 2, 3} {
+  \draw[->, very thick, OrangeLine] (n_0_\row.east) -- (n_1_\row.west);
+  \draw[->, very thick, OrangeLine] (n_1_\row.east) -- (n_2_\row.west);
+  \draw[->, very thick, OrangeLine] (n_2_\row.east) -- (n_3_\row.west);
+}
+
+% Direct Vertical Arrows (Phase 2 - Violet)
+\foreach \col in {0, 1, 2, 3} {
+  \draw[->, very thick, VioletLine] (n_\col_0.south) -- (n_\col_1.north);
+  \draw[->, very thick, VioletLine] (n_\col_1.south) -- (n_\col_2.north);
+  \draw[->, very thick, VioletLine] (n_\col_2.south) -- (n_\col_3.north);
+}
+
+% Wrap-around Horizontal Links (Phase 1 - Dashed Orange)
+\foreach \row in {0, 1, 2, 3} {
+  \draw[->, thick, dashed, OrangeLine]
+    (n_3_\row.east) -- ++(0.35,0) -- ++(0, 0.58)
+    -- ($(n_0_\row.west)+(-0.35, 0.58)$) -- ++(0, -0.58)
+    -- (n_0_\row.west);
+}
+
+% Wrap-around Vertical Links (Phase 2 - Dashed Violet)
+\foreach \col in {0, 1, 2, 3} {
+  \draw[->, thick, dashed, VioletLine]
+    (n_\col_3.south) -- ++(0, -0.35)
+    -- ++(-0.85, 0)
+    -- ($(n_\col_0.north)+(-0.85, 0.38)$)
+    -- ++(0.85, 0)
+    -- (n_\col_0.north);
+}
+
+% Right Side Cards
+% Card 1: Phase 1
+\node[card, draw=OrangeLine!80, fill=OrangeL] (card1) at (11.0, 5.85) {
+  \textbf{\large\textcolor{OrangeLine}{Phase 1: X-Dimension Rings}}\\[2pt]
+  \small Ring AllReduce along each row in parallel.\\[3pt]
+  \footnotesize\textbf{Topology:} 4 rings parallel \hfill \textbf{Steps:} $2(X - 1) = 6$
+};
+
+% Card 2: Phase 2
+\node[card, draw=VioletLine!80, fill=VioletL] (card2) at (11.0, 4.25) {
+  \textbf{\large\textcolor{VioletLine}{Phase 2: Y-Dimension Rings}}\\[2pt]
+  \small Ring AllReduce along each column in parallel.\\[3pt]
+  \footnotesize\textbf{Topology:} 4 rings parallel \hfill \textbf{Steps:} $2(Y - 1) = 6$
+};
+
+% Card 3: Latency & Step Complexity
+\node[card, draw=CardBorder, fill=CardFill] (card3) at (11.0, 2.45) {
+  \textbf{\normalsize Latency \& Step Complexity}\\[3pt]
+  \footnotesize
+  \begin{tabular}{@{}ll@{}}
+    1D Global Ring ($N = 16$): & \textbf{\textcolor{RedLine}{30 steps}} \\[2pt]
+    2D Torus $4\times 4$: $2(X-1) + 2(Y-1)$: & \textbf{\textcolor{DarkGreen}{12 steps}} \\
+  \end{tabular}\\[4pt]
+  \centering
+  \tikz\node[badge, minimum width=5.8cm] {\textbf{2.5$\times$ Step Latency Reduction}};
+};
+
+% Card 4: Bandwidth Invariant
+\node[card, draw=CardBorder, fill=CardFill] (card4) at (11.0, 0.65) {
+  \textbf{\normalsize Bandwidth Volume Invariant}\\[2pt]
+  \small$\text{Total volume} = 2 \times \frac{N-1}{N} \times M \approx \frac{2M}{\beta}$\\[2pt]
+  \scriptsize\textcolor{TextMuted}{Identical link utilization to a flat ring}
+};
+
+% Legend
+\coordinate (legBase) at (7.8, -0.4);
+\draw[very thick, OrangeLine] ($(legBase)+(0,0)$) -- ++(0.7,0)
+  node[right, font=\scriptsize, text=TextDark] {Phase 1: X-dim horizontal ring};
+\draw[very thick, VioletLine] ($(legBase)+(4.0,0)$) -- ++(0.7,0)
+  node[right, font=\scriptsize, text=TextDark] {Phase 2: Y-dim vertical ring};
+\draw[thick, dashed, gray!80] ($(legBase)+(0,-0.4)$) -- ++(0.7,0)
+  node[right, font=\scriptsize, text=TextDark] {Dashed: wrap-around torus boundary links};
+
+\end{tikzpicture}
+```
 :::
 
-Google's Tensor Processing Unit (TPU)\index{TPU}\index{Tensor Processing Unit|see{TPU}} pods use a 3D torus topology\index{Torus Topology} where each TPU connects directly to 6 neighbors $(\pm X, \pm Y, \pm Z)$; @fig-torus-reduction depicts the same dimension-ordered idea as a 2D simplification. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. The optimal AllReduce strategy for this topology is **Dimension-Ordered Reduction**\index{Dimension-Ordered Reduction}:
+Google's TPU pods use a 3D torus topology\index{Torus Topology} where each TPU connects directly to 6 neighbors $(\pm X, \pm Y, \pm Z)$; @fig-torus-reduction depicts the same dimension-ordered idea as a 2D simplification. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. The optimal AllReduce strategy for this topology is **Dimension-Ordered Reduction**\index{Dimension-Ordered Reduction}:
 
 1. Reduce along X for each fixed $(Y,Z)$ line, producing partial sums over the X dimension
 2. Reduce those partials along Y for each fixed $(X,Z)$ line, producing partial sums over the $X \times Y$ plane
