@@ -3303,7 +3303,198 @@ class FrontierModelParallelRecap:
 Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. Tensor parallelism, illustrated in @fig-model-parallel-flow, addresses this by partitioning individual weight matrices across devices; pipeline parallelism partitions layers across stages and is introduced later in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. For a `{python} FrontierModelParallelRecap.frontier_params_b_str`-parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across 64 GPUs. Full mixed-precision Adam training state is much larger: `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, or roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations. This distinction matters because optimizer sharding reduces static state, but it does not eliminate the activation and per-layer capacity constraints that force model parallelism.
 
 ::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism data flow**: Tensor parallelism column-splits a single weight matrix ($W_0\ldots W_3$) across four GPUs, with each GPU computing a partial output that is recombined through an AllGather. The companion strategy, pipeline parallelism, partitions layers vertically across stages and is shown separately in the layer-block figure. The two strategies are often combined in hybrid 3D parallelism for large models." fig-alt="Single panel showing tensor parallelism: a weight matrix column-split as W0, W1, W2, W3 across four GPUs, with partial outputs combined via AllGather."}
-![](images/svg/model-parallel-flow.svg){width=100%}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  io card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=1.0pt,
+    draw=OrangeLine,
+    fill=OrangeL!60,
+    inner sep=5pt,
+    align=center
+  },
+  gpu card/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.8pt,
+    inner sep=4pt,
+    align=center,
+    minimum width=3.6cm
+  },
+  y badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    draw=GreenLine,
+    fill=GreenFill,
+    inner sep=3.5pt,
+    align=center,
+    font=\scriptsize
+  },
+  info box/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    draw=CardBorder,
+    fill=CardFill,
+    inner sep=6pt,
+    align=left
+  }
+]
+
+  % MLSysBook Palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{240,245,252}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{253,242,242}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,246,233}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{248,250,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TOP FORMULA BANNER
+  % ===========================================================
+  \node[rectangle, rounded corners=3.5pt, draw=SteelBlue!40, fill=LightBlue!50, line width=0.8pt, inner sep=5pt, font=\small, text=TextDark] at (7.6, 9.4) {
+    \textbf{Column-Parallel Partition:}\quad $\boldsymbol{Y} = \boldsymbol{X} \cdot [\boldsymbol{W}_0 \mid \boldsymbol{W}_1 \mid \boldsymbol{W}_2 \mid \boldsymbol{W}_3] = [\boldsymbol{X}\boldsymbol{W}_0 \mid \boldsymbol{X}\boldsymbol{W}_1 \mid \boldsymbol{X}\boldsymbol{W}_2 \mid \boldsymbol{X}\boldsymbol{W}_3] = [\boldsymbol{Y}_0 \mid \boldsymbol{Y}_1 \mid \boldsymbol{Y}_2 \mid \boldsymbol{Y}_3]$
+  };
+
+  % ===========================================================
+  % INPUT TENSOR X
+  % ===========================================================
+  \node[io card] (X) at (0.8, 5.75) {
+    \textbf{\Large\textcolor{OrangeLine!90!black}{X}}\\[2pt]
+    \textbf{\footnotesize Input Activations}\\[4pt]
+    \colorbox{white}{\scriptsize\strut $[B, d]$}
+  };
+
+  % ===========================================================
+  % GPU SHARD CARDS
+  % ===========================================================
+  % GPU 0
+  \node[gpu card, draw=NavyBlue!40, fill=LightBlue!70] (GPU0) at (4.8, 7.7) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{NavyBlue}{GPU 0 $\cdot$ Shard $\boldsymbol{W}_0$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_0 = \boldsymbol{X} \times \boldsymbol{W}_0$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % GPU 1
+  \node[gpu card, draw=GreenLine!40, fill=GreenFill!70] (GPU1) at (4.8, 6.4) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{DarkGreen}{GPU 1 $\cdot$ Shard $\boldsymbol{W}_1$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_1 = \boldsymbol{X} \times \boldsymbol{W}_1$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % GPU 2
+  \node[gpu card, draw=OrangeLine!40, fill=OrangeL!50] (GPU2) at (4.8, 5.1) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{OrangeLine!90!black}{GPU 2 $\cdot$ Shard $\boldsymbol{W}_2$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_2 = \boldsymbol{X} \times \boldsymbol{W}_2$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % GPU 3
+  \node[gpu card, draw=purple!30, fill=purple!5] (GPU3) at (4.8, 3.8) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{purple!80!black}{GPU 3 $\cdot$ Shard $\boldsymbol{W}_3$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_3 = \boldsymbol{X} \times \boldsymbol{W}_3$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % Broadcast paths from X to GPUs
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU0.west);
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU1.west);
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU2.west);
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU3.west);
+
+  \node[rectangle, rounded corners=2pt, draw=SteelBlue!40, fill=white, font=\tiny\bfseries, text=SteelBlue, inner sep=2pt] at (2.2, 7.8) {Broadcast $\boldsymbol{X}$};
+
+  % ===========================================================
+  % OUTPUT BADGES Y_i
+  % ===========================================================
+  \node[y badge] (Y0) at (7.5, 7.7) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_0$}}\\[1pt]\tiny $[B, d/4]$};
+  \node[y badge] (Y1) at (7.5, 6.4) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_1$}}\\[1pt]\tiny $[B, d/4]$};
+  \node[y badge] (Y2) at (7.5, 5.1) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_2$}}\\[1pt]\tiny $[B, d/4]$};
+  \node[y badge] (Y3) at (7.5, 3.8) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_3$}}\\[1pt]\tiny $[B, d/4]$};
+
+  \draw[->, line width=0.8pt, TextMuted] (GPU0.east) -- (Y0.west);
+  \draw[->, line width=0.8pt, TextMuted] (GPU1.east) -- (Y1.west);
+  \draw[->, line width=0.8pt, TextMuted] (GPU2.east) -- (Y2.west);
+  \draw[->, line width=0.8pt, TextMuted] (GPU3.east) -- (Y3.west);
+
+  % ===========================================================
+  % ALLGATHER COLLECTIVE NODE
+  % ===========================================================
+  \node[rectangle, rounded corners=4pt, line width=1.0pt, draw=GreenLine, fill=GreenFill!50, inner sep=5pt, align=center] (AG) at (10.6, 5.75) {
+    \textbf{\large\textcolor{DarkGreen}{AllGather}}\\[4pt]
+    \footnotesize\textbf{Concatenate}\\[2pt]
+    \scriptsize $[\boldsymbol{Y}_0 \mid \boldsymbol{Y}_1 \mid \boldsymbol{Y}_2 \mid \boldsymbol{Y}_3]$\\[6pt]
+    \colorbox{white}{\tiny\bfseries\textcolor{DarkGreen}{\strut via NVLink Mesh}}
+  };
+
+  % Paths from Y_i to AllGather
+  \draw[->, line width=0.9pt, GreenLine] (Y0.east) -| (AG.140);
+  \draw[->, line width=0.9pt, GreenLine] (Y1.east) -- (AG.165);
+  \draw[->, line width=0.9pt, GreenLine] (Y2.east) -- (AG.195);
+  \draw[->, line width=0.9pt, GreenLine] (Y3.east) -| (AG.220);
+
+  % ===========================================================
+  % OUTPUT TENSOR Y
+  % ===========================================================
+  \node[io card] (Y) at (13.8, 5.75) {
+    \textbf{\Large\textcolor{OrangeLine!90!black}{Y}}\\[2pt]
+    \textbf{\footnotesize Output Tensor}\\[4pt]
+    \colorbox{white}{\scriptsize\strut $[B, d] = \boldsymbol{X}\boldsymbol{W}$}
+  };
+
+  \draw[->, line width=1.1pt, TextMuted] (AG.east) -- (Y.west);
+
+  % ===========================================================
+  % BOTTOM ANALYSIS PANELS
+  % ===========================================================
+  % Left Panel: Backward Pass
+  \node[info box, anchor=north west] (BP) at (-0.2, 2.5) {
+    \begin{minipage}{7.2cm}
+      \textbf{\small\textcolor{NavyBlue}{Backward Pass: Gradient Synchronization}}\\[4pt]
+      \textbf{\scriptsize Weight Gradients (Local):} \scriptsize $\partial L / \partial \boldsymbol{W}_i = \boldsymbol{X}^T (\partial L / \partial \boldsymbol{Y}_i)$\\[1pt]
+      \tiny\textcolor{TextDark}{Computed independently on each GPU; requires no collective.}\\[4pt]
+      \textbf{\scriptsize Input Activation Gradients:} \scriptsize $\partial L / \partial \boldsymbol{X} = \sum_i (\partial L / \partial \boldsymbol{Y}_i) \boldsymbol{W}_i^T$\\[1pt]
+      \tiny\textcolor{TextDark}{Requires an AllReduce (sum) across GPUs to reconstitute $\partial L / \partial \boldsymbol{X}$.}\\[5pt]
+      \centering
+      \fcolorbox{RedLine}{RedFill}{\tiny\bfseries\textcolor{RedLine}{\strut Forward uses AllGather $\;\cdot\;$ Backward uses AllReduce}}
+    \end{minipage}
+  };
+
+  % Right Panel: Hardware Constraints
+  \node[info box, anchor=north east] (HC) at (15.4, 2.5) {
+    \begin{minipage}{7.2cm}
+      \textbf{\small\textcolor{NavyBlue}{Hardware \& Interconnect Constraints}}\\[4pt]
+      \textbf{\scriptsize NVLink Intra-Node Requirement:} \scriptsize 600--900 GB/s bandwidth\\[1pt]
+      \tiny\textcolor{TextDark}{Communication occurs twice per transformer layer (sub-millisecond scale).}\\[4pt]
+      \textbf{\scriptsize Scaling Boundary (TP $\le$ 8):} \scriptsize Confined within single server node\\[1pt]
+      \tiny\textcolor{TextDark}{Cross-node TP incurs network latency overheads that stall tensor cores.}\\[5pt]
+      \centering
+      \fcolorbox{GreenLine}{GreenFill}{\tiny\bfseries\textcolor{DarkGreen}{\strut Pair with Row-Parallel linear layer to fuse AllReduce}}
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters generates on the order of a terabyte of intermediate activations at even a small micro-batch (roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` at micro-batch 4, as computed earlier), and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
