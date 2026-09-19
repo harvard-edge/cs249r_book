@@ -4622,7 +4622,288 @@ In a distributed setting, experts are partitioned across workers. If we have 8 G
 4.  **All-to-All Combine**: Processed tokens are routed back to their original device to resume the sequence.
 
 ::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) AllToAll routing**: Expert parallelism requires a unique \"All-to-All\" communication pattern. Tokens from a local batch are routed by a gating network to experts sharded across the cluster. This involves a global shuffle where every GPU sends tokens to and receives tokens from potentially every other GPU, stressing the cluster's bisection bandwidth." fig-alt="Diagram showing tokens being routed from a gating network to four different experts sharded across multiple GPUs, then returning to the original sequence order."}
-![](images/svg/moe-all-to-all-routing.svg){width=100%}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  step_banner/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    inner sep=3.5pt,
+    font=\bfseries\scriptsize,
+    align=center,
+    minimum width=3.2cm
+  },
+  card/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.7pt,
+    align=center,
+    inner sep=3pt
+  },
+  rank0/.style={card, draw=SteelBlue, fill=LightBlue, text=NavyBlue},
+  rank1/.style={card, draw=GreenLine, fill=GreenFill, text=DarkGreen},
+  rank2/.style={card, draw=OrangeLine, fill=OrangeL, text=OrangeLine!80!black},
+  rank3/.style={card, draw=PurpleLine, fill=PurpleFill, text=PurpleLine},
+  gate/.style={card, draw=OrangeLine, fill=OrangeL!50, text=TextDark},
+  alltoall_dispatch/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.9pt,
+    draw=RedLine,
+    fill=RedFill,
+    text=RedLine,
+    align=center,
+    inner sep=4pt
+  },
+  alltoall_combine/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.9pt,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen,
+    align=center,
+    inner sep=4pt
+  }
+]
+
+  % -------------------------------------------------------------
+  % TOP STEP BANNERS (Evenly spaced across width)
+  % -------------------------------------------------------------
+  \node[step_banner, draw=OrangeLine, fill=OrangeL, text=OrangeLine!80!black]
+    (s1) at (0.7, 5.0) {Step 1 $\cdot$ Gating \& Routing};
+  \node[step_banner, draw=RedLine, fill=RedFill, text=RedLine]
+    (s2) at (5.1, 5.0) {Step 2 $\cdot$ Dispatch};
+  \node[step_banner, draw=NavyBlue, fill=LightBlue, text=NavyBlue]
+    (s3) at (9.5, 5.0) {Step 3 $\cdot$ Expert FFNs};
+  \node[step_banner, draw=GreenLine, fill=GreenFill, text=DarkGreen]
+    (s4) at (13.9, 5.0) {Step 4 $\cdot$ Combine \& Output};
+
+  \draw[->, line width=0.9pt, TextMuted] (s1.east) -- (s2.west);
+  \draw[->, line width=0.9pt, TextMuted] (s2.east) -- (s3.west);
+  \draw[->, line width=0.9pt, TextMuted] (s3.east) -- (s4.west);
+
+  % -------------------------------------------------------------
+  % 4 PIPELINE ROWS (Ranks 0 to 3)
+  % -------------------------------------------------------------
+  \def\wcard{2.2cm}
+  \def\hcard{0.85cm}
+
+  % Row 0 (y = 3.6)
+  \node[rank0, minimum width=\wcard, minimum height=\hcard] (r0) at (0, 3.6) {
+    \textbf{\scriptsize Rank 0}\\[-1pt]
+    \tiny Tokens: $T_1$--$T_4$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g0) at (2.7, 3.6) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank0, minimum width=2.4cm, minimum height=\hcard] (e0) at (8.5, 3.6) {
+    \textbf{\scriptsize Expert 0 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 0
+  };
+  \node[rank0, minimum width=\wcard, minimum height=\hcard] (o0) at (14.2, 3.6) {
+    \textbf{\scriptsize Output Rank 0}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % Row 1 (y = 2.4)
+  \node[rank1, minimum width=\wcard, minimum height=\hcard] (r1) at (0, 2.4) {
+    \textbf{\scriptsize Rank 1}\\[-1pt]
+    \tiny Tokens: $T_5$--$T_8$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g1) at (2.7, 2.4) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank1, minimum width=2.4cm, minimum height=\hcard] (e1) at (8.5, 2.4) {
+    \textbf{\scriptsize Expert 1 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 1
+  };
+  \node[rank1, minimum width=\wcard, minimum height=\hcard] (o1) at (14.2, 2.4) {
+    \textbf{\scriptsize Output Rank 1}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % Row 2 (y = 1.2)
+  \node[rank2, minimum width=\wcard, minimum height=\hcard] (r2) at (0, 1.2) {
+    \textbf{\scriptsize Rank 2}\\[-1pt]
+    \tiny Tokens: $T_9$--$T_{12}$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g2) at (2.7, 1.2) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank2, minimum width=2.4cm, minimum height=\hcard] (e2) at (8.5, 1.2) {
+    \textbf{\scriptsize Expert 2 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 2
+  };
+  \node[rank2, minimum width=\wcard, minimum height=\hcard] (o2) at (14.2, 1.2) {
+    \textbf{\scriptsize Output Rank 2}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % Row 3 (y = 0.0)
+  \node[rank3, minimum width=\wcard, minimum height=\hcard] (r3) at (0, 0.0) {
+    \textbf{\scriptsize Rank 3}\\[-1pt]
+    \tiny Tokens: $T_{13}$--$T_{16}$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g3) at (2.7, 0.0) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank3, minimum width=2.4cm, minimum height=\hcard] (e3) at (8.5, 0.0) {
+    \textbf{\scriptsize Expert 3 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 3
+  };
+  \node[rank3, minimum width=\wcard, minimum height=\hcard] (o3) at (14.2, 0.0) {
+    \textbf{\scriptsize Output Rank 3}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % -------------------------------------------------------------
+  % ALLTOALL COLUMNS (TALL RECTANGLES)
+  % -------------------------------------------------------------
+  \node[alltoall_dispatch, minimum width=1.9cm, minimum height=4.3cm] (dispatch) at (5.3, 1.8) {
+    \textbf{\small All-to-All}\\[3pt]
+    \textbf{\footnotesize Dispatch}\\[4pt]
+    \scriptsize Tokens routed\\[1pt]
+    \scriptsize to designated\\[1pt]
+    \scriptsize expert hosts
+  };
+
+  \node[alltoall_combine, minimum width=1.9cm, minimum height=4.3cm] (combine) at (11.7, 1.8) {
+    \textbf{\small All-to-All}\\[3pt]
+    \textbf{\footnotesize Combine}\\[4pt]
+    \scriptsize Outputs routed\\[1pt]
+    \scriptsize back to original\\[1pt]
+    \scriptsize source ranks
+  };
+
+  % Connections: Ranks -> Gate
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, TextDark] (r\i.east) -- (g\i.west);
+  }
+
+  % Connections: Gate -> Dispatch (red dashed)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, RedLine, dashed] (g\i.east) -- (g\i.east -| dispatch.west);
+  }
+
+  % Connections: Dispatch -> Experts (red dashed)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, RedLine, dashed] (e\i.west -| dispatch.east) -- (e\i.west);
+  }
+
+  % Connections: Experts -> Combine (green solid)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, GreenLine] (e\i.east) -- (e\i.east -| combine.west);
+  }
+
+  % Connections: Combine -> Output (green solid)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, GreenLine] (o\i.west -| combine.east) -- (o\i.west);
+  }
+
+  % -------------------------------------------------------------
+  % BOTTOM CARDS: Communication & Capacity Factor
+  % -------------------------------------------------------------
+  % Left Card: Communication
+  \node[
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=LightBlue!35,
+    line width=0.8pt,
+    anchor=north,
+    minimum width=7.4cm,
+    minimum height=4.5cm,
+    inner sep=6pt
+  ] (bcard_left) at (3.2, -0.9) {};
+
+  \node[anchor=north west, font=\footnotesize, text=NavyBlue] (t_left) at ($(bcard_left.north west) + (0.35, -0.25)$) {
+    \textbf{All-to-All Communication Overhead}
+  };
+  \node[anchor=north west, font=\scriptsize, text=TextDark, align=left, text width=6.7cm] (body_left) at ($(t_left.south west) + (0, -0.15)$) {
+    \textbf{Two-Phase Collective:}\\
+    Dispatch (tokens) $+$ Combine (outputs)\\[3pt]
+    \textbf{Volume per MoE Layer:}\\
+    $4 \cdot B \cdot S \cdot d_{\text{model}}$ bytes (forward $+$ backward pass)\\[3pt]
+    \textbf{Traffic Pattern:} Personalized exchange across all $E$ ranks.
+  };
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue!50,
+    fill=white,
+    inner sep=4pt,
+    anchor=north west,
+    minimum width=6.7cm
+  ] (inner_left) at ($(body_left.south west) + (0, -0.2)$) {
+    \begin{minipage}{6.4cm}
+      \tiny\textbf{\textcolor{SteelBlue}{Interconnect Requirement:}}\\
+      \tiny Bisection bandwidth critical; typically mapped across NVLink cliques or non-blocking fabric to avoid bottlenecks.
+    \end{minipage}
+  };
+
+  % Right Card: Capacity Factor
+  \node[
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=OrangeL!45,
+    line width=0.8pt,
+    anchor=north,
+    minimum width=7.4cm,
+    minimum height=4.5cm,
+    inner sep=6pt
+  ] (bcard_right) at (11.1, -0.9) {};
+
+  \node[anchor=north west, font=\footnotesize, text=OrangeLine!90!black] (t_right) at ($(bcard_right.north west) + (0.35, -0.25)$) {
+    \textbf{Capacity Factor \& Token Load Balancing}
+  };
+  \node[anchor=north west, font=\scriptsize, text=TextDark, align=left, text width=6.7cm] (body_right) at ($(t_right.south west) + (0, -0.15)$) {
+    \textbf{Capacity Factor ($C$):}\\
+    $C \in [1.0, 1.5]$ bounds buffer: $C \cdot \frac{k N}{E}$ tokens per expert\\[3pt]
+    \textbf{Overflow Handling:}\\
+    Dropped tokens bypass expert FFN via residual path\\[3pt]
+    \textbf{Load Balancing:} Auxiliary loss $\mathcal{L}_{\text{balance}}$ penalizes imbalance.
+  };
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=OrangeLine!50,
+    fill=white,
+    inner sep=4pt,
+    anchor=north west,
+    minimum width=6.7cm
+  ] (inner_right) at ($(body_right.south west) + (0, -0.2)$) {
+    \begin{minipage}{6.4cm}
+      \tiny\textbf{\textcolor{OrangeLine!90!black}{Throughput vs. Quality Trade-off:}}\\
+      \tiny Lower $C$ reduces collective buffer memory; higher $C$ eliminates token drop during bursts at the cost of padding.
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the All-to-All\index{All-to-All!expert parallelism} communication, which is bandwidth-intensive and sensitive to load imbalance.
