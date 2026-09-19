@@ -128,7 +128,319 @@ class FleetReliabilityRates:
 Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The communication layer has done its job: thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault Tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the fleet stack shown in @fig-fleet-stack, fault tolerance acts as the resilience layer for distributed execution. The challenges span the full failure spectrum, from transient bit flips through intermittent aging-related errors to permanent component failures, as @fig-fault-tolerance-failure-spectrum illustrates. The per-category failure rates and the mean time between failures (MTBF) scaling, $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}}/N$, annotated in that figure are previews; later analysis derives the inverse scaling and tabulates the cluster rates. Gray failures and silent data corruption (SDC) add a second axis of difficulty: low detection rate, high blast radius (see @sec-appdx-reliability-sdc-perturbation for the FP16 exponent bit-flip model and attention softmax perturbation derivation).
 
 ::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML failure spectrum**: Reliability challenges at scale span a temporal taxonomy from transient errors (bit flips, single-event upsets) through intermittent errors (aging, marginal components) to permanent errors (stuck-at faults, dead components). Each category demands different detection latency and recovery strategy, and fault tolerance engineering must address all three to maintain fleet-scale throughput." fig-alt="Continuum diagram showing failure characteristics across three categories: Transient, Intermittent, and Permanent. Each category labeled with characteristic frequency and detection profile."}
-![](images/svg/failure-spectrum.svg)
+
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % =============================================================
+  % TOP CONTINUUM BANNER
+  % =============================================================
+  \def\hbar{0.18}
+
+  % Titles above bars
+  \node[font=\footnotesize\bfseries, text=DarkGreen] at (-4.9, 0.45) {Fast Recovery (Soft Errors)};
+  \node[font=\footnotesize\bfseries, text=OrangeLine!95!black] at (0, 0.45) {Marginal / Environmental (Intermittent)};
+  \node[font=\footnotesize\bfseries, text=DarkRed] at (4.9, 0.45) {Permanent Hardware Loss (Hard Faults)};
+
+  % Three colored horizontal segments
+  \fill[GreenFill!80!GreenLine, rounded corners=2pt] (-7.35, 0.12) rectangle (-2.55, 0.12+\hbar);
+  \fill[OrangeL!85!OrangeLine, rounded corners=2pt] (-2.40, 0.12) rectangle (2.40, 0.12+\hbar);
+  \fill[RedFill!80!RedLine, rounded corners=2pt] (2.55, 0.12) rectangle (7.35, 0.12+\hbar);
+
+  % Spectrum arrow below
+  \draw[->, line width=0.9pt, SlateLine!70] (-7.35, -0.15) -- (7.35, -0.15);
+  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (0, -0.22)
+    {Increasing blast radius, diagnosis latency, and operational cost $\longrightarrow$};
+
+  % =============================================================
+  % PARAMETERS
+  % =============================================================
+  \def\colW{4.80}
+  \def\colH{10.35}
+  \def\cardW{4.38}
+  \def\topY{-0.85}
+
+  % -------------------------------------------------------------
+  % COLUMN 1: TRANSIENT FAILURES (GREEN)
+  % -------------------------------------------------------------
+  \def\xone{-4.90}
+
+  % Outer container box with clipped header
+  \draw[GreenLine!50, fill=GreenFill!20, rounded corners=6pt, line width=0.8pt]
+    (\xone-0.5*\colW, \topY-\colH) rectangle (\xone+0.5*\colW, \topY);
+  \begin{scope}
+    \clip[rounded corners=6pt] (\xone-0.5*\colW, \topY-\colH) rectangle (\xone+0.5*\colW, \topY);
+    \fill[GreenFill!80!GreenLine] (\xone-0.5*\colW, \topY-1.22) rectangle (\xone+0.5*\colW, \topY);
+    \draw[GreenLine!40, line width=0.6pt] (\xone-0.5*\colW, \topY-1.22) -- (\xone+0.5*\colW, \topY-1.22);
+  \end{scope}
+
+  % Header text
+  \node[align=center] at (\xone, \topY-0.42) {
+    \textbf{\small\textcolor{DarkGreen}{Transient Failures}}
+  };
+  \node[align=center] at (\xone, \topY-0.85) {
+    \scriptsize\bfseries\textcolor{DarkGreen!90!black}{Duration: Microseconds to Milliseconds}
+  };
+
+  % Summary under header
+  \node[anchor=north, align=center, font=\scriptsize, text=TextDark] at (\xone, \topY-1.38) {
+    Single-event upset; occurs once\\
+    then vanishes completely.\\[2pt]
+    \textbf{\textcolor{DarkGreen}{Underlying silicon is undamaged.}}
+  };
+
+  % Card 1: Physical Cause
+  \node[
+    rectangle, rounded corners=4pt, draw=GreenLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xone, \topY-2.48) {
+    \textbf{\scriptsize\textcolor{TextDark}{Physical Cause}}\\[2pt]
+    \tiny\textcolor{TextDark}{Cosmic ray or alpha particle strike}\\
+    \tiny\textcolor{TextDark}{flips bit in DRAM or register latch}
+  };
+
+  % Card 2: Detection Mechanism
+  \node[
+    rectangle, rounded corners=4pt, draw=GreenLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xone, \topY-3.85) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Detection Mechanism}}\\[2pt]
+    \tiny\textcolor{TextDark}{In-line SECDED ECC parity checks}\\
+    \tiny\textcolor{TextDark}{Immediate hardware signal interrupt}
+  };
+
+  % Card 3: Recovery Strategy
+  \node[
+    rectangle, rounded corners=4pt, draw=GreenLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xone, \topY-5.22) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Recovery Strategy}}\\[2pt]
+    \tiny\textcolor{TextDark}{Automatic 1-bit hardware scrubbing}\\
+    \tiny\textcolor{TextDark}{Zero application interruption}
+  };
+
+  % Card 4: Scale Rate Container
+  \node[
+    rectangle, rounded corners=5pt, draw=GreenLine!45, fill=white, line width=0.7pt,
+    minimum width=\cardW cm, minimum height=3.45cm, anchor=north
+  ] at (\xone, \topY-6.60) {};
+
+  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\xone, \topY-6.75)
+    {Scale Rate (10K GPUs)};
+  \draw[GreenLine!25, line width=0.5pt] (\xone-1.8, \topY-7.10) -- (\xone+1.8, \topY-7.10);
+
+  \node[align=center] at (\xone, \topY-7.58) {
+    \fontsize{10.5pt}{12pt}\selectfont\textbf{\textcolor{DarkGreen}{\raisebox{0.5pt}{\textasciitilde}1--5 errors / hour}}\\[2.5pt]
+    \tiny\textcolor{TextMuted}{99.9\% masked by hardware ECC}
+  };
+
+  % Sub-card
+  \node[
+    rectangle, rounded corners=4pt, draw=GreenLine!50, fill=GreenFill!60, line width=0.6pt,
+    minimum width=3.95cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xone, \topY-8.45) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Residual Threat:}}\\[2pt]
+    \tiny\textcolor{TextDark}{Double-bit flips halt execution}\\
+    \tiny\textcolor{TextDark}{Silent data corruption (SDC)}
+  };
+
+
+  % -------------------------------------------------------------
+  % COLUMN 2: INTERMITTENT FAILURES (ORANGE)
+  % -------------------------------------------------------------
+  \def\xtwo{0.0}
+
+  % Outer container box with clipped header
+  \draw[OrangeLine!50, fill=OrangeL!18, rounded corners=6pt, line width=0.8pt]
+    (\xtwo-0.5*\colW, \topY-\colH) rectangle (\xtwo+0.5*\colW, \topY);
+  \begin{scope}
+    \clip[rounded corners=6pt] (\xtwo-0.5*\colW, \topY-\colH) rectangle (\xtwo+0.5*\colW, \topY);
+    \fill[OrangeL!85!OrangeLine] (\xtwo-0.5*\colW, \topY-1.22) rectangle (\xtwo+0.5*\colW, \topY);
+    \draw[OrangeLine!40, line width=0.6pt] (\xtwo-0.5*\colW, \topY-1.22) -- (\xtwo+0.5*\colW, \topY-1.22);
+  \end{scope}
+
+  % Header text
+  \node[align=center] at (\xtwo, \topY-0.42) {
+    \textbf{\small\textcolor{OrangeLine!95!black}{Intermittent Failures}}
+  };
+  \node[align=center] at (\xtwo, \topY-0.85) {
+    \scriptsize\bfseries\textcolor{OrangeLine!95!black}{Duration: Seconds to Minutes}
+  };
+
+  % Summary under header
+  \node[anchor=north, align=center, font=\scriptsize, text=TextDark] at (\xtwo, \topY-1.38) {
+    Recurs under specific operating\\
+    conditions (temperature, VDD droop).\\[2pt]
+    \textbf{\textcolor{OrangeLine!95!black}{Disappears on cooldown or idle.}}
+  };
+
+  % Card 1: Physical Cause
+  \node[
+    rectangle, rounded corners=4pt, draw=OrangeLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xtwo, \topY-2.48) {
+    \textbf{\scriptsize\textcolor{TextDark}{Physical Cause}}\\[2pt]
+    \tiny\textcolor{TextDark}{Solder fatigue, loose optical link,}\\
+    \tiny\textcolor{TextDark}{or high-load voltage fluctuation}
+  };
+
+  % Card 2: Detection Mechanism
+  \node[
+    rectangle, rounded corners=4pt, draw=OrangeLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xtwo, \topY-3.85) {
+    \textbf{\scriptsize\textcolor{OrangeLine!95!black}{Detection Mechanism}}\\[2pt]
+    \tiny\textcolor{TextDark}{Loss anomalies, telemetry drift}\\
+    \tiny\textcolor{TextDark}{PCIe link re-training event counters}
+  };
+
+  % Card 3: Recovery Strategy
+  \node[
+    rectangle, rounded corners=4pt, draw=OrangeLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xtwo, \topY-5.22) {
+    \textbf{\scriptsize\textcolor{OrangeLine!95!black}{Recovery Strategy}}\\[2pt]
+    \tiny\textcolor{TextDark}{Task retry, frequency throttling}\\
+    \tiny\textcolor{TextDark}{Cordon and drain suspicious node}
+  };
+
+  % Card 4: Scale Rate Container
+  \node[
+    rectangle, rounded corners=5pt, draw=OrangeLine!45, fill=white, line width=0.7pt,
+    minimum width=\cardW cm, minimum height=3.45cm, anchor=north
+  ] at (\xtwo, \topY-6.60) {};
+
+  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\xtwo, \topY-6.75)
+    {Scale Rate (10K GPUs)};
+  \draw[OrangeLine!25, line width=0.5pt] (\xtwo-1.8, \topY-7.10) -- (\xtwo+1.8, \topY-7.10);
+
+  \node[align=center] at (\xtwo, \topY-7.58) {
+    \fontsize{10.5pt}{12pt}\selectfont\textbf{\textcolor{OrangeLine!95!black}{\raisebox{0.5pt}{\textasciitilde}1--3 faults / day}}\\[2.5pt]
+    \tiny\textcolor{TextMuted}{Most insidious to isolate}
+  };
+
+  % Sub-card
+  \node[
+    rectangle, rounded corners=4pt, draw=OrangeLine!50, fill=OrangeL!60, line width=0.6pt,
+    minimum width=3.95cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xtwo, \topY-8.45) {
+    \textbf{\scriptsize\textcolor{OrangeLine!95!black}{Diagnostic Trap:}}\\[2pt]
+    \tiny\textcolor{TextDark}{Node passes idle offline diagnostics}\\
+    \tiny\textcolor{TextDark}{Re-fails immediately under full load}
+  };
+
+
+  % -------------------------------------------------------------
+  % COLUMN 3: PERMANENT FAILURES (RED)
+  % -------------------------------------------------------------
+  \def\xthr{4.90}
+
+  % Outer container box with clipped header
+  \draw[RedLine!50, fill=RedFill!18, rounded corners=6pt, line width=0.8pt]
+    (\xthr-0.5*\colW, \topY-\colH) rectangle (\xthr+0.5*\colW, \topY);
+  \begin{scope}
+    \clip[rounded corners=6pt] (\xthr-0.5*\colW, \topY-\colH) rectangle (\xthr+0.5*\colW, \topY);
+    \fill[RedFill!80!RedLine] (\xthr-0.5*\colW, \topY-1.22) rectangle (\xthr+0.5*\colW, \topY);
+    \draw[RedLine!40, line width=0.6pt] (\xthr-0.5*\colW, \topY-1.22) -- (\xthr+0.5*\colW, \topY-1.22);
+  \end{scope}
+
+  % Header text
+  \node[align=center] at (\xthr, \topY-0.42) {
+    \textbf{\small\textcolor{DarkRed}{Permanent Failures}}
+  };
+  \node[align=center] at (\xthr, \topY-0.85) {
+    \scriptsize\bfseries\textcolor{DarkRed!90!black}{Duration: Forever (Irreversible)}
+  };
+
+  % Summary under header
+  \node[anchor=north, align=center, font=\scriptsize, text=TextDark] at (\xthr, \topY-1.38) {
+    Physical silicon damage or burn;\\
+    component cannot recover on retry.\\[2pt]
+    \textbf{\textcolor{DarkRed}{Requires physical replacement.}}
+  };
+
+  % Card 1: Physical Cause
+  \node[
+    rectangle, rounded corners=4pt, draw=RedLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xthr, \topY-2.48) {
+    \textbf{\scriptsize\textcolor{TextDark}{Physical Cause}}\\[2pt]
+    \tiny\textcolor{TextDark}{Gate dielectric breakdown, short,}\\
+    \tiny\textcolor{TextDark}{or electromigration wire void}
+  };
+
+  % Card 2: Detection Mechanism
+  \node[
+    rectangle, rounded corners=4pt, draw=RedLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xthr, \topY-3.85) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Detection Mechanism}}\\[2pt]
+    \tiny\textcolor{TextDark}{Heartbeat timeout, fatal MCE}\\
+    \tiny\textcolor{TextDark}{PCIe device fallen off bus}
+  };
+
+  % Card 3: Recovery Strategy
+  \node[
+    rectangle, rounded corners=4pt, draw=RedLine!35, fill=white, line width=0.6pt,
+    minimum width=\cardW cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xthr, \topY-5.22) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Recovery Strategy}}\\[2pt]
+    \tiny\textcolor{TextDark}{Hot-spare node swap \& resume}\\
+    \tiny\textcolor{TextDark}{RMA hardware component replacement}
+  };
+
+  % Card 4: Scale Rate Container
+  \node[
+    rectangle, rounded corners=5pt, draw=RedLine!45, fill=white, line width=0.7pt,
+    minimum width=\cardW cm, minimum height=3.45cm, anchor=north
+  ] at (\xthr, \topY-6.60) {};
+
+  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\xthr, \topY-6.75)
+    {Scale Rate (10K GPUs)};
+  \draw[RedLine!25, line width=0.5pt] (\xthr-1.8, \topY-7.10) -- (\xthr+1.8, \topY-7.10);
+
+  \node[align=center] at (\xthr, \topY-7.58) {
+    \fontsize{9.3pt}{11pt}\selectfont\textbf{\textcolor{DarkRed}{\raisebox{0.5pt}{\textasciitilde}1 hardware death / 5\,hrs}}\\[2.5pt]
+    \tiny\textcolor{TextMuted}{$\text{MTBF}_{\text{sys}} = \text{MTBF}_{\text{comp}} / N$}
+  };
+
+  % Sub-card
+  \node[
+    rectangle, rounded corners=4pt, draw=RedLine!50, fill=RedFill!60, line width=0.6pt,
+    minimum width=3.95cm, inner sep=4pt, align=center, anchor=north
+  ] at (\xthr, \topY-8.45) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Fleet Consequence:}}\\[2pt]
+    \tiny\textcolor{TextDark}{Demands checkpoint rollback}\\
+    \tiny\textcolor{TextDark}{$N+1$ redundancy buffer required}
+  };
+
+\end{tikzpicture}
+```
+
 :::
 
 That fragility is the direct consequence of successful synchronization. Distributed training systems achieve massive throughput by coordinating thousands of devices, and collective communication keeps that coordination synchronized through rigid exchanges. The same synchronization means one stalled device can stall the fleet. Fault-tolerant ML systems preserve progress by detecting failure, checkpointing recoverable state, restarting or elastically reshaping jobs, and treating hardware churn as normal execution rather than an exceptional path.
