@@ -1238,8 +1238,230 @@ The key trade-offs across synchronization models are summarized in @tbl-sync-mod
 
 The same trade-off becomes clearer when the schedules are placed on a timeline.
 
-::: {#fig-sync-model-timeline fig-env="figure" fig-pos="htb" fig-cap="**Distributed synchronization models**: The timelines compare three synchronization strategies. (A) Bulk synchronous parallel (BSP) forces all workers to wait at a global barrier every step. (B) Stale synchronous parallel (SSP) allows workers to proceed up to $s$ steps ahead of the slowest worker. (C) Asynchronous SGD eliminates barriers, increasing throughput at the cost of gradient staleness." fig-alt="Timeline diagram with three panels. Top: BSP with global barriers. Middle: SSP with bounded staleness slack. Bottom: Asynchronous with independent workers and overlapping steps."}
-![](images/svg/sync-model-timeline.svg){width=100%}
+::: {#fig-sync-model-timeline fig-env="figure" fig-pos="htb" fig-cap="**Distributed synchronization models**: The timelines compare three synchronization strategies. (a) Bulk synchronous parallel (BSP) forces all workers to wait at a global barrier every step. (b) Stale synchronous parallel (SSP) allows workers to proceed up to $s$ steps ahead of the slowest worker. (c) Asynchronous SGD eliminates barriers, increasing throughput at the cost of gradient staleness." fig-alt="Timeline diagram with three panels. Top: BSP with global barriers. Middle: SSP with bounded staleness slack. Bottom: Asynchronous with independent workers and overlapping steps."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  scale=1.0,
+  panel card/.style={
+    draw=CardBorder,
+    fill=white,
+    rounded corners=5pt,
+    line width=0.8pt
+  },
+  badge/.style={
+    rounded corners=2.5pt,
+    font=\bfseries\tiny,
+    inner sep=2.5pt,
+    align=center
+  },
+  worker label/.style={
+    font=\bfseries\scriptsize,
+    text=TextDark,
+    anchor=east
+  },
+  compute block/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=SteelBlue,
+    fill=LightBlue,
+    line width=0.7pt,
+    inner sep=0pt
+  },
+  wait block/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=RedLine,
+    fill=RedFill,
+    line width=0.7pt,
+    inner sep=0pt
+  },
+  ssp pause/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=OrangeLine,
+    fill=OrangeL,
+    line width=0.7pt,
+    inner sep=0pt
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{VioletLine}{RGB}{125,45,150}
+  \definecolor{VioletL}{RGB}{248,240,252}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TIME AXIS AT TOP
+  % ===========================================================
+  \draw[->, line width=0.9pt, TextMuted] (2.2, 11.0) -- (14.2, 11.0) node[right=3pt, font=\scriptsize\bfseries, text=TextDark] {Time};
+  \foreach \x/\t in {2.2/0, 4.54/1, 6.88/2, 9.22/3, 11.56/4, 13.9/5} {
+    \draw[line width=0.8pt, TextMuted] (\x, 10.9) -- (\x, 11.1);
+    \node[above=1pt, font=\tiny\bfseries, text=TextMuted] at (\x, 11.1) {$t = \t$};
+  }
+
+  % ===========================================================
+  % PANEL (a): BSP (s = 0)
+  % ===========================================================
+  \node[panel card, minimum width=14.4cm, minimum height=3.2cm, anchor=north west] at (0, 10.6) {};
+
+  % Header banner
+  \fill[fill=SteelBlue!12, rounded corners=4pt] (0.05, 10.55) rectangle (14.35, 10.05);
+  \node[anchor=west, font=\bfseries\footnotesize, text=NavyBlue] at (0.3, 10.3) {(a) Bulk Synchronous Parallel (BSP) $\boldsymbol{\cdot s = 0}$};
+  \node[anchor=west, font=\tiny, text=TextMuted] at (6.0, 10.3) {Strict barrier per step; fast workers idle while straggler W3 completes};
+  \node[badge, fill=NavyBlue, text=white] at (13.6, 10.3) {EXACT SGD};
+
+  % Worker rows
+  \node[worker label] at (2.05, 9.55) {W1};
+  \node[worker label] at (2.05, 8.95) {W2};
+  \node[worker label, text=RedLine] at (2.05, 8.35) {W3 (Straggler)};
+  \node[worker label] at (2.05, 7.75) {W4};
+
+  % Step barriers (red dashed lines)
+  \foreach \x in {4.54, 6.88, 9.22, 11.56, 13.9} {
+    \draw[dashed, line width=1.0pt, RedLine!80] (\x, 9.9) -- (\x, 7.5);
+  }
+
+  % Step blocks for BSP (5 steps, width = 2.34cm each)
+  \foreach \step/\xstart in {0/2.2, 1/4.54, 2/6.88, 3/9.22, 4/11.56} {
+    % W1
+    \node[compute block, minimum width=1.48cm, minimum height=0.45cm, anchor=west] at (\xstart, 9.55) {
+      \ifnum\step=0\tiny\textcolor{SteelBlue}{Compute}\fi
+    };
+    \node[wait block, minimum width=0.84cm, minimum height=0.45cm, anchor=west] at (\xstart + 1.49, 9.55) {
+      \tiny\bfseries\textcolor{RedLine}{wait}
+    };
+    % W2
+    \node[compute block, minimum width=1.48cm, minimum height=0.45cm, anchor=west] at (\xstart, 8.95) {
+      \ifnum\step=0\tiny\textcolor{SteelBlue}{Compute}\fi
+    };
+    \node[wait block, minimum width=0.84cm, minimum height=0.45cm, anchor=west] at (\xstart + 1.49, 8.95) {
+      \tiny\bfseries\textcolor{RedLine}{wait}
+    };
+    % W3 (Straggler)
+    \node[compute block, draw=RedLine, fill=SteelBlue!15, minimum width=2.33cm, minimum height=0.45cm, anchor=west] at (\xstart, 8.35) {
+      \ifnum\step=0\tiny\bfseries\textcolor{NavyBlue}{Compute (Slow Straggler)}\fi
+    };
+    % W4
+    \node[compute block, minimum width=1.48cm, minimum height=0.45cm, anchor=west] at (\xstart, 7.75) {
+      \ifnum\step=0\tiny\textcolor{SteelBlue}{Compute}\fi
+    };
+    \node[wait block, minimum width=0.84cm, minimum height=0.45cm, anchor=west] at (\xstart + 1.49, 7.75) {
+      \tiny\bfseries\textcolor{RedLine}{wait}
+    };
+  }
+
+  % ===========================================================
+  % PANEL (b): SSP (s = 1)
+  % ===========================================================
+  \node[panel card, minimum width=14.4cm, minimum height=3.2cm, anchor=north west] at (0, 7.1) {};
+
+  % Header banner
+  \fill[fill=OrangeLine!12, rounded corners=4pt] (0.05, 7.05) rectangle (14.35, 6.55);
+  \node[anchor=west, font=\bfseries\footnotesize, text=OrangeLine!90!black] at (0.3, 6.8) {(b) Stale Synchronous Parallel (SSP) $\boldsymbol{\cdot s = 1}$};
+  \node[anchor=west, font=\tiny, text=TextMuted] at (6.0, 6.8) {Bounded staleness window; workers proceed up to $s = 1$ step ahead of slowest};
+  \node[badge, fill=OrangeLine, text=white] at (13.5, 6.8) {BOUNDED DRIFT};
+
+  % Worker rows
+  \node[worker label] at (2.05, 6.05) {W1};
+  \node[worker label] at (2.05, 5.45) {W2};
+  \node[worker label, text=OrangeLine!90!black] at (2.05, 4.85) {W3 (Slow)};
+  \node[worker label] at (2.05, 4.25) {W4};
+
+  % SSP fast workers: 2 compute blocks then s<=1 pause, perfectly budgeted
+  \foreach \y in {6.05, 5.45, 4.25} {
+    % Cycle 1 (steps 0, 1)
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (2.20, \y) {
+      \tiny\textcolor{SteelBlue}{Compute}
+    };
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (3.90, \y) {};
+    \node[ssp pause, minimum width=0.42cm, minimum height=0.45cm, anchor=west] at (5.60, \y) {\tiny\bfseries $s{\le}1$};
+
+    % Cycle 2 (steps 2, 3)
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (6.04, \y) {};
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (7.74, \y) {};
+    \node[ssp pause, minimum width=0.42cm, minimum height=0.45cm, anchor=west] at (9.44, \y) {\tiny\bfseries $s{\le}1$};
+
+    % Cycle 3 (steps 4, 5)
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (9.88, \y) {};
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (11.58, \y) {};
+    \node[ssp pause, minimum width=0.42cm, minimum height=0.45cm, anchor=west] at (13.28, \y) {\tiny\bfseries $s{\le}1$};
+  }
+
+  % W3 slow workers (matches clock rate 2.34cm)
+  \foreach \step/\xstart in {0/2.2, 1/4.54, 2/6.88, 3/9.22, 4/11.56} {
+    \node[compute block, draw=OrangeLine, fill=OrangeL!50, minimum width=2.32cm, minimum height=0.45cm, anchor=west] at (\xstart, 4.85) {
+      \tiny\textcolor{OrangeLine!90!black}{Compute (Slow)}
+    };
+  }
+
+  % ===========================================================
+  % PANEL (c): ASP (s = \infty)
+  % ===========================================================
+  \node[panel card, minimum width=14.4cm, minimum height=3.2cm, anchor=north west] at (0, 3.6) {};
+
+  % Header banner
+  \fill[fill=DarkGreen!12, rounded corners=4pt] (0.05, 3.55) rectangle (14.35, 3.05);
+  \node[anchor=west, font=\bfseries\footnotesize, text=DarkGreen] at (0.3, 3.3) {(c) Asynchronous SGD (ASP) $\boldsymbol{\cdot s = \infty}$};
+  \node[anchor=west, font=\tiny, text=TextMuted] at (6.0, 3.3) {No barriers; lock-free gradient updates applied immediately to shared weights};
+  \node[badge, fill=DarkGreen, text=white] at (13.4, 3.3) {MAX THROUGHPUT};
+
+  % Worker rows
+  \node[worker label] at (2.05, 2.55) {W1};
+  \node[worker label] at (2.05, 1.95) {W2};
+  \node[worker label] at (2.05, 1.35) {W3};
+  \node[worker label] at (2.05, 0.75) {W4};
+
+  % Time horizon marker in ASP
+  \draw[dashed, line width=0.8pt, DarkGreen!50] (13.9, 2.8) -- (13.9, 0.5);
+
+  % W1: Fast (duration 1.28cm, 9 blocks fit within 11.7cm)
+  \foreach \i in {0,...,8} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*1.295}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=1.275cm, minimum height=0.45cm, anchor=west] at (\xpos, 2.55) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+  % W2: Medium-Fast (duration 1.64cm, 7 blocks fit within 11.7cm)
+  \foreach \i in {0,...,6} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*1.655}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=1.635cm, minimum height=0.45cm, anchor=west] at (\xpos, 1.95) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+  % W3: Slow (duration 2.32cm, 5 blocks fit within 11.7cm)
+  \foreach \i in {0,...,4} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*2.335}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=2.315cm, minimum height=0.45cm, anchor=west] at (\xpos, 1.35) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+  % W4: Medium (duration 1.92cm, 6 blocks fit within 11.7cm)
+  \foreach \i in {0,...,5} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*1.935}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=1.915cm, minimum height=0.45cm, anchor=west] at (\xpos, 0.75) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+
+\end{tikzpicture}
+```
+
 :::
 
 The choice of synchronization model directly affects both system throughput and model convergence. Training teams often use BSP for controlled final runs because synchronous steps simplify comparison and replay, while exploring SSP or async approaches during hyperparameter search where throughput can outweigh exact update equivalence. Reproducible replay still requires deterministic sampling, kernels, collective ordering, and restored random state.
