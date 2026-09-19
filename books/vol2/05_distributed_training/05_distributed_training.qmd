@@ -1858,7 +1858,185 @@ Per-GPU Memory:
 ZeRO addresses this redundancy through progressive sharding, as @fig-zero-memory illustrates and @tbl-zero-stages summarizes.
 
 ::: {#fig-zero-memory fig-env="figure" fig-pos="htb" fig-cap="**ZeRO memory reduction**: Standard data parallelism (DDP) replicates all model states across every GPU. ZeRO progressively partitions these states: ZeRO-1 shards optimizer states, ZeRO-2 adds gradient sharding, and ZeRO-3 shards the parameters themselves. ZeRO-3 achieves linear memory scaling, enabling models with 100B+ parameters to fit on accelerators that could not hold the replicated state." fig-alt="Bar chart comparing per-GPU memory usage across DDP, ZeRO-1, ZeRO-2, and ZeRO-3 with decreasing memory footprint."}
-![](images/svg/zero-memory-partitioning.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  legend item/.style={
+    font=\scriptsize,
+    text=TextDark
+  },
+  header card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    minimum width=2.4cm,
+    minimum height=0.75cm,
+    align=center
+  },
+  total pill/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    minimum width=2.4cm,
+    minimum height=0.8cm,
+    align=center
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TOP LEGEND
+  % ===========================================================
+  \node[draw=CardBorder, fill=white, rounded corners=4pt, line width=0.8pt, minimum width=13.8cm, minimum height=0.75cm] at (7.0, 7.6) {};
+
+  \node[draw=SteelBlue, fill=LightBlue, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (1.0, 7.6) {};
+  \node[legend item, anchor=west] at (1.3, 7.6) {\textbf{Weights} (FP16, 2\,B/param)};
+
+  \node[draw=OrangeLine, fill=OrangeL, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (5.1, 7.6) {};
+  \node[legend item, anchor=west] at (5.4, 7.6) {\textbf{Gradients} (FP16, 2\,B/param)};
+
+  \node[draw=DarkGreen, fill=GreenFill, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (9.1, 7.6) {};
+  \node[legend item, anchor=west] at (9.4, 7.6) {\textbf{Optimizer States} (FP32, 12\,B/param)};
+
+  % ===========================================================
+  % AXIS & GRIDLINES
+  % ===========================================================
+  % y = 0 GB at y = 1.6 cm, 120 GB at y = 6.4 cm (scale: 1 GB = 0.04 cm)
+  \draw[line width=0.8pt, TextMuted] (1.1, 1.6) -- (13.7, 1.6);
+
+  \foreach \gb/\y in {0/1.6, 20/2.4, 40/3.2, 60/4.0, 80/4.8, 100/5.6, 120/6.4} {
+    \draw[dashed, gray!25, thin] (1.1, \y) -- (13.7, \y);
+    \node[anchor=east, font=\tiny\bfseries, text=TextMuted] at (1.0, \y) {\gb};
+  }
+
+  \node[rotate=90, font=\bfseries\footnotesize, text=TextDark] at (0.35, 4.0) {Memory per GPU (GB)};
+
+  % ===========================================================
+  % COLUMN 1: DDP (112 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=CardBorder, fill=CardFill] at (2.4, 6.85) {
+    \textbf{\footnotesize DDP}\\[-1pt]
+    \tiny\textcolor{TextMuted}{Baseline Replicated}
+  };
+
+  % Stack:
+  % OS: 84 GB -> from 1.6 to 4.96
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (1.4, 1.6) rectangle (3.4, 4.96);
+  \node[font=\bfseries\scriptsize, text=DarkGreen] at (2.4, 3.28) {OS (84\,GB)};
+
+  % G: 14 GB -> from 4.96 to 5.52
+  \draw[draw=OrangeLine, fill=OrangeL, rounded corners=1.5pt, line width=0.8pt] (1.4, 4.96) rectangle (3.4, 5.52);
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at (2.4, 5.24) {G (14\,GB)};
+
+  % W: 14 GB -> from 5.52 to 6.08
+  \draw[draw=SteelBlue, fill=LightBlue, rounded corners=1.5pt, line width=0.8pt] (1.4, 5.52) rectangle (3.4, 6.08);
+  \node[font=\bfseries\tiny, text=SteelBlue] at (2.4, 5.80) {W (14\,GB)};
+
+  % Total Pill
+  \node[total pill, draw=CardBorder, fill=white] at (2.4, 0.95) {
+    \textbf{\footnotesize 112\,GB}\\[-1pt]
+    \tiny\textcolor{TextMuted}{1.0$\times$ Baseline}
+  };
+
+  % ===========================================================
+  % COLUMN 2: ZeRO-1 (~29.3 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=OrangeLine, fill=OrangeL] at (5.3, 6.85) {
+    \textbf{\footnotesize\textcolor{OrangeLine!90!black}{ZeRO-1}}\\[-1pt]
+    \tiny\textcolor{OrangeLine!80!black}{Shard Opt States}
+  };
+
+  % Stack:
+  % OS/N: 1.31 GB -> from 1.6 to 1.78
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (4.4, 1.6) rectangle (6.2, 1.78);
+  \node[font=\tiny\bfseries, text=DarkGreen, anchor=west] at (6.28, 1.69) {$\leftarrow$ OS/$N$};
+
+  % G: 14 GB -> from 1.78 to 2.34
+  \draw[draw=OrangeLine, fill=OrangeL, rounded corners=1.5pt, line width=0.8pt] (4.4, 1.78) rectangle (6.2, 2.34);
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at (5.3, 2.06) {G (14\,GB)};
+
+  % W: 14 GB -> from 2.34 to 2.90
+  \draw[draw=SteelBlue, fill=LightBlue, rounded corners=1.5pt, line width=0.8pt] (4.4, 2.34) rectangle (6.2, 2.90);
+  \node[font=\bfseries\tiny, text=SteelBlue] at (5.3, 2.62) {W (14\,GB)};
+
+  % Total Pill
+  \node[total pill, draw=OrangeLine, fill=OrangeL!50] at (5.3, 0.95) {
+    \textbf{\footnotesize\textcolor{OrangeLine!90!black}{$\approx$ 29.3\,GB}}\\[-1pt]
+    \tiny\bfseries\textcolor{OrangeLine!90!black}{3.8$\times$ Reduction}
+  };
+
+  % ===========================================================
+  % COLUMN 3: ZeRO-2 (~15.5 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=SteelBlue, fill=LightBlue] at (8.2, 6.85) {
+    \textbf{\footnotesize\textcolor{SteelBlue}{ZeRO-2}}\\[-1pt]
+    \tiny\textcolor{SteelBlue}{+ Shard Gradients}
+  };
+
+  % Stack:
+  % (OS+G)/N: 1.53 GB -> from 1.6 to 1.82
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (7.3, 1.6) rectangle (9.1, 1.82);
+  \node[font=\tiny\bfseries, text=DarkGreen, anchor=west] at (9.18, 1.71) {$\leftarrow$ (OS+G)/$N$};
+
+  % W: 14 GB -> from 1.82 to 2.38
+  \draw[draw=SteelBlue, fill=LightBlue, rounded corners=1.5pt, line width=0.8pt] (7.3, 1.82) rectangle (9.1, 2.38);
+  \node[font=\bfseries\tiny, text=SteelBlue] at (8.2, 2.10) {W (14\,GB)};
+
+  % Total Pill
+  \node[total pill, draw=SteelBlue, fill=LightBlue!70] at (8.2, 0.95) {
+    \textbf{\footnotesize\textcolor{SteelBlue}{$\approx$ 15.5\,GB}}\\[-1pt]
+    \tiny\bfseries\textcolor{SteelBlue}{7.2$\times$ Reduction}
+  };
+
+  % ===========================================================
+  % COLUMN 4: ZeRO-3 (~1.75 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=DarkGreen, fill=GreenFill] at (11.4, 6.85) {
+    \textbf{\footnotesize\textcolor{DarkGreen}{ZeRO-3 / FSDP}}\\[-1pt]
+    \tiny\textcolor{DarkGreen}{+ Shard Parameters}
+  };
+
+  % Stack:
+  % (W+G+OS)/N: 1.75 GB -> from 1.6 to 1.86
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (10.5, 1.6) rectangle (12.3, 1.86);
+  \node[font=\tiny\bfseries, text=DarkGreen, anchor=west] at (12.38, 1.73) {$\leftarrow$ State/$N$};
+  \node[font=\tiny\bfseries, text=DarkGreen] at (11.4, 2.25) {Fully Sharded};
+
+  % Total Pill
+  \node[total pill, draw=DarkGreen, fill=GreenFill!80] at (11.4, 0.95) {
+    \textbf{\footnotesize\textcolor{DarkGreen}{$\approx$ 1.75\,GB}}\\[-1pt]
+    \tiny\bfseries\textcolor{DarkGreen}{64$\times$ Linear Scaling}
+  };
+
+  % ===========================================================
+  % FOOTER STRIP
+  % ===========================================================
+  \node[draw=CardBorder, fill=CardFill, rounded corners=4pt, line width=0.7pt, minimum width=13.8cm, minimum height=0.55cm] at (7.0, 0.25) {
+    \footnotesize\textmd{Reference Benchmark: 7B FP16 Model (16\,B/param under AdamW) Sharded Across $N = 64$ Accelerators}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 | **Stage**       |  **What is Sharded**  |   **Memory Reduction**   |    **Communication Overhead**    |
@@ -1877,7 +2055,164 @@ ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the m
 
 ::: {#fig-zero-partitioning fig-env="figure" fig-pos="htb" fig-cap="**ZeRO state partitioning across GPU ranks**: Memory layout per GPU for 4 workers under standard DDP versus ZeRO stages 1, 2, and 3. ZeRO-1 shards optimizer states ($O/4$), ZeRO-2 adds gradient sharding ($G/4$), and ZeRO-3 partitions all model state ($P/4$, $G/4$, $O/4$)." fig-alt="Matrix diagram comparing state layout across 4 GPUs for Baseline DDP, ZeRO Stage 1, ZeRO Stage 2, and ZeRO Stage 3."}
 
-![](images/svg/zero-partitioning.svg){width="100%"}
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  col card/.style={
+    draw=CardBorder,
+    fill=white,
+    rounded corners=5pt,
+    line width=0.8pt,
+    minimum width=3.35cm,
+    minimum height=5.2cm
+  },
+  comm badge/.style={
+    rectangle,
+    rounded corners=2.5pt,
+    line width=0.65pt,
+    font=\bfseries\tiny,
+    inner sep=2.5pt,
+    minimum width=3.0cm,
+    minimum height=0.45cm,
+    align=center
+  },
+  state block/.style={
+    rectangle,
+    rounded corners=2pt,
+    line width=0.7pt,
+    align=center,
+    font=\bfseries\scriptsize,
+    inner sep=0pt
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TOP LEGEND
+  % ===========================================================
+  \node[draw=CardBorder, fill=white, rounded corners=4pt, line width=0.8pt, minimum width=14.0cm, minimum height=0.7cm] at (7.1, 8.4) {};
+
+  \node[draw=SteelBlue, fill=LightBlue, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (1.2, 8.4) {};
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (1.5, 8.4) {\textbf{P:} Parameters (2\,B/param)};
+
+  \node[draw=OrangeLine, fill=OrangeL, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (5.5, 8.4) {};
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (5.8, 8.4) {\textbf{G:} Gradients (2\,B/param)};
+
+  \node[draw=DarkGreen, fill=GreenFill, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (9.6, 8.4) {};
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (9.9, 8.4) {\textbf{O:} Optimizer States (12\,B/param)};
+
+  % ===========================================================
+  % COLUMN 1: BASELINE DDP
+  % ===========================================================
+  \node[col card, anchor=north] (COL1) at (1.75, 7.8) {};
+  % Header banner
+  \fill[fill=CardFill, rounded corners=4pt] (0.1, 7.75) rectangle (3.4, 7.15);
+  \node[font=\bfseries\footnotesize, text=TextDark] at (1.75, 7.55) {Baseline DDP};
+  \node[font=\tiny, text=TextMuted] at (1.75, 7.3) {Full 16\,B Replication};
+
+  % GPU Rows in Col 1 (y = 6.6, 5.8, 5.0, 4.2)
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (0.85, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.68cm, minimum height=0.55cm] at (1.3, \y) {P};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.68cm, minimum height=0.55cm] at (2.05, \y) {G};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.68cm, minimum height=0.55cm] at (2.8, \y) {O};
+  }
+  \node[comm badge, draw=CardBorder, fill=CardFill, text=TextMuted] at (1.75, 3.0) {Comm: $2\times$ AllReduce};
+
+  % ===========================================================
+  % COLUMN 2: ZeRO-1
+  % ===========================================================
+  \node[col card, anchor=north] (COL2) at (5.3, 7.8) {};
+  % Header banner
+  \fill[fill=OrangeLine!12, rounded corners=4pt] (3.65, 7.75) rectangle (6.95, 7.15);
+  \node[font=\bfseries\footnotesize, text=OrangeLine!90!black] at (5.3, 7.55) {ZeRO Stage 1};
+  \node[font=\tiny, text=OrangeLine!80!black] at (5.3, 7.3) {Shard Optimizer State ($O$)};
+
+  % GPU Rows in Col 2
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (4.4, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.68cm, minimum height=0.55cm] at (4.85, \y) {P};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.68cm, minimum height=0.55cm] at (5.60, \y) {G};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.55cm, minimum height=0.55cm] at (6.32, \y) {O$_{\gpu}$};
+  }
+  \node[comm badge, draw=OrangeLine!70, fill=OrangeL!50, text=OrangeLine!90!black] at (5.3, 3.0) {Comm: Same as DDP ($1.0\times$)};
+
+  % ===========================================================
+  % COLUMN 3: ZeRO-2
+  % ===========================================================
+  \node[col card, anchor=north] (COL3) at (8.85, 7.8) {};
+  % Header banner
+  \fill[fill=SteelBlue!12, rounded corners=4pt] (7.2, 7.75) rectangle (10.5, 7.15);
+  \node[font=\bfseries\footnotesize, text=SteelBlue] at (8.85, 7.55) {ZeRO Stage 2};
+  \node[font=\tiny, text=SteelBlue] at (8.85, 7.3) {Shard Opt ($O$) + Grad ($G$)};
+
+  % GPU Rows in Col 3
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (7.95, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.72cm, minimum height=0.55cm] at (8.45, \y) {P};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.55cm, minimum height=0.55cm] at (9.22, \y) {G$_{\gpu}$};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.55cm, minimum height=0.55cm] at (9.87, \y) {O$_{\gpu}$};
+  }
+  \node[comm badge, draw=SteelBlue!70, fill=LightBlue!70, text=SteelBlue] at (8.85, 3.0) {Comm: ReduceScatter only};
+
+  % ===========================================================
+  % COLUMN 4: ZeRO-3
+  % ===========================================================
+  \node[col card, anchor=north] (COL4) at (12.45, 7.8) {};
+  % Header banner
+  \fill[fill=DarkGreen!12, rounded corners=4pt] (10.8, 7.75) rectangle (14.1, 7.15);
+  \node[font=\bfseries\footnotesize, text=DarkGreen] at (12.45, 7.55) {ZeRO Stage 3};
+  \node[font=\tiny, text=DarkGreen] at (12.45, 7.3) {Shard All State ($P + G + O$)};
+
+  % GPU Rows in Col 4
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (11.55, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.55cm, minimum height=0.55cm] at (12.05, \y) {P$_{\gpu}$};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.55cm, minimum height=0.55cm] at (12.70, \y) {G$_{\gpu}$};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.55cm, minimum height=0.55cm] at (13.35, \y) {O$_{\gpu}$};
+  }
+  \node[comm badge, draw=DarkGreen!70, fill=GreenFill!80, text=DarkGreen] at (12.45, 3.0) {Comm: $1.5\times$ (+AllGather P)};
+
+  % ===========================================================
+  % BOTTOM SUMMARY CARD
+  % ===========================================================
+  \node[draw=CardBorder, fill=white, rounded corners=5pt, line width=0.8pt, minimum width=14.0cm, minimum height=2.4cm, anchor=north] at (7.1, 2.55) {};
+
+  \fill[fill=SteelBlue!10, rounded corners=4pt] (0.15, 2.50) rectangle (14.05, 2.05);
+  \node[anchor=west, font=\bfseries\scriptsize, text=NavyBlue] at (0.35, 2.28) {ZeRO Mechanism: Trading Communication Primitives for Memory Capacity};
+
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (0.35, 1.72) {
+    \textcolor{OrangeLine!90!black}{\textbf{ZeRO-1 ($P_{os}$):}} Partitions 12\,B/param optimizer state across $N$ GPUs ($4\times$ reduction). Zero extra communication overhead.
+  };
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (0.35, 1.32) {
+    \textcolor{SteelBlue}{\textbf{ZeRO-2 ($P_{os} + P_g$):}} Also partitions gradients ($8\times$ reduction). Replaces AllReduce with ReduceScatter; zero extra communication volume.
+  };
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (0.35, 0.92) {
+    \textcolor{DarkGreen}{\textbf{ZeRO-3 ($P_{os} + P_g + P_p$):}} Shards parameters; AllGathers parameters layer-by-layer during forward and backward passes ($1.5\times$ communication tax).
+  };
+
+  \node[draw=SteelBlue!40, fill=LightBlue!60, rounded corners=3pt, line width=0.6pt, minimum width=13.6cm, minimum height=0.45cm] at (7.1, 0.42) {
+    \tiny\bfseries\textcolor{NavyBlue}{Core Principle: ZeRO converts memory redundancy into ring collective operations without changing mathematical output}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
