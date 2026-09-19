@@ -699,11 +699,15 @@ do_install() {
     rm -f "$INSTALL_DIR/progress.json" 2>/dev/null || true
     rm -rf "$INSTALL_DIR/.tito" 2>/dev/null || true
 
-    # Clear tinytorch/core/ implementation files - students build these
-    # Keep __init__.py files (package structure)
+    # Clear exported module implementations in tinytorch/ - students build these
+    # Keep __init__.py files (package structure) and hand-written tinytorch/extensions/
     if [ -d "$INSTALL_DIR/tinytorch/core" ]; then
         find "$INSTALL_DIR/tinytorch/core" -name "*.py" ! -name "__init__.py" -type f -delete 2>/dev/null || true
     fi
+    if [ -d "$INSTALL_DIR/tinytorch/perf" ]; then
+        find "$INSTALL_DIR/tinytorch/perf" -name "*.py" ! -name "__init__.py" -type f -delete 2>/dev/null || true
+    fi
+    rm -f "$INSTALL_DIR/tinytorch/olympics.py" 2>/dev/null || true
 
     print_success "Downloaded TinyTorch ${DIM}(${COMMIT_HASH})${NC}"
 

@@ -11,6 +11,7 @@ Usage:
 
 import subprocess
 from argparse import ArgumentParser, Namespace
+from pathlib import Path
 
 from ..base import BaseCommand
 
@@ -31,38 +32,39 @@ class DevCleanCommand(BaseCommand):
             'target',
             nargs='?',
             default='all',
-            choices=['all', 'site'],
-            help='What to clean: all (default), site'
+            choices=['all', 'guide', 'site', 'book', 'paper'],
+            help='What to clean: all (default), guide (or site), book, paper'
         )
 
     def run(self, args: Namespace) -> int:
         target = args.target or 'all'
         console = self.console
 
-        if target == 'site':
-            cwd = self.config.project_root / 'site'
-            if not cwd.exists():
-                console.print(f"[red]❌ Directory not found: {cwd}[/red]")
+        def _run_make_clean(dir_path: Path, label: str) -> int:
+            if not dir_path.exists():
+                console.print(f"[red]❌ Directory not found: {dir_path}[/red]")
                 return 1
-            console.print("[cyan]🧹 Cleaning site build artifacts...[/cyan]")
+            console.print(f"[cyan]🧹 Cleaning {label} build artifacts...[/cyan]")
+            try:
+                res = subprocess.run(['make', 'clean'], cwd=str(dir_path))
+                return res.returncode
+            except FileNotFoundError:
+                console.print("[red]❌ 'make' is not installed or not on your PATH[/red]")
+                console.print("  This command needs GNU Make to run its clean targets.")
+                console.print("  Windows: install via 'choco install make', WSL, or Git Bash's own")
+                console.print("           MinGW package manager.")
+                console.print("  macOS/Linux: usually preinstalled, or 'brew install make' / 'apt install make'.")
+                return 1
+
+        if target in ('guide', 'site'):
+            return _run_make_clean(self.config.project_root / 'guide', 'guide')
+        elif target == 'book':
+            return _run_make_clean(self.config.project_root / 'book', 'book')
+        elif target == 'paper':
+            return _run_make_clean(self.config.project_root / 'paper', 'paper')
         else:
-            cwd = self.config.project_root
-            console.print("[cyan]🧹 Cleaning all generated files...[/cyan]")
-
-        # `make` isn't bundled with Git Bash on Windows (unlike git/python,
-        # it has no equivalent auto-installed fallback), so this is a very
-        # reachable crash for any Windows user without WSL or a separate
-        # make install: subprocess.run raises FileNotFoundError with no
-        # indication of *why*, rather than something recognizable as
-        # "install this tool".
-        try:
-            result = subprocess.run(['make', 'clean'], cwd=str(cwd))
-        except FileNotFoundError:
-            console.print("[red]❌ 'make' is not installed or not on your PATH[/red]")
-            console.print("  This command needs GNU Make to run its clean targets.")
-            console.print("  Windows: install via 'choco install make', WSL, or Git Bash's own")
-            console.print("           MinGW package manager.")
-            console.print("  macOS/Linux: usually preinstalled, or 'brew install make' / 'apt install make'.")
-            return 1
-
-        return result.returncode
+            rc = _run_make_clean(self.config.project_root, 'all generated files')
+            guide_dir = self.config.project_root / 'guide'
+            if guide_dir.exists() and (guide_dir / 'Makefile').exists():
+                _run_make_clean(guide_dir, 'guide')
+            return rc

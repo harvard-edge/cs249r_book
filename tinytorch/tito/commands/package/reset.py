@@ -161,10 +161,12 @@ class ResetCommand(BaseCommand):
         reset_text = Text()
         reset_text.append("🗑️  Removing all exported files:\n", style="bold red")
 
-        # Simple approach: remove all .py files except __init__.py
+        # Remove all exported .py files except __init__.py and hand-written extensions/
         files_removed = 0
         for py_file in tinytorch_path.rglob("*.py"):
             if py_file.name != "__init__.py":
+                if "extensions" in py_file.relative_to(tinytorch_path).parts:
+                    continue
                 try:
                     rel_path = py_file.relative_to(tinytorch_path)
                     reset_text.append(f"  🗑️  tinytorch/{rel_path}\n", style="red")
