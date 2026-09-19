@@ -3135,6 +3135,99 @@ def fmt_torque(quantity, *, unit=None, precision=None, commas=False):
     )
 
 
+def fmt_velocity(quantity, *, unit=None, precision=None, commas=False):
+    """Format velocity/speed quantities for prose (m/s, km/h, mph)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_velocity() requires a Pint Quantity.")
+    vel_dim = (1 * (ureg.meter / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != vel_dim:
+        raise ValueError(f"fmt_velocity unit must have velocity dimensionality (length/time), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.meter / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = None
+    try:
+        if abs((1 * display_unit).to(ureg.meter / ureg.second).magnitude - 1) < 1e-12:
+            unit_label = "m/s"
+        elif abs((1 * display_unit).to(ureg.kilometer / ureg.hour).magnitude - 1) < 1e-12:
+            unit_label = "km/h"
+    except Exception:
+        unit_label = None
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label=unit_label, trim_trailing_zeros=auto_precision)
+
+
+def fmt_jerk(quantity, *, unit=None, precision=None, commas=False):
+    """Format kinematic jerk quantities for prose (m/s³)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_jerk() requires a Pint Quantity.")
+    jerk_dim = (1 * (ureg.meter / (ureg.second**3))).dimensionality
+    if (1 * quantity).dimensionality != jerk_dim:
+        raise ValueError(f"fmt_jerk unit must have jerk dimensionality (m/s³), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.meter / (ureg.second**3))
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="m/s³", trim_trailing_zeros=auto_precision)
+
+
+def fmt_inertia(quantity, *, unit=None, precision=None, commas=False):
+    """Format moment of inertia quantities for prose (kg·m²)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_inertia() requires a Pint Quantity.")
+    inertia_dim = (1 * (ureg.kilogram * (ureg.meter**2))).dimensionality
+    if (1 * quantity).dimensionality != inertia_dim:
+        raise ValueError(f"fmt_inertia unit must have moment of inertia dimensionality (kg·m²), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.kilogram * (ureg.meter**2))
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="kg·m²", trim_trailing_zeros=auto_precision)
+
+
+def fmt_voltage(quantity, *, unit=None, precision=None, commas=False):
+    """Format electrical potential / voltage quantities for prose (V, mV, kV)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_voltage() requires a Pint Quantity.")
+    volt_dim = (1 * ureg.volt).dimensionality
+    if (1 * quantity).dimensionality != volt_dim:
+        raise ValueError(f"fmt_voltage unit must have voltage dimensionality (V), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.volt
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+
+
+def fmt_current(quantity, *, unit=None, precision=None, commas=False):
+    """Format electrical current quantities for prose (A, mA)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_current() requires a Pint Quantity.")
+    curr_dim = (1 * ureg.ampere).dimensionality
+    if (1 * quantity).dimensionality != curr_dim:
+        raise ValueError(f"fmt_current unit must have electric current dimensionality (A), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.ampere
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+
+
+def fmt_resistance(quantity, *, unit=None, precision=None, commas=False):
+    """Format electrical resistance quantities for prose (Ω, mΩ)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_resistance() requires a Pint Quantity.")
+    res_dim = (1 * ureg.ohm).dimensionality
+    if (1 * quantity).dimensionality != res_dim:
+        raise ValueError(f"fmt_resistance unit must have electrical resistance dimensionality (Ω), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.ohm
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(q, display_unit, precision=p, commas=commas, unit_label="Ω" if display_unit == ureg.ohm else None, trim_trailing_zeros=auto_precision)
+
+
+
 def fmt_token_rate(
     value,
     *,

@@ -64,12 +64,17 @@
       <td><b>Execution & Resolvers</b><br><code>mlsysim.engine.solver</code></td>
       <td>The 3-tier math engine: Models, Solvers, and Optimizers (Design space search).</td>
     </tr>
+    <tr>
+      <td align="center"><b>Layer F</b></td>
+      <td><b>Embodied & Physical AI</b><br><code>mlsysim.embodied</code>, <code>mlsysim.physics.robotics</code></td>
+      <td>Cyber-physical platforms (AMRs, Autonomous Vehicles, Manipulators) and closed-form physics (stopping envelopes, impact forces, stiction, bus utilization, safety leases).</td>
+    </tr>
   </tbody>
 </table>
 
 `Scenarios.*` sits above the stack as the runnable composition layer: it pairs a
-`Models.*` workload with a `Hardware.*` or `Systems.*` target and local
-constraints such as latency or power. Non-executable real-world anchors live in
+`Models.*` workload with a `Hardware.*`, `Systems.*`, or `Embodied.*` target and local
+constraints such as latency, power, or stopping envelopes. Non-executable real-world anchors live in
 `ReferenceStats.*`. There are no compatibility aliases between these namespaces:
 new and existing code should use the canonical path directly.
 

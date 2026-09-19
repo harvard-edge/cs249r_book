@@ -413,3 +413,32 @@ class DiffusionWorkload(Workload):
             arithmetic_intensity=(total_ops / weights).to("flop/byte"),
             layers=None
         )
+
+
+class EmbodiedWorkload(Workload):
+    """Workload representation of an embodied policy or vision-language-action (VLA) model."""
+    parameters: Quantity
+    action_chunk_horizon: Optional[int] = None
+    action_dim: Optional[int] = None
+    observation_horizon: Optional[int] = 1
+    inference_flops: Optional[Quantity] = None
+    layers: Optional[int] = None
+    hidden_dim: Optional[int] = None
+
+    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
+        param_count = self.parameters.to(ureg.count).magnitude
+        bpp = precision.to(ureg.byte).magnitude
+        return (param_count * bpp * ureg.byte).to(ureg.byte)
+
+    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+        base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
+        weights = self.size_in_bytes(precision)
+        return ComputationGraph(
+            name=self.name,
+            total_ops=base_ops,
+            parameter_count=self.parameters,
+            weight_bytes=weights,
+            arithmetic_intensity=(base_ops / weights).to("flop/byte"),
+            layers=self.layers,
+        )
+

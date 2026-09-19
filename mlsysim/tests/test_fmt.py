@@ -1380,3 +1380,47 @@ class TestFmtLength:
 
     def test_fmt_rate_kmh(self):
         assert fmt_rate(120, "km/h", precision=0, commas=False) == "120 km/h"
+
+
+class TestPhysicalAIFormatters:
+    def test_fmt_velocity(self):
+        from mlsysim.fmt import fmt_velocity
+        from mlsysim.core.units import meter, second, kilometer, hour
+        v1 = 2.5 * (meter / second)
+        assert fmt_velocity(v1) == "2.5 m/s"
+        assert fmt_velocity(v1, precision=1) == "2.5 m/s"
+        v2 = (120 * (kilometer / hour))
+        assert fmt_velocity(v2, unit=kilometer / hour, precision=0) == "120 km/h"
+
+    def test_fmt_jerk(self):
+        from mlsysim.fmt import fmt_jerk
+        from mlsysim.core.units import meter, second
+        j = 15.0 * (meter / (second**3))
+        assert fmt_jerk(j, precision=0) == "15 m/s³"
+
+    def test_fmt_inertia(self):
+        from mlsysim.fmt import fmt_inertia
+        from mlsysim.core.units import kilogram, meter
+        j_rotor = 0.0001 * (kilogram * (meter**2))
+        assert fmt_inertia(j_rotor, precision=4) == "0.0001 kg·m²"
+        j_refl = 0.25 * (kilogram * (meter**2))
+        assert fmt_inertia(j_refl, precision=2) == "0.25 kg·m²"
+
+    def test_fmt_voltage(self):
+        from mlsysim.fmt import fmt_voltage
+        from mlsysim.core.units import volt, millivolt
+        assert fmt_voltage(48.0 * volt, precision=0) == "48 V"
+        assert fmt_voltage(350 * millivolt, unit=millivolt, precision=0) == "350 mV"
+
+    def test_fmt_current(self):
+        from mlsysim.fmt import fmt_current
+        from mlsysim.core.units import ampere, milliampere
+        assert fmt_current(25.0 * ampere, precision=0) == "25 A"
+        assert fmt_current(450 * milliampere, unit=milliampere, precision=0) == "450 mA"
+
+    def test_fmt_resistance(self):
+        from mlsysim.fmt import fmt_resistance
+        from mlsysim.core.units import ohm, milliohm
+        assert fmt_resistance(0.05 * ohm, precision=2) == "0.05 Ω"
+        assert fmt_resistance(50 * milliohm, unit=milliohm, precision=0) == "50 mΩ"
+
