@@ -406,9 +406,161 @@ Tensor parallelism across server racks connected by standard Ethernet will stall
 
 @Fig-parallelism-decision-tree formalizes this constraint satisfaction process as a decision tree, showing how model size and hardware topology determine the viable parallelism strategies.
 
-::: {#fig-parallelism-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision tree**: Starting from the model's memory requirements, the tree follows the constraints that determine which parallelism strategies are physically feasible. The critical branches compare model memory with single-GPU and single-node capacity; leaf nodes identify the resulting strategy and dominant hardware constraint." fig-alt="Decision tree flowchart. Root asks if model fits in one GPU. Yes branch leads to data parallelism. No branch asks if model fits in one node, leading to tensor or pipeline parallelism with hardware annotations."}
+::: {#fig-parallelism-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision tree**: Starting from the model's memory footprint, the tree evaluates hardware-boundary constraints to identify viable execution strategies. The branches compare parameter and activation capacity against single-device and single-node physical limits, pairing each resulting strategy with its required interconnect tier." fig-alt="Decision tree flowchart. Root asks if model fits in one GPU. Yes branch leads to data parallelism. No branch asks if model fits in one node, leading to tensor or pipeline parallelism with hardware annotations."}
 
-![](images/svg/parallelism-decision-tree.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  decision/.style={
+    diamond,
+    aspect=2.2,
+    draw=OrangeLine,
+    fill=OrangeL,
+    line width=1.1pt,
+    inner sep=3pt,
+    align=center,
+    font=\bfseries\footnotesize,
+    text=TextDark
+  },
+  card/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.85pt,
+    inner sep=6pt,
+    align=left,
+    text width=4.3cm,
+    font=\scriptsize
+  },
+  badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.7pt,
+    inner sep=2pt,
+    align=center,
+    font=\bfseries\tiny
+  },
+  fabric chip/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.65pt,
+    inner sep=2.5pt,
+    align=center,
+    font=\scriptsize\bfseries,
+    fill=white
+  }
+]
+
+  % Decision Nodes
+  \node[decision] (Q1) at (7.0, 8.2) {
+    \textbf{\footnotesize 1. Model \& Activations}\\[1pt]
+    \textbf{\footnotesize fit on 1 GPU?}
+  };
+
+  \node[decision] (Q2) at (12.2, 5.8) {
+    \textbf{\footnotesize 2. Fits in 1 Node}\\[1pt]
+    \textbf{\footnotesize ($\le 8$ GPUs)?}
+  };
+
+  \node[decision] (Q3) at (12.2, 2.9) {
+    \textbf{\footnotesize 3. Sequential Depth /}\\[1pt]
+    \textbf{\footnotesize Bubble Tolerable?}
+  };
+
+  % Outcome Cards
+  % Column 1: Data Parallelism
+  \node[card, draw=GreenLine!70, top color=GreenFill!50, bottom color=white] (DDP) at (1.8, 5.8) {
+    {\normalsize\textcolor{GreenLine}{\textbf{Data Parallel (DDP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Replicate weights on all GPUs}\\
+    \textcolor{TextDark}{$\bullet$ Partition batch across workers}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=GreenLine, text=GreenLine, text width=4.0cm] {
+        \ding{51}\; Fabric: Standard IB / RoCE
+      };
+    \end{tikzpicture}
+  };
+
+  \node[card, draw=BlueLine!70, top color=BlueFill!50, bottom color=white] (ZeRO) at (1.8, 2.4) {
+    {\normalsize\textcolor{BlueLine}{\textbf{ZeRO / FSDP}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Shard optimizer, grads, weights}\\
+    \textcolor{TextDark}{$\bullet$ Eliminates memory redundancy}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=BlueLine, text=BlueLine, text width=4.0cm] {
+        \ding{51}\; Fabric: AllGather + ReduceScatter
+      };
+    \end{tikzpicture}
+  };
+
+  % Column 2: Tensor & Pipeline Parallelism
+  \node[card, draw=OrangeLine!80, top color=OrangeL!50, bottom color=white] (TP) at (7.0, 4.4) {
+    {\normalsize\textcolor{OrangeLine}{\textbf{Tensor Parallel (TP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Shard weight matrix columns/rows}\\
+    \textcolor{TextDark}{$\bullet$ AllReduce at every linear layer}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=OrangeLine, text=OrangeLine, text width=4.0cm] {
+        \ding{51}\; Fabric: Strictly NVLink (900 GB/s)
+      };
+    \end{tikzpicture}
+  };
+
+  \node[card, draw=GreenLine!80, top color=GreenFill!50, bottom color=white] (PP) at (7.0, 0.6) {
+    {\normalsize\textcolor{GreenLine}{\textbf{Pipeline Parallel (PP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Partition layer stages sequentially}\\
+    \textcolor{TextDark}{$\bullet$ 1F1B micro-batch scheduling}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=GreenLine, text=GreenLine, text width=4.0cm] {
+        \ding{51}\; Fabric: P2P over IB / Ethernet
+      };
+    \end{tikzpicture}
+  };
+
+  % Column 3: 3D Parallelism Fallback
+  \node[card, draw=VioletLine!80, top color=VioletL!60, bottom color=white] (Hybrid3D) at (12.2, 0.6) {
+    {\normalsize\textcolor{VioletLine}{\textbf{3D Parallelism (TP+PP+DP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Combined scaling for $>100\text{B}$ params}\\
+    \textcolor{TextDark}{$\bullet$ Intra TP $\times$ Inter PP $\times$ Outer DP}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=VioletLine, text=VioletLine, text width=4.0cm] {
+        \ding{51}\; Fabric: Tiered NVLink + IB + DC
+      };
+    \end{tikzpicture}
+  };
+
+  % Branch Connectors
+  % Branch 1: Q1 -> DDP (YES)
+  \draw[->, line width=1.4pt, GreenLine] (Q1.west) -| (DDP.north);
+  \node[badge, draw=GreenLine, fill=GreenFill, text=GreenLine] at (3.8, 8.2) {\textbf{Yes}};
+
+  % Branch 1: Q1 -> Q2 (NO)
+  \draw[->, line width=1.4pt, RedLine] (Q1.east) -| (Q2.north);
+  \node[badge, draw=RedLine, fill=RedFill, text=RedLine] at (10.2, 8.2) {\textbf{No}};
+
+  % Connector DDP -> ZeRO (Memory Pressure?)
+  \draw[->, line width=1.2pt, BlueLine, dashed] (DDP.south) -- (ZeRO.north)
+    node[midway, fill=BlueFill!80, draw=BlueLine!60, rounded corners=3pt, font=\scriptsize\bfseries, text=BlueLine, inner sep=2.5pt] {
+      Memory pressure?
+    };
+
+  % Branch 2: Q2 -> TP (YES)
+  \draw[->, line width=1.4pt, GreenLine] (Q2.west) -| (TP.north);
+  \node[badge, draw=GreenLine, fill=GreenFill, text=GreenLine] at (9.2, 5.8) {\textbf{Yes}};
+
+  % Branch 2: Q2 -> Q3 (NO)
+  \draw[->, line width=1.4pt, RedLine] (Q2.south) -- (Q3.north);
+  \node[badge, draw=RedLine, fill=RedFill, text=RedLine] at (12.6, 4.45) {\textbf{No}};
+
+  % Branch 3: Q3 -> PP (YES)
+  \draw[->, line width=1.4pt, GreenLine] (Q3.west) -| (PP.north);
+  \node[badge, draw=GreenLine, fill=GreenFill, text=GreenLine] at (9.2, 2.9) {\textbf{Yes}};
+
+  % Branch 3: Q3 -> Hybrid3D (NO)
+  \draw[->, line width=1.4pt, RedLine] (Q3.south) -- (Hybrid3D.north);
+  \node[badge, draw=RedLine, fill=RedFill, text=RedLine] at (12.6, 1.8) {\textbf{No}};
+
+\end{tikzpicture}
+```
 
 :::
 
