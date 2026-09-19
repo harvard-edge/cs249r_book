@@ -3707,9 +3707,249 @@ Partitioning strategy determines which cost the model pays after memory no longe
 Layer-wise partitioning is the least invasive model cut: it saves memory by assigning consecutive layers to separate devices, but it preserves the model's sequential dependence. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @Fig-dist-layers-blocks demonstrates this partitioning for a 16-layer transformer: four consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
 
 ::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-wise model parallelism**: The upper path assigns four consecutive transformer blocks to each of four GPUs, with activation checkpoints at device boundaries. The lower schedule shows forward work in blue, backward work in orange, and hatched pipeline bubbles. Partitioning reduces the weight footprint per GPU to one-quarter of the model, but sequential dependencies leave downstream devices waiting during pipeline fill." fig-alt="A 16-layer transformer is split across four GPUs, with layers 1–4, 5–8, 9–12, and 13–16 assigned to successive devices. Below, a timeline shows staggered blue forward passes, orange backward passes, and hatched idle pipeline bubbles."}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  stage card/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.8pt,
+    inner sep=4pt,
+    align=center,
+    text width=2.6cm
+  },
+  f block/.style={
+    rectangle,
+    rounded corners=2pt,
+    line width=0.7pt,
+    draw=SteelBlue,
+    fill=LightBlue!90,
+    inner sep=0pt,
+    font=\bfseries\scriptsize,
+    text=NavyBlue,
+    minimum width=0.52cm,
+    minimum height=0.48cm,
+    align=center
+  },
+  b block/.style={
+    rectangle,
+    rounded corners=2pt,
+    line width=0.7pt,
+    draw=OrangeLine,
+    fill=OrangeL,
+    inner sep=0pt,
+    font=\bfseries\scriptsize,
+    text=OrangeLine!90!black,
+    minimum width=0.52cm,
+    minimum height=0.48cm,
+    align=center
+  },
+  bubble style/.style={
+    rounded corners=2pt,
+    draw=gray!40,
+    preaction={fill=white},
+    pattern=north east lines,
+    pattern color=gray!30,
+    line width=0.6pt
+  }
+]
 
-![](images/svg/layer-wise-partitioning.svg)
+  % MLSysBook Palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{240,245,252}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{253,242,242}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,246,233}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{248,250,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
 
+  % ===========================================================
+  % UPPER DIAGRAM: LAYER-WISE PARTITIONING ACROSS GPUS
+  % ===========================================================
+
+  % Input Batch
+  \node[rectangle, rounded corners=3.5pt, draw=OrangeLine, fill=OrangeL, line width=0.9pt, inner sep=4.5pt, align=center] (INP) at (0.6, 7.6) {
+    \textbf{\textcolor{OrangeLine!90!black}{Input}}\\[1.5pt]
+    \footnotesize Batch
+  };
+
+  % Stage 0
+  \node[stage card, draw=NavyBlue!40, fill=LightBlue!60] (ST0) at (2.9, 7.6) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{Stage 0 $\cdot$ GPU 0}}\\[2pt]
+    \textbf{\footnotesize Layers 1--4}\\[1pt]
+    \tiny\textcolor{TextMuted}{Embedding + Attn}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{NavyBlue!50}{white}{\tiny L1}\,\fcolorbox{NavyBlue!50}{white}{\tiny L2}\,\fcolorbox{NavyBlue!50}{white}{\tiny L3}\,\fcolorbox{NavyBlue!50}{white}{\tiny L4}
+  };
+
+  % Stage 1
+  \node[stage card, draw=GreenLine!40, fill=GreenFill!60] (ST1) at (6.3, 7.6) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Stage 1 $\cdot$ GPU 1}}\\[2pt]
+    \textbf{\footnotesize Layers 5--8}\\[1pt]
+    \tiny\textcolor{TextMuted}{Attn + FFN Blocks}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{GreenLine!50}{white}{\tiny L5}\,\fcolorbox{GreenLine!50}{white}{\tiny L6}\,\fcolorbox{GreenLine!50}{white}{\tiny L7}\,\fcolorbox{GreenLine!50}{white}{\tiny L8}
+  };
+
+  % Stage 2
+  \node[stage card, draw=OrangeLine!40, fill=OrangeL!50] (ST2) at (9.7, 7.6) {
+    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{Stage 2 $\cdot$ GPU 2}}\\[2pt]
+    \textbf{\footnotesize Layers 9--12}\\[1pt]
+    \tiny\textcolor{TextMuted}{FFN + LayerNorm}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{OrangeLine!50}{white}{\tiny L9}\,\fcolorbox{OrangeLine!50}{white}{\tiny L10}\,\fcolorbox{OrangeLine!50}{white}{\tiny L11}\,\fcolorbox{OrangeLine!50}{white}{\tiny L12}
+  };
+
+  % Stage 3
+  \node[stage card, draw=purple!30, fill=purple!5] (ST3) at (13.1, 7.6) {
+    \textbf{\scriptsize\textcolor{purple!80!black}{Stage 3 $\cdot$ GPU 3}}\\[2pt]
+    \textbf{\footnotesize Layers 13--16}\\[1pt]
+    \tiny\textcolor{TextMuted}{Output + Criterion}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{purple!40}{white}{\tiny L13}\,\fcolorbox{purple!40}{white}{\tiny L14}\,\fcolorbox{purple!40}{white}{\tiny L15}\,\fcolorbox{purple!40}{white}{\tiny L16}
+  };
+
+  % Boundary P2P Arrows & Badges
+  \draw[->, line width=0.9pt, TextMuted] (INP.east) -- (ST0.west);
+
+  \path (ST0.east) -- (ST1.west) coordinate[midway] (M01);
+  \draw[->, line width=0.9pt, TextMuted] (ST0.east) -- (ST1.west);
+  \node[rectangle, rounded corners=2pt, draw=GreenLine, fill=GreenFill, font=\bfseries\tiny, text=DarkGreen, inner sep=1.8pt] at (M01) {P2P};
+
+  \path (ST1.east) -- (ST2.west) coordinate[midway] (M12);
+  \draw[->, line width=0.9pt, TextMuted] (ST1.east) -- (ST2.west);
+  \node[rectangle, rounded corners=2pt, draw=GreenLine, fill=GreenFill, font=\bfseries\tiny, text=DarkGreen, inner sep=1.8pt] at (M12) {P2P};
+
+  \path (ST2.east) -- (ST3.west) coordinate[midway] (M23);
+  \draw[->, line width=0.9pt, TextMuted] (ST2.east) -- (ST3.west);
+  \node[rectangle, rounded corners=2pt, draw=GreenLine, fill=GreenFill, font=\bfseries\tiny, text=DarkGreen, inner sep=1.8pt] at (M23) {P2P};
+
+  % Loss arrow
+  \draw[->, line width=1.0pt, RedLine] (ST3.south) -- ++(0, -0.4) node[below, font=\bfseries\tiny, text=RedLine] {Loss / Loss Backward};
+
+  % ===========================================================
+  % LOWER PANELS: BUBBLE THEORY (LEFT) & SCHEDULE (RIGHT)
+  % ===========================================================
+
+  % Left Panel: Pipeline Bubble & Communication
+  \node[rectangle, rounded corners=4pt, draw=CardBorder, fill=CardFill, line width=0.8pt, inner sep=6pt, anchor=north west] (LEFT_BOX) at (-0.1, 5.5) {
+    \begin{minipage}{4.7cm}
+      \textbf{\footnotesize\textcolor{NavyBlue}{Pipeline Bubble \& Comm.}}\\[4pt]
+      \textbf{\scriptsize Stages ($p$):} \scriptsize 4 GPUs across pipeline\\[1.5pt]
+      \textbf{\scriptsize Micro-batches ($m$):} \scriptsize 4 micro-batches in flight\\[5pt]
+      \centering
+      \fcolorbox{CardBorder}{white}{%
+        \begin{minipage}{4.2cm}
+          \centering
+          \textbf{\tiny Theoretical Bubble Overhead Fraction}\\[2pt]
+          \textbf{\scriptsize\textcolor{RedLine}{$F_{\text{bubble}} = \frac{p - 1}{p - 1 + m}$}}\\[2pt]
+          \tiny For $p=4, m=4$: $3/(3+4) = 42.9\%$ idle
+        \end{minipage}%
+      }\\[5pt]
+      \raggedright
+      \textbf{\tiny\textcolor{DarkGreen}{Mitigation:}} \tiny Scale $m \gg p$. $m=32 \implies 8.6\%$ bubble, but raises in-flight activation memory.\\[5pt]
+      \centering
+      \fcolorbox{SteelBlue!40}{LightBlue!50}{%
+        \begin{minipage}{4.2cm}
+          \textbf{\tiny\textcolor{NavyBlue}{P2P Boundary Activation Transfer:}}\\[1pt]
+          \tiny $\cdot$ \textbf{Volume:} $\mathcal{O}(B_{\text{micro}} \cdot s \cdot h)$ tensor size\\
+          \tiny $\cdot$ \textbf{Fabric:} Inter-node InfiniBand / RoCE\\
+          \tiny $\cdot$ \textbf{Ckpt:} Store activations at boundaries
+        \end{minipage}%
+      }
+    \end{minipage}
+  };
+
+  % Right Panel: Pipeline Schedule Grid
+  \node[rectangle, rounded corners=4pt, draw=CardBorder, fill=CardFill, line width=0.8pt, inner sep=6pt, anchor=north east] (RIGHT_BOX) at (14.6, 5.5) {
+    \begin{minipage}{9.2cm}
+      % Header & Legend
+      \textbf{\footnotesize\textcolor{NavyBlue}{Pipeline Schedule: Forward \& Backward Flow}}\\[3pt]
+      \tikz[baseline=-2pt]{\node[f block, minimum width=0.30cm, minimum height=0.22cm] {};}~\tiny Forward (F)\quad
+      \tikz[baseline=-2pt]{\node[b block, minimum width=0.30cm, minimum height=0.22cm] {};}~\tiny Backward (B)\quad
+      \tikz[baseline=-2pt]{\filldraw[bubble style] (0,-0.11) rectangle (0.35,0.11); }~\tiny Idle Bubble\\[8pt]
+
+      % Timeline grid
+      \begin{tikzpicture}
+        % Row labels
+        \node[anchor=east, font=\scriptsize\bfseries, text=NavyBlue] at (-0.35, 2.34) {GPU 0};
+        \node[anchor=east, font=\scriptsize\bfseries, text=DarkGreen] at (-0.35, 1.64) {GPU 1};
+        \node[anchor=east, font=\scriptsize\bfseries, text=OrangeLine!90!black] at (-0.35, 0.94) {GPU 2};
+        \node[anchor=east, font=\scriptsize\bfseries, text=purple!80!black] at (-0.35, 0.24) {GPU 3};
+
+        % Time axis line
+        \draw[->, line width=0.8pt, TextMuted] (-0.2, -0.4) -- (7.5, -0.4) node[midway, below=2pt, font=\bfseries\tiny, text=TextDark] {Execution Time (Clock Cycles / Steps) $\rightarrow$};
+
+        % --- GPU 0 (y: 2.10 to 2.58, center 2.34) ---
+        \node[f block] at (0.26, 2.34) {F0};
+        \node[f block] at (0.86, 2.34) {F1};
+        \node[f block] at (1.46, 2.34) {F2};
+        \node[f block] at (2.06, 2.34) {F3};
+        \filldraw[bubble style] (2.36, 2.10) rectangle (4.76, 2.58);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (3.56, 2.34) {Idle Bubble};
+        \node[b block] at (5.06, 2.34) {B3};
+        \node[b block] at (5.66, 2.34) {B2};
+        \node[b block] at (6.26, 2.34) {B1};
+        \node[b block] at (6.86, 2.34) {B0};
+
+        % --- GPU 1 (y: 1.40 to 1.88, center 1.64) ---
+        \filldraw[bubble style] (0.00, 1.40) rectangle (0.52, 1.88);
+        \node[f block] at (0.86, 1.64) {F0};
+        \node[f block] at (1.46, 1.64) {F1};
+        \node[f block] at (2.06, 1.64) {F2};
+        \node[f block] at (2.66, 1.64) {F3};
+        \filldraw[bubble style] (2.96, 1.40) rectangle (4.16, 1.88);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (3.56, 1.64) {Idle};
+        \node[b block] at (4.46, 1.64) {B3};
+        \node[b block] at (5.06, 1.64) {B2};
+        \node[b block] at (5.66, 1.64) {B1};
+        \node[b block] at (6.26, 1.64) {B0};
+        \filldraw[bubble style] (6.56, 1.40) rectangle (7.08, 1.88);
+
+        % --- GPU 2 (y: 0.70 to 1.18, center 0.94) ---
+        \filldraw[bubble style] (0.00, 0.70) rectangle (1.12, 1.18);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (0.56, 0.94) {Fill};
+        \node[f block] at (1.46, 0.94) {F0};
+        \node[f block] at (2.06, 0.94) {F1};
+        \node[f block] at (2.66, 0.94) {F2};
+        \node[f block] at (3.26, 0.94) {F3};
+        \node[b block] at (3.86, 0.94) {B3};
+        \node[b block] at (4.46, 0.94) {B2};
+        \node[b block] at (5.06, 0.94) {B1};
+        \node[b block] at (5.66, 0.94) {B0};
+        \filldraw[bubble style] (5.96, 0.70) rectangle (7.08, 1.18);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (6.52, 0.94) {Drain};
+
+        % --- GPU 3 (y: 0.00 to 0.48, center 0.24) ---
+        \filldraw[bubble style] (0.00, 0.00) rectangle (1.72, 0.48);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (0.86, 0.24) {Fill Bubble};
+        \node[f block] at (2.06, 0.24) {F0};
+        \node[f block] at (2.66, 0.24) {F1};
+        \node[f block] at (3.26, 0.24) {F2};
+        \node[f block] at (3.86, 0.24) {F3};
+        \node[b block] at (4.46, 0.24) {B3};
+        \node[b block] at (5.06, 0.24) {B2};
+        \node[b block] at (5.66, 0.24) {B1};
+        \node[b block] at (6.26, 0.24) {B0};
+        \filldraw[bubble style] (6.56, 0.00) rectangle (7.08, 0.48);
+
+        % Phase callouts below axis
+        \draw[line width=1.0pt, RedLine] (0.0, -0.95) -- (1.72, -0.95) node[midway, below=1pt, font=\bfseries\tiny, text=RedLine] {Fill Bubble ($p-1$)};
+        \draw[line width=1.0pt, RedLine] (2.40, -0.95) -- (5.00, -0.95) node[midway, below=1pt, font=\bfseries\tiny, text=RedLine] {Turnaround / Drain Bubble};
+      \end{tikzpicture}
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 Sequential processing introduces device idle time, as each device must wait for the previous device to complete its computation before beginning work. While device 1 processes the initial blocks, devices 2, 3, and 4 remain inactive. Similarly, when device 2 begins its computation, device 1 sits idle. This pattern of waiting and idle time reduces hardware utilization efficiency compared to other parallelization strategies.
