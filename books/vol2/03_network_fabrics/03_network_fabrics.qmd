@@ -1063,7 +1063,239 @@ RDMA bypasses the kernel data path. Offloading transport logic to the NIC allows
 [^fn-gpudirect-rdma-bypass]: **GPUDirect RDMA**\index{GPUDirect RDMA!zero-copy}: Introduced by NVIDIA for Kepler-class GPUs and CUDA 5.0, GPUDirect RDMA enables a direct PCIe path between GPU memory and third-party peer devices such as network interfaces [@nvidia2026gpudirectRdma]. Before GPUDirect, every gradient transfer had to stage through host memory, consuming CPU memory bandwidth that competes with data loading. Eliminating this bounce path is one reason overlapping communication with backward-pass computation is feasible at scale.
 
 ::: {#fig-gpudirect-data-path fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA data path**: The red traditional path stages an accelerator payload in registered host memory before the NIC reads it. The green GPUDirect path lets the NIC access GPU memory over PCIe, eliminating the host-memory bounce." fig-alt="Single diagram with a red path from GPU memory through registered host memory to the network interface and a green direct path between GPU memory and the network interface."}
-![](images/svg/gpudirect-data-path.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  node_box/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.8pt,
+    minimum width=5.5cm,
+    minimum height=5.6cm,
+    inner sep=0pt
+  },
+  comp_box/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    minimum width=3.2cm,
+    minimum height=0.95cm,
+    inner sep=3pt,
+    align=center
+  },
+  fabric_box/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=PurpleLine!40,
+    fill=PurpleFill!25,
+    line width=0.8pt,
+    minimum width=3.4cm,
+    minimum height=5.6cm,
+    inner sep=0pt
+  },
+  p2p_badge/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=DarkGreen,
+    fill=GreenFill,
+    line width=0.6pt,
+    text=DarkGreen,
+    font=\bfseries\tiny,
+    inner xsep=3pt,
+    inner ysep=1.5pt
+  }
+]
+
+  % =============================================================
+  % 1. SENDER NODE (Host A)
+  % =============================================================
+  \def\xs{-4.75}
+  \node[node_box] (n_send) at (\xs, 3.25) {};
+
+  % Header
+  \path[fill=SlateFill, rounded corners=5pt]
+    ($(n_send.north west)$) rectangle ($(n_send.north east) + (0, -0.45)$);
+  \path[fill=SlateFill]
+    ($(n_send.north west) + (0, -0.3)$) rectangle ($(n_send.north east) + (0, -0.45)$);
+  \draw[CardBorder, line width=0.7pt]
+    ($(n_send.north west) + (0, -0.45)$) -- ($(n_send.north east) + (0, -0.45)$);
+
+  \node[anchor=west, font=\scriptsize\bfseries, text=TextDark] at ($(n_send.north west) + (0.25, -0.225)$)
+    {Sender Node};
+  \node[anchor=east, font=\tiny\bfseries, text=TextMuted] at ($(n_send.north east) + (-0.25, -0.225)$)
+    {Host A};
+
+  % Sender Components (centered at -4.0, leaves 1.9cm left corridor for P2P DMA)
+  \def\xcs{-4.0}
+  \node[comp_box, draw=SteelBlue, fill=LightBlue] (s_gpu) at (\xcs, 4.8) {
+    \textbf{\scriptsize GPU Memory (HBM3)}\\[1pt]
+    \tiny\textcolor{NavyBlue}{Gradient payload ($350\text{ GB}$)}
+  };
+
+  \node[comp_box, draw=SlateLine!60, fill=SlateFill!40] (s_host) at (\xcs, 3.3) {
+    \textbf{\scriptsize Host CPU \& RAM}\\[1pt]
+    \tiny\textcolor{TextMuted}{Bounce buffer (TCP stack)}
+  };
+
+  \node[comp_box, draw=OrangeLine, fill=OrangeL] (s_nic) at (\xcs, 1.7) {
+    \textbf{\scriptsize Host NIC (ConnectX-7)}\\[1pt]
+    \tiny\textcolor{OrangeLine!85!black}{$400\text{ Gb/s}$ RDMA engine}
+  };
+
+
+  % =============================================================
+  % 2. CENTER: NETWORK FABRIC
+  % =============================================================
+  \def\xf{0}
+  \node[fabric_box] (n_fab) at (\xf, 3.25) {};
+
+  % Header
+  \path[fill=PurpleFill!70, rounded corners=5pt]
+    ($(n_fab.north west)$) rectangle ($(n_fab.north east) + (0, -0.45)$);
+  \path[fill=PurpleFill!70]
+    ($(n_fab.north west) + (0, -0.3)$) rectangle ($(n_fab.north east) + (0, -0.45)$);
+  \draw[PurpleLine!40, line width=0.7pt]
+    ($(n_fab.north west) + (0, -0.45)$) -- ($(n_fab.north east) + (0, -0.45)$);
+
+  \node[anchor=center, font=\scriptsize\bfseries, text=PurpleLine] at ($(n_fab.north) + (0, -0.225)$)
+    {Network Fabric};
+
+  % Fabric spec card (top)
+  \node[rectangle, rounded corners=3pt, draw=PurpleLine!50, fill=white, line width=0.6pt, inner sep=3.5pt, align=center, minimum width=3.0cm]
+    at (\xf, 4.85) {
+      \textbf{\scriptsize InfiniBand / RoCEv2}\\[1.5pt]
+      \tiny\textcolor{TextMuted}{$400\text{--}800\text{ Gb/s}$ non-blocking}\\[1pt]
+      \tiny\textcolor{TextMuted}{$1\text{--}3\text{ }\mu\text{s}$ flight time}
+    };
+
+  % Hero Badge: 700 GB Bounce Eliminated (middle)
+  \node[rectangle, rounded corners=3pt, draw=DarkRed, fill=RedFill, line width=0.8pt, inner sep=3.5pt, align=center, minimum width=3.0cm]
+    at (\xf, 3.3) {
+      \textbf{\scriptsize\textcolor{DarkRed}{700 GB ELIMINATED}}\\[1.5pt]
+      \tiny\textbf{\textcolor{DarkRed}{per training step}}\\[1pt]
+      \tiny\textcolor{TextDark}{Zero host CPU thrashing}\\[1pt]
+      \tiny\textcolor{TextMuted}{Direct PCIe peer-to-peer}
+    };
+
+
+  % =============================================================
+  % 3. RECEIVER NODE (Host B)
+  % =============================================================
+  \def\xr{4.75}
+  \node[node_box] (n_recv) at (\xr, 3.25) {};
+
+  % Header
+  \path[fill=SlateFill, rounded corners=5pt]
+    ($(n_recv.north west)$) rectangle ($(n_recv.north east) + (0, -0.45)$);
+  \path[fill=SlateFill]
+    ($(n_recv.north west) + (0, -0.3)$) rectangle ($(n_recv.north east) + (0, -0.45)$);
+  \draw[CardBorder, line width=0.7pt]
+    ($(n_recv.north west) + (0, -0.45)$) -- ($(n_recv.north east) + (0, -0.45)$);
+
+  \node[anchor=west, font=\scriptsize\bfseries, text=TextDark] at ($(n_recv.north west) + (0.25, -0.225)$)
+    {Receiver Node};
+  \node[anchor=east, font=\tiny\bfseries, text=TextMuted] at ($(n_recv.north east) + (-0.25, -0.225)$)
+    {Host B};
+
+  % Receiver Components (centered at 4.0, leaves 1.9cm right corridor for P2P DMA)
+  \def\xcr{4.0}
+  \node[comp_box, draw=SteelBlue, fill=LightBlue] (r_gpu) at (\xcr, 4.8) {
+    \textbf{\scriptsize GPU Memory (HBM3)}\\[1pt]
+    \tiny\textcolor{NavyBlue}{AllReduce accumulator}
+  };
+
+  \node[comp_box, draw=SlateLine!60, fill=SlateFill!40] (r_host) at (\xcr, 3.3) {
+    \textbf{\scriptsize Host CPU \& RAM}\\[1pt]
+    \tiny\textcolor{TextMuted}{Bounce buffer (TCP stack)}
+  };
+
+  \node[comp_box, draw=OrangeLine, fill=OrangeL] (r_nic) at (\xcr, 1.7) {
+    \textbf{\scriptsize Host NIC (ConnectX-7)}\\[1pt]
+    \tiny\textcolor{OrangeLine!85!black}{$400\text{ Gb/s}$ RDMA engine}
+  };
+
+
+  % =============================================================
+  % 4. DATA PATHS: TRADITIONAL VS GPUDIRECT
+  % =============================================================
+
+  % PATH A: Traditional (Red dashed)
+  % Sender: GPU -> Host RAM -> NIC
+  \draw[->, line width=1.1pt, DarkRed, dashed] (s_gpu.south) -- (s_host.north);
+  \draw[->, line width=1.1pt, DarkRed, dashed] (s_host.south) -- (s_nic.north);
+
+  % Upper wire lane: TCP/IP wire transfer across fabric at y = 1.95
+  \draw[->, line width=1.1pt, DarkRed, dashed]
+    ($(s_nic.east) + (0, 0.25)$) -- ($(r_nic.west) + (0, 0.25)$);
+  \node[font=\tiny\bfseries, text=DarkRed, fill=PurpleFill!25, inner sep=1.5pt] at (\xf, 2.18) {TCP/IP Wire Transport};
+
+  % Receiver: NIC -> Host RAM -> GPU
+  \draw[->, line width=1.1pt, DarkRed, dashed] (r_nic.north) -- (r_host.south);
+  \draw[->, line width=1.1pt, DarkRed, dashed] (r_host.north) -- (r_gpu.south);
+
+  % PATH B: GPUDirect RDMA (Green solid)
+  % Sender: GPU direct to NIC via internal PCIe switch (centered in left corridor at x = -6.55)
+  \draw[->, line width=1.4pt, DarkGreen]
+    (s_gpu.west) -- (-6.55, 4.8) -- node[p2p_badge, midway] {P2P DMA} (-6.55, 1.7) -- (s_nic.west);
+
+  % Lower wire lane: GPUDirect RDMA direct wire transfer across fabric at y = 1.45
+  \draw[->, line width=1.4pt, DarkGreen]
+    ($(s_nic.east) + (0, -0.25)$) -- ($(r_nic.west) + (0, -0.25)$);
+  \node[font=\tiny\bfseries, text=DarkGreen, fill=PurpleFill!25, inner sep=1.5pt] at (\xf, 1.22) {GPUDirect RDMA Wire Transfer};
+
+  % Receiver: NIC direct to GPU via internal PCIe switch (centered in right corridor at x = 6.55)
+  \draw[->, line width=1.4pt, DarkGreen]
+    (r_nic.east) -- (6.55, 1.7) -- node[p2p_badge, midway] {P2P DMA} (6.55, 4.8) -- (r_gpu.east);
+
+
+  % =============================================================
+  % 5. BOTTOM COMPARISON CARDS
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkRed!60,
+    fill=white,
+    line width=0.8pt,
+    minimum width=7.1cm,
+    minimum height=1.5cm,
+    inner sep=5pt,
+    anchor=north west
+  ] (c_trad) at (-7.5, 0.2) {
+    \begin{minipage}{6.7cm}
+      \textbf{\scriptsize\textcolor{DarkRed}{Traditional TCP/IP Staging Path}}\\[2pt]
+      \tiny
+      $\bullet$ \textbf{4 Host Copies:} GPU $\to$ Host RAM $\to$ NIC $\to$ Fabric $\to$ NIC $\to$ Host $\to$ GPU\\[1pt]
+      $\bullet$ \textbf{Bottleneck:} Saturates CPU memory bus; competes with data loading\\[1pt]
+      $\bullet$ \textbf{CPU Tax:} Interrupt overhead \& kernel context switches stall workers
+    \end{minipage}
+  };
+
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=white,
+    line width=0.8pt,
+    minimum width=7.1cm,
+    minimum height=1.5cm,
+    inner sep=5pt,
+    anchor=north east
+  ] (c_gpudirect) at (7.5, 0.2) {
+    \begin{minipage}{6.7cm}
+      \textbf{\scriptsize\textcolor{DarkGreen}{GPUDirect RDMA Zero-Copy Path}}\\[2pt]
+      \tiny
+      $\bullet$ \textbf{0 Host Copies:} NIC reads/writes GPU HBM directly over PCIe switch\\[1pt]
+      $\bullet$ \textbf{Traffic Saved:} Eliminates $700\text{ GB}$ of host memory staging per step\\[1pt]
+      $\bullet$ \textbf{Overlap Ready:} Enables true computation--communication overlap
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 ### InfiniBand and RoCE {#sec-network-fabrics-ib-roce}
