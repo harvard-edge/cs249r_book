@@ -4300,7 +4300,210 @@ Each GPU computes a partial sum, and the system pays one AllReduce to combine th
 
 ::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Matrix partitioning under tensor parallelism**: The first linear layer (for example, QKV) is split column-wise as $[W_1 | W_2]$, and the second (for example, the output projection) is split row-wise as $[W_1 ; W_2]$. This Megatron-LM arrangement passes the intermediate result directly between the two splits and requires one AllReduce after the second layer to sum partial outputs." fig-alt="Two-panel diagram of tensor parallelism. Left: Column Parallel splits weight matrix into columns, GPUs compute independently. Right: Row Parallel splits by rows, requires AllReduce to sum partial results."}
 
-![](images/svg/tensor-parallel-split.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  header node/.style={
+    font=\bfseries\normalsize,
+    text=NavyBlue,
+    align=center
+  },
+  subhead node/.style={
+    font=\scriptsize,
+    text=TextMuted,
+    align=center
+  },
+  block/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    align=center,
+    inner sep=4pt
+  },
+  gpu0 block/.style={
+    block,
+    draw=SteelBlue,
+    fill=LightBlue,
+    text=NavyBlue
+  },
+  gpu1 block/.style={
+    block,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen
+  },
+  neutral block/.style={
+    block,
+    draw=CardBorder,
+    fill=CardFill,
+    text=TextDark
+  },
+  allreduce block/.style={
+    block,
+    draw=RedLine,
+    fill=RedFill,
+    text=RedLine
+  },
+  summary card/.style={
+    block,
+    draw=OrangeLine!80,
+    fill=OrangeL,
+    text=TextDark,
+    inner sep=5pt,
+    text width=7.4cm,
+    align=center
+  }
+]
+
+  \def\lx{0}
+  \def\rx{9.4}
+  \def\midx{4.7}
+
+  % -------------------------------------------------------------
+  % LEFT PANEL: Column Parallel
+  % -------------------------------------------------------------
+  % Header & subhead
+  \node[header node] at (\lx, 7.4) {Column-Parallel Linear Layer};
+  \node[subhead node] at (\lx, 6.95) {Weight split along columns: $W = [W_1 \mid W_2]$ (e.g., QKV projection, MLP 1)};
+
+  % Input x
+  \node[neutral block, text width=6.4cm, minimum height=0.85cm] (col_x) at (\lx, 5.7) {
+    \textbf{Input Tensor $\mathbf{X}$}\\[1pt]
+    \scriptsize\textcolor{TextMuted}{Replicated / broadcast to both GPUs \ $[B, S, d_{\text{model}}]$}
+  };
+
+  % GPU 0 & GPU 1 Weights
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.35cm] (col_w1) at (\lx - 1.7, 3.8) {
+    \textbf{Weight Slice $W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{\textbf{GPU 0}}\\[2pt]
+    \tiny $[d_{\text{model}} \times d_{\text{ff}}/2]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.35cm] (col_w2) at (\lx + 1.7, 3.8) {
+    \textbf{Weight Slice $W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{\textbf{GPU 1}}\\[2pt]
+    \tiny $[d_{\text{model}} \times d_{\text{ff}}/2]$
+  };
+
+  % GPU 0 & GPU 1 Independent Local Multiplies
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.05cm] (col_y1) at (\lx - 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_1 = \mathbf{X} W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{Local output (GPU 0)}\\[1pt]
+    \tiny $[B, S, d_{\text{ff}}/2]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.05cm] (col_y2) at (\lx + 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_2 = \mathbf{X} W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{Local output (GPU 1)}\\[1pt]
+    \tiny $[B, S, d_{\text{ff}}/2]$
+  };
+
+  % Concatenated output
+  \node[neutral block, text width=6.8cm, minimum height=0.95cm] (col_out) at (\lx, -0.3) {
+    \textbf{Concatenated Output $\mathbf{Y} = [\mathbf{Y}_1 \mid \mathbf{Y}_2]$}\\[1pt]
+    \scriptsize\textcolor{TextDark}{$[\mathbf{X}W_1 \mid \mathbf{X}W_2]$ directly feeds Row-Parallel layer}\\[1pt]
+    \tiny\textcolor{TextMuted}{Size: $[B, S, d_{\text{ff}}]$ (zero inter-GPU communication required)}
+  };
+
+  % Summary card Left
+  \node[summary card] (col_summary) at (\lx, -2.15) {
+    \textbf{\footnotesize Forward:} \textcolor{DarkGreen}{\textbf{Zero communication}}\\[1pt]
+    \scriptsize(no AllReduce required in forward pass)\\[3pt]
+    \textbf{\footnotesize Backward:} AllReduce required to aggregate gradients $\nabla_{\mathbf{X}}$
+  };
+
+  % Connections Left
+  \draw[->, line width=0.9pt, SteelBlue] ($(col_x.south) + (-1.7, 0)$) -- (col_w1.north);
+  \draw[->, line width=0.9pt, DarkGreen] ($(col_x.south) + (1.7, 0)$) -- (col_w2.north);
+
+  \draw[->, line width=0.9pt, SteelBlue] (col_w1.south) -- (col_y1.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=SteelBlue] {MatMul};
+  \draw[->, line width=0.9pt, DarkGreen] (col_w2.south) -- (col_y2.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=DarkGreen] {MatMul};
+
+  \draw[->, line width=0.9pt, SteelBlue] (col_y1.south) -- (col_y1.south |- col_out.north);
+  \draw[->, line width=0.9pt, DarkGreen] (col_y2.south) -- (col_y2.south |- col_out.north);
+
+  % -------------------------------------------------------------
+  % DIVIDER
+  % -------------------------------------------------------------
+  \draw[line width=0.8pt, CardBorder, dashed] (\midx, 7.6) -- (\midx, -3.1);
+
+  % -------------------------------------------------------------
+  % RIGHT PANEL: Row Parallel
+  % -------------------------------------------------------------
+  % Header & subhead
+  \node[header node] at (\rx, 7.4) {Row-Parallel Linear Layer};
+  \node[subhead node] at (\rx, 6.95) {Weight split along rows: $W = [W_1 ; W_2]$ (e.g., Attention Out, MLP 2)};
+
+  % Sharded Input
+  \node[gpu0 block, minimum width=2.8cm, minimum height=0.85cm] (row_x1) at (\rx - 1.7, 5.7) {
+    \textbf{Input Shard $\mathbf{X}_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{\textbf{GPU 0}} \tiny$[B, S, d_{\text{ff}}/2]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=0.85cm] (row_x2) at (\rx + 1.7, 5.7) {
+    \textbf{Input Shard $\mathbf{X}_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{\textbf{GPU 1}} \tiny$[B, S, d_{\text{ff}}/2]$
+  };
+
+  % GPU 0 & GPU 1 Weights
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.35cm] (row_w1) at (\rx - 1.7, 3.8) {
+    \textbf{Weight Slice $W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{\textbf{GPU 0}}\\[2pt]
+    \tiny $[d_{\text{ff}}/2 \times d_{\text{model}}]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.35cm] (row_w2) at (\rx + 1.7, 3.8) {
+    \textbf{Weight Slice $W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{\textbf{GPU 1}}\\[2pt]
+    \tiny $[d_{\text{ff}}/2 \times d_{\text{model}}]$
+  };
+
+  % GPU 0 & GPU 1 Partial Sum Multiplies
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.05cm] (row_y1) at (\rx - 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_1 = \mathbf{X}_1 W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{Partial sum (GPU 0)}\\[1pt]
+    \tiny $[B, S, d_{\text{model}}]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.05cm] (row_y2) at (\rx + 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_2 = \mathbf{X}_2 W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{Partial sum (GPU 1)}\\[1pt]
+    \tiny $[B, S, d_{\text{model}}]$
+  };
+
+  % AllReduce Reduction Node
+  \node[allreduce block, text width=6.8cm, minimum height=0.85cm] (row_ar) at (\rx, 0.45) {
+    \textbf{AllReduce (Sum):} $\mathbf{Y} = \mathbf{X}_1 W_1 + \mathbf{X}_2 W_2$\\[1pt]
+    \scriptsize\textcolor{RedLine}{Synchronizes partial sums across all tensor ranks}
+  };
+
+  % Full Output
+  \node[neutral block, text width=6.8cm, minimum height=0.75cm] (row_out) at (\rx, -0.65) {
+    \textbf{Full Output $\mathbf{Y} = \mathbf{X}W$}\\[1pt]
+    \scriptsize\textcolor{TextMuted}{Replicated identically across all GPUs \ $[B, S, d_{\text{model}}]$}
+  };
+
+  % Summary card Right
+  \node[summary card] (row_summary) at (\rx, -2.15) {
+    \textbf{\footnotesize Forward:} \textcolor{RedLine}{\textbf{One AllReduce collective}}\\[1pt]
+    \scriptsize(sums partial products across tensor ranks)\\[3pt]
+    \textbf{\footnotesize Backward:} Zero extra communication ($\nabla_{W_i} = \mathbf{X}_i^T \nabla_{\mathbf{Y}}$)
+  };
+
+  % Connections Right
+  \draw[->, line width=0.9pt, SteelBlue] (row_x1.south) -- (row_w1.north);
+  \draw[->, line width=0.9pt, DarkGreen] (row_x2.south) -- (row_w2.north);
+
+  \draw[->, line width=0.9pt, SteelBlue] (row_w1.south) -- (row_y1.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=SteelBlue] {MatMul};
+  \draw[->, line width=0.9pt, DarkGreen] (row_w2.south) -- (row_y2.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=DarkGreen] {MatMul};
+
+  \draw[->, line width=0.9pt, SteelBlue] (row_y1.south) -- (row_y1.south |- row_ar.north);
+  \draw[->, line width=0.9pt, DarkGreen] (row_y2.south) -- (row_y2.south |- row_ar.north);
+
+  \draw[->, line width=0.9pt, RedLine] (row_ar.south) -- (row_out.north);
+
+\end{tikzpicture}
+```
 
 :::
 
