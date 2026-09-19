@@ -135,10 +135,173 @@ At large scale (hundreds of billions of parameters across thousands of GPUs), gr
 
 Physical constraints govern data movement before algorithms are designed. @Sec-network-fabrics-wire-link establishes the wire-level physics behind these algorithms: the speed of light sets a latency floor[^fn-speed-of-light] (roughly 5 $\mu\text{s}$ per kilometer in fiber), the bandwidth-distance product limits how far a fast link can reach before it needs optics (PAM4 signaling and copper-vs.-optics reach are developed in @sec-network-fabrics-pam4), and kernel-bypass transports such as remote direct memory access (RDMA) and GPUDirect RDMA strip the per-message software tax down to a few microseconds (@sec-network-fabrics-rdma). Collective communication adds the energy cost of moving a bit, which the algorithms must respect as firmly as latency and bandwidth.
 
-Moving data costs energy that scales with distance, as @fig-data-movement-hierarchy illustrates. Concrete reference values are: local SRAM\index{SRAM}\index{Static Random-Access Memory|see{SRAM}} at roughly 0.5 pJ/bit, NVLink\index{NVLink} (on-package PCB) at the tens of pJ/bit, and inter-node InfiniBand at the hundreds-to-thousand-plus pJ/bit. The figure uses the higher published estimates that include link-, switch-, and transceiver-side power; chapter prose elsewhere uses the lower bound of each range. Both views agree on the central point: the energy cost climbs by two-to-three orders of magnitude between SRAM and inter-node fabric.
+Moving data costs energy that scales exponentially with distance. @Fig-data-movement-hierarchy illustrates this data-movement energy hierarchy across four physical tiers: local on-chip SRAM ($\sim$0.5\,pJ/bit), on-package high-bandwidth memory (HBM)\index{HBM}\index{High-Bandwidth Memory|see{HBM}} ($\sim$20\,pJ/bit), intra-node NVLink ($\sim$100\,pJ/bit), and optical inter-node InfiniBand ($\sim$1{,}000\,pJ/bit). The figure plots higher-bound published estimates that include link-, switch-, and transceiver-side power; chapter prose elsewhere uses the lower bound of each range for back-of-the-envelope models. Both views agree on the central thermodynamic reality: crossing from on-package SRAM to a 50-meter optical data center fabric incurs a 2{,}000$\times$ energy penalty, making physical data locality the primary driver of sustainable distributed ML system design.
 
-::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The data-movement energy hierarchy**: The energy cost of moving a single bit climbs by orders of magnitude across the system hierarchy — from SRAM through HBM to intra-node NVLink to inter-node InfiniBand. The figure plots higher-bound published estimates (NVLink in the tens of pJ/bit, InfiniBand near 1{,}000 pJ/bit) that include switch and transceiver overheads. The chapter prose elsewhere uses the lower-bound estimates for back-of-the-envelope calculations. Either way, the gradient makes data locality the primary driver of sustainable and efficient distributed ML system design." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM through HBM, NVLink, and InfiniBand to remote data center nodes."}
-![](images/svg/data-movement-hierarchy.svg)
+::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The data-movement energy hierarchy**: The energy cost of moving a single bit climbs by orders of magnitude across the system hierarchy: from local SRAM (0.5\\,pJ/bit) through HBM (20\\,pJ/bit, $40\\times$) and intra-node NVLink (100\\,pJ/bit, $200\\times$) to inter-node InfiniBand (1{,}000\\,pJ/bit, $2{,}000\\times$). Higher-bound published estimates include link, switch, and laser transceiver overheads. This steep thermodynamic gradient makes data locality the primary driver of sustainable distributed ML system architecture." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM through HBM, NVLink, and InfiniBand to remote data center nodes. Multiplier badges on the right highlight the 1x baseline, 40x, 200x, and 2,000x energy cliff."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\small\sffamily,
+  >=Stealth,
+  tier label/.style={
+    font=\footnotesize,
+    text=TextDark,
+    align=right,
+    text width=2.5cm,
+    anchor=east
+  },
+  energy box/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.85pt,
+    align=center,
+    inner sep=3.5pt
+  },
+  context card/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.7pt,
+    align=left,
+    inner sep=4.5pt,
+    anchor=west
+  },
+  multiplier badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.85pt,
+    align=center,
+    inner sep=3.5pt,
+    minimum width=1.7cm,
+    minimum height=1.05cm
+  },
+  law card/.style={
+    rectangle,
+    rounded corners=4pt,
+    draw=SteelBlue!40,
+    fill=LightBlue!40,
+    line width=0.7pt,
+    inner sep=6.5pt,
+    align=left,
+    text width=14.4cm
+  }
+]
+
+% Tier 1: SRAM (y = 6.4)
+\node[tier label] (lbl1) at (2.5, 6.4) {
+  \textbf{\normalsize SRAM}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{On-Chip Cache}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$0--1\,mm die}
+};
+
+\node[energy box, draw=DarkGreen, fill=GreenFill, minimum width=1.4cm, minimum height=1.05cm] (eng1) at (3.4, 6.4) {
+  \textbf{\footnotesize$\sim$0.5\,pJ}\\[1pt]
+  \tiny\textcolor{DarkGreen}{per bit}
+};
+
+\node[context card, text width=7.7cm, minimum height=1.05cm] (ctx1) at (4.3, 6.4) {
+  \textbf{\footnotesize Tiling \& Kernel Fusion}\\[1.5pt]
+  \scriptsize Maximized via FlashAttention tiling; keeps intermediate activations inside SRAM.
+};
+
+\node[multiplier badge, draw=DarkGreen, fill=GreenFill, text=DarkGreen] (mul1) at (13.5, 6.4) {
+  \textbf{\small 1$\times$}\\[1pt]
+  \tiny Baseline
+};
+
+% Tier 2: DRAM / HBM (y = 4.9)
+\node[tier label] (lbl2) at (2.5, 4.9) {
+  \textbf{\normalsize DRAM / HBM}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{On-Package Stack}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$1--10\,mm 2.5D}
+};
+
+\node[energy box, draw=SteelBlue, fill=LightBlue, minimum width=2.7cm, minimum height=1.05cm] (eng2) at (4.05, 4.9) {
+  \textbf{\footnotesize$\sim$20\,pJ / bit}\\[1pt]
+  \tiny\textcolor{SteelBlue}{HBM3e PHY read}
+};
+
+\node[context card, text width=6.4cm, minimum height=1.05cm] (ctx2) at (5.6, 4.9) {
+  \textbf{\footnotesize Memory Bandwidth Wall}\\[1.5pt]
+  \scriptsize Requires memory-bound operator recomputation to avoid HBM round-trips.
+};
+
+\node[multiplier badge, draw=SteelBlue, fill=LightBlue, text=SteelBlue] (mul2) at (13.5, 4.9) {
+  \textbf{\small 40$\times$}\\[1pt]
+  \tiny vs.\ SRAM
+};
+
+% Tier 3: NVLink 4.0 (y = 3.4)
+\node[tier label] (lbl3) at (2.5, 3.4) {
+  \textbf{\normalsize NVLink 4.0}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{Intra-Node Mesh}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$0.5--1\,m PCB}
+};
+
+\node[energy box, draw=OrangeLine, fill=OrangeL, minimum width=5.2cm, minimum height=1.05cm] (eng3) at (5.3, 3.4) {
+  \textbf{\footnotesize$\sim$100\,pJ / bit}\\[1pt]
+  \tiny\textcolor{OrangeLine}{NVSwitch copper trace}
+};
+
+\node[context card, text width=3.9cm, minimum height=1.05cm] (ctx3) at (8.1, 3.4) {
+  \textbf{\footnotesize Intra-Node Locality}\\[1.5pt]
+  \scriptsize Enables Tensor Parallelism (TP).
+};
+
+\node[multiplier badge, draw=OrangeLine, fill=OrangeL, text=OrangeLine] (mul3) at (13.5, 3.4) {
+  \textbf{\small 200$\times$}\\[1pt]
+  \tiny vs.\ SRAM
+};
+
+% Tier 4: InfiniBand NDR (y = 1.9)
+\node[tier label] (lbl4) at (2.5, 1.9) {
+  \textbf{\normalsize InfiniBand NDR}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{Inter-Node Fabric}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$10--100\,m optics}
+};
+
+\node[energy box, draw=VioletLine, fill=VioletL, minimum width=9.7cm, minimum height=1.05cm] (eng4) at (7.55, 1.9) {
+  \textbf{\footnotesize$\sim$1{,}000\,pJ / bit (Laser Transceiver + Serialization + Optical Fiber)}\\[1.5pt]
+  \scriptsize\textcolor{VioletLine}{Dominates cluster power budget during all-to-all collectives}
+};
+
+\node[multiplier badge, draw=RedLine, fill=RedFill, text=RedLine] (mul4) at (13.5, 1.9) {
+  \textbf{\small 2{,}000$\times$}\\[1pt]
+  \tiny\textbf{\textcolor{RedLine}{Energy Cliff}}
+};
+
+% Log-scale axis bar (y = 1.0)
+\draw[line width=0.8pt, CardBorder!90] (2.7, 1.0) -- (12.4, 1.0);
+
+\draw[line width=0.8pt, CardBorder!90] (4.1, 0.9) -- (4.1, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (4.1, 0.9) {0.5\,pJ};
+
+\draw[line width=0.8pt, CardBorder!90] (5.4, 0.9) -- (5.4, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (5.4, 0.9) {20\,pJ};
+
+\draw[line width=0.8pt, CardBorder!90] (7.9, 0.9) -- (7.9, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (7.9, 0.9) {100\,pJ};
+
+\draw[line width=0.8pt, CardBorder!90] (12.4, 0.9) -- (12.4, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (12.4, 0.9) {1{,}000\,pJ};
+
+\node[below=15pt, font=\footnotesize\bfseries, text=TextDark] at (7.55, 1.0) {
+  Energy Cost per Bit Transferred (pJ / bit, Log Scale)
+};
+
+% Bottom Thermodynamic Law Card (y = -0.95)
+\node[law card] (law) at (7.25, -0.95) {
+  \centering\textbf{\footnotesize Thermodynamic Law of Distributed ML Systems}\\[3pt]
+  \raggedright\scriptsize
+  \begin{tabular}{@{}ll@{}}
+    \textbf{The Distance Penalty:} & Moving a bit across a 50-meter optical datacenter fabric costs 2,000$\times$ more energy than inside SRAM. \\[2pt]
+    \textbf{Algorithmic Defense:} & Hierarchical AllReduce and FP8/FP4 quantization exist primarily to avoid paying this 2,000$\times$ optical tax. \\
+  \end{tabular}
+};
+
+\end{tikzpicture}
+```
 :::
 
 At the exascale (tens of thousands of GPUs), the power budget for communication rivals the power budget for computation itself. A 10,000-GPU cluster exchanging 1 GB of gradients per step at 30 pJ/bit consumes approximately 4.8 kJ per AllReduce (accounting for the factor of 2 in data movement), a nontrivial fraction of the total per-step energy budget.
@@ -3133,7 +3296,7 @@ Writing a highly optimized, topology-aware, hierarchical Ring AllReduce from scr
 
 ### NCCL: Why it is central to NVIDIA GPU workloads {#sec-communication-nccl}
 
-NVIDIA Collective Communications Library (NCCL)[^fn-nccl-gpu-collectives] is central to many NVIDIA multi-GPU training deployments because it turns collective algorithms (covered in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 and @sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214) into GPU-resident data movement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. Its adoption stems from three GPU-specific optimizations that MPI and Gloo cannot replicate without hardware vendor support. Kernel fusion folds the reduction operator (sum, average) directly into the memory-copy kernel, so instead of copying data to a buffer, reducing, then copying the results back, NCCL reduces during the transfer and eliminates the intermediate memory traffic that would otherwise cap high-bandwidth memory (HBM)\index{HBM}\index{High Bandwidth Memory|see{HBM}} bandwidth utilization. Channel pipelining\index{Channel Pipelining} opens multiple parallel communication channels to saturate every network interface at once, so a DGX node with 8 NICs reaches 8$\times$ the bandwidth of a single-channel implementation. GPUDirect RDMA lets the network card read directly from GPU memory over PCIe, bypassing the CPU entirely; without it, data would traverse GPU → CPU memory → NIC → network, adding microseconds of latency and consuming CPU cycles. Together these explain why NCCL is usually the first backend to benchmark for NVIDIA GPU collectives before falling back to generic MPI implementations.
+NVIDIA Collective Communications Library (NCCL)[^fn-nccl-gpu-collectives] is central to many NVIDIA multi-GPU training deployments because it turns collective algorithms (covered in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 and @sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214) into GPU-resident data movement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. Its adoption stems from three GPU-specific optimizations that MPI and Gloo cannot replicate without hardware vendor support. Kernel fusion folds the reduction operator (sum, average) directly into the memory-copy kernel, so instead of copying data to a buffer, reducing, then copying the results back, NCCL reduces during the transfer and eliminates the intermediate memory traffic that would otherwise cap HBM\index{HBM} bandwidth utilization. Channel pipelining\index{Channel Pipelining} opens multiple parallel communication channels to saturate every network interface at once, so a DGX node with 8 NICs reaches 8$\times$ the bandwidth of a single-channel implementation. GPUDirect RDMA lets the network card read directly from GPU memory over PCIe, bypassing the CPU entirely; without it, data would traverse GPU → CPU memory → NIC → network, adding microseconds of latency and consuming CPU cycles. Together these explain why NCCL is usually the first backend to benchmark for NVIDIA GPU collectives before falling back to generic MPI implementations.
 
 Beyond raw performance, NCCL's topology auto-discovery is a critical differentiator. The topology-detection phase from @sec-communication-collective-operations-collective-operations-topology-detection-selection-2dc7 is, in NCCL, driven by NVIDIA Management Library queries and PCI bus enumeration of NVLink connectivity and NIC placement. The library-specific payoff is hardware-aware algorithm selection: on a DGX H100 with NVSwitch, NCCL recognizes that all 8 GPUs are fully connected and selects NVSwitch-based algorithms that differ from the ring algorithms used on systems with point-to-point NVLink connections.
 
