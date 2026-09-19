@@ -671,7 +671,172 @@ class LogPOverlap:
 :::
 
 ::: {#fig-comm-compute-overlap fig-env="figure" fig-pos="htb" fig-cap="**Communication-computation overlap**: By pipelining collective operations with the backward pass, systems can hide network latency behind arithmetic execution. Overlap is successful only when the nonoverlappable overhead ($o$) is minimized, allowing the bulk transfer term to proceed while the GPU computes the next layer's gradients." fig-alt="Timeline diagram showing overlapping Compute and Communication bars. Computation for layer N overlaps with Communication for layer N-1."}
-![](images/svg/comm-compute-overlap.svg)
+
+```{.tikz}
+\scalebox{0.8}{%
+\begin{tikzpicture}[line join=round, line cap=round, font=\small\sffamily]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfdeclarelayer{foreground}
+  \pgfsetlayers{background,main,foreground}
+
+  % Styles
+  \tikzset{
+    stream_label/.style={font=\small\bfseries\sffamily, align=right, text=TextBlack},
+    compute_box/.style={
+      draw=OrangeLine, fill=OrangeFill!75, line width=0.8pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    comm_box/.style={
+      draw=VioletLine, fill=VioletFill!85, line width=0.8pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    stall_compute/.style={
+      draw=RedLine, fill=RedFill!75, line width=0.9pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    stall_comm/.style={
+      draw=RedLine, fill=RedFill!75, line width=0.9pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    opt_box/.style={
+      draw=BlueLine, fill=BlueFill!75, line width=0.8pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.2cm, anchor=west, align=center, font=\small\sffamily
+    },
+    hook_arr/.style={
+      ->, >=Latex, line width=0.9pt, OrangeLine!90!black
+    },
+    axis_arr/.style={
+      ->, >=Latex, line width=0.75pt, GrayLine
+    }
+  }
+
+  % Stream Header Labels (Left side)
+  \node[stream_label, anchor=east] at (-0.4, 2.0) {Compute Stream\\[-1pt]\footnotesize\color{OrangeLine!90!black}(Tensor Cores / Default)};
+  \node[stream_label, anchor=east] at (-0.4, 0.0) {Network Stream\\[-1pt]\footnotesize\color{VioletLine}(NIC / NCCL Comms)};
+
+  % Compute Stream Blocks (y = 2.0, height = 1.2, spans y from 1.4 to 2.6)
+  \node[compute_box] (C_L4) at (0.0, 2.0) {\textbf{Backward $L_4$}\\[1pt]\footnotesize Compute $\nabla W_4$};
+  \node[compute_box] (C_L3) at (2.4, 2.0) {\textbf{Backward $L_3$}\\[1pt]\footnotesize Compute $\nabla W_3$};
+  \node[compute_box] (C_L2) at (4.8, 2.0) {\textbf{Backward $L_2$}\\[1pt]\footnotesize Compute $\nabla W_2$};
+  \node[compute_box] (C_L1) at (7.2, 2.0) {\textbf{Backward $L_1$}\\[1pt]\footnotesize Compute $\nabla W_1$};
+  \node[stall_compute] (C_STALL) at (9.6, 2.0) {\textbf{Compute Stall}\\[1pt]\footnotesize\color{RedLine!90!black}Wait for $\nabla W_1$};
+  \node[opt_box] (C_OPT) at (12.0, 2.0) {\textbf{Optimizer}\\[1pt]\footnotesize Weight Update};
+
+  % Communication Stream Blocks (y = 0.0, height = 1.2, spans y from -0.6 to 0.6)
+  % Idle / warmup slot on comms stream
+  \draw[draw=black!25, fill=black!3, dashed, rounded corners=2.5pt, line width=0.6pt]
+    (0.0, -0.6) rectangle (2.4, 0.6)
+    node[pos=0.5, font=\footnotesize\color{black!40}\sffamily\itshape] {Comms Idle};
+
+  \node[comm_box] (M_L4) at (2.4, 0.0) {\textbf{AllReduce $L_4$}\\[1pt]\footnotesize\color{GreenLine!90!black}\textbf{100\% Hidden}};
+  \node[comm_box] (M_L3) at (4.8, 0.0) {\textbf{AllReduce $L_3$}\\[1pt]\footnotesize\color{GreenLine!90!black}\textbf{100\% Hidden}};
+  \node[comm_box] (M_L2) at (7.2, 0.0) {\textbf{AllReduce $L_2$}\\[1pt]\footnotesize\color{GreenLine!90!black}\textbf{100\% Hidden}};
+  \node[stall_comm] (M_L1) at (9.6, 0.0) {\textbf{AllReduce $L_1$}\\[1pt]\footnotesize\color{RedLine!90!black}\textbf{Exposed Latency}};
+
+  % Idle on comms stream during optimizer step
+  \draw[draw=black!25, fill=black!3, dashed, rounded corners=2.5pt, line width=0.6pt]
+    (12.0, -0.6) rectangle (14.2, 0.6)
+    node[pos=0.5, font=\footnotesize\color{black!40}\sffamily\itshape] {Comms Idle};
+
+  % Vertical Droplines & Hook Arrows
+  % L4 -> M_L4 hook at x = 2.4
+  \fill[OrangeLine] (2.4, 1.4) circle (2pt);
+  \draw[hook_arr] (2.4, 1.4) -- (2.4, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{OrangeLine!90!black}] at (2.4, 1.0) {hook};
+
+  % L3 -> M_L3 hook at x = 4.8
+  \fill[OrangeLine] (4.8, 1.4) circle (2pt);
+  \draw[hook_arr] (4.8, 1.4) -- (4.8, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{OrangeLine!90!black}] at (4.8, 1.0) {hook};
+
+  % L2 -> M_L2 hook at x = 7.2
+  \fill[OrangeLine] (7.2, 1.4) circle (2pt);
+  \draw[hook_arr] (7.2, 1.4) -- (7.2, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{OrangeLine!90!black}] at (7.2, 1.0) {hook};
+
+  % L1 -> M_L1 trigger at x = 9.6 (Critical Path!)
+  \fill[RedLine] (9.6, 1.4) circle (2pt);
+  \draw[->, >=Latex, line width=1.1pt, RedLine] (9.6, 1.4) -- (9.6, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{RedLine}] at (9.6, 1.0) {tail hook};
+
+  % M_L1 -> Optimizer Step release at x = 12.0 (Sync Barrier!)
+  \fill[BlueLine] (12.0, 0.6) circle (2pt);
+  \draw[->, >=Latex, line width=1.1pt, BlueLine] (12.0, 0.6) -- (12.0, 1.4);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{BlueLine}] at (12.0, 1.0) {sync release};
+
+  % Background Shaded Regions
+  \begin{pgfonlayer}{background}
+    % Overlap Shading (x: 2.35 to 9.55, y: -0.85 to 2.95)
+    \draw[draw=GreenLine, fill=GreenFill!25, line width=0.85pt, dashed, rounded corners=5pt]
+      (2.35, -0.85) rectangle (9.55, 2.95);
+
+    % Critical Tail Barrier Shading (x: 9.65 to 11.95, y: -0.85 to 2.95)
+    \draw[draw=RedLine, fill=RedFill!25, line width=0.85pt, dashed, rounded corners=5pt]
+      (9.65, -0.85) rectangle (11.95, 2.95);
+  \end{pgfonlayer}
+
+  % Region Title Badges above
+  \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{GreenLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
+    at (5.95, 3.05) {Pipelined Overlap Region ($L_{\text{lat}}$ Hidden)};
+
+  \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{RedLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
+    at (10.8, 3.05) {Critical Tail Barrier (Exposed)};
+
+  % Time Axis below (y = -1.4)
+  \draw[axis_arr] (-0.4, -1.4) -- (14.6, -1.4) node[right, font=\footnotesize\sffamily\bfseries] {Time ($t$)};
+
+  % Milestone Ticks & Droplines
+  \foreach \x/\txt in {
+    0.0/{$t_0$},
+    2.4/{$L_4$ done},
+    4.8/{$L_3$ done},
+    7.2/{$L_2$ done},
+    9.6/{Compute ends},
+    12.0/{AllReduce ends},
+    14.2/{Step Boundary}
+  } {
+    \draw[GrayLine, line width=0.6pt] (\x, -1.3) -- (\x, -1.5);
+    \node[below, font=\scriptsize\sffamily, text=TextBlack] at (\x, -1.5) {\txt};
+  }
+
+  % Subtle background vertical guide lines
+  \begin{pgfonlayer}{background}
+    \draw[GrayLine!35, dotted, line width=0.5pt] (0.0, 2.9) -- (0.0, -1.3);
+    \draw[GrayLine!35, dotted, line width=0.5pt] (2.4, 2.9) -- (2.4, -1.3);
+    \draw[GrayLine!35, dotted, line width=0.5pt] (4.8, 2.9) -- (4.8, -1.3);
+    \draw[GrayLine!35, dotted, line width=0.5pt] (7.2, 2.9) -- (7.2, -1.3);
+    \draw[RedLine!40, dotted, line width=0.6pt] (9.6, 2.9) -- (9.6, -1.3);
+    \draw[RedLine!40, dotted, line width=0.6pt] (12.0, 2.9) -- (12.0, -1.3);
+    \draw[BlueLine!40, dotted, line width=0.6pt] (14.2, 2.9) -- (14.2, -1.3);
+  \end{pgfonlayer}
+
+  % Tight Architectural Legend (Integrated Table Structure)
+  \node[
+    draw=black!15, fill=black!2, line width=0.5pt, rounded corners=3pt,
+    anchor=north, minimum width=14.8cm, inner sep=6pt
+  ] at (7.0, -2.3) {
+    \begin{minipage}{14.5cm}\footnotesize\sffamily
+      \begin{tabular}{@{}p{7.3cm}@{\hspace{0.3cm}}p{6.9cm}@{}}
+        \textbf{Execution Streams \& Mechanics} & \textbf{Systems Timing Invariants} \\[2pt]
+        \tikz[baseline=-2pt]\fill[OrangeFill!75,draw=OrangeLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
+        \textbf{Compute:} Reverse autograd ($L_4 \to L_1$), non-blocking &
+        $\bullet$ \textbf{Hidden Latency:} $\sum_{i=2}^4 \text{Time}(L_i)$ masked by compute \\
+        \tikz[baseline=-2pt]\fill[VioletFill!85,draw=VioletLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
+        \textbf{Network:} Concurrent AllReduce transfers via NCCL &
+        $\bullet$ \textbf{Exposed Barrier:} $\text{Time}(L_1)$ sets sync stall floor \\
+        \tikz[baseline=-2pt]\fill[BlueFill!75,draw=BlueLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
+        \textbf{Optimizer:} Weights updated after global barrier &
+        $\bullet$ \textbf{Step Time:} $T_{\text{step}} = T_{\text{backward}} + T_{\text{tail}} + T_{\text{optimizer}}$
+      \end{tabular}
+    \end{minipage}
+  };
+
+\end{tikzpicture}%
+}
+```
+
 :::
 
 The choice between models depends on the analysis context. The $\alpha$-$\beta$ model is the right tool for back-of-envelope calculations, algorithm selection (Ring vs. Tree), and blocking communication whose completion lies on the dependency path. Its strength is simplicity, since the two parameters can be estimated from latency and bandwidth measurements. Its weakness is the assumption that the processor is idle during communication, which makes it overly pessimistic when overlap is possible. The LogP model earns its extra parameters when the analysis turns to **Pipelined Execution**\index{Pipelined Execution}, compute-communication overlap, or diagnosing why a theoretically fast algorithm underperforms. Its distinction between network latency $L_{\text{lat}}$ and processor overhead $o$ determines whether a given overlap strategy can hide communication. The profiling method in @sec-performance-engineering-profiling measures those terms and attributes the residual; this chapter uses them to choose the communication schedule.
@@ -1095,7 +1260,163 @@ Across the $2(N-1)$ send/receive rounds each rank moves $M/N$ bytes per round, f
 
 ::: {#fig-ring-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce data flow**: Nodes arranged in a logical ring exchange chunks in two phases: a Scatter-Reduce phase (each node accumulates one chunk's partial sum) followed by an AllGather phase (complete sums circulate to all nodes). The figure shows the ring laid out horizontally with a wrap-around bus closing the loop; every link is used simultaneously, achieving bandwidth optimality." fig-alt="Horizontal linear layout of N GPUs forming a logical ring, with an orthogonal wrap-around bus closing the loop. Arrows show data flow along the ring; color-coded chunks at each GPU represent partial gradient sums."}
 
-![](images/svg/ring-allreduce.svg)
+```{.tikz}
+\scalebox{0.85}{%
+\begin{tikzpicture}[line join=round, line cap=round, font=\small\sffamily]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfdeclarelayer{foreground}
+  \pgfsetlayers{background,main,foreground}
+
+  % Styles
+  \tikzset{
+    gpu_chassis/.style={
+      draw=BlueLine, fill=white, line width=0.85pt, rounded corners=3pt,
+      minimum width=2.7cm, minimum height=1.5cm
+    },
+    shard_idle/.style={
+      draw=black!25, fill=black!3, line width=0.5pt, rounded corners=1.5pt,
+      minimum width=0.52cm, minimum height=0.65cm, font=\scriptsize\sffamily, text=black!50
+    },
+    shard_reduced/.style={
+      draw=GreenLine, fill=GreenFill!85, line width=0.8pt, rounded corners=1.5pt,
+      minimum width=0.52cm, minimum height=0.65cm, font=\scriptsize\bfseries\sffamily, text=GreenLine!90!black
+    },
+    ring_arr_blue/.style={
+      ->, >=Latex, line width=1.2pt, BlueLine
+    },
+    ring_arr_green/.style={
+      ->, >=Latex, line width=1.2pt, GreenLine
+    }
+  }
+
+  % ==========================================
+  % PHASE 1: SCATTER-REDUCE
+  % ==========================================
+  \begin{scope}[shift={(0, 5.0)}]
+    % Section Header Band
+    \node[anchor=west, font=\normalsize\bfseries\sffamily, text=TextBlack] at (-0.2, 1.9)
+      {Phase 1: Scatter-Reduce \mdseries\footnotesize($N-1 = 3$ Transmission Rounds)};
+    \node[anchor=east, font=\scriptsize\bfseries\sffamily, text=BlueLine] at (14.2, 1.9)
+      {Each Rank Obtains $1/N$ Fully Reduced Shard};
+
+    % GPUs (0 to 3)
+    \foreach \idx/\rank/\reduced in {
+      0/{GPU 0 (Rank 0)}/1,
+      1/{GPU 1 (Rank 1)}/2,
+      2/{GPU 2 (Rank 2)}/3,
+      3/{GPU 3 (Rank 3)}/4
+    } {
+      \pgfmathsetmacro{\xpos}{\idx * 3.6 + 1.4}
+      % Chassis
+      \node[gpu_chassis] (G1_\idx) at (\xpos, 0.8) {};
+      \node[font=\footnotesize\bfseries\sffamily, text=TextBlack] at (\xpos, 1.28) {\rank};
+
+      % 4 Shard Blocks inside GPU
+      \foreach \sidx/\slabel in {1/A, 2/B, 3/C, 4/D} {
+        \pgfmathsetmacro{\sxpos}{\xpos - 0.84 + (\sidx - 1) * 0.56}
+        \ifnum\sidx=\reduced
+          \node[shard_reduced] at (\sxpos, 0.55) {$\slabel^*$};
+        \else
+          \node[shard_idle] at (\sxpos, 0.55) {$\slabel$};
+        \fi
+      }
+    }
+
+    % Forward Ring Links
+    \draw[ring_arr_blue] (G1_0.east) -- (G1_1.west);
+    \draw[ring_arr_blue] (G1_1.east) -- (G1_2.west);
+    \draw[ring_arr_blue] (G1_2.east) -- (G1_3.west);
+
+    % Wrap-Around Ring Link (3 -> 0)
+    \draw[ring_arr_blue, rounded corners=4pt]
+      (G1_3.south) -- ++(0, -0.45) -| (G1_0.south);
+    \node[below=1pt, font=\scriptsize\bfseries\sffamily, text=BlueLine] at (6.8, -0.45)
+      {Unidirectional Ring Wrap-Around Link (Rank 3 $\to$ Rank 0)};
+
+    % Phase 1 Completion Status Callout
+    \node[anchor=north, font=\scriptsize\sffamily, text=GreenLine!90!black] at (6.8, -0.78)
+      {\textbf{Scatter-Reduce Result:} Rank $i$ holds global sum $\sum x^{(i)}$ ($A^*$ on G0, $B^*$ on G1, $C^*$ on G2, $D^*$ on G3)};
+
+    % Background Container
+    \begin{pgfonlayer}{background}
+      \draw[draw=black!15, fill=black!1, rounded corners=4pt, line width=0.5pt]
+        (-0.4, -1.15) rectangle (14.4, 2.25);
+    \end{pgfonlayer}
+  \end{scope}
+
+  % ==========================================
+  % PHASE 2: ALLGATHER
+  % ==========================================
+  \begin{scope}[shift={(0, 1.2)}]
+    % Section Header Band
+    \node[anchor=west, font=\normalsize\bfseries\sffamily, text=TextBlack] at (-0.2, 1.9)
+      {Phase 2: AllGather \mdseries\footnotesize($N-1 = 3$ Transmission Rounds)};
+    \node[anchor=east, font=\scriptsize\bfseries\sffamily, text=GreenLine] at (14.2, 1.9)
+      {All Ranks Circulate Shards to Reach Full Vector};
+
+    % GPUs (0 to 3)
+    \foreach \idx/\rank in {
+      0/{GPU 0 (Rank 0)},
+      1/{GPU 1 (Rank 1)},
+      2/{GPU 2 (Rank 2)},
+      3/{GPU 3 (Rank 3)}
+    } {
+      \pgfmathsetmacro{\xpos}{\idx * 3.6 + 1.4}
+      \node[gpu_chassis, draw=GreenLine] (G2_\idx) at (\xpos, 0.8) {};
+      \node[font=\footnotesize\bfseries\sffamily, text=TextBlack] at (\xpos, 1.28) {\rank};
+
+      % All 4 Shards are now fully reduced!
+      \foreach \sidx/\slabel in {1/A, 2/B, 3/C, 4/D} {
+        \pgfmathsetmacro{\sxpos}{\xpos - 0.84 + (\sidx - 1) * 0.56}
+        \node[shard_reduced] at (\sxpos, 0.55) {$\slabel^*$};
+      }
+    }
+
+    % Forward Ring Links (Green)
+    \draw[ring_arr_green] (G2_0.east) -- (G2_1.west);
+    \draw[ring_arr_green] (G2_1.east) -- (G2_2.west);
+    \draw[ring_arr_green] (G2_2.east) -- (G2_3.west);
+
+    % Wrap-Around Ring Link (3 -> 0)
+    \draw[ring_arr_green, rounded corners=4pt]
+      (G2_3.south) -- ++(0, -0.45) -| (G2_0.south);
+    \node[below=1pt, font=\scriptsize\bfseries\sffamily, text=GreenLine] at (6.8, -0.45)
+      {AllGather Forwarding Around Ring (Rank 3 $\to$ Rank 0)};
+
+    % Phase 2 Completion Status Callout
+    \node[anchor=north, font=\scriptsize\sffamily, text=GreenLine!90!black] at (6.8, -0.78)
+      {\textbf{AllGather Final State:} Every GPU possesses the complete synchronized gradient tensor $[A^*, B^*, C^*, D^*]$};
+
+    % Background Container
+    \begin{pgfonlayer}{background}
+      \draw[draw=black!15, fill=black!1, rounded corners=4pt, line width=0.5pt]
+        (-0.4, -1.15) rectangle (14.4, 2.25);
+    \end{pgfonlayer}
+  \end{scope}
+
+  % ==========================================
+  % ANALYTICAL INVARIANTS FOOTER CARD
+  % ==========================================
+  \node[
+    draw=black!15, fill=black!2, line width=0.5pt, rounded corners=3pt,
+    anchor=north, minimum width=14.8cm, inner sep=6pt
+  ] at (7.0, -0.2) {
+    \begin{minipage}{14.5cm}\footnotesize\sffamily
+      \begin{tabular}{@{}p{7.1cm}@{\hspace{0.4cm}}p{7.0cm}@{}}
+        \textbf{Bandwidth Optimality (Lower Bound)} & \textbf{Latency Scaling Penalty (Ring Diameter)} \\[2pt]
+        $\bullet$ \textbf{Per-GPU Traffic:} $2 \cdot \frac{N-1}{N} \cdot M \to 2M$ as $N \to \infty$ &
+        $\bullet$ \textbf{Ring Steps:} $2(N-1)$ sequential point-to-point transfers \\
+        $\bullet$ \textbf{Link Utilization:} $100\%$ of links active concurrently in every round &
+        $\bullet$ \textbf{Latency Overhead:} $T_{\text{lat}} = 2(N-1) \cdot \alpha$ (scales linearly with $N$)
+      \end{tabular}
+    \end{minipage}
+  };
+
+\end{tikzpicture}%
+}
+```
 
 :::
 
