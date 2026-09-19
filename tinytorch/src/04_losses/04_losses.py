@@ -38,10 +38,7 @@ By the end of this module, you will:
 5. Test all loss functions with realistic examples
 
 Let's measure prediction quality!
-"""
 
-# %% [markdown]
-"""
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/04_losses/losses.ipynb`
@@ -877,8 +874,8 @@ class BinaryCrossEntropyFunction(Function):
 
         HINTS:
         - Use np.clip(predictions, 1e-7, 1-1e-7) to prevent log(0)
-        - Clipping makes the loss constant outside that interval. Module 06
-          will give those regions zero prediction gradient; at each clipping
+        - Clipping makes the loss constant outside that interval; Module 06 will give
+          those regions zero prediction gradient; at each clipping
           boundary it will choose the derivative from inside the interval.
         - Binary cross-entropy: -(targets * log(preds) + (1-targets) * log(1-preds))
         - Use np.mean() to average over all samples

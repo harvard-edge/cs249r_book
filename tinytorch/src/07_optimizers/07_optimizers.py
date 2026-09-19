@@ -609,7 +609,7 @@ class SGD(Optimizer):
         """
         Check if this optimizer uses momentum.
 
-        Module 08's Trainer calls this before saving a checkpoint, to know
+        Module 08's Trainer will call this before saving a checkpoint, to know
         whether there is optimizer state to store.
 
         Returns:
@@ -626,7 +626,7 @@ class SGD(Optimizer):
         """
         Get momentum buffers for checkpointing.
 
-        Module 08's Trainer stores the returned list in the checkpoint file.
+        Module 08's Trainer will store the returned list in the checkpoint file.
         The buffers are copied, so later steps do not alter the saved state.
 
         Returns:
@@ -648,7 +648,7 @@ class SGD(Optimizer):
         """
         Restore momentum buffers from checkpointing.
 
-        Module 08's Trainer calls this when it resumes from a checkpoint, so a
+        Module 08's Trainer will call this when it resumes from a checkpoint, so a
         resumed run continues with the velocity it had, not from zero.
 
         Args:

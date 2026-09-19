@@ -37,9 +37,7 @@ By the end of this module, you will:
 4. Connect activations to real neural network components
 
 Let's add intelligence to your tensors!
-"""
-# %% [markdown]
-"""
+
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/02_activations/activations.ipynb`
@@ -266,7 +264,7 @@ class Sigmoid:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -401,7 +399,7 @@ class ReLU:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -530,7 +528,7 @@ class Tanh:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -682,7 +680,7 @@ class GELU:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -836,7 +834,7 @@ class Softmax:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor, dim: int = -1) -> Tensor:
