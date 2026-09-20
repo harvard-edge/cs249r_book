@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 04: Losses - Measuring How Wrong We Are
 
 Welcome to Module 04! Today you'll implement the mathematical functions that measure how wrong your model's predictions are - the essential feedback signal that enables all machine learning.
@@ -24,10 +24,12 @@ Welcome to Module 04! Today you'll implement the mathematical functions that mea
 **You'll Enable**: The feedback signal needed for training
 
 **Connection Map**:
-```
-Layers → Losses → Autograd
-(predictions) (error measurement) (learning signals)
-```
+
+$$\underbrace{\text{Layers}}_{\text{predictions } \mathbf{\hat{y}}} \longrightarrow \underbrace{\mathbf{\text{Losses}}}_{\text{error measurement } \mathcal{L}(\mathbf{\hat{y}}, \mathbf{y})} \longrightarrow \underbrace{\text{Autograd}}_{\text{learning signals } \nabla_{\boldsymbol{\theta}}\mathcal{L}}$$
+
+<div align="center">
+  <img src="losses_blueprint.svg" width="360" alt="Framework Blueprint: Loss Functions">
+</div>
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -57,7 +59,7 @@ from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyL
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Modules 01 (Tensor), 02 (Activations), and 03 (Layers) must be completed
@@ -77,12 +79,12 @@ from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyL
   - Required: Yes - for building test networks
 
 **Dependency Flow**:
-```
-Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module 04 (Losses)
-     ↓                      ↓                         ↓                    ↓
-  Foundation          Nonlinearity              Architecture        Error Measurement
-```
 
+$$\begin{array}{ccccccc}
+\text{Module 01 (Tensor)} & \longrightarrow & \text{Module 02 (Activations)} & \longrightarrow & \text{Module 03 (Layers)} & \longrightarrow & \mathbf{\text{Module 04 (Losses)}} \\
+\downarrow & & \downarrow & & \downarrow & & \downarrow \\
+\text{Memory and Strides} & & \text{Nonlinearities} & & \text{Linear Parametric} & & \text{Error Measurement}
+\end{array}$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
@@ -116,105 +118,85 @@ Think of loss functions as different ways to measure "wrongness" - each optimize
 - Calculation: Average of squared differences between predictions and targets
 - Properties: Heavily penalizes large errors, smooth gradients
 
-```
-Loss Landscape for MSE:
-     Loss
-      ^
-      |
-   4  |  |       |
-      |   \     /
-   2  |    |   |
-      |     \ /
-   0  |______*______> Prediction Error
-      0  -2  0  +2
+$$\mathcal{L}_{\text{MSE}}(e) = e^2 \quad \text{where } e = (\hat{y} - y)$$
 
-Quadratic growth: small errors → small penalty, large errors → huge penalty
-```
+| Prediction Error ($e$) | $-2.0$ | $-1.0$ | $-0.5$ | $0.0$ | $+0.5$ | $+1.0$ | $+2.0$ |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Squared Loss ($e^2$)** | $4.00$ | $1.00$ | $0.25$ | $0.00$ | $0.25$ | $1.00$ | $4.00$ |
+| **Gradient ($\frac{\partial \mathcal{L}}{\partial e}$)** | $-4.0$ | $-2.0$ | $-1.0$ | $0.0$ | $+1.0$ | $+2.0$ | $+4.0$ |
+
+*Quadratic growth: small errors yield modest penalties, while large outlier errors yield aggressively growing gradients.*
 
 **CrossEntropyLoss**: "How confident am I in the wrong class?"
 - Used for: Multi-class classification (image recognition, text classification)
 - Calculation: Negative log-likelihood of correct class probability
 - Properties: Encourages confident correct predictions, punishes confident wrong ones
 
-```
-Cross-Entropy Penalty Curve:
-     Loss
-      ^
-   10 |*
-      ||
-    5 | \
-      |  \
-    2 |   \
-      |    \
-    0 |_____\____> Predicted Probability of Correct Class
-      0   0.5   1.0
+$$\mathcal{L}_{\text{CE}}(p) = -\ln(p) \quad \text{where } p = P(y = y^* \mid \mathbf{x}) \in (0, 1]$$
 
-Logarithmic: wrong confident predictions get severe penalty
-```
+<div align="center">
+  <img src="exp_overflow_cliff.svg" width="340" alt="Float32 Exp Range Cliff">
+</div>
+
+| Predicted Probability ($p$) | $0.99$ | $0.90$ | $0.50$ | $0.10$ | $0.01$ | $10^{-4}$ | $\to 0^+$ |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Loss ($-\ln p$)** | $0.010$ | $0.105$ | $0.693$ | $2.303$ | $4.605$ | $9.210$ | $+\infty$ |
+| **Surprise / Penalty** | Negligible | Low | Moderate | Severe | Massive | Catastrophic | Asymptote |
+
+*Logarithmic penalty: wrong confident predictions face near-vertical asymptotic gradients.*
 
 **BinaryCrossEntropyLoss**: "How wrong am I about yes/no decisions?"
 - Used for: Binary classification (spam detection, medical diagnosis)
 - Calculation: Cross-entropy specialized for two classes
 - Properties: Symmetric penalty for false positives and false negatives
 
-```
-Binary Decision Boundary:
-     Target=1 (Positive)    Target=0 (Negative)
-     ┌─────────────────┬─────────────────┐
-     │  Pred → 1.0     │  Pred → 1.0     │
-     │  Loss → 0       │  Loss → ∞       │
-     ├─────────────────┼─────────────────┤
-     │  Pred → 0.0     │  Pred → 0.0     │
-     │  Loss → ∞       │  Loss → 0       │
-     └─────────────────┴─────────────────┘
-```
+| Prediction $\hat{y}$ | True Target $y = 1$ (Positive) | True Target $y = 0$ (Negative) | Decision Consequence |
+| :--- | :--- | :--- | :--- |
+| **$\hat{y} \to 1.0$ (High Conf)** | $\mathcal{L} \to 0$ (Near Zero Loss) | $\mathcal{L} \to +\infty$ (Severe Penalty) | Confident True Positive vs False Alarm |
+| **$\hat{y} = 0.5$ (Uncertain)** | $\mathcal{L} = -\ln(0.5) \approx 0.693$ | $\mathcal{L} = -\ln(0.5) \approx 0.693$ | Maximum entropy / uninformative |
+| **$\hat{y} \to 0.0$ (Low Conf)** | $\mathcal{L} \to +\infty$ (Severe Penalty) | $\mathcal{L} \to 0$ (Near Zero Loss) | Missed Detection vs Confident Rejection |
 
-Each loss function creates a different "error landscape" that guides learning in different ways.
+Each loss function creates a distinct geometric error landscape that guides optimization in different ways.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: Mathematical Background
 
 ### Mean Squared Error (MSE)
-The foundation of regression, MSE measures the average squared distance between predictions and targets:
+The foundation of regression, MSE measures the average squared distance between predictions and targets across all $N$ elements:
 
-```
-MSE = (1/N) * Σ(prediction_i - target_i)²
-```
+$$\mathcal{L}_{\text{MSE}}(\mathbf{\hat{y}}, \mathbf{y}) = \frac{1}{N} \sum_{i=1}^{N} (\hat{y}_i - y_i)^2$$
 
 **Why square the differences?**
-- Makes all errors positive (no cancellation between positive/negative errors)
-- Heavily penalizes large errors (error of 2 becomes 4, error of 10 becomes 100)
-- Creates smooth gradients for optimization
+- Makes all errors strictly positive (no cancellation between positive and negative residuals)
+- Heavily penalizes large errors (error of 2 produces penalty of 4; error of 10 produces penalty of 100)
+- Yields a linear, smooth gradient $\nabla_{\hat{y}} \mathcal{L} = \frac{2}{N}(\mathbf{\hat{y}} - \mathbf{y})$ ideal for gradient descent
 
 ### Cross-Entropy Loss
-For classification, we need to measure how wrong our probability distributions are:
+For multi-class classification over $C$ mutually exclusive classes, we measure the negative log-likelihood of the true target class $y^* \in \{0, \dots, C-1\}$:
 
-```
-CrossEntropy = -Σ target_i * log(prediction_i)
-```
+$$\mathcal{L}_{\text{CE}}(\mathbf{z}, y^*) = -\log\left(\frac{e^{z_{y^*}}}{\sum_{j=1}^{C} e^{z_j}}\right) = -z_{y^*} + \log\left(\sum_{j=1}^{C} e^{z_j}\right)$$
 
 **The Log-Sum-Exp Trick**:
-Computing softmax directly can cause numerical overflow. The log-sum-exp trick provides stability:
-```
-log_softmax(x) = x - log(Σ exp(x_i))
-                = x - max(x) - log(Σ exp(x_i - max(x)))
-```
+Direct computation of softmax risks immediate IEEE 754 float32 overflow when $z_j > 88.72$. Factoring out the maximum logit $c = \max_k z_k$ guarantees numerical stability:
 
-This prevents exp(large_number) from exploding to infinity.
+$$\log \sum_{j=1}^C e^{z_j} = \log \sum_{j=1}^C e^{z_j - c} \cdot e^c = c + \log \left(\sum_{j=1}^{C} e^{z_j - c}\right)$$
+
+$$\operatorname{log\_softmax}(\mathbf{z})_i = (z_i - c) - \log \left(\sum_{j=1}^{C} e^{z_j - c}\right)$$
+
+Because $z_j - c \le 0$ for all $j$, every exponent $e^{z_j - c} \in (0, 1]$, completely eliminating the possibility of overflow.
 
 ### Binary Cross-Entropy
-A specialized case where we have only two classes:
-```
-BCE = -(target * log(prediction) + (1-target) * log(1-prediction))
-```
+A specialized formulation where targets are binary labels $y \in \{0, 1\}$ and predictions are probabilities $\hat{y} \in [0, 1]$:
 
-The mathematics naturally handles both "positive" and "negative" cases in a single formula.
+$$\mathcal{L}_{\text{BCE}}(\hat{y}, y) = -\big[y \ln(\hat{y}) + (1 - y) \ln(1 - \hat{y})\big]$$
+
+The mathematics naturally handles both positive and negative cases in a single unified equation.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Implementation: Building Loss Functions
 
 Let's implement our loss functions with proper numerical stability and clear educational structure.
@@ -225,39 +207,22 @@ Before implementing loss functions, we need a reliable way to compute log-softma
 
 ### Why Log-Softmax Matters
 
-Naive softmax can explode with large numbers:
-```
-Naive approach:
-  logits = [100, 200, 300]
-  exp(300) = 1.94 × 10^130  ← This breaks computers!
+Naive softmax exponentiates raw logits directly, causing catastrophic float32 overflow:
 
-Stable approach:
-  max_logit = 300
-  shifted = [-200, -100, 0]  ← Subtract max
-  exp(0) = 1.0  ← Manageable numbers
-```
+| Metric / Stage | Naive Direct Exponentiation | Numerically Stable Log-Sum-Exp |
+| :--- | :--- | :--- |
+| **Input Logits $\mathbf{z}$** | $[100, 200, 300]$ | $[100, 200, 300]$ |
+| **Maximum $c = \max(\mathbf{z})$** | *(Unused)* | $c = 300$ |
+| **Shifted Logits $\mathbf{z} - c$** | *(Unused)* | $[-200, -100, 0]$ |
+| **Exponentials $e^{\mathbf{z}}$** | $[e^{100}, e^{200}, e^{300}] \to [\infty, \infty, \infty]$ | $[e^{-200}, e^{-100}, e^0] \to [0, 0, 1.0]$ |
+| **Sum of Exponentials** | $\sum = \infty$ | $\sum \approx 1.0$ |
+| **Normalization / Log** | $\infty / \infty \to \mathbf{\text{NaN}}$ ❌ | $0 - \ln(1.0) = 0$ ✅ |
 
-### The Log-Sum-Exp Trick Visualization
+<div align="center">
+  <img src="numerical_stability_flow.svg" width="680" alt="Numerical Stability Flow: Exponentiation vs Max Shift">
+</div>
 
-```
-Original Computation:           Stable Computation:
-
-logits: [a, b, c]              logits: [a, b, c]
-   ↓                              ↓
-exp(logits)                    max_val = max(a,b,c)
-   ↓                              ↓
-sum(exp(logits))               shifted = [a-max, b-max, c-max]
-   ↓                              ↓
-log(sum)                       exp(shifted)  ← All ≤ 1.0
-   ↓                              ↓
-logits - log(sum)              sum(exp(shifted))
-                                  ↓
-                               log(sum) + max_val
-                                  ↓
-                               logits - (log(sum) + max_val)
-```
-
-Both give the same result, but the stable version never overflows!
+Both yield mathematically identical results in exact arithmetic, but the stabilized version never encounters exponential overflow!
 """
 
 # %% nbgrader={"grade": false, "grade_id": "log-softmax", "solution": true}
@@ -349,7 +314,7 @@ if __name__ == "__main__":
     test_unit_log_softmax()
 
 # %% [markdown]
-"""
+r"""
 ### MSELoss: Measuring Continuous Prediction Quality
 
 Mean Squared Error is the workhorse of regression problems. It measures how far your continuous predictions are from the true values.
@@ -357,58 +322,37 @@ Mean Squared Error is the workhorse of regression problems. It measures how far 
 ### When to Use MSE
 
 **Perfect for:**
-- House price prediction ($200k vs $195k)
+- House price prediction (200k vs 195k USD)
 - Temperature forecasting (25°C vs 23°C)
-- Stock price prediction ($150 vs $148)
+- Stock price prediction (150 vs 148 USD)
 - Any continuous value where "distance" matters
 
 ### How MSE Shapes Learning
 
-```
-Prediction vs Target Visualization:
+$$\mathcal{L}_{\text{MSE}}(\hat{y}, y^*) = (\hat{y} - y^*)^2 \quad \text{with target } y^* = 100$$
 
-Target = 100
+| Candidate Prediction $\hat{y}$ | $80$ | $90$ | $95$ | $100$ | $105$ | $110$ | $120$ |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Residual Error ($e = \hat{y} - y^*$)** | $-20$ | $-10$ | $-5$ | $0$ | $+5$ | $+10$ | $+20$ |
+| **Squared Loss ($e^2$)** | $400$ | $100$ | $25$ | $0$ | $25$ | $100$ | $400$ |
+| **Gradient Magnitude ($\lvert 2e \rvert$)** | $40$ | $20$ | $10$ | $0$ | $10$ | $20$ | $40$ |
 
-Prediction: 80   90   95   100  105  110  120
-Error:     -20  -10   -5    0   +5  +10  +20
-MSE:       400  100   25    0   25  100  400
-
-Loss Curve:
-     MSE
-      ^
-  400 |*           *
-      |
-  100 | *         *
-      |  \
-   25 |   *     *
-      |    \\   /
-    0 |_____*_____> Prediction
-       80   100   120
-
-Quadratic penalty: Large errors are MUCH more costly than small errors
-```
+*Quadratic penalty: Large errors are punished quadratically harder than small errors, providing strong restoring forces during gradient descent.*
 
 ### Why Square the Errors?
 
-1. **Positive penalties**: (-10)² = 100, same as (+10)² = 100
-2. **Heavy punishment for large errors**: Error of 20 → penalty of 400
-3. **Smooth gradients**: Quadratic function has nice derivatives for optimization
-4. **Statistical foundation**: Maximum likelihood for Gaussian noise
+1. **Positive penalties**: $(-10)^2 = 100$, strictly identical to $(+10)^2 = 100$
+2. **Heavy punishment for large errors**: Error of $20 \to$ penalty of $400$
+3. **Smooth gradients**: Quadratic function $\nabla_e (e^2) = 2e$ is everywhere differentiable and continuous
+4. **Statistical foundation**: Corresponds to maximum likelihood estimation under Gaussian noise $\mathcal{N}(0, \sigma^2)$
 
 ### MSE vs Other Regression Losses
 
-```
-Error Sensitivity Comparison:
-
- Error:   -10    -5     0     +5    +10
- MSE:     100    25     0     25    100  ← Quadratic growth
- MAE:      10     5     0      5     10  ← Linear growth
- Huber:    50    12.5   0    12.5    50  ← Hybrid approach
-
- MSE: More sensitive to outliers
- MAE: More robust to outliers
- Huber: Best of both worlds
-```
+| Loss Function | Mathematical Formulation | $e = \pm 1$ | $e = \pm 5$ | $e = \pm 10$ | Outlier Robustness |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **Mean Squared Error (MSE)** | $\mathcal{L}(e) = e^2$ | $1.0$ | $25.0$ | $100.0$ | Low (strongly influenced by outliers) |
+| **Mean Absolute Error (MAE)** | $\mathcal{L}(e) = \lvert e \rvert$ | $1.0$ | $5.0$ | $10.0$ | High (constant gradient magnitude $\pm 1$) |
+| **Huber Loss ($\delta = 1.0$)** | $\frac{1}{2}e^2 \text{ if } \lvert e \rvert \le 1 \text{ else } \lvert e \rvert - \frac{1}{2}$ | $0.5$ | $4.5$ | $9.5$ | Balanced (quadratic near 0, linear tails) |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "mse-loss", "solution": true}
@@ -527,7 +471,7 @@ if __name__ == "__main__":
     test_unit_mse_loss()
 
 # %% [markdown]
-"""
+r"""
 ### CrossEntropyLoss: Measuring Classification Confidence
 
 Cross-entropy loss is the gold standard for multi-class classification. It measures how wrong your probability predictions are and heavily penalizes confident mistakes.
@@ -542,74 +486,41 @@ Cross-entropy loss is the gold standard for multi-class classification. It measu
 
 ### Understanding Cross-Entropy Through Examples
 
-```
-Scenario: Image Classification (3 classes: cat, dog, bird)
+Consider a 3-class vision task across classes: $\text{Class } 0 \to \text{Cat}$, $\text{Class } 1 \to \text{Dog}$, $\text{Class } 2 \to \text{Bird}$, where the true target is $y^* = 0$ (Cat):
 
-Case 1: Correct and Confident
-Model Output (logits): [5.0, 1.0, 0.1]  ← Very confident about "cat"
-After Softmax:        [0.975, 0.018, 0.007]
-True Label:           cat (class 0)
-Loss: -log(0.975) = 0.03  ← Very low loss ✅
-
-Case 2: Correct but Uncertain
-Model Output:         [1.1, 1.0, 0.9]  ← Uncertain between classes
-After Softmax:        [0.367, 0.332, 0.301]
-True Label:           cat (class 0)
-Loss: -log(0.367) = 1.00  ← Higher loss (uncertainty penalized)
-
-Case 3: Wrong and Confident
-Model Output:         [0.1, 5.0, 1.0]  ← Very confident about "dog"
-After Softmax:        [0.007, 0.975, 0.018]
-True Label:           cat (class 0)
-Loss: -log(0.007) = 4.93  ← Very high loss ❌
-```
+| Scenario Case | Logits $\mathbf{z}$ | Softmax $\mathbf{p} = \sigma(\mathbf{z})$ | True Label $y^*$ | Cross-Entropy Loss $-\ln(p_0)$ | Learning Consequence |
+| :--- | :--- | :--- | :---: | :---: | :--- |
+| **Case 1: Correct & Confident** | $[5.0, 1.0, 0.1]$ | $[0.975, 0.018, 0.007]$ | Cat (0) | $\mathbf{0.025}$ ✅ | Negligible error signal; weights remain intact |
+| **Case 2: Correct but Uncertain** | $[1.1, 1.0, 0.9]$ | $[0.367, 0.332, 0.301]$ | Cat (0) | $\mathbf{1.002}$ ⚠️ | Significant push ($p_0 - 1 \approx -0.633$) to increase confidence |
+| **Case 3: Wrong & Confident** | $[0.1, 5.0, 1.0]$ | $[0.007, 0.975, 0.018]$ | Cat (0) | $\mathbf{4.962}$ ❌ | Massive error signal ($p_0 - 1 \approx -0.993$) driving rapid correction |
 
 ### Cross-Entropy's Learning Signal
 
-```
-What Cross-Entropy Teaches the Model:
+$$\frac{\partial \mathcal{L}_{\text{CE}}}{\partial z_i} = p_i - y_i \quad \text{where } y_i = \mathbf{1}[i = y^*]$$
 
-┌─────────────────┬─────────────────┬───────────────────────────┐
-│ Prediction      │ True Label      │ Learning Signal           │
-├─────────────────┼─────────────────┼───────────────────────────┤
-│ Confident       │ Correct         │ "Keep doing this"         │
-│ Uncertain       │ Correct         │ "Be more confident"       │
-│ Confident       │ Wrong           │ "STOP! Change everything" │
-│ Uncertain       │ Wrong           │ "Learn the right answer"  │
-└─────────────────┴─────────────────┴───────────────────────────┘
-
-Loss Landscape by Confidence:
-     Loss
-      ^
-    5 |*
-      ||
-    3 | *
-      |  \
-    1 |   *
-      |    \\
-    0 |______**____> Predicted Probability (correct class)
-      0   0.5   1.0
-
-Message: "Be confident when you're right!"
-```
+| Prediction State | True Class Alignment | Gradient Push $(p_i - y_i)$ | Learning Signal Directive |
+| :--- | :--- | :---: | :--- |
+| **Confident High Probability** | Correct ($y_i = 1, p_i \approx 1$) | $\approx 0$ | "Converged — preserve current weights" |
+| **Uncertain Probability** | Correct ($y_i = 1, p_i \approx 0.33$) | $\approx -0.67$ | "Step aggressively toward higher confidence" |
+| **Confident High Probability** | Wrong ($y_i = 0, p_i \approx 1$) | $\approx +1.0$ | "Maximum emergency suppression of this logit" |
+| **Uncertain Probability** | Wrong ($y_i = 0, p_i \approx 0.33$) | $\approx +0.33$ | "Gradually suppress probability" |
 
 ### Why Cross-Entropy Works So Well
 
-1. **Probabilistic interpretation**: Measures quality of probability distributions
-2. **Strong gradients**: Large penalty for confident mistakes drives fast learning
-3. **Smooth optimization**: Log function provides nice gradients
-4. **Information theory**: Minimizes "surprise" about correct answers
+1. **Probabilistic interpretation**: Directly measures negative log-likelihood under multinomial distribution
+2. **Linear gradient in logit space**: Softmax and log-likelihood cancel elegantly: $\nabla_{\mathbf{z}} \mathcal{L} = \mathbf{p} - \mathbf{y}$ (no vanishing gradient near saturation!)
+3. **Smooth convex optimization**: Log-sum-exp is globally convex in logit space
+4. **Information theory**: Minimizes the Kullback-Leibler divergence $D_{\text{KL}}(p_{\text{data}} \parallel p_{\text{model}})$
 
 ### Multi-Class vs Binary Classification
 
-```
-Multi-Class (3+ classes):          Binary (2 classes):
-
-Classes: [cat, dog, bird]         Classes: [spam, not_spam]
-Output:  [0.7, 0.2, 0.1]         Output:  0.8 (spam probability)
-Must sum to 1.0 ✅               Must be between 0 and 1 ✅
-Uses: CrossEntropyLoss            Uses: BinaryCrossEntropyLoss
-```
+| Architectural Property | Multi-Class Classification ($C \ge 3$) | Binary Classification ($C = 2$) |
+| :--- | :--- | :--- |
+| **Target Representation** | Class index $y^* \in \{0, \dots, C-1\}$ (int64) | Binary indicator $y \in \{0.0, 1.0\}$ (float32) |
+| **Model Output Shape** | $(B, C)$ unnormalized logits | $(B,)$ or $(B, 1)$ probability |
+| **Activation Function** | $\operatorname{Softmax}(\mathbf{z})_i = \frac{e^{z_i}}{\sum_j e^{z_j}}$ | $\operatorname{Sigmoid}(z) = \frac{1}{1 + e^{-z}}$ |
+| **Normalization Constraint** | $\sum_{c=1}^C p_c = 1.0$ | $p + (1 - p) = 1.0$ |
+| **TinyTorch Module Class** | `CrossEntropyLoss` | `BinaryCrossEntropyLoss` |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "cross-entropy-loss", "solution": true}
@@ -747,7 +658,7 @@ if __name__ == "__main__":
     test_unit_cross_entropy_loss()
 
 # %% [markdown]
-"""
+r"""
 ### BinaryCrossEntropyLoss: Measuring Yes/No Decision Quality
 
 Binary Cross-Entropy is specialized for yes/no decisions. It's like regular cross-entropy but optimized for the special case of exactly two classes.
@@ -763,87 +674,45 @@ Binary Cross-Entropy is specialized for yes/no decisions. It's like regular cros
 
 ### Understanding Binary Cross-Entropy
 
-```
-Binary Classification Decision Matrix:
+$$\mathcal{L}_{\text{BCE}}(\hat{y}, y) = - \big[ y \ln(\hat{y}) + (1 - y) \ln(1 - \hat{y}) \big]$$
 
-                 TRUE LABEL
-              Positive  Negative
-PREDICTED  P    TP       FP     ← Model says "Yes"
-           N    FN       TN     ← Model says "No"
-
-BCE Loss for each quadrant:
-- True Positive (TP): -log(prediction)    ← Reward confident correct "Yes"
-- False Positive (FP): -log(1-prediction) ← Punish confident wrong "Yes"
-- False Negative (FN): -log(prediction)   ← Punish confident wrong "No"
-- True Negative (TN): -log(1-prediction)  ← Reward confident correct "No"
-```
+| Prediction ($\hat{y}$) | True Target $y = 1$ (Positive Class) | True Target $y = 0$ (Negative Class) |
+| :--- | :--- | :--- |
+| **Model predicts $\hat{y} \to 1.0$ ("Yes")** | **True Positive (TP)**: $\mathcal{L} = -\ln(1.0) = 0$ (Reward) | **False Positive (FP)**: $\mathcal{L} = -\ln(0) \to +\infty$ (Severe Penalty) |
+| **Model predicts $\hat{y} \to 0.0$ ("No")** | **False Negative (FN)**: $\mathcal{L} = -\ln(0) \to +\infty$ (Severe Penalty) | **True Negative (TN)**: $\mathcal{L} = -\ln(1.0) = 0$ (Reward) |
 
 ### Binary Cross-Entropy Behavior Examples
 
-```
-Scenario: Spam Detection
+Consider email spam detection where label $y = 1$ denotes spam and $y = 0$ denotes legitimate ham:
 
-Case 1: Perfect Spam Detection
-Email: "Buy now! 50% off! Limited time!"
-Model Prediction: 0.99 (99% spam probability)
-True Label: 1 (actually spam)
-Loss: -log(0.99) = 0.01  ← Very low loss ✅
-
-Case 2: Uncertain About Spam
-Email: "Meeting rescheduled to 2pm"
-Model Prediction: 0.51 (slightly thinks spam)
-True Label: 0 (actually not spam)
-Loss: -log(1-0.51) = -log(0.49) = 0.71  ← Moderate loss
-
-Case 3: Confident Wrong Prediction
-Email: "Hi mom, how are you?"
-Model Prediction: 0.95 (very confident spam)
-True Label: 0 (actually not spam)
-Loss: -log(1-0.95) = -log(0.05) = 3.0  ← High loss ❌
-```
+| Email Prediction Scenario | Predicted $\hat{y}$ | True Label $y$ | Evaluated BCE Loss | Optimization Feedback |
+| :--- | :---: | :---: | :---: | :--- |
+| **Case 1: Confident Spam Detection** | $0.99$ | $1$ (Spam) | $-\ln(0.99) \approx \mathbf{0.010}$ ✅ | Negligible error signal; spam filter verified |
+| **Case 2: Uncertain Classification** | $0.51$ | $0$ (Ham) | $-\ln(1 - 0.51) \approx \mathbf{0.713}$ ⚠️ | Substantial gradient push to classify email as ham |
+| **Case 3: Catastrophic False Alarm** | $0.95$ | $0$ (Ham) | $-\ln(1 - 0.95) \approx \mathbf{2.996}$ ❌ | Massive error signal; urgent suppression of spam logit |
 
 ### Binary vs Multi-Class Cross-Entropy
 
-```
-Binary Cross-Entropy:              Regular Cross-Entropy:
+| Property | Binary Cross-Entropy (`BCE`) | Multi-Class Cross-Entropy (`CE`) |
+| :--- | :--- | :--- |
+| **Output Dimension** | Single probability scalar $\hat{y} \in [0, 1]$ | Vector of probabilities $\mathbf{p} \in [0, 1]^C$ |
+| **Mathematical Formula** | $-\big[y \ln(\hat{y}) + (1-y)\ln(1-\hat{y})\big]$ | $-\sum_{c=1}^C y_c \ln(p_c) = -\ln(p_{y^*})$ |
+| **Class Topology** | Independent binary Bernoulli trials | Mutually exclusive Multinomial distribution |
+| **Activation Pairing** | Logistic Sigmoid $\sigma(z) = \frac{1}{1 + e^{-z}}$ | Softmax $\sigma(\mathbf{z})_i = \frac{e^{z_i}}{\sum_j e^{z_j}}$ |
 
-Single probability output         Probability distribution output
-Predict: 0.8 (spam prob)         Predict: [0.1, 0.8, 0.1] (3 classes)
-Target: 1.0 (is spam)            Target: 1 (class index)
+### Loss Landscape and Epsilon Boundary Clamping
 
-Formula:                         Formula:
--[y*log(p) + (1-y)*log(1-p)]    -log(p[target_class])
+To prevent $\ln(0) \to -\infty$ and floating-point `NaN` values, our implementation clamps predicted probabilities to the safe range $[\varepsilon, 1 - \varepsilon]$ where $\varepsilon = 10^{-7}$:
 
-One output, one probability      One output per class
-Specialized for 2 classes        General for N classes
-```
+$$\hat{y}_{\text{clamped}} = \operatorname{clip}(\hat{y}, \, \varepsilon, \, 1 - \varepsilon)$$
 
-### Why Binary Cross-Entropy is Special
-
-1. **Symmetric penalties**: False positives and false negatives treated equally
-2. **Probability calibration**: Output directly interpretable as probability
-3. **Efficient computation**: Simpler than full softmax for binary cases
-4. **Medical-grade**: Well-suited for safety-critical binary decisions
-
-### Loss Landscape Visualization
-
-```
-Binary Cross-Entropy for Target = 1:
-
-     Loss = -log(p)
-      ^
-    5 |*
-      | *
-    3 |  *
-      |    *
-    1 |        *
-      |              *
-    0 |____________________*> Prediction p
-      0        0.5         1.0
-
-Increasing the probability of the positive class lowers its loss.
-The implementation clips probabilities near 0 and 1 to keep logs finite.
-```
+| Unclamped Prediction $\hat{y}$ | Target $y = 1$ Clamped Loss | Target $y = 0$ Clamped Loss | Float Status |
+| :---: | :---: | :---: | :---: |
+| $1.0000$ | $-\ln(1 - 10^{-7}) \approx 10^{-7}$ | $-\ln(10^{-7}) \approx 16.118$ | Finite IEEE 754 float32 ✅ |
+| $0.9000$ | $-\ln(0.9) \approx 0.105$ | $-\ln(0.1) \approx 2.303$ | Finite IEEE 754 float32 ✅ |
+| $0.5000$ | $-\ln(0.5) \approx 0.693$ | $-\ln(0.5) \approx 0.693$ | Finite IEEE 754 float32 ✅ |
+| $0.1000$ | $-\ln(0.1) \approx 2.303$ | $-\ln(0.9) \approx 0.105$ | Finite IEEE 754 float32 ✅ |
+| $0.0000$ | $-\ln(10^{-7}) \approx 16.118$ | $-\ln(1 - 10^{-7}) \approx 10^{-7}$ | Finite IEEE 754 float32 ✅ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "binary-cross-entropy-loss", "solution": true}
@@ -976,7 +845,7 @@ if __name__ == "__main__":
     test_unit_binary_cross_entropy_loss()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Bringing It Together
 
 Now let's test how our loss functions work together with real data scenarios and explore their behavior with different types of predictions.
@@ -985,44 +854,35 @@ Now let's test how our loss functions work together with real data scenarios and
 
 Understanding when and why to use each loss function is crucial for ML engineering success:
 
-```
-Problem Type Decision Tree:
+$$\mathbf{\text{Supervised Learning Problem Formulation}}$$
+$$\begin{array}{ccc}
+\swarrow & & \searrow \\
+\mathbf{\text{Continuous Regression}} & & \mathbf{\text{Categorical Classification}} \\
+\downarrow & & \swarrow \qquad\qquad\qquad\qquad \searrow \\
+\mathbf{\text{MSELoss}} & \mathbf{\text{Binary (2 Mutually Exclusive Classes)}} & \mathbf{\text{Multi-Class (} C \ge 3 \text{ Classes)}} \\
+(\text{Linear Output } \hat{y} \in \mathbb{R}) & \downarrow & \downarrow \\
+& \mathbf{\text{BinaryCrossEntropyLoss}} & \mathbf{\text{CrossEntropyLoss}} \\
+& (\text{Sigmoid Probability } \hat{y} \in [0, 1]) & (\text{Log-Softmax Logits } \mathbf{z} \in \mathbb{R}^C)
+\end{array}$$
 
-What are you predicting?
-         │
-    ┌────┼────┐
-    │         │
-Continuous   Categorical
- Values       Classes
-    │         │
-    │    ┌───┼───┐
-    │    │       │
-    │   2 Classes  3+ Classes
-    │       │       │
- MSELoss   BCE Loss  CE Loss
-
-Examples:
-MSE: House prices, temperature, stock values
-BCE: Spam detection, fraud detection, medical diagnosis
-CE:  Image classification, language modeling, multiclass text classification
-```
+| Problem Domain | Output Modality | Recommended TinyTorch Loss | Example Task |
+| :--- | :--- | :--- | :--- |
+| **Continuous Regression** | Unconstrained scalar $\hat{y} \in \mathbb{R}$ | `MSELoss` | House pricing, temperature forecasting, trajectory regression |
+| **Binary Classification** | Single probability $\hat{y} \in [0, 1]$ | `BinaryCrossEntropyLoss` | Spam filtering, fraud detection, medical anomaly detection |
+| **Multi-Class Classification** | $C$-class logits $\mathbf{z} \in \mathbb{R}^C$ | `CrossEntropyLoss` | Image classification, next-token language modeling, audio phonemes |
 
 ### Loss Function Behavior Comparison
 
 Each loss function creates different learning pressures on your model:
 
-```
-Error Sensitivity Comparison:
+| Error Distance $\lvert e \rvert$ | MSE Loss ($\lvert e \rvert^2$) | BCE / CE Loss ($-\ln(1 - \lvert e \rvert)$) | Relative Learning Pressure |
+| :---: | :---: | :---: | :--- |
+| **Small Error ($0.1$)** | $0.010$ | $0.105$ | Moderate gradient push across both paradigms |
+| **Medium Error ($0.5$)** | $0.250$ | $0.693$ | BCE/CE applies nearly $3\times$ higher penalty than MSE |
+| **Large Error ($0.9$)** | $0.810$ | $2.303$ | BCE/CE penalty accelerates logarithmically toward asymptote |
+| **Extreme Outlier ($1.0^-$)** | $1.000$ | $16.118$ (clamped) | Cross-entropy generates an emergency restorative gradient |
 
-Small Error (0.1):     Medium Error (0.5):     Large Error (2.0):
-
-MSE:     0.01         MSE:     0.25           MSE:     4.0
-BCE:     0.11         BCE:     0.69           BCE:     ∞ (clips to large)
-CE:      0.11         CE:      0.69           CE:      ∞ (clips to large)
-
-MSE: Quadratic growth, manageable with outliers
-BCE/CE: Logarithmic growth, explodes with confident wrong predictions
-```
+*MSE scales quadratically (gentle on confident wrong guesses, sensitive to outliers). BCE/CE scales logarithmically, generating explosive gradient updates when the model is confidently wrong.*
 """
 
 # %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": false}
@@ -1132,73 +992,39 @@ if __name__ == "__main__":
     analyze_loss_sensitivity()
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Understanding Loss Function Performance
 
-Loss functions seem simple, but they have important computational and numerical properties that affect training performance. Let's analyze the systems aspects.
+Loss functions seem simple, but they have critical computational and memory bandwidth implications that govern large-scale distributed training throughput.
 
 ### Computational Complexity Analysis
 
-Different loss functions have different computational costs, especially at scale:
+| Loss Function | Mathematical Core | Algorithmic Operations | Time Complexity | Memory Complexity |
+| :--- | :--- | :--- | :---: | :---: |
+| **`MSELoss`** | $\frac{1}{B} \sum_{b=1}^B (\hat{y}_b - y_b)^2$ | Subtraction $\to$ Square $\to$ Mean | $\mathcal{O}(B)$ | $\mathcal{O}(B)$ |
+| **`CrossEntropyLoss`** | $-\frac{1}{B} \sum_{b=1}^B \log\left(\frac{e^{z_{b, y_b^*}}}{\sum_c e^{z_{b, c}}}\right)$ | Max-Reduction $\to$ Subtraction $\to \operatorname{Exp} \to \text{Sum} \to \operatorname{Log} \to \text{Gather}$ | $\mathcal{O}(B \cdot C)$ | $\mathcal{O}(B \cdot C)$ |
+| **`BinaryCrossEntropy`** | $-\frac{1}{B} \sum_{b=1}^B \big[y_b \ln(\hat{y}_b) + (1-y_b)\ln(1-\hat{y}_b)\big]$ | Clip $\to \operatorname{Log} \to$ Linear Comb $\to$ Mean | $\mathcal{O}(B)$ | $\mathcal{O}(B)$ |
 
-```
-Computational Cost Comparison (Batch Size B, Classes C):
+*For single-output regression, MSE processes $B$ scalars. In language models with vocabulary $C = 32{,}000$, CrossEntropy processes $B \cdot C$ floats—over $30{,}000\times$ more data elements per batch.*
 
-MSELoss:
-┌────────────────┬────────────────┐
-│ Operation      │ Complexity     │
-├────────────────┼────────────────┤
-│ Subtraction    │ O(B)           │
-│ Squaring       │ O(B)           │
-│ Mean           │ O(B)           │
-│ Total          │ O(B)           │
-└────────────────┴────────────────┘
+### Memory Layout and Production Memory Footprint
 
-CrossEntropyLoss:
-┌────────────────┬────────────────┐
-│ Operation      │ Complexity     │
-├────────────────┼────────────────┤
-│ Max (stability)│ O(B*C)         │
-│ Exponential    │ O(B*C)         │
-│ Sum            │ O(B*C)         │
-│ Log            │ O(B)           │
-│ Indexing       │ O(B)           │
-│ Total          │ O(B*C)         │
-└────────────────┴────────────────┘
+A common systems pitfall is treating multi-class cross-entropy as matrix multiplication against one-hot targets. In reality, modern ML systems perform direct index gathering:
 
-For one regression output per sample, MSE processes B values while
-cross-entropy processes B*C logits. With C=1000, that is 1000 times as
-many input values, not a measured runtime ratio. MSE over C outputs
-also has O(B*C) work; actual timings depend on operations and hardware.
-```
+<div align="center">
+  <img src="index_gather_memory.svg" width="680" alt="Direct Index Gather vs One-Hot Memory">
+</div>
 
-### Memory Layout and Access Patterns
+### Forward Pass Buffer Lifecycle
 
-```
-Memory Usage Patterns:
-
-MSE Forward Pass:              CE Forward Pass:
-
-Input:  [B] predictions       Input:  [B, C] logits
-       │                             │
-       │ subtract                    │ subtract max
-       v                             v
-Temp:  [B] differences        Temp1: [B, C] shifted
-       │                             │
-       │ square                      │ exponential
-       v                             v
-Temp:  [B] squared            Temp2: [B, C] exp_vals
-       │                             │
-       │ mean                        │ sum along C
-       v                             v
-Output: [1] scalar            Temp3: [B] sums
-                                     │
-Memory: 3*B*sizeof(float)            │ log + index
-                                     v
-                              Output: [1] scalar
-
-                              Memory: (3*B*C + 2*B)*sizeof(float)
-```
+| Pipeline Step | `MSELoss` Buffer Allocated | `CrossEntropyLoss` Buffer Allocated |
+| :--- | :--- | :--- |
+| **Input Buffer** | $\mathbf{\hat{y}} \in \mathbb{R}^B$ ($4B$ bytes) | $\mathbf{z} \in \mathbb{R}^{B \times C}$ ($4BC$ bytes) |
+| **Intermediate 1** | Residual $(\mathbf{\hat{y}} - \mathbf{y}) \in \mathbb{R}^B$ ($4B$ bytes) | Row Maximums $\mathbf{m} \in \mathbb{R}^{B \times 1}$ ($4B$ bytes) |
+| **Intermediate 2** | Squared Residuals $(\mathbf{\hat{y}} - \mathbf{y})^2 \in \mathbb{R}^B$ ($4B$ bytes) | Exponentials $e^{\mathbf{z} - \mathbf{m}} \in \mathbb{R}^{B \times C}$ ($4BC$ bytes) |
+| **Intermediate 3** | *(None)* | Normalizer $\sum_c e^{z_{b,c}-m_b} \in \mathbb{R}^{B \times 1}$ ($4B$ bytes) |
+| **Intermediate 4** | *(None)* | Gathered Log-Probs $\mathbf{z}_{y^*} \in \mathbb{R}^B$ ($4B$ bytes) |
+| **Total Transient Footprint** | $\approx 3B \times 4 \text{ bytes} = 12B \text{ bytes}$ | $\approx (2BC + 3B) \times 4 \text{ bytes}$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-numerical-stability", "solution": false}
@@ -1290,58 +1116,33 @@ if __name__ == "__main__":
     analyze_loss_memory()
 
 # %% [markdown]
-"""
+r"""
 ### Production Context: How Loss Functions Scale
 
 Understanding how loss functions behave in production helps make informed engineering decisions about model architecture and training strategies.
 
 **Loss Function Scaling Challenges**
 
-As models grow larger, loss function bottlenecks become critical:
+As models grow larger, loss function memory and compute bottlenecks become critical:
 
-```
-Scaling Challenge Matrix:
+| Scaling Dimension | Small Model (MNIST) | Large Model (ImageNet) | Production Scale (LLM / GPT-4) |
+| :--- | :---: | :---: | :---: |
+| **Output Classes ($C$)** | $10$ | $1{,}000$ | $32{,}000$ to $128{,}000$ |
+| **Batch Size ($B$)** | $64$ | $256$ | $2{,}048$ to $8{,}192$ |
+| **Logit Memory ($B \cdot C \cdot 4\text{B}$)** | $2.5\text{ KB}$ | $1.0\text{ MB}$ | $262\text{ MB}$ to $1.05\text{ GB}$ |
+| **Log-Softmax Temp Buffers** | $\approx 7.5\text{ KB}$ | $\approx 3.0\text{ MB}$ | $\approx 786\text{ MB}$ to $3.15\text{ GB}$ |
+| **Primary System Bottleneck** | Compute bound (negligible) | Softmax GPU core reduction | HBM Memory Capacity & Bandwidth |
 
-                    │ Small Model     │ Large Model      │ Production Scale  │
-                    │ (MNIST)         │ (ImageNet)       │ (GPT/BERT)        │
-────────────────────┼─────────────────┼──────────────────┼───────────────────┤
-Classes (C)         │ 10              │ 1,000            │ 50,000+           │
-Batch Size (B)      │ 64              │ 256              │ 2,048             │
-Memory (CE)         │ 2.5 KB          │ 1 MB             │ 400 MB            │
-Memory (MSE)        │ 0.25 KB         │ 1 KB             │ 8 KB              │
-Bottleneck          │ None            │ Softmax compute  │ Vocabulary memory │
+*Memory scales as $\mathcal{O}(B \cdot C)$ for standard cross-entropy. In modern LLMs, vocabulary size $C$ dominates loss computation.*
 
-Memory grows as B*C for cross-entropy!
-At scale, vocabulary (C) dominates everything.
-```
+### Engineering Optimizations in Production
 
-**Engineering Optimizations in Production**
-
-```
-Common Production Optimizations:
-
-1. Hierarchical Softmax:
-   ┌─────────────────────┐     ┌─────────────────────┐
-   │ Full Softmax:       │     │ Hierarchical:       │
-   │ O(V) per sample     │ →   │ O(log V) per sample │
-   │ 50k classes = 50k   │     │ 50k classes = 16    │
-   │ operations          │     │ operations          │
-   └─────────────────────┘     └─────────────────────┘
-
-2. Sampled Softmax:
-   Instead of computing over all 50k classes,
-   sample 1k negative classes + correct class.
-   50× speedup for training!
-
-3. Label Smoothing:
-   Instead of hard targets [0, 0, 1, 0],
-   use soft targets [0.1, 0.1, 0.7, 0.1].
-   Improves generalization.
-
-4. Lower Precision:
-   Using smaller data types can reduce memory
-   (e.g., FP16 uses 2 bytes instead of 4).
-```
+| Optimization Technique | Mathematical Mechanism | Production Impact | Typical Application |
+| :--- | :--- | :--- | :--- |
+| **Hierarchical Softmax** | Decompose $C$ into balanced binary tree: $\mathcal{O}(\log_2 C)$ decisions | Reduces compute from $50{,}000$ ops to $\approx 16$ ops per sample | Word2Vec, extreme multi-label text |
+| **Sampled Softmax** | Compute normalization over positive target + $K \ll C$ negative samples | $50\times$ speedup during pre-training | Recommendation candidate retrieval |
+| **Label Smoothing** | Target $\mathbf{y}_{\text{smooth}} = (1 - \alpha)\mathbf{y} + \frac{\alpha}{C}$ | Prevents overconfident logit explosion ($z \to \infty$) | ImageNet training, Transformer translation |
+| **Kernel Fusion / Triton** | Fuse logit write + softmax + cross-entropy into a single streaming GPU kernel | Eliminates $3\times B \cdot C$ intermediate DRAM roundtrips | FlashCrossEntropy, PyTorch Inductor |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-production-patterns", "solution": false}
@@ -1468,7 +1269,7 @@ def test_module():
 
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of loss functions and their systems implications:
@@ -1675,11 +1476,8 @@ What happens to:
 **Memory Usage**: Almost. About 29 GB (1 GB fixed + 4 × 7 GB of activations) - **EXCEEDS GPU MEMORY! Training will crash.**
 
 **Why linear scaling?**
-```
-Memory = Model_Params + Batch_Size × (Intermediate_Results)
-         ↑              ↑
-      Fixed (1GB)     Scales linearly (7GB → 28GB)
-```
+
+$$\text{Memory} = \underbrace{\text{Model Params}}_{\text{Fixed } (1\text{ GB})} + \underbrace{B \times (\text{Intermediate Buffers})}_{\text{Scales linearly } (7\text{ GB} \to 28\text{ GB})}$$
 
 **Loss computation time**: ~4× slower (linear with batch size)
 - 32 samples: 0.5ms
