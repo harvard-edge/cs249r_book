@@ -103,9 +103,8 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
     blocks.push(block);
   }
   
-  const handleKey = (e) => {
+  const routeLetter = (key) => {
     if (!state.started || state.gameOver) return;
-    const key = e.key.toUpperCase();
     if (letters.includes(key)) {
       // Find oldest unprocessed block in zone
       const target = blocks.find(b => !b.processed && !b.bounced && b.x > 150 && b.x < 450);
@@ -119,14 +118,15 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
       }
     }
   };
+  const handleKey = (e) => routeLetter(e.key.toUpperCase());
   window.addEventListener('keydown', handleKey);
   
   // Pre-game READY overlay
   runtime.mountReadyOverlay(stage, {
     width: width, height: height,
     title: "DATA LOADER DASH",
-    goal: "Type each letter as it enters the zone — feed the GPU.",
-    controls: "TYPE letters (J · C · A · T) as they appear",
+    goal: "Prepare each block in the zone — feed the GPU.",
+    controls: "TYPE or TAP J · C · A · T as they appear",
     onLaunch: () => { state.started = true; }
   });
 
@@ -138,7 +138,13 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
     state.hunger -= dt * 0.01;
     if (state.hunger <= 0) {
       state.hunger = 0;
-      state.health -= dt * 0.02;
+      state.health = Math.max(0, state.health - dt * 0.02);
+      if (state.health === 0) {
+        callbacks.onScoreChange({ score: state.score, health: 0 });
+        state.gameOver = true;
+        endGame();
+        return;
+      }
     }
     updateHungerBar();
     
@@ -172,7 +178,7 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
         if (b.x > 550) {
           if (!b.processed) {
             // RAW BLOCK bounces off
-            state.health -= 15;
+            state.health = Math.max(0, state.health - 15);
             runtime.flash(stage, 0xff0000, 200, 0.3);
             runtime.shake(container, 10, 200);
             b.bounced = true;
@@ -189,11 +195,12 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
             b.poolItem.sprite.visible = false;
             blocks.splice(i, 1);
           }
-          callbacks.onScoreChange(state);
+          callbacks.onScoreChange({ score: state.score, health: Math.floor(state.health) });
           
           if (state.health <= 0 && !state.gameOver) {
             state.gameOver = true;
             endGame();
+            return;
           }
         }
       }
@@ -201,7 +208,12 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
   });
   
   function endGame() {
-    const go = new PIXI.Text({ text: "GAME OVER\nPress R to Retry", style: { fill: 0xffffff, fontSize: 48, align: 'center' } });
+    const panel = new PIXI.Graphics();
+    panel.roundRect(width / 2 - 245, height / 2 - 72, 490, 144, 14)
+      .fill({ color: 0x101827, alpha: 0.96 })
+      .stroke({ color: 0x00aaff, width: 2 });
+    stage.addChild(panel);
+    const go = new PIXI.Text({ text: "GAME OVER\nTap retry or press R", style: { fill: 0xffffff, fontSize: 36, fontWeight: 'bold', align: 'center' } });
     go.anchor.set(0.5);
     go.position.set(width/2, height/2);
     stage.addChild(go);
@@ -209,9 +221,10 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
   }
   
   return {
+    routeLetter,
     ahaLabel: "Data Loading",
     ahaText: "If the CPU can't decode and prep data fast enough, the GPU sits idle.",
-    ahaLink: { href: "/", label: "Read Vol I: Data Engineering" },
+    ahaLink: { href: "/vol1/data_engineering/data_engineering.html", label: "Read Vol I: Data Engineering" },
     destroy: () => {
       window.removeEventListener('keydown', handleKey);
       destroy();

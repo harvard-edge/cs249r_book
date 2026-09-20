@@ -20,10 +20,12 @@ This volume follows the content layout shared by all four volumes:
 ```
 vol4/
 ├── index.qmd              volume home page
-├── frontmatter/           author note, about, prerequisites, syllabus, notation
+├── frontmatter/           author note, about, prerequisites, notation
 ├── parts/                 part openers and part summaries
 ├── NN_chapter/            one directory per chapter: NN_chapter.qmd plus its images and data
 └── backmatter/            references, appendices, glossary
 ```
 
 Chapter order comes from `books/config/_quarto-pdf-vol4.yml`, and `books/shared/STRUCTURE.md` lists it for every volume.
+
+The proposed Physical AI course is a working [instructor draft](../../instructors/vol4/README.md). Its hardware studio plan is in [`labs/vol4/README.md`](../../labs/vol4/README.md).

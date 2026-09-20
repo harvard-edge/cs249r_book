@@ -1,7 +1,7 @@
 /* ============================================================
    MLSysBook Playground — game registry
-   Single source of truth. The 404 randomiser picks an
-   `available: true` game; the gallery lists them all.
+   The 404 randomizer picks an `available: true` game.
+   The volume field records the playground's teaching placement.
    ============================================================ */
 
 window.MLSP = window.MLSP || {};
@@ -9,6 +9,7 @@ window.MLSP = window.MLSP || {};
 MLSP.registry = [
   {
     id: "lander",
+    volume: 2,
     name: "Gradient Lander",
     tagline: "Balance batch size and learning rate to converge safely.",
     url: "/games/lander.html",
@@ -20,6 +21,7 @@ MLSP.registry = [
   },
   {
     id: "pipeline",
+    volume: 2,
     name: "Pipeline Pacer",
     tagline: "Keep the GPUs fed without bubbling.",
     url: "/games/pipeline.html",
@@ -31,6 +33,7 @@ MLSP.registry = [
   },
   {
     id: "oom",
+    volume: 1,
     name: "Tensor Tetris",
     tagline: "Pack training memory before you OOM.",
     url: "/games/oom.html",
@@ -42,6 +45,7 @@ MLSP.registry = [
   },
   {
     id: "prune",
+    volume: 1,
     name: "Pulse Prune",
     tagline: "Shrink a network without breaking it.",
     url: "/games/prune.html",
@@ -53,6 +57,7 @@ MLSP.registry = [
   },
   {
     id: "quantization",
+    volume: 1,
     name: "Quantization Sharp Shot",
     tagline: "Compress a model before the target blurs.",
     url: "/games/quantization.html",
@@ -64,6 +69,7 @@ MLSP.registry = [
   },
   {
     id: "batch",
+    volume: 1,
     name: "Batch Size Balancer",
     tagline: "Push throughput to the edge of OOM.",
     url: "/games/batch.html",
@@ -75,8 +81,9 @@ MLSP.registry = [
   },
   {
     id: "moe",
+    volume: 2,
     name: "MoE Router",
-    tagline: "Distribute tokens, balance the experts.",
+    tagline: "Route tokens to the right experts before they expire.",
     url: "/games/moe.html",
     module: "/assets/games/moe.mjs",
     teaches: "Mixture of Experts.",
@@ -86,6 +93,7 @@ MLSP.registry = [
   },
   {
     id: "loader",
+    volume: 1,
     name: "Data Loader Dash",
     tagline: "The CPU preparing data before the GPU starves.",
     url: "/games/loader.html",
@@ -97,6 +105,7 @@ MLSP.registry = [
   },
   {
     id: "checkpoint",
+    volume: 2,
     name: "Checkpoint Roulette",
     tagline: "Fault tolerance and checkpointing at scale.",
     url: "/games/checkpoint.html",
@@ -108,8 +117,9 @@ MLSP.registry = [
   },
   {
     id: "roofline",
+    volume: 1,
     name: "Roofline Rider",
-    tagline: "The Roofline model: Compute vs Memory bound.",
+    tagline: "Ride from the memory limit to the compute limit.",
     url: "/games/roofline.html",
     module: "/assets/games/roofline.mjs",
     teaches: "Hardware Acceleration.",
@@ -119,6 +129,7 @@ MLSP.registry = [
   },
   {
     id: "allreduce",
+    volume: 2,
     name: "All-Reduce Rhythm",
     tagline: "Keep the gradients flowing in a perfect ring.",
     url: "/games/allreduce.html",
@@ -130,6 +141,7 @@ MLSP.registry = [
   },
   {
     id: "topology",
+    volume: 2,
     name: "Topology Tycoon",
     tagline: "Build the fabric, avoid the bottlenecks.",
     url: "/games/topology.html",
@@ -141,6 +153,7 @@ MLSP.registry = [
   },
   {
     id: "kvcache",
+    volume: 2,
     name: "KV Cache Packer",
     tagline: "Pack the pages. Defrag the cache.",
     url: "/games/kvcache.html",
@@ -152,6 +165,7 @@ MLSP.registry = [
   },
   {
     id: "cluster",
+    volume: 2,
     name: "Cluster Commander",
     tagline: "Pack your workloads, avoid fragmentation.",
     url: "/games/cluster.html",
@@ -159,6 +173,54 @@ MLSP.registry = [
     teaches: "Fleet Orchestration.",
     featured404: false,
     inline404: true,
+    available: true
+  },
+  {
+    id: "context-cache",
+    volume: 3,
+    name: "Context Cache",
+    tagline: "Keep the next action's evidence inside a limited working set.",
+    url: "/games/context-cache.html",
+    module: "/assets/games/volume34.mjs",
+    teaches: "Context Working Sets.",
+    featured404: false,
+    inline404: false,
+    available: true
+  },
+  {
+    id: "tool-trail",
+    volume: 3,
+    name: "Tool Trail",
+    tagline: "Recover a trajectory without duplicating an external effect.",
+    url: "/games/tool-trail.html",
+    module: "/assets/games/volume34.mjs",
+    teaches: "Tool Actuation and Recovery.",
+    featured404: false,
+    inline404: false,
+    available: true
+  },
+  {
+    id: "latency-line",
+    volume: 4,
+    name: "Latency Line",
+    tagline: "Get a physical action through the pipeline before its deadline.",
+    url: "/games/latency-line.html",
+    module: "/assets/games/volume34.mjs",
+    teaches: "Action Latency.",
+    featured404: false,
+    inline404: false,
+    available: true
+  },
+  {
+    id: "safety-gate",
+    volume: 4,
+    name: "Safety Gate",
+    tagline: "Keep the rover inside the safe set.",
+    url: "/games/safety-gate.html",
+    module: "/assets/games/volume34.mjs",
+    teaches: "Safety Enforcement.",
+    featured404: false,
+    inline404: false,
     available: true
   }
 ];
