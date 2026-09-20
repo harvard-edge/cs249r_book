@@ -1338,7 +1338,109 @@ The scheduler must therefore model the cluster not as a flat list of compute slo
 
 ::: {#fig-fleet-orchestration-topology-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Physical topology hierarchy and bandwidth cliffs**: Hardware boundaries dictate communication performance across three distinct domains. Within a node, NVLink provides 900 GB/s bidirectional bandwidth for tensor-parallel communication. Within a rack, InfiniBand/RoCE links deliver 50 GB/s for pipeline and data parallelism. Across racks and pods, spine switch fabrics drop effective bandwidth to 12–25 GB/s with 2:1 to 4:1 oversubscription." fig-alt="Three-tier physical hierarchy showing Node domain (NVLink at 900 GB/s), Rack domain (InfiniBand/RoCE at 50 GB/s), and Pod domain (Spine switch fabric at 12 to 25 GB/s) with order-of-magnitude bandwidth cliffs."}
 
-![](images/svg/topology-hierarchy.svg)
+```{=latex}
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small
+]
+
+    % Provide colors if not defined
+    \providecolor{NavyBlue}{RGB}{0,102,204}
+    \providecolor{DarkOrchid}{RGB}{153,50,204}
+    \providecolor{BurntOrange}{RGB}{210,105,30}
+    \providecolor{BrickRed}{RGB}{178,34,34}
+
+    % =========================================================================
+    % LEFT PANEL: Nested Topology Domains
+    % =========================================================================
+
+    % Outer: Pod / Fabric Domain
+    \node[draw=BurntOrange, fill=BurntOrange!4!white, rounded corners=6pt, line width=1.3pt,
+          minimum width=10.6cm, minimum height=8.4cm, anchor=south west] (pod_box) at (-8.0, -4.2) {};
+
+    \node[draw=BurntOrange, fill=BurntOrange, rounded corners=3pt, inner sep=4pt, text=white, font=\footnotesize\bfseries, anchor=north west] (pod_badge) at (-7.7, 3.9) {Pod / Fabric Domain};
+    \node[font=\scriptsize\bfseries\color{BurntOrange!80!black}, anchor=east] at (2.4, 3.68) {Cross-rack Spine: $\sim$25 GB/s effective (2:1 oversubscribed)};
+
+    % Middle: Rack / Leaf Switch Domain
+    \node[draw=DarkOrchid, fill=DarkOrchid!3!white, rounded corners=5pt, line width=1.2pt,
+          minimum width=10.0cm, minimum height=6.8cm, anchor=south west] (rack_box) at (-7.7, -3.8) {};
+
+    \node[draw=DarkOrchid, fill=DarkOrchid, rounded corners=3pt, inner sep=4pt, text=white, font=\footnotesize\bfseries, anchor=north west] (rack_badge) at (-7.4, 2.7) {Rack / Leaf Switch Domain};
+    \node[font=\scriptsize\bfseries\color{DarkOrchid!80!black}, anchor=east] at (2.1, 2.48) {InfiniBand NDR: 50 GB/s per port (400 Gbps)};
+
+    % Inner: Node (Single Server Chassis)
+    \node[draw=NavyBlue!80!black, fill=white, rounded corners=4pt, line width=1.2pt,
+          minimum width=9.4cm, minimum height=5.2cm, anchor=south west] (node_box) at (-7.4, -3.4) {};
+
+    \node[draw=NavyBlue!90!black, fill=NavyBlue!90!black, rounded corners=3pt, inner sep=4pt, text=white, font=\footnotesize\bfseries, anchor=north west] (node_badge) at (-7.1, 1.5) {Node (Single Server Chassis)};
+    \node[font=\scriptsize\bfseries\color{NavyBlue!90!black}, anchor=east] at (1.8, 1.28) {NVLink 4: 900 GB/s bidirectional};
+
+    % 8 GPUs inside Node
+    \foreach \i in {0,...,7} {
+        \node[draw=NavyBlue!80!black, fill=NavyBlue!6!white, rounded corners=2pt, line width=0.8pt,
+              minimum width=0.96cm, minimum height=1.15cm, align=center, inner sep=1pt] (gpu\i) at (-6.375 + \i*1.05, 0.25) {
+            {\scriptsize\bfseries GPU \i}\\[3pt]
+            {\tiny\color{black!70} 80 GB}
+        };
+    }
+
+    % NVSwitch Crossbar Box
+    \node[draw=NavyBlue!80!black, fill=NavyBlue!4!white, rounded corners=2pt, line width=0.8pt,
+          minimum width=8.6cm, minimum height=1.05cm, align=center, inner sep=3pt] (nvswitch) at (-2.7, -1.35) {
+        {\footnotesize\bfseries NVSwitch Intra-Node Crossbar}\\[2pt]
+        {\scriptsize\color{black!80} Full mesh all-to-all: 900 GB/s per GPU $\cdot$ zero OS/PCIe overhead}
+    };
+
+    % Connectors from each GPU to NVSwitch
+    \foreach \i in {0,...,7} {
+        \draw[thick, NavyBlue!80!black] (gpu\i.south) -- (gpu\i.south |- nvswitch.north);
+    }
+
+    % =========================================================================
+    % RIGHT PANEL: 3 Tiers & Bandwidth Drops
+    % Center: x = 5.4
+    % =========================================================================
+
+    % Tier 1 Card (Intra-Node)
+    \node[draw=NavyBlue!50, fill=NavyBlue!5!white, rounded corners=4pt, line width=0.9pt,
+          minimum width=4.0cm, minimum height=1.75cm, align=center, inner sep=4pt] (t1_card) at (5.4, 3.1) {
+        {\footnotesize\bfseries\color{NavyBlue!90!black} Tier 1: Intra-Node}\\[2pt]
+        {\Large\bfseries\color{NavyBlue!90!black} 900 GB/s}\\[2pt]
+        {\scriptsize\color{black!80} NVLink Mesh (NVSwitch)}\\[1pt]
+        {\tiny\color{black!70} Latency: $< 1\,\mu$s}\\[3pt]
+        \colorbox{NavyBlue!12}{\strut\tiny\bfseries\color{NavyBlue!90!black}\;Tensor Parallelism (TP)\;}
+    };
+
+    % Tier 2 Card (Intra-Rack)
+    \node[draw=DarkOrchid!50, fill=DarkOrchid!5!white, rounded corners=4pt, line width=0.9pt,
+          minimum width=4.0cm, minimum height=1.75cm, align=center, inner sep=4pt] (t2_card) at (5.4, 0.0) {
+        {\footnotesize\bfseries\color{DarkOrchid!90!black} Tier 2: Intra-Rack}\\[2pt]
+        {\Large\bfseries\color{DarkOrchid!90!black} 50 GB/s}\\[2pt]
+        {\scriptsize\color{black!80} InfiniBand NDR Leaf}\\[1pt]
+        {\tiny\color{black!70} Latency: 2--5\,$\mu$s}\\[3pt]
+        \colorbox{DarkOrchid!12}{\strut\tiny\bfseries\color{DarkOrchid!90!black}\;Pipeline Parallelism (PP)\;}
+    };
+
+    % Drop 1 (18x Drop)
+    \draw[-{Stealth[length=4pt, width=3pt]}, dashed, line width=1.1pt, BrickRed] (t1_card.south) -- (t2_card.north);
+    \node[draw=BrickRed!40, fill=BrickRed!10, rounded corners=2pt, inner sep=2pt, font=\tiny\bfseries\color{BrickRed!90!black}, anchor=west] at ($(t1_card.south)!0.5!(t2_card.north) + (0.15, 0)$) {18$\times$ Drop};
+
+    % Tier 3 Card (Inter-Rack)
+    \node[draw=BurntOrange!50, fill=BurntOrange!5!white, rounded corners=4pt, line width=0.9pt,
+          minimum width=4.0cm, minimum height=1.75cm, align=center, inner sep=4pt] (t3_card) at (5.4, -3.1) {
+        {\footnotesize\bfseries\color{BurntOrange!90!black} Tier 3: Inter-Rack}\\[2pt]
+        {\Large\bfseries\color{BurntOrange!90!black} $\sim$25 GB/s}\\[2pt]
+        {\scriptsize\color{black!80} Spine Switch Fabric (2:1)}\\[1pt]
+        {\tiny\color{black!70} Latency: 10--30\,$\mu$s (tail-heavy)}\\[3pt]
+        \colorbox{BurntOrange!15}{\strut\tiny\bfseries\color{BurntOrange!90!black}\;Data Parallelism (DP)\;}
+    };
+
+    % Drop 2 (2x Drop (36x))
+    \draw[-{Stealth[length=4pt, width=3pt]}, dashed, line width=1.1pt, BrickRed] (t2_card.south) -- (t3_card.north);
+    \node[draw=BrickRed!40, fill=BrickRed!10, rounded corners=2pt, inner sep=2pt, font=\tiny\bfseries\color{BrickRed!90!black}, anchor=west] at ($(t2_card.south)!0.5!(t3_card.north) + (0.15, 0)$) {2$\times$ Drop (36$\times$)};
+
+\end{tikzpicture}
+```
 
 :::
 
