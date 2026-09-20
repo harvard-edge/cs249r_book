@@ -57,7 +57,7 @@ TinyTorch supports three assignment staging tiers via `--tier <tier>`:
 
 | Release Tier | CLI Flag | Student Implementation Scope | Best For |
 |:---|:---|:---|:---|
-| **Student** *(Default)* | `--tier student` | **47 core archetypes** (189 secondary helper blocks scaffolded) | Standard 14-week university courses (Harvard CS249r model) |
+| **Student** *(Default)* | `--tier student` | **52 core regions** (189 secondary helper blocks scaffolded) | Standard 14-week university courses (Harvard CS249r model) |
 | **Challenge** | `--tier challenge` | Regions marked `role="challenge"` *(currently unannotated: no `role="challenge"` region exists yet, so `tito nbgrader generate --tier challenge` refuses rather than emit the full reference)* | Advanced graduate courses, hackathons, honors tracks |
 | **Instructor** | `--tier instructor` | **0 Blocks** (complete reference solutions retained) | Solution keys, grading rubrics, and TA references |
 
@@ -76,7 +76,7 @@ Hardware extensions are optional and ungraded, and every one falls back to NumPy
 
 ### **1. Prepare Assignments**
 ```bash
-# Stage student assignment (default: 47 core archetypes)
+# Stage student assignment (default: 52 core regions)
 tito nbgrader generate 01_tensor --tier student
 
 # Or stage full challenge assignment

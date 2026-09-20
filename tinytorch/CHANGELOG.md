@@ -17,7 +17,7 @@ for the canonical list.
 
 ### Added
 - **Full End-to-End Pedagogical Certification**: Automated student journey simulation executing all 20 modules progressively from scratch, certified through 35 pre-release release gates.
-- **Enhanced NBGrader 3-Tier Staging**: Student (41 core archetypes), Challenge (236 full blocks), and Instructor (full solutions) release tiers with automated solution stripping and nbgrader schema validation.
+- **Enhanced NBGrader 3-Tier Staging**: Student (52 core regions), Challenge (no annotated regions yet, so the tier refuses to stage), and Instructor (full solutions) release tiers with automated solution stripping and nbgrader schema validation.
 - **Three-Phase Educational Test Runner**: `tito module test` with inline notebook assertions, educational pytest explanations, and cumulative cross-module integration tests.
 - **Narrative Book Code Synchronization**: Real-time listing quotation from source modules into textbook chapters via `tools/listings.py`.
 - **Hardware Extensions Track**: Optional hardware optimization modules (`tinytorch.extensions`) for AVX2/NEON SIMD, Apple Silicon Metal (MPS), and OpenAI Triton kernels.
