@@ -100,7 +100,9 @@ Interleaving nonlinear activation functions $\sigma(\cdot)$ prevents linear coll
 $$\mathbf{h}_1 = \sigma(\mathbf{W}_1 \mathbf{x}), \quad \mathbf{h}_2 = \sigma(\mathbf{W}_2 \mathbf{h}_1), \quad \hat{\mathbf{y}} = \mathbf{W}_3 \mathbf{h}_2$$
 Each activation function selectively warps and bends the coordinate space, allowing deep networks to approximate arbitrary continuous functions (Universal Approximation Theorem).
 
-![TinyTorch Activation Functions Overview](activations_overview.svg)
+<div align="center">
+  <img src="activations_overview.svg" alt="TinyTorch Activation Functions Overview" width="680px">
+</div>
 
 ## 📐 Foundations: Five Activation Functions
 
@@ -171,7 +173,9 @@ $$\sigma(x) = \frac{1}{1 + e^{-x}} = \frac{e^x}{e^x + 1}$$
 
 $$\begin{bmatrix} -3.0 & -1.0 & 0.0 & 1.0 & 3.0 \end{bmatrix} \xrightarrow{\sigma(x)} \begin{bmatrix} 0.0474 & 0.2689 & 0.5000 & 0.7311 & 0.9526 \end{bmatrix}$$
 
-![Sigmoid Squashing and Saturation](sigmoid_curve.svg)
+<div align="center">
+  <img src="sigmoid_curve.svg" alt="Sigmoid Squashing and Saturation" width="320px">
+</div>
 
 **Why Sigmoid matters**: In binary classification, we need outputs between $0$ and $1$ to represent probabilities. Notice the red saturation zones where $|x| \ge 3$: the gradient vanishes toward zero ($\sigma'(x) \to 0$), which will motivate ReLU and GELU in deep hidden layers.
 """
@@ -302,7 +306,9 @@ $$f(x) = \max(0, x) = \begin{cases} x & \text{if } x > 0 \\ 0 & \text{if } x \le
 
 $$\begin{bmatrix} -2.0 & -1.0 & 0.0 & 1.0 & 2.0 \end{bmatrix} \xrightarrow{\text{ReLU}} \begin{bmatrix} 0.0 & 0.0 & 0.0 & 1.0 & 2.0 \end{bmatrix}$$
 
-![ReLU Piecewise Linear Hinge](relu_curve.svg)
+<div align="center">
+  <img src="relu_curve.svg" alt="ReLU Piecewise Linear Hinge" width="320px">
+</div>
 
 **Why ReLU matters**: By zeroing negative values, ReLU creates representation sparsity (often $\approx 50\%$ dead/zeroed units in trained networks). Because a comparison instruction (`max`) executes in a single clock cycle compared to multi-cycle transcendentals (`exp`), ReLU dramatically accelerates deep architectures.
 """
@@ -425,7 +431,9 @@ $$\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}} = 2\sigma(2x) - 1$$
 
 $$\begin{bmatrix} -2.0 & 0.0 & 2.0 \end{bmatrix} \xrightarrow{\tanh(x)} \begin{bmatrix} -0.9640 & 0.0000 & 0.9640 \end{bmatrix}$$
 
-![Tanh Zero-Centered S-Curve](tanh_curve.svg)
+<div align="center">
+  <img src="tanh_curve.svg" alt="Tanh Zero-Centered S-Curve" width="320px">
+</div>
 
 **Why Tanh matters**: Because Sigmoid outputs are strictly positive ($> 0$), downstream gradients all inherit the same sign, causing systematic zig-zagging in weight space. Tanh outputs have zero mean on symmetric inputs, preserving gradient balance across intermediate layers.
 """
@@ -555,7 +563,9 @@ $$\text{Tanh-GELU (PyTorch default): } \text{GELU}(x) \approx 0.5x \left(1 + \ta
 
 $$\begin{bmatrix} -1.0 & 0.0 & 1.0 \end{bmatrix} \xrightarrow{\text{GELU}} \begin{bmatrix} -0.1543 & 0.0000 & 0.8457 \end{bmatrix}$$
 
-![GELU vs ReLU Curvature](gelu_curve.svg)
+<div align="center">
+  <img src="gelu_curve.svg" alt="GELU vs ReLU Curvature" width="320px">
+</div>
 
 **Why GELU matters**: Unlike ReLU's sharp non-differentiable hinge at $x = 0$, GELU provides smooth non-zero gradients everywhere, eliminating the "dying neuron" failure mode in deep Transformers.
 """

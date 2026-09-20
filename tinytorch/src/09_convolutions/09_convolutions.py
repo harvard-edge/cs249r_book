@@ -24,7 +24,7 @@ Welcome to Module 09! You'll implement spatial operations that transform machine
 **You'll Enable**: Convolutional Neural Networks (CNNs) for computer vision and spatial representation learning
 
 <div align="center">
-  <img src="convolution_blueprint.svg" alt="TinyTorch Execution Datapath: Module 09 Convolutions Highlighted" width="550px">
+  <img src="convolution_blueprint.svg" alt="TinyTorch Execution Datapath: Module 09 Convolutions Highlighted" width="380px">
 </div>
 
 ### Architectural Roadmap

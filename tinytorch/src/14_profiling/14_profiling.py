@@ -24,7 +24,9 @@ Welcome to Module 14! You'll build professional profiling tools to measure model
 **You'll Build**: Comprehensive profiling system for parameters, FLOPs, memory allocations, and latency (`Profiler`, `count_parameters`, `count_flops`, `measure_memory`, `measure_latency`).
 **You'll Enable**: Data-driven optimization decisions across quantization (`15_quantization`), compression (`16_compression`), acceleration (`17_acceleration`), and memory caching (`18_memoization`).
 
-![TinyTorch Architecture Blueprint: Module 14 Profiling](profiling_blueprint.svg)
+<div align="center">
+  <img src="profiling_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 14 Profiling" width="380px">
+</div>
 
 ### Architectural Roadmap
 
@@ -54,7 +56,9 @@ By the end of this module, you will:
 from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_distribution
 ```
 
-![Source Code Mapping: Module 14 Profiling](prof_margin_source.svg)
+<div align="center">
+  <img src="prof_margin_source.svg" alt="Source Code Mapping: Module 14 Profiling" width="260px">
+</div>
 
 ## 📋 Module Dependencies
 
@@ -97,7 +101,9 @@ r"""
 
 Imagine you're an engineer investigating an ML systems regression. Your model runs unacceptably slowly, exhausts device memory, or inflates cloud inference bills. Without profiling, you are flying blind—guessing whether to optimize matrix multiplication kernels, reduce activation precision, or shard model weights. With profiling, you have empirical ground truth.
 
-![Systems Profiling and Optimization Workflow](profiling_engineering_workflow.svg)
+<div align="center">
+  <img src="profiling_engineering_workflow.svg" alt="Systems Profiling and Optimization Workflow" width="680px">
+</div>
 
 ### The Profiling and Optimization Engineering Loop
 
@@ -153,7 +159,9 @@ $$\text{FLOP}_{\text{Conv2d}} = 2 \cdot B \cdot H_{\text{out}} \cdot W_{\text{ou
 
 Deep learning training memory divides into four distinct pools that undergo dynamic lifecycle transitions during forward and backward passes.
 
-![Deep Learning Training Memory Lifecycle](training_memory_lifecycle.svg)
+<div align="center">
+  <img src="training_memory_lifecycle.svg" alt="Deep Learning Training Memory Lifecycle" width="680px">
+</div>
 
 | Memory Pool | Lifecycle Invariant | Scaling Dimensions | Budget Formula (FP32) | Example (125M GPT) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -180,7 +188,9 @@ r"""
 
 Let us now implement the complete `Profiler` class. We structure the profiling harness into four core telemetry engines and two multi-pass synthesis pipelines.
 
-![Profiler Architecture and Diagnostic Pipeline](profiler_architecture_pipeline.svg)
+<div align="center">
+  <img src="profiler_architecture_pipeline.svg" alt="Profiler Architecture and Diagnostic Pipeline" width="680px">
+</div>
 
 ### Profiler Architectural Specification
 
@@ -2219,7 +2229,9 @@ r"""
 
 Model profiling reveals the empirical performance characteristics of deep learning architectures across dimensions of model scale, batch size, and arithmetic intensity.
 
-![Illustrative Hardware Limits and the Roofline Model](roofline_model_hardware_limits.svg)
+<div align="center">
+  <img src="roofline_model_hardware_limits.svg" alt="Illustrative Hardware Limits and the Roofline Model" width="680px">
+</div>
 
 ### The Roofline Model Formulation
 
@@ -2241,7 +2253,9 @@ $$I_{\text{ridge}} = \frac{P_{\text{peak}}}{\text{BW}_{\text{mem}}}$$
 | **Memory-Bandwidth Bound** | $I < I_{\text{ridge}}$ | DRAM / HBM transfer bus | Weight quantization, operator fusion, KV caching |
 | **Compute Bound** | $I \ge I_{\text{ridge}}$ | ALU / Tensor Core matrix engines | Algorithmic transforms, FP16 Tensor Cores |
 
-![Weight Streaming vs Cache Reuse in Autoregressive Decode](weight_streaming_vs_reuse.svg)
+<div align="center">
+  <img src="weight_streaming_vs_reuse.svg" alt="Weight Streaming vs Cache Reuse in Autoregressive Decode" width="680px">
+</div>
 """
 
 # %% nbgrader={"grade": false, "grade_id": "performance_analysis", "solution": false}

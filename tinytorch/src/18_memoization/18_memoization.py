@@ -20,7 +20,9 @@ Welcome to Module 18! In this module, we transition from silicon execution primi
 
 ## 🔗 Prerequisites & Progress
 
-<img src="memoization_blueprint.svg" width="100%" alt="TinyTorch Framework Blueprint: Module 18 Memoization" />
+<div align="center">
+  <img src="memoization_blueprint.svg" width="380px" alt="TinyTorch Framework Blueprint: Module 18 Memoization" />
+</div>
 
 ### Architectural Roadmap
 
@@ -46,7 +48,9 @@ By the end of this module, you will:
 **Learning Side:** You work in `modules/18_memoization/memoization.ipynb`  
 **Building Side:** Code exports to `tinytorch.perf.memoization`
 
-<img src="memoization_source_card.svg" width="100%" alt="Source Code Mapping Card for Module 18 Memoization" />
+<div align="center">
+  <img src="memoization_source_card.svg" width="260px" alt="Source Code Mapping Card for Module 18 Memoization" />
+</div>
 
 ```python
 # How to use this module:
@@ -86,7 +90,9 @@ r"""
 
 Before implementing KV caching, let us profile naive autoregressive generation to isolate the fundamental computational bottleneck of modern transformer inference.
 
-<img src="memoization_generation_overview.svg" width="100%" alt="Autoregressive KV Cache Generation Overview" />
+<div align="center">
+  <img src="memoization_generation_overview.svg" width="680px" alt="Autoregressive KV Cache Generation Overview" />
+</div>
 
 ### Computational Paradigm Comparison
 
@@ -242,9 +248,13 @@ To serve high-performance inference pipelines, `KVCache` must satisfy five syste
 4. **$\mathcal{O}(1)$ Update Semantics**: In-place indexed assignment at write cursor `seq_pos` without array recreation.
 5. **Zero-Copy Slicing**: Exposing valid token history $\mathbf{K}[:, :, :t, :]$ via views for immediate vector-matrix GEMV attention.
 
-<img src="kv_cache_state_machine.svg" width="100%" alt="KV Cache Buffer State Machine" />
+<div align="center">
+  <img src="kv_cache_state_machine.svg" width="680px" alt="KV Cache Buffer State Machine" />
+</div>
 
-<img src="kv_cache_buffer_card.svg" width="100%" alt="KV Cache Buffer Card" />
+<div align="center">
+  <img src="kv_cache_buffer_card.svg" width="320px" alt="KV Cache Buffer Card" />
+</div>
 
 ### Buffer Dimension Specification
 

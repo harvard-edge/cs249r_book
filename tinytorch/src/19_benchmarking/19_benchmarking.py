@@ -20,7 +20,9 @@ Welcome to Module 19! In this module, we transition from individual optimization
 
 ## 🔗 Prerequisites & Progress
 
-<img src="benchmarking_blueprint.svg" width="100%" alt="TinyTorch Framework Blueprint: Module 19 Benchmarking" />
+<div align="center">
+  <img src="benchmarking_blueprint.svg" width="380px" alt="TinyTorch Framework Blueprint: Module 19 Benchmarking" />
+</div>
 
 ### Architectural Roadmap
 
@@ -47,7 +49,9 @@ By the end of this module, you will:
 **Learning Side:** You work in `modules/19_benchmarking/benchmarking.ipynb`  
 **Building Side:** Code exports to `tinytorch.perf.benchmarking`
 
-<img src="benchmarking_source_card.svg" width="100%" alt="Source Code Mapping Card for Module 19 Benchmarking" />
+<div align="center">
+  <img src="benchmarking_source_card.svg" width="260px" alt="Source Code Mapping Card for Module 19 Benchmarking" />
+</div>
 
 ```python
 # Final package structure:
@@ -116,7 +120,9 @@ r"""
 
 Benchmarking in ML systems is not merely recording wall-clock time—it is an empirical science requiring controlled experimental conditions to enable fair, reproducible comparisons that guide production deployment decisions.
 
-<img src="benchmarking_methodology_overview.svg" width="100%" alt="Benchmarking Methodology Pipeline" />
+<div align="center">
+  <img src="benchmarking_methodology_overview.svg" width="680px" alt="Benchmarking Methodology Pipeline" />
+</div>
 
 ### Confounding Factors & Controlled Experimental Variables
 
@@ -134,9 +140,13 @@ Benchmarking in ML systems is not merely recording wall-clock time—it is an em
 
 Inference latency on modern superscalar processors is an inherently non-deterministic, right-skewed stochastic process.
 
-<img src="latency_anatomy_distribution.svg" width="100%" alt="The Anatomy of Latency Distributions and Tail Percentiles" />
+<div align="center">
+  <img src="latency_anatomy_distribution.svg" width="680px" alt="The Anatomy of Latency Distributions and Tail Percentiles" />
+</div>
 
-<img src="benchmarking_latency_card.svg" width="100%" alt="Latency Distribution Card" />
+<div align="center">
+  <img src="benchmarking_latency_card.svg" width="320px" alt="Latency Distribution Card" />
+</div>
 
 ### Central Limit Theorem & Confidence Intervals
 
@@ -439,7 +449,9 @@ r"""
 
 The `Benchmark` class implements the core measurement logic for different metrics. It handles the orchestration of multiple models, datasets, and measurement protocols.
 
-<img src="benchmarking_methodology_overview.svg" alt="Benchmarking Methodology Overview" width="100%">
+<div align="center">
+  <img src="benchmarking_methodology_overview.svg" alt="Benchmarking Methodology Overview" width="680px">
+</div>
 
 ### Benchmark Architecture Execution Flow
 
@@ -459,7 +471,9 @@ Modern operating systems and processors have multiple layers of runtime adaptati
 - **Cache warming**: Instruction and weight caches ($L_1/L_2/L_3$) achieve steady-state hit rates
 - **Memory frame allocation**: OS page faults occur during initial virtual memory touches
 
-<img src="latency_anatomy_distribution.svg" alt="Latency Anatomy and Warmup" width="100%">
+<div align="center">
+  <img src="latency_anatomy_distribution.svg" alt="Latency Anatomy and Warmup" width="680px">
+</div>
 
 ### Multiple Benchmark Dimensions
 
@@ -603,7 +617,9 @@ Latency benchmarking measures how long each model takes to process input. We use
 the Profiler for warmup, then collect multiple individual measurements for
 statistical analysis via `BenchmarkResult`.
 
-<img src="benchmarking_latency_card.svg" alt="Tail Latency Percentiles" width="100%">
+<div align="center">
+  <img src="benchmarking_latency_card.svg" alt="Tail Latency Percentiles" width="320px">
+</div>
 
 ### Latency Measurement Pipeline
 
@@ -1187,7 +1203,9 @@ Which is "best"? It depends on your constraints:
 
 ### Multi-Dimensional Comparison Workflow
 
-<img src="benchmarking_source_card.svg" alt="Source Code Mapping" width="100%">
+<div align="center">
+  <img src="benchmarking_source_card.svg" alt="Source Code Mapping" width="260px">
+</div>
 
 | Evaluation Phase | Component Operation | Collected Data | Systems Decision Role |
 | :--- | :--- | :--- | :--- |

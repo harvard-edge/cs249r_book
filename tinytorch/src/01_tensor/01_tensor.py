@@ -164,7 +164,9 @@ Let's build our Tensor class step by step, testing each component as we go.
 
 ### Tensor Class Architecture
 
-![Tensor Class Structure](tensor_class_structure.svg)
+<div align="center">
+  <img src="tensor_class_structure.svg" alt="Tensor Class Structure" width="680px">
+</div>
 
 This clean design focuses on what tensors fundamentally do: store numerical data and route every operation through one shared mechanism, `Function.apply`.
 """

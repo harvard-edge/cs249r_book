@@ -115,7 +115,9 @@ Neural network layers are the fundamental building blocks that transform data as
 - **Dropout layers** randomly zero elements during training for regularization
 - **Sequential containers** compose multiple layers into unified callable models
 
-![TinyTorch Layer System Architecture](layers_architecture.svg)
+<div align="center">
+  <img src="layers_architecture.svg" alt="TinyTorch Layer System Architecture" width="680px">
+</div>
 
 Data flows sequentially through cascaded representations:
 $$\mathbf{X} \in \mathbb{R}^{B \times D_0} \xrightarrow{\text{Layer}_1} \mathbf{H}_1 \in \mathbb{R}^{B \times D_1} \xrightarrow{\text{Layer}_2} \mathbf{H}_2 \in \mathbb{R}^{B \times D_2} \xrightarrow{\text{Layer}_3} \hat{\mathbf{Y}} \in \mathbb{R}^{B \times C}$$
@@ -138,7 +140,9 @@ $$\underbrace{\mathbf{X}}_{(B, D_{\text{in}})} \times \underbrace{\mathbf{W}}_{(
 
 Random initialization is crucial for breaking symmetry and preventing signals from exploding or vanishing across deep cascades:
 
-![Signal Variance Across Layers](variance_waterfall.svg)
+<div align="center">
+  <img src="variance_waterfall.svg" alt="Signal Variance Across Layers" width="680px">
+</div>
 
 | Initialization Scheme | Standard Deviation ($\sigma$) | Target Activation / Design Rationale |
 |:---|:---|:---|
@@ -146,7 +150,9 @@ Random initialization is crucial for breaking symmetry and preventing signals fr
 | **Xavier / Glorot** | $\sigma = \sqrt{\frac{2}{D_{\text{in}} + D_{\text{out}}}}$ | Tanh / symmetric activations; harmonizes forward & backward pass signal variance |
 | **He / Kaiming** | $\sigma = \sqrt{\frac{2}{D_{\text{in}}}}$ | ReLU activations; compensates for the $50\%$ variance loss from negative clamping |
 
-![Kaiming Scale Scaling Factor](kaiming_scaling.svg)
+<div align="center">
+  <img src="kaiming_scaling.svg" alt="Kaiming Scale Scaling Factor" width="280px">
+</div>
 
 We adopt LeCun initialization $\sigma = \sqrt{\frac{1}{D_{\text{in}}}}$ for clean pedagogical clarity: on zero-mean unit-variance inputs, $\text{Var}(y_j) = \sum_{i=1}^{D_{\text{in}}} \text{Var}(x_i) \text{Var}(w_{ij}) = D_{\text{in}} \cdot \frac{1}{D_{\text{in}}} = 1.0$.
 

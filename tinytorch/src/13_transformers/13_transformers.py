@@ -24,7 +24,7 @@ Welcome to Module 13! You're about to synthesize everything you've built across 
 **You'll Enable**: Profiling and roofline optimization (`14_profiling`), post-training quantization (`15_quantization`), and key-value memory caching (`18_memoization`).
 
 <div align="center">
-  <img src="transformer_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 13 Transformers" width="600px">
+  <img src="transformer_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 13 Transformers" width="380px">
 </div>
 
 ### Architectural Roadmap
@@ -168,7 +168,7 @@ When differentiating with respect to early representation $x_0$, the chain rule 
 $$\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} \frac{\partial x_L}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} \left( I + \sum_{l=0}^{L-1} \frac{\partial F_l}{\partial x_l} \right)$$
 
 <div align="center">
-  <img src="transformer_pre_ln_highway.svg" alt="Pre-LN Clean Skip Connection" width="460px">
+  <img src="transformer_pre_ln_highway.svg" alt="Pre-LN Clean Skip Connection" width="300px">
 </div>
 
 Because of the identity matrix $I$, the error signal propagates directly from the loss function $\mathcal{L}$ back to initial embeddings $x_0$ **without vanishing**, allowing architectures with 100+ layers (like GPT-3 175B) to converge reliably.
@@ -625,7 +625,7 @@ r"""
 The `TransformerBlock` represents the fundamental atomic unit of GPT and modern generative language models. It harmonizes two complementary operations: **spatial information routing** across tokens via multi-head causal self-attention, and **pointwise non-linear feature synthesis** via the two-stage MLP.
 
 <div align="center">
-  <img src="transformer_pre_ln_highway.svg" alt="Pre-LN Clean Skip Connection and Sub-layer Off-ramp" width="460px">
+  <img src="transformer_pre_ln_highway.svg" alt="Pre-LN Clean Skip Connection and Sub-layer Off-ramp" width="300px">
 </div>
 
 #### Pre-Norm vs Post-Norm Architectural Comparison

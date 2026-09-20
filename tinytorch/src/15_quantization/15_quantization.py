@@ -24,7 +24,9 @@ Welcome to Module 15! You will build an INT8 post-training quantization system, 
 **You'll Build**: An INT8 quantization engine (`quantize_int8`, `dequantize_int8`, `QuantizedLinear`, `quantize_model`) with empirical activation calibration.
 **You'll Enable**: Modeling the $4\times$ weight-storage compression and memory bandwidth reduction of INT8 serving, unlocking deployment on memory-constrained edge hardware.
 
-![TinyTorch Architecture Blueprint: Module 15 Quantization](quantization_blueprint.svg)
+<div align="center">
+  <img src="quantization_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 15 Quantization" width="380px">
+</div>
 
 ### Architectural Roadmap
 
@@ -56,7 +58,9 @@ By the end of this module, you will:
 from tinytorch.perf.quantization import quantize_int8, dequantize_int8, QuantizedLinear, quantize_model
 ```
 
-![Source Code Mapping: Module 15 Quantization](quant_margin_source.svg)
+<div align="center">
+  <img src="quant_margin_source.svg" alt="Source Code Mapping: Module 15 Quantization" width="260px">
+</div>
 
 ## 📋 Module Dependencies
 
@@ -229,7 +233,9 @@ r"""
 Quantization projects continuous high-precision real numbers onto a discrete lattice of $2^b$ integer values (for $b=8$, exactly 256 discrete levels). The primary systems challenge is minimizing quantization distortion (measured by mean-squared error or Signal-to-Quantization-Noise Ratio) while preserving the zero-value boundary without rounding bias.
 
 <div align="center">
-  <img src="affine_quantization_grid.svg" alt="Affine Quantization Grid" width="100%">
+  <div align="center">
+  <img src="affine_quantization_grid.svg" alt="Affine Quantization Grid" width="680px">
+</div>
 </div>
 
 ### The Affine (Asymmetric) Quantization Formulation
@@ -258,7 +264,9 @@ To guarantee that $x_{\min}$ aligns with the lowest integer coordinate $q_{\min}
 $$-128 = \frac{x_{\min}}{s} + z \implies z = \left\lfloor -128 - \frac{x_{\min}}{s} \right\rceil$$
 
 <div align="center">
-  <img src="zero_point_centering.svg" alt="Zero Point Centering" width="100%">
+  <div align="center">
+  <img src="zero_point_centering.svg" alt="Zero Point Centering" width="680px">
+</div>
 </div>
 
 ### Symmetric vs. Asymmetric Quantization
@@ -300,7 +308,9 @@ r"""
 We construct the quantization engine across four modular abstraction boundaries, matching the design of production inference toolchains (such as PyTorch's `torch.ao.quantization` and ONNX Runtime):
 
 <div align="center">
-  <img src="quantization_pipeline_stages.svg" alt="Quantization Pipeline Stages" width="100%">
+  <div align="center">
+  <img src="quantization_pipeline_stages.svg" alt="Quantization Pipeline Stages" width="680px">
+</div>
 </div>
 
 | Abstraction Tier | Target Primitives | Engineering Functionality | Precision Transformation |

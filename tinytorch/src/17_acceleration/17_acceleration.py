@@ -19,7 +19,9 @@ r"""
 Welcome to Module 17! In this module, we transition from pure mathematical abstractions to silicon-level efficiency: vectorizing operations via BLAS GEMM kernels, analyzing memory traffic savings from operator fusion, implementing cache-aware matrix tiling, and lowering multi-loop 2D convolutions into single matrix multiplies via `im2col` and its backward dual `col2im`.
 
 <div align="center">
-  <img src="acceleration_blueprint.svg" alt="Acceleration Framework Blueprint" width="100%">
+  <div align="center">
+  <img src="acceleration_blueprint.svg" alt="Acceleration Framework Blueprint" width="380px">
+</div>
 </div>
 
 ## 🔗 Prerequisites & Progress
@@ -91,7 +93,9 @@ r"""
 Modern deep learning workloads are constrained not only by theoretical FLOP capacity, but by the physical movement of bytes across silicon memory hierarchies. Understanding whether a workload is compute-bound or memory-bound dictates whether optimization requires algorithmic restructuring or memory traffic elimination.
 
 <div align="center">
-  <img src="roofline_model_performance.svg" alt="Roofline Model Performance Bounds" width="100%">
+  <div align="center">
+  <img src="roofline_model_performance.svg" alt="Roofline Model Performance Bounds" width="340px">
+</div>
 </div>
 
 ### The Two Fundamental Execution Bottlenecks
@@ -129,7 +133,9 @@ where:
 | **2D Convolution** | $N \times C_{\text{out}} \times H \times W$ | $2 N C_{\text{out}} H W C_{\text{in}} K^2$ | Input $+$ Kernel $+$ Output bytes | $\approx \frac{C_{\text{out}} K^2}{2}\text{ FLOP/B}$ | Compute-Bound ($K \ge 3$) |
 
 <div align="center">
-  <img src="acceleration_techniques_overview.svg" alt="Acceleration Techniques Overview" width="100%">
+  <div align="center">
+  <img src="acceleration_techniques_overview.svg" alt="Acceleration Techniques Overview" width="680px">
+</div>
 </div>
 """
 
@@ -314,7 +320,9 @@ r"""
 In modern transformer architectures, memory-bound activation layers (GELU, SwiGLU, LayerNorm) create severe memory bus saturation when executed as separate unfused kernels.
 
 <div align="center">
-  <img src="kernel_fusion_traffic.svg" alt="Kernel Fusion Memory Traffic Comparison" width="100%">
+  <div align="center">
+  <img src="kernel_fusion_traffic.svg" alt="Kernel Fusion Memory Traffic Comparison" width="680px">
+</div>
 </div>
 
 ### The Memory Bandwidth Crisis: Unfused vs. Fused Execution
@@ -616,7 +624,9 @@ r"""
 When matrices exceed the capacity of fast CPU on-chip caches (L1/L2), naive matrix multiplication causes continuous cache evictions, repeatedly fetching the same rows and columns from high-latency main memory (DRAM). Tiling (loop blocking) reorganizes nested loops to operate on sub-matrices sized to remain resident in SRAM cache.
 
 <div align="center">
-  <img src="tiled_matmul_accumulation.svg" alt="Tiled Matrix Multiplication Accumulation" width="100%">
+  <div align="center">
+  <img src="tiled_matmul_accumulation.svg" alt="Tiled Matrix Multiplication Accumulation" width="560px">
+</div>
 </div>
 
 ### Silicon Memory Hierarchy Latency & Bandwidth
@@ -806,7 +816,9 @@ In Module 09 (`09_convolutions`), `Conv2d` implemented spatial feature extractio
 `im2col` ("image to columns") algorithmically lowers a multi-channel 2D convolution into a single contiguous General Matrix Multiply (GEMM), allowing the entire workload to execute on SIMD vector units, multi-threaded BLAS libraries, and systolic Tensor Cores.
 
 <div align="center">
-  <img src="im2col_lowering_gemm.svg" alt="im2col Lowering to GEMM" width="100%">
+  <div align="center">
+  <img src="im2col_lowering_gemm.svg" alt="im2col Lowering to GEMM" width="680px">
+</div>
 </div>
 
 ### Workload Audit: Python Loops vs. Single GEMM

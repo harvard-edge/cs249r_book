@@ -18,7 +18,9 @@ r"""
 
 Welcome to the TinyTorch capstone! You've built an entire deep learning framework from scratch across 19 foundational modules. Now it is time to demonstrate your engineering achievements by systematically benchmarking a neural architecture, applying compound optimizations, and generating a verified submission that proves framework performance.
 
-<img src="capstone_blueprint.svg" alt="Capstone Framework Blueprint" width="100%">
+<div align="center">
+  <img src="capstone_blueprint.svg" alt="Capstone Framework Blueprint" width="380px">
+</div>
 
 ## 🔗 Prerequisites & Progress
 
@@ -49,7 +51,9 @@ By the end of this capstone, you will:
 
 ## 📦 Where This Code Lives in the Final Package
 
-<img src="capstone_source_card.svg" alt="Source Code Mapping" width="100%">
+<div align="center">
+  <img src="capstone_source_card.svg" alt="Source Code Mapping" width="280px">
+</div>
 
 **Learning Side:** You work in `modules/20_capstone/capstone.ipynb`  
 **Building Side:** Code exports to `tinytorch.olympics`
@@ -930,7 +934,9 @@ $$\text{Accuracy Delta } (\Delta \text{Acc}) = \text{Accuracy}_{\text{opt}} - \t
 
 Every physical optimization technique trades off across the three vertices of systems engineering: speed, storage, and predictive accuracy:
 
-<img src="capstone_pareto_frontier.svg" alt="Capstone Optimization Pareto Frontier" width="100%">
+<div align="center">
+  <img src="capstone_pareto_frontier.svg" alt="Capstone Optimization Pareto Frontier" width="340px">
+</div>
 
 | Optimization Strategy | Prioritized Dimensions | Incurred Cost | Typical Target Deployment |
 | :--- | :--- | :--- | :--- |
@@ -1435,7 +1441,9 @@ r"""
 
 This workflow follows industry best practices for iterative optimization and deployment qualification:
 
-<img src="capstone_pipeline_overview.svg" alt="Capstone Optimization Pipeline Overview" width="100%">
+<div align="center">
+  <img src="capstone_pipeline_overview.svg" alt="Capstone Optimization Pipeline Overview" width="680px">
+</div>
 
 ### Production ML Systems Optimization Lifecycle
 
@@ -1592,7 +1600,9 @@ r"""
 
 In production ML systems, optimizations are rarely deployed in isolation. Rather, systems engineers stack multiple complementary transformations (vectorization, operator fusion, INT8 quantization, weight pruning, KV-caching) for compounding returns:
 
-<img src="stacking_waterfall_amdahl.svg" alt="Stacking Optimizations Waterfall & Amdahl's Law" width="100%">
+<div align="center">
+  <img src="stacking_waterfall_amdahl.svg" alt="Stacking Optimizations Waterfall & Amdahl's Law" width="680px">
+</div>
 
 ### Compounding Optimization Stacking
 

@@ -19,7 +19,9 @@ r"""
 Welcome to Module 16! You are about to build model compression techniques that reduce parameter count and compute footprint: magnitude and structured pruning, low-rank SVD factorization, and knowledge distillation.
 
 <div align="center">
-  <img src="compression_blueprint.svg" alt="Compression Blueprint" width="220">
+  <div align="center">
+  <img src="compression_blueprint.svg" alt="Compression Blueprint" width="380px">
+</div>
 </div>
 
 ## 🔗 Prerequisites & Progress
@@ -180,7 +182,9 @@ Deep neural networks are typically over-parameterized: their parameter matrices 
 Model compression bridges the gap between research models and production edge constraints by eliminating redundant parameters, factorizing low-rank manifolds, and distilling dark knowledge into compact student topologies.
 
 <div align="center">
-  <img src="compression_methods_overview.svg" alt="Compression Methods Overview" width="100%">
+  <div align="center">
+  <img src="compression_methods_overview.svg" alt="Compression Methods Overview" width="680px">
+</div>
 </div>
 
 ### The Model Compression Taxonomy
@@ -236,7 +240,9 @@ where temperature parameter $T > 1$ softens probability distributions over outpu
 $$p_k = \sigma\left(\frac{z}{T}\right)_k = \frac{\exp(z_k / T)}{\sum_{j=1}^C \exp(z_j / T)}$$
 
 <div align="center">
-  <img src="distillation_temperature_dark_knowledge.svg" alt="Distillation Temperature Softening" width="100%">
+  <div align="center">
+  <img src="distillation_temperature_dark_knowledge.svg" alt="Distillation Temperature Softening" width="320px">
+</div>
 </div>
 
 At $T=1$, the softmax distribution is peaked, suppressing inter-class correlations ("dark knowledge"). At $T=3\text{--}5$, minor class probabilities rise by orders of magnitude, exposing structural similarities between related semantic categories (e.g., distinguishing between a sedan and an SUV versus a truck).
@@ -250,7 +256,9 @@ $$W = U \Sigma V^T \approx U_r \Sigma_r V_r^T$$
 where $U_r \in \mathbb{R}^{M \times r}$, $\Sigma_r = \text{diag}(\sigma_1, \dots, \sigma_r) \in \mathbb{R}^{r \times r}$, and $V_r^T \in \mathbb{R}^{r \times N}$.
 
 <div align="center">
-  <img src="svd_rank_breakeven.svg" alt="SVD Rank Break-Even Curve" width="100%">
+  <div align="center">
+  <img src="svd_rank_breakeven.svg" alt="SVD Rank Break-Even Curve" width="680px">
+</div>
 </div>
 
 By absorbing $\Sigma_r$ into $U_r$ or $V_r^T$, the linear projection $y = x W^T$ is factorized into two cascaded low-rank operations:
@@ -835,7 +843,9 @@ r"""
 Knowledge distillation transfers the dark knowledge embedded in a wide, highly accurate teacher model $\mathcal{T}$ into an architecturally compact student model $\mathcal{S}$. While traditional supervised learning forces models to fit sparse, one-hot ground-truth labels, distillation exposes continuous relative probabilities across all negative classes.
 
 <div align="center">
-  <img src="distillation_temperature_dark_knowledge.svg" alt="Distillation Temperature and Dark Knowledge" width="100%">
+  <div align="center">
+  <img src="distillation_temperature_dark_knowledge.svg" alt="Distillation Temperature and Dark Knowledge" width="320px">
+</div>
 </div>
 
 ### Teacher vs. Student Systems Profile

@@ -24,7 +24,7 @@ Welcome to Module 11! You're about to build embedding layers that convert discre
 **You'll Enable**: Continuous sequence modeling powering Multi-Head Attention (`12_attention`) and full Transformers (`13_transformers`).
 
 <div align="center">
-  <img src="embeddings_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 11 Embeddings" width="600px">
+  <img src="embeddings_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 11 Embeddings" width="380px">
 </div>
 
 ### Architectural Roadmap

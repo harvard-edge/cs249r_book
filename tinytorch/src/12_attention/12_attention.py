@@ -24,7 +24,7 @@ Welcome to Module 12! You're about to build the multi-head attention mechanism t
 **You'll Enable**: Complete Transformer Blocks (`13_transformers`), causal language models (`16_nanogpt`), KV caching (`18_memoization`), and the Capstone model (`20_capstone`).
 
 <div align="center">
-  <img src="attention_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 12 Attention" width="600px">
+  <img src="attention_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 12 Attention" width="380px">
 </div>
 
 ### Architectural Roadmap
@@ -373,7 +373,7 @@ r"""
 In autoregressive language models (such as GPT and Llama), generation proceeds token by token. A token at position $i$ must only attend to past and current tokens ($j \le i$), never future tokens ($j > i$). We enforce this temporal causality by replacing future attention logits with $-\infty$ before applying the softmax operator:
 
 <div align="center">
-  <img src="attention_margin_mask.svg" alt="Causal Attention Masking Transformation" width="480px">
+  <img src="attention_margin_mask.svg" alt="Causal Attention Masking Transformation" width="300px">
 </div>
 
 #### Mathematical Formulation of Causal Masking

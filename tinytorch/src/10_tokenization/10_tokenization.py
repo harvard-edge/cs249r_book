@@ -24,7 +24,7 @@ Welcome to Module 10! You're about to build tokenization — the critical bridge
 **You'll Enable**: Subword representation learning that powers language modeling in Transformers
 
 <div align="center">
-  <img src="tokenization_blueprint.svg" alt="TinyTorch Execution Datapath: Module 10 Tokenization Highlighted" width="550px">
+  <img src="tokenization_blueprint.svg" alt="TinyTorch Execution Datapath: Module 10 Tokenization Highlighted" width="380px">
 </div>
 
 ### Architectural Roadmap
